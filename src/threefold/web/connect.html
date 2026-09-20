@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Threefold — Connect a Coding Agent</title>
+  <!-- Tailwind CSS via CDN for zero-dependency portability, as on the dashboard -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+      // The server rewrites __THREEFOLD_BASE_PATH__ to the API Gateway stage prefix
+      // when it serves this page, so the base is exact rather than guessed from the
+      // URL, which is ambiguous when the trailing slash is missing. Opening the file
+      // straight from disk leaves the token in place and falls back to a local server.
+      const SERVED_BASE_PATH = "__THREEFOLD_BASE_PATH__";
+      const DEFAULT_API_BASE = SERVED_BASE_PATH.indexOf("THREEFOLD_BASE_PATH") !== -1
+        ? "http://localhost:8001"
+        : location.origin + SERVED_BASE_PATH;
+      // Sibling pages sit under the same stage prefix. A bare relative href breaks
+      // when the page is reached without a trailing slash, which is the same reason
+      // the base path is injected rather than guessed.
+      const PAGE_BASE = SERVED_BASE_PATH.indexOf("THREEFOLD_BASE_PATH") !== -1
+        ? ""
+        : location.origin + SERVED_BASE_PATH + "/";
+
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#f5f3ff',
+              500: '#8b5cf6',
+              900: '#4c1d95',
+              dark: '#0a0d18',
+              card: '#111528',
+              border: '#1e243d'
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+    body { font-family: 'Inter', sans-serif; background-color: #0a0d18; color: #f3f4f6; }
+    .font-mono { font-family: 'JetBrains Mono', monospace; }
+    .glow-purple { box-shadow: 0 0 25px -5px rgba(139, 92, 246, 0.35); }
+    pre.code { white-space: pre; overflow-x: auto; }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+  <!-- TOP HEADER -->
+  <header class="border-b border-gray-800 bg-gray-950/80 backdrop-blur sticky top-0 z-50">
+    <div class="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-4">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-lg bg-gradient-to-br from-indigo-500 via-purple-600 to-pink-600 flex items-center justify-center font-bold text-white text-xl shadow-lg shadow-purple-500/20">
+          🔌
+        </div>
+        <div>
+          <div class="flex items-center gap-2">
+            <h1 class="text-lg font-bold tracking-tight text-white">Connect a Coding Agent</h1>
+            <span class="px-2 py-0.5 rounded text-xs font-semibold bg-purple-950 text-purple-400 border border-purple-800 font-mono">
+              hooks/claude_code_hook.py
+            </span>
+          </div>
+          <p class="text-xs text-gray-400">Put Threefold in front of a real Claude Code session, not in front of a demo payload</p>
+        </div>
+      </div>
+      <nav id="page-nav" class="flex items-center gap-2 text-xs"></nav>
+    </div>
+
+    <div class="bg-gray-950/90 border-b border-gray-800 px-4 py-2 text-xs flex flex-wrap items-center justify-between gap-3">
+      <div class="flex items-center gap-2 flex-wrap">
+        <span class="text-gray-400 font-medium">Endpoint the hook will call:</span>
+        <input id="apiBaseInput" type="text" value="" oninput="renderSnippets()" class="bg-gray-900 border border-gray-700 rounded px-2 py-0.5 text-xs text-purple-300 font-mono w-80 focus:outline-none focus:border-purple-500" />
+        <span class="text-gray-400 font-medium ml-1">API Key:</span>
+        <input id="apiKeyInput" type="password" value="" placeholder="only if the stack enforces one" class="bg-gray-900 border border-gray-700 rounded px-2 py-0.5 text-xs text-sky-300 font-mono w-40 focus:outline-none focus:border-sky-500" />
+        <span id="apiConnectionStatus" class="px-2 py-0.5 rounded text-[11px] font-mono bg-amber-950 text-amber-400 border border-amber-800 flex items-center gap-1.5">
+          <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span> NOT CHECKED
+        </span>
+      </div>
+      <div class="text-gray-400 text-[11px] hidden md:block">
+        🛡️ The snippets below rewrite themselves from this field, so what you copy is what this page can reach
+      </div>
+    </div>
+  </header>
+
+  <main class="flex-1 max-w-7xl mx-auto px-4 py-6 w-full space-y-6">
+
+    <!-- WHAT THIS IS -->
+    <div class="p-5 rounded-2xl bg-gray-900 border border-gray-800 space-y-2">
+      <h2 class="text-base font-semibold text-white">What the hook changes</h2>
+      <p class="text-xs text-gray-400">
+        The scenarios on the dashboard build their own payloads and then refuse them. That proves the gates run; it intercepts
+        nobody. This hook is the difference: Claude Code calls it
+        <span class="text-purple-300">before</span> every matched tool call, hands it the call it is about to make, and obeys the
+        decision that comes back. A refusal here stops an edit at the moment of the edit, not in a pipeline twenty minutes later.
+      </p>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2">
+        <div class="p-3 rounded-xl bg-gray-950 border border-gray-800">
+          <p class="text-xs font-semibold text-purple-300">1 · Claude Code proposes a tool call</p>
+          <p class="text-[11px] text-gray-400 mt-1">Write, Edit, Bash or Read, matched by the hook configuration.</p>
+        </div>
+        <div class="p-3 rounded-xl bg-gray-950 border border-gray-800">
+          <p class="text-xs font-semibold text-purple-300">2 · The hook asks this service</p>
+          <p class="text-[11px] text-gray-400 mt-1">One <span class="font-mono">POST /evaluate-tool-call</span>, standard library only, no dependencies to install.</p>
+        </div>
+        <div class="p-3 rounded-xl bg-gray-950 border border-gray-800">
+          <p class="text-xs font-semibold text-purple-300">3 · The agent obeys the verdict</p>
+          <p class="text-[11px] text-gray-400 mt-1">An approval runs. A refusal never executes, and the reason carries the model's sentence when one was produced.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+      <!-- INSTALLATION -->
+      <div class="rounded-2xl bg-gray-900 border border-gray-800 p-5 space-y-4">
+        <div class="flex items-center justify-between border-b border-gray-800 pb-3">
+          <h2 class="text-sm font-semibold text-white">Install, three steps</h2>
+          <span class="text-xs px-2.5 py-1 rounded-full font-semibold bg-purple-950 text-purple-400 border border-purple-800">~2 minutes</span>
+        </div>
+
+        <div>
+          <p class="text-xs font-semibold text-gray-200">Step 1 · Get the script</p>
+          <p class="text-xs text-gray-400 mt-1">
+            It ships in the repository at <span class="font-mono text-purple-300">hooks/claude_code_hook.py</span>. This page does
+            not serve it: the Lambda package contains <span class="font-mono">src/</span> only, so the hook is never uploaded and
+            there is nothing here to download. Clone the repository and the file is already on disk.
+          </p>
+          <pre class="code mt-2 p-3 rounded-xl bg-gray-950 border border-gray-800 text-[11px] font-mono text-gray-300">git clone &lt;repository&gt; threefold
+cd threefold
+echo '{"tool_name":"Read","tool_input":{"file_path":"README.md"}}' \
+  | python hooks/claude_code_hook.py</pre>
+          <p class="text-[11px] text-gray-500 mt-1">
+            The script takes no flags. It reads one JSON object on stdin and writes one decision on stdout, which is the whole of
+            its interface, so the line above is both the smoke test and the thing Claude Code will do to it. Standard library
+            only: there is nothing to install.
+          </p>
+        </div>
+
+        <div>
+          <p class="text-xs font-semibold text-gray-200">Step 2 · Register it as a PreToolUse hook</p>
+          <p class="text-xs text-gray-400 mt-1">
+            Add this to <span class="font-mono text-purple-300">.claude/settings.json</span> in the project you want governed, with
+            the absolute path to the script on your machine.
+          </p>
+          <div class="relative">
+            <pre class="code mt-2 p-3 rounded-xl bg-gray-950 border border-gray-800 text-[11px] font-mono text-gray-300" id="settings-snippet"></pre>
+            <button onclick="copyText('settings-snippet', this)" class="absolute top-3 right-2 text-[11px] px-2 py-0.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700">Copy</button>
+          </div>
+          <p class="text-[11px] text-gray-500 mt-1">
+            The matcher decides what is governed. <span class="font-mono">Write|Edit</span> alone governs the file writes and lets
+            reads through; the four above are what the project tested.
+          </p>
+        </div>
+
+        <div>
+          <p class="text-xs font-semibold text-gray-200">Step 3 · Point it at a service</p>
+          <p class="text-xs text-gray-400 mt-1">
+            With no environment set, the hook calls the deployment it was written against. Set
+            <span class="font-mono text-purple-300">THREEFOLD_ENDPOINT</span> to use another one, including a local
+            <span class="font-mono">make run</span> on port 8001.
+          </p>
+          <div class="relative">
+            <pre class="code mt-2 p-3 rounded-xl bg-gray-950 border border-gray-800 text-[11px] font-mono text-gray-300" id="env-snippet"></pre>
+            <button onclick="copyText('env-snippet', this)" class="absolute top-3 right-2 text-[11px] px-2 py-0.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700">Copy</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- TRY IT AGAINST THE LIVE SERVICE -->
+      <div class="rounded-2xl bg-gray-900 border border-gray-800 p-5 space-y-4">
+        <div class="flex items-center justify-between border-b border-gray-800 pb-3">
+          <h2 class="text-sm font-semibold text-white">See the decision the agent would get</h2>
+          <span id="probe-tag" class="text-xs px-2.5 py-1 rounded-full font-semibold bg-gray-800 text-gray-400">Idle</span>
+        </div>
+
+        <p class="text-xs text-gray-400">
+          Each button sends exactly the body the hook builds for that tool call, to the endpoint in the bar above, and then
+          translates the answer into the JSON Claude Code would act on. Nothing here is canned: if the service is unreachable the
+          panel says so instead of showing a verdict.
+        </p>
+
+        <div class="grid grid-cols-1 gap-2">
+          <button onclick="probe('domain_write')" class="p-3 rounded-xl bg-gray-950 border border-gray-800 hover:border-red-500 text-left transition group">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold text-red-400">Write · architectural boundary</span>
+              <span class="text-base">🛡️</span>
+            </div>
+            <p class="text-xs text-gray-300 mt-1 font-mono break-all">Write src/threefold/domain/models.py ← "from boto3 import client"</p>
+          </button>
+
+          <button onclick="probe('credential_read')" class="p-3 rounded-xl bg-gray-950 border border-gray-800 hover:border-amber-500 text-left transition group">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold text-amber-400">Bash · credential path</span>
+              <span class="text-base">🔑</span>
+            </div>
+            <p class="text-xs text-gray-300 mt-1 font-mono break-all">Bash cat ~/.aws/credentials</p>
+          </button>
+
+          <button onclick="probe('ordinary_edit')" class="p-3 rounded-xl bg-gray-950 border border-gray-800 hover:border-emerald-500 text-left transition group">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold text-emerald-400">Edit · ordinary work</span>
+              <span class="text-base">✅</span>
+            </div>
+            <p class="text-xs text-gray-300 mt-1 font-mono break-all">Edit README.md ← a corrected sentence</p>
+          </button>
+        </div>
+
+        <div>
+          <p class="text-xs font-medium text-gray-400 uppercase">What Claude Code receives on stdout</p>
+          <pre class="code mt-2 p-3 rounded-xl bg-gray-950 border border-gray-800 text-[11px] font-mono text-gray-300 max-h-64 overflow-y-auto" id="hook-output">Press a button above.</pre>
+        </div>
+
+        <div>
+          <p class="text-xs font-medium text-gray-400 uppercase">The service's own answer</p>
+          <pre class="code mt-2 p-3 rounded-xl bg-gray-950 border border-gray-800 text-[11px] font-mono text-gray-300 max-h-64 overflow-y-auto" id="raw-response">Nothing sent yet.</pre>
+        </div>
+      </div>
+    </div>
+
+    <!-- CONTRACT AND CONFIGURATION -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+      <div class="rounded-2xl bg-gray-900 border border-gray-800 p-5 space-y-3">
+        <h2 class="text-sm font-semibold text-white border-b border-gray-800 pb-3">Environment</h2>
+        <div class="overflow-x-auto">
+          <table class="w-full text-xs">
+            <thead>
+              <tr class="text-gray-400 uppercase tracking-wider text-[11px] border-b border-gray-800">
+                <th class="text-left font-medium py-2 pr-3">Variable</th>
+                <th class="text-left font-medium py-2 pr-3">Default</th>
+                <th class="text-left font-medium py-2">Effect</th>
+              </tr>
+            </thead>
+            <tbody class="text-gray-300">
+              <tr class="border-b border-gray-800/60">
+                <td class="py-2 pr-3 font-mono text-purple-300">THREEFOLD_ENDPOINT</td>
+                <td class="py-2 pr-3 font-mono text-gray-400">the shipped deployment</td>
+                <td class="py-2 text-gray-400">Base URL the hook posts to.</td>
+              </tr>
+              <tr class="border-b border-gray-800/60">
+                <td class="py-2 pr-3 font-mono text-purple-300">THREEFOLD_FAIL_CLOSED</td>
+                <td class="py-2 pr-3 font-mono text-gray-400">unset, so it fails open</td>
+                <td class="py-2 text-gray-400">Set to 1 to refuse the call when the service cannot be reached.</td>
+              </tr>
+              <tr class="border-b border-gray-800/60">
+                <td class="py-2 pr-3 font-mono text-purple-300">THREEFOLD_TIMEOUT</td>
+                <td class="py-2 pr-3 font-mono text-gray-400">6</td>
+                <td class="py-2 text-gray-400">Seconds to wait before the call is treated as unreachable.</td>
+              </tr>
+              <tr class="border-b border-gray-800/60">
+                <td class="py-2 pr-3 font-mono text-purple-300">THREEFOLD_BUDGET_USD</td>
+                <td class="py-2 pr-3 font-mono text-gray-400">25</td>
+                <td class="py-2 text-gray-400">Session budget declared to the cost gate.</td>
+              </tr>
+              <tr class="border-b border-gray-800/60">
+                <td class="py-2 pr-3 font-mono text-purple-300">THREEFOLD_INPUT_TOKENS<br />THREEFOLD_OUTPUT_TOKENS</td>
+                <td class="py-2 pr-3 font-mono text-gray-400">0</td>
+                <td class="py-2 text-gray-400">Projected token counts. Left at zero, the cost gate has nothing to weigh, which is why the loop and boundary gates are what stop things here.</td>
+              </tr>
+              <tr>
+                <td class="py-2 pr-3 font-mono text-purple-300">THREEFOLD_SESSION</td>
+                <td class="py-2 pr-3 font-mono text-gray-400">claude-code-local</td>
+                <td class="py-2 text-gray-400">Used when Claude Code sends no session id. The session id is what the loop detector counts against.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="p-3 rounded-xl bg-amber-950/20 border border-amber-900/40">
+          <p class="text-xs font-semibold text-amber-300">It fails open, and says so</p>
+          <p class="text-[11px] text-gray-400 mt-1">
+            If the service times out or the network drops, the hook returns <span class="font-mono">allow</span> with a reason that
+            states the call was never checked. That is a deliberate trade: a guard that bricks the agent on a hiccup gets
+            uninstalled by lunchtime. Where the risk is worth the interruption, set
+            <span class="font-mono text-amber-300">THREEFOLD_FAIL_CLOSED=1</span> and the same failure denies instead.
+          </p>
+        </div>
+      </div>
+
+      <div class="rounded-2xl bg-gray-900 border border-gray-800 p-5 space-y-3">
+        <h2 class="text-sm font-semibold text-white border-b border-gray-800 pb-3">The contract, both directions</h2>
+
+        <div>
+          <p class="text-xs font-medium text-gray-400 uppercase">Claude Code writes this on stdin</p>
+          <pre class="code mt-2 p-3 rounded-xl bg-gray-950 border border-gray-800 text-[11px] font-mono text-gray-300">{
+  "session_id": "0f3c…",
+  "tool_name": "Write",
+  "tool_input": {
+    "file_path": "src/threefold/domain/models.py",
+    "content": "from boto3 import client"
+  }
+}</pre>
+        </div>
+
+        <div>
+          <p class="text-xs font-medium text-gray-400 uppercase">The hook writes this on stdout</p>
+          <pre class="code mt-2 p-3 rounded-xl bg-gray-950 border border-gray-800 text-[11px] font-mono text-gray-300">{
+  "hookSpecificOutput": {
+    "hookEventName": "PreToolUse",
+    "permissionDecision": "deny",
+    "permissionDecisionReason": "Threefold refused this call. …"
+  }
+}</pre>
+        </div>
+
+        <div>
+          <p class="text-xs font-medium text-gray-400 uppercase">Tool names, mapped to the service's vocabulary</p>
+          <div class="grid grid-cols-2 gap-2 mt-2 text-[11px] font-mono">
+            <div class="p-2 rounded bg-gray-950 border border-gray-800 flex items-center justify-between">
+              <span class="text-gray-300">Read, NotebookRead</span><span class="text-purple-300">FILE_READ</span>
+            </div>
+            <div class="p-2 rounded bg-gray-950 border border-gray-800 flex items-center justify-between">
+              <span class="text-gray-300">Write, Edit, MultiEdit</span><span class="text-purple-300">FILE_WRITE</span>
+            </div>
+            <div class="p-2 rounded bg-gray-950 border border-gray-800 flex items-center justify-between">
+              <span class="text-gray-300">NotebookEdit</span><span class="text-purple-300">FILE_WRITE</span>
+            </div>
+            <div class="p-2 rounded bg-gray-950 border border-gray-800 flex items-center justify-between">
+              <span class="text-gray-300">Bash</span><span class="text-purple-300">COMMAND_EXEC</span>
+            </div>
+            <div class="p-2 rounded bg-gray-950 border border-gray-800 flex items-center justify-between">
+              <span class="text-gray-300">WebFetch, WebSearch</span><span class="text-purple-300">WEB_SEARCH</span>
+            </div>
+            <div class="p-2 rounded bg-gray-950 border border-gray-800 flex items-center justify-between">
+              <span class="text-gray-300">anything else</span><span class="text-purple-300">UNKNOWN</span>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <p class="text-xs font-medium text-gray-400 uppercase">Verify without an agent</p>
+          <div class="relative">
+            <pre class="code mt-2 p-3 rounded-xl bg-gray-950 border border-gray-800 text-[11px] font-mono text-gray-300" id="curl-snippet"></pre>
+            <button onclick="copyText('curl-snippet', this)" class="absolute top-3 right-2 text-[11px] px-2 py-0.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700">Copy</button>
+          </div>
+          <p class="text-[11px] text-gray-500 mt-1">
+            Piping the JSON into the script gives the hook decision; sending it to the endpoint gives the verdict the hook
+            translates. A refused call never enters the session's history, so repeating the boundary violation is refused for that
+            reason every time and never reaches the loop gate. The third command is the one that halts a session.
+          </p>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <footer class="border-t border-gray-800 py-4 text-center text-xs text-gray-500">
+    Threefold · AWS Zero to Shipped Hackathon 2026 · Built with Amazon Bedrock &amp; AWS Serverless
+  </footer>
+
+  <script>
+    const NAV = [
+      { href: 'index.html', label: 'Dashboard' },
+      { href: 'sessions.html', label: 'Sessions' },
+      { href: 'settings.html', label: 'Policy Settings' },
+      { href: 'testbook.html', label: 'Judge Testbook' },
+      { href: 'swagger.html', label: 'OpenAPI 3.1' }
+    ];
+
+    // Each case is the tool call as Claude Code would present it, before the hook
+    // translates it. The translation below is the hook's own, not a paraphrase.
+    const CASES = {
+      domain_write: {
+        tool_name: 'Write',
+        tool_input: {
+          file_path: 'src/threefold/domain/models.py',
+          content: 'from boto3 import client\n\nclient("dynamodb").put_item(TableName="sessions", Item={})\n'
+        }
+      },
+      credential_read: {
+        tool_name: 'Bash',
+        tool_input: { command: 'cat ~/.aws/credentials' }
+      },
+      ordinary_edit: {
+        tool_name: 'Edit',
+        tool_input: {
+          file_path: 'README.md',
+          old_string: 'the third identical call',
+          new_string: 'the third byte-identical call'
+        }
+      }
+    };
+
+    const ACTION_TYPES = {
+      Read: 'FILE_READ',
+      NotebookRead: 'FILE_READ',
+      Write: 'FILE_WRITE',
+      Edit: 'FILE_WRITE',
+      MultiEdit: 'FILE_WRITE',
+      NotebookEdit: 'FILE_WRITE',
+      Bash: 'COMMAND_EXEC',
+      WebFetch: 'WEB_SEARCH',
+      WebSearch: 'WEB_SEARCH'
+    };
+
+    function renderNav() {
+      document.getElementById('page-nav').innerHTML = NAV.map(item =>
+        '<a href="' + PAGE_BASE + item.href + '" class="px-3 py-1.5 rounded-md bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700 transition">' + item.label + '</a>'
+      ).join('');
+    }
+
+    function escapeHtml(str) {
+      if (typeof str !== 'string') return str == null ? '' : String(str);
+      return str.replace(/[&<>"']/g, m => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#039;'
+      }[m]));
+    }
+
+    function getApiBase() {
+      const configured = document.getElementById("apiBaseInput").value.trim().replace(/\/+$/, "");
+      return configured || DEFAULT_API_BASE;
+    }
+
+    function authHeaders(extra) {
+      const headers = Object.assign({ "Accept": "application/json" }, extra || {});
+      const key = document.getElementById("apiKeyInput").value.trim();
+      if (key) headers["X-API-Key"] = key;
+      return headers;
+    }
+
+    function setConnection(ok, text) {
+      const badge = document.getElementById("apiConnectionStatus");
+      const tone = ok
+        ? "bg-emerald-950 text-emerald-400 border-emerald-800"
+        : "bg-red-950 text-red-400 border-red-800";
+      const dot = ok ? "bg-emerald-400" : "bg-red-400";
+      badge.className = "px-2 py-0.5 rounded text-[11px] font-mono border flex items-center gap-1.5 " + tone;
+      badge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full ' + dot + '"></span> ' + escapeHtml(text);
+    }
+
+    function copyText(elementId, button) {
+      const text = document.getElementById(elementId).textContent;
+      navigator.clipboard.writeText(text).then(() => {
+        const original = button.innerText;
+        button.innerText = 'Copied';
+        setTimeout(() => { button.innerText = original; }, 1500);
+      }).catch(() => {
+        button.innerText = 'Copy failed';
+      });
+    }
+
+    // Every snippet is written from the endpoint field, so a reader never copies a
+    // command pointing somewhere this page has not tried to reach.
+    function renderSnippets() {
+      const endpoint = getApiBase();
+
+      document.getElementById('settings-snippet').textContent =
+        '{\n' +
+        '  "hooks": {\n' +
+        '    "PreToolUse": [\n' +
+        '      {\n' +
+        '        "matcher": "Write|Edit|Bash|Read",\n' +
+        '        "hooks": [\n' +
+        '          {\n' +
+        '            "type": "command",\n' +
+        '            "command": "python /absolute/path/to/hooks/claude_code_hook.py"\n' +
+        '          }\n' +
+        '        ]\n' +
+        '      }\n' +
+        '    ]\n' +
+        '  }\n' +
+        '}';
+
+      document.getElementById('env-snippet').textContent =
+        '# The endpoint this page is talking to\n' +
+        'export THREEFOLD_ENDPOINT="' + endpoint + '"\n\n' +
+        '# Refuse the call instead of allowing it when the service is unreachable\n' +
+        'export THREEFOLD_FAIL_CLOSED=1\n\n' +
+        '# Against a local server: make run, then\n' +
+        'export THREEFOLD_ENDPOINT="http://localhost:8001"';
+
+      document.getElementById('curl-snippet').textContent =
+        '# The verdict the service returns for a call the boundary gate refuses\n' +
+        'curl -s -X POST ' + endpoint + '/evaluate-tool-call \\\n' +
+        "  -H 'Content-Type: application/json' \\\n" +
+        '  -d \'' + JSON.stringify(hookRequestBody(CASES.domain_write, 'demo-session')) + '\'\n\n' +
+        '# The decision Claude Code would act on, from the script itself\n' +
+        'echo \'' + JSON.stringify(CASES.domain_write) + '\' \\\n' +
+        '  | THREEFOLD_ENDPOINT=' + endpoint + ' python hooks/claude_code_hook.py\n\n' +
+        '# The loop gate needs calls that PASS. Send the ordinary edit three times\n' +
+        '# under one session id: the third answers BLOCKED_LOOP_DETECTED.\n' +
+        'for i in 1 2 3; do curl -s -X POST ' + endpoint + '/evaluate-tool-call \\\n' +
+        "  -H 'Content-Type: application/json' \\\n" +
+        '  -d \'' + JSON.stringify(hookRequestBody(CASES.ordinary_edit, 'loop-demo-session')) + '\' \\\n' +
+        '  | python -c \'import sys,json;print(json.load(sys.stdin)["status"])\'; done';
+    }
+
+    // The same body the hook builds, field for field.
+    function hookRequestBody(testCase, sessionId) {
+      return {
+        session_id: sessionId,
+        developer_id: 'connect-page',
+        project_name: 'threefold',
+        tool_name: testCase.tool_name,
+        action_type: ACTION_TYPES[testCase.tool_name] || 'UNKNOWN',
+        arguments: testCase.tool_input,
+        projected_input_tokens: 0,
+        projected_output_tokens: 0,
+        budget_usd: 25.0
+      };
+    }
+
+    // The hook's own translation of a verdict into a permission decision.
+    function hookDecision(verdict) {
+      if ((verdict.status || 'APPROVED') === 'APPROVED') {
+        return {
+          hookSpecificOutput: {
+            hookEventName: 'PreToolUse',
+            permissionDecision: 'allow',
+            permissionDecisionReason: 'Threefold: every gate passed.'
+          }
+        };
+      }
+      const reason = verdict.reason || verdict.status;
+      const explanation = verdict.bedrock_explanation || '';
+      const source = verdict.explanation_source || 'unknown';
+      let detail = 'Threefold refused this call. ' + reason;
+      if (explanation) {
+        const label = source === 'bedrock' ? 'Bedrock' : 'Deterministic explanation';
+        detail = detail + '\n' + label + ': ' + explanation;
+      }
+      return {
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          permissionDecision: 'deny',
+          permissionDecisionReason: detail
+        }
+      };
+    }
+
+    async function probe(caseName) {
+      const testCase = CASES[caseName];
+      const tag = document.getElementById('probe-tag');
+      tag.className = 'text-xs px-2.5 py-1 rounded-full font-semibold bg-gray-800 text-gray-400';
+      tag.innerText = 'Calling…';
+      document.getElementById('hook-output').textContent = 'Waiting for the service…';
+
+      // A fresh session id per press, so a second press is not read as a repeat by
+      // the loop detector and mistaken for the boundary gate firing.
+      const sessionId = 'connect-page-' + caseName + '-' + Date.now();
+      try {
+        const res = await fetch(getApiBase() + '/evaluate-tool-call', {
+          method: 'POST',
+          headers: authHeaders({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify(hookRequestBody(testCase, sessionId))
+        });
+        const data = await res.json();
+        document.getElementById('raw-response').textContent = JSON.stringify(data, null, 2);
+        if (!res.ok) {
+          setConnection(false, 'HTTP ' + res.status);
+          tag.className = 'text-xs px-2.5 py-1 rounded-full font-semibold bg-red-950 text-red-400 border border-red-800';
+          tag.innerText = 'HTTP ' + res.status;
+          document.getElementById('hook-output').textContent =
+            'The service answered ' + res.status + '. The hook treats a non-answer as unreachable and, by default, allows the call.';
+          return;
+        }
+        const decision = hookDecision(data);
+        const denied = decision.hookSpecificOutput.permissionDecision === 'deny';
+        document.getElementById('hook-output').textContent = JSON.stringify(decision, null, 2);
+        setConnection(true, 'LIVE · ' + (data.status || 'ANSWERED'));
+        tag.className = denied
+          ? 'text-xs px-2.5 py-1 rounded-full font-semibold bg-red-950 text-red-400 border border-red-800'
+          : 'text-xs px-2.5 py-1 rounded-full font-semibold bg-emerald-950 text-emerald-400 border border-emerald-800';
+        tag.innerText = denied ? 'DENIED' : 'ALLOWED';
+      } catch (err) {
+        setConnection(false, 'UNREACHABLE');
+        tag.className = 'text-xs px-2.5 py-1 rounded-full font-semibold bg-amber-950 text-amber-400 border border-amber-800';
+        tag.innerText = 'UNREACHABLE';
+        document.getElementById('raw-response').textContent = JSON.stringify({ error: String(err) }, null, 2);
+        document.getElementById('hook-output').textContent = JSON.stringify({
+          hookSpecificOutput: {
+            hookEventName: 'PreToolUse',
+            permissionDecision: 'allow',
+            permissionDecisionReason: 'Threefold was unreachable, so this call was not checked: ' + String(err)
+          }
+        }, null, 2) + '\n\n// This is the fail-open path, shown because the service could not be reached from this page.';
+      }
+    }
+
+    renderNav();
+    document.getElementById('apiBaseInput').value = DEFAULT_API_BASE;
+    renderSnippets();
+  </script>
+</body>
+</html>

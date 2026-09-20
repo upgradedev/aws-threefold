@@ -75,6 +75,14 @@ above rather than in four different places.
 
 Open <https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/> and press a button. The same page is in the repository at [`src/threefold/web/index.html`](src/threefold/web/index.html), which the Lambda serves.
 
+Three more pages are served beside it, each one reading the live API rather than
+a fixture: [`/sessions.html`](src/threefold/web/sessions.html) lists the sessions
+the service has actually governed and reads any one of them back,
+[`/settings.html`](src/threefold/web/settings.html) reads and writes the policy
+thresholds the gates enforce, and [`/connect.html`](src/threefold/web/connect.html)
+is the installation path for [`hooks/claude_code_hook.py`](hooks/claude_code_hook.py),
+which puts Threefold in front of a real Claude Code session.
+
 1. **Journey 1 · Runaway Tool Loop Interception:**  
    Click **Runaway Tool Loop**. The simulator sends 3 identical tool calls. Threefold detects the monomorphic loop on iteration 3, instantly trips the circuit breaker, locks the session, and halts token expenditure.
 2. **Journey 2 · Secret Leakage Pre-Invocation Rejection:**  

@@ -10,7 +10,7 @@ import argparse
 import json
 import logging
 import sys
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -99,7 +99,10 @@ class ThreefoldHTTPRequestHandler(BaseHTTPRequestHandler):
 
 def run_server(port: int = 8001, host: str = "0.0.0.0") -> None:
     server_address = (host, port)
-    httpd = HTTPServer(server_address, ThreefoldHTTPRequestHandler)
+    # Threading, not the single-connection server: a browser holds this open with
+    # keep-alive, and every curl issued against the same port while a page is open
+    # would otherwise block until that tab is closed.
+    httpd = ThreadingHTTPServer(server_address, ThreefoldHTTPRequestHandler)
     logger.info("Threefold live backend listening on http://%s:%d", host, port)
     logger.info("Ready to intercept agent tool calls and serve live REST API requests")
     try:

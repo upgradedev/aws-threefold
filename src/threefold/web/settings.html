@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Threefold — Policy Settings</title>
+  <!-- Tailwind CSS via CDN for zero-dependency portability, as on the dashboard -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+      // The server rewrites __THREEFOLD_BASE_PATH__ to the API Gateway stage prefix
+      // when it serves this page, so the base is exact rather than guessed from the
+      // URL, which is ambiguous when the trailing slash is missing. Opening the file
+      // straight from disk leaves the token in place and falls back to a local server.
+      const SERVED_BASE_PATH = "__THREEFOLD_BASE_PATH__";
+      const DEFAULT_API_BASE = SERVED_BASE_PATH.indexOf("THREEFOLD_BASE_PATH") !== -1
+        ? "http://localhost:8001"
+        : location.origin + SERVED_BASE_PATH;
+      // Sibling pages sit under the same stage prefix. A bare relative href breaks
+      // when the page is reached without a trailing slash, which is the same reason
+      // the base path is injected rather than guessed.
+      const PAGE_BASE = SERVED_BASE_PATH.indexOf("THREEFOLD_BASE_PATH") !== -1
+        ? ""
+        : location.origin + SERVED_BASE_PATH + "/";
+
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#f5f3ff',
+              500: '#8b5cf6',
+              900: '#4c1d95',
+              dark: '#0a0d18',
+              card: '#111528',
+              border: '#1e243d'
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+    body { font-family: 'Inter', sans-serif; background-color: #0a0d18; color: #f3f4f6; }
+    .font-mono { font-family: 'JetBrains Mono', monospace; }
+    .glow-purple { box-shadow: 0 0 25px -5px rgba(139, 92, 246, 0.35); }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+  <!-- TOP HEADER -->
+  <header class="border-b border-gray-800 bg-gray-950/80 backdrop-blur sticky top-0 z-50">
+    <div class="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-4">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-lg bg-gradient-to-br from-indigo-500 via-purple-600 to-pink-600 flex items-center justify-center font-bold text-white text-xl shadow-lg shadow-purple-500/20">
+          ⚙️
+        </div>
+        <div>
+          <div class="flex items-center gap-2">
+            <h1 class="text-lg font-bold tracking-tight text-white">Policy Settings</h1>
+            <span class="px-2 py-0.5 rounded text-xs font-semibold bg-purple-950 text-purple-400 border border-purple-800 font-mono">
+              /policy/config
+            </span>
+          </div>
+          <p class="text-xs text-gray-400">The stored governance policy · read from and written to the live service, with each field labelled by whether a gate reads it</p>
+        </div>
+      </div>
+      <nav id="page-nav" class="flex items-center gap-2 text-xs"></nav>
+    </div>
+
+    <!-- LIVE API CONNECTION BAR -->
+    <div class="bg-gray-950/90 border-b border-gray-800 px-4 py-2 text-xs flex flex-wrap items-center justify-between gap-3">
+      <div class="flex items-center gap-2 flex-wrap">
+        <span class="text-gray-400 font-medium">Sidecar REST:</span>
+        <input id="apiBaseInput" type="text" value="" class="bg-gray-900 border border-gray-700 rounded px-2 py-0.5 text-xs text-purple-300 font-mono w-56 focus:outline-none focus:border-purple-500" />
+        <span class="text-gray-400 font-medium ml-1">API Key:</span>
+        <input id="apiKeyInput" type="password" value="" placeholder="only if the stack enforces one" class="bg-gray-900 border border-gray-700 rounded px-2 py-0.5 text-xs text-sky-300 font-mono w-44 focus:outline-none focus:border-sky-500" />
+        <button onclick="loadPolicy()" class="px-2 py-0.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs border border-gray-700">Reload from API</button>
+        <span id="apiConnectionStatus" class="px-2 py-0.5 rounded text-[11px] font-mono bg-amber-950 text-amber-400 border border-amber-800 flex items-center gap-1.5">
+          <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span> NOT READ YET
+        </span>
+      </div>
+      <div class="text-gray-400 text-[11px] hidden md:block">
+        🛡️ Every value on this page came from <span class="font-mono text-purple-400">GET /policy/config</span>, not from a default in the markup
+      </div>
+    </div>
+  </header>
+
+  <main class="flex-1 max-w-7xl mx-auto px-4 py-6 w-full space-y-6">
+
+    <!-- CURRENT POLICY, AS THE SERVICE REPORTS IT -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div class="p-4 rounded-xl bg-gray-900 border border-gray-800">
+        <p class="text-xs font-medium text-gray-400 uppercase tracking-wider">Max Single Call</p>
+        <p id="kpi-single" class="text-2xl font-bold text-white mt-1">--</p>
+        <p class="text-xs text-gray-400 mt-1">One tool call above this is refused</p>
+      </div>
+      <div class="p-4 rounded-xl bg-gray-900 border border-gray-800">
+        <p class="text-xs font-medium text-gray-400 uppercase tracking-wider">Session Budget</p>
+        <p id="kpi-budget" class="text-2xl font-bold text-white mt-1">--</p>
+        <p class="text-xs text-gray-400 mt-1">Cumulative ceiling before the breaker trips</p>
+      </div>
+      <div class="p-4 rounded-xl bg-gray-900 border border-gray-800">
+        <p class="text-xs font-medium text-gray-400 uppercase tracking-wider">Loop Window</p>
+        <p id="kpi-window" class="text-2xl font-bold text-purple-400 mt-1">--</p>
+        <p class="text-xs text-gray-400 mt-1">Calls kept in the signature history</p>
+      </div>
+      <div class="p-4 rounded-xl bg-gray-900 border border-gray-800">
+        <p class="text-xs font-medium text-gray-400 uppercase tracking-wider">Repetition Threshold</p>
+        <p id="kpi-threshold" class="text-2xl font-bold text-purple-400 mt-1">--</p>
+        <p class="text-xs text-gray-400 mt-1">Identical calls before the session halts</p>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+      <!-- EDITABLE POLICY -->
+      <div class="rounded-2xl bg-gray-900 border border-gray-800 p-5 space-y-4">
+        <div class="flex items-center justify-between border-b border-gray-800 pb-3">
+          <h2 class="text-sm font-semibold text-white">Editable thresholds</h2>
+          <span id="policy-source" class="text-xs px-2.5 py-1 rounded-full font-semibold bg-gray-800 text-gray-400">Loading…</span>
+        </div>
+
+        <p class="text-xs text-gray-400">
+          The service rebuilds the whole policy from each <span class="font-mono text-purple-300">POST</span>, so this form always
+          submits all four fields together. Sending one field on its own would reset the other three to their defaults.
+          Two of the four are wired to a gate today and two are not; each is labelled with which it is.
+        </p>
+
+        <div class="space-y-3">
+          <label class="block">
+            <span class="text-xs font-medium text-gray-400 uppercase tracking-wider">max_single_call_usd
+              <span class="ml-1 px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800 text-[10px] normal-case">live</span>
+            </span>
+            <input id="in-single" type="number" step="0.01" min="0.01" class="mt-1 w-full bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-purple-500" />
+            <span class="text-[11px] text-gray-500">A single projected call costing more than this is refused before it runs.</span>
+          </label>
+
+          <label class="block">
+            <span class="text-xs font-medium text-gray-400 uppercase tracking-wider">max_session_budget_usd
+              <span class="ml-1 px-1.5 py-0.5 rounded bg-amber-950 text-amber-400 border border-amber-800 text-[10px] normal-case">stored, not enforced</span>
+            </span>
+            <input id="in-budget" type="number" step="0.01" min="0.01" class="mt-1 w-full bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-purple-500" />
+            <span class="text-[11px] text-gray-500">Intended as the cumulative ceiling for a session. Today the evaluator never reads it: the ceiling a session is actually held to is the <span class="font-mono">budget_usd</span> the caller sends with each tool call, defaulting to $10.00.</span>
+          </label>
+
+          <label class="block">
+            <span class="text-xs font-medium text-gray-400 uppercase tracking-wider">loop_history_window
+              <span class="ml-1 px-1.5 py-0.5 rounded bg-amber-950 text-amber-400 border border-amber-800 text-[10px] normal-case">stored, not enforced</span>
+            </span>
+            <input id="in-window" type="number" step="1" min="2" max="50" class="mt-1 w-full bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-purple-500" />
+            <span class="text-[11px] text-gray-500">Intended as the length of the signature history searched for a cycle. The detector is never given it; it searches cycles up to six steps, compiled in.</span>
+          </label>
+
+          <label class="block">
+            <span class="text-xs font-medium text-gray-400 uppercase tracking-wider">monomorphic_repetition_threshold
+              <span class="ml-1 px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800 text-[10px] normal-case">live</span>
+            </span>
+            <input id="in-threshold" type="number" step="1" min="2" max="20" class="mt-1 w-full bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-purple-500" />
+            <span class="text-[11px] text-gray-500">Identical consecutive calls tolerated. At this count the session halts. The product's headline is 3.</span>
+          </label>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2 pt-1">
+          <button onclick="savePolicy()" id="btnSave" class="px-4 py-2 bg-purple-600 hover:bg-purple-500 font-semibold text-xs rounded-lg text-white shadow-lg shadow-purple-600/20 transition">
+            Save policy ▷
+          </button>
+          <button onclick="loadPolicy()" class="px-3 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs border border-gray-700">
+            Discard edits
+          </button>
+          <button onclick="applyDefaults()" class="px-3 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs border border-gray-700">
+            Fill shipped defaults
+          </button>
+          <span id="save-status" class="text-xs text-gray-500"></span>
+        </div>
+
+        <div class="text-[11px] text-gray-500 border-t border-gray-800 pt-3">
+          The bounds on this form are enforced in the browser. The API accepts any parseable number and answers
+          <span class="font-mono">400</span> only when a value cannot be parsed at all, so a policy written with
+          <span class="font-mono">curl</span> is not checked the way this form checks it.
+        </div>
+      </div>
+
+      <!-- READ-ONLY POLICY AND THE WRITE LOG -->
+      <div class="rounded-2xl bg-gray-900 border border-gray-800 p-5 space-y-4">
+        <div class="flex items-center justify-between border-b border-gray-800 pb-3">
+          <h2 class="text-sm font-semibold text-white">Compiled in, not editable here</h2>
+          <span class="text-xs px-2.5 py-1 rounded-full font-semibold bg-amber-950 text-amber-400 border border-amber-800">READ ONLY</span>
+        </div>
+
+        <p class="text-xs text-gray-400">
+          <span class="font-mono text-amber-300">blocked_patterns</span> is reported by
+          <span class="font-mono">GET /policy/config</span>, but the <span class="font-mono">POST</span> handler does not accept the
+          field, so it cannot be changed from here and saving does not touch it. The credential shapes the secret gate actually
+          matches are in the domain rules, which this list only samples.
+        </p>
+
+        <div id="blocked-patterns" class="space-y-2">
+          <p class="text-xs text-gray-500">Loading…</p>
+        </div>
+
+        <div class="border-t border-gray-800 pt-3">
+          <p class="text-xs font-medium text-gray-400 uppercase">Last response from the service</p>
+          <pre id="raw-response" class="mt-2 p-3 rounded-xl bg-gray-950 border border-gray-800 text-[11px] font-mono text-gray-300 overflow-x-auto max-h-72 overflow-y-auto">Nothing sent yet.</pre>
+        </div>
+
+        <div class="border-t border-gray-800 pt-3">
+          <p class="text-xs font-medium text-gray-400 uppercase">Where a saved policy lives</p>
+          <p class="text-xs text-gray-400 mt-1">
+            A saved policy is written to DynamoDB under <span class="font-mono text-purple-300">CONFIG#policy</span> and read back when a
+            cold Lambda container starts, so a change made here outlives the container that accepted it. If that write fails, the
+            service keeps the value in process memory only and the next container starts on the previous policy.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- WHAT EACH THRESHOLD GATES -->
+    <div class="rounded-2xl bg-gray-900 border border-gray-800 p-5 space-y-3">
+      <h2 class="text-sm font-semibold text-white">What these numbers change, and what they do not</h2>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+        <div class="p-3 rounded-xl bg-gray-950 border border-gray-800">
+          <p class="font-semibold text-emerald-300">Two are applied to the gates</p>
+          <p class="text-gray-400 mt-1">
+            Saving sets the loop detector's repetition threshold from
+            <span class="font-mono">monomorphic_repetition_threshold</span> and the breaker's single-call cap from
+            <span class="font-mono">max_single_call_usd</span>. Raise the threshold to 5 and the first scenario on the dashboard no
+            longer halts on the third call: that is the quickest proof this page reaches the evaluator the gate uses. The cap is
+            weighed against caller-declared token counts, so a caller that declares zero tokens is not stopped by it.
+          </p>
+        </div>
+        <div class="p-3 rounded-xl bg-gray-950 border border-gray-800">
+          <p class="font-semibold text-amber-300">Two are stored and reported only</p>
+          <p class="text-gray-400 mt-1">
+            <span class="font-mono">max_session_budget_usd</span> and <span class="font-mono">loop_history_window</span> are
+            persisted, re-read on a cold start and returned by this endpoint, but no gate reads them: the session ceiling comes
+            from each call's own <span class="font-mono">budget_usd</span>, and the detector's cycle search length is compiled in.
+            They are shown because hiding an unwired setting is how a dashboard starts lying.
+          </p>
+        </div>
+      </div>
+      <div class="p-3 rounded-xl bg-gray-950 border border-gray-800 text-xs">
+        <p class="font-semibold text-gray-300">The same change over curl</p>
+        <pre class="mt-2 text-[11px] font-mono text-gray-400 overflow-x-auto" id="curl-example">Loading the current policy first.</pre>
+      </div>
+    </div>
+
+  </main>
+
+  <footer class="border-t border-gray-800 py-4 text-center text-xs text-gray-500">
+    Threefold · AWS Zero to Shipped Hackathon 2026 · Built with Amazon Bedrock &amp; AWS Serverless
+  </footer>
+
+  <script>
+    const SHIPPED_DEFAULTS = {
+      max_single_call_usd: 1.00,
+      max_session_budget_usd: 10.00,
+      loop_history_window: 6,
+      monomorphic_repetition_threshold: 3
+    };
+
+    const NAV = [
+      { href: 'index.html', label: 'Dashboard' },
+      { href: 'sessions.html', label: 'Sessions' },
+      { href: 'connect.html', label: 'Connect an agent' },
+      { href: 'testbook.html', label: 'Judge Testbook' },
+      { href: 'swagger.html', label: 'OpenAPI 3.1' }
+    ];
+
+    function renderNav() {
+      document.getElementById('page-nav').innerHTML = NAV.map(item =>
+        '<a href="' + PAGE_BASE + item.href + '" class="px-3 py-1.5 rounded-md bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700 transition">' + item.label + '</a>'
+      ).join('');
+    }
+
+    function escapeHtml(str) {
+      if (typeof str !== 'string') return str == null ? '' : String(str);
+      return str.replace(/[&<>"']/g, m => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#039;'
+      }[m]));
+    }
+
+    function getApiBase() {
+      const configured = document.getElementById("apiBaseInput").value.trim().replace(/\/+$/, "");
+      return configured || DEFAULT_API_BASE;
+    }
+
+    function authHeaders(extra) {
+      const headers = Object.assign({ "Accept": "application/json" }, extra || {});
+      const key = document.getElementById("apiKeyInput").value.trim();
+      if (key) headers["X-API-Key"] = key;
+      return headers;
+    }
+
+    function setConnection(ok, text) {
+      const badge = document.getElementById("apiConnectionStatus");
+      const tone = ok
+        ? "bg-emerald-950 text-emerald-400 border-emerald-800"
+        : "bg-red-950 text-red-400 border-red-800";
+      const dot = ok ? "bg-emerald-400" : "bg-red-400";
+      badge.className = "px-2 py-0.5 rounded text-[11px] font-mono border flex items-center gap-1.5 " + tone;
+      badge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full ' + dot + '"></span> ' + escapeHtml(text);
+    }
+
+    function showRaw(obj) {
+      document.getElementById('raw-response').textContent = JSON.stringify(obj, null, 2);
+    }
+
+    // The strip at the top and the form below it render from one payload, so
+    // nothing on the page can show a threshold the service did not just report.
+    function renderPolicy(config) {
+      document.getElementById('kpi-single').innerText = '$' + Number(config.max_single_call_usd).toFixed(2);
+      document.getElementById('kpi-budget').innerText = '$' + Number(config.max_session_budget_usd).toFixed(2);
+      document.getElementById('kpi-window').innerText = String(config.loop_history_window);
+      document.getElementById('kpi-threshold').innerText = String(config.monomorphic_repetition_threshold);
+
+      document.getElementById('in-single').value = Number(config.max_single_call_usd);
+      document.getElementById('in-budget').value = Number(config.max_session_budget_usd);
+      document.getElementById('in-window').value = Number(config.loop_history_window);
+      document.getElementById('in-threshold').value = Number(config.monomorphic_repetition_threshold);
+
+      const patterns = Array.isArray(config.blocked_patterns) ? config.blocked_patterns : [];
+      document.getElementById('blocked-patterns').innerHTML = patterns.length
+        ? patterns.map(p => '<div class="p-2 rounded bg-gray-950 border border-gray-800 text-xs font-mono text-amber-300 break-all">' + escapeHtml(p) + '</div>').join('')
+        : '<p class="text-xs text-gray-500">The service reported no patterns.</p>';
+
+      const curlBody = JSON.stringify({
+        max_single_call_usd: Number(config.max_single_call_usd),
+        max_session_budget_usd: Number(config.max_session_budget_usd),
+        loop_history_window: Number(config.loop_history_window),
+        monomorphic_repetition_threshold: Number(config.monomorphic_repetition_threshold)
+      });
+      document.getElementById('curl-example').textContent =
+        'curl -X POST ' + getApiBase() + '/policy/config \\\n' +
+        "  -H 'Content-Type: application/json' \\\n" +
+        "  -d '" + curlBody + "'";
+    }
+
+    async function loadPolicy() {
+      const tag = document.getElementById('policy-source');
+      tag.className = 'text-xs px-2.5 py-1 rounded-full font-semibold bg-gray-800 text-gray-400';
+      tag.innerText = 'Loading…';
+      try {
+        const res = await fetch(getApiBase() + '/policy/config', { method: 'GET', headers: authHeaders() });
+        const data = await res.json();
+        if (!res.ok) {
+          setConnection(false, 'HTTP ' + res.status);
+          tag.className = 'text-xs px-2.5 py-1 rounded-full font-semibold bg-red-950 text-red-400 border border-red-800';
+          tag.innerText = 'READ FAILED';
+          showRaw(data);
+          return;
+        }
+        renderPolicy(data);
+        showRaw(data);
+        setConnection(true, 'LIVE POLICY READ');
+        tag.className = 'text-xs px-2.5 py-1 rounded-full font-semibold bg-emerald-950 text-emerald-400 border border-emerald-800';
+        tag.innerText = 'LIVE FROM API';
+        document.getElementById('save-status').innerText = '';
+      } catch (err) {
+        setConnection(false, 'UNREACHABLE');
+        tag.className = 'text-xs px-2.5 py-1 rounded-full font-semibold bg-red-950 text-red-400 border border-red-800';
+        tag.innerText = 'UNREACHABLE';
+        document.getElementById('blocked-patterns').innerHTML =
+          '<p class="text-xs text-red-400">The service could not be reached, so no policy is shown. Nothing here is filled in from a guess while it is offline.</p>';
+        showRaw({ error: String(err) });
+      }
+    }
+
+    function applyDefaults() {
+      document.getElementById('in-single').value = SHIPPED_DEFAULTS.max_single_call_usd;
+      document.getElementById('in-budget').value = SHIPPED_DEFAULTS.max_session_budget_usd;
+      document.getElementById('in-window').value = SHIPPED_DEFAULTS.loop_history_window;
+      document.getElementById('in-threshold').value = SHIPPED_DEFAULTS.monomorphic_repetition_threshold;
+      document.getElementById('save-status').innerHTML =
+        '<span class="text-amber-400">Form filled with the shipped defaults. Nothing is saved until you press Save.</span>';
+    }
+
+    function readForm() {
+      return {
+        max_single_call_usd: parseFloat(document.getElementById('in-single').value),
+        max_session_budget_usd: parseFloat(document.getElementById('in-budget').value),
+        loop_history_window: parseInt(document.getElementById('in-window').value, 10),
+        monomorphic_repetition_threshold: parseInt(document.getElementById('in-threshold').value, 10)
+      };
+    }
+
+    function validate(body) {
+      const problems = [];
+      if (!(body.max_single_call_usd > 0)) problems.push('max_single_call_usd must be greater than 0');
+      if (!(body.max_session_budget_usd > 0)) problems.push('max_session_budget_usd must be greater than 0');
+      if (!Number.isInteger(body.loop_history_window) || body.loop_history_window < 2) problems.push('loop_history_window must be a whole number of at least 2');
+      if (!Number.isInteger(body.monomorphic_repetition_threshold) || body.monomorphic_repetition_threshold < 2) problems.push('monomorphic_repetition_threshold must be a whole number of at least 2');
+      // Only shapes the service can actually be given are checked. No rule is
+      // invented here between a field a gate reads and one it does not.
+      if (body.max_single_call_usd > body.max_session_budget_usd) problems.push('a single call cannot be allowed to cost more than the session budget recorded beside it');
+      return problems;
+    }
+
+    async function savePolicy() {
+      const status = document.getElementById('save-status');
+      const body = readForm();
+      const problems = validate(body);
+      if (problems.length) {
+        status.innerHTML = '<span class="text-red-400">' + escapeHtml(problems[0]) + '</span>';
+        return;
+      }
+
+      const button = document.getElementById('btnSave');
+      button.disabled = true;
+      status.innerHTML = '<span class="text-gray-400">Sending…</span>';
+      try {
+        const res = await fetch(getApiBase() + '/policy/config', {
+          method: 'POST',
+          headers: authHeaders({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify(body)
+        });
+        const data = await res.json();
+        showRaw(data);
+        if (!res.ok) {
+          status.innerHTML = '<span class="text-red-400">Refused with HTTP ' + res.status + '. The policy is unchanged.</span>';
+          setConnection(false, 'HTTP ' + res.status);
+          return;
+        }
+        // A write that is only echoed back proves nothing, so the saved policy is
+        // read again from the service and the page re-renders from that read. The
+        // write already succeeded at this point, so a failed read-back is reported
+        // as exactly that rather than as a failed save or as a policy of NaN.
+        let verified = null;
+        try {
+          const verify = await fetch(getApiBase() + '/policy/config', { method: 'GET', headers: authHeaders() });
+          if (verify.ok) verified = await verify.json();
+        } catch (readBackError) {
+          verified = null;
+        }
+        if (!verified || typeof verified.max_single_call_usd === 'undefined') {
+          status.innerHTML = '<span class="text-amber-400">The service accepted the write, but reading the policy back failed, so the values above are still the ones from before the save.</span>';
+          setConnection(false, 'READ BACK FAILED');
+          return;
+        }
+        renderPolicy(verified);
+        const matches = ['max_single_call_usd', 'max_session_budget_usd', 'loop_history_window', 'monomorphic_repetition_threshold']
+          .every(k => Number(verified[k]) === Number(body[k]));
+        status.innerHTML = matches
+          ? '<span class="text-emerald-400">Saved, and read back from the service.</span>'
+          : '<span class="text-amber-400">Saved, but the value read back differs from what was sent. The panel on the right shows what the service reports.</span>';
+        setConnection(true, matches ? 'POLICY UPDATED' : 'READ BACK DIFFERS');
+      } catch (err) {
+        status.innerHTML = '<span class="text-red-400">' + escapeHtml(String(err)) + '</span>';
+        setConnection(false, 'UNREACHABLE');
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    renderNav();
+    document.getElementById('apiBaseInput').value = DEFAULT_API_BASE;
+    loadPolicy();
+  </script>
+</body>
+</html>

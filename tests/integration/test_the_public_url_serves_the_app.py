@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from threefold.interfaces.api_handlers import lambda_handler
 
 
@@ -57,3 +59,27 @@ def test_the_testbook_is_reachable() -> None:
     response = _get("/testbook.html")
     assert response["statusCode"] == 200
     assert response["headers"]["Content-Type"].startswith("text/html")
+
+
+@pytest.mark.parametrize(
+    "path, title",
+    [
+        ("/settings.html", "Threefold — Policy Settings"),
+        ("/sessions.html", "Threefold — Governed Sessions"),
+        ("/connect.html", "Threefold — Connect a Coding Agent"),
+    ],
+)
+def test_the_operator_pages_are_reachable(path: str, title: str) -> None:
+    """A page that is written but not routed is a page nobody can open."""
+    response = _get(path)
+    assert response["statusCode"] == 200
+    assert response["headers"]["Content-Type"].startswith("text/html")
+    assert f"<title>{title}</title>" in response["body"]
+
+
+@pytest.mark.parametrize("path", ["/settings.html", "/sessions.html", "/connect.html"])
+def test_the_operator_pages_are_told_the_api_base(path: str) -> None:
+    """Each page calls the API itself, so each one needs the stage prefix injected."""
+    response = _get(path)
+    assert "__THREEFOLD_BASE_PATH__" not in response["body"], "The token must be substituted"
+    assert 'const SERVED_BASE_PATH = "/prod";' in response["body"]

@@ -11,6 +11,7 @@ import logging
 import os
 import time
 from typing import Any, Dict
+from urllib.parse import unquote
 
 from threefold.application.audit_issuer import AuditIssuer
 from threefold.application.bedrock_reviewer import BedrockArchitecturalReviewer
@@ -36,7 +37,7 @@ CORS_HEADERS = {
     "Content-Type": "application/json",
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With, X-API-Key",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With, X-API-Key, Idempotency-Key",
 }
 
 
@@ -49,6 +50,9 @@ WEB_ASSETS = {
     "/index.html": "index.html",
     "/testbook.html": "testbook.html",
     "/swagger.html": "swagger.html",
+    "/settings.html": "settings.html",
+    "/sessions.html": "sessions.html",
+    "/connect.html": "connect.html",
 }
 
 
@@ -423,7 +427,11 @@ def lambda_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]
 
         # Route 6: Inspect Session History & Metrics
         if path.startswith("/sessions/") and http_method == "GET":
-            target_session_id = path.replace("/sessions/", "").strip()
+            # The raw path is not URL-decoded by API Gateway, so a session id carrying
+            # a space or a bracket would arrive percent-encoded and look like an id
+            # nobody has ever used. Reading it back would then create an empty session
+            # and report that as the caller's, which is worse than an error.
+            target_session_id = unquote(path.replace("/sessions/", "").strip())
             session = _evaluator.get_or_create_session(target_session_id)
             return build_response(200, {
                 "session_id": session.session_id,
@@ -438,7 +446,7 @@ def lambda_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]
 
         # Route 6b: Enterprise Emergency Kill Switch (Manual Session Freeze)
         if path.startswith("/sessions/") and path.endswith("/terminate") and http_method == "POST":
-            target_session_id = path.replace("/sessions/", "").replace("/terminate", "").strip()
+            target_session_id = unquote(path.replace("/sessions/", "").replace("/terminate", "").strip())
             body = _parse_body(event)
             operator_name = body.get("operator_name", "Enterprise Security Admin")
             reason = body.get("reason", "Manual emergency kill-switch invoked")

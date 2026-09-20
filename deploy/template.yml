@@ -35,7 +35,10 @@ Resources:
       StageName: prod
       CorsConfiguration:
         AllowMethods: ['GET', 'POST', 'OPTIONS']
-        AllowHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-API-Key']
+        # Idempotency-Key is sent by the dashboard's kill switch and by the sessions
+        # console. Omitting it here fails the preflight whenever a page is served
+        # from anywhere but this API's own origin.
+        AllowHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-API-Key', 'Idempotency-Key']
         AllowOrigins: ['*']
 
   ThreefoldFunction:
@@ -57,6 +60,11 @@ Resources:
                 - dynamodb:GetItem
                 - dynamodb:UpdateItem
                 - dynamodb:Query
+                # The sessions listing scans for session metadata. Without this the
+                # scan is refused, the repository silently falls back to whatever the
+                # container happens to hold in memory, and the sessions page shows
+                # rows on a warm container and nothing on a cold one.
+                - dynamodb:Scan
               Resource: !GetAtt ThreefoldTable.Arn
             - Effect: Allow
               Action:

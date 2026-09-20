@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Threefold — Governed Sessions</title>
+  <!-- Tailwind CSS via CDN for zero-dependency portability, as on the dashboard -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+      // The server rewrites __THREEFOLD_BASE_PATH__ to the API Gateway stage prefix
+      // when it serves this page, so the base is exact rather than guessed from the
+      // URL, which is ambiguous when the trailing slash is missing. Opening the file
+      // straight from disk leaves the token in place and falls back to a local server.
+      const SERVED_BASE_PATH = "__THREEFOLD_BASE_PATH__";
+      const DEFAULT_API_BASE = SERVED_BASE_PATH.indexOf("THREEFOLD_BASE_PATH") !== -1
+        ? "http://localhost:8001"
+        : location.origin + SERVED_BASE_PATH;
+      // Sibling pages sit under the same stage prefix. A bare relative href breaks
+      // when the page is reached without a trailing slash, which is the same reason
+      // the base path is injected rather than guessed.
+      const PAGE_BASE = SERVED_BASE_PATH.indexOf("THREEFOLD_BASE_PATH") !== -1
+        ? ""
+        : location.origin + SERVED_BASE_PATH + "/";
+
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#f5f3ff',
+              500: '#8b5cf6',
+              900: '#4c1d95',
+              dark: '#0a0d18',
+              card: '#111528',
+              border: '#1e243d'
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+    body { font-family: 'Inter', sans-serif; background-color: #0a0d18; color: #f3f4f6; }
+    .font-mono { font-family: 'JetBrains Mono', monospace; }
+    .glow-red { box-shadow: 0 0 25px -5px rgba(239, 68, 68, 0.45); }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+  <!-- TOP HEADER -->
+  <header class="border-b border-gray-800 bg-gray-950/80 backdrop-blur sticky top-0 z-50">
+    <div class="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-4">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-lg bg-gradient-to-br from-indigo-500 via-purple-600 to-pink-600 flex items-center justify-center font-bold text-white text-xl shadow-lg shadow-purple-500/20">
+          📓
+        </div>
+        <div>
+          <div class="flex items-center gap-2">
+            <h1 class="text-lg font-bold tracking-tight text-white">Governed Sessions</h1>
+            <span class="px-2 py-0.5 rounded text-xs font-semibold bg-purple-950 text-purple-400 border border-purple-800 font-mono">
+              /api/sessions
+            </span>
+          </div>
+          <p class="text-xs text-gray-400">Every session the service has actually evaluated · not a sample, not a mock</p>
+        </div>
+      </div>
+      <nav id="page-nav" class="flex items-center gap-2 text-xs"></nav>
+    </div>
+
+    <!-- LIVE API CONNECTION BAR -->
+    <div class="bg-gray-950/90 border-b border-gray-800 px-4 py-2 text-xs flex flex-wrap items-center justify-between gap-3">
+      <div class="flex items-center gap-2 flex-wrap">
+        <span class="text-gray-400 font-medium">Sidecar REST:</span>
+        <input id="apiBaseInput" type="text" value="" class="bg-gray-900 border border-gray-700 rounded px-2 py-0.5 text-xs text-purple-300 font-mono w-56 focus:outline-none focus:border-purple-500" />
+        <span class="text-gray-400 font-medium ml-1">API Key:</span>
+        <input id="apiKeyInput" type="password" value="" placeholder="only if the stack enforces one" class="bg-gray-900 border border-gray-700 rounded px-2 py-0.5 text-xs text-sky-300 font-mono w-40 focus:outline-none focus:border-sky-500" />
+        <span class="text-gray-400 font-medium ml-1">Limit:</span>
+        <select id="limitSelect" onchange="loadSessions()" class="bg-gray-900 border border-gray-700 rounded px-2 py-0.5 text-xs text-gray-200 font-mono focus:outline-none focus:border-purple-500">
+          <option value="25">25</option>
+          <option value="50" selected>50</option>
+          <option value="100">100</option>
+          <option value="200">200</option>
+        </select>
+        <button onclick="loadSessions()" class="px-2 py-0.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs border border-gray-700">Refresh</button>
+        <label class="flex items-center gap-1.5 text-gray-400">
+          <input id="autoRefresh" type="checkbox" onchange="toggleAutoRefresh()" class="accent-purple-500" />
+          auto, every 10s
+        </label>
+        <span id="apiConnectionStatus" class="px-2 py-0.5 rounded text-[11px] font-mono bg-amber-950 text-amber-400 border border-amber-800 flex items-center gap-1.5">
+          <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span> NOT READ YET
+        </span>
+        <span id="persistenceBadge" class="px-2 py-0.5 rounded text-[11px] font-mono bg-gray-900 text-gray-400 border border-gray-700 flex items-center gap-1.5">
+          <span class="w-1.5 h-1.5 rounded-full bg-gray-500"></span> LAST WRITE: --
+        </span>
+      </div>
+      <div class="text-gray-400 text-[11px] hidden md:block">
+        🛡️ The refresh interval is deliberately slow. The API rate limits one address to 60 requests a minute
+      </div>
+    </div>
+  </header>
+
+  <main class="flex-1 max-w-7xl mx-auto px-4 py-6 w-full space-y-6">
+
+    <!-- KPI STRIP, COMPUTED FROM THE ROWS BELOW -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div class="p-4 rounded-xl bg-gray-900 border border-gray-800">
+        <p class="text-xs font-medium text-gray-400 uppercase tracking-wider">Sessions Returned</p>
+        <p id="kpi-count" class="text-2xl font-bold text-white mt-1">--</p>
+        <p id="kpi-count-note" class="text-xs text-gray-400 mt-1">Newest first</p>
+      </div>
+      <div class="p-4 rounded-xl bg-gray-900 border border-gray-800">
+        <p class="text-xs font-medium text-gray-400 uppercase tracking-wider">Halted Sessions</p>
+        <p id="kpi-tripped" class="text-2xl font-bold text-emerald-400 mt-1">--</p>
+        <p class="text-xs text-gray-400 mt-1">Loop, budget or manual freeze</p>
+      </div>
+      <div class="p-4 rounded-xl bg-gray-900 border border-gray-800">
+        <p class="text-xs font-medium text-gray-400 uppercase tracking-wider">Recorded Spend</p>
+        <p id="kpi-cost" class="text-2xl font-bold text-white mt-1">--</p>
+        <p class="text-xs text-gray-400 mt-1">Summed over the rows shown</p>
+      </div>
+      <div class="p-4 rounded-xl bg-gray-900 border border-gray-800">
+        <p class="text-xs font-medium text-gray-400 uppercase tracking-wider">Calls In Retained History</p>
+        <p id="kpi-calls" class="text-2xl font-bold text-purple-400 mt-1">--</p>
+        <p class="text-xs text-gray-400 mt-1">The store keeps the last 50 per session, so a longer session counts 50 here</p>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+      <!-- SESSION TABLE -->
+      <div class="lg:col-span-2 rounded-2xl bg-gray-900 border border-gray-800 p-5 space-y-3">
+        <div class="flex items-center justify-between border-b border-gray-800 pb-3 gap-3 flex-wrap">
+          <h2 class="text-sm font-semibold text-white">Sessions</h2>
+          <div class="flex items-center gap-2">
+            <input id="filterInput" type="text" oninput="renderTable()" placeholder="filter by session, project or developer" class="bg-gray-950 border border-gray-800 rounded px-2 py-1 text-xs text-gray-200 font-mono w-64 focus:outline-none focus:border-purple-500" />
+            <label class="flex items-center gap-1.5 text-xs text-gray-400">
+              <input id="onlyTripped" type="checkbox" onchange="renderTable()" class="accent-red-500" />
+              halted only
+            </label>
+          </div>
+        </div>
+
+        <div class="overflow-x-auto">
+          <table class="w-full text-xs">
+            <thead>
+              <tr class="text-gray-400 uppercase tracking-wider text-[11px] border-b border-gray-800">
+                <th class="text-left font-medium py-2 pr-3">Session</th>
+                <th class="text-left font-medium py-2 pr-3">Project</th>
+                <th class="text-right font-medium py-2 pr-3">Calls</th>
+                <th class="text-right font-medium py-2 pr-3">Cost</th>
+                <th class="text-right font-medium py-2 pr-3">Tokens</th>
+                <th class="text-left font-medium py-2 pr-3">State</th>
+                <th class="text-left font-medium py-2">Created</th>
+              </tr>
+            </thead>
+            <tbody id="sessions-body">
+              <tr><td colspan="7" class="py-6 text-center text-gray-500">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p class="text-[11px] text-gray-500 border-t border-gray-800 pt-3">
+          The listing scans the session table and keeps the newest rows, which is honest at this scale and would not be at any
+          other. A deployment with real traffic wants a secondary index on a recency key instead. The
+          <span class="font-mono">Calls</span> column counts the retained history, which the store caps at the last 50 per
+          session; cost and tokens are cumulative and are not capped.
+        </p>
+      </div>
+
+      <!-- SESSION DETAIL -->
+      <div class="rounded-2xl bg-gray-900 border border-gray-800 p-5 space-y-4">
+        <div class="flex items-center justify-between border-b border-gray-800 pb-3">
+          <h2 class="text-sm font-semibold text-white">Session detail</h2>
+          <span id="detail-tag" class="text-xs px-2.5 py-1 rounded-full font-semibold bg-gray-800 text-gray-400">No row selected</span>
+        </div>
+
+        <div id="detail-body" class="text-xs text-gray-400">
+          Select a session on the left. The panel then reads
+          <span class="font-mono text-purple-300">GET /sessions/{id}</span>, which is a second request against the service rather
+          than a re-display of the row.
+        </div>
+
+        <div id="detail-actions" class="hidden border-t border-gray-800 pt-3 space-y-2">
+          <button onclick="freezeSelected()" class="w-full px-3 py-2 rounded-lg bg-rose-950 hover:bg-rose-900 text-rose-300 text-xs border border-rose-800 font-semibold">
+            🚨 Freeze this session
+          </button>
+          <p class="text-[11px] text-gray-500">
+            A freeze is the operator kill switch. It writes a terminal state that the service will not undo, and every later call
+            in that session is refused. There is no unfreeze endpoint.
+          </p>
+        </div>
+
+        <div class="border-t border-gray-800 pt-3">
+          <p class="text-xs font-medium text-gray-400 uppercase">Last response from the service</p>
+          <pre id="raw-response" class="mt-2 p-3 rounded-xl bg-gray-950 border border-gray-800 text-[11px] font-mono text-gray-300 overflow-x-auto max-h-64 overflow-y-auto">Nothing requested yet.</pre>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <footer class="border-t border-gray-800 py-4 text-center text-xs text-gray-500">
+    Threefold · AWS Zero to Shipped Hackathon 2026 · Built with Amazon Bedrock &amp; AWS Serverless
+  </footer>
+
+  <script>
+    const NAV = [
+      { href: 'index.html', label: 'Dashboard' },
+      { href: 'settings.html', label: 'Policy Settings' },
+      { href: 'connect.html', label: 'Connect an agent' },
+      { href: 'testbook.html', label: 'Judge Testbook' },
+      { href: 'swagger.html', label: 'OpenAPI 3.1' }
+    ];
+
+    let sessions = [];
+    let selectedId = null;
+    let autoTimer = null;
+
+    function renderNav() {
+      document.getElementById('page-nav').innerHTML = NAV.map(item =>
+        '<a href="' + PAGE_BASE + item.href + '" class="px-3 py-1.5 rounded-md bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700 transition">' + item.label + '</a>'
+      ).join('');
+    }
+
+    function escapeHtml(str) {
+      if (typeof str !== 'string') return str == null ? '' : String(str);
+      return str.replace(/[&<>"']/g, m => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#039;'
+      }[m]));
+    }
+
+    function getApiBase() {
+      const configured = document.getElementById("apiBaseInput").value.trim().replace(/\/+$/, "");
+      return configured || DEFAULT_API_BASE;
+    }
+
+    function authHeaders(extra) {
+      const headers = Object.assign({ "Accept": "application/json" }, extra || {});
+      const key = document.getElementById("apiKeyInput").value.trim();
+      if (key) headers["X-API-Key"] = key;
+      return headers;
+    }
+
+    function setConnection(ok, text) {
+      const badge = document.getElementById("apiConnectionStatus");
+      const tone = ok
+        ? "bg-emerald-950 text-emerald-400 border-emerald-800"
+        : "bg-red-950 text-red-400 border-red-800";
+      const dot = ok ? "bg-emerald-400" : "bg-red-400";
+      badge.className = "px-2 py-0.5 rounded text-[11px] font-mono border flex items-center gap-1.5 " + tone;
+      badge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full ' + dot + '"></span> ' + escapeHtml(text);
+    }
+
+    // This reports where the most recent session WRITE landed, which is the only
+    // thing the service measures. It is not a statement about where the rows below
+    // were read from: a container that has written nothing since it started reports
+    // 'memory' while still listing rows the table returned.
+    function setPersistence(mode) {
+      const badge = document.getElementById('persistenceBadge');
+      const durable = mode === 'dynamodb';
+      const tone = durable
+        ? 'bg-emerald-950 text-emerald-400 border-emerald-800'
+        : 'bg-amber-950 text-amber-400 border-amber-800';
+      const dot = durable ? 'bg-emerald-400' : 'bg-amber-400';
+      badge.className = 'px-2 py-0.5 rounded text-[11px] font-mono border flex items-center gap-1.5 ' + tone;
+      badge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full ' + dot + '"></span> LAST WRITE: ' + escapeHtml(String(mode || 'unknown').toUpperCase());
+      badge.title = durable
+        ? 'The most recent session write reached DynamoDB, so what it wrote outlives the container that evaluated it.'
+        : 'The most recent session write stayed inside one container, or this container has written nothing yet. It says nothing about where the rows below came from.';
+    }
+
+    function showRaw(obj) {
+      document.getElementById('raw-response').textContent = JSON.stringify(obj, null, 2);
+    }
+
+    function formatTimestamp(value) {
+      if (!value) return '—';
+      const parsed = Date.parse(value);
+      if (Number.isNaN(parsed)) return String(value);
+      return new Date(parsed).toISOString().replace('T', ' ').slice(0, 19) + 'Z';
+    }
+
+    function stateBadge(session) {
+      if (session.is_terminated) {
+        return '<span class="px-2 py-0.5 rounded font-mono text-[11px] bg-rose-950 text-rose-400 border border-rose-800">FROZEN</span>';
+      }
+      if (session.is_tripped) {
+        return '<span class="px-2 py-0.5 rounded font-mono text-[11px] bg-red-950 text-red-400 border border-red-800">HALTED</span>';
+      }
+      return '<span class="px-2 py-0.5 rounded font-mono text-[11px] bg-emerald-950 text-emerald-400 border border-emerald-800">RUNNING</span>';
+    }
+
+    function visibleSessions() {
+      const needle = document.getElementById('filterInput').value.trim().toLowerCase();
+      const onlyTripped = document.getElementById('onlyTripped').checked;
+      return sessions.filter(s => {
+        if (onlyTripped && !(s.is_tripped || s.is_terminated)) return false;
+        if (!needle) return true;
+        return [s.session_id, s.project_name, s.developer_id]
+          .map(v => String(v || '').toLowerCase())
+          .some(v => v.indexOf(needle) !== -1);
+      });
+    }
+
+    function renderTable() {
+      const rows = visibleSessions();
+      const body = document.getElementById('sessions-body');
+
+      if (!rows.length) {
+        body.innerHTML = '<tr><td colspan="7" class="py-8 text-center text-gray-500">' +
+          (sessions.length
+            ? 'No session matches the filter.'
+            : 'The service reported no sessions. Nothing has been evaluated yet on the container that answered, or the rows have aged past their thirty day expiry. Run a scenario on the dashboard and refresh.') +
+          '</td></tr>';
+      } else {
+        // Rows carry their index, and the click handler is attached below rather than
+        // written into an onclick attribute. A session id is caller supplied and an
+        // apostrophe in one would otherwise close the string literal in that attribute.
+        body.innerHTML = rows.map((s, index) => {
+          const tokens = (Number(s.total_input_tokens) || 0) + (Number(s.total_output_tokens) || 0);
+          const selected = s.session_id === selectedId ? ' bg-gray-950' : '';
+          return '<tr data-index="' + index + '" class="border-b border-gray-800/60 hover:bg-gray-950 cursor-pointer transition' + selected + '">' +
+            '<td class="py-2 pr-3 font-mono text-purple-300 break-all">' + escapeHtml(s.session_id) +
+              '<div class="text-[11px] text-gray-500">' + escapeHtml(s.developer_id || 'unknown developer') + '</div></td>' +
+            '<td class="py-2 pr-3 text-gray-300">' + escapeHtml(s.project_name || '—') + '</td>' +
+            '<td class="py-2 pr-3 text-right font-mono text-gray-300">' + (Number(s.calls) || 0) + '</td>' +
+            '<td class="py-2 pr-3 text-right font-mono text-gray-300">$' + (Number(s.total_cost_usd) || 0).toFixed(4) + '</td>' +
+            '<td class="py-2 pr-3 text-right font-mono text-gray-400">' + tokens.toLocaleString() + '</td>' +
+            '<td class="py-2 pr-3">' + stateBadge(s) +
+              (s.trip_reason ? '<div class="text-[11px] text-gray-500 mt-1 max-w-xs truncate" title="' + escapeHtml(s.trip_reason) + '">' + escapeHtml(s.trip_reason) + '</div>' : '') +
+            '</td>' +
+            '<td class="py-2 font-mono text-gray-500">' + escapeHtml(formatTimestamp(s.created_at)) + '</td>' +
+          '</tr>';
+        }).join('');
+
+        body.querySelectorAll('tr[data-index]').forEach(row => {
+          const session = rows[Number(row.getAttribute('data-index'))];
+          if (session) row.addEventListener('click', () => selectSession(session.session_id));
+        });
+      }
+
+      const tripped = rows.filter(s => s.is_tripped || s.is_terminated).length;
+      const cost = rows.reduce((sum, s) => sum + (Number(s.total_cost_usd) || 0), 0);
+      const calls = rows.reduce((sum, s) => sum + (Number(s.calls) || 0), 0);
+
+      document.getElementById('kpi-count').innerText = String(rows.length);
+      document.getElementById('kpi-count-note').innerText = rows.length === sessions.length
+        ? 'Newest first'
+        : rows.length + ' of ' + sessions.length + ' shown by the filter';
+      document.getElementById('kpi-tripped').innerText = String(tripped);
+      document.getElementById('kpi-tripped').className = tripped
+        ? 'text-2xl font-bold text-red-400 mt-1'
+        : 'text-2xl font-bold text-emerald-400 mt-1';
+      document.getElementById('kpi-cost').innerText = '$' + cost.toFixed(4);
+      document.getElementById('kpi-calls').innerText = calls.toLocaleString();
+    }
+
+    async function loadSessions() {
+      const limit = document.getElementById('limitSelect').value;
+      try {
+        const res = await fetch(getApiBase() + '/api/sessions?limit=' + encodeURIComponent(limit), {
+          method: 'GET',
+          headers: authHeaders()
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          setConnection(false, 'HTTP ' + res.status);
+          showRaw(data);
+          document.getElementById('sessions-body').innerHTML =
+            '<tr><td colspan="7" class="py-8 text-center text-red-400">The listing was refused with HTTP ' + res.status +
+            '. Nothing is shown rather than something invented.</td></tr>';
+          return;
+        }
+        sessions = Array.isArray(data.sessions) ? data.sessions : [];
+        setConnection(true, 'LIVE · ' + sessions.length + ' SESSION' + (sessions.length === 1 ? '' : 'S'));
+        setPersistence(data.persistence);
+        showRaw(data);
+        renderTable();
+      } catch (err) {
+        setConnection(false, 'UNREACHABLE');
+        showRaw({ error: String(err) });
+        document.getElementById('sessions-body').innerHTML =
+          '<tr><td colspan="7" class="py-8 text-center text-red-400">The service could not be reached, so no sessions are shown.</td></tr>';
+      }
+    }
+
+    async function selectSession(sessionId) {
+      selectedId = sessionId;
+      renderTable();
+
+      const tag = document.getElementById('detail-tag');
+      const body = document.getElementById('detail-body');
+      tag.className = 'text-xs px-2.5 py-1 rounded-full font-semibold bg-gray-800 text-gray-400';
+      tag.innerText = 'Reading…';
+      body.innerHTML = '<p class="text-xs text-gray-500">Reading ' + escapeHtml(sessionId) + '…</p>';
+
+      try {
+        const res = await fetch(getApiBase() + '/sessions/' + encodeURIComponent(sessionId), {
+          method: 'GET',
+          headers: authHeaders()
+        });
+        const data = await res.json();
+        showRaw(data);
+        if (!res.ok) {
+          tag.className = 'text-xs px-2.5 py-1 rounded-full font-semibold bg-red-950 text-red-400 border border-red-800';
+          tag.innerText = 'HTTP ' + res.status;
+          body.innerHTML = '<p class="text-xs text-red-400">The service refused the read with HTTP ' + res.status + '.</p>';
+          return;
+        }
+        renderDetail(data);
+      } catch (err) {
+        tag.className = 'text-xs px-2.5 py-1 rounded-full font-semibold bg-red-950 text-red-400 border border-red-800';
+        tag.innerText = 'UNREACHABLE';
+        body.innerHTML = '<p class="text-xs text-red-400">' + escapeHtml(String(err)) + '</p>';
+      }
+    }
+
+    function detailRow(label, value, valueClass) {
+      return '<div class="flex items-center justify-between gap-3 py-1.5 border-b border-gray-800/60">' +
+        '<span class="text-gray-400">' + escapeHtml(label) + '</span>' +
+        '<span class="font-mono ' + (valueClass || 'text-gray-200') + ' text-right break-all">' + escapeHtml(value) + '</span>' +
+      '</div>';
+    }
+
+    function renderDetail(data) {
+      const tag = document.getElementById('detail-tag');
+      const halted = Boolean(data.is_tripped);
+      tag.className = halted
+        ? 'text-xs px-2.5 py-1 rounded-full font-semibold bg-red-950 text-red-400 border border-red-800'
+        : 'text-xs px-2.5 py-1 rounded-full font-semibold bg-emerald-950 text-emerald-400 border border-emerald-800';
+      tag.innerText = halted ? 'HALTED' : 'RUNNING';
+
+      const budget = Number(data.budget_usd) || 0;
+      const spent = Number(data.cumulative_cost_usd) || 0;
+      const used = budget > 0 ? Math.min(100, (spent / budget) * 100) : 0;
+
+      document.getElementById('detail-body').innerHTML =
+        '<div class="text-xs space-y-0">' +
+          detailRow('session_id', data.session_id, 'text-purple-300') +
+          detailRow('project', data.project_name || '—') +
+          detailRow('tool calls recorded', String(data.tool_call_history_count)) +
+          detailRow('cumulative cost', '$' + spent.toFixed(4)) +
+          detailRow('budget', '$' + budget.toFixed(2)) +
+          detailRow('budget remaining', '$' + (Number(data.budget_remaining_usd) || 0).toFixed(4),
+            (Number(data.budget_remaining_usd) || 0) > 0 ? 'text-emerald-400' : 'text-red-400') +
+          detailRow('halted', halted ? 'yes' : 'no', halted ? 'text-red-400' : 'text-emerald-400') +
+          detailRow('created', formatTimestamp(data.created_at), 'text-gray-400') +
+        '</div>' +
+        '<div class="mt-3">' +
+          '<div class="flex items-center justify-between text-[11px] text-gray-400 mb-1">' +
+            '<span>Budget consumed</span><span class="font-mono">' + used.toFixed(1) + '%</span>' +
+          '</div>' +
+          '<div class="h-2 rounded-full bg-gray-950 border border-gray-800 overflow-hidden">' +
+            '<div class="h-full ' + (used > 80 ? 'bg-red-500' : 'bg-emerald-500') + '" style="width:' + used.toFixed(1) + '%"></div>' +
+          '</div>' +
+        '</div>' +
+        '<p class="text-[11px] text-gray-500 mt-3">' +
+          'This endpoint creates a session record when the id is unknown, so a detail panel is never empty and an id typed by ' +
+          'hand becomes a real, zero-cost session.' +
+        '</p>';
+
+      document.getElementById('detail-actions').classList.remove('hidden');
+    }
+
+    async function freezeSelected() {
+      if (!selectedId) return;
+      if (!confirm('Freeze session ' + selectedId + '?\n\nThis writes a terminal state. Every later call in the session is refused and there is no unfreeze endpoint.')) return;
+      try {
+        const res = await fetch(getApiBase() + '/sessions/' + encodeURIComponent(selectedId) + '/terminate', {
+          method: 'POST',
+          headers: authHeaders({ 'Content-Type': 'application/json', 'Idempotency-Key': 'freeze-sessions-page-' + Date.now() }),
+          body: JSON.stringify({
+            operator_name: 'Sessions console operator',
+            reason: 'Manual kill switch invoked from the sessions console'
+          })
+        });
+        const data = await res.json();
+        showRaw(data);
+        if (!res.ok) {
+          alert('The freeze was refused with HTTP ' + res.status + '.');
+          return;
+        }
+        await loadSessions();
+        await selectSession(selectedId);
+      } catch (err) {
+        alert('Freeze error: ' + err.message);
+      }
+    }
+
+    // Ten seconds, not one. The API rate limits a single address to 60 requests a
+    // minute, and a dashboard that spends that budget on itself starves the demo.
+    function toggleAutoRefresh() {
+      const on = document.getElementById('autoRefresh').checked;
+      if (autoTimer) {
+        clearInterval(autoTimer);
+        autoTimer = null;
+      }
+      if (on) autoTimer = setInterval(loadSessions, 10000);
+    }
+
+    renderNav();
+    document.getElementById('apiBaseInput').value = DEFAULT_API_BASE;
+    loadSessions();
+  </script>
+</body>
+</html>

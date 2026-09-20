@@ -44,9 +44,18 @@ class GovernanceEvaluator:
         session_repo: Optional[Any] = None,
         policy_config: Optional[PolicyConfigDTO] = None,
     ) -> None:
-        self.cost_breaker = cost_breaker or CostCircuitBreaker()
-        self.loop_detector = loop_detector or LoopDetector(repetition_threshold=3)
+        # The gates are built from the policy rather than from their own defaults.
+        # They used to disagree: the policy reported a $1.00 single-call cap while a
+        # freshly built breaker enforced $2.50, so /policy/config described a limit
+        # that no call was ever measured against until someone happened to POST a
+        # policy. A gate a caller supplies is left exactly as it was supplied.
         self.policy_config = policy_config or PolicyConfigDTO()
+        self.cost_breaker = cost_breaker or CostCircuitBreaker(
+            max_single_invocation_cost=self.policy_config.max_single_call_usd
+        )
+        self.loop_detector = loop_detector or LoopDetector(
+            repetition_threshold=self.policy_config.monomorphic_repetition_threshold
+        )
         if session_repo is not None:
             self.session_repo = session_repo
         else:

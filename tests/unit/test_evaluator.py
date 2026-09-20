@@ -65,3 +65,26 @@ def test_audit_issuer_generates_valid_certificate():
     assert cert.all_passed is True
     assert len(cert.sha256_fingerprint) == 64
     assert cert.certificate_id.startswith("CERT-TF-")
+
+
+def test_the_reported_policy_is_the_policy_the_gates_enforce():
+    """A settings page reads /policy/config. That has to be what a call is measured against.
+
+    The evaluator used to build its breaker with a $2.50 cap while reporting a
+    $1.00 policy, so a fresh stack described a limit it did not apply until a
+    policy happened to be posted. An operator reading the settings page would have
+    been told a number no call was ever checked against.
+    """
+    evaluator = GovernanceEvaluator()
+    assert evaluator.cost_breaker.max_single_invocation_cost == evaluator.policy_config.max_single_call_usd
+    assert evaluator.loop_detector.repetition_threshold == evaluator.policy_config.monomorphic_repetition_threshold
+
+
+def test_a_supplied_gate_is_left_as_it_was_supplied():
+    """Building the gates from the policy must not overwrite one a caller injected."""
+    from threefold.domain.circuit_breaker import CostCircuitBreaker
+
+    injected = CostCircuitBreaker(max_single_invocation_cost=7.5)
+    evaluator = GovernanceEvaluator(cost_breaker=injected)
+    assert evaluator.cost_breaker is injected
+    assert evaluator.cost_breaker.max_single_invocation_cost == 7.5
