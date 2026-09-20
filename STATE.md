@@ -18,7 +18,7 @@ it, treat the later date as the one that governs teardown.
 | Requirement | State | Evidence `[PRIMARY]` |
 |---|---|---|
 | Live on AWS, public URL | **PASS** | `https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/` serves the dashboard itself, 200 and `text/html`, to an anonymous request with no API key. Stack `threefold-prod`, eu-west-1. The trailing slash is part of the URL: API Gateway answers the bare `/prod` with its own `{"message":"Not Found"}` before the function is reached, so every link to this project must carry it |
-| A visitor can run the demo | **PASS** | Walked in a browser: Scenario 1 sent one `POST /simulate-loop`, the function evaluated the same call three times inside that request, and the response was `BLOCKED_LOOP_DETECTED`, and the panel showed a genuine Haiku 4.5 sentence under the heading "Amazon Bedrock (Claude Haiku 4.5)" |
+| A visitor can run the demo | **PASS** | Walked in a browser: Scenario 1 sent one `POST /simulate-loop`, the function evaluated the same call three times inside that request, the response was `BLOCKED_LOOP_DETECTED`, and the panel showed a genuine Haiku 4.5 sentence under the heading "Amazon Bedrock (Claude Haiku 4.5)" |
 | Reachable by the AI scorer | **PASS** | `STAGE` is unset on the function, so the middleware defaults to `dev` and enforces no key. Verified by unauthenticated request. Do not read this off `/status`, which prints `"stage": "prod"`: that field has its own default and says nothing about whether a key is required |
 | Proof of coding agent connected to AWS | **PASS** | `docs/PROOF_OF_AWS_AGENT.md` rewritten around the real session: the commands run, the two defects AWS surfaced, and the CloudTrail principal. Raw output in `docs/evidence/DEPLOYMENT_2026-09-20.md` |
 | Public repository | **BLOCKED, owner action** | `main` is local only, with no remote configured, so none of the work is published. Publishing is one command, in `docs/RUNBOOK.md` step 2. The count of commits is deliberately not recorded here: `git log` holds it, and any line stating it is wrong again the moment it is committed |
@@ -56,12 +56,12 @@ hidden in a document that a judge would read as finished work.
    the `budget_usd` each call declares, and the detector's cycle length is
    compiled in at six. `blocked_patterns` is the third: it is defined on the DTO
    and read by no module in `src/`, because the credential shapes the secret gate
-   matches live in the domain rules instead. `/settings.html` labels all three on
-   its face. The other two
-   fields are wired: the breaker is now built from the policy rather than from
-   its own $2.50 default, so the cap `/policy/config` reports is the cap a call
-   is measured against, including on a cold container that has never been sent
-   a policy.
+   matches live in the domain rules instead. `/settings.html` carries all three on
+   its face: the two numeric ones are badged "stored, not enforced", and the
+   pattern list is shown read only with the reason. The remaining two keys are
+   wired, and the breaker is now built from the policy rather than from its own
+   $2.50 default, so the cap `/policy/config` reports is the cap a call is
+   measured against, including on a cold container that was never sent a policy.
 2. The `calls` count in the sessions listing saturates at 50, because the store
    keeps `history[-50:]`. Cost and tokens are cumulative and are not capped. The
    page says so rather than presenting 50 as a total.
