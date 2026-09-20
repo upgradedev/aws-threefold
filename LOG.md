@@ -37,3 +37,8 @@
 - Corrected two false statements inside the document itself: it named Claude 3.5 Sonnet while the stack runs Haiku 4.5, and its only server was `127.0.0.1:8001`, so a judge pressing Try it out called their own laptop. A test now reads the model family out of `deploy/template.yml` and fails if the document drifts.
 - The Dockerfile copied the old path and would no longer have built.
 - Tests 117 → 124. Deployed and verified on the live URL: eleven paths served, twelve operations rendered, no console error.
+
+## 2026-09-20T20:52:00+03:00 — The console links to the contract, not to its cover
+- The three pages already carried an `OpenAPI 3.1` entry in their nav. They now also deep link to the operation each page is built on: `/policy/config` from the settings page, `/api/sessions`, `/sessions/{id}` and the terminate route from the sessions console, `/evaluate-tool-call` from the connect page.
+- Anchors are the ones Swagger UI derives from method and path for a spec with no operationIds. A test rebuilds those anchors from the served document and fails if a page points at an operation the spec does not document, so renaming a route cannot silently break the links.
+- Tests 124 → 131.

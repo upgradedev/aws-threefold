@@ -104,7 +104,9 @@
         </div>
         <div class="p-3 rounded-xl bg-gray-950 border border-gray-800">
           <p class="text-xs font-semibold text-purple-300">2 · The hook asks this service</p>
-          <p class="text-[11px] text-gray-400 mt-1">One <span class="font-mono">POST /evaluate-tool-call</span>, standard library only, no dependencies to install.</p>
+          <p class="text-[11px] text-gray-400 mt-1">One
+            <a id="spec-link-evaluate" href="swagger.html" class="font-mono text-purple-300 hover:text-purple-200 underline">POST /evaluate-tool-call ↗</a>,
+            standard library only, no dependencies to install.</p>
         </div>
         <div class="p-3 rounded-xl bg-gray-950 border border-gray-800">
           <p class="text-xs font-semibold text-purple-300">3 · The agent obeys the verdict</p>
@@ -282,7 +284,13 @@ echo '{"tool_name":"Read","tool_input":{"file_path":"README.md"}}' \
       </div>
 
       <div class="rounded-2xl bg-gray-900 border border-gray-800 p-5 space-y-3">
-        <h2 class="text-sm font-semibold text-white border-b border-gray-800 pb-3">The contract, both directions</h2>
+        <div class="flex items-center justify-between gap-3 flex-wrap border-b border-gray-800 pb-3">
+          <h2 class="text-sm font-semibold text-white">The contract, both directions</h2>
+          <a id="spec-link-evaluate-2" href="swagger.html" title="Open this operation in the published OpenAPI document"
+             class="px-2 py-0.5 rounded text-[11px] font-semibold bg-purple-950 hover:bg-purple-900 text-purple-400 border border-purple-800 font-mono transition">
+            /evaluate-tool-call in the spec ↗
+          </a>
+        </div>
 
         <div>
           <p class="text-xs font-medium text-gray-400 uppercase">Claude Code writes this on stdin</p>
@@ -401,6 +409,16 @@ echo '{"tool_name":"Read","tool_input":{"file_path":"README.md"}}' \
       document.getElementById('page-nav').innerHTML = NAV.map(item =>
         '<a href="' + PAGE_BASE + item.href + '" class="px-3 py-1.5 rounded-md bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700 transition">' + item.label + '</a>'
       ).join('');
+    }
+
+    // The nav carries the document itself; these carry the one operation the hook
+    // calls, so a reader lands on the contract rather than on its front page. The
+    // anchor is the one Swagger UI generates for a spec without operationIds.
+    function linkToSpec() {
+      ['spec-link-evaluate', 'spec-link-evaluate-2'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.href = PAGE_BASE + 'swagger.html#/default/post_evaluate_tool_call';
+      });
     }
 
     function escapeHtml(str) {
@@ -586,6 +604,7 @@ echo '{"tool_name":"Read","tool_input":{"file_path":"README.md"}}' \
     }
 
     renderNav();
+    linkToSpec();
     document.getElementById('apiBaseInput').value = DEFAULT_API_BASE;
     renderSnippets();
   </script>

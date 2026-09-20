@@ -59,9 +59,10 @@
         <div>
           <div class="flex items-center gap-2">
             <h1 class="text-lg font-bold tracking-tight text-white">Governed Sessions</h1>
-            <span class="px-2 py-0.5 rounded text-xs font-semibold bg-purple-950 text-purple-400 border border-purple-800 font-mono">
-              /api/sessions
-            </span>
+            <a id="spec-link-sessions" href="swagger.html" title="Open this operation in the published OpenAPI document"
+               class="px-2 py-0.5 rounded text-xs font-semibold bg-purple-950 hover:bg-purple-900 text-purple-400 border border-purple-800 font-mono transition">
+              /api/sessions ↗
+            </a>
           </div>
           <p class="text-xs text-gray-400">Every session the service has actually evaluated · not a sample, not a mock</p>
         </div>
@@ -178,8 +179,8 @@
 
         <div id="detail-body" class="text-xs text-gray-400">
           Select a session on the left. The panel then reads
-          <span class="font-mono text-purple-300">GET /sessions/{id}</span>, which is a second request against the service rather
-          than a re-display of the row.
+          <a id="spec-link-session" href="swagger.html" class="font-mono text-purple-300 hover:text-purple-200 underline">GET /sessions/{id} ↗</a>,
+          which is a second request against the service rather than a re-display of the row.
         </div>
 
         <div id="detail-actions" class="hidden border-t border-gray-800 pt-3 space-y-2">
@@ -187,8 +188,10 @@
             🚨 Freeze this session
           </button>
           <p class="text-[11px] text-gray-500">
-            A freeze is the operator kill switch. It writes a terminal state that the service will not undo, and every later call
-            in that session is refused. There is no unfreeze endpoint.
+            A freeze is the operator kill switch, documented as
+            <a id="spec-link-terminate" href="swagger.html" class="font-mono text-rose-300 hover:text-rose-200 underline">POST /sessions/{id}/terminate ↗</a>.
+            It writes a terminal state that the service will not undo, and every later call in that session is refused. There is
+            no unfreeze endpoint.
           </p>
         </div>
 
@@ -222,6 +225,26 @@
       document.getElementById('page-nav').innerHTML = NAV.map(item =>
         '<a href="' + PAGE_BASE + item.href + '" class="px-3 py-1.5 rounded-md bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700 transition">' + item.label + '</a>'
       ).join('');
+    }
+
+    // The nav carries the document itself; these carry the three operations this
+    // page calls, so a reader lands on the contract rather than on its front page.
+    // The anchors are the ones Swagger UI generates for a spec without operationIds.
+    const SPEC_ANCHORS = {
+      'spec-link-sessions': '#/default/get_api_sessions',
+      'spec-link-session': '#/default/get_sessions__session_id_',
+      'spec-link-terminate': '#/default/post_sessions__session_id__terminate'
+    };
+
+    function specHref(id) {
+      return PAGE_BASE + 'swagger.html' + (SPEC_ANCHORS[id] || '');
+    }
+
+    function linkToSpec() {
+      Object.keys(SPEC_ANCHORS).forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.href = specHref(id);
+      });
     }
 
     function escapeHtml(str) {
@@ -461,6 +484,7 @@
           '</div>' +
         '</div>' +
         '<p class="text-[11px] text-gray-500 mt-3">' +
+          'Read from <a href="' + specHref('spec-link-session') + '" class="font-mono text-purple-300 hover:text-purple-200 underline">GET /sessions/{id} ↗</a>. ' +
           'This endpoint creates a session record when the id is unknown, so a detail panel is never empty and an id typed by ' +
           'hand becomes a real, zero-cost session.' +
         '</p>';
@@ -505,6 +529,7 @@
     }
 
     renderNav();
+    linkToSpec();
     document.getElementById('apiBaseInput').value = DEFAULT_API_BASE;
     loadSessions();
   </script>

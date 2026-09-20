@@ -59,9 +59,10 @@
         <div>
           <div class="flex items-center gap-2">
             <h1 class="text-lg font-bold tracking-tight text-white">Policy Settings</h1>
-            <span class="px-2 py-0.5 rounded text-xs font-semibold bg-purple-950 text-purple-400 border border-purple-800 font-mono">
-              /policy/config
-            </span>
+            <a id="spec-link-policy" href="swagger.html" title="Open this operation in the published OpenAPI document"
+               class="px-2 py-0.5 rounded text-xs font-semibold bg-purple-950 hover:bg-purple-900 text-purple-400 border border-purple-800 font-mono transition">
+              /policy/config ↗
+            </a>
           </div>
           <p class="text-xs text-gray-400">The stored governance policy · read from and written to the live service, with each field labelled by whether a gate reads it</p>
         </div>
@@ -241,7 +242,14 @@
         </div>
       </div>
       <div class="p-3 rounded-xl bg-gray-950 border border-gray-800 text-xs">
-        <p class="font-semibold text-gray-300">The same change over curl</p>
+        <div class="flex items-center justify-between gap-3 flex-wrap">
+          <p class="font-semibold text-gray-300">The same change over curl</p>
+          <span class="text-[11px] text-gray-500">
+            Both operations in the spec:
+            <a id="spec-link-policy-get" href="swagger.html" class="font-mono text-purple-300 hover:text-purple-200 underline">GET</a> ·
+            <a id="spec-link-policy-post" href="swagger.html" class="font-mono text-purple-300 hover:text-purple-200 underline">POST</a>
+          </span>
+        </div>
         <pre class="mt-2 text-[11px] font-mono text-gray-400 overflow-x-auto" id="curl-example">Loading the current policy first.</pre>
       </div>
     </div>
@@ -272,6 +280,21 @@
       document.getElementById('page-nav').innerHTML = NAV.map(item =>
         '<a href="' + PAGE_BASE + item.href + '" class="px-3 py-1.5 rounded-md bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700 transition">' + item.label + '</a>'
       ).join('');
+    }
+
+    // The nav carries the document itself; these carry the operation this page is
+    // built on, so a reader lands on the contract rather than on its front page.
+    // The anchors are the ones Swagger UI generates for a spec without operationIds.
+    function linkToSpec() {
+      const operations = {
+        'spec-link-policy': '#/default/get_policy_config',
+        'spec-link-policy-get': '#/default/get_policy_config',
+        'spec-link-policy-post': '#/default/post_policy_config'
+      };
+      Object.keys(operations).forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.href = PAGE_BASE + 'swagger.html' + operations[id];
+      });
     }
 
     function escapeHtml(str) {
@@ -458,6 +481,7 @@
     }
 
     renderNav();
+    linkToSpec();
     document.getElementById('apiBaseInput').value = DEFAULT_API_BASE;
     loadPolicy();
   </script>
