@@ -15,7 +15,7 @@ from threefold.domain.models import (
 )
 from threefold.domain.circuit_breaker import CostCircuitBreaker, TokenCostCalculator
 from threefold.domain.loop_detector import LoopDetector
-from threefold.domain.boundary_guard import ArchitecturalBoundaryGuard
+from threefold.domain.boundary_guard import ArchitecturalBoundaryGuard, describe_target
 from threefold.application.dtos import (
     EvaluationResultDTO,
     PolicyConfigDTO,
@@ -115,6 +115,11 @@ class GovernanceEvaluator:
         lister = getattr(self.session_repo, "list_sessions", None)
         return lister(limit=limit) if lister else []
 
+    def list_decisions(self, days: int = 7, limit: int = 1000):
+        """Every decision in a window, for the console that reports on them."""
+        lister = getattr(self.session_repo, "list_decisions", None)
+        return lister(days=days, limit=limit) if lister else []
+
     def terminate_session(self, session_id: str, operator_name: str, reason: str) -> AgentSession:
         """Manual enterprise kill-switch to immediately freeze an agent session."""
         session = self.get_or_create_session(session_id)
@@ -202,6 +207,56 @@ class GovernanceEvaluator:
         return new_session
 
     def evaluate_tool_call(self, request: ToolCallRequestDTO) -> EvaluationResultDTO:
+        """Evaluates a tool call and records the decision.
+
+        The recording is here rather than inside the gates because a refusal used
+        to leave no trace at all: the gates return early, so only approved calls
+        reached the session write. Nothing could answer which rule refused what,
+        for whom, last week, which is the only question a platform owner has.
+        """
+        result = self._decide(request)
+        self._record_decision(request, result)
+        return result
+
+    def _record_decision(self, request: ToolCallRequestDTO, result: EvaluationResultDTO) -> None:
+        """Appends one row to the decision ledger, best effort.
+
+        Deliberately narrow: the tool, the rule, who and where, and a short
+        descriptor of the target. Never the arguments and never file content.
+        The service already sees those; it does not need to keep them, and a
+        ledger that stored a refused secret would be the joke that writes itself.
+        """
+        recorder = getattr(self.session_repo, "record_decision", None)
+        if recorder is None:
+            return
+        try:
+            recorder(
+                {
+                    "verdict_id": result.verdict_id,
+                    "timestamp": result.timestamp,
+                    "session_id": request.session_id,
+                    "developer_id": request.developer_id,
+                    "project_name": request.project_name,
+                    "tool_name": request.tool_name,
+                    "action_type": str(request.action_type),
+                    "status": result.status,
+                    "rule": self._rule_that_fired(result),
+                    "target": describe_target(request),
+                    "cost_usd": result.current_session_cost_usd,
+                }
+            )
+        except Exception as exc:  # pragma: no cover - the ledger must not break a verdict
+            logger.warning("Could not record the decision: %s", exc)
+
+    @staticmethod
+    def _rule_that_fired(result: EvaluationResultDTO) -> str:
+        """Names the gate that refused, or NONE when every gate passed."""
+        for rule, passed in (result.rule_evaluations or {}).items():
+            if not passed:
+                return rule
+        return "NONE"
+
+    def _decide(self, request: ToolCallRequestDTO) -> EvaluationResultDTO:
         """Evaluates tool invocation against all deterministic safety gates."""
         session = self.get_or_create_session(
             session_id=request.session_id,

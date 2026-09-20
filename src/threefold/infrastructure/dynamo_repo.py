@@ -5,10 +5,15 @@ import json
 import logging
 import os
 import time
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 from threefold.domain.models import AgentSession, ToolActionType, ToolInvocation
 
 logger = logging.getLogger(__name__)
+
+# Every decision the service makes, partitioned by day so a window is a query
+# rather than a scan.
+DECISION_PARTITION = "DECISION"
 
 SESSION_TTL_SECONDS = 30 * 24 * 3600
 
@@ -175,6 +180,89 @@ class DynamoDBSessionRepository:
             )
         summaries.sort(key=lambda s: s["created_at"], reverse=True)
         return summaries[:limit]
+
+    # ------------------------------------------------------------------ ledger
+
+    def record_decision(self, decision: Dict[str, Any]) -> bool:
+        """Appends one decision to the ledger.
+
+        Partitioned by day and sorted by timestamp, so a console asks for a
+        window with one Query per day rather than scanning the table. The same
+        thirty day ttl the sessions carry applies here: this is an operating
+        record, not an archive, and it says so wherever it is shown.
+        """
+        timestamp = str(decision.get("timestamp") or "")
+        day = timestamp[:10] or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        item = {
+            "PK": f"{DECISION_PARTITION}#{day}",
+            "SK": f"{timestamp}#{decision.get('verdict_id', '')}",
+            "ttl": int(time.time()) + SESSION_TTL_SECONDS,
+        }
+        for key, value in decision.items():
+            if isinstance(value, float):
+                item[key] = str(value)
+            elif value is not None:
+                item[key] = value
+
+        if self._table is not None:
+            try:
+                self._table.put_item(Item=item)
+                return True
+            except Exception as exc:
+                logger.warning("DynamoDB record_decision failed, keeping it in memory: %s", exc)
+        self._memory_store[f"{item['PK']}#{item['SK']}"] = item
+        return True
+
+    def list_decisions(self, days: int = 7, limit: int = 1000) -> List[Dict[str, Any]]:
+        """Returns the decisions of the last `days` days, newest first."""
+        today = datetime.now(timezone.utc).date()
+        wanted = [str(today - timedelta(days=offset)) for offset in range(max(1, days))]
+        rows: List[Dict[str, Any]] = []
+
+        if self._table is not None:
+            for day in wanted:
+                if len(rows) >= limit:
+                    break
+                try:
+                    # Expressed as a string rather than with boto3's Key helper so
+                    # this module keeps its single lazy import of boto3.
+                    response = self._table.query(
+                        KeyConditionExpression="PK = :pk",
+                        ExpressionAttributeValues={":pk": f"{DECISION_PARTITION}#{day}"},
+                        ScanIndexForward=False,
+                        Limit=min(limit, 500),
+                    )
+                    rows.extend(response.get("Items", []))
+                except Exception as exc:
+                    logger.warning("Failed to read the decision ledger for %s: %s", day, exc)
+
+        if not rows:
+            rows = [
+                item
+                for key, item in self._memory_store.items()
+                if key.startswith(f"{DECISION_PARTITION}#")
+                and str(item.get("timestamp", ""))[:10] in wanted
+            ]
+
+        cleaned = []
+        for row in rows:
+            cleaned.append(
+                {
+                    "verdict_id": row.get("verdict_id", ""),
+                    "timestamp": row.get("timestamp", ""),
+                    "session_id": row.get("session_id", ""),
+                    "developer_id": row.get("developer_id", ""),
+                    "project_name": row.get("project_name", ""),
+                    "tool_name": row.get("tool_name", ""),
+                    "action_type": row.get("action_type", ""),
+                    "status": row.get("status", ""),
+                    "rule": row.get("rule", "NONE"),
+                    "target": row.get("target", ""),
+                    "cost_usd": float(row.get("cost_usd", 0) or 0),
+                }
+            )
+        cleaned.sort(key=lambda d: d["timestamp"], reverse=True)
+        return cleaned[:limit]
 
     def load_policy(self) -> Optional[Dict[str, Any]]:
         """Reads the saved policy, so settings outlive the container that set them."""

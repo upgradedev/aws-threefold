@@ -181,3 +181,31 @@ class ArchitecturalBoundaryGuard:
                         )
 
         return True, "Architectural boundaries respected"
+
+
+def describe_target(request: Any) -> str:
+    """A short, safe descriptor of what a tool call was aimed at.
+
+    The ledger needs to say what was attempted without keeping what was
+    attempted. For a file operation that is the path. For a command it is the
+    program name alone: the rest of a command line is exactly where a refused
+    credential would be, and a ledger that stored those would recreate the leak
+    it exists to record. Nothing here ever returns file content.
+    """
+    action = str(getattr(request, "action_type", "")).upper()
+    arguments = getattr(request, "arguments", None)
+    if not isinstance(arguments, dict):
+        return ""
+
+    if "COMMAND" in action or "EXEC" in action:
+        for key in ("command", "cmd", "script", "shell"):
+            value = arguments.get(key)
+            if isinstance(value, str) and value.strip():
+                program = value.strip().split()[0]
+                return program[:60]
+        return ""
+
+    for candidate in iter_string_leaves(arguments):
+        if looks_like_path(candidate):
+            return candidate[:160]
+    return ""

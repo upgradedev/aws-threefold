@@ -17,6 +17,7 @@ from threefold.application.audit_issuer import AuditIssuer
 from threefold.application.bedrock_reviewer import BedrockArchitecturalReviewer
 from threefold.application.dtos import PolicyConfigDTO, ToolCallRequestDTO
 from threefold.application.evaluator import GovernanceEvaluator
+from threefold.application.insights import summarise
 from threefold.domain.exceptions import EmptyAttestationException
 from threefold.infrastructure.bedrock_client import BedrockGovernanceClient
 from threefold.infrastructure.idempotency import global_idempotency_cache
@@ -247,6 +248,21 @@ def lambda_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]
                     "persistence": getattr(_evaluator.session_repo, "persistence_mode", "memory"),
                 },
             )
+
+        # Route 0c: what the gates did, aggregated the way a platform owner asks.
+        # The console renders this and computes nothing of its own, so a number on
+        # the page cannot disagree with the ledger it came from.
+        if path in ("/api/insights", "/insights.json") and http_method == "GET":
+            days = 7
+            try:
+                days = int((event.get("queryStringParameters") or {}).get("days", 7))
+            except (TypeError, ValueError):
+                days = 7
+            days = max(1, min(days, 30))
+            decisions = _evaluator.list_decisions(days=days, limit=2000)
+            payload = summarise(decisions, days)
+            payload["persistence"] = getattr(_evaluator.session_repo, "persistence_mode", "memory")
+            return build_response(200, payload)
 
         # Route 1a: Deep Readiness Probe (/readyz)
         if path in ("/readyz", "/ready") and http_method == "GET":
