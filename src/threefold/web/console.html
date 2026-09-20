@@ -426,10 +426,10 @@
       const badge = document.getElementById('ledger-state');
       badge.className = 'px-2 py-0.5 rounded text-[11px] font-mono border ' +
         (durable ? 'bg-emerald-950 text-emerald-400 border-emerald-800' : 'bg-amber-950 text-amber-400 border-amber-800');
-      badge.innerText = durable ? 'LEDGER: DYNAMODB' : 'LEDGER: LAST WRITE IN MEMORY';
+      badge.innerText = durable ? 'LAST WRITE: DYNAMODB' : 'LAST WRITE: MEMORY';
       badge.title = durable
-        ? 'The most recent write reached the table, so these rows outlive the container that recorded them.'
-        : 'The most recent write stayed in one container, or this container has written nothing yet.';
+        ? 'The most recent write from the container that answered reached DynamoDB, so what it recorded outlives it.'
+        : 'The most recent write stayed in one container, or the container that answered has written nothing yet. It does not say where the rows below were read from.';
 
       renderStandingLine();
 

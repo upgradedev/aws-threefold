@@ -207,9 +207,14 @@ class DynamoDBSessionRepository:
         if self._table is not None:
             try:
                 self._table.put_item(Item=item)
+                # A decision is a write like any other, and the badge that reports
+                # where writes land was reading session writes only. On the console,
+                # which is a page about this ledger, that was the wrong write.
+                self._last_persistence_mode = "dynamodb"
                 return True
             except Exception as exc:
                 logger.warning("DynamoDB record_decision failed, keeping it in memory: %s", exc)
+        self._last_persistence_mode = "memory"
         self._memory_store[f"{item['PK']}#{item['SK']}"] = item
         return True
 
