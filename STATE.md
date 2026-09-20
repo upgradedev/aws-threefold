@@ -9,14 +9,17 @@
 ## Ship gate
 
 The gate is pass or fail: live on AWS, reachable by a public URL, with documented
-proof of a coding agent connected to the AWS console. Judging runs the weeks of
-6 and 13 October, so the stack stays up past the submission deadline.
+proof of a coding agent connected to the AWS console. The stack stays up past the
+submission deadline, but **how far past is unresolved**: this file says judging runs
+the weeks of 6 and 13 October while `docs/RUNBOOK.md` says it finishes in the week of
+19 October, and neither cites the rules page it came from. Until the Rules tab settles
+it, treat the later date as the one that governs teardown.
 
 | Requirement | State | Evidence `[PRIMARY]` |
 |---|---|---|
-| Live on AWS, public URL | **PASS** | `https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/` serves the dashboard itself, 200 and `text/html`, to an anonymous request with no API key. Stack `threefold-prod`, eu-west-1 |
-| A visitor can run the demo | **PASS** | Walked in a browser: Scenario 1 dispatched three calls to the live backend, the third returned `BLOCKED_LOOP_DETECTED`, and the panel showed a genuine Haiku 4.5 sentence under the heading "Amazon Bedrock (Claude Haiku 4.5)" |
-| Reachable by the AI scorer | **PASS** | `STAGE` is unset so the middleware defaults to `dev` and enforces no key. Verified by unauthenticated request |
+| Live on AWS, public URL | **PASS** | `https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/` serves the dashboard itself, 200 and `text/html`, to an anonymous request with no API key. Stack `threefold-prod`, eu-west-1. The trailing slash is part of the URL: API Gateway answers the bare `/prod` with its own `{"message":"Not Found"}` before the function is reached, so every link to this project must carry it |
+| A visitor can run the demo | **PASS** | Walked in a browser: Scenario 1 sent one `POST /simulate-loop`, the function evaluated the same call three times inside that request, and the response was `BLOCKED_LOOP_DETECTED`, and the panel showed a genuine Haiku 4.5 sentence under the heading "Amazon Bedrock (Claude Haiku 4.5)" |
+| Reachable by the AI scorer | **PASS** | `STAGE` is unset on the function, so the middleware defaults to `dev` and enforces no key. Verified by unauthenticated request. Do not read this off `/status`, which prints `"stage": "prod"`: that field has its own default and says nothing about whether a key is required |
 | Proof of coding agent connected to AWS | **PASS** | `docs/PROOF_OF_AWS_AGENT.md` rewritten around the real session: the commands run, the two defects AWS surfaced, and the CloudTrail principal. Raw output in `docs/evidence/DEPLOYMENT_2026-09-20.md` |
 | Public repository | **BLOCKED, owner action** | `main` is local only, with no remote configured, so none of the work is published. Publishing is one command, in `docs/RUNBOOK.md` step 2. The count of commits is deliberately not recorded here: `git log` holds it, and any line stating it is wrong again the moment it is committed |
 | Continuous delivery | **WRITTEN, role missing** | `.github/workflows/{ci,deploy,keepalive}.yml`. Deploy assumes `threefold-github-deploy`, which does not exist yet. Policy documents are committed at `deploy/iam/`, creation is `docs/RUNBOOK.md` step 1 |
@@ -32,8 +35,8 @@ proof of a coding agent connected to the AWS console. Judging runs the weeks of
 | A halted session refuses unrelated work | A fourth call with a different tool returned `BLOCKED_CIRCUIT_BREAKER` |
 | Every explanation names its source | Responses carry `explanation_source: "bedrock"` and `persistence: "dynamodb"`, and the UI prints the source as the heading rather than assuming Bedrock |
 | Numeric arguments survive the round trip | Three identical calls with `{"retries": 3, "timeout": 1.5, "flag": true}` still halted on the third, so reloading history does not change a call's signature |
-| Readiness can be alarmed on | `/readyz` answers 503 when a dependency is unreachable, 200 when both probes pass |
-| The operator console is served | `/settings.html`, `/sessions.html` and `/connect.html` each answer 200 `text/html` to an anonymous request, with the API base substituted. Walked in a browser against the live URL: the sessions page listed 43 real sessions, the policy page read the live policy, and the connect page's denial carried a Bedrock sentence |
+| Readiness can be alarmed on | `/readyz` answers 503 when a dependency is unreachable and 200 when both probes pass; live now it answers 200 with `GetItem succeeded against threefold-prod-ThreefoldTable-12AHEKBKP5RCP`. The two probes are not equally strong and the response says which is which: the store is exercised with a real read, while the Bedrock probe reports the client's own record and returns healthy on a container that has not called the model yet, because invoking one on every readiness check would bill the account for being looked at |
+| The operator console is served | `/settings.html`, `/sessions.html` and `/connect.html` each answer 200 `text/html` to an anonymous request, with the API base substituted. Walked in a browser against the live URL: the sessions page listed 43 sessions, the policy page read the live policy, and the connect page's denial carried a Bedrock sentence. Those 43 are real rows from the table rather than fixtures in the page, but most were created by this project's own testing, not by governed outside work |
 | The sessions listing reads the table, not one container | A Lambda cold-started by the deploy returned 43 rows to `/api/sessions` with an empty in-process store, so the rows came from the DynamoDB scan. `dynamodb:Scan` was missing from the function role before this deploy and the fallback would have hidden it |
 | A session id that must be escaped reads back | `GET /sessions/<urlencoded 'live console fixture <angle>'>` returns that session with its real project and call count, rather than creating an empty one |
 | The published contract is the real one | `/openapi.json` on the live stack returns all eleven paths including `/api/sessions`, and `/prod/swagger.html` renders twelve operations from it with no console error. Both used to fail: the document sat outside `CodeUri` so a two-line placeholder was served, and the page asked for a URL missing the stage prefix |
@@ -47,25 +50,40 @@ proof of a coding agent connected to the AWS console. Judging runs the weeks of
 These are recorded because they are still false or missing in the tree. None is
 hidden in a document that a judge would read as finished work.
 
-1. Two policy fields are stored, reported and enforced by nothing.
+1. Three of the five keys `/policy/config` returns are enforced by nothing.
    `max_session_budget_usd` and `loop_history_window` survive a cold start and
-   come back from `/policy/config`, but no gate reads them: the session ceiling
-   is the `budget_usd` each call declares, and the detector's cycle length is
-   compiled in at six. `/settings.html` labels both on its face. The other two
-   fields are wired, and since this deploy the breaker is built from the policy
-   rather than from its own $2.50 default, so the reported cap is the enforced
-   one on a cold container.
+   come back from that endpoint, but no gate reads them: the session ceiling is
+   the `budget_usd` each call declares, and the detector's cycle length is
+   compiled in at six. `blocked_patterns` is the third: it is defined on the DTO
+   and read by no module in `src/`, because the credential shapes the secret gate
+   matches live in the domain rules instead. `/settings.html` labels all three on
+   its face. The other two
+   fields are wired: the breaker is now built from the policy rather than from
+   its own $2.50 default, so the cap `/policy/config` reports is the cap a call
+   is measured against, including on a cold container that has never been sent
+   a policy.
 2. The `calls` count in the sessions listing saturates at 50, because the store
    keeps `history[-50:]`. Cost and tokens are cumulative and are not capped. The
    page says so rather than presenting 50 as a total.
-3. Four of the five offline fallback panels still show canned prose. They now say
+3. The offline fallback of the compliant scenario builds a certificate with an
+   invented id and an invented SHA-256, and the Export JSON button downloads it
+   as a file with nothing in it marking the document as simulated. The
+   explanation box above it does say "Simulated, offline demo, no model was
+   reached", but the certificate panel and the exported file do not, and the file
+   is what leaves the browser.
+4. Four of the five offline fallback panels still show canned prose. They now say
    "Simulated, offline demo, no model was reached" on their face, but the numbers
    inside them are invented and should be replaced with a real offline run.
-4. The loop detector catches byte-identical repeats only. The README no longer
-   claims entropy scanning, because there is no entropy code.
-5. No headline number exists yet. This is the largest remaining gap for judging:
+5. The loop detector compares signatures byte for byte. A signature is a SHA-256
+   of the tool name and its sorted arguments, so a call that differs by one
+   character is a different call and two semantically identical calls are not
+   matched. Any repeating cycle of those signatures is caught, up to period six,
+   which is what the audit table below means by an A, A, B cycle; what is missing
+   is fuzzy or semantic matching. The README no longer claims entropy scanning,
+   because there is no entropy code.
+6. No headline number exists yet. This is the largest remaining gap for judging:
    the framing gate wants one comparative number against two named baselines.
-6. No video and no Builder Center article. Neither is required by the rules, but
+7. No video and no Builder Center article. Neither is required by the rules, but
    the Builder Center project itself is, and it is owner-gated.
 
 ## Audit and what was done about it, 2026-09-20
@@ -106,14 +124,20 @@ traffic.
 ### Still open
 
 1. There is no Builder Center project and no public repository. Until both
-   exist there is no submission, whatever the code does. One command each, in
-   `docs/RUNBOOK.md`.
+   exist there is no submission, whatever the code does. The repository is one
+   command, in `docs/RUNBOOK.md` step 2. The Builder Center project is not: it is
+   a profile, a Join, and a web form, and no command for it exists anywhere in
+   this repository.
 2. No measured number yet. The hook is installed-ready but has not been run
    across a working week, which is where the number comes from.
 3. The certificate is a fingerprint, not a signature. There is no KMS call and
    no key, so it detects corruption rather than an adversary, and nothing in CI
-   verifies one before a merge. Both limitations are now stated wherever the
-   certificate appears.
+   verifies one before a merge. **The dashboard still contradicts this**, in the
+   one place a visitor meets it: `src/threefold/web/index.html` calls it a
+   "signed SHA-256 Governance Certificate" on the scenario card, heads its panel
+   "Signed Governance Certificate", and on success logs "Received signed
+   Certificate … from DynamoDB & S3" although `AuditIssuer` writes it to neither.
+   The limitation is stated in the documents and denied in the product.
 4. `TokenCostCalculator` is never given a model id, so every session is priced
    at the default Sonnet-class rate rather than the model actually in use.
 5. The cost gate trusts caller-declared token counts. A caller declaring zero is

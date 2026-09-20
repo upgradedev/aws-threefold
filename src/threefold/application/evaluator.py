@@ -125,10 +125,14 @@ class GovernanceEvaluator:
         return session
 
     def check_readiness(self, bedrock_client: Optional[Any] = None) -> ReadinessResponseDTO:
-        """Readiness probe that actually exercises each dependency it reports on.
+        """Readiness probe reporting what each dependency has actually shown.
 
-        Every subsystem below is measured at call time. Nothing is reported
-        healthy on the strength of being configured.
+        The session store is exercised at call time with a real read. The model
+        is not: invoking one on every readiness check would bill the account for
+        being looked at, so that subsystem reports the client's own record and
+        is healthy on a container that has not called it yet. The detail string
+        says which of the two a reader is looking at, and this docstring used to
+        claim both were measured.
         """
         now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
         subsystems = []
