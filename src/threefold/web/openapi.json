@@ -3,7 +3,7 @@
   "info": {
     "title": "Threefold Governance Sidecar API",
     "version": "1.0.0",
-    "description": "Autonomous coding agent governance sidecar and real-time cost circuit-breaker. Enforces deterministic sub-millisecond perimeters (secrets, loops, architectural boundaries), evaluates cognitive trade-offs with Amazon Bedrock (Claude 3.5 Sonnet), and issues cryptographic SHA-256 CI/CD governance certificates.\n",
+    "description": "Autonomous coding agent governance sidecar and cost circuit-breaker. Deterministic code decides: it scans arguments for credential shapes, refuses writes that cross a Clean Architecture boundary, halts a session that repeats a cycle of tool calls, and caps projected spend. Amazon Bedrock (Claude Haiku 4.5) only phrases the verdict, and every response says which of the two produced the sentence it carries, in explanation_source. Certificates are SHA-256 fingerprints over a session's verdicts: they detect corruption, not an adversary, because nothing signs them.\n",
     "contact": {
       "name": "Threefold Team",
       "url": "https://github.com/upgradedev/threefold-aws"
@@ -11,8 +11,12 @@
   },
   "servers": [
     {
+      "url": "https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod",
+      "description": "Live deployment, eu-west-1. Answers an anonymous request with no key."
+    },
+    {
       "url": "http://127.0.0.1:8001",
-      "description": "Local Serverless Runtime"
+      "description": "Local runtime, started by make run."
     }
   ],
   "paths": {

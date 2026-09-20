@@ -59,3 +59,37 @@ def test_the_swagger_page_is_told_where_the_spec_is() -> None:
     assert response["statusCode"] == 200
     assert "__THREEFOLD_BASE_PATH__" not in response["body"], "The token must be substituted"
     assert 'const SERVED_BASE_PATH = "/prod";' in response["body"]
+
+
+def test_the_spec_points_at_the_deployment_a_reader_can_reach() -> None:
+    """Swagger UI sends "Try it out" to the first server, so it cannot be a laptop."""
+    spec = json.loads(_get("/openapi.json")["body"])
+    first = spec["servers"][0]["url"]
+    assert first.startswith("https://"), f"The first server is {first}, which no visitor can reach"
+    assert "127.0.0.1" not in first and "localhost" not in first
+
+
+def test_the_spec_names_the_model_the_template_deploys() -> None:
+    """The description claimed Claude 3.5 Sonnet while the stack ran Haiku 4.5.
+
+    A judge reads this document. Naming a model the deployment does not use is
+    the kind of claim this project's ledger exists to keep out.
+    """
+    import os
+    import re
+
+    template = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "deploy",
+        "template.yml",
+    )
+    with open(template, "r", encoding="utf-8") as handle:
+        deployed_model = re.search(r"Default:\s*(\S*anthropic\S+)", handle.read()).group(1)
+
+    family = re.search(r"claude-(haiku|sonnet|opus)-(\d+)-(\d+)", deployed_model)
+    assert family, f"Could not read a model family out of {deployed_model}"
+    tier, major, minor = family.groups()
+
+    description = json.loads(_get("/openapi.json")["body"])["info"]["description"].lower()
+    assert tier in description, f"The spec does not name {tier}, which is what the template deploys"
+    assert f"{major}.{minor}" in description, f"The spec does not name version {major}.{minor}"
