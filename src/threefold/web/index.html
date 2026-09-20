@@ -189,7 +189,7 @@
             <span class="text-base">📜</span>
           </div>
           <p class="text-sm font-semibold text-white group-hover:text-emerald-300">Compliant Run & Cert</p>
-          <p class="text-xs text-gray-400 mt-1">Linear execution within budget. Issues signed SHA-256 Governance Certificate.</p>
+          <p class="text-xs text-gray-400 mt-1">Linear execution within budget. Issues a SHA-256 fingerprinted Governance Certificate.</p>
         </button>
 
         <!-- Scenario 5: Universal Adapter -->
@@ -276,13 +276,19 @@
 
           <div id="cert-container" class="hidden p-3 rounded-xl bg-emerald-950/20 border border-emerald-900/40 space-y-2">
             <div class="flex items-center justify-between">
-              <span class="text-xs font-semibold text-emerald-400">Signed Governance Certificate</span>
+              <span class="text-xs font-semibold text-emerald-400">Governance Certificate</span>
               <button onclick="downloadCert()" class="text-xs px-2 py-1 bg-emerald-800 hover:bg-emerald-700 text-white rounded">
                 Export JSON ↗
               </button>
             </div>
             <p id="cert-id" class="text-xs font-mono text-emerald-300">CERT-TF-...</p>
             <p id="cert-hash" class="text-xs font-mono text-gray-400 truncate">SHA256: ...</p>
+            <p id="cert-origin" class="text-[11px] text-gray-400"></p>
+            <p class="text-[11px] text-gray-500 border-t border-emerald-900/40 pt-2">
+              The fingerprint is an unkeyed SHA-256 of the payload. It detects corruption and casual edits, not an adversary:
+              anyone who changes the payload can recompute the hash. Nothing signs it, and nothing in CI requires one before a
+              merge.
+            </p>
           </div>
         </div>
       </div>
@@ -368,6 +374,7 @@
       document.getElementById('inv-cost').innerText = '--';
       document.getElementById('bedrock-box').innerText = 'Awaiting agent action to evaluate architectural trade-offs and safety implications.';
       document.getElementById('cert-container').classList.add('hidden');
+      document.getElementById('cert-origin').innerText = '';
     }
 
     function escapeHtml(str) {
@@ -619,7 +626,7 @@
             logTerminal(`⚡ [Step ${i+1}/4] ${s.tool} -> ${data.status} (Cost: $${data.current_session_cost_usd.toFixed(4)})`, 'text-emerald-400');
           }
 
-          // Request signed certificate from backend
+          // Ask the service for a certificate over the four verdicts just issued
           const certRes = await fetch(`${base}/issue-certificate`, {
             method: "POST",
             headers: { "Content-Type": "application/json", "X-API-Key": getApiKey() },
@@ -635,7 +642,9 @@
             totalCost = certData.total_cost_usd;
             totalTokens = certData.total_tokens;
 
-            logTerminal(`🎉 All 4 steps compliant. Received signed Certificate ${certData.certificate_id} from DynamoDB & S3.`, 'text-emerald-300 font-bold');
+            logTerminal(`🎉 All 4 steps compliant. The service returned Certificate ${certData.certificate_id}, computed from the four verdicts above.`, 'text-emerald-300 font-bold');
+            document.getElementById('cert-origin').innerHTML =
+              '<span class="text-emerald-400">Issued by the live service</span> for the four calls above. The session behind it is in DynamoDB; the certificate itself is returned, not archived.';
 
             document.getElementById('kpi-spend').innerText = `$${totalCost.toFixed(4)}`;
             document.getElementById('kpi-tokens').innerText = `${totalTokens} tokens consumed`;
@@ -665,7 +674,7 @@
       logTerminal('⚡ [Step 2] tool: grep_search(query="validate_user") -> Approved ($0.0060)', 'text-emerald-400');
       logTerminal('⚡ [Step 3] tool: replace_file_content(path="src/service.py") -> Approved ($0.0125)', 'text-emerald-400');
       logTerminal('⚡ [Step 4] tool: run_command(command="pytest") -> Approved ($0.0124)', 'text-emerald-400');
-      logTerminal('🎉 All 4 steps compliant. Generating signed SHA-256 certificate.', 'text-emerald-300 font-bold');
+      logTerminal('🎉 Simulated run complete. The certificate below is invented, not computed from a live evaluation.', 'text-amber-300 font-bold');
 
       document.getElementById('kpi-spend').innerText = '$0.0384';
       document.getElementById('kpi-tokens').innerText = '6,400 tokens consumed';
@@ -680,20 +689,28 @@
 
       renderSimulatedExplanation('Clean execution verified. All tool calls adhere to bounded context definitions. Cost velocity remained below $0.05/min. Safe to merge into CI/CD.');
 
+      // Every field here is invented, including the fingerprint, because no
+      // evaluation ran. The marker travels inside the object so it survives the
+      // export: the file is what leaves the browser, and a reader opening it
+      // later has no other way to tell it apart from one the service issued.
       currentCertData = {
-        certificate_id: "CERT-TF-9F4B18A72C3D",
-        session_id: "session-compliant-01",
+        simulated: true,
+        disclaimer: "SIMULATED. No evaluation ran, the service was not reached, and every value below is invented, including the fingerprint. This document attests to nothing.",
+        certificate_id: "CERT-TF-SIMULATED-0000",
+        session_id: "session-compliant-offline",
         project_name: "Acme-Core",
-        verdict_status: "COMPLIANT_APPROVED",
+        verdict_status: "SIMULATED_NOT_ISSUED",
         total_cost_usd: 0.0384,
         total_tokens: 6400,
         evaluations_count: 4,
         all_passed: true,
-        sha256_fingerprint: "e58b5f39c2d1b82736e4f3a1d95018b26182c0b471928374a56b2c81928374fa"
+        sha256_fingerprint: "0000000000000000000000000000000000000000000000000000000000000000"
       };
 
       document.getElementById('cert-id').innerText = currentCertData.certificate_id;
       document.getElementById('cert-hash').innerText = 'SHA256: ' + currentCertData.sha256_fingerprint;
+      document.getElementById('cert-origin').innerHTML =
+        '<span class="text-amber-400 font-semibold">Simulated, offline demo.</span> No evaluation ran and the service was not reached. Every value here is invented, and the exported file says so on its face.';
       document.getElementById('cert-container').classList.remove('hidden');
     }
 

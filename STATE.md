@@ -43,6 +43,7 @@ it, treat the later date as the one that governs teardown.
 | The spec names what is deployed | Its description said Claude 3.5 Sonnet while the stack runs `eu.anthropic.claude-haiku-4-5-20251001-v1:0`, and its only server was `127.0.0.1:8001`, so Try it out went to the reader's own laptop. Both corrected, and a test now reads the model family out of `deploy/template.yml` and fails if the document drifts from it |
 | Every page reaches the operation it calls | The four pages deep link into the document rather than at its cover: the dashboard lists the seven operations its buttons call, settings links `/policy/config`, the sessions console links `/api/sessions`, `/sessions/{id}` and the terminate route, and connect links `/evaluate-tool-call`. Walked on the live URL: following one opens Swagger UI with that operation expanded |
 | The links cannot drift from the routes | Swagger UI derives its anchors from method and path, so a renamed route would break every link pointing at it silently. A test rebuilds those anchors from the served document, extracts the endpoints the dashboard actually fetches, and fails when one is unlinked. Confirmed by deleting a single entry and watching it fail |
+| A visitor can take the hook | The deployment serves it at `/hooks/claude_code_hook.py`, anonymously, as readable text. Downloaded from the live URL and run: an ordinary read came back `allow`, a `from boto3 import client` write into a domain file came back `deny` with a Bedrock sentence. Before this, `connect.html` told the reader to `git clone <repository>` — a literal placeholder, since the repository is not published — and the install path ended there |
 | Test suite | 134 passed in 6.2s, hermetic under `THREEFOLD_OFFLINE=1`, and no longer order-dependent. Every test reaches `lambda_handler` from one address and shared a sixty-token rate-limit bucket, so once the suite grew past that count, unrelated tests began failing with 429 depending on the order they ran in. `tests/conftest.py` resets the bucket per test; the rate limiter's own tests build their own instance, so nothing is hidden |
 
 ## Known gaps, not yet fixed
@@ -67,15 +68,11 @@ hidden in a document that a judge would read as finished work.
 2. The `calls` count in the sessions listing saturates at 50, because the store
    keeps `history[-50:]`. Cost and tokens are cumulative and are not capped. The
    page says so rather than presenting 50 as a total.
-3. The offline fallback of the compliant scenario builds a certificate with an
-   invented id and an invented SHA-256, and the Export JSON button downloads it
-   as a file with nothing in it marking the document as simulated. The
-   explanation box above it does say "Simulated, offline demo, no model was
-   reached", but the certificate panel and the exported file do not, and the file
-   is what leaves the browser. This is not only the offline path: the live branch
-   returns early only when every call succeeds, so a non-2xx answer or a throw
-   anywhere in the sequence falls through to the same canned block, and the
-   visitor is shown the invented certificate with no error reported.
+3. `/issue-certificate` attests to nothing when given nothing. A POST with
+   `{"evaluations": []}` returns `verdict_status: COMPLIANT_APPROVED`,
+   `all_passed: true` and a valid fingerprint over an empty list, verified
+   against the live stack. The caller decides what the certificate certifies,
+   which is the weakness under every other certificate claim in this project.
 4. Four of the five offline fallback panels still show canned prose. They now say
    "Simulated, offline demo, no model was reached" on their face, but the numbers
    inside them are invented and should be replaced with a real offline run.
@@ -120,7 +117,7 @@ inputs, so the table's claim survives as tests even though its evidence does
 not survive as output.
 
 **The product now intercepts rather than rehearses.**
-[`hooks/claude_code_hook.py`](hooks/claude_code_hook.py) puts Threefold in front
+[`claude_code_hook.py`](src/threefold/hooks/claude_code_hook.py) puts Threefold in front
 of a real Claude Code session. Confirmed end to end against the live stack: a
 write of `from boto3 import client` into a domain file comes back denied with a
 Bedrock sentence attached, an ordinary edit is allowed, and `cat ~/.aws/credentials`

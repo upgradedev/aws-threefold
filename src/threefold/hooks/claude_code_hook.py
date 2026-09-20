@@ -7,6 +7,10 @@ but intercepts nobody. This script puts Threefold in front of a real agent: it
 receives the tool call Claude Code is about to make, asks the deployed service,
 and returns the decision that Claude Code obeys.
 
+Take it from the running service, which serves this file:
+
+    curl -O https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/hooks/claude_code_hook.py
+
 Install by adding to .claude/settings.json:
 
     {
@@ -15,7 +19,7 @@ Install by adding to .claude/settings.json:
           {
             "matcher": "Write|Edit|Bash|Read",
             "hooks": [
-              {"type": "command", "command": "python /path/to/hooks/claude_code_hook.py"}
+              {"type": "command", "command": "python3 /absolute/path/to/claude_code_hook.py"}
             ]
           }
         ]

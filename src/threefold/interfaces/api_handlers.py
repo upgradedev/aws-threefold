@@ -43,6 +43,16 @@ CORS_HEADERS = {
 
 WEB_ROOT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web")
 
+# The Claude Code hook is the one artifact that turns this service from a demo
+# into something in front of a real agent, so the deployment hands it out rather
+# than telling a reader to find a repository. It lives under the packaged tree
+# for that reason: anything outside CodeUri never reaches the function.
+HOOKS_ROOT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "hooks")
+SERVED_SCRIPTS = {
+    "/hooks/claude_code_hook.py": "claude_code_hook.py",
+    "/claude_code_hook.py": "claude_code_hook.py",
+}
+
 # Paths the deployed stack serves as pages rather than as JSON. The dashboard sits
 # at the root so the public URL opens the application itself.
 WEB_ASSETS = {
@@ -69,6 +79,21 @@ def _read_web_asset(filename: str, stage: str) -> Any:
         markup = handle.read()
     base_path = f"/{stage}" if stage and stage != "$default" else ""
     return markup.replace("__THREEFOLD_BASE_PATH__", base_path)
+
+
+def build_script_response(source: str, filename: str) -> Dict[str, Any]:
+    """Hands back a script as text a browser will show and a shell can pipe.
+
+    Served as plain text rather than as an attachment so a reader can inspect
+    what they are about to run before they run it, which for a file that sits in
+    front of an agent's tool calls is the only defensible default.
+    """
+    headers = dict(CORS_HEADERS)
+    headers["Content-Type"] = "text/plain; charset=utf-8"
+    headers["Cache-Control"] = "no-cache"
+    headers["X-Content-Type-Options"] = "nosniff"
+    headers["Content-Disposition"] = f'inline; filename="{filename}"'
+    return {"statusCode": 200, "headers": headers, "body": source}
 
 
 def build_html_response(status_code: int, markup: str) -> Dict[str, Any]:
@@ -160,6 +185,26 @@ def lambda_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]
             page = _read_web_asset(WEB_ASSETS[path], stage)
             if page is not None:
                 return build_html_response(200, page)
+
+        # Route 0b: the hook itself. A reader who wants Threefold in front of their
+        # own agent can take the script from the deployment they just watched work,
+        # without a repository, an account or a package manager.
+        if http_method == "GET" and path in SERVED_SCRIPTS:
+            script_path = os.path.join(HOOKS_ROOT, SERVED_SCRIPTS[path])
+            if not os.path.isfile(script_path):
+                logger.error("The hook is missing from the package at %s", script_path)
+                return build_response(
+                    500,
+                    rfc7807_error(
+                        500,
+                        "Script Unavailable",
+                        "The hook was not found in this deployment.",
+                        path,
+                        error_type="urn:threefold:error:script-missing",
+                    ),
+                )
+            with open(script_path, "r", encoding="utf-8") as handle:
+                return build_script_response(handle.read(), SERVED_SCRIPTS[path])
 
         # Route 1: Health & Operational Status
         if path in ("/status", "/health") and http_method == "GET":

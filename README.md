@@ -39,7 +39,7 @@ that merely mentions the rule is not. When the answer is no, the tool call does
 not happen.
 
 ```
-$ cat call.json | python hooks/claude_code_hook.py
+$ cat call.json | python3 claude_code_hook.py
 {"permissionDecision": "deny",
  "permissionDecisionReason": "Threefold refused this call. Clean Architecture
   violation: domain file 'src/domain/user.py' cannot depend on an outer layer
@@ -47,7 +47,9 @@ $ cat call.json | python hooks/claude_code_hook.py
 ```
 
 That is a real Claude Code hook against the live service, not a mock. Point
-your own agent at it with [`hooks/claude_code_hook.py`](hooks/claude_code_hook.py).
+your own agent at it with [`claude_code_hook.py`](src/threefold/hooks/claude_code_hook.py),
+which the deployment serves at
+<https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/hooks/claude_code_hook.py>.
 
 ## Three more gates, honestly described
 
@@ -80,7 +82,7 @@ a fixture: [`/sessions.html`](src/threefold/web/sessions.html) lists the session
 the service has actually governed and reads any one of them back,
 [`/settings.html`](src/threefold/web/settings.html) reads and writes the policy
 thresholds the gates enforce, and [`/connect.html`](src/threefold/web/connect.html)
-is the installation path for [`hooks/claude_code_hook.py`](hooks/claude_code_hook.py),
+is the installation path for [`claude_code_hook.py`](src/threefold/hooks/claude_code_hook.py),
 which puts Threefold in front of a real Claude Code session.
 
 1. **Journey 1 · Runaway Tool Loop Interception:**  
@@ -90,7 +92,7 @@ which puts Threefold in front of a real Claude Code session.
 3. **Journey 3 · Clean Architecture Drift Prevention:**  
    Click **Clean Architecture Drift**. An agent attempts to write `import boto3` inside `src/domain/user.py`. Threefold blocks the write with a Clean Architecture violation alert.
 4. **Journey 4 · Compliant Execution & Certificate:**  
-   Click **Compliant Run & Cert**. 4 legitimate tool calls execute within budget ($0.0384). Amazon Bedrock provides architectural commentary, and the system issues a SHA-256 **Governance Certificate** exportable to JSON.
+   Click **Compliant Run & Cert**. 4 legitimate tool calls execute within budget ($0.0384). Amazon Bedrock provides architectural commentary, and the system issues a SHA-256 **Governance Certificate** exportable to JSON. The fingerprint is unkeyed: it detects corruption, not an adversary, and nothing in CI requires one before a merge.
 
 ---
 
@@ -163,7 +165,7 @@ THREEFOLD_OFFLINE=1 python -m pytest tests -v
 
 ```
 $ THREEFOLD_OFFLINE=1 python -m pytest tests -q
-65 passed
+134 passed
 ```
 
 - **Unit Tests:** cost arithmetic, single-invocation caps, monomorphic loops, ping-pong loops, secret regex matching, and Clean Architecture imports.

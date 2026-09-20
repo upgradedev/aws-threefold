@@ -112,7 +112,19 @@ def validate_request_security(
         )
 
     # 3. Public paths exemption
-    public_paths = {"/", "/status", "/health", "/docs", "/openapi.json", "/openapi.yaml"}
+    # The hook is handed out anonymously on purpose: a reader who cannot take the
+    # script cannot adopt the product, and a key requirement would put the one
+    # artifact that matters behind the one thing a visitor does not have.
+    public_paths = {
+        "/",
+        "/status",
+        "/health",
+        "/docs",
+        "/openapi.json",
+        "/openapi.yaml",
+        "/hooks/claude_code_hook.py",
+        "/claude_code_hook.py",
+    }
     if path in public_paths:
         return True, None
 

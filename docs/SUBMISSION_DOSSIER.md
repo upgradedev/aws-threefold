@@ -14,7 +14,7 @@
 ## Submission Portal Field-by-Field Answers
 
 ### 1. Project Description (Short Summary)
-Threefold is a high-performance, serverless governance proxy and architectural guardrail engine for autonomous AI coding agents (Claude Code, Cursor, Copilot, OpenAI Swarm). Operating on the philosophy that *"Deterministic code trips the circuit breaker; Amazon Bedrock explains why,"* Threefold intercepts tool invocations before execution, evaluating four critical invariants: token-cost budgets, recursive thrashing loops, Clean Architecture layer boundaries, and credential leakage. When compliant, it tracks live dollar spend and issues an immutable, SHA-256 fingerprinted Governance Certificate archived in Amazon S3 and DynamoDB, verifiable via a zero-dependency git pre-commit hook in CI/CD deployment pipelines.
+Threefold is a high-performance, serverless governance proxy and architectural guardrail engine for autonomous AI coding agents (Claude Code, Cursor, Copilot, OpenAI Swarm). Operating on the philosophy that *"Deterministic code trips the circuit breaker; Amazon Bedrock explains why,"* Threefold intercepts tool invocations before execution, evaluating four critical invariants: token-cost budgets, recursive thrashing loops, Clean Architecture layer boundaries, and credential leakage. When compliant, it tracks live dollar spend and issues a SHA-256 fingerprinted Governance Certificate over the session's verdicts. The fingerprint is unkeyed: it detects corruption and casual edits, not an adversary, and nothing in CI requires one before a merge. The certificate is returned by the API rather than archived, and the session behind it is what persists, in DynamoDB.
 
 ---
 

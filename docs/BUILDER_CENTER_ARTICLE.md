@@ -85,7 +85,7 @@ The record looks like this:
   "sha256_fingerprint": "e58b5f39c2d1b82736e4f3a1d95018b26182c0b471928374a56b2c81928374fa"
 }
 ```
-This certificate is verified by CI/CD pipelines as a required status check before any pull request is eligible for merging.
+Nothing verifies this certificate yet. Making a CI check refuse a pull request whose session has no valid certificate is the next piece of work, and it is the part that would make the certificate load-bearing rather than decorative.
 
 ---
 

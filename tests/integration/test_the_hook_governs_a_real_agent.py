@@ -13,7 +13,9 @@ from pathlib import Path
 
 import pytest
 
-HOOKS = Path(__file__).resolve().parents[2] / "hooks"
+# The hook moved under src/ so the deployment can hand it out; anything outside
+# CodeUri never reaches the function.
+HOOKS = Path(__file__).resolve().parents[2] / "src" / "threefold" / "hooks"
 sys.path.insert(0, str(HOOKS))
 
 import claude_code_hook as hook  # noqa: E402

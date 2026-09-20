@@ -60,9 +60,11 @@
         <div>
           <div class="flex items-center gap-2">
             <h1 class="text-lg font-bold tracking-tight text-white">Connect a Coding Agent</h1>
-            <span class="px-2 py-0.5 rounded text-xs font-semibold bg-purple-950 text-purple-400 border border-purple-800 font-mono">
-              hooks/claude_code_hook.py
-            </span>
+            <a id="hook-badge" href="hooks/claude_code_hook.py" target="_blank" rel="noopener"
+               title="Read the script this deployment serves"
+               class="px-2 py-0.5 rounded text-xs font-semibold bg-purple-950 hover:bg-purple-900 text-purple-400 border border-purple-800 font-mono transition">
+              claude_code_hook.py ↗
+            </a>
           </div>
           <p class="text-xs text-gray-400">Put Threefold in front of a real Claude Code session, not in front of a demo payload</p>
         </div>
@@ -125,20 +127,31 @@
         </div>
 
         <div>
-          <p class="text-xs font-semibold text-gray-200">Step 1 · Get the script</p>
+          <p class="text-xs font-semibold text-gray-200">Step 1 · Take the script</p>
           <p class="text-xs text-gray-400 mt-1">
-            It ships in the repository at <span class="font-mono text-purple-300">hooks/claude_code_hook.py</span>. This page does
-            not serve it: the Lambda package contains <span class="font-mono">src/</span> only, so the hook is never uploaded and
-            there is nothing here to download. Clone the repository and the file is already on disk.
+            This deployment serves it. No repository, no account, no package manager: the same stack you just watched refuse a
+            call hands you the file that does the refusing.
           </p>
-          <pre class="code mt-2 p-3 rounded-xl bg-gray-950 border border-gray-800 text-[11px] font-mono text-gray-300">git clone &lt;repository&gt; threefold
-cd threefold
-echo '{"tool_name":"Read","tool_input":{"file_path":"README.md"}}' \
-  | python hooks/claude_code_hook.py</pre>
+          <div class="flex flex-wrap items-center gap-2 mt-2">
+            <a id="hook-download" href="hooks/claude_code_hook.py" download="claude_code_hook.py"
+               class="px-3 py-1.5 rounded-lg bg-emerald-950 hover:bg-emerald-900 text-emerald-300 text-xs border border-emerald-800 font-semibold transition">
+              ⬇ Download claude_code_hook.py
+            </a>
+            <a id="hook-view" href="hooks/claude_code_hook.py" target="_blank" rel="noopener"
+               class="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-200 text-xs border border-gray-700 transition">
+              Read it first ↗
+            </a>
+            <span class="text-[11px] text-gray-500">5 KB, standard library only, nothing to install</span>
+          </div>
+          <div class="relative">
+            <pre class="code mt-2 p-3 rounded-xl bg-gray-950 border border-gray-800 text-[11px] font-mono text-gray-300" id="fetch-snippet"></pre>
+            <button onclick="copyText('fetch-snippet', this)" class="absolute top-3 right-2 text-[11px] px-2 py-0.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700">Copy</button>
+          </div>
           <p class="text-[11px] text-gray-500 mt-1">
             The script takes no flags. It reads one JSON object on stdin and writes one decision on stdout, which is the whole of
-            its interface, so the line above is both the smoke test and the thing Claude Code will do to it. Standard library
-            only: there is nothing to install.
+            its interface, so the second line above is both the smoke test and exactly what Claude Code will do to it. It is
+            served as readable text rather than as a download you cannot inspect, because a file that sits in front of an agent's
+            tool calls is one you should read before you run.
           </p>
         </div>
 
@@ -421,6 +434,15 @@ echo '{"tool_name":"Read","tool_input":{"file_path":"README.md"}}' \
       });
     }
 
+    // The script is served by this deployment, under the same stage prefix as the
+    // pages, so its links are built the same way rather than left relative.
+    function linkToHook() {
+      ['hook-download', 'hook-view', 'hook-badge'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.href = PAGE_BASE + 'hooks/claude_code_hook.py';
+      });
+    }
+
     function escapeHtml(str) {
       if (typeof str !== 'string') return str == null ? '' : String(str);
       return str.replace(/[&<>"']/g, m => ({
@@ -470,6 +492,12 @@ echo '{"tool_name":"Read","tool_input":{"file_path":"README.md"}}' \
     function renderSnippets() {
       const endpoint = getApiBase();
 
+      document.getElementById('fetch-snippet').textContent =
+        'curl -O ' + endpoint + '/hooks/claude_code_hook.py\n\n' +
+        '# one JSON object on stdin, one decision on stdout\n' +
+        'echo \'{"tool_name":"Read","tool_input":{"file_path":"README.md"}}\' \\\n' +
+        '  | THREEFOLD_ENDPOINT=' + endpoint + ' python3 claude_code_hook.py';
+
       document.getElementById('settings-snippet').textContent =
         '{\n' +
         '  "hooks": {\n' +
@@ -479,7 +507,7 @@ echo '{"tool_name":"Read","tool_input":{"file_path":"README.md"}}' \
         '        "hooks": [\n' +
         '          {\n' +
         '            "type": "command",\n' +
-        '            "command": "python /absolute/path/to/hooks/claude_code_hook.py"\n' +
+        '            "command": "python3 /absolute/path/to/claude_code_hook.py"\n' +
         '          }\n' +
         '        ]\n' +
         '      }\n' +
@@ -502,7 +530,7 @@ echo '{"tool_name":"Read","tool_input":{"file_path":"README.md"}}' \
         '  -d \'' + JSON.stringify(hookRequestBody(CASES.domain_write, 'demo-session')) + '\'\n\n' +
         '# The decision Claude Code would act on, from the script itself\n' +
         'echo \'' + JSON.stringify(CASES.domain_write) + '\' \\\n' +
-        '  | THREEFOLD_ENDPOINT=' + endpoint + ' python hooks/claude_code_hook.py\n\n' +
+        '  | THREEFOLD_ENDPOINT=' + endpoint + ' python3 claude_code_hook.py\n\n' +
         '# The loop gate needs calls that PASS. Send the ordinary edit three times\n' +
         '# under one session id: the third answers BLOCKED_LOOP_DETECTED.\n' +
         'for i in 1 2 3; do curl -s -X POST ' + endpoint + '/evaluate-tool-call \\\n' +
@@ -605,6 +633,7 @@ echo '{"tool_name":"Read","tool_input":{"file_path":"README.md"}}' \
 
     renderNav();
     linkToSpec();
+    linkToHook();
     document.getElementById('apiBaseInput').value = DEFAULT_API_BASE;
     renderSnippets();
   </script>
