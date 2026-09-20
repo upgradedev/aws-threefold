@@ -15,7 +15,9 @@ When an autonomous coding agent encounters a compilation error or unexpected tes
 **Threefold** provides a state-of-the-art **deterministic governance sidecar**:
 > **"Deterministic code trips circuit breakers and enforces boundaries; Amazon Bedrock provides semantic architectural explanations."**
 
-The sidecar intercepts agent tool calls at the pre-invocation phase, executing 4 deterministic safety evaluations in sub-millisecond time. If any invariant fails, execution is halted immediately. When operations succeed, Amazon Bedrock analyzes high-level architectural implications, and the system issues an immutable SHA-256 **Governance Certificate** required for CI/CD pull request merging.
+The sidecar intercepts agent tool calls at the pre-invocation phase and runs four deterministic evaluations. If any invariant fails, execution is halted immediately. When operations succeed, Amazon Bedrock explains the verdict in a sentence, and the system issues a SHA-256 **Governance Certificate**.
+
+The certificate is currently a signed record, not a gate: nothing in this repository verifies one before a merge. Making a CI check refuse a pull request whose session has no valid certificate is the next piece of work, and it is the part that would make the certificate load-bearing rather than decorative.
 
 ---
 

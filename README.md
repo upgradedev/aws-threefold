@@ -29,7 +29,7 @@ As enterprise engineering teams and open-source contributors increasingly integr
 
 > **The Central Tenet:** *Deterministic code trips circuit breakers and enforces boundaries; Amazon Bedrock provides semantic architectural explanations.*
 
-Threefold intercepts agent tool calls and prompt context in real-time, executing 4 deterministic safety gates in under 1 millisecond:
+Threefold intercepts an agent's intended tool call and runs four deterministic gates before the call is allowed to proceed:
 1. **Secret and credential filter:** five regular expressions block AWS keys (`AKIA...`), GitHub PATs, and private keys at the pre-invocation perimeter.
 2. **Clean Architecture Boundary Guard:** Prevents agents from altering `.env` files, modifying frozen paths, or violating dependency inversion.
 3. **N-gram Loop & Thrashing Detector:** Identifies monomorphic repetition and ping-pong tool thrashing within $\le 3$ iterations.
@@ -106,7 +106,7 @@ Open <https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/> and press a 
 - **Ingress & API:** Amazon API Gateway HTTP API with full CORS support.
 - **Audit Storage:** Amazon DynamoDB (Single-table session state) & Amazon S3 (Cryptographic evidence bundles).
 - **Frontend:** served by the same Lambda that answers the API, so one URL is the whole application. There is no CloudFront distribution in the stack.
-- **Standards:** Clean Architecture, Domain-Driven Design (DDD), sub-millisecond deterministic evaluation.
+- **Standards:** Clean Architecture, Domain-Driven Design. The gates are pure standard-library Python with no model on the critical path, so the verdict does not wait on an LLM. No latency figure is quoted because none has been measured.
 
 ---
 

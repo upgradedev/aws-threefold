@@ -25,7 +25,7 @@
 - **Visual:**
   - Architecture diagram showing:
     `Agent Tool Invocation -> Universal Adapter (OpenAI / Anthropic) -> Deterministic Safety Invariants (Tokens, Loops, Boundaries, Secrets) -> Amazon Bedrock Reviewer -> DynamoDB & S3 Signed Governance Certificate`.
-  - Highlight the millisecond deterministic gate separating agent execution from Bedrock explanation.
+  - Highlight that the deterministic gate decides, and Bedrock only explains the decision afterwards.
 - **Narration (Spoken):**
   > "Threefold is built on a clear architectural principle: *Deterministic code trips the circuit breaker; Amazon Bedrock explains why.*
   > All agent tool calls pass through an ultra-fast, air-gapped governance layer in Python that enforces four critical invariants:

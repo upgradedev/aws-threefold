@@ -24,7 +24,7 @@ Autonomous coding agents are rapidly transforming enterprise software engineerin
 ---
 
 ### 3. What It Does
-1. **Real-Time Tool Interception & Invariant Verification:** Intercepts agent tool requests (file edits, bash execution, database queries) in under 1 millisecond and checks them against four deterministic rules.
+1. **Tool interception and invariant verification:** intercepts an agent's intended tool request (file edits, shell execution, queries) and checks it against four deterministic rules before it runs.
 2. **Cost Circuit Breaker & Real-Time Spend Tracking:** Models exact token-to-dollar pricing for foundation models, enforcing hard session budget caps and blocking single-invocation spend spikes.
 3. **N-Gram Thrashing & Infinite Loop Detection:** Tracks recent invocation sequences using monomorphic and ping-pong N-gram pattern matching, tripping the circuit breaker before tokens are burned.
 4. **Architectural Boundary & Secret Scanner:** Enforces Clean Architecture dependency rules (e.g., domain entities cannot import outer infrastructure frameworks) and blocks sensitive API keys or credentials from being committed or piped to shell commands.
@@ -46,7 +46,7 @@ Autonomous coding agents are rapidly transforming enterprise software engineerin
 ---
 
 ### 5. Challenges We Overcame
-1. **Sub-Millisecond Evaluation Overhead:** Developers demand instant responsiveness from their tools. We engineered the entire invariant evaluation engine in pure Python with zero heavy ML or LLM overhead on the critical path, keeping evaluation latency under 1ms.
+1. **No model on the critical path:** the whole invariant engine is standard-library Python, so a refusal never waits on an LLM. The overhead has not been benchmarked, so no figure is claimed.
 2. **Universal Multi-Agent Compatibility:** Different AI models use conflicting tool-calling representations (OpenAI's JSON-string `arguments` vs. Anthropic's structured `input` object). We developed a universal normalization adapter that maps any agent payload into unified domain entities.
 3. **Hermetic Clean-Room Compliance:** We ensured the entire codebase, mock repositories, live dev servers, and test suite execute using Python's standard library alone, maintaining 100% clean-room isolation with zero external package dependencies.
 

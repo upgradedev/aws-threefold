@@ -25,7 +25,7 @@ To solve this, we built **Threefold**: an autonomous governance proxy, real-time
 When building guardrails for autonomous agents, a common mistake is using another prompt to check the first prompt. LLM-based guardrails suffer from non-zero latency, non-deterministic outputs, and token costs of their own.
 
 Threefold adopts an **air-gapped hybrid architecture**:
-1. **Deterministic Perimeter (Sub-Millisecond):** Every agent tool call is intercepted by compiled Python logic executing 4 deterministic checks:
+1. **Deterministic perimeter:** every agent tool call is intercepted by standard-library Python running four checks, with no model on the critical path:
    - *Secret Scanner:* Blocks AWS Access Keys (`AKIA...`), GitHub tokens, and private keys at the argument boundary.
    - *Boundary Guard:* Prohibits reading `.env` files or importing outer-layer dependencies into pure domain code.
    - *Loop & Thrashing Detector:* Hashes tool calls into N-gram signatures to detect monomorphic loops ($\ge 3$ identical calls) or ping-pong thrashing.
@@ -35,7 +35,7 @@ Threefold adopts an **air-gapped hybrid architecture**:
 ```
  ┌──────────────────────┐          ┌──────────────────────┐          ┌──────────────────────┐
  │ Autonomous Coding    │          │ Deterministic Safety │          │ Amazon Bedrock       │
- │ Agent (Tool Call)    │─────────►│ Gatekeeper (<0.5ms)  │─────────►│ (Claude 3.5 Sonnet)  │
+ │ Agent (Tool Call)    │─────────►│ Gatekeeper (no model)│─────────►│ (Claude Haiku 4.5)   │
  └──────────────────────┘          └──────────┬───────────┘          └──────────┬───────────┘
                                               │                                 │
                                       Evaluates Secrets,               Synthesizes Plain-
@@ -67,7 +67,7 @@ response = bedrock_runtime.converse(
 ```
 
 ### 2. ARM64 Graviton2 Serverless Architecture
-Threefold runs on **AWS Lambda powered by AWS Graviton2 (ARM64)** processors behind an **Amazon API Gateway HTTP API**. Cold start latency is under 180ms, and individual deterministic evaluations complete in under **0.5 milliseconds**, adding virtually zero overhead to the agent's workflow.
+Threefold runs on **AWS Lambda** (arm64) behind an **Amazon API Gateway HTTP API**. The deterministic gates hold no model call, so a blocked call never waits on Bedrock; only the explanation for an allowed call does. Neither cold start nor gate latency has been measured, so neither is quoted here.
 
 ### 3. Cryptographic Governance Certificates
 When a coding agent completes a compliant task, Threefold issues a signed **Governance Certificate** with a 64-character SHA-256 fingerprint:
