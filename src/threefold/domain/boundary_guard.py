@@ -8,8 +8,12 @@ be stepped around by renaming a field.
 from __future__ import annotations
 
 import re
-from typing import Any, Iterator, List, Tuple
-from threefold.domain.import_rules import find_forbidden_imports
+from typing import Any, Dict, Iterator, List, Optional, Tuple
+from threefold.domain.layering_rules import (
+    DEFAULT_RULES,
+    evaluate as evaluate_layering,
+    rules_for_path,
+)
 from threefold.domain.models import ToolActionType, ToolInvocation
 
 MAX_PATHLIKE_LENGTH = 400
@@ -127,7 +131,11 @@ class ArchitecturalBoundaryGuard:
         return [leaf for leaf in iter_string_leaves(arguments) if looks_like_path(leaf)]
 
     @classmethod
-    def evaluate_tool_boundary(cls, invocation: ToolInvocation) -> Tuple[bool, str]:
+    def evaluate_tool_boundary(
+        cls,
+        invocation: ToolInvocation,
+        rules: Optional[List[Dict[str, Any]]] = None,
+    ) -> Tuple[bool, str]:
         """Checks a tool invocation against safety and architectural boundaries.
 
         Returns (is_permitted, failure_reason).
@@ -148,22 +156,24 @@ class ArchitecturalBoundaryGuard:
                 if pattern.search(candidate):
                     return False, f"Target path '{candidate}' is protected by architectural governance"
 
-        # 3. The Clean Architecture rule. This runs whenever the call carries
-        #    content and points at a domain file. It deliberately does not
-        #    require the caller to have declared FILE_WRITE: the declared action
-        #    type is a hint from the agent, and a guard that only inspects calls
-        #    which admit to being writes is one omitted field from silence.
-        domain_targets = [p for p in path_like if cls.DOMAIN_DIRECTORY.search(p)]
-        if domain_targets:
+        # 3. The layering rules. These are declared rather than compiled in, so
+        #    the rule that has no incumbent can be the architecture of whoever is
+        #    running this rather than the one example it shipped with. The check
+        #    runs whenever the call carries content and points at a covered path.
+        #    It deliberately does not require the caller to have declared
+        #    FILE_WRITE: the declared action type is a hint from the agent, and a
+        #    guard that only inspects calls which admit to being writes is one
+        #    omitted field away from silence.
+        active_rules = rules if rules is not None else DEFAULT_RULES
+        for target in path_like:
+            if not rules_for_path(target, active_rules):
+                continue
             for leaf in iter_string_leaves(arguments):
                 if leaf in path_like:
                     continue
-                violations = find_forbidden_imports(leaf)
-                if violations:
-                    return False, (
-                        f"Clean Architecture violation: domain file '{domain_targets[0]}' "
-                        f"cannot depend on an outer layer ({violations[0]})"
-                    )
+                allowed, reason = evaluate_layering(target, leaf, active_rules)
+                if not allowed:
+                    return False, f"Clean Architecture violation: {reason}"
 
         # 4. Destructive or exfiltrating shell commands.
         if invocation.action_type == ToolActionType.COMMAND_EXEC or not path_like:

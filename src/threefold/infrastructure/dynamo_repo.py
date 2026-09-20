@@ -296,6 +296,41 @@ class DynamoDBSessionRepository:
         self._memory_store["CONFIG#policy#METADATA"] = item
         return True
 
+    def load_rules(self) -> Optional[List[Dict[str, Any]]]:
+        """Reads the saved layering rules, so a cold container enforces the same ones."""
+        if self._table is not None:
+            try:
+                res = self._table.get_item(Key={"PK": "CONFIG#rules", "SK": "METADATA"})
+                item = res.get("Item")
+                if item and item.get("rules_json"):
+                    return json.loads(item["rules_json"])
+            except Exception as exc:
+                logger.warning("Failed to read layering rules from DynamoDB: %s", exc)
+        stored = self._memory_store.get("CONFIG#rules#METADATA")
+        if stored and stored.get("rules_json"):
+            return json.loads(stored["rules_json"])
+        return None
+
+    def save_rules(self, rules: List[Dict[str, Any]]) -> bool:
+        """Persists the rules. An architecture that resets on a cold start is not one."""
+        item = {
+            "PK": "CONFIG#rules",
+            "SK": "METADATA",
+            "rules_json": json.dumps(rules, sort_keys=True),
+            "rule_count": len(rules),
+        }
+        if self._table is not None:
+            try:
+                self._table.put_item(Item=item)
+                self._memory_store["CONFIG#rules#METADATA"] = item
+                self._last_persistence_mode = "dynamodb"
+                return True
+            except Exception as exc:
+                logger.warning("DynamoDB save_rules failed, writing to memory: %s", exc)
+        self._memory_store["CONFIG#rules#METADATA"] = item
+        self._last_persistence_mode = "memory"
+        return True
+
     def save_session(self, session: AgentSession, force: bool = False) -> bool:
         """Persists complete session state to DynamoDB.
 

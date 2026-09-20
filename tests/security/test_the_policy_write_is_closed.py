@@ -32,6 +32,21 @@ def _no_keys_unless_a_test_sets_them():
         os.environ["THREEFOLD_API_KEYS"] = previous
 
 
+@pytest.fixture(autouse=True)
+def _restore_the_rules_the_handler_holds():
+    """A test that saves rules changes the handler's singleton for everything after it.
+
+    The evaluator is module level so a later test would inherit whatever this
+    file wrote, and the failure would land somewhere unrelated and order
+    dependent.
+    """
+    from threefold.interfaces.api_handlers import _evaluator
+
+    before = list(_evaluator.layering_rules)
+    yield
+    _evaluator.layering_rules = before
+
+
 def _call(method: str, path: str, body: dict | None = None, headers: dict | None = None):
     event = {
         "rawPath": f"/prod{path}",
@@ -129,3 +144,69 @@ def test_closing_the_write_left_the_rest_of_the_demo_open() -> None:
     assert status == 200
     assert _call("GET", "/status")[0] == 200
     assert _call("POST", "/simulate-loop")[0] == 200
+
+
+def test_the_layering_rules_read_openly_and_write_closed() -> None:
+    """The rules are the gate itself, so rewriting them is at least as closed.
+
+    An anonymous caller who could replace them could delete the architecture
+    rather than trip it, which is a quieter failure than raising a threshold.
+    """
+    status, body = _call("GET", "/rules")
+    assert status == 200
+    assert body["count"] >= 1
+    assert body["languages_read"], "A reader must be able to see which languages are read"
+
+    assert _call("POST", "/rules", {"rules": []})[0] == 403
+
+    os.environ["THREEFOLD_API_KEYS"] = "operator-key-1"
+    own = {
+        "rules": [
+            {
+                "id": "acme-billing-domain",
+                "description": "Billing domain classes may not reach persistence",
+                "when_path_matches": ["**/billing/domain/**/*.java"],
+                "forbid_imports": ["javax.persistence", "java.sql"],
+                "allow_imports": ["java.util"],
+            }
+        ]
+    }
+    assert _call("POST", "/rules", own)[0] == 401, "A key is required even though reading needs none"
+
+    status, saved = _call(
+        "POST", "/rules", own, {"Content-Type": "application/json", "X-API-Key": "operator-key-1"}
+    )
+    assert status == 200
+    assert saved["count"] == 1
+
+    # And the gate now enforces what was saved, on a language it could not read before.
+    status, verdict = _call(
+        "POST",
+        "/evaluate-tool-call",
+        {
+            "session_id": "rules-enforced-001",
+            "project_name": "Acme-Billing",
+            "tool_name": "Write",
+            "action_type": "FILE_WRITE",
+            "arguments": {
+                "file_path": "src/main/java/com/acme/billing/domain/Order.java",
+                "content": "package com.acme.billing.domain;\nimport javax.persistence.Entity;",
+            },
+        },
+    )
+    assert status == 200
+    assert verdict["status"] == "BLOCKED_BOUNDARY_VIOLATION"
+    assert "acme-billing-domain" in verdict["reason"], "The refusal must name the architect's own rule"
+
+
+def test_a_rule_that_says_nothing_is_refused_rather_than_saved() -> None:
+    """An empty rule set would silently remove the gate."""
+    os.environ["THREEFOLD_API_KEYS"] = "operator-key-1"
+    status, body = _call(
+        "POST",
+        "/rules",
+        {"rules": [{"id": "empty"}]},
+        {"Content-Type": "application/json", "X-API-Key": "operator-key-1"},
+    )
+    assert status == 400
+    assert body["type"] == "urn:threefold:error:unusable-rule"

@@ -23,8 +23,12 @@ GATE_COVERAGE = [
     },
     {
         "rule": "ARCHITECTURAL_BOUNDARY_SAFE",
-        "watches": "Python files under a directory named domain/, importing one of twelve library roots or a package part named infrastructure or adapters",
-        "blind_to": "Java, C#, TypeScript and every other language, any layering convention that is not a domain/ directory, and any dependency outside that list",
+        # Replaced at call time by describe_layering(), which reads the rules in
+        # force. A fixed sentence here would have gone stale the first time an
+        # architect saved their own, and a coverage statement that lies is worse
+        # than none: it is the line a reader trusts to interpret a zero.
+        "watches": "Set from the layering rules in force",
+        "blind_to": "Set from the layering rules in force",
     },
     {
         "rule": "LOOP_THRASHING_FREE",
@@ -203,3 +207,42 @@ def summarise(decisions: List[Dict[str, Any]], window_days: int) -> Dict[str, An
         ],
         "coverage": GATE_COVERAGE,
     }
+
+
+def describe_layering(rules: List[Dict[str, Any]], languages_read: List[str]) -> Dict[str, str]:
+    """What the layering gate watches, read off the rules actually in force."""
+    if not rules:
+        return {
+            "rule": "ARCHITECTURAL_BOUNDARY_SAFE",
+            "watches": "Nothing: no layering rule is configured",
+            "blind_to": "Every layering question, until a rule is saved",
+        }
+    ids = ", ".join(rule.get("id", "?") for rule in rules[:6])
+    paths = sorted({pattern for rule in rules for pattern in rule.get("when_path_matches", [])})
+    return {
+        "rule": "ARCHITECTURAL_BOUNDARY_SAFE",
+        "watches": (
+            f"{len(rules)} rule(s) in force ({ids}), over paths matching "
+            f"{', '.join(paths[:6])}. Imports are read from "
+            f"{', '.join(languages_read)} source"
+        ),
+        "blind_to": (
+            "Any path no rule covers, any language not in that list, and the "
+            "dependencies a file does not declare: an import is read from the "
+            "file's own statements, not resolved, followed or injected"
+        ),
+    }
+
+
+def with_layering_coverage(
+    payload: Dict[str, Any],
+    rules: List[Dict[str, Any]],
+    languages_read: List[str],
+) -> Dict[str, Any]:
+    """Swaps the placeholder coverage row for the one the deployment can prove."""
+    described = describe_layering(rules, languages_read)
+    payload["coverage"] = [
+        described if entry["rule"] == "ARCHITECTURAL_BOUNDARY_SAFE" else entry
+        for entry in payload.get("coverage", [])
+    ]
+    return payload

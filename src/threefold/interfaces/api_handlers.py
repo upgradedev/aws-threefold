@@ -17,7 +17,9 @@ from threefold.application.audit_issuer import AuditIssuer
 from threefold.application.bedrock_reviewer import BedrockArchitecturalReviewer
 from threefold.application.dtos import PolicyConfigDTO, ToolCallRequestDTO
 from threefold.application.evaluator import GovernanceEvaluator
-from threefold.application.insights import summarise
+from threefold.application.insights import summarise, with_layering_coverage
+from threefold.domain.imports import LANGUAGE_BY_SUFFIX
+from threefold.domain.layering_rules import DEFAULT_RULES, UNSUPPORTED
 from threefold.domain.exceptions import EmptyAttestationException
 from threefold.infrastructure.bedrock_client import BedrockGovernanceClient
 from threefold.infrastructure.idempotency import global_idempotency_cache
@@ -262,6 +264,11 @@ def lambda_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]
             days = max(1, min(days, 30))
             decisions = _evaluator.list_decisions(days=days, limit=2000)
             payload = summarise(decisions, days)
+            payload = with_layering_coverage(
+                payload,
+                _evaluator.layering_rules,
+                sorted(set(LANGUAGE_BY_SUFFIX.values())),
+            )
             payload["persistence"] = getattr(_evaluator.session_repo, "persistence_mode", "memory")
             return build_response(200, payload)
 
@@ -571,6 +578,43 @@ def lambda_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]
                 {"SessionManuallyTerminated": 1.0},
                 namespace="Threefold/Emergency",
             )
+            return build_response(200, res_dict)
+
+        # Route 6c: the layering rules. Reading them is open, because a reader
+        # has to be able to see the architecture they are being held to; writing
+        # them is not, because they are the gate rather than a setting on it.
+        if path in ("/rules", "/rules/layering") and http_method == "GET":
+            rules = _evaluator.layering_rules
+            return build_response(
+                200,
+                {
+                    "rules": rules,
+                    "count": len(rules),
+                    "is_default": rules == DEFAULT_RULES,
+                    "languages_read": sorted(set(LANGUAGE_BY_SUFFIX.values())),
+                    "unsupported": UNSUPPORTED,
+                },
+            )
+
+        if path in ("/rules", "/rules/layering") and http_method == "POST":
+            body = _parse_body(event)
+            try:
+                saved = _evaluator.update_rules(body.get("rules", body))
+            except ValueError as invalid:
+                return build_response(
+                    400,
+                    rfc7807_error(
+                        400,
+                        "No Usable Rule",
+                        str(invalid),
+                        path,
+                        error_type="urn:threefold:error:unusable-rule",
+                    ),
+                )
+            res_dict = {"status": "RULES_UPDATED", "count": len(saved), "rules": saved}
+            if idempotency_key:
+                global_idempotency_cache.set(idempotency_key, 200, res_dict)
+            emit_threefold_emf_metrics({"LayeringRulesUpdated": 1.0}, namespace="Threefold/Audits")
             return build_response(200, res_dict)
 
         # Route 7: Dynamic Enterprise Policy Configuration

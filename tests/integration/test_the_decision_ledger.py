@@ -169,9 +169,13 @@ def test_the_console_is_told_what_the_gates_cannot_see() -> None:
     coverage = json.loads(response["body"])["coverage"]
     assert len(coverage) == 4, "Every gate owes the reader a statement of what it misses"
 
+    # The layering statement is computed from the rules in force rather than
+    # fixed, because a fixed one went stale the moment an architect saved their
+    # own and a coverage line that lies is worse than none.
     architecture = [c for c in coverage if c["rule"] == "ARCHITECTURAL_BOUNDARY_SAFE"][0]
-    assert "Python" in architecture["watches"]
-    assert "Java" in architecture["blind_to"], "The narrowest gate must say so where it is counted"
+    assert "rule(s) in force" in architecture["watches"], "It must say what is actually enforced"
+    assert "domain" in architecture["watches"], "And over which paths"
+    assert "not resolved" in architecture["blind_to"], "And how shallow the reading is"
 
 
 def test_a_refusal_reason_is_redacted_before_it_is_stored() -> None:

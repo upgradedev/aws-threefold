@@ -114,6 +114,10 @@ def _configured_keys(allow_placeholder: bool) -> list[str]:
 PROTECTED_WRITES = {
     ("POST", "/policy/config"),
     ("POST", "/policy"),
+    # The layering rules are the architecture itself. An anonymous caller who
+    # could rewrite them could delete the gate rather than trip it.
+    ("POST", "/rules"),
+    ("POST", "/rules/layering"),
 }
 
 

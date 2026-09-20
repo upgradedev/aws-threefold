@@ -15,6 +15,7 @@ from threefold.domain.models import (
 )
 from threefold.domain.circuit_breaker import CostCircuitBreaker, TokenCostCalculator
 from threefold.domain.loop_detector import LoopDetector
+from threefold.domain.layering_rules import DEFAULT_RULES, normalise_rules
 from threefold.domain.boundary_guard import (
     ArchitecturalBoundaryGuard,
     describe_target,
@@ -67,6 +68,10 @@ class GovernanceEvaluator:
             self.session_repo = DynamoDBSessionRepository()
         if policy_config is None:
             self._adopt_saved_policy()
+        # The layering rules are the architecture of whoever runs this, so they
+        # are read from storage rather than compiled in. A deployment that has
+        # never been given any enforces the shipped set.
+        self.layering_rules = self._adopt_saved_rules()
 
     def _adopt_saved_policy(self) -> None:
         """Applies the stored policy, so a cold container does not start on defaults."""
@@ -93,6 +98,35 @@ class GovernanceEvaluator:
             )
         except (TypeError, ValueError) as exc:
             logger.warning("Saved policy was unreadable, keeping defaults: %s", exc)
+
+    def _adopt_saved_rules(self) -> list:
+        loader = getattr(self.session_repo, "load_rules", None)
+        if loader is None:
+            return list(DEFAULT_RULES)
+        try:
+            saved = loader()
+        except Exception as exc:  # pragma: no cover - storage is best effort
+            logger.warning("Could not read the layering rules: %s", exc)
+            return list(DEFAULT_RULES)
+        cleaned = normalise_rules(saved) if saved else []
+        return cleaned or list(DEFAULT_RULES)
+
+    def update_rules(self, raw_rules) -> list:
+        """Replaces the layering rules and stores them."""
+        cleaned = normalise_rules(raw_rules)
+        if not cleaned:
+            raise ValueError(
+                "No usable rule was supplied. A rule needs at least one path pattern "
+                "under when_path_matches and at least one pattern under forbid_imports."
+            )
+        self.layering_rules = cleaned
+        saver = getattr(self.session_repo, "save_rules", None)
+        if saver is not None:
+            try:
+                saver(cleaned)
+            except Exception as exc:  # pragma: no cover - storage is best effort
+                logger.warning("Could not persist the layering rules: %s", exc)
+        return cleaned
 
     def _apply(self, config: PolicyConfigDTO) -> None:
         self.policy_config = config
@@ -313,7 +347,9 @@ class GovernanceEvaluator:
         )
 
         # Gate 1: Check for Secrets & Credentials
-        is_boundary_safe, boundary_reason = ArchitecturalBoundaryGuard.evaluate_tool_boundary(invocation)
+        is_boundary_safe, boundary_reason = ArchitecturalBoundaryGuard.evaluate_tool_boundary(
+            invocation, rules=self.layering_rules
+        )
         if not is_boundary_safe:
             if "Sensitive credential detected" in boundary_reason:
                 rule_evaluations["SECRET_LEAKAGE_FREE"] = False

@@ -123,3 +123,12 @@
 - The empty state is a first-class screen, not a skeleton, because on a real deployment it is the first thing anyone sees: it says the ledger is empty rather than that nothing was found, and gives the one curl that starts filling it.
 - Two defects the design pass forced out before anything rendered them. A call into an already-halted session marks the budget invariant false whatever did the halting, so a loop-halted session filed every later refusal under cost; the ledger now names that `SESSION_ALREADY_HALTED` and a test pins that no spend problem is reported where there was a thrashing problem. And `by_project` computed a per-project cost with `max()` over cumulative session costs, which is not a project total; it was never emitted and is now gone rather than left to be shown.
 - Tests 163 → 167.
+
+## 2026-09-21T02:30:00+03:00 — The layering rule becomes the architect's, in four languages
+- The one gate with no incumbent was a Python example: files under a directory named `domain/`, parsed with `ast`, refused against twelve hardcoded library names. On a codebase in Java, C# or TypeScript it enforced nothing, and changing it needed a deployment.
+- A rule now says three things and nothing else: which paths it covers, what they may not depend on, and what is allowed anyway. `src/threefold/domain/layering_rules.py` evaluates them; `imports.py` reads what a file declares in Python, Java, C# and TypeScript; `path_match.py` does the `**` globbing an architect writes first.
+- Precedence is specificity, not order. Allowing `System` while forbidding `System.Data` has to leave `System.Data.SqlClient` refused, or one broad allowance quietly repeals every narrower prohibition beneath it. That was a real defect caught by the shipped .NET rule allowing `System`.
+- Two near misses are pinned as tests because a false refusal is what gets the tool uninstalled: `System.ComponentModel.DataAnnotations` is not `System.Data`, and `reactive-forms` is not `react`.
+- `GET /rules` is open and `POST /rules` is closed with the operator key, on the same grounds as the policy write: an anonymous caller who could replace the rules could delete the gate rather than trip it. A rule set that would say nothing is refused with 400 rather than saved.
+- The console's coverage line is computed from the rules in force rather than fixed. It had said "Python only, blind to Java" — true when written, false the moment an architect saves a Java rule.
+- Tests 168 → 199.
