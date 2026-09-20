@@ -1,0 +1,19 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "OnlyThisRepositoryOnlyMain",
+      "Effect": "Allow",
+      "Principal": {
+        "Federated": "arn:aws:iam::308857099262:oidc-provider/token.actions.githubusercontent.com"
+      },
+      "Action": "sts:AssumeRoleWithWebIdentity",
+      "Condition": {
+        "StringEquals": {
+          "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+          "token.actions.githubusercontent.com:sub": "repo:upgradedev/threefold-aws:ref:refs/heads/main"
+        }
+      }
+    }
+  ]
+}

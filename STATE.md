@@ -17,8 +17,9 @@ proof of a coding agent connected to the AWS console. Judging runs the weeks of
 | Live on AWS, public URL | **PASS** | `https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/` serves the dashboard itself, 200 and `text/html`, to an anonymous request with no API key. Stack `threefold-prod`, eu-west-1 |
 | A visitor can run the demo | **PASS** | Walked in a browser: Scenario 1 dispatched three calls to the live backend, the third returned `BLOCKED_LOOP_DETECTED`, and the panel showed a genuine Haiku 4.5 sentence under the heading "Amazon Bedrock (Claude Haiku 4.5)" |
 | Reachable by the AI scorer | **PASS** | `STAGE` is unset so the middleware defaults to `dev` and enforces no key. Verified by unauthenticated request |
-| Proof of coding agent connected to AWS | **PARTIAL** | Commands and CloudTrail captured in `docs/evidence/DEPLOYMENT_2026-09-20.md`. `docs/PROOF_OF_AWS_AGENT.md` still holds the old pytest transcript and must be rewritten |
-| Public repository | **NOT DONE** | Local `main` only, no remote. `gh repo create upgradedev/threefold-aws --public` is owner-gated |
+| Proof of coding agent connected to AWS | **PASS** | `docs/PROOF_OF_AWS_AGENT.md` rewritten around the real session: the commands run, the two defects AWS surfaced, and the CloudTrail principal. Raw output in `docs/evidence/DEPLOYMENT_2026-09-20.md` |
+| Public repository | **BLOCKED, owner action** | Four commits on local `main`, no remote. One command, in `docs/RUNBOOK.md` step 2 |
+| Continuous delivery | **WRITTEN, role missing** | `.github/workflows/{ci,deploy,keepalive}.yml`. Deploy assumes `threefold-github-deploy`, which does not exist yet. Policy documents are committed at `deploy/iam/`, creation is `docs/RUNBOOK.md` step 1 |
 | Builder Center project, two tags | **NOT DONE** | Owner-gated. Requires Builder Center profile, Join, then the Create Project form |
 
 ## What is real, measured today
@@ -39,21 +40,19 @@ proof of a coding agent connected to the AWS console. Judging runs the weeks of
 These are recorded because they are still false or missing in the tree. None is
 hidden in a document that a judge would read as finished work.
 
-1. `README.md` says "Submitted to AWS Zero to Shipped Hackathon" and advertises a
-   CloudFront deployment that does not exist. The CI badge is a static image.
-2. `docs/SUBMISSION_DOSSIER.md` carries placeholder article and video URLs that
-   resolve to nothing, and a `127.0.0.1` live URL.
-3. `docs/PROOF_OF_AWS_AGENT.md` is a pytest transcript attributed to a coding
-   agent that never touched AWS.
-4. `scripts/pre-commit-gate.py --scan-dir src/` exits 1 against this repository,
-   so the first CI run would be red.
-5. Four of the five offline fallback panels still show canned prose. They now say
+1. The source tree has changes that are committed but not yet deployed: the demo
+   key moved to an environment variable and the gate was rewritten. The live
+   stack still runs the previous commit. A deploy is needed, and once the role
+   exists the pipeline does it on push.
+2. Four of the five offline fallback panels still show canned prose. They now say
    "Simulated, offline demo, no model was reached" on their face, but the numbers
    inside them are invented and should be replaced with a real offline run.
-6. The loop detector catches byte-identical repeats only. The README's "entropy
-   scanning" claim has no code behind it.
-7. No headline number exists. The `$14.8k` figure in earlier drafts was never
-   computed and has no place in anything public.
+3. The loop detector catches byte-identical repeats only. The README no longer
+   claims entropy scanning, because there is no entropy code.
+4. No headline number exists yet. This is the largest remaining gap for judging:
+   the framing gate wants one comparative number against two named baselines.
+5. No video and no Builder Center article. Neither is required by the rules, but
+   the Builder Center project itself is, and it is owner-gated.
 
 ## Cost and teardown
 
