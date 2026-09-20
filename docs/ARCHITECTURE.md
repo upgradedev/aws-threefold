@@ -17,7 +17,7 @@ When an autonomous coding agent encounters a compilation error or unexpected tes
 
 The sidecar intercepts agent tool calls at the pre-invocation phase and runs four deterministic evaluations. If any invariant fails, execution is halted immediately. When operations succeed, Amazon Bedrock explains the verdict in a sentence, and the system issues a SHA-256 **Governance Certificate**.
 
-The certificate is currently a signed record, not a gate: nothing in this repository verifies one before a merge. Making a CI check refuse a pull request whose session has no valid certificate is the next piece of work, and it is the part that would make the certificate load-bearing rather than decorative.
+The certificate is currently a fingerprinted record, not a gate: nothing in this repository verifies one before a merge. The fingerprint is an unkeyed SHA-256 of the payload. It detects accidental corruption and casual edits, and it is not tamper-evidence against an adversary: anyone who changes the payload can recompute the hash. Making it real means signing with KMS and shipping a verifier that checks the signature, which is not done. Making a CI check refuse a pull request whose session has no valid certificate is the next piece of work, and it is the part that would make the certificate load-bearing rather than decorative.
 
 ---
 
@@ -153,7 +153,7 @@ sequenceDiagram
                 Breaker-->>Proxy: PASS
                 Proxy->>Bedrock: Converse API (Architectural Review & Commentary)
                 Bedrock-->>Proxy: Review Summary & Risk Assessment
-                Proxy->>CI: Issue Signed SHA-256 Governance Certificate
+                Proxy->>CI: Issue SHA-256 Governance Certificate
                 Proxy-->>Dev: APPROVED (Execute Tool Call)
             end
         end
@@ -164,7 +164,7 @@ sequenceDiagram
 
 ## 5. Cryptographic Certificate & Audit Dossier
 
-When an agent completes a compliant workflow, Threefold issues a canonical signed certificate:
+When an agent completes a compliant workflow, Threefold issues a canonical fingerprinted certificate:
 
 ```json
 {

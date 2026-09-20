@@ -14,7 +14,7 @@
 ## Submission Portal Field-by-Field Answers
 
 ### 1. Project Description (Short Summary)
-Threefold is a high-performance, serverless governance proxy and architectural guardrail engine for autonomous AI coding agents (Claude Code, Cursor, Copilot, OpenAI Swarm). Operating on the philosophy that *"Deterministic code trips the circuit breaker; Amazon Bedrock explains why,"* Threefold intercepts tool invocations before execution, evaluating four critical invariants: token-cost budgets, recursive thrashing loops, Clean Architecture layer boundaries, and credential leakage. When compliant, it tracks live dollar spend and issues an immutable, cryptographically signed SHA-256 Governance Certificate archived in Amazon S3 and DynamoDB, verifiable via a zero-dependency git pre-commit hook in CI/CD deployment pipelines.
+Threefold is a high-performance, serverless governance proxy and architectural guardrail engine for autonomous AI coding agents (Claude Code, Cursor, Copilot, OpenAI Swarm). Operating on the philosophy that *"Deterministic code trips the circuit breaker; Amazon Bedrock explains why,"* Threefold intercepts tool invocations before execution, evaluating four critical invariants: token-cost budgets, recursive thrashing loops, Clean Architecture layer boundaries, and credential leakage. When compliant, it tracks live dollar spend and issues an immutable, SHA-256 fingerprinted Governance Certificate archived in Amazon S3 and DynamoDB, verifiable via a zero-dependency git pre-commit hook in CI/CD deployment pipelines.
 
 ---
 
@@ -30,14 +30,14 @@ Autonomous coding agents are rapidly transforming enterprise software engineerin
 4. **Architectural Boundary & Secret Scanner:** Enforces Clean Architecture dependency rules (e.g., domain entities cannot import outer infrastructure frameworks) and blocks sensitive API keys or credentials from being committed or piped to shell commands.
 5. **Amazon Bedrock Architectural Explanations:** When a safety rule trips, Amazon Bedrock (Claude Haiku 4.5) reviews the incident and generates plain-language, contextual advice for the developer.
 6. **Universal Multi-Agent Adapter:** Seamlessly parses both native OpenAI `function_call` and Anthropic `tool_use` schemas, enabling universal compatibility with any coding agent.
-7. **Signed Governance Certificates & Git Pre-Commit Hook:** Issues immutable SHA-256 signed audit certificates and includes a standalone pre-commit hook script (`scripts/pre-commit-gate.py`) for CI/CD gates.
+7. **Fingerprinted Governance Certificates & Git Pre-Commit Hook:** Issues SHA-256 fingerprinted audit records and includes a standalone pre-commit hook script (`scripts/pre-commit-gate.py`) for CI/CD gates.
 
 ---
 
 ### 4. How We Built It
 - **Architecture:** Clean Architecture & Domain-Driven Design (DDD) with strict layer boundaries: Domain Core, Application Evaluators, Infrastructure Adapters, and Interfaces.
 - **AI Reasoning:** Amazon Bedrock Claude Haiku 4.5 (`eu.anthropic.claude-haiku-4-5-20251001-v1:0`) accessed via the Bedrock Converse API for contextual incident explanation.
-- **State & Evidence Persistence:** Amazon DynamoDB single-table design with session history and budget attributes, and Amazon S3 for signed governance certificate bundles.
+- **State & Evidence Persistence:** Amazon DynamoDB single-table design with session history and budget attributes, and Amazon S3 for governance certificate bundles.
 - **Observability:** Real-time AWS CloudWatch Embedded Metric Format (EMF) emitting zero-overhead structured telemetry directly to stdout.
 - **Security & Resilience:** Zero-trust token-bucket rate limiting (60 req/min), API Key authentication, RFC 7807 Problem Details, and exponential backoff with full jitter retry decorators.
 - **API & UI:** Complete OpenAPI 3.1 specifications, interactive Swagger UI (`src/threefold/web/swagger.html`), and a responsive single-page console (`src/threefold/web/index.html`) using vanilla JavaScript with zero external npm build dependencies.

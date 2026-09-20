@@ -112,6 +112,34 @@ one literal the demo uses. There is no negative-variant coverage of the API gate
 at all, which is the gap to close first: a variant test per rule would have
 caught every row above.
 
+**The certificate is not signed, and the documents said it was.** There is no
+KMS call, no HMAC and no key anywhere in `evidence_store.py` or
+`audit_issuer.py`. The verifier recomputes a SHA-256 of the payload, which
+anyone who edits the payload can also recompute. It detects corruption, not an
+adversary. Every "signed", "cryptographically signed" and "immutable" in the
+judge-facing documents has been corrected, and the limitation is now stated
+where the certificate is sold. The code still returns the message "100%
+authentic" on a hash match, which overstates what was checked; changing it
+needs a deploy.
+
+**Two more live bypasses, found by a second independent probe.** A secret on its
+own line inside a command is approved, because the arguments are stringified
+before scanning and the escaped newline leaves `` with no boundary to match.
+The flagship secret-leak scenario therefore fails on realistic multi-line input,
+and the fix is one line. Separately, an argument named `notebook_path` defeats
+both the path guard and the architecture check, because only four argument names
+are ever inspected.
+
+**Prior art is the hardest problem this project has.** Policy in Amazon Bedrock
+AgentCore reached general availability on 2026-03-03, six months before this
+hackathon, and AWS describes it as intercepting every tool call before
+execution, with session-aware repeat caps and running cost budgets. All five
+judges are AWS employees. The defensible distinction, which is true, is that
+AgentCore Policy governs traffic routed through its gateway while the risk in a
+coding agent sits in local shell and file edits that never reach one. The one
+idea with no incumbent at all is Clean Architecture layer semantics as a
+tool-call gate, and it is currently a substring search over five literals.
+
 **The cost engine prices every session wrongly.** `TokenCostCalculator` carries
 per-model rates but is never given a model id, so the table is unreachable and
 all sessions are billed at the default Sonnet-class rate.

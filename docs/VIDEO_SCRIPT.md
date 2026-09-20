@@ -24,7 +24,7 @@
 ### Scene 2: The Architectural Axiom — "Deterministic Code Trips the Breaker, Bedrock Explains Why" (0:25 - 0:55)
 - **Visual:**
   - Architecture diagram showing:
-    `Agent Tool Invocation -> Universal Adapter (OpenAI / Anthropic) -> Deterministic Safety Invariants (Tokens, Loops, Boundaries, Secrets) -> Amazon Bedrock Reviewer -> DynamoDB & S3 Signed Governance Certificate`.
+    `Agent Tool Invocation -> Universal Adapter (OpenAI / Anthropic) -> Deterministic Safety Invariants (Tokens, Loops, Boundaries, Secrets) -> Amazon Bedrock Reviewer -> DynamoDB & S3 Governance Certificate`.
   - Highlight that the deterministic gate decides, and Bedrock only explains the decision afterwards.
 - **Narration (Spoken):**
   > "Threefold is built on a clear architectural principle: *Deterministic code trips the circuit breaker; Amazon Bedrock explains why.*
@@ -55,7 +55,7 @@
 
 ---
 
-### Scene 4: Universal Multi-Agent Adapter & Signed Governance Certificate (1:40 - 2:15)
+### Scene 4: Universal Multi-Agent Adapter & Governance Certificate (1:40 - 2:15)
 - **Visual:**
   - Click **"Scenario 5: Universal Adapter (OpenAI / Anthropic)"**:
     - Show real OpenAI `function_call` payload being ingested and normalized into domain entities.
@@ -68,7 +68,7 @@
     - Open the downloaded JSON certificate showing the SHA-256 seal and list of verified invariants.
 - **Narration (Spoken):**
   > "Threefold is model-agnostic. With our Universal Multi-Agent Adapter, you can protect Claude Code, Cursor, Copilot, or OpenAI Swarm agents using their native payload schemas.
-  > When an agent operates safely within boundaries, Threefold tracks the exact token cost and issues an immutable, cryptographically signed SHA-256 **Governance Certificate**.
+  > When an agent operates safely within boundaries, Threefold tracks the cost it was told about and issues a SHA-256 fingerprinted **Governance Certificate**.
   > Teams can verify this certificate directly in their CI/CD deployment pipelines using our zero-dependency pre-commit hook script."
 
 ---

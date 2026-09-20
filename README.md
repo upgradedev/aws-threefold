@@ -47,8 +47,8 @@ Open <https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/> and press a 
    Click **Secret Leak Intercept**. An agent attempts to execute a shell command exporting an AWS Access Key (`AKIAIOSFODNN7EXAMPLE`). Threefold rejects the call before it leaves the local environment.
 3. **Journey 3 · Clean Architecture Drift Prevention:**  
    Click **Clean Architecture Drift**. An agent attempts to write `import boto3` inside `src/domain/user.py`. Threefold blocks the write with a Clean Architecture violation alert.
-4. **Journey 4 · Compliant Execution & Signed Certificate:**  
-   Click **Compliant Run & Cert**. 4 legitimate tool calls execute within budget ($0.0384). Amazon Bedrock provides architectural commentary, and the system issues an immutable SHA-256 **Governance Certificate** exportable to JSON.
+4. **Journey 4 · Compliant Execution & Certificate:**  
+   Click **Compliant Run & Cert**. 4 legitimate tool calls execute within budget ($0.0384). Amazon Bedrock provides architectural commentary, and the system issues a SHA-256 **Governance Certificate** exportable to JSON.
 
 ---
 

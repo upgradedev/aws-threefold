@@ -44,7 +44,7 @@ Threefold adopts an **air-gapped hybrid architecture**:
                                               ▼                                 │
                                    ┌──────────────────────┐                     ▼
                                    │  Circuit Breaker     │          ┌──────────────────────┐
-                                   │  (Tripped or Safe)   │          │ Signed SHA-256 Cert  │
+                                   │  (Tripped or Safe)   │          │ SHA-256 Fingerprint  │
                                    └──────────────────────┘          │ for CI/CD Gates      │
                                                                      └──────────────────────┘
 ```
@@ -70,7 +70,11 @@ response = bedrock_runtime.converse(
 Threefold runs on **AWS Lambda** (arm64) behind an **Amazon API Gateway HTTP API**. The deterministic gates hold no model call, so a blocked call never waits on Bedrock; only the explanation for an allowed call does. Neither cold start nor gate latency has been measured, so neither is quoted here.
 
 ### 3. Cryptographic Governance Certificates
-When a coding agent completes a compliant task, Threefold issues a signed **Governance Certificate** with a 64-character SHA-256 fingerprint:
+When a coding agent completes a compliant task, Threefold issues a **Governance Certificate** with a 64-character SHA-256 fingerprint.
+
+The fingerprint is an unkeyed SHA-256 of the payload. It detects accidental corruption and casual edits, and it is not tamper-evidence against an adversary: anyone who changes the payload can recompute the hash. Making it real means signing with KMS and shipping a verifier that checks the signature, which is not done.
+
+The record looks like this:
 ```json
 {
   "certificate_id": "CERT-TF-9F4B18A72C3D",
@@ -92,7 +96,7 @@ Open [`src/threefold/web/index.html`](../src/threefold/web/index.html) or open <
 1. **Journey 1 · Runaway Tool Loop:** Watch the simulator fire 3 identical tool calls. On iteration 3, the circuit breaker instantly trips with a red visual alert, freezing the session and preserving your budget.
 2. **Journey 2 · Secret Leakage Intercept:** Simulate an agent passing an AWS Access Key (`AKIAIOSFODNN7EXAMPLE`) in a command argument. Blocked instantly at the perimeter before leaving the machine.
 3. **Journey 3 · Clean Architecture Guard:** Simulate an agent attempting to inject `import boto3` into a domain aggregate. Blocked with a dependency inversion error.
-4. **Journey 4 · Compliant Execution & Signed Certificate:** Run 4 safe development operations. Review Bedrock's architectural commentary and export the signed SHA-256 certificate to JSON.
+4. **Journey 4 · Compliant Execution & Certificate:** Run 4 safe development operations. Review Bedrock's architectural commentary and export the certificate to JSON.
 
 ---
 
