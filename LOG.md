@@ -48,3 +48,9 @@
 - A test extracts the endpoints the page actually fetches, matches each against the templated path in the served spec, and fails when one has no link. Removing a single entry from the strip was confirmed to fail it, so the guard is not vacuous.
 - Fixed a flakiness the new tests exposed rather than caused: every test arrives at `lambda_handler` from 127.0.0.1 and shares one sixty-token bucket, so once the suite grew past it, unrelated tests began failing with 429 depending on order. `tests/conftest.py` now resets that bucket per test. The rate limiter's own tests build their own instance, so nothing is hidden.
 - Tests 131 → 134.
+
+## 2026-09-20T21:18:00+03:00 — Ledger reconciled with the last two passes
+- `STATE.md` gained two rows in what is measured: that every page reaches the operation it calls, walked on the live URL, and that a test rebuilds Swagger UI's anchors from the served document so a renamed route breaks a test rather than a link.
+- The test-suite row carries the rate limiter beside the count, because the count is what tipped it: the suite shares one sixty-token bucket and, past that many calls, unrelated tests failed with 429 depending on order. Stating the number without stating what it broke would have left the next person to rediscover it.
+- Corrected the commit count, which had been stale by two passes.
+- Documentation only. `STATE.md` and `LOG.md` sit outside `CodeUri: ../src`, so nothing shipped and the live stack stays on the commit verified at 21:06.
