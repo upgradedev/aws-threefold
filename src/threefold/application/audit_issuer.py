@@ -6,6 +6,7 @@ import json
 from typing import List
 from threefold.domain.models import AgentSession
 from threefold.application.dtos import EvaluationResultDTO, GovernanceCertificateDTO
+from threefold.domain.exceptions import EmptyAttestationException
 
 
 class AuditIssuer:
@@ -16,6 +17,25 @@ class AuditIssuer:
         session: AgentSession,
         evaluations: List[EvaluationResultDTO],
     ) -> GovernanceCertificateDTO:
+        """Issues a certificate over verdicts that exist.
+
+        The invariant lives here rather than only at the edge, because every
+        caller of this function is publishing a governance artifact and none of
+        them should be able to publish one that attests to nothing.
+        """
+        if not evaluations:
+            raise EmptyAttestationException(
+                session.session_id,
+                "no evaluations were supplied, and a certificate over nothing would "
+                "report all_passed on the strength of an empty list",
+            )
+        if not session.history:
+            raise EmptyAttestationException(
+                session.session_id,
+                "this service has no record of governing that session, so there is "
+                "nothing of its own to certify",
+            )
+
         all_passed = all(e.status == "APPROVED" for e in evaluations) and not session.is_tripped
         status = "COMPLIANT_APPROVED" if all_passed else "NON_COMPLIANT_REJECTED"
 

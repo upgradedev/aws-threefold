@@ -73,3 +73,10 @@
 - The offline certificate says so on its face and inside the file: `simulated: true`, a disclaimer field, `CERT-TF-SIMULATED-0000` and a zeroed fingerprint. The file is what leaves the browser, so the marker travels in the file.
 - README: hook paths, the missing certificate caveat, and a test count stale by three passes (65 → 134).
 - Tests 134 → 141. The new ones check that what is served is byte-identical to the file under test, compiles, is reachable without a key, and that the page no longer prints a placeholder.
+
+## 2026-09-20T23:05:00+03:00 — A certificate has to attest to something
+- `POST /issue-certificate` with `{"evaluations": []}` answered 200 with `verdict_status: COMPLIANT_APPROVED` and `all_passed: true`. The cause is one line in `AuditIssuer`: `all()` over an empty list is true, so an empty attestation read as a clean bill of health and carried a valid fingerprint over nothing.
+- Both refusals now live in `AuditIssuer`, not only at the edge, because every caller of that function is publishing a governance artifact: an empty evaluation list, and a session this service has no record of governing. `EmptyAttestationException` carries the code `EMPTY_ATTESTATION`; the route translates it into a 400 RFC 7807 `Nothing To Certify` with an `invalid_params` entry, and emits a `CertificatesRefused` metric.
+- Checked that the flagship demo still works rather than assuming it: Scenario 4 evaluates four calls and then certifies them, so its session has history and its certificate is issued as before.
+- What is still open, and now stated in gap 3: the verdicts themselves are the caller's word. A session with one real call can be certified with four invented ones. Issuing from the session's own stored history is the real fix and is not done.
+- Tests 141 → 146.

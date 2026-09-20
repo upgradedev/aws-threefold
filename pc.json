@@ -1,0 +1,1 @@
+{"blocked_patterns": ["AKIA[0-9A-Z]{16}", "aws_secret_access_key", "\\.env", "\\.pem$", "id_rsa"], "loop_history_window": 6, "max_session_budget_usd": 10.0, "max_single_call_usd": 1.0, "monomorphic_repetition_threshold": 3}

@@ -17,6 +17,7 @@ from threefold.application.audit_issuer import AuditIssuer
 from threefold.application.bedrock_reviewer import BedrockArchitecturalReviewer
 from threefold.application.dtos import PolicyConfigDTO, ToolCallRequestDTO
 from threefold.application.evaluator import GovernanceEvaluator
+from threefold.domain.exceptions import EmptyAttestationException
 from threefold.infrastructure.bedrock_client import BedrockGovernanceClient
 from threefold.infrastructure.idempotency import global_idempotency_cache
 from threefold.infrastructure.metrics_emf import emit_threefold_emf_metrics
@@ -472,7 +473,35 @@ def lambda_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]
                     )
                 )
 
-            cert = AuditIssuer.issue_certificate(session, parsed_evals)
+            # A certificate that attests to nothing is the one artifact this
+            # product cannot afford to hand out, so the refusal is reported as a
+            # problem the caller can read rather than as a server error.
+            try:
+                cert = AuditIssuer.issue_certificate(session, parsed_evals)
+            except EmptyAttestationException as empty:
+                emit_threefold_emf_metrics(
+                    {"CertificatesRefused": 1.0},
+                    namespace="Threefold/Audits",
+                )
+                return build_response(
+                    400,
+                    rfc7807_error(
+                        400,
+                        "Nothing To Certify",
+                        empty.message,
+                        path,
+                        error_type="urn:threefold:error:empty-attestation",
+                        invalid_params=[
+                            {
+                                "name": "evaluations",
+                                "reason": (
+                                    "Send the verdicts the certificate covers. This service "
+                                    "issues one only for a session it has evaluated."
+                                ),
+                            }
+                        ],
+                    ),
+                )
 
             emit_threefold_emf_metrics(
                 {"CertificatesIssued": 1.0},

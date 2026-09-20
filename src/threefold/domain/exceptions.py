@@ -71,3 +71,19 @@ class InvalidValueObjectException(DomainException):
         super().__init__(message, code="INVALID_VALUE_OBJECT")
         self.vo_name = vo_name
         self.value = value
+
+
+class EmptyAttestationException(DomainException):
+    """Raised when a certificate is asked to attest to nothing.
+
+    `all()` over an empty list is True, so a certificate issued over no
+    evaluations used to come back COMPLIANT_APPROVED with all_passed set: a
+    document that certifies nothing while reading as a clean bill of health.
+    That is the one failure a governance artifact must not have.
+    """
+
+    def __init__(self, session_id: str, reason: str) -> None:
+        message = f"Refusing to certify session '{session_id}': {reason}"
+        super().__init__(message, code="EMPTY_ATTESTATION")
+        self.session_id = session_id
+        self.reason = reason

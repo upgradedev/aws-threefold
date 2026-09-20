@@ -44,6 +44,7 @@ it, treat the later date as the one that governs teardown.
 | Every page reaches the operation it calls | The four pages deep link into the document rather than at its cover: the dashboard lists the seven operations its buttons call, settings links `/policy/config`, the sessions console links `/api/sessions`, `/sessions/{id}` and the terminate route, and connect links `/evaluate-tool-call`. Walked on the live URL: following one opens Swagger UI with that operation expanded |
 | The links cannot drift from the routes | Swagger UI derives its anchors from method and path, so a renamed route would break every link pointing at it silently. A test rebuilds those anchors from the served document, extracts the endpoints the dashboard actually fetches, and fails when one is unlinked. Confirmed by deleting a single entry and watching it fail |
 | A visitor can take the hook | The deployment serves it at `/hooks/claude_code_hook.py`, anonymously, as readable text. Downloaded from the live URL and run: an ordinary read came back `allow`, a `from boto3 import client` write into a domain file came back `deny` with a Bedrock sentence. Before this, `connect.html` told the reader to `git clone <repository>` — a literal placeholder, since the repository is not published — and the install path ended there |
+| A certificate cannot attest to nothing | `POST /issue-certificate` with `{"evaluations": []}` used to answer 200 with `verdict_status: COMPLIANT_APPROVED` and `all_passed: true`, because `all()` over an empty list is true. It now answers 400 `Nothing To Certify`, as does a session this service has no record of governing. Verified against the live stack, and the dashboard's Scenario 4 still issues its certificate |
 | Test suite | 134 passed in 6.2s, hermetic under `THREEFOLD_OFFLINE=1`, and no longer order-dependent. Every test reaches `lambda_handler` from one address and shared a sixty-token rate-limit bucket, so once the suite grew past that count, unrelated tests began failing with 429 depending on the order they ran in. `tests/conftest.py` resets the bucket per test; the rate limiter's own tests build their own instance, so nothing is hidden |
 
 ## Known gaps, not yet fixed
@@ -68,11 +69,12 @@ hidden in a document that a judge would read as finished work.
 2. The `calls` count in the sessions listing saturates at 50, because the store
    keeps `history[-50:]`. Cost and tokens are cumulative and are not capped. The
    page says so rather than presenting 50 as a total.
-3. `/issue-certificate` attests to nothing when given nothing. A POST with
-   `{"evaluations": []}` returns `verdict_status: COMPLIANT_APPROVED`,
-   `all_passed: true` and a valid fingerprint over an empty list, verified
-   against the live stack. The caller decides what the certificate certifies,
-   which is the weakness under every other certificate claim in this project.
+3. The certificate still covers verdicts the caller supplies. An empty list and
+   a session this service never governed are now both refused with 400, and the
+   invariant sits in `AuditIssuer` so no caller can go around it, but the
+   contents of the evaluations are still taken on the caller's word: a session
+   with one real call can be certified with four invented ones. Issuing from the
+   session's own stored history is the fix, and it is not done.
 4. Four of the five offline fallback panels still show canned prose. They now say
    "Simulated, offline demo, no model was reached" on their face, but the numbers
    inside them are invented and should be replaced with a real offline run.
