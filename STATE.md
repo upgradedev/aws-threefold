@@ -45,6 +45,7 @@ it, treat the later date as the one that governs teardown.
 | The links cannot drift from the routes | Swagger UI derives its anchors from method and path, so a renamed route would break every link pointing at it silently. A test rebuilds those anchors from the served document, extracts the endpoints the dashboard actually fetches, and fails when one is unlinked. Confirmed by deleting a single entry and watching it fail |
 | A visitor can take the hook | The deployment serves it at `/hooks/claude_code_hook.py`, anonymously, as readable text. Downloaded from the live URL and run: an ordinary read came back `allow`, a `from boto3 import client` write into a domain file came back `deny` with a Bedrock sentence. Before this, `connect.html` told the reader to `git clone <repository>` — a literal placeholder, since the repository is not published — and the install path ended there |
 | A certificate cannot attest to nothing | `POST /issue-certificate` with `{"evaluations": []}` used to answer 200 with `verdict_status: COMPLIANT_APPROVED` and `all_passed: true`, because `all()` over an empty list is true. It now answers 400 `Nothing To Certify`, as does a session this service has no record of governing. Verified against the live stack, and the dashboard's Scenario 4 still issues its certificate |
+| The policy cannot be rewritten by a stranger | `POST /policy/config` and its `/policy` alias now require an operator key even where reads need none, because the write lands in DynamoDB and every later container adopts it. With no key configured, which is how the stack deploys, the write is refused outright with 403 `Policy Is Read Only Here`; with one configured, a missing key is 401 and a wrong key is 403. Verified against the live stack, and `GET /policy/config` still answers 200 to an anonymous request |
 | Test suite | 134 passed in 6.2s, hermetic under `THREEFOLD_OFFLINE=1`, and no longer order-dependent. Every test reaches `lambda_handler` from one address and shared a sixty-token rate-limit bucket, so once the suite grew past that count, unrelated tests began failing with 429 depending on the order they ran in. `tests/conftest.py` resets the bucket per test; the rate limiter's own tests build their own instance, so nothing is hidden |
 
 ## Known gaps, not yet fixed
@@ -159,14 +160,11 @@ traffic.
    certificate load-bearing rather than decorative.
 4. `TokenCostCalculator` is never given a model id, so every session is priced
    at the default Sonnet-class rate rather than the model actually in use.
-5. The API enforces no key, and that is load-bearing in two directions. `STAGE`
-   is unset so the middleware defaults to `dev`, which is what lets an anonymous
-   judge and the AI scorer reach everything. It also means `POST /policy/config`
-   is anonymous, and that route writes through to DynamoDB under
-   `CONFIG#policy`, so a stranger can durably raise the loop threshold that is
-   this product's headline claim and every later container adopts it. Reads
-   should stay open; the write should not. Not fixed, and the trade-off belongs
-   to the owner because closing it wrong fails the ship gate's scorer row.
+5. The API still enforces no key on reads, deliberately: `STAGE` is unset so an
+   anonymous judge and the AI scorer reach everything, which is the ship gate's
+   scorer row. The one write that outlived its caller is now closed. Everything
+   else a visitor can POST — evaluating a call, the scenarios, the certificate,
+   the kill switch — is still open and is bounded by the session it names.
 6. The cost gate trusts caller-declared token counts. A caller declaring zero is
    not stopped. A proxy that meters real usage is the stronger control and this
    is not one.

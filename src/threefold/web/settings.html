@@ -76,7 +76,7 @@
         <span class="text-gray-400 font-medium">Sidecar REST:</span>
         <input id="apiBaseInput" type="text" value="" class="bg-gray-900 border border-gray-700 rounded px-2 py-0.5 text-xs text-purple-300 font-mono w-56 focus:outline-none focus:border-purple-500" />
         <span class="text-gray-400 font-medium ml-1">API Key:</span>
-        <input id="apiKeyInput" type="password" value="" placeholder="only if the stack enforces one" class="bg-gray-900 border border-gray-700 rounded px-2 py-0.5 text-xs text-sky-300 font-mono w-44 focus:outline-none focus:border-sky-500" />
+        <input id="apiKeyInput" type="password" value="" placeholder="needed to save, not to read" class="bg-gray-900 border border-gray-700 rounded px-2 py-0.5 text-xs text-sky-300 font-mono w-44 focus:outline-none focus:border-sky-500" />
         <button onclick="loadPolicy()" class="px-2 py-0.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs border border-gray-700">Reload from API</button>
         <span id="apiConnectionStatus" class="px-2 py-0.5 rounded text-[11px] font-mono bg-amber-950 text-amber-400 border border-amber-800 flex items-center gap-1.5">
           <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span> NOT READ YET
@@ -128,6 +128,16 @@
           submits all four fields together. Sending one field on its own would reset the other three to their defaults.
           Two of the four are wired to a gate today and two are not; each is labelled with which it is.
         </p>
+
+        <div class="p-3 rounded-xl bg-sky-950/20 border border-sky-900/40">
+          <p class="text-xs font-semibold text-sky-300">Reading is open. Saving needs a key.</p>
+          <p class="text-[11px] text-gray-400 mt-1">
+            A saved policy is written to DynamoDB and adopted by every container that starts afterwards, so an anonymous write
+            would change the thresholds this product leads with for everyone who came after it. Reads stay open, because a
+            reader has to be able to see what is enforced. Put the operator key in the <span class="font-mono">API Key</span>
+            field above before saving. A deployment that has configured no key refuses writes outright and says so.
+          </p>
+        </div>
 
         <div class="space-y-3">
           <label class="block">
@@ -445,7 +455,17 @@
         const data = await res.json();
         showRaw(data);
         if (!res.ok) {
-          status.innerHTML = '<span class="text-red-400">Refused with HTTP ' + res.status + '. The policy is unchanged.</span>';
+          // The two refusals a reader can act on are named, because "HTTP 403"
+          // alone leaves them guessing which of the two situations they are in.
+          let explanation = 'Refused with HTTP ' + res.status + '. The policy is unchanged.';
+          if (data && data.type === 'urn:threefold:error:policy-write-disabled') {
+            explanation = 'This deployment has no policy-write key configured, so the policy is read only here. The values above are unchanged.';
+          } else if (res.status === 401) {
+            explanation = 'Saving needs the operator key. Put it in the API Key field above; reading needed none. The policy is unchanged.';
+          } else if (res.status === 403) {
+            explanation = 'That key was not accepted. The policy is unchanged.';
+          }
+          status.innerHTML = '<span class="text-red-400">' + escapeHtml(explanation) + '</span>';
           setConnection(false, 'HTTP ' + res.status);
           return;
         }

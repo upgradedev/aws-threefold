@@ -3,6 +3,18 @@ Transform: AWS::Serverless-2016-10-31
 Description: Threefold Serverless Backend - AWS Zero to Shipped 2026 (#workplace-efficiency)
 
 Parameters:
+  PolicyWriteApiKeys:
+    Type: String
+    Default: ''
+    NoEcho: true
+    Description: >-
+      Comma-separated keys that may change the governance policy. Reading the
+      policy needs none of them. Left empty, which is the default, the stack
+      deploys with policy writes refused outright: an anonymous POST to
+      /policy/config would otherwise rewrite the loop and cost thresholds
+      durably in DynamoDB, and every later container would adopt them. Pass a
+      key with --parameter-overrides when an operator needs the settings page.
+
   BedrockModelId:
     Type: String
     Default: eu.anthropic.claude-haiku-4-5-20251001-v1:0
@@ -24,6 +36,10 @@ Globals:
         TABLE_NAME: !Ref ThreefoldTable
         EVIDENCE_BUCKET: !Ref EvidenceBucket
         LOG_LEVEL: INFO
+        # Empty by design: with no key configured the middleware refuses every
+        # policy write rather than falling back to a placeholder that is printed
+        # in the source. Reads are unaffected.
+        THREEFOLD_API_KEYS: !Ref PolicyWriteApiKeys
         # AWS_REGION is supplied by the Lambda runtime and is reserved, so it is
         # read from the environment in code rather than declared here.
         BEDROCK_MODEL_ID: !Ref BedrockModelId

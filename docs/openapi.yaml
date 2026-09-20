@@ -243,7 +243,14 @@ paths:
           description: Current policy configuration
     post:
       summary: Update Dynamic Policy Configuration
-      description: Adjusts runtime governance thresholds dynamically.
+      description: >-
+        Adjusts the runtime governance thresholds. This write is durable: it lands in
+        DynamoDB and every container that starts afterwards adopts it, so it requires
+        the operator key even on a deployment where reads are anonymous. The handler
+        rebuilds the whole policy from the body, so send all four fields;
+        blocked_patterns is not accepted and is discarded.
+      security:
+        - OperatorApiKey: []
       requestBody:
         required: true
         content:
@@ -270,3 +277,13 @@ components:
     BearerAuth:
       type: http
       scheme: bearer
+
+components:
+  securitySchemes:
+    OperatorApiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: >-
+        Operator key for writes that outlive the request. Reading needs none. A
+        deployment that has configured no key refuses policy writes outright with 403.

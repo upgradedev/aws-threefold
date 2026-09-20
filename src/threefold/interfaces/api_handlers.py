@@ -162,6 +162,9 @@ def lambda_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]
         client_ip=client_ip,
         path=path,
         payload_size_bytes=payload_size,
+        # The method is part of the decision: reading the policy is open to
+        # anyone, and writing it is not, on the same path.
+        method=http_method,
     )
     if not is_authorized and security_problem:
         return build_response(security_problem["status"], security_problem)

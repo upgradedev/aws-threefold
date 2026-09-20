@@ -80,12 +80,50 @@ def rfc7807_error(
     return problem
 
 
+def _presented_key(headers: Dict[str, str]) -> Optional[str]:
+    """Reads the key off either header the API documents."""
+    normalized = {k.lower(): v for k, v in headers.items()}
+    api_key = normalized.get("x-api-key")
+    if not api_key:
+        auth_header = normalized.get("authorization", "")
+        if auth_header.startswith("Bearer "):
+            api_key = auth_header[7:].strip()
+    return api_key or None
+
+
+def _configured_keys(allow_placeholder: bool) -> list[str]:
+    """The keys this deployment accepts.
+
+    `allow_placeholder` is the difference between the two callers. Reading the
+    API with keys switched on falls back to the demo placeholder, which is how
+    the local and container setups have always worked. A policy write does not:
+    a deployment that has configured no key refuses the write rather than
+    accepting one that is printed in the source.
+    """
+    raw = os.environ.get("THREEFOLD_API_KEYS")
+    if raw is None and allow_placeholder:
+        raw = DEFAULT_DEMO_API_KEY
+    return [k.strip() for k in (raw or "").split(",") if k.strip()]
+
+
+# Requests that change what the gates do to everyone after them. `POST
+# /policy/config` writes through to DynamoDB under `CONFIG#policy`, and every
+# later container adopts it on a cold start, so an anonymous caller could raise
+# the loop threshold this product leads with and the change would outlive them.
+# Reading the policy stays open: a judge has to be able to see what is enforced.
+PROTECTED_WRITES = {
+    ("POST", "/policy/config"),
+    ("POST", "/policy"),
+}
+
+
 def validate_request_security(
     headers: Dict[str, str],
     client_ip: str,
     path: str,
     payload_size_bytes: int = 0,
     rate_limiter: Optional[TokenBucketRateLimiter] = None,
+    method: str = "GET",
 ) -> Tuple[bool, Optional[Dict[str, Any]]]:
     limiter = rate_limiter or _global_rate_limiter
     stage = os.environ.get("STAGE", "dev").lower()
@@ -111,7 +149,45 @@ def validate_request_security(
             error_type="urn:threefold:error:rate-limit-exceeded",
         )
 
-    # 3. Public paths exemption
+    # 3. Durable policy writes are closed whether or not the rest is
+    if (method.upper(), path) in PROTECTED_WRITES:
+        presented = _presented_key(headers)
+        accepted = _configured_keys(allow_placeholder=False)
+        if not accepted:
+            return False, rfc7807_error(
+                status_code=403,
+                title="Policy Is Read Only Here",
+                detail=(
+                    "This deployment has no policy-write key configured, so the policy can be "
+                    "read but not changed. Set THREEFOLD_API_KEYS on the function to enable "
+                    "writes."
+                ),
+                instance=path,
+                error_type="urn:threefold:error:policy-write-disabled",
+            )
+        if not presented:
+            return False, rfc7807_error(
+                status_code=401,
+                title="Unauthorized",
+                detail=(
+                    "Changing the policy requires a key, even where reading it does not, because "
+                    "the write is durable and applies to every session after it. Provide it via "
+                    "'X-API-Key' or 'Authorization: Bearer <key>'."
+                ),
+                instance=path,
+                error_type="urn:threefold:error:missing-credentials",
+            )
+        if presented not in accepted:
+            return False, rfc7807_error(
+                status_code=403,
+                title="Forbidden",
+                detail="Provided API Key is invalid or expired.",
+                instance=path,
+                error_type="urn:threefold:error:invalid-credentials",
+            )
+        return True, None
+
+    # 4. Public paths exemption
     # The pages and the hook are handed out anonymously on purpose: a reader who
     # cannot open the install page or take the script cannot adopt the product,
     # and a key requirement would put the artifacts that matter behind the one
@@ -136,17 +212,10 @@ def validate_request_security(
     if path in public_paths:
         return True, None
 
-    # 4. Authentication enforcement
+    # 5. Authentication enforcement
     if enforce_auth or stage == "prod":
-        normalized_headers = {k.lower(): v for k, v in headers.items()}
-        api_key = normalized_headers.get("x-api-key")
-        auth_header = normalized_headers.get("authorization", "")
-
-        if not api_key and auth_header.startswith("Bearer "):
-            api_key = auth_header[7:].strip()
-
-        configured_keys = os.environ.get("THREEFOLD_API_KEYS", DEFAULT_DEMO_API_KEY).split(",")
-        configured_keys = [k.strip() for k in configured_keys if k.strip()]
+        api_key = _presented_key(headers)
+        configured_keys = _configured_keys(allow_placeholder=True)
 
         if not api_key:
             return False, rfc7807_error(

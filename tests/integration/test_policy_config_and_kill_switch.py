@@ -57,18 +57,34 @@ def test_dynamic_policy_configuration() -> None:
     get_body = json.loads(get_res["body"])
     assert "max_single_call_usd" in get_body
 
-    # 2. POST updated policy config
-    post_event = {
-        "httpMethod": "POST",
-        "path": "/policy/config",
-        "headers": {"Content-Type": "application/json"},
-        "body": json.dumps({
-            "max_single_call_usd": 0.75,
-            "max_session_budget_usd": 25.00,
-            "monomorphic_repetition_threshold": 4,
-        }),
-    }
-    post_res = lambda_handler(post_event)
+    # 2. POST updated policy config. The write is closed even where the read is
+    # open, because it lands in DynamoDB and every later container adopts it, so
+    # the request carries the operator key.
+    import os
+
+    os.environ["THREEFOLD_API_KEYS"] = "policy-test-key"
+    try:
+        anonymous = lambda_handler({
+            "httpMethod": "POST",
+            "path": "/policy/config",
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps({"max_single_call_usd": 99.0}),
+        })
+        assert anonymous["statusCode"] == 401, "An anonymous policy write must not be accepted"
+
+        post_event = {
+            "httpMethod": "POST",
+            "path": "/policy/config",
+            "headers": {"Content-Type": "application/json", "X-API-Key": "policy-test-key"},
+            "body": json.dumps({
+                "max_single_call_usd": 0.75,
+                "max_session_budget_usd": 25.00,
+                "monomorphic_repetition_threshold": 4,
+            }),
+        }
+        post_res = lambda_handler(post_event)
+    finally:
+        os.environ.pop("THREEFOLD_API_KEYS", None)
     assert post_res["statusCode"] == 200
     post_body = json.loads(post_res["body"])
     assert post_body["status"] == "POLICY_UPDATED"
