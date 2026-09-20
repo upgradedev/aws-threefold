@@ -120,20 +120,11 @@ THREEFOLD_OFFLINE=1 python -m pytest tests -v
 ```
 
 ```
-============================= test session starts =============================
-collected 23 items
-
-tests/integration/test_api_handlers.py ......                            [ 26%]
-tests/security/test_tamper_and_invariants.py ..                          [ 34%]
-tests/unit/test_boundary_guard.py ....                                   [ 52%]
-tests/unit/test_circuit_breaker.py ....                                  [ 69%]
-tests/unit/test_evaluator.py ...                                         [ 82%]
-tests/unit/test_loop_detector.py ....                                    [100%]
-
-============================= 23 passed in under a second ==============================
+$ THREEFOLD_OFFLINE=1 python -m pytest tests -q
+65 passed
 ```
 
-- **Unit Tests:** Verified tiered token pricing ($3/M in, $15/M out), single-invocation caps, monomorphic loops, ping-pong loops, secret regex matching, and Clean Architecture imports.
+- **Unit Tests:** cost arithmetic, single-invocation caps, monomorphic loops, ping-pong loops, secret regex matching, and Clean Architecture imports.
 - **Integration Tests:** AWS Lambda API Gateway proxy routing, query normalization, and error handling.
 - **Security & Tamper Tests:** Negative-control proving mutating 1 byte in the sealed evidence bundle triggers instant cryptographic validation failure.
 

@@ -75,7 +75,7 @@
 
 ### Scene 5: Production Engineering, CloudWatch EMF, & Conclusion (2:15 - 2:45)
 - **Visual:**
-  - Switch to terminal. Run `python -m pytest repos/threefold/tests -v` showing all **32 tests passing**.
+  - Switch to terminal. Run `THREEFOLD_OFFLINE=1 python -m pytest tests -q` showing all **65 tests passing**.
   - Show Swagger UI at `src/threefold/web/swagger.html` with OpenAPI 3.1 endpoints.
   - Show CloudWatch Embedded Metric Format (EMF) logs streaming in the terminal (`Threefold/Governance`).
   - Return to slide with GitHub repository link: `https://github.com/upgradedev/threefold-aws`.

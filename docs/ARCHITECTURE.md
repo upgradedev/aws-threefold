@@ -62,7 +62,8 @@ Threefold strictly implements **Clean Architecture** (Robert C. Martin) and **Do
 - **Aggregates & Value Objects:**
   - `AgentSession`: Aggregate root tracking total input/output tokens, cumulative USD expenditure, tool call audit history, and circuit breaker trip state.
   - `ToolInvocation`: Captures tool name, action type (`FILE_READ`, `FILE_WRITE`, `COMMAND_EXEC`), arguments, and deterministic SHA-256 canonical signature.
-  - `TokenUsage`: Value object calculating exact USD cost using distinct input/output rates ($1/M input, $5/M output for Claude Haiku 4.5; the table also carries Sonnet 4.5 rates).
+  - `TokenUsage`: value object holding the USD cost of a call, from distinct input and output rates.
+  - Known limitation: `TokenCostCalculator` carries per-model rates, but `GovernanceEvaluator` calls it without a model id, so every session is currently priced at the default Sonnet-class rate of $3 per million input and $15 per million output. A caller governing a cheaper model is therefore over-charged in the budget arithmetic. Letting the request name its model is the fix, and it is not done.
   - `GovernanceVerdict`: Value object encapsulating verdict status, risk level, pass/fail evaluation per rule, and proof hash.
 - **Engines:**
   - `CostCircuitBreaker`: Enforces single-invocation cost ceiling ($2.50) and cumulative budget ceiling ($10.00).

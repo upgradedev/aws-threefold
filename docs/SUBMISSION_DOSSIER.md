@@ -41,19 +41,19 @@ Autonomous coding agents are rapidly transforming enterprise software engineerin
 - **Observability:** Real-time AWS CloudWatch Embedded Metric Format (EMF) emitting zero-overhead structured telemetry directly to stdout.
 - **Security & Resilience:** Zero-trust token-bucket rate limiting (60 req/min), API Key authentication, RFC 7807 Problem Details, and exponential backoff with full jitter retry decorators.
 - **API & UI:** Complete OpenAPI 3.1 specifications, interactive Swagger UI (`src/threefold/web/swagger.html`), and a responsive single-page console (`src/threefold/web/index.html`) using vanilla JavaScript with zero external npm build dependencies.
-- **Infrastructure as Code & CI/CD:** AWS SAM (`template.yml`), multi-stage Dockerfiles, Docker Compose, and GitHub Actions CI running 32 automated tests.
+- **Infrastructure as Code & CI/CD:** AWS SAM (`template.yml`), multi-stage Dockerfiles, Docker Compose, and GitHub Actions CI running 65 tests.
 
 ---
 
 ### 5. Challenges We Overcame
 1. **No model on the critical path:** the whole invariant engine is standard-library Python, so a refusal never waits on an LLM. The overhead has not been benchmarked, so no figure is claimed.
 2. **Universal Multi-Agent Compatibility:** Different AI models use conflicting tool-calling representations (OpenAI's JSON-string `arguments` vs. Anthropic's structured `input` object). We developed a universal normalization adapter that maps any agent payload into unified domain entities.
-3. **Hermetic Clean-Room Compliance:** We ensured the entire codebase, mock repositories, live dev servers, and test suite execute using Python's standard library alone, maintaining 100% clean-room isolation with zero external package dependencies.
+3. **A dependency-free domain:** the gates and the domain model import nothing outside the standard library, and boto3 is imported lazily in the infrastructure adapters only. The Lambda therefore ships without a build step.
 
 ---
 
 ### 6. Accomplishments That We're Proud Of
-- **Deterministic Prevention of Cost Runaways:** Created an automated circuit breaker that guarantees an AI coding agent can never exceed its allocated budget cap.
+- **Deterministic Prevention of Cost Runaways:** Created an automated circuit breaker that refuses a call whose declared cost would breach the cap. It trusts the token counts the caller declares, so a caller that declares zero is not stopped.
 - **100% Green Automated Test Pyramid:** Built a comprehensive 65-test hermetic test suite covering unit, integration, universal adapter, and security tests.
 - **Turnkey Production Readiness:** Delivered production Docker containers, OpenAPI 3.1 specs, Swagger UI, CloudWatch EMF metrics, and pre-commit hook gating.
 
