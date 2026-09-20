@@ -40,6 +40,41 @@ CORS_HEADERS = {
 }
 
 
+WEB_ROOT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web")
+
+# Paths the deployed stack serves as pages rather than as JSON. The dashboard sits
+# at the root so the public URL opens the application itself.
+WEB_ASSETS = {
+    "/": "index.html",
+    "/index.html": "index.html",
+    "/testbook.html": "testbook.html",
+    "/swagger.html": "swagger.html",
+}
+
+
+def _read_web_asset(filename: str, stage: str) -> Any:
+    """Loads a page and tells it which base path the API is reachable on.
+
+    The stage prefix is injected here rather than derived in the browser because
+    the page's own URL does not distinguish /prod from /prod/ reliably.
+    """
+    asset_path = os.path.join(WEB_ROOT, filename)
+    if not os.path.isfile(asset_path):
+        return None
+    with open(asset_path, "r", encoding="utf-8") as handle:
+        markup = handle.read()
+    base_path = f"/{stage}" if stage and stage != "$default" else ""
+    return markup.replace("__THREEFOLD_BASE_PATH__", base_path)
+
+
+def build_html_response(status_code: int, markup: str) -> Dict[str, Any]:
+    """Returns a page, with the CORS headers the JSON routes also send."""
+    headers = dict(CORS_HEADERS)
+    headers["Content-Type"] = "text/html; charset=utf-8"
+    headers["Cache-Control"] = "no-cache"
+    return {"statusCode": status_code, "headers": headers, "body": markup}
+
+
 def build_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
     """Formats standardized API Gateway proxy response with CORS and problem details."""
     content_type = "application/json"
@@ -114,8 +149,16 @@ def lambda_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]
             return build_response(cached[0], cached[1])
 
     try:
+        # Route 0: the application itself. A visitor who opens the public URL gets
+        # the dashboard, not a JSON document, and the page is told the exact API
+        # base so nothing has to be configured by hand.
+        if http_method == "GET" and path in WEB_ASSETS:
+            page = _read_web_asset(WEB_ASSETS[path], stage)
+            if page is not None:
+                return build_html_response(200, page)
+
         # Route 1: Health & Operational Status
-        if path in ("/", "/status", "/health") and http_method == "GET":
+        if path in ("/status", "/health") and http_method == "GET":
             emit_threefold_emf_metrics({"HealthCheck": 1.0}, namespace="Threefold/Operations")
             return build_response(
                 200,
@@ -137,7 +180,10 @@ def lambda_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]
         # Route 1a: Deep Readiness Probe (/readyz)
         if path in ("/readyz", "/ready") and http_method == "GET":
             readiness = _evaluator.check_readiness(bedrock_client=_bedrock_client)
-            return build_response(200, readiness.to_dict())
+            # A readiness probe that always answers 200 cannot be alarmed on, so a
+            # degraded result is reported with the status code that says so.
+            code = 200 if readiness.status == "READY" else 503
+            return build_response(code, readiness.to_dict())
 
         # Route 1b: OpenAPI JSON Specification
         if path in ("/openapi.json", "/docs/openapi.json") and http_method == "GET":

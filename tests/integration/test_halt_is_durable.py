@@ -55,7 +55,14 @@ def test_trip_is_written_through_so_a_second_worker_sees_it() -> None:
     assert "identical" in (reloaded.trip_reason or "")
 
 
-def test_a_second_worker_cannot_approve_a_halted_session() -> None:
+def test_a_second_worker_reloads_the_halt_and_refuses_the_next_call() -> None:
+    """The common case: the halt is already visible when the next request is read.
+
+    This exercises the pre-check at the top of evaluate_tool_call, not the
+    conditional write. The write is what covers the narrower race where a
+    session is halted after this request read it, and that path is pinned by
+    test_an_approval_that_loses_the_race_is_reported_as_blocked below.
+    """
     repo_a, repo_b = _shared_store_repos()
     worker_a = GovernanceEvaluator(session_repo=repo_a)
     worker_b = GovernanceEvaluator(session_repo=repo_b)
@@ -81,6 +88,42 @@ def test_a_second_worker_cannot_approve_a_halted_session() -> None:
     verdict = worker_b.evaluate_tool_call(fresh_tool)
     assert verdict.status == "BLOCKED_CIRCUIT_BREAKER"
     assert verdict.session_tripped is True
+
+
+def test_an_approval_that_loses_the_race_is_reported_as_blocked() -> None:
+    """The narrow race the conditional write exists for.
+
+    Another worker halts the session after this request has read it and cleared
+    every gate. The write is refused, and the caller must be told the session is
+    blocked. Returning APPROVED here would let a halted session keep spending.
+    """
+
+    class _HaltedUnderneath(DynamoDBSessionRepository):
+        """Accepts the session's creation, then refuses the approval write once."""
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.refusals = 0
+
+        def save_session(self, session, force: bool = False):
+            if not force and session.history and self.refusals == 0:
+                self.refusals += 1
+                # Record the halt another worker decided, so the re-read finds it.
+                session.is_tripped = True
+                session.trip_reason = "Halted by another worker mid-request"
+                super().save_session(session, force=True)
+                raise SessionConflictError("stored session is already tripped")
+            return super().save_session(session, force=force)
+
+    repo = _HaltedUnderneath()
+    evaluator = GovernanceEvaluator(session_repo=repo)
+
+    verdict = evaluator.evaluate_tool_call(_repeated_call("session-durable-race"))
+
+    assert repo.refusals == 1, "The approval write must have been refused exactly once"
+    assert verdict.status == "BLOCKED_CIRCUIT_BREAKER"
+    assert verdict.session_tripped is True
+    assert "Halted by another worker" in verdict.reason
 
 
 def test_the_store_refuses_to_clear_a_halted_session() -> None:

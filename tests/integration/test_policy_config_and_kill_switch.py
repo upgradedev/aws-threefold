@@ -29,7 +29,9 @@ def test_readyz_reports_each_dependency_it_measured() -> None:
         "headers": {},
     }
     response = lambda_handler(event)
-    assert response["statusCode"] == 200
+    # 503, not 200: an uptime check pointed at this endpoint has to be able to
+    # alarm on the status code alone.
+    assert response["statusCode"] == 503
     body = json.loads(response["body"])
     assert body["service"] == "Threefold"
 

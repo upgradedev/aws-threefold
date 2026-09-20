@@ -7,6 +7,15 @@
   <!-- Tailwind CSS & Lucide Icons via CDN for zero-dependency portability -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
+      // The server rewrites __THREEFOLD_BASE_PATH__ to the API Gateway stage prefix
+      // when it serves this page, so the base is exact rather than guessed from the
+      // URL, which is ambiguous when the trailing slash is missing. Opening the file
+      // straight from disk leaves the token in place and falls back to a local server.
+      const SERVED_BASE_PATH = "__THREEFOLD_BASE_PATH__";
+      const DEFAULT_API_BASE = SERVED_BASE_PATH.indexOf("THREEFOLD_BASE_PATH") !== -1
+        ? "http://localhost:8001"
+        : location.origin + SERVED_BASE_PATH;
+
     tailwind.config = {
       darkMode: 'class',
       theme: {
@@ -75,7 +84,7 @@
   <div class="bg-gray-950/90 border-b border-gray-800 px-4 py-2 text-xs flex flex-wrap items-center justify-between gap-3">
     <div class="flex items-center gap-2 flex-wrap">
       <span class="text-gray-400 font-medium">Sidecar REST:</span>
-      <input id="apiBaseInput" type="text" value="http://localhost:8001" class="bg-gray-900 border border-gray-700 rounded px-2 py-0.5 text-xs text-purple-300 font-mono w-44 focus:outline-none focus:border-purple-500" />
+      <input id="apiBaseInput" type="text" value="" class="bg-gray-900 border border-gray-700 rounded px-2 py-0.5 text-xs text-purple-300 font-mono w-44 focus:outline-none focus:border-purple-500" />
       <span class="text-gray-400 font-medium ml-1">API Key:</span>
       <input id="apiKeyInput" type="password" value="threefold-demo-key-2026" class="bg-gray-900 border border-gray-700 rounded px-2 py-0.5 text-xs text-sky-300 font-mono w-44 focus:outline-none focus:border-sky-500" />
       <button id="btnCheckConnection" onclick="checkApiHealth()" class="px-2 py-0.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs border border-gray-700">Check</button>
@@ -269,8 +278,30 @@
     let currentCertData = null;
     let liveBackendActive = false;
 
+
+    // The label must name what actually produced the sentence. A deterministic
+    // fallback shown under a Bedrock heading is a fabrication the reader cannot
+    // detect, so the source the API reports is rendered verbatim.
+    function renderExplanation(data) {
+      const source = data && data.explanation_source;
+      const text = (data && (data.bedrock_explanation || data.reason)) || "No explanation returned.";
+      const label = source === "bedrock"
+        ? "Amazon Bedrock (Claude Haiku 4.5)"
+        : "Deterministic explanation, no model was reached";
+      document.getElementById('bedrock-box').innerHTML =
+        `<strong>${label}:</strong> ${escapeHtml(text)}`;
+    }
+
+    // Simulated panels label themselves, so a reader is never shown canned prose
+    // as if a model had produced it.
+    function renderSimulatedExplanation(text) {
+      document.getElementById('bedrock-box').innerHTML =
+        `<strong>Simulated, offline demo, no model was reached:</strong> ${escapeHtml(text)}`;
+    }
+
     function getApiBase() {
-      return document.getElementById("apiBaseInput").value.trim().replace(/\/+$/, "");
+      const configured = document.getElementById("apiBaseInput").value.trim().replace(/\/+$/, "");
+      return configured || DEFAULT_API_BASE;
     }
 
     function getApiKey() {
@@ -375,7 +406,7 @@
             document.getElementById('inv-loop').className = 'text-red-400 font-bold font-mono';
             document.getElementById('inv-cost').innerText = 'PASS';
 
-            document.getElementById('bedrock-box').innerHTML = `<strong>Amazon Bedrock Evaluation:</strong> ${data.bedrock_explanation || data.reason}`;
+            renderExplanation(data);
             return;
           }
         } catch (err) {
@@ -404,7 +435,7 @@
       document.getElementById('inv-loop').className = 'text-red-400 font-bold font-mono';
       document.getElementById('inv-cost').innerText = 'PASS';
 
-      document.getElementById('bedrock-box').innerHTML = '<strong>Amazon Bedrock Evaluation:</strong> Coding agent thrashing detected on <code>edit_file</code>. Halting recursive loop prevents unbounded token consumption and $100+ runaway cloud spend.';
+      renderSimulatedExplanation('Coding agent thrashing detected on <code>edit_file</code>. Halting recursive loop prevents unbounded token consumption and $100+ runaway cloud spend.');
     }
 
     async function simulateSecret() {
@@ -436,7 +467,7 @@
             document.getElementById('inv-loop').innerText = 'PASS';
             document.getElementById('inv-cost').innerText = 'PASS';
 
-            document.getElementById('bedrock-box').innerHTML = `<strong>Amazon Bedrock Evaluation:</strong> ${data.bedrock_explanation || data.reason}`;
+            renderExplanation(data);
             return;
           }
         } catch (err) {
@@ -457,7 +488,7 @@
       document.getElementById('inv-loop').innerText = 'PASS';
       document.getElementById('inv-cost').innerText = 'PASS';
 
-      document.getElementById('bedrock-box').innerHTML = '<strong>Amazon Bedrock Evaluation:</strong> High-severity security threat intercepted. Unsanitized credentials in agent execution payloads violate enterprise data governance. Zero-leakage policy enforced.';
+      renderSimulatedExplanation('High-severity security threat intercepted. Unsanitized credentials in agent execution payloads violate enterprise data governance. Zero-leakage policy enforced.');
     }
 
     async function simulateBoundary() {
@@ -499,7 +530,7 @@
             document.getElementById('inv-loop').innerText = 'PASS';
             document.getElementById('inv-cost').innerText = 'PASS';
 
-            document.getElementById('bedrock-box').innerHTML = `<strong>Amazon Bedrock Evaluation:</strong> ${data.bedrock_explanation || data.reason}`;
+            renderExplanation(data);
             return;
           }
         } catch (err) {
@@ -520,7 +551,7 @@
       document.getElementById('inv-loop').innerText = 'PASS';
       document.getElementById('inv-cost').innerText = 'PASS';
 
-      document.getElementById('bedrock-box').innerHTML = '<strong>Amazon Bedrock Evaluation:</strong> The proposed edit introduces direct cloud infrastructure coupling into the pure domain aggregate, violating Clean Architecture Inversion of Control. Request rejected.';
+      renderSimulatedExplanation('The proposed edit introduces direct cloud infrastructure coupling into the pure domain aggregate, violating Clean Architecture Inversion of Control. Request rejected.');
     }
 
     async function simulateCompliant() {
@@ -544,6 +575,7 @@
           const base = getApiBase();
           const sessId = "session-live-" + Math.random().toString(36).substr(2, 6);
 
+          let lastEvaluation = null;
           for (let i = 0; i < steps.length; i++) {
             const s = steps[i];
             const res = await fetch(`${base}/evaluate-tool-call`, {
@@ -561,6 +593,7 @@
               })
             });
             const data = await res.json();
+            lastEvaluation = data;
             evaluations.push(data);
             logTerminal(`⚡ [Step ${i+1}/4] ${s.tool} -> ${data.status} (Cost: $${data.current_session_cost_usd.toFixed(4)})`, 'text-emerald-400');
           }
@@ -594,7 +627,7 @@
               el.className = 'text-emerald-400 font-bold font-mono';
             });
 
-            document.getElementById('bedrock-box').innerHTML = `<strong>Amazon Bedrock Evaluation:</strong> Clean execution verified. All tool calls adhere to bounded context definitions. Cost velocity remained below $0.05/min. Safe to merge into CI/CD.`;
+            renderExplanation(lastEvaluation);
 
             document.getElementById('cert-id').innerText = certData.certificate_id;
             document.getElementById('cert-hash').innerText = 'SHA256: ' + certData.sha256_fingerprint;
@@ -624,7 +657,7 @@
         el.className = 'text-emerald-400 font-bold font-mono';
       });
 
-      document.getElementById('bedrock-box').innerHTML = '<strong>Amazon Bedrock Evaluation:</strong> Clean execution verified. All tool calls adhere to bounded context definitions. Cost velocity remained below $0.05/min. Safe to merge into CI/CD.';
+      renderSimulatedExplanation('Clean execution verified. All tool calls adhere to bounded context definitions. Cost velocity remained below $0.05/min. Safe to merge into CI/CD.');
 
       currentCertData = {
         certificate_id: "CERT-TF-9F4B18A72C3D",
@@ -680,7 +713,7 @@
               el.className = 'text-emerald-400 font-bold font-mono';
             });
 
-            document.getElementById('bedrock-box').innerHTML = `<strong>Amazon Bedrock Evaluation:</strong> Cross-agent tool invocation verified. Normalized schema validated against Clean Architecture bounded contexts without runtime exceptions.`;
+            renderExplanation(data.evaluation);
             return;
           }
         } catch (err) {
@@ -694,7 +727,7 @@
     async function triggerManualFreeze() {
       if (!confirm("🚨 ENTERPRISE KILL-SWITCH: Manually terminate and lock this autonomous agent session?")) return;
       try {
-        const apiBase = document.getElementById("apiBaseInput").value.replace(/\/$/, "");
+        const apiBase = getApiBase();
         const apiKey = document.getElementById("apiKeyInput").value;
         const res = await fetch(`${apiBase}/sessions/session-default/terminate`, {
           method: "POST",

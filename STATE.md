@@ -14,7 +14,8 @@ proof of a coding agent connected to the AWS console. Judging runs the weeks of
 
 | Requirement | State | Evidence `[PRIMARY]` |
 |---|---|---|
-| Live on AWS, public URL | **PASS** | `https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod` returns 200 to an anonymous `curl` with no API key. Stack `threefold-prod`, eu-west-1, `UPDATE_COMPLETE` |
+| Live on AWS, public URL | **PASS** | `https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/` serves the dashboard itself, 200 and `text/html`, to an anonymous request with no API key. Stack `threefold-prod`, eu-west-1 |
+| A visitor can run the demo | **PASS** | Walked in a browser: Scenario 1 dispatched three calls to the live backend, the third returned `BLOCKED_LOOP_DETECTED`, and the panel showed a genuine Haiku 4.5 sentence under the heading "Amazon Bedrock (Claude Haiku 4.5)" |
 | Reachable by the AI scorer | **PASS** | `STAGE` is unset so the middleware defaults to `dev` and enforces no key. Verified by unauthenticated request |
 | Proof of coding agent connected to AWS | **PARTIAL** | Commands and CloudTrail captured in `docs/evidence/DEPLOYMENT_2026-09-20.md`. `docs/PROOF_OF_AWS_AGENT.md` still holds the old pytest transcript and must be rewritten |
 | Public repository | **NOT DONE** | Local `main` only, no remote. `gh repo create upgradedev/threefold-aws --public` is owner-gated |
@@ -28,8 +29,10 @@ proof of a coding agent connected to the AWS console. Judging runs the weeks of
 | The third identical call halts the session | Three POSTs to `/evaluate-tool-call`: APPROVED, APPROVED, `BLOCKED_LOOP_DETECTED` with `session_tripped: true` |
 | The halt is durable | `aws dynamodb get-item` on the session returns `is_tripped: true`, the loop reason, and a `ttl` 30 days out |
 | A halted session refuses unrelated work | A fourth call with a different tool returned `BLOCKED_CIRCUIT_BREAKER` |
-| Every explanation names its source | Responses carry `explanation_source: "bedrock"` and `persistence: "dynamodb"` |
-| Test suite | 53 passed in 0.64s, hermetic under `THREEFOLD_OFFLINE=1` |
+| Every explanation names its source | Responses carry `explanation_source: "bedrock"` and `persistence: "dynamodb"`, and the UI prints the source as the heading rather than assuming Bedrock |
+| Numeric arguments survive the round trip | Three identical calls with `{"retries": 3, "timeout": 1.5, "flag": true}` still halted on the third, so reloading history does not change a call's signature |
+| Readiness can be alarmed on | `/readyz` answers 503 when a dependency is unreachable, 200 when both probes pass |
+| Test suite | 59 passed in 0.57s, hermetic under `THREEFOLD_OFFLINE=1` |
 
 ## Known gaps, not yet fixed
 
@@ -44,8 +47,9 @@ hidden in a document that a judge would read as finished work.
    agent that never touched AWS.
 4. `scripts/pre-commit-gate.py --scan-dir src/` exits 1 against this repository,
    so the first CI run would be red.
-5. The web UI defaults its API base to `localhost:8001` and falls back to canned
-   output without labelling it as simulated. It is not served from the stack.
+5. Four of the five offline fallback panels still show canned prose. They now say
+   "Simulated, offline demo, no model was reached" on their face, but the numbers
+   inside them are invented and should be replaced with a real offline run.
 6. The loop detector catches byte-identical repeats only. The README's "entropy
    scanning" claim has no code behind it.
 7. No headline number exists. The `$14.8k` figure in earlier drafts was never
