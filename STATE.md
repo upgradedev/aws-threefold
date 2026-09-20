@@ -54,95 +54,57 @@ hidden in a document that a judge would read as finished work.
 5. No video and no Builder Center article. Neither is required by the rules, but
    the Builder Center project itself is, and it is owner-gated.
 
-## Audit, 2026-09-20
+## Audit and what was done about it, 2026-09-20
 
-What a judge would find, written down before they find it.
+An independent scoring pass and a competitive analysis both probed the live API.
+Between them they found eight inputs that walked through the gate. All eight are
+now refused, verified against the deployed stack rather than in tests alone.
 
-**The two gaps that are not scores.** There is no Builder Center project and no
-public repository. Until both exist there is no submission, however good the
-code is, and neither is a thing an agent may do unsupervised. Both are one
-command each in `docs/RUNBOOK.md`.
-
-**The differentiator is prose, not code.** Every reviewer who has looked at this
-named the same thing as the novel idea: a governance certificate that a CI check
-refuses to merge without. Nothing in this repository verifies a certificate.
-`ARCHITECTURE.md` used to state the requirement as fact and now states it as the
-next piece of work. The same is true of the dogfooding story: a Claude Code hook
-pointing at the deployed API would make the interception real rather than
-simulated, and it does not exist.
-
-**The demo intercepts nothing.** `/simulate-loop` and `/simulate-secret` build
-their own payloads server side. The gates are real and the halt is durable, but
-no agent is being stopped, so the panels show a rehearsal rather than a capture.
-
-**What the loop detector does and does not catch.** Three checks: identical
-signature repeated, ping-pong between two calls, and a repeating three-step
-cycle. All three compare a SHA-256 of the tool name and sorted arguments, so ten
-different edits to the same file are not a loop by this definition, although the
-README's "edit-test-fail cycles" invites the reader to expect otherwise.
-
-**Numbers that were never measured have been removed** rather than defended. The
-sub-millisecond gate, the 0.5ms evaluation and the 180ms cold start are gone,
-and the Well-Architected page no longer contradicts itself about whether any
-latency was measured. Nothing replaced them, because there is still no
-benchmark. There is also still no headline comparative number against a named
-baseline, which is the largest remaining gap for scoring.
-
-**The perimeter is demo grade. Six of seven adversarial inputs passed the live
-gate** in an independent probe on 2026-09-20. This is the most serious finding
-and none of it is fixed.
-
-| Input sent to the live API | Verdict | Why it passed |
+| Input that used to be approved | Now | Cause that was fixed |
 |---|---|---|
-| Domain write of `import boto3` with `action_type` omitted | APPROVED | the handler defaults to `FILE_READ` and the guard only inspects `FILE_WRITE` |
-| Domain write of `from boto3 import client` | APPROVED | the guard matches substrings, so the other import form is unseen |
-| A temporary `ASIA` key and an `sk-proj-` key in a shell command | APPROVED | five regular expressions, neither pattern among them |
-| Reading `.env` passed under an argument named `filename` | APPROVED | only four argument names are inspected |
-| An A,A,B cycle repeated five times, one session | APPROVED | none of the three loop shapes describes it |
-| Twelve calls declaring zero projected tokens | APPROVED, session cost stayed at zero | the cost is whatever the caller declares |
-| One call declaring 200,000 output tokens | BLOCKED | the per-call cap does work |
+| Domain write with `action_type` omitted | refused | the content check no longer requires the caller to admit it is a write |
+| `from boto3 import client` | refused | the rule parses imports with `ast` instead of matching substrings |
+| `ASIA` and `sk-proj-` keys in a command | refused | ten credential shapes, up from five |
+| `.env` under an argument named `filename` | refused | paths are found by shape, not by a four-name allowlist |
+| `notebook_path` plus `new_source` | refused | same |
+| A secret on its own line | refused | each string is scanned on its own, not `str(arguments)` |
+| `curl -d @.env` | refused | protected-path patterns use lookaheads |
+| An A, A, B cycle, fifteen calls deep | refused | any repeating period up to six, not three hardcoded shapes |
 
-Two of these defeat the exact scenarios the README advertises. The repository
-also contains a stricter checker than the product ships: the pre-commit script
-parses imports with `ast`, while the live gate matches substrings, so the weaker
-engine is the one on the perimeter.
+Ordinary work still passes: an edit outside the domain, and seven varied calls
+in a row, are approved on the live API.
 
-The tests pass alongside these holes because each rule is asserted against the
-one literal the demo uses. There is no negative-variant coverage of the API gate
-at all, which is the gap to close first: a variant test per rule would have
-caught every row above.
+**The product now intercepts rather than rehearses.**
+[`hooks/claude_code_hook.py`](hooks/claude_code_hook.py) puts Threefold in front
+of a real Claude Code session. Confirmed end to end against the live stack: a
+write of `from boto3 import client` into a domain file comes back denied with a
+Bedrock sentence attached, an ordinary edit is allowed, and `cat ~/.aws/credentials`
+is refused. It fails open by default and says so in the reason it returns.
 
-**The certificate is not signed, and the documents said it was.** There is no
-KMS call, no HMAC and no key anywhere in `evidence_store.py` or
-`audit_issuer.py`. The verifier recomputes a SHA-256 of the payload, which
-anyone who edits the payload can also recompute. It detects corruption, not an
-adversary. Every "signed", "cryptographically signed" and "immutable" in the
-judge-facing documents has been corrected, and the limitation is now stated
-where the certificate is sold. The code still returns the message "100%
-authentic" on a hash match, which overstates what was checked; changing it
-needs a deploy.
+**Positioning changed.** The README leads with the one rule that has no
+incumbent, enforced at the moment of the edit rather than in CI. The other three
+gates are described honestly as less novel than the tools that specialise in
+them. This matters because Policy in Amazon Bedrock AgentCore has intercepted
+tool calls before execution since March, and the judging panel is five AWS
+employees. The distinction that holds is local tool calls against gateway
+traffic.
 
-**Two more live bypasses, found by a second independent probe.** A secret on its
-own line inside a command is approved, because the arguments are stringified
-before scanning and the escaped newline leaves `` with no boundary to match.
-The flagship secret-leak scenario therefore fails on realistic multi-line input,
-and the fix is one line. Separately, an argument named `notebook_path` defeats
-both the path guard and the architecture check, because only four argument names
-are ever inspected.
+### Still open
 
-**Prior art is the hardest problem this project has.** Policy in Amazon Bedrock
-AgentCore reached general availability on 2026-03-03, six months before this
-hackathon, and AWS describes it as intercepting every tool call before
-execution, with session-aware repeat caps and running cost budgets. All five
-judges are AWS employees. The defensible distinction, which is true, is that
-AgentCore Policy governs traffic routed through its gateway while the risk in a
-coding agent sits in local shell and file edits that never reach one. The one
-idea with no incumbent at all is Clean Architecture layer semantics as a
-tool-call gate, and it is currently a substring search over five literals.
-
-**The cost engine prices every session wrongly.** `TokenCostCalculator` carries
-per-model rates but is never given a model id, so the table is unreachable and
-all sessions are billed at the default Sonnet-class rate.
+1. There is no Builder Center project and no public repository. Until both
+   exist there is no submission, whatever the code does. One command each, in
+   `docs/RUNBOOK.md`.
+2. No measured number yet. The hook is installed-ready but has not been run
+   across a working week, which is where the number comes from.
+3. The certificate is a fingerprint, not a signature. There is no KMS call and
+   no key, so it detects corruption rather than an adversary, and nothing in CI
+   verifies one before a merge. Both limitations are now stated wherever the
+   certificate appears.
+4. `TokenCostCalculator` is never given a model id, so every session is priced
+   at the default Sonnet-class rate rather than the model actually in use.
+5. The cost gate trusts caller-declared token counts. A caller declaring zero is
+   not stopped. A proxy that meters real usage is the stronger control and this
+   is not one.
 
 ## Cost and teardown
 

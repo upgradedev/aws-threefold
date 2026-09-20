@@ -1,6 +1,7 @@
-# Threefold 🔍
+# Threefold
 
-**Autonomous Coding Agent Governance, Cost Circuit-Breaker & Architectural Compliance Sidecar**  
+**Threefold refuses a coding agent's edit the moment it is made, not after the commit, so your architecture does not rot while you sleep.**
+
 Built for the AWS Zero to Shipped hackathon. **Category:** `#workplace-efficiency` · **Lane:** `#community`
 
 [![CI](https://github.com/upgradedev/threefold-aws/actions/workflows/ci.yml/badge.svg)](https://github.com/upgradedev/threefold-aws/actions/workflows/ci.yml)
@@ -12,28 +13,61 @@ Built for the AWS Zero to Shipped hackathon. **Category:** `#workplace-efficienc
 
 ---
 
-## The Problem
+## Why I built it
 
-As enterprise engineering teams and open-source contributors increasingly integrate autonomous coding agents (Claude Code, Amazon Q Developer, custom LLM tool loops) directly into their terminal workflows and CI/CD pipelines, three severe engineering bottlenecks emerge:
+I run three coding agents on one laptop and I pay for their tokens. They are
+good, and they are tireless, and that is the problem. One of them spent forty
+minutes rewriting the same failing test. Another quietly imported the AWS SDK
+into a domain entity because that was the shortest path to a green test, and I
+found it a week later in review.
 
-1. **Token Cost Runaways & Looping Traps:** Autonomous agents caught in repetitive edit-test-fail cycles consume tens of thousands of tokens and hundreds of cloud dollars within minutes.
-2. **Architectural Drift & Boundary Violations:** Coding agents inadvertently modify frozen core architecture, bypass Clean Architecture rules (e.g. importing infrastructure into pure domain entities), or edit unauthorized sensitive directories.
-3. **Secret & Credential Leakage:** Agents reading local project directories can accidentally ingest `.env` files or API keys and stream them into model prompts or pull request commits.
-4. **Lack of Cryptographic Auditability in CI/CD:** Teams have no verifiable proof of what tools were executed, what safety invariants passed, and whether costs were bounded before code is merged.
+The second one is the reason this exists. The first costs money. The second
+costs the shape of the codebase, and nothing was watching at the moment it
+happened.
 
----
+## The rule nothing else enforces
 
-## The Threefold Solution
+A file under a `domain/` directory may not import the outside world. That is an
+old idea and every architecture linter checks it: import-linter, ArchUnit, Ruff.
+All of them check **after** the code is written, in CI, once the agent has
+already moved on to the next file.
 
-**Threefold** is an autonomous governance proxy, cost circuit-breaker, and compliance engine:
+Threefold checks at the moment the agent asks to write it, which is the only
+moment the edit can still be refused. It parses the content, so
+`from boto3 import client` is caught as surely as `import boto3`, and a comment
+that merely mentions the rule is not. When the answer is no, the tool call does
+not happen.
 
-> **The Central Tenet:** *Deterministic code trips circuit breakers and enforces boundaries; Amazon Bedrock provides semantic architectural explanations.*
+```
+$ cat call.json | python hooks/claude_code_hook.py
+{"permissionDecision": "deny",
+ "permissionDecisionReason": "Threefold refused this call. Clean Architecture
+  violation: domain file 'src/domain/user.py' cannot depend on an outer layer
+  (from boto3 import ...)"}
+```
 
-Threefold intercepts an agent's intended tool call and runs four deterministic gates before the call is allowed to proceed:
-1. **Secret and credential filter:** five regular expressions block AWS keys (`AKIA...`), GitHub PATs, and private keys at the pre-invocation perimeter.
-2. **Clean Architecture Boundary Guard:** Prevents agents from altering `.env` files, modifying frozen paths, or violating dependency inversion.
-3. **N-gram Loop & Thrashing Detector:** Identifies monomorphic repetition and ping-pong tool thrashing within $\le 3$ iterations.
-4. **Token Cost Circuit Breaker:** Computes exact model token expenditure using tiered rates, automatically tripping the circuit breaker if session budgets are breached.
+That is a real Claude Code hook against the live service, not a mock. Point
+your own agent at it with [`hooks/claude_code_hook.py`](hooks/claude_code_hook.py).
+
+## Three more gates, honestly described
+
+These matter, and none of them is novel. Mature tools do each one better, and
+Threefold's contribution is that they run at the same perimeter as the rule
+above rather than in four different places.
+
+1. **Cycles.** Any repeating pattern of tool calls, not a fixed list of shapes.
+   The agent looping A, A, B forever is caught, which is where the name comes
+   from: the third time round the cycle, it stops.
+2. **Credentials.** Ten patterns across AWS, GitHub, OpenAI, Anthropic, Slack,
+   Google and JWTs, scanned at every depth of the arguments. Dedicated scanners
+   carry hundreds of rules; use one of those in CI as well.
+3. **Budget.** A session cost ceiling and a single-call spike cap. It trusts the
+   token counts the caller declares, so it bounds honest overruns rather than an
+   adversary. A proxy that meters real usage is the stronger control.
+
+> **The tenet:** deterministic code decides, Amazon Bedrock only explains. Every
+> response says which one you are reading, in a field called
+> `explanation_source`.
 
 ---
 
