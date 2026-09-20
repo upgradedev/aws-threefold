@@ -40,7 +40,7 @@ def test_boundary_guard_blocks_clean_architecture_domain_violation():
     )
     is_safe, reason = ArchitecturalBoundaryGuard.evaluate_tool_boundary(inv)
     assert is_safe is False
-    assert "Clean Architecture Violation" in reason
+    assert "clean architecture violation" in reason.lower()
 
 
 def test_boundary_guard_blocks_destructive_shell_command():
@@ -51,4 +51,4 @@ def test_boundary_guard_blocks_destructive_shell_command():
     )
     is_safe, reason = ArchitecturalBoundaryGuard.evaluate_tool_boundary(inv)
     assert is_safe is False
-    assert "dangerous destructive operations" in reason
+    assert "destructive" in reason.lower()

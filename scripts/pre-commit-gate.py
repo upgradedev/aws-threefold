@@ -26,6 +26,7 @@ sys.path.insert(0, str(repo_root / "src"))
 
 try:
     from threefold.domain.boundary_guard import ArchitecturalBoundaryGuard, SecretScanner
+    from threefold.domain.import_rules import find_forbidden_imports
 except ImportError:
     # Standalone fallback if package structure differs
     import re
@@ -57,45 +58,17 @@ FORBIDDEN_DOMAIN_IMPORTS = ("boto3", "requests", "fastapi", "flask", "sqlalchemy
 
 
 def find_domain_import_violations(content: str, file_path: Path) -> list[str]:
-    """Finds real imports, by parsing the module rather than reading its text.
+    """Delegates to the same rule the live gate enforces.
 
-    Searching the source text for the word "infrastructure" near the word "import"
-    also matches the line that *defines* the rule, so the guard used to report
-    itself. Only an import statement the interpreter would execute counts.
+    Keeping a second implementation here is how the perimeter came to be weaker
+    than this script: the script parsed imports while the API matched
+    substrings, so `from boto3 import client` was caught before a commit and
+    approved at runtime.
     """
-    violations: list[str] = []
-    try:
-        tree = ast.parse(content)
-    except SyntaxError as exc:
-        return [f"Could not parse {file_path}: {exc}"]
-
-    def offending(module: str) -> str | None:
-        root = module.split(".")[0]
-        if "infrastructure" in module.split("."):
-            return "infrastructure"
-        if root in FORBIDDEN_DOMAIN_IMPORTS:
-            return root
-        return None
-
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                hit = offending(alias.name)
-                if hit:
-                    violations.append(
-                        f"CLEAN ARCHITECTURE VIOLATION in {file_path}:{node.lineno} -> "
-                        f"domain imports '{alias.name}'"
-                    )
-        elif isinstance(node, ast.ImportFrom):
-            module = node.module or ""
-            # A relative import of ..infrastructure carries the name in module.
-            hit = offending(module)
-            if hit:
-                violations.append(
-                    f"CLEAN ARCHITECTURE VIOLATION in {file_path}:{node.lineno} -> "
-                    f"domain imports from '{module}'"
-                )
-    return violations
+    return [
+        f"CLEAN ARCHITECTURE VIOLATION in {file_path} -> domain {violation}"
+        for violation in find_forbidden_imports(content)
+    ]
 
 
 def scan_file(file_path: Path) -> list[str]:
