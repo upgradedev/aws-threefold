@@ -1,79 +1,77 @@
-# Threefold — Proof of Coding Agent Connected to AWS
+# Proof of a coding agent connected to AWS
 
-**Hackathon Requirement:** Every submission to *AWS Zero to Shipped* must include verifiable proof of a coding agent connected to AWS (CLI connection, MCP server, agent-assisted terminal output, or trace).
+The hackathon asks for a coding agent connected to the AWS console, with
+documented proof of the connection. This page is that proof. It records what the
+agent did against account `308857099262`, and how a reader can check each claim
+without taking our word for it.
 
----
+An earlier version of this file showed a pytest transcript. That proved the agent
+could run tests on a laptop, which is not what was asked, so it was replaced.
 
-## 1. Summary of Agentic Development Workflow
+## The agent
 
-Threefold was conceived, architected, scaffolded, implemented, and verified entirely through an autonomous AI coding agent (**Antigravity**) connected directly to the local shell and AWS development utilities.
+Claude Code, driving the AWS CLI v2 and boto3 under the operator's credentials,
+in a Windows terminal. The same session wrote the code, created the
+stack, read the failures back out of AWS, and fixed them.
 
-The agent connected directly to AWS infrastructure:
-1. **Amazon Bedrock (Converse API):** Agent built and verified the Claude 3.5 Sonnet Converse API adapter (`src/threefold/infrastructure/bedrock_client.py`).
-2. **AWS SAM (Serverless Application Model):** Agent generated and validated the CloudFormation infrastructure template (`deploy/template.yml`) defining Lambda functions on Graviton2 ARM64, HTTP API Gateway, DynamoDB, and S3 evidence stores.
-3. **Automated Test Pyramid:** Agent wrote and executed 23 hermetic automated tests covering token math, loop detectors, secret interceptors, and Lambda API handlers in 0.45 seconds.
+## What the connection was used for, in order
 
----
+The first deploy went out with the code exactly as it stood, before any polish,
+specifically so that packaging and IAM would fail early if they were going to.
+They did, and that is the useful part of this record.
 
-## 2. Agent Connection & Environment Transcript
+| # | The agent ran | AWS answered | What changed |
+|---|---|---|---|
+| 1 | `aws sts get-caller-identity` | `arn:aws:iam::308857099262:user/tf-surface-studio` | Connection confirmed before anything was created |
+| 2 | `aws cloudformation package --template-file deploy/template.yml --s3-bucket cf-templates-qd4r568jc7n6-eu-west-1` | uploaded 116,087 bytes | The Lambda zip, built without SAM and without installing anything locally |
+| 3 | `aws cloudformation deploy --stack-name threefold-prod --capabilities CAPABILITY_IAM` | `CREATE_COMPLETE` | Stack `threefold-prod` in eu-west-1 |
+| 4 | `curl https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/status` | **HTTP 404** | The first real defect. API Gateway prefixes the path with the stage name, and the handler routed on `/prod/status`. Found in minutes because the deploy came first |
+| 5 | Fixed the stage prefix, redeployed | HTTP 200 | The ship gate, passed |
+| 6 | Three POSTs to `/evaluate-tool-call` with identical arguments | `APPROVED`, `APPROVED`, `BLOCKED_LOOP_DETECTED` | The product's central claim, working in the cloud |
+| 7 | `aws dynamodb get-item` on that session | `is_tripped: false` | The second real defect. The API reported the session halted while the table said otherwise, so another container would have kept approving |
+| 8 | Wrote the halt through, added the terminal-state guard, redeployed, repeated 6 and 7 | `is_tripped: true`, with a `ttl` | Fixed, and verified in the table rather than in the response |
+| 9 | `aws cloudtrail lookup-events --lookup-attributes AttributeKey=EventName,AttributeValue=Converse` | three events, principal `assumed-role/threefold-prod-ThreefoldFunctionRole-JzGN3b6RjC7w` | Bedrock is called by the function's own role, not by the operator's user |
 
-### 2.1 Agent Environment & Tooling Configuration
+Step 9 is the one worth checking closely. A Bedrock call made from a workstation
+proves the account has model access. It does not prove the deployed application
+can reach the model. Only the execution role appearing as the CloudTrail
+principal shows that, and it is why that command is in the list.
 
-```json
-{
-  "agent_identity": "Antigravity (Google DeepMind Agentic Coding)",
-  "workspace_root": "c:\\dev\\solutions\\threefold",
-  "python_version": "Python 3.11.0",
-  "pytest_runner": "pytest-9.0.2",
-  "cloud_target": "AWS Serverless (Bedrock, Lambda ARM64, DynamoDB, S3, CloudFront)",
-  "primary_model": "anthropic.claude-3-5-sonnet-20241022-v2:0"
-}
+## Checking it yourself
+
+Everything below is readable by anyone with credentials on the account. The raw
+output is committed at [`evidence/DEPLOYMENT_2026-09-20.md`](evidence/DEPLOYMENT_2026-09-20.md).
+
+```bash
+# The stack exists and is healthy
+aws cloudformation describe-stacks --stack-name threefold-prod --region eu-west-1
+
+# Bedrock was invoked by the function role, not by a person
+aws cloudtrail lookup-events --region eu-west-1 \
+  --lookup-attributes AttributeKey=EventName,AttributeValue=Converse
 ```
 
-### 2.2 Agent CLI Command Execution Trace
+Without any AWS credentials at all, the deployed application answers:
 
-The coding agent directly invoked terminal commands via the `run_command` tool to test and verify the codebase:
-
-```powershell
-# Executed by Coding Agent via run_command tool:
-PS C:\dev\solutions\threefold> python -m pytest tests -v
-
-============================= test session starts =============================
-platform win32 -- Python 3.11.0, pytest-9.0.2, pluggy-1.6.0
-rootdir: C:\dev\solutions\threefold
-configfile: pyproject.toml
-plugins: anyio-4.13.0, nbmake-1.5.5, cov-7.1.0, zarr-3.1.6, geff-0.3.0
-collected 32 items
-
-tests\integration\test_api_handlers.py ......          [ 18%]
-tests\integration\test_universal_adapter.py ....       [ 31%]
-tests\security\test_production_security.py .....       [ 46%]
-tests\security\test_tamper_and_invariants.py ..        [ 53%]
-tests\unit\test_boundary_guard.py ....                 [ 65%]
-tests\unit\test_circuit_breaker.py ....                [ 78%]
-tests\unit\test_evaluator.py ...                       [ 87%]
-tests\unit\test_loop_detector.py ....                  [100%]
-
-============================= 32 passed in 7.91s ==============================
+```bash
+curl -s https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/status
+curl -s -o /dev/null -w '%{http_code} %{content_type}\n' \
+  https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/
 ```
 
----
+## The connection is also the product
 
-## 3. Judge Reproduction Instructions
+Threefold governs coding agents, and it was built by one. Every response from
+`/evaluate-tool-call` carries `explanation_source`, which reads `bedrock` when
+the model answered and `deterministic_fallback` when it did not, so a reader can
+always tell which they are looking at. The same discipline produced this page:
+the table above lists two defects the agent shipped and then caught, because a
+proof that records only successes is not evidence of a working connection.
 
-1. **Verify Offline Test Suite:**
-   ```bash
-   git clone https://github.com/upgradedev/threefold-aws.git
-   cd threefold-aws
-   python -m pytest tests/ -v
-   ```
-   Output: 32 passed in <8 seconds.
+## What this does not claim
 
-2. **Verify Browser Dashboard & Testbook:**
-   Open `web/index.html` or `web/testbook.html` directly in any web browser. Zero npm or server dependencies needed.
-
-3. **Deploy to AWS via SAM:**
-   ```bash
-   sam build -t deploy/template.yml
-   sam deploy --guided
-   ```
+The agent ran under a human operator's credentials and every deploy was reviewed
+before it was run. No autonomous production access was granted, and none is
+claimed. The continuous deployment that now runs in GitHub Actions uses a
+short-lived OIDC role rather than stored keys, described in
+[`../.github/workflows/deploy.yml`](../.github/workflows/deploy.yml).

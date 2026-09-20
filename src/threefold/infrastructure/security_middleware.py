@@ -15,7 +15,11 @@ import time
 from typing import Any, Dict, Optional, Tuple
 
 MAX_PAYLOAD_SIZE_BYTES = 1024 * 1024
-DEFAULT_DEMO_API_KEY = "threefold-demo-key-2026"
+# Read from the environment so no key literal lives in the source tree. The
+# fallback is a placeholder, not a credential: the middleware only enforces keys
+# when STAGE is prod or ENFORCE_API_KEY is set, and a deployment that turns those
+# on without setting THREEFOLD_API_KEYS is meant to reject every request.
+DEFAULT_DEMO_API_KEY = os.environ.get("THREEFOLD_DEMO_API_KEY", "unset-demo-key")
 
 
 class TokenBucketRateLimiter:

@@ -1,14 +1,14 @@
 # Threefold 🔍
 
 **Autonomous Coding Agent Governance, Cost Circuit-Breaker & Architectural Compliance Sidecar**  
-*Submitted to AWS Zero to Shipped Hackathon 2026*  
-**Category:** `#workplace-efficiency` · **Lane:** `#community`
+Built for the AWS Zero to Shipped hackathon. **Category:** `#workplace-efficiency` · **Lane:** `#community`
 
-[![CI](https://img.shields.io/badge/CI-passed-emerald)](https://github.com/upgradedev/threefold-aws)
+[![CI](https://github.com/upgradedev/threefold-aws/actions/workflows/ci.yml/badge.svg)](https://github.com/upgradedev/threefold-aws/actions/workflows/ci.yml)
+[![Deploy](https://github.com/upgradedev/threefold-aws/actions/workflows/deploy.yml/badge.svg)](https://github.com/upgradedev/threefold-aws/actions/workflows/deploy.yml)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://python.org)
-[![AWS](https://img.shields.io/badge/AWS-Serverless-orange)](https://aws.amazon.com)
-[![Bedrock](https://img.shields.io/badge/Bedrock-Claude%203.5%20Sonnet-purple)](https://aws.amazon.com/bedrock)
-[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![License](https://img.shields.io/badge/license-Apache--2.0-green)](LICENSE)
+
+**Live: <https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/>** — open it and press a scenario. No account, no key, nothing to install.
 
 ---
 
@@ -30,7 +30,7 @@ As enterprise engineering teams and open-source contributors increasingly integr
 > **The Central Tenet:** *Deterministic code trips circuit breakers and enforces boundaries; Amazon Bedrock provides semantic architectural explanations.*
 
 Threefold intercepts agent tool calls and prompt context in real-time, executing 4 deterministic safety gates in under 1 millisecond:
-1. **Secret & Credential Leakage Filter:** Regex & entropy scanning blocks AWS keys (`AKIA...`), GitHub PATs, and private keys at the pre-invocation perimeter.
+1. **Secret and credential filter:** five regular expressions block AWS keys (`AKIA...`), GitHub PATs, and private keys at the pre-invocation perimeter.
 2. **Clean Architecture Boundary Guard:** Prevents agents from altering `.env` files, modifying frozen paths, or violating dependency inversion.
 3. **N-gram Loop & Thrashing Detector:** Identifies monomorphic repetition and ping-pong tool thrashing within $\le 3$ iterations.
 4. **Token Cost Circuit Breaker:** Computes exact model token expenditure using tiered rates, automatically tripping the circuit breaker if session budgets are breached.
@@ -39,7 +39,7 @@ Threefold intercepts agent tool calls and prompt context in real-time, executing
 
 ## 4 Guided User Journeys (Zero-Setup Live Demo)
 
-Open the live dashboard at [`web/index.html`](web/index.html) or our live AWS CloudFront deployment:
+Open <https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/> and press a button. The same page is in the repository at [`src/threefold/web/index.html`](src/threefold/web/index.html), which the Lambda serves.
 
 1. **Journey 1 · Runaway Tool Loop Interception:**  
    Click **Runaway Tool Loop**. The simulator sends 3 identical tool calls. Threefold detects the monomorphic loop on iteration 3, instantly trips the circuit breaker, locks the session, and halts token expenditure.
@@ -105,18 +105,18 @@ Open the live dashboard at [`web/index.html`](web/index.html) or our live AWS Cl
 - **Serverless Compute:** AWS Lambda (Python 3.11 on ARM64 Graviton2).
 - **Ingress & API:** Amazon API Gateway HTTP API with full CORS support.
 - **Audit Storage:** Amazon DynamoDB (Single-table session state) & Amazon S3 (Cryptographic evidence bundles).
-- **Frontend & Edge:** Amazon CloudFront & Amazon S3 Static Hosting.
+- **Frontend:** served by the same Lambda that answers the API, so one URL is the whole application. There is no CloudFront distribution in the stack.
 - **Standards:** Clean Architecture, Domain-Driven Design (DDD), sub-millisecond deterministic evaluation.
 
 ---
 
 ## Testing Pyramid & Verification
 
-Threefold ships with 100% hermetic offline unit, integration, and security tests:
+The suite is hermetic: `THREEFOLD_OFFLINE=1` keeps every AWS client out of the tests, so they make no network call and do not depend on the credentials on the machine.
 
 ```bash
 # Run the complete test suite
-python -m pytest repos/threefold/tests -v
+THREEFOLD_OFFLINE=1 python -m pytest tests -v
 ```
 
 ```
@@ -130,7 +130,7 @@ tests/unit/test_circuit_breaker.py ....                                  [ 69%]
 tests/unit/test_evaluator.py ...                                         [ 82%]
 tests/unit/test_loop_detector.py ....                                    [100%]
 
-============================= 23 passed in 0.45s ==============================
+============================= 23 passed in under a second ==============================
 ```
 
 - **Unit Tests:** Verified tiered token pricing ($3/M in, $15/M out), single-invocation caps, monomorphic loops, ping-pong loops, secret regex matching, and Clean Architecture imports.
@@ -141,4 +141,4 @@ tests/unit/test_loop_detector.py ....                                    [100%]
 
 ## Clean-Room & Privacy Compliance
 
-Threefold uses **100% synthetic development workloads** ("Acme DevCo - Core Services"). Zero proprietary corporate data, zero private repository identifiers, and zero personally identifiable information (PII). Conforms in full to EU GDPR and the EU AI Act governance standards.
+Threefold uses **100% synthetic development workloads** ("Acme DevCo - Core Services"). Zero proprietary corporate data, zero private repository identifiers, and zero personally identifiable information (PII).

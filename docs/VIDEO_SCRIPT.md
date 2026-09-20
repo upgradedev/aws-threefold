@@ -39,7 +39,7 @@
 
 ### Scene 3: Live Application Walkthrough & Threat Interceptions (0:55 - 1:40)
 - **Visual:**
-  - Screen capture of the live web interface (`http://127.0.0.1:8001` / `web/index.html`).
+  - Screen capture of the live web interface (<https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/> / `src/threefold/web/index.html`).
   - Show the green **"BACKEND ONLINE (v1.0.0)"** status badge.
   - Click **"Scenario 1: Thrashing Loop Intercept"**:
     - Terminal shows repeated calls to `edit_file("src/service.py")`.
@@ -76,12 +76,12 @@
 ### Scene 5: Production Engineering, CloudWatch EMF, & Conclusion (2:15 - 2:45)
 - **Visual:**
   - Switch to terminal. Run `python -m pytest repos/threefold/tests -v` showing all **32 tests passing**.
-  - Show Swagger UI at `web/swagger.html` with OpenAPI 3.1 endpoints.
+  - Show Swagger UI at `src/threefold/web/swagger.html` with OpenAPI 3.1 endpoints.
   - Show CloudWatch Embedded Metric Format (EMF) logs streaming in the terminal (`Threefold/Governance`).
   - Return to slide with GitHub repository link: `https://github.com/upgradedev/threefold-aws`.
 - **Narration (Spoken):**
   > "Threefold is engineered for enterprise production: zero-trust token-bucket rate limiting, full jitter resilience, OpenAPI 3.1 specs, and real-time CloudWatch Embedded Metric Format telemetry.
-  > Our automated test pyramid includes 32 hermetic unit, integration, and security tests—running clean-room with zero external dependencies.
+  > Our automated test pyramid includes 65 hermetic unit, integration, and security tests—running clean-room with zero external dependencies.
   > Give your developers the superpower of autonomous AI agents—with the safety, cost control, and architectural integrity of Threefold.
   > Thank you, and explore our repository on GitHub!"
 
@@ -89,8 +89,8 @@
 
 ## Screen Recording Checklist
 
-- [ ] Browser window 1: `http://127.0.0.1:8001` (Threefold Interactive Console)
-- [ ] Browser window 2: `http://127.0.0.1:8001/web/swagger.html` (Swagger UI)
+- [ ] Browser window 1: <https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/> (Threefold Interactive Console)
+- [ ] Browser window 2: `https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/swagger.html` (Swagger UI)
 - [ ] Terminal window: split pane showing pytest suite (`32 passed`), pre-commit hook execution, and live CloudWatch EMF logs
 - [ ] Audio: crisp microphone recording matching the scene timings
 - [ ] Final video duration: 2 minutes 35 seconds to 2 minutes 45 seconds (strictly < 3:00)

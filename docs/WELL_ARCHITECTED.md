@@ -19,7 +19,7 @@ Threefold is engineered to meet the highest standards of the **AWS Well-Architec
 | Objective | Threefold Implementation |
 |---|---|
 | **Infrastructure as Code (IaC)** | 100% codified via AWS SAM (`deploy/template.yml`). Zero manual configuration needed. |
-| **Comprehensive Test Pyramid** | 23 automated tests (Unit, Integration, Security) passing hermetically offline in 0.45 seconds. |
+| **Comprehensive Test Pyramid** | 65 tests (Unit, Integration, Security) passing hermetically offline in under a second. |
 | **Observability & Health Probes** | CloudWatch structured logging enabled on all Lambda invocations, with health endpoints (`/status`) reporting active governance rules. |
 | **Fail-Safe Runbooks** | Built-in deterministic fallback ensures that even during Amazon Bedrock throttling, all cost limits and security gates remain fully operational. |
 
@@ -52,7 +52,7 @@ Threefold is engineered to meet the highest standards of the **AWS Well-Architec
 |---|---|
 | **Sub-Millisecond Gate Latency** | All deterministic safety evaluations (cost calculation, secret scanning, loop signature hashing) execute in compiled Python standard library in <0.5ms, ensuring zero developer lag. |
 | **ARM64 Graviton2 Execution** | AWS Lambda functions run on Graviton2 (ARM64) processors, delivering 34% better price-performance. |
-| **Edge Distribution** | Web dashboard and judge testbook are distributed via Amazon CloudFront CDN for global sub-100ms load times. |
+| **Single origin** | The dashboard and testbook are served by the API's own Lambda, so there is one URL and no separate origin to keep in step. No CDN is deployed, and no latency figure is claimed because none was measured. |
 
 ---
 

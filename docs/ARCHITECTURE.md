@@ -27,7 +27,7 @@ Threefold strictly implements **Clean Architecture** (Robert C. Martin) and **Do
                     ┌─────────────────────────────────────────┐
                     │               INTERFACES                │
                     │   AWS Lambda Handlers, API Gateway      │
-                    │   CloudFront, Interactive Web Dashboard │
+                    │   Interactive Web Dashboard (Lambda)   │
                     └────────────────────┬────────────────────┘
                                          │
                     ┌────────────────────▼────────────────────┐
@@ -79,11 +79,11 @@ Threefold strictly implements **Clean Architecture** (Robert C. Martin) and **Do
   - `BedrockGovernanceClient`: Implements the Bedrock Converse API abstraction with token-minimized prompts and deterministic fallback.
   - `EvidenceStore`: Generates canonical JSON audit dossiers and validates cryptographic integrity against tamper attacks.
 
-#### Layer 4: Interfaces (`src/threefold/interfaces/` & `web/`)
+#### Layer 4: Interfaces (`src/threefold/interfaces/` & `src/threefold/web/`)
 - **Delivery:**
   - `api_handlers.py`: AWS Lambda proxy handler supporting REST operations (`/status`, `/evaluate-tool-call`, `/simulate-loop`, `/simulate-secret`, `/issue-certificate`).
   - `deploy/template.yml`: AWS SAM serverless definition specifying Graviton ARM64 Lambdas, HTTP API Gateway, DynamoDB, and S3.
-  - `web/index.html` & `web/testbook.html`: Zero-dependency browser dashboard and testbook running Tailwind CSS via CDN.
+  - `src/threefold/web/index.html` & `src/threefold/web/testbook.html`: Zero-dependency browser dashboard and testbook running Tailwind CSS via CDN.
 
 ---
 

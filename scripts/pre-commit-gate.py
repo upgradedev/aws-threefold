@@ -15,6 +15,7 @@ Exit Code:
 from __future__ import annotations
 
 import argparse
+import ast
 import os
 import sys
 from pathlib import Path
@@ -45,8 +46,60 @@ except ImportError:
             return ".env" in clean or ".git/" in clean
 
 
+# Keys that AWS publishes in its own documentation. They authenticate nothing, and
+# a scanner that cannot tell them from a live key cries wolf on every tutorial.
+PUBLISHED_EXAMPLE_KEYS = {
+    "AKIAIOSFODNN7EXAMPLE",
+    "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+}
+
+FORBIDDEN_DOMAIN_IMPORTS = ("boto3", "requests", "fastapi", "flask", "sqlalchemy")
+
+
+def find_domain_import_violations(content: str, file_path: Path) -> list[str]:
+    """Finds real imports, by parsing the module rather than reading its text.
+
+    Searching the source text for the word "infrastructure" near the word "import"
+    also matches the line that *defines* the rule, so the guard used to report
+    itself. Only an import statement the interpreter would execute counts.
+    """
+    violations: list[str] = []
+    try:
+        tree = ast.parse(content)
+    except SyntaxError as exc:
+        return [f"Could not parse {file_path}: {exc}"]
+
+    def offending(module: str) -> str | None:
+        root = module.split(".")[0]
+        if "infrastructure" in module.split("."):
+            return "infrastructure"
+        if root in FORBIDDEN_DOMAIN_IMPORTS:
+            return root
+        return None
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                hit = offending(alias.name)
+                if hit:
+                    violations.append(
+                        f"CLEAN ARCHITECTURE VIOLATION in {file_path}:{node.lineno} -> "
+                        f"domain imports '{alias.name}'"
+                    )
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            # A relative import of ..infrastructure carries the name in module.
+            hit = offending(module)
+            if hit:
+                violations.append(
+                    f"CLEAN ARCHITECTURE VIOLATION in {file_path}:{node.lineno} -> "
+                    f"domain imports from '{module}'"
+                )
+    return violations
+
+
 def scan_file(file_path: Path) -> list[str]:
-    """Inspects a single file against security & architectural rules."""
+    """Inspects a single file against security and architectural rules."""
     violations = []
 
     # Check forbidden file names
@@ -63,19 +116,18 @@ def scan_file(file_path: Path) -> list[str]:
         violations.append(f"Could not read {file_path}: {exc}")
         return violations
 
-    # Check secrets
-    is_clean, secret_msg = SecretScanner.scan_payload(content)
+    # Check secrets, ignoring the keys AWS publishes as examples.
+    scrubbed = content
+    for example in PUBLISHED_EXAMPLE_KEYS:
+        scrubbed = scrubbed.replace(example, "REDACTED_PUBLISHED_EXAMPLE")
+    is_clean, secret_msg = SecretScanner.scan_payload(scrubbed)
     if not is_clean:
         violations.append(f"SECRET LEAK DETECTED in {file_path}: {secret_msg}")
 
-    # Check Clean Architecture: domain layer must never import infrastructure
+    # Check Clean Architecture: the domain layer must never import infrastructure.
     clean_path = str(file_path).replace("\\", "/")
     if "/domain/" in clean_path:
-        for line_no, line in enumerate(content.splitlines(), start=1):
-            if "infrastructure" in line and ("import" in line or "from" in line):
-                violations.append(
-                    f"CLEAN ARCHITECTURE VIOLATION in {file_path}:{line_no} -> Domain cannot import infrastructure: '{line.strip()}'"
-                )
+        violations.extend(find_domain_import_violations(content, file_path))
 
     return violations
 

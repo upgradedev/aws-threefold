@@ -1,0 +1,138 @@
+name: Deploy
+
+# Ships main to AWS and then proves the deployed thing works. `cloudformation
+# deploy` reports success when the stack updates, which says nothing about
+# whether the application still functions, so the verify job below exercises the
+# product's central claim against the live URL and fails the run if it regressed.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write   # required to mint the OIDC token AWS trades for credentials
+  contents: read
+
+concurrency:
+  group: deploy-threefold-prod
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: eu-west-1
+  STACK_NAME: threefold-prod
+  PACKAGING_BUCKET: cf-templates-qd4r568jc7n6-eu-west-1
+  # The trust policy on this role pins the subject to this repository's main
+  # branch, so a fork or a pull request cannot assume it. No AWS key is stored
+  # in this repository; the role is assumed for the length of one job.
+  DEPLOY_ROLE: arn:aws:iam::308857099262:role/threefold-github-deploy
+
+jobs:
+  deploy:
+    name: Package, deploy, verify
+    runs-on: ubuntu-latest
+    outputs:
+      api: ${{ steps.outputs.outputs.api }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.DEPLOY_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: threefold-deploy-${{ github.run_id }}
+
+      - name: Confirm which identity is deploying
+        run: aws sts get-caller-identity
+
+      - name: Package
+        run: |
+          aws cloudformation package \
+            --template-file deploy/template.yml \
+            --s3-bucket "$PACKAGING_BUCKET" \
+            --s3-prefix threefold \
+            --output-template-file packaged.yml \
+            --region "$AWS_REGION"
+
+      - name: Deploy
+        run: |
+          aws cloudformation deploy \
+            --template-file packaged.yml \
+            --stack-name "$STACK_NAME" \
+            --capabilities CAPABILITY_IAM CAPABILITY_AUTO_EXPAND \
+            --region "$AWS_REGION" \
+            --no-fail-on-empty-changeset \
+            --tags project=threefold hackathon=zero-to-shipped commit=${{ github.sha }}
+
+      - name: Read the endpoint back out of the stack
+        id: outputs
+        run: |
+          API=$(aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" --region "$AWS_REGION" \
+            --query "Stacks[0].Outputs[?OutputKey=='ApiEndpoint'].OutputValue" --output text)
+          echo "api=$API" >> "$GITHUB_OUTPUT"
+          echo "Deployed to $API"
+
+  verify:
+    name: The deployed application still works
+    needs: deploy
+    runs-on: ubuntu-latest
+    env:
+      API: ${{ needs.deploy.outputs.api }}
+    steps:
+      - name: The public URL serves the application, anonymously
+        run: |
+          set -euo pipefail
+          read -r code type < <(curl -s -o /tmp/root.html \
+            -w '%{http_code} %{content_type}\n' "$API/")
+          echo "root: $code $type"
+          test "$code" = "200"
+          case "$type" in text/html*) ;; *) echo "Root is not a page"; exit 1 ;; esac
+          grep -q '<title>Threefold' /tmp/root.html
+          # A page that still carries the token was served without its API base.
+          if grep -q '__THREEFOLD_BASE_PATH__' /tmp/root.html; then
+            echo "The API base was not substituted into the page"; exit 1
+          fi
+
+      - name: Status answers JSON
+        run: |
+          set -euo pipefail
+          curl -sf "$API/status" | tee /tmp/status.json
+          python -c "import json;d=json.load(open('/tmp/status.json'));assert d['service']=='Threefold',d"
+
+      - name: The third identical call halts the session
+        # The product's central claim, exercised against the deployment that was
+        # just shipped rather than against a local process.
+        run: |
+          set -euo pipefail
+          SID="ci-${{ github.run_id }}-$RANDOM"
+          BODY=$(printf '{"session_id":"%s","developer_id":"ci","project_name":"CI","tool_name":"run_tests","action_type":"COMMAND_EXEC","arguments":{"cmd":"pytest -q"},"projected_input_tokens":800,"projected_output_tokens":200,"budget_usd":5.0}' "$SID")
+          for i in 1 2 3; do
+            STATUS=$(curl -sf -X POST "$API/evaluate-tool-call" \
+              -H 'Content-Type: application/json' -d "$BODY" \
+              | python -c 'import sys,json;print(json.load(sys.stdin)["status"])')
+            echo "call $i -> $STATUS"
+            if [ "$i" -lt 3 ] && [ "$STATUS" != "APPROVED" ]; then
+              echo "Expected the first two calls to be approved"; exit 1
+            fi
+            if [ "$i" -eq 3 ] && [ "$STATUS" != "BLOCKED_LOOP_DETECTED" ]; then
+              echo "The loop detector did not halt the session"; exit 1
+            fi
+          done
+
+      - name: The halt is durable, not just reported
+        # Reading the verdict back out of the response would only prove the
+        # container that answered remembers it. This re-reads the session.
+        run: |
+          set -euo pipefail
+          SID="ci-durable-${{ github.run_id }}-$RANDOM"
+          BODY=$(printf '{"session_id":"%s","tool_name":"run_tests","action_type":"COMMAND_EXEC","arguments":{"cmd":"pytest -q"},"projected_input_tokens":800,"projected_output_tokens":200,"budget_usd":5.0}' "$SID")
+          for i in 1 2 3; do
+            curl -sf -X POST "$API/evaluate-tool-call" -H 'Content-Type: application/json' -d "$BODY" >/dev/null
+          done
+          OTHER=$(printf '{"session_id":"%s","tool_name":"read_file","action_type":"FILE_READ","arguments":{"path":"/src/main.py"},"projected_input_tokens":10,"projected_output_tokens":10,"budget_usd":5.0}' "$SID")
+          STATUS=$(curl -sf -X POST "$API/evaluate-tool-call" \
+            -H 'Content-Type: application/json' -d "$OTHER" \
+            | python -c 'import sys,json;print(json.load(sys.stdin)["status"])')
+          echo "unrelated call on the halted session -> $STATUS"
+          test "$STATUS" = "BLOCKED_CIRCUIT_BREAKER"

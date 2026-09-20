@@ -74,13 +74,22 @@ def test_session_inspection_endpoint():
 
 
 def test_pre_commit_gate_standalone(tmp_path: Path):
-    """Verify that pre-commit gate blocks secret leaks in synthetic files."""
+    """The gate blocks a credential-shaped literal in a committed file.
+
+    The key is assembled at runtime rather than written out, so this file does
+    not itself carry the pattern. AWS's published example key is deliberately
+    NOT used here: the gate excludes it by value, because a scanner that flags
+    the key printed in AWS's own documentation teaches people to ignore it. The
+    runtime scanner still flags it, which is what Scenario 2 of the demo relies
+    on, and that difference is pinned in tests/security/test_the_gate_still_bites.py.
+    """
     import subprocess
     import sys
 
     # Create a synthetic dirty file with AWS key
     dirty_file = tmp_path / "dirty.py"
-    dirty_file.write_text('AWS_SECRET = "AKIAIOSFODNN7EXAMPLE"', encoding="utf-8")
+    planted_key = "AKIA" + "3XQ7MZKD2TVLPR9W"
+    dirty_file.write_text(f'AWS_SECRET = "{planted_key}"', encoding="utf-8")
 
     # Run pre-commit-gate
     candidates = [

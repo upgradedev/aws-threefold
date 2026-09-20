@@ -5,9 +5,9 @@
 **Application Name:** Threefold  
 **Tagline / Elevator Pitch:** Serverless real-time governance proxy, token cost circuit breakers, and architectural invariant enforcement for autonomous AI coding agents on AWS.  
 **Public Repository URL:** `https://github.com/upgradedev/threefold-aws`  
-**Live Application URL:** `http://127.0.0.1:8001` (Local Live Server) / CloudFront Deployed URL  
-**Article Published URL:** `https://community.aws/posts/threefold-serverless-ai-agent-governance`  
-**Demo Video URL:** `https://youtu.be/threefold-demo-2026` (Under 3 minutes)  
+**Live Application URL:** <https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/>  
+**Article Published URL:** not published yet  
+**Demo Video URL:** not recorded yet  
 
 ---
 
@@ -40,7 +40,7 @@ Autonomous coding agents are rapidly transforming enterprise software engineerin
 - **State & Evidence Persistence:** Amazon DynamoDB single-table design with session history and budget attributes, and Amazon S3 for signed governance certificate bundles.
 - **Observability:** Real-time AWS CloudWatch Embedded Metric Format (EMF) emitting zero-overhead structured telemetry directly to stdout.
 - **Security & Resilience:** Zero-trust token-bucket rate limiting (60 req/min), API Key authentication, RFC 7807 Problem Details, and exponential backoff with full jitter retry decorators.
-- **API & UI:** Complete OpenAPI 3.1 specifications, interactive Swagger UI (`web/swagger.html`), and a responsive single-page console (`web/index.html`) using vanilla JavaScript with zero external npm build dependencies.
+- **API & UI:** Complete OpenAPI 3.1 specifications, interactive Swagger UI (`src/threefold/web/swagger.html`), and a responsive single-page console (`src/threefold/web/index.html`) using vanilla JavaScript with zero external npm build dependencies.
 - **Infrastructure as Code & CI/CD:** AWS SAM (`template.yml`), multi-stage Dockerfiles, Docker Compose, and GitHub Actions CI running 32 automated tests.
 
 ---
@@ -54,7 +54,7 @@ Autonomous coding agents are rapidly transforming enterprise software engineerin
 
 ### 6. Accomplishments That We're Proud Of
 - **Deterministic Prevention of Cost Runaways:** Created an automated circuit breaker that guarantees an AI coding agent can never exceed its allocated budget cap.
-- **100% Green Automated Test Pyramid:** Built a comprehensive 32-test hermetic test suite covering unit, integration, universal adapter, and security tests.
+- **100% Green Automated Test Pyramid:** Built a comprehensive 65-test hermetic test suite covering unit, integration, universal adapter, and security tests.
 - **Turnkey Production Readiness:** Delivered production Docker containers, OpenAPI 3.1 specs, Swagger UI, CloudWatch EMF metrics, and pre-commit hook gating.
 
 ---

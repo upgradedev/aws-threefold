@@ -1,0 +1,46 @@
+name: Still up
+
+# The ship gate is judged "at the time of evaluation", which runs for weeks after
+# the submission closes. A stack that quietly breaks in between fails the gate
+# without anyone noticing, so this asks the live URL the two questions that
+# matter and fails loudly.
+#
+# It deliberately does not press the demo scenarios. Those call Bedrock, and
+# spending model tokens four times a day to watch our own uptime helps nobody.
+
+on:
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  API: https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod
+
+jobs:
+  probe:
+    name: The public URL still answers
+    runs-on: ubuntu-latest
+    steps:
+      - name: The application is reachable anonymously
+        run: |
+          set -euo pipefail
+          read -r code type < <(curl -s -o /tmp/root.html --max-time 30 \
+            -w '%{http_code} %{content_type}\n' "$API/")
+          echo "root: $code $type"
+          test "$code" = "200"
+          grep -q '<title>Threefold' /tmp/root.html
+
+      - name: Readiness reports every dependency as healthy
+        # /readyz answers 503 when a dependency is unreachable, so the status
+        # code alone is enough to alarm on.
+        run: |
+          set -euo pipefail
+          code=$(curl -s -o /tmp/ready.json --max-time 30 -w '%{http_code}' "$API/readyz")
+          cat /tmp/ready.json
+          echo
+          if [ "$code" != "200" ]; then
+            echo "Readiness is degraded (HTTP $code)"; exit 1
+          fi

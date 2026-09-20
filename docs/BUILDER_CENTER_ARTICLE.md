@@ -87,7 +87,7 @@ This certificate is verified by CI/CD pipelines as a required status check befor
 
 ## The 4 Guided User Journeys (Try It Live)
 
-Open [`web/index.html`](web/index.html) or our CloudFront demo:
+Open [`src/threefold/web/index.html`](../src/threefold/web/index.html) or open <https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/>:
 
 1. **Journey 1 · Runaway Tool Loop:** Watch the simulator fire 3 identical tool calls. On iteration 3, the circuit breaker instantly trips with a red visual alert, freezing the session and preserving your budget.
 2. **Journey 2 · Secret Leakage Intercept:** Simulate an agent passing an AWS Access Key (`AKIAIOSFODNN7EXAMPLE`) in a command argument. Blocked instantly at the perimeter before leaving the machine.
@@ -107,5 +107,5 @@ Open [`web/index.html`](web/index.html) or our CloudFront demo:
 ## Experience Threefold
 
 - **Repository:** [`github.com/upgradedev/threefold-aws`](https://github.com/upgradedev/threefold-aws)
-- **Hermetic Test Suite:** 23 tests passing in 0.45s (`python -m pytest repos/threefold/tests -v`).
-- **Interactive Live Dashboard:** Open `web/index.html` in any browser. Zero installation required.
+- **Hermetic Test Suite:** 65 tests passing in under a second (`python -m pytest repos/threefold/tests -v`).
+- **Interactive Live Dashboard:** Open `src/threefold/web/index.html` in any browser. Zero installation required.
