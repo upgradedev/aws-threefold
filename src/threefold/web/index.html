@@ -117,6 +117,35 @@
   </div>
   <main class="flex-1 max-w-7xl mx-auto px-4 py-6 w-full space-y-6">
 
+    <!-- WHAT THIS IS. The page used to open on four metric tiles for a session
+         that did not exist yet, so a first-time reader met numbers before they
+         met the problem. This sentence is the README's opening line, which was
+         already written and already true. -->
+    <section class="p-6 rounded-2xl bg-gradient-to-br from-gray-900 via-gray-900 to-purple-950/30 border border-gray-800">
+      <div class="max-w-4xl space-y-3">
+        <h2 class="text-xl md:text-2xl font-bold text-white leading-snug">
+          Threefold refuses a coding agent's edit at the moment it is made, not after the commit, so your architecture does not
+          rot while you sleep.
+        </h2>
+        <p class="text-sm text-gray-300">
+          An agent asks to write a file or run a command. Threefold reads that request first and answers yes or no, in about a
+          second, before the tool call happens. Four deterministic gates decide: a credential in the arguments, a domain file
+          importing infrastructure, the same call repeating, a spend ceiling. Amazon Bedrock never decides; it only explains the
+          verdict in a sentence, and every response names which of the two you are reading.
+        </p>
+        <div class="flex flex-wrap items-center gap-3 pt-1">
+          <span class="text-xs text-gray-400">
+            Press a scenario below to watch it refuse one, or
+          </span>
+          <a id="hero-connect" href="connect.html"
+             class="text-xs font-semibold px-3 py-1.5 rounded-lg bg-emerald-950 hover:bg-emerald-900 text-emerald-300 border border-emerald-800 transition">
+            put it in front of your own agent ↗
+          </a>
+          <span class="text-xs text-gray-500">— one file, standard library, served from this page</span>
+        </div>
+      </div>
+    </section>
+
     <!-- KPI STRIP -->
     <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
       <div class="p-4 rounded-xl bg-gray-900 border border-gray-800">
@@ -813,6 +842,11 @@
       { label: 'POST /sessions/{id}/terminate', anchor: '#/default/post_sessions__session_id__terminate' }
     ];
 
+    function linkHero() {
+      const el = document.getElementById('hero-connect');
+      if (el) el.href = PAGE_BASE + 'connect.html';
+    }
+
     function renderContractStrip() {
       document.getElementById('contract-strip').innerHTML = CONTRACT_OPERATIONS.map(op =>
         '<a href="' + PAGE_BASE + 'swagger.html' + op.anchor + '" ' +
@@ -823,6 +857,7 @@
     }
 
     // On Load: check if live API is available
+    linkHero();
     renderContractStrip();
     checkApiHealth();
   </script>

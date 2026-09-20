@@ -95,3 +95,7 @@
 - `/settings.html` says which half is which and names the two refusals a reader can act on rather than printing a bare status code. The OpenAPI document carries an `OperatorApiKey` scheme on that one operation, in both twins.
 - Checked that the visitor path is untouched: evaluating a call, the four scenarios, the certificate and the kill switch are all still anonymous, and `GET /policy/config` still answers 200.
 - Tests 146 → 155. The existing policy test now asserts the anonymous write is refused before it presents the key.
+
+## 2026-09-20T23:58:00+03:00 — The page says what it is before it shows numbers
+- `index.html` opened on four metric tiles for a session that did not exist yet, so a first-time reader met `$10.00` and `0% (Safe)` before meeting the problem. The only statement of purpose was a 12px line in the header.
+- A hero block now sits above the KPI strip, carrying the README's opening sentence verbatim, one paragraph on how the refusal works and who decides, and a link into the install path. Nothing new was written: the sentence was already in `README.md` and already true.
