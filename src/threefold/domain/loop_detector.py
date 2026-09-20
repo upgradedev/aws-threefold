@@ -1,4 +1,4 @@
-"""N-gram loop detection and thrashing prevention engine."""
+"""Cycle detection over tool-call signatures."""
 from __future__ import annotations
 
 from typing import List, Tuple
@@ -8,8 +8,12 @@ from threefold.domain.models import ToolInvocation
 class LoopDetector:
     """Detects runaway agent loops and ping-pong tool thrashing."""
 
-    def __init__(self, repetition_threshold: int = 3) -> None:
+    def __init__(self, repetition_threshold: int = 3, max_cycle_length: int = 6) -> None:
         self.repetition_threshold = repetition_threshold
+        # Cycles longer than this are not searched for. A six-step loop already
+        # needs thirteen calls to be recognised at the default threshold, and
+        # beyond that the window costs more history than a session carries.
+        self.max_cycle_length = max_cycle_length
 
     def evaluate_loop_risk(
         self,
@@ -24,49 +28,47 @@ class LoopDetector:
             return True, "No prior history"
 
         next_sig = next_call.canonical_signature
+        sequence = [call.canonical_signature for call in history] + [next_sig]
 
-        # Check 1: Monomorphic repetition (exact same tool + arguments N times)
-        recent_signatures = [call.canonical_signature for call in history[-(self.repetition_threshold - 1):]]
-        if len(recent_signatures) >= (self.repetition_threshold - 1):
-            if all(sig == next_sig for sig in recent_signatures):
-                return False, (
-                    f"Monomorphic loop detected: Tool '{next_call.tool_name}' "
-                    f"invoked with identical arguments {self.repetition_threshold} consecutive times"
-                )
+        period = self._repeating_period(sequence)
+        if period is None:
+            return True, "Execution flow is linear"
 
-        # Check 2: Ping-pong oscillation (Pattern: A -> B -> A -> B -> [A])
-        # Requires at least 4 history items: history[-4..-1] = [A, B, A, B], next = A
-        if len(history) >= 4:
-            sig_history = [c.canonical_signature for c in history]
-            a = sig_history[-4]
-            b = sig_history[-3]
-            if (
-                sig_history[-2] == a
-                and sig_history[-1] == b
-                and next_sig == a
-                and a != b
-            ):
-                return False, (
-                    f"Ping-pong oscillation loop detected: Agent oscillating between "
-                    f"two alternating tool calls ({history[-2].tool_name} <-> {history[-1].tool_name})"
-                )
+        if period == 1:
+            return False, (
+                f"Monomorphic loop detected: Tool '{next_call.tool_name}' "
+                f"invoked with identical arguments {self.repetition_threshold} consecutive times"
+            )
 
-        # Check 3: Sliding 3-gram circular loop (A -> B -> C -> A -> B -> C -> [A])
-        if len(history) >= 6:
-            sig_history = [c.canonical_signature for c in history]
-            a = sig_history[-6]
-            b = sig_history[-5]
-            c = sig_history[-4]
-            if (
-                sig_history[-3] == a
-                and sig_history[-2] == b
-                and sig_history[-1] == c
-                and next_sig == a
-                and len({a, b, c}) == 3
-            ):
-                return False, (
-                    f"Circular 3-step loop detected: Agent repeating 3-phase cycle "
-                    f"({history[-3].tool_name} -> {history[-2].tool_name} -> {history[-1].tool_name})"
-                )
+        cycle = [call.tool_name for call in history[-period:]]
+        shape = "Ping-pong oscillation loop" if period == 2 else f"Circular {period}-step loop"
+        return False, (
+            f"{shape} detected: Agent repeating the cycle "
+            f"({' -> '.join(cycle)}) for the {self.repetition_threshold}rd time"
+        )
 
-        return True, "Execution flow is linear"
+    def _repeating_period(self, sequence: List[str]) -> int | None:
+        """Finds the shortest cycle the sequence has just closed, if any.
+
+        Three hardcoded shapes used to be checked here: the same call repeated,
+        two calls alternating, and a three-step cycle. That left gaps between
+        them. An agent looping A, A, B forever matched none of the three and was
+        approved indefinitely, which is precisely the runaway this product is
+        named after.
+
+        This looks for any period instead. A cycle of length p counts once the
+        sequence shows it `repetition_threshold - 1` times over and then begins
+        it again, which for the default threshold of three means the third
+        occurrence of the first call in the cycle.
+        """
+        repeats = max(self.repetition_threshold - 1, 1)
+        for period in range(1, self.max_cycle_length + 1):
+            window_length = period * repeats + 1
+            if len(sequence) < window_length:
+                break
+            window = sequence[-window_length:]
+            if all(window[i] == window[i % period] for i in range(window_length)):
+                # A period that is a multiple of a shorter one is reported by
+                # the shorter one first, because the search runs shortest first.
+                return period
+        return None
