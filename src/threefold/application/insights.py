@@ -193,6 +193,13 @@ def summarise(decisions: List[Dict[str, Any]], window_days: int) -> Dict[str, An
             {"day": day, "decisions": counts["decisions"], "refused": counts["refused"]}
             for day, counts in sorted(by_day.items())
         ],
-        "recent_refusals": refusals[:25],
+        "recent_refusals": [
+            dict(
+                row,
+                category=categorise(row),
+                category_label=CATEGORY_LABELS.get(categorise(row), "Other"),
+            )
+            for row in refusals[:25]
+        ],
         "coverage": GATE_COVERAGE,
     }

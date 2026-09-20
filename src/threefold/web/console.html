@@ -229,19 +229,6 @@
       OTHER: 'bg-gray-800 text-gray-300 border-gray-700'
     };
 
-    function categoryOf(row) {
-      const status = (row.status || '').toUpperCase();
-      const reason = (row.reason || '').toLowerCase();
-      if (status.indexOf('LOOP') !== -1) return 'LOOP';
-      if (status.indexOf('CIRCUIT_BREAKER') !== -1) return 'HALTED_SESSION';
-      if (status.indexOf('BUDGET') !== -1) return 'BUDGET';
-      if (reason.indexOf('sensitive credential') !== -1) return 'CREDENTIAL_IN_ARGUMENTS';
-      if (reason.indexOf('protected path') !== -1 || reason.indexOf('credential store') !== -1) return 'PROTECTED_PATH';
-      if (reason.indexOf('clean architecture') !== -1) return 'LAYERING';
-      if (status.indexOf('SECRET') !== -1) return 'CREDENTIAL_IN_ARGUMENTS';
-      return 'OTHER';
-    }
-
     function labelFor(category) {
       const found = (state.data && state.data.by_category || []).find(c => c.category === category);
       return found ? found.label : category;
@@ -373,11 +360,12 @@
         return;
       }
       holder.innerHTML = rows.map((r, index) => {
-        const category = categoryOf(r);
+        // The server categorised this row; the page does not second-guess it.
+        const category = r.category || 'OTHER';
         return '<div data-refusal-index="' + index + '" class="p-3 rounded-xl bg-gray-950 border border-gray-800 hover:border-purple-700 cursor-pointer transition">' +
           '<div class="flex items-center justify-between gap-3 flex-wrap">' +
             '<div class="flex items-center gap-2">' +
-              '<span class="px-2 py-0.5 rounded text-[11px] font-semibold border ' + (CATEGORY_TONE[category] || CATEGORY_TONE.OTHER) + '">' + escapeHtml(labelFor(category)) + '</span>' +
+              '<span class="px-2 py-0.5 rounded text-[11px] font-semibold border ' + (CATEGORY_TONE[category] || CATEGORY_TONE.OTHER) + '">' + escapeHtml(r.category_label || labelFor(category)) + '</span>' +
               '<span class="text-xs text-gray-300 font-mono">' + escapeHtml(r.tool_name || 'tool') + '</span>' +
               '<span class="text-xs text-gray-500 font-mono break-all">' + escapeHtml(r.target || '') + '</span>' +
             '</div>' +

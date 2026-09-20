@@ -264,3 +264,31 @@ def test_a_call_into_a_halted_session_is_not_filed_as_a_budget_breach() -> None:
     assert "LOOP_THRASHING_FREE" in rules, "The halt itself is the loop detector's"
     assert "SESSION_ALREADY_HALTED" in rules, "A call into a halted session is refused by the session, not by a gate"
     assert "BUDGET_CIRCUIT_BREAKER_SAFE" not in rules, "Nothing here was a spend problem"
+
+
+def test_a_refusal_row_carries_its_own_category() -> None:
+    """The page must not hold a second copy of the classification rules.
+
+    It did, and the two drifted: a row stored before the reason was kept fell to
+    OTHER in the browser while the server called it a layering violation. The
+    server now labels each row and the page renders what it is given.
+    """
+    _post_call(
+        "category-on-row",
+        "Acme-Invoicing",
+        tool_name="write_to_file",
+        action_type="FILE_WRITE",
+        arguments={"file_path": "src/domain/thing.py", "content": "import boto3"},
+    )
+    response = lambda_handler(
+        {
+            "rawPath": "/prod/api/insights",
+            "headers": {},
+            "requestContext": {"http": {"method": "GET"}, "stage": "prod"},
+        }
+    )
+    rows = json.loads(response["body"])["recent_refusals"]
+    assert rows, "Nothing was refused, so this test proves nothing"
+    for row in rows:
+        assert row.get("category"), "Every refusal row must carry the category the server assigned"
+        assert row.get("category_label"), "And the label a reader sees"
