@@ -88,10 +88,33 @@ latency was measured. Nothing replaced them, because there is still no
 benchmark. There is also still no headline comparative number against a named
 baseline, which is the largest remaining gap for scoring.
 
-**Other live weaknesses, unfixed and known.** The cost breaker trusts the token
-counts the caller declares, so a caller reporting zero passes. The boundary
-guard is bypassable by moving a path into a differently named argument. Five
-regular expressions do the secret scanning, against tools that carry hundreds.
+**The perimeter is demo grade. Six of seven adversarial inputs passed the live
+gate** in an independent probe on 2026-09-20. This is the most serious finding
+and none of it is fixed.
+
+| Input sent to the live API | Verdict | Why it passed |
+|---|---|---|
+| Domain write of `import boto3` with `action_type` omitted | APPROVED | the handler defaults to `FILE_READ` and the guard only inspects `FILE_WRITE` |
+| Domain write of `from boto3 import client` | APPROVED | the guard matches substrings, so the other import form is unseen |
+| A temporary `ASIA` key and an `sk-proj-` key in a shell command | APPROVED | five regular expressions, neither pattern among them |
+| Reading `.env` passed under an argument named `filename` | APPROVED | only four argument names are inspected |
+| An A,A,B cycle repeated five times, one session | APPROVED | none of the three loop shapes describes it |
+| Twelve calls declaring zero projected tokens | APPROVED, session cost stayed at zero | the cost is whatever the caller declares |
+| One call declaring 200,000 output tokens | BLOCKED | the per-call cap does work |
+
+Two of these defeat the exact scenarios the README advertises. The repository
+also contains a stricter checker than the product ships: the pre-commit script
+parses imports with `ast`, while the live gate matches substrings, so the weaker
+engine is the one on the perimeter.
+
+The tests pass alongside these holes because each rule is asserted against the
+one literal the demo uses. There is no negative-variant coverage of the API gate
+at all, which is the gap to close first: a variant test per rule would have
+caught every row above.
+
+**The cost engine prices every session wrongly.** `TokenCostCalculator` carries
+per-model rates but is never given a model id, so the table is unreachable and
+all sessions are billed at the default Sonnet-class rate.
 
 ## Cost and teardown
 
