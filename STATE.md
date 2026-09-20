@@ -18,7 +18,7 @@ proof of a coding agent connected to the AWS console. Judging runs the weeks of
 | A visitor can run the demo | **PASS** | Walked in a browser: Scenario 1 dispatched three calls to the live backend, the third returned `BLOCKED_LOOP_DETECTED`, and the panel showed a genuine Haiku 4.5 sentence under the heading "Amazon Bedrock (Claude Haiku 4.5)" |
 | Reachable by the AI scorer | **PASS** | `STAGE` is unset so the middleware defaults to `dev` and enforces no key. Verified by unauthenticated request |
 | Proof of coding agent connected to AWS | **PASS** | `docs/PROOF_OF_AWS_AGENT.md` rewritten around the real session: the commands run, the two defects AWS surfaced, and the CloudTrail principal. Raw output in `docs/evidence/DEPLOYMENT_2026-09-20.md` |
-| Public repository | **BLOCKED, owner action** | Twenty-two commits on local `main`, no remote. One command, in `docs/RUNBOOK.md` step 2 |
+| Public repository | **BLOCKED, owner action** | Twenty-five commits on local `main`, no remote. One command, in `docs/RUNBOOK.md` step 2 |
 | Continuous delivery | **WRITTEN, role missing** | `.github/workflows/{ci,deploy,keepalive}.yml`. Deploy assumes `threefold-github-deploy`, which does not exist yet. Policy documents are committed at `deploy/iam/`, creation is `docs/RUNBOOK.md` step 1 |
 | Builder Center project, two tags | **NOT DONE** | Owner-gated. Requires Builder Center profile, Join, then the Create Project form |
 
@@ -38,7 +38,9 @@ proof of a coding agent connected to the AWS console. Judging runs the weeks of
 | A session id that must be escaped reads back | `GET /sessions/<urlencoded 'live console fixture <angle>'>` returns that session with its real project and call count, rather than creating an empty one |
 | The published contract is the real one | `/openapi.json` on the live stack returns all eleven paths including `/api/sessions`, and `/prod/swagger.html` renders twelve operations from it with no console error. Both used to fail: the document sat outside `CodeUri` so a two-line placeholder was served, and the page asked for a URL missing the stage prefix |
 | The spec names what is deployed | Its description said Claude 3.5 Sonnet while the stack runs `eu.anthropic.claude-haiku-4-5-20251001-v1:0`, and its only server was `127.0.0.1:8001`, so Try it out went to the reader's own laptop. Both corrected, and a test now reads the model family out of `deploy/template.yml` and fails if the document drifts from it |
-| Test suite | 124 passed in 3.2s, hermetic under `THREEFOLD_OFFLINE=1` |
+| Every page reaches the operation it calls | The four pages deep link into the document rather than at its cover: the dashboard lists the seven operations its buttons call, settings links `/policy/config`, the sessions console links `/api/sessions`, `/sessions/{id}` and the terminate route, and connect links `/evaluate-tool-call`. Walked on the live URL: following one opens Swagger UI with that operation expanded |
+| The links cannot drift from the routes | Swagger UI derives its anchors from method and path, so a renamed route would break every link pointing at it silently. A test rebuilds those anchors from the served document, extracts the endpoints the dashboard actually fetches, and fails when one is unlinked. Confirmed by deleting a single entry and watching it fail |
+| Test suite | 134 passed in 6.2s, hermetic under `THREEFOLD_OFFLINE=1`, and no longer order-dependent. Every test reaches `lambda_handler` from one address and shared a sixty-token rate-limit bucket, so once the suite grew past that count, unrelated tests began failing with 429 depending on the order they ran in. `tests/conftest.py` resets the bucket per test; the rate limiter's own tests build their own instance, so nothing is hidden |
 
 ## Known gaps, not yet fixed
 
