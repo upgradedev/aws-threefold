@@ -56,7 +56,9 @@ hidden in a document that a judge would read as finished work.
    the `budget_usd` each call declares, and the detector's cycle length is
    compiled in at six. `blocked_patterns` is the third: it is defined on the DTO
    and read by no module in `src/`, because the credential shapes the secret gate
-   matches live in the domain rules instead. `/settings.html` carries all three on
+   matches live in the domain rules instead. The POST handler builds the policy
+   from four fields, so a caller that sends a pattern list has it discarded and
+   the defaults echoed back as though they had been accepted. `/settings.html` carries all three on
    its face: the two numeric ones are badged "stored, not enforced", and the
    pattern list is shown read only with the reason. The remaining two keys are
    wired, and the breaker is now built from the policy rather than from its own
@@ -70,7 +72,10 @@ hidden in a document that a judge would read as finished work.
    as a file with nothing in it marking the document as simulated. The
    explanation box above it does say "Simulated, offline demo, no model was
    reached", but the certificate panel and the exported file do not, and the file
-   is what leaves the browser.
+   is what leaves the browser. This is not only the offline path: the live branch
+   returns early only when every call succeeds, so a non-2xx answer or a throw
+   anywhere in the sequence falls through to the same canned block, and the
+   visitor is shown the invented certificate with no error reported.
 4. Four of the five offline fallback panels still show canned prose. They now say
    "Simulated, offline demo, no model was reached" on their face, but the numbers
    inside them are invented and should be replaced with a real offline run.
@@ -140,12 +145,23 @@ traffic.
    across a working week, which is where the number comes from.
 3. The certificate is a fingerprint, not a signature. There is no KMS call and
    no key, so it detects corruption rather than an adversary, and nothing in CI
-   verifies one before a merge. **The dashboard still contradicts this**, in the
-   one place a visitor meets it: `src/threefold/web/index.html` calls it a
-   "signed SHA-256 Governance Certificate" on the scenario card, heads its panel
-   "Signed Governance Certificate", and on success logs "Received signed
-   Certificate … from DynamoDB & S3" although `AuditIssuer` writes it to neither.
-   The limitation is stated in the documents and denied in the product.
+   verifies one before a merge. That is stated in `docs/ARCHITECTURE.md`,
+   `docs/WELL_ARCHITECTED.md` and `docs/BUILDER_CENTER_ARTICLE.md`, and **denied
+   in four places a judge is more likely to read**:
+   - `docs/BUILDER_CENTER_ARTICLE.md` line 88, thirteen lines after stating the
+     limitation at line 75, says the certificate "is verified by CI/CD pipelines
+     as a required status check before any pull request is eligible for merging".
+     Nothing verifies one anywhere.
+   - `docs/SUBMISSION_DOSSIER.md` line 17, the judge-facing summary, calls it
+     "immutable", "archived in Amazon S3 and DynamoDB" and "verifiable via a
+     zero-dependency git pre-commit hook in CI/CD". `AuditIssuer` writes to
+     neither store and no such hook exists.
+   - `src/threefold/web/index.html` calls it a "signed SHA-256 Governance
+     Certificate" on the scenario card, heads its panel "Signed Governance
+     Certificate", and logs "Received signed Certificate … from DynamoDB & S3".
+   - `README.md` names it with no caveat.
+   The correction belongs in those four, not in the three that are already
+   honest.
 4. `TokenCostCalculator` is never given a model id, so every session is priced
    at the default Sonnet-class rate rather than the model actually in use.
 5. The cost gate trusts caller-declared token counts. A caller declaring zero is
