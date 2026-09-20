@@ -67,6 +67,7 @@ def test_the_testbook_is_reachable() -> None:
         ("/settings.html", "Threefold — Policy Settings"),
         ("/sessions.html", "Threefold — Governed Sessions"),
         ("/connect.html", "Threefold — Connect a Coding Agent"),
+        ("/console.html", "Threefold — Enforcement Console"),
     ],
 )
 def test_the_operator_pages_are_reachable(path: str, title: str) -> None:
@@ -77,7 +78,7 @@ def test_the_operator_pages_are_reachable(path: str, title: str) -> None:
     assert f"<title>{title}</title>" in response["body"]
 
 
-@pytest.mark.parametrize("path", ["/settings.html", "/sessions.html", "/connect.html"])
+@pytest.mark.parametrize("path", ["/settings.html", "/sessions.html", "/connect.html", "/console.html"])
 def test_the_operator_pages_are_told_the_api_base(path: str) -> None:
     """Each page calls the API itself, so each one needs the stage prefix injected."""
     response = _get(path)

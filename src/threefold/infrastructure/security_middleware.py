@@ -197,6 +197,7 @@ def validate_request_security(
         "/",
         "/index.html",
         "/connect.html",
+        "/console.html",
         "/sessions.html",
         "/settings.html",
         "/swagger.html",

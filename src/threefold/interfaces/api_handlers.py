@@ -65,6 +65,7 @@ WEB_ASSETS = {
     "/settings.html": "settings.html",
     "/sessions.html": "sessions.html",
     "/connect.html": "connect.html",
+    "/console.html": "console.html",
 }
 
 

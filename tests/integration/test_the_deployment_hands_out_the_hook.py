@@ -62,6 +62,7 @@ def test_the_hook_is_reachable_without_a_key() -> None:
         "/hooks/claude_code_hook.py",
         "/claude_code_hook.py",
         "/connect.html",
+        "/console.html",
         "/index.html",
         "/sessions.html",
         "/settings.html",

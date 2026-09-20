@@ -91,7 +91,7 @@ def categorise(row: Dict[str, Any]) -> str:
 def summarise(decisions: List[Dict[str, Any]], window_days: int) -> Dict[str, Any]:
     """Turns a list of ledger rows into the console's payload."""
     by_project: Dict[str, Dict[str, Any]] = defaultdict(
-        lambda: {"decisions": 0, "refused": 0, "cost_usd": 0.0, "developers": set(), "rules": Counter(), "last_seen": ""}
+        lambda: {"decisions": 0, "refused": 0, "developers": set(), "rules": Counter(), "categories": Counter(), "last_seen": ""}
     )
     by_developer: Dict[str, Dict[str, Any]] = defaultdict(
         lambda: {"decisions": 0, "refused": 0, "projects": set(), "last_seen": ""}
@@ -111,7 +111,6 @@ def summarise(decisions: List[Dict[str, Any]], window_days: int) -> Dict[str, An
         entry = by_project[project]
         entry["decisions"] += 1
         entry["developers"].add(developer)
-        entry["cost_usd"] = round(max(entry["cost_usd"], float(row.get("cost_usd", 0) or 0)), 4)
         entry["last_seen"] = max(entry["last_seen"], timestamp)
 
         person = by_developer[developer]
@@ -126,6 +125,7 @@ def summarise(decisions: List[Dict[str, Any]], window_days: int) -> Dict[str, An
         if refused:
             entry["refused"] += 1
             entry["rules"][row.get("rule", "UNKNOWN")] += 1
+            entry["categories"][categorise(row)] += 1
             person["refused"] += 1
             rule_counts[row.get("rule", "UNKNOWN")] += 1
             category_counts[categorise(row)] += 1
@@ -164,6 +164,10 @@ def summarise(decisions: List[Dict[str, Any]], window_days: int) -> Dict[str, An
                     "refusal_rate": round(data["refused"] / data["decisions"], 4) if data["decisions"] else 0.0,
                     "developers": len(data["developers"]),
                     "top_rule": data["rules"].most_common(1)[0][0] if data["rules"] else "",
+                    "top_category": data["categories"].most_common(1)[0][0] if data["categories"] else "",
+                    "top_category_label": CATEGORY_LABELS.get(
+                        data["categories"].most_common(1)[0][0], ""
+                    ) if data["categories"] else "",
                     "last_seen": data["last_seen"],
                 }
                 for project, data in by_project.items()

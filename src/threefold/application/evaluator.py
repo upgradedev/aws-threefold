@@ -258,7 +258,16 @@ class GovernanceEvaluator:
 
     @staticmethod
     def _rule_that_fired(result: EvaluationResultDTO) -> str:
-        """Names the gate that refused, or NONE when every gate passed."""
+        """Names the gate that refused, or NONE when every gate passed.
+
+        A call into a session that is already halted is refused by the session's
+        state, not by a gate. The verdict marks the budget invariant false for
+        every one of them, whatever did the halting, so a loop-halted session
+        would file all of its later refusals under budget and the console would
+        report a cost problem where there was a thrashing problem.
+        """
+        if (result.status or "").upper() == "BLOCKED_CIRCUIT_BREAKER":
+            return "SESSION_ALREADY_HALTED"
         for rule, passed in (result.rule_evaluations or {}).items():
             if not passed:
                 return rule

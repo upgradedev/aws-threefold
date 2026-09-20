@@ -225,3 +225,42 @@ def test_the_console_separates_a_crossed_layer_from_a_reached_credential_store()
     categories = {c["category"] for c in json.loads(response["body"])["by_category"]}
     assert "LAYERING" in categories
     assert "PROTECTED_PATH" in categories
+
+
+def test_the_console_page_reads_the_ledger_rather_than_computing_its_own() -> None:
+    """A page that recomputed totals could disagree with the record it shows."""
+    page = lambda_handler(
+        {
+            "rawPath": "/prod/console.html",
+            "headers": {},
+            "requestContext": {"http": {"method": "GET"}, "stage": "prod"},
+        }
+    )["body"]
+
+    assert "/api/insights" in page, "The console must read the aggregate the service computed"
+    for field in ("by_category", "by_project", "recent_refusals", "coverage"):
+        assert field in page, f"The console does not render {field}, which the endpoint returns for it"
+    assert "simulateLoop" not in page, "The console is not the demo harness"
+
+
+def test_a_call_into_a_halted_session_is_not_filed_as_a_budget_breach() -> None:
+    """Every later call in a halted session marks the budget invariant false.
+
+    Whatever did the halting, so a loop-halted session would file all of its
+    subsequent refusals under cost and the console would report a spend problem
+    where there was a thrashing problem.
+    """
+    evaluator = GovernanceEvaluator()
+    for _ in range(4):
+        _evaluate(
+            evaluator,
+            session_id="ledger-halted",
+            tool_name="edit_file",
+            action_type="FILE_WRITE",
+            arguments={"file_path": "src/ui/list.tsx", "old_string": "a", "new_string": "b"},
+        )
+
+    rules = [r["rule"] for r in evaluator.list_decisions(days=1) if r["session_id"] == "ledger-halted"]
+    assert "LOOP_THRASHING_FREE" in rules, "The halt itself is the loop detector's"
+    assert "SESSION_ALREADY_HALTED" in rules, "A call into a halted session is refused by the session, not by a gate"
+    assert "BUDGET_CIRCUIT_BREAKER_SAFE" not in rules, "Nothing here was a spend problem"
