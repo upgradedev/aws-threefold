@@ -15,6 +15,11 @@
       const DEFAULT_API_BASE = SERVED_BASE_PATH.indexOf("THREEFOLD_BASE_PATH") !== -1
         ? "http://localhost:8001"
         : location.origin + SERVED_BASE_PATH;
+      // Sibling pages sit under the same stage prefix, which a bare relative href
+      // loses when this page is reached without its trailing slash.
+      const PAGE_BASE = SERVED_BASE_PATH.indexOf("THREEFOLD_BASE_PATH") !== -1
+        ? ""
+        : location.origin + SERVED_BASE_PATH + "/";
 
     tailwind.config = {
       darkMode: 'class',
@@ -199,6 +204,13 @@
           </div>
           <span class="text-xs font-semibold px-3 py-1.5 rounded-lg bg-cyan-950 hover:bg-cyan-900 text-cyan-300 border border-cyan-800 transition whitespace-nowrap">Test Adapter ⚡</span>
         </button>
+      </div>
+
+      <!-- Every operation the buttons above call, linked to its entry in the
+           published contract rather than to the front page of the document. -->
+      <div class="border-t border-gray-800 pt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-gray-500">
+        <span class="text-gray-400">What these buttons call, in the contract:</span>
+        <span id="contract-strip" class="flex flex-wrap items-center gap-x-2 gap-y-1"></span>
       </div>
     </div>
 
@@ -771,7 +783,30 @@
       downloadAnchor.remove();
     }
 
+    // Every operation this page calls, with the anchor Swagger UI derives from a
+    // method and a path when a spec declares no operationIds. A reader following
+    // one of these lands on the operation rather than on the document's cover.
+    const CONTRACT_OPERATIONS = [
+      { label: 'GET /status', anchor: '#/default/get_status' },
+      { label: 'POST /simulate-loop', anchor: '#/default/post_simulate_loop' },
+      { label: 'POST /simulate-secret', anchor: '#/default/post_simulate_secret' },
+      { label: 'POST /evaluate-tool-call', anchor: '#/default/post_evaluate_tool_call' },
+      { label: 'POST /issue-certificate', anchor: '#/default/post_issue_certificate' },
+      { label: 'POST /adapter/universal-tool-call', anchor: '#/default/post_adapter_universal_tool_call' },
+      { label: 'POST /sessions/{id}/terminate', anchor: '#/default/post_sessions__session_id__terminate' }
+    ];
+
+    function renderContractStrip() {
+      document.getElementById('contract-strip').innerHTML = CONTRACT_OPERATIONS.map(op =>
+        '<a href="' + PAGE_BASE + 'swagger.html' + op.anchor + '" ' +
+        'title="Open this operation in the published OpenAPI document" ' +
+        'class="font-mono px-1.5 py-0.5 rounded bg-gray-950 border border-gray-800 text-purple-300 hover:text-purple-200 hover:border-purple-700 transition">' +
+        escapeHtml(op.label) + ' ↗</a>'
+      ).join('');
+    }
+
     // On Load: check if live API is available
+    renderContractStrip();
     checkApiHealth();
   </script>
 </body>

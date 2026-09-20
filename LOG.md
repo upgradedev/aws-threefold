@@ -42,3 +42,9 @@
 - The three pages already carried an `OpenAPI 3.1` entry in their nav. They now also deep link to the operation each page is built on: `/policy/config` from the settings page, `/api/sessions`, `/sessions/{id}` and the terminate route from the sessions console, `/evaluate-tool-call` from the connect page.
 - Anchors are the ones Swagger UI derives from method and path for a spec with no operationIds. A test rebuilds those anchors from the served document and fails if a page points at an operation the spec does not document, so renaming a route cannot silently break the links.
 - Tests 124 → 131.
+
+## 2026-09-20T21:06:00+03:00 — The dashboard links its own operations too
+- `index.html` carries a strip under the scenario buttons listing the seven operations those buttons call, each deep linked into the published document: `/status`, `/simulate-loop`, `/simulate-secret`, `/evaluate-tool-call`, `/issue-certificate`, `/adapter/universal-tool-call` and the terminate route.
+- A test extracts the endpoints the page actually fetches, matches each against the templated path in the served spec, and fails when one has no link. Removing a single entry from the strip was confirmed to fail it, so the guard is not vacuous.
+- Fixed a flakiness the new tests exposed rather than caused: every test arrives at `lambda_handler` from 127.0.0.1 and shares one sixty-token bucket, so once the suite grew past it, unrelated tests began failing with 429 depending on order. `tests/conftest.py` now resets that bucket per test. The rate limiter's own tests build their own instance, so nothing is hidden.
+- Tests 131 → 134.
