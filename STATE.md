@@ -149,23 +149,14 @@ traffic.
    across a working week, which is where the number comes from.
 3. The certificate is a fingerprint, not a signature. There is no KMS call and
    no key, so it detects corruption rather than an adversary, and nothing in CI
-   verifies one before a merge. That is stated in `docs/ARCHITECTURE.md`,
-   `docs/WELL_ARCHITECTED.md` and `docs/BUILDER_CENTER_ARTICLE.md`, and **denied
-   in four places a judge is more likely to read**:
-   - `docs/BUILDER_CENTER_ARTICLE.md` line 88, thirteen lines after stating the
-     limitation at line 75, says the certificate "is verified by CI/CD pipelines
-     as a required status check before any pull request is eligible for merging".
-     Nothing verifies one anywhere.
-   - `docs/SUBMISSION_DOSSIER.md` line 17, the judge-facing summary, calls it
-     "immutable", "archived in Amazon S3 and DynamoDB" and "verifiable via a
-     zero-dependency git pre-commit hook in CI/CD". `AuditIssuer` writes to
-     neither store and no such hook exists.
-   - `src/threefold/web/index.html` calls it a "signed SHA-256 Governance
-     Certificate" on the scenario card, heads its panel "Signed Governance
-     Certificate", and logs "Received signed Certificate … from DynamoDB & S3".
-   - `README.md` names it with no caveat.
-   The correction belongs in those four, not in the three that are already
-   honest.
+   verifies one before a merge. Every surface now says so, including the panel
+   where a visitor meets the document: the dashboard, the README, the submission
+   dossier, the Builder Center article, the video script and the docstrings in
+   `dtos.py`, `audit_issuer.py` and `s3_store.py` were each corrected after an
+   audit found them claiming a signature, S3 archival or CI verification. What
+   remains open is the thing itself: making a CI check refuse a pull request
+   whose session has no valid certificate, which is the work that would make the
+   certificate load-bearing rather than decorative.
 4. `TokenCostCalculator` is never given a model id, so every session is priced
    at the default Sonnet-class rate rather than the model actually in use.
 5. The API enforces no key, and that is load-bearing in two directions. `STAGE`
