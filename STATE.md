@@ -106,6 +106,14 @@ now refused, verified against the deployed stack rather than in tests alone.
 Ordinary work still passes: an edit outside the domain, and seven varied calls
 in a row, are approved on the live API.
 
+Unlike the tables above, the eight rows cite no command a reader could repeat:
+they were one-off probes against the deployed stack on 2026-09-20 and the
+transcripts were not kept. What is repeatable is the regression suite left
+behind, `tests/security/test_the_perimeter_holds.py` and
+`tests/integration/test_the_hook_governs_a_real_agent.py`, which carry all eight
+inputs, so the table's claim survives as tests even though its evidence does
+not survive as output.
+
 **The product now intercepts rather than rehearses.**
 [`hooks/claude_code_hook.py`](hooks/claude_code_hook.py) puts Threefold in front
 of a real Claude Code session. Confirmed end to end against the live stack: a
