@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  threefold:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8001:8001"
+    environment:
+      - STAGE=prod
+      - AWS_DEFAULT_REGION=eu-central-1
+      - THREEFOLD_API_KEYS=threefold-demo-key-2026
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/status')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3

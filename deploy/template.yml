@@ -1,0 +1,135 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Threefold Serverless Backend - AWS Zero to Shipped 2026 (#workplace-efficiency)
+
+Globals:
+  Function:
+    Timeout: 15
+    MemorySize: 256
+    Runtime: python3.11
+    Architectures:
+      - arm64
+    Environment:
+      Variables:
+        TABLE_NAME: !Ref ThreefoldTable
+        EVIDENCE_BUCKET: !Ref EvidenceBucket
+        LOG_LEVEL: INFO
+
+Resources:
+  ThreefoldHttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: prod
+      CorsConfiguration:
+        AllowMethods: ['GET', 'POST', 'OPTIONS']
+        AllowHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-API-Key']
+        AllowOrigins: ['*']
+
+  ThreefoldFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../src
+      Handler: threefold.interfaces.api_handlers.lambda_handler
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+                - bedrock:Converse
+              Resource: 'arn:aws:bedrock:*::foundation-model/anthropic.claude-3-5-sonnet-*'
+            - Effect: Allow
+              Action:
+                - dynamodb:PutItem
+                - dynamodb:GetItem
+                - dynamodb:UpdateItem
+                - dynamodb:Query
+              Resource: !GetAtt ThreefoldTable.Arn
+            - Effect: Allow
+              Action:
+                - s3:PutObject
+                - s3:GetObject
+              Resource: !Sub '${EvidenceBucket.Arn}/*'
+      Events:
+        StatusRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ThreefoldHttpApi
+            Path: /status
+            Method: GET
+        EvaluateRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ThreefoldHttpApi
+            Path: /evaluate-tool-call
+            Method: POST
+        SimulateLoopRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ThreefoldHttpApi
+            Path: /simulate-loop
+            Method: POST
+        SimulateSecretRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ThreefoldHttpApi
+            Path: /simulate-secret
+            Method: POST
+        CertificateRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ThreefoldHttpApi
+            Path: /issue-certificate
+            Method: POST
+
+  ThreefoldTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      SSESpecification:
+        SSEEnabled: true
+
+  EvidenceBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: AbortIncompleteMultipartUploadRule
+            Status: Enabled
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 7
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  ThreefoldLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${ThreefoldFunction}'
+      RetentionInDays: 30
+
+Outputs:
+  ApiEndpoint:
+    Description: HTTP API Gateway endpoint URL for Threefold
+    Value: !Sub 'https://${ThreefoldHttpApi}.execute-api.${AWS::Region}.amazonaws.com/prod'
+  LambdaFunctionArn:
+    Description: Threefold Lambda Function ARN
+    Value: !GetAtt ThreefoldFunction.Arn

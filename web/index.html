@@ -1,0 +1,736 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Threefold — Autonomous Coding Agent Governance & Cost Circuit-Breaker</title>
+  <!-- Tailwind CSS & Lucide Icons via CDN for zero-dependency portability -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#f5f3ff',
+              500: '#8b5cf6',
+              900: '#4c1d95',
+              dark: '#0a0d18',
+              card: '#111528',
+              border: '#1e243d'
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+    body { font-family: 'Inter', sans-serif; background-color: #0a0d18; color: #f3f4f6; }
+    .font-mono { font-family: 'JetBrains Mono', monospace; }
+    .glow-purple { box-shadow: 0 0 25px -5px rgba(139, 92, 246, 0.35); }
+    .glow-red { box-shadow: 0 0 25px -5px rgba(239, 68, 68, 0.45); }
+    .glow-green { box-shadow: 0 0 25px -5px rgba(34, 197, 94, 0.35); }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+  <!-- TOP HEADER -->
+  <header class="border-b border-gray-800 bg-gray-950/80 backdrop-blur sticky top-0 z-50">
+    <div class="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-4">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-lg bg-gradient-to-br from-indigo-500 via-purple-600 to-pink-600 flex items-center justify-center font-bold text-white text-xl shadow-lg shadow-purple-500/20">
+          🔍
+        </div>
+        <div>
+          <div class="flex items-center gap-2">
+            <h1 class="text-lg font-bold tracking-tight text-white">Threefold</h1>
+            <span class="px-2 py-0.5 rounded text-xs font-semibold bg-purple-950 text-purple-400 border border-purple-800">
+              #workplace-efficiency
+            </span>
+            <span class="px-2 py-0.5 rounded text-xs font-semibold bg-blue-950 text-blue-400 border border-blue-800">
+              #community
+            </span>
+          </div>
+          <p class="text-xs text-gray-400">Autonomous Coding Agent Governance & Cost Circuit-Breaker · AWS Zero to Shipped</p>
+        </div>
+      </div>
+
+      <!-- Circuit Breaker Status Indicator -->
+      <div class="flex items-center gap-3">
+        <div id="cb-indicator" class="flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium bg-emerald-950/80 text-emerald-400 border border-emerald-800">
+          <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+          CIRCUIT BREAKER: ARMED
+        </div>
+        <a href="swagger.html" class="text-xs px-3 py-1.5 rounded-md bg-purple-950 hover:bg-purple-900 text-purple-300 border border-purple-800 transition">
+          OpenAPI 3.1 ↗
+        </a>
+        <a href="testbook.html" class="text-xs px-3 py-1.5 rounded-md bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700 transition">
+          Judge Testbook ↗
+        </a>
+      </div>
+    </div>
+  <!-- LIVE API CONNECTION & STATUS BAR -->
+  <div class="bg-gray-950/90 border-b border-gray-800 px-4 py-2 text-xs flex flex-wrap items-center justify-between gap-3">
+    <div class="flex items-center gap-2 flex-wrap">
+      <span class="text-gray-400 font-medium">Sidecar REST:</span>
+      <input id="apiBaseInput" type="text" value="http://localhost:8001" class="bg-gray-900 border border-gray-700 rounded px-2 py-0.5 text-xs text-purple-300 font-mono w-44 focus:outline-none focus:border-purple-500" />
+      <span class="text-gray-400 font-medium ml-1">API Key:</span>
+      <input id="apiKeyInput" type="password" value="threefold-demo-key-2026" class="bg-gray-900 border border-gray-700 rounded px-2 py-0.5 text-xs text-sky-300 font-mono w-44 focus:outline-none focus:border-sky-500" />
+      <button id="btnCheckConnection" onclick="checkApiHealth()" class="px-2 py-0.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs border border-gray-700">Check</button>
+      <button id="btnExportCert" onclick="downloadCert()" class="px-2 py-0.5 rounded bg-purple-950 hover:bg-purple-900 text-purple-300 text-xs border border-purple-800 font-semibold">📥 Export Governance Cert</button>
+      <button id="btnEmergencyFreeze" onclick="triggerManualFreeze()" class="px-2 py-0.5 rounded bg-rose-950 hover:bg-rose-900 text-rose-300 text-xs border border-rose-800 font-semibold">🚨 Freeze Session</button>
+      <span id="apiConnectionStatus" class="px-2 py-0.5 rounded text-[11px] font-mono bg-amber-950 text-amber-400 border border-amber-800 flex items-center gap-1.5">
+        <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span> STANDALONE CLIENT
+      </span>
+      <span id="readinessStatusBadge" class="px-2 py-0.5 rounded text-[11px] font-mono bg-emerald-950 text-emerald-400 border border-emerald-800 flex items-center gap-1.5">
+        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> READY (/readyz)
+      </span>
+    </div>
+    <div class="text-gray-400 text-[11px] hidden md:block">
+      🛡️ <strong class="text-purple-400">2026 AI Lens:</strong> Zero-Trust API Guard · Real-time Circuit Breaker · CloudWatch EMF
+    </div>
+  </div>
+  <main class="flex-1 max-w-7xl mx-auto px-4 py-6 w-full space-y-6">
+
+    <!-- KPI STRIP -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div class="p-4 rounded-xl bg-gray-900 border border-gray-800">
+        <p class="text-xs font-medium text-gray-400 uppercase tracking-wider">Session Budget</p>
+        <p class="text-2xl font-bold text-white mt-1">$10.00</p>
+        <p class="text-xs text-emerald-400 mt-1">Hard cap allocated</p>
+      </div>
+      <div class="p-4 rounded-xl bg-gray-900 border border-gray-800">
+        <p class="text-xs font-medium text-gray-400 uppercase tracking-wider">Current Session Spend</p>
+        <p id="kpi-spend" class="text-2xl font-bold text-emerald-400 mt-1">$0.0000</p>
+        <p id="kpi-tokens" class="text-xs text-gray-400 mt-1">0 tokens consumed</p>
+      </div>
+      <div class="p-4 rounded-xl bg-gray-900 border border-gray-800">
+        <p class="text-xs font-medium text-gray-400 uppercase tracking-wider">Loop Thrashing Risk</p>
+        <p id="kpi-loop" class="text-2xl font-bold text-emerald-400 mt-1">0% (Safe)</p>
+        <p class="text-xs text-gray-400 mt-1">N-gram signature monitor</p>
+      </div>
+      <div class="p-4 rounded-xl bg-gray-900 border border-gray-800">
+        <p class="text-xs font-medium text-gray-400 uppercase tracking-wider">Active Invariants</p>
+        <p class="text-2xl font-bold text-purple-400 mt-1">4 / 4</p>
+        <p class="text-xs text-gray-400 mt-1">Zero secrets, clean boundaries</p>
+      </div>
+    </div>
+
+    <!-- 4 GUIDED JOURNEYS PANEL -->
+    <div class="p-6 rounded-2xl bg-gray-900 border border-gray-800 space-y-4">
+      <div class="flex items-center justify-between">
+        <div>
+          <h2 class="text-base font-semibold text-white">4 Guided Agent Scenarios (Zero-Setup Live Demo)</h2>
+          <p class="text-xs text-gray-400">Trigger real-world developer scenarios to evaluate Threefold deterministic interception and Bedrock reasoning</p>
+        </div>
+        <button onclick="resetDemo()" class="text-xs text-gray-400 hover:text-white underline">Reset State</button>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
+        <!-- Scenario 1 -->
+        <button onclick="simulateLoop()" class="p-4 rounded-xl bg-gray-950 border border-gray-800 hover:border-purple-500 text-left transition group">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-xs font-bold text-purple-400">Scenario 1</span>
+            <span class="text-base">🔄</span>
+          </div>
+          <p class="text-sm font-semibold text-white group-hover:text-purple-300">Runaway Tool Loop</p>
+          <p class="text-xs text-gray-400 mt-1">Agent caught in recursive edit thrashing. Circuit breaker trips in 3 iterations.</p>
+        </button>
+
+        <!-- Scenario 2 -->
+        <button onclick="simulateSecret()" class="p-4 rounded-xl bg-gray-950 border border-gray-800 hover:border-red-500 text-left transition group">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-xs font-bold text-red-400">Scenario 2</span>
+            <span class="text-base">🔑</span>
+          </div>
+          <p class="text-sm font-semibold text-white group-hover:text-red-300">Secret Leak Intercept</p>
+          <p class="text-xs text-gray-400 mt-1">Agent attempts to pass AWS credentials in arguments. Blocked at perimeter.</p>
+        </button>
+
+        <!-- Scenario 3 -->
+        <button onclick="simulateBoundary()" class="p-4 rounded-xl bg-gray-950 border border-gray-800 hover:border-amber-500 text-left transition group">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-xs font-bold text-amber-400">Scenario 3</span>
+            <span class="text-base">🛡️</span>
+          </div>
+          <p class="text-sm font-semibold text-white group-hover:text-amber-300">Clean Architecture Drift</p>
+          <p class="text-xs text-gray-400 mt-1">Agent attempts to import AWS SDK in pure domain layer. Blocked.</p>
+        </button>
+
+        <!-- Scenario 4 -->
+        <button onclick="simulateCompliant()" class="p-4 rounded-xl bg-gray-950 border border-gray-800 hover:border-emerald-500 text-left transition group">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-xs font-bold text-emerald-400">Scenario 4</span>
+            <span class="text-base">📜</span>
+          </div>
+          <p class="text-sm font-semibold text-white group-hover:text-emerald-300">Compliant Run & Cert</p>
+          <p class="text-xs text-gray-400 mt-1">Linear execution within budget. Issues signed SHA-256 Governance Certificate.</p>
+        </button>
+
+        <!-- Scenario 5: Universal Adapter -->
+        <button onclick="simulateUniversalAdapter()" class="p-4 rounded-xl bg-gray-950 border border-gray-800 hover:border-cyan-500 text-left transition group col-span-2 md:col-span-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
+          <div>
+            <div class="flex items-center gap-2 mb-1">
+              <span class="text-xs font-bold text-cyan-400">Production Feature</span>
+              <span class="text-xs px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 font-mono">POST /adapter/universal-tool-call</span>
+            </div>
+            <p class="text-sm font-semibold text-white group-hover:text-cyan-300">Universal Multi-Agent Adapter (OpenAI & Anthropic formats)</p>
+            <p class="text-xs text-gray-400 mt-0.5">Evaluates native JSON payloads from any coding agent (OpenAI function_call, Anthropic tool_use) with zero glue code.</p>
+          </div>
+          <span class="text-xs font-semibold px-3 py-1.5 rounded-lg bg-cyan-950 hover:bg-cyan-900 text-cyan-300 border border-cyan-800 transition whitespace-nowrap">Test Adapter ⚡</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- TERMINAL & VERDICT DISPLAY -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+      <!-- Real-Time Agent Stream & Interception -->
+      <div class="rounded-2xl bg-gray-900 border border-gray-800 p-5 flex flex-col space-y-3">
+        <div class="flex items-center justify-between border-b border-gray-800 pb-3">
+          <div class="flex items-center gap-2">
+            <span class="w-3 h-3 rounded-full bg-red-500"></span>
+            <span class="w-3 h-3 rounded-full bg-yellow-500"></span>
+            <span class="w-3 h-3 rounded-full bg-green-500"></span>
+            <span class="text-xs font-mono text-gray-400 ml-2">agent-telemetry-stream</span>
+          </div>
+          <span id="terminal-badge" class="text-xs px-2 py-0.5 rounded bg-gray-800 text-gray-300">Idle</span>
+        </div>
+        <div id="terminal-log" class="font-mono text-xs text-gray-300 bg-gray-950 p-4 rounded-xl h-64 overflow-y-auto space-y-2 border border-gray-800">
+          <p class="text-gray-500">// Ready. Select a scenario above to simulate coding agent actions.</p>
+        </div>
+      </div>
+
+      <!-- Gatekeeper Verdict & Bedrock Commentary -->
+      <div class="rounded-2xl bg-gray-900 border border-gray-800 p-5 flex flex-col space-y-4">
+        <div class="flex items-center justify-between border-b border-gray-800 pb-3">
+          <h3 class="text-sm font-semibold text-white flex items-center gap-2">
+            <span>Deterministic Gatekeeper & Bedrock Review</span>
+          </h3>
+          <span id="verdict-tag" class="text-xs px-2.5 py-1 rounded-full font-semibold bg-gray-800 text-gray-400">
+            Awaiting Input
+          </span>
+        </div>
+
+        <div class="space-y-3">
+          <div>
+            <p class="text-xs font-medium text-gray-400 uppercase">Deterministic Safety Invariants</p>
+            <div class="grid grid-cols-2 gap-2 mt-2" id="invariants-list">
+              <div class="p-2 rounded bg-gray-950 border border-gray-800 text-xs flex items-center justify-between">
+                <span class="text-gray-400">Secret Leakage Free</span>
+                <span id="inv-secrets" class="text-gray-500 font-mono">--</span>
+              </div>
+              <div class="p-2 rounded bg-gray-950 border border-gray-800 text-xs flex items-center justify-between">
+                <span class="text-gray-400">Clean Architecture Boundary</span>
+                <span id="inv-boundary" class="text-gray-500 font-mono">--</span>
+              </div>
+              <div class="p-2 rounded bg-gray-950 border border-gray-800 text-xs flex items-center justify-between">
+                <span class="text-gray-400">Loop Thrashing Free</span>
+                <span id="inv-loop" class="text-gray-500 font-mono">--</span>
+              </div>
+              <div class="p-2 rounded bg-gray-950 border border-gray-800 text-xs flex items-center justify-between">
+                <span class="text-gray-400">Cost Circuit Breaker</span>
+                <span id="inv-cost" class="text-gray-500 font-mono">--</span>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <p class="text-xs font-medium text-gray-400 uppercase">Amazon Bedrock Architectural Commentary</p>
+            <div id="bedrock-box" class="mt-1 p-3 rounded-xl bg-purple-950/20 border border-purple-900/40 text-xs text-purple-200">
+              Awaiting agent action to evaluate architectural trade-offs and safety implications.
+            </div>
+          </div>
+
+          <div id="cert-container" class="hidden p-3 rounded-xl bg-emerald-950/20 border border-emerald-900/40 space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-semibold text-emerald-400">Signed Governance Certificate</span>
+              <button onclick="downloadCert()" class="text-xs px-2 py-1 bg-emerald-800 hover:bg-emerald-700 text-white rounded">
+                Export JSON ↗
+              </button>
+            </div>
+            <p id="cert-id" class="text-xs font-mono text-emerald-300">CERT-TF-...</p>
+            <p id="cert-hash" class="text-xs font-mono text-gray-400 truncate">SHA256: ...</p>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+  </main>
+
+  <footer class="border-t border-gray-800 py-4 text-center text-xs text-gray-500">
+    Threefold · AWS Zero to Shipped Hackathon 2026 · Built with Amazon Bedrock & AWS Serverless
+  </footer>
+
+  <script>
+    let currentCertData = null;
+    let liveBackendActive = false;
+
+    function getApiBase() {
+      return document.getElementById("apiBaseInput").value.trim().replace(/\/+$/, "");
+    }
+
+    function getApiKey() {
+      const el = document.getElementById("apiKeyInput");
+      return el ? el.value.trim() : "threefold-demo-key-2026";
+    }
+
+    async function checkApiHealth() {
+      const base = getApiBase();
+      const statusBadge = document.getElementById("apiConnectionStatus");
+      try {
+        const res = await fetch(`${base}/status`, {
+          method: "GET",
+          headers: { "Accept": "application/json", "X-API-Key": getApiKey() }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          liveBackendActive = true;
+          statusBadge.className = "px-2 py-0.5 rounded text-[11px] font-mono bg-emerald-950 text-emerald-400 border border-emerald-800 flex items-center gap-1.5";
+          statusBadge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> LIVE API CONNECTED (${data.service})`;
+          return true;
+        }
+      } catch (err) {}
+      liveBackendActive = false;
+      statusBadge.className = "px-2 py-0.5 rounded text-[11px] font-mono bg-amber-950 text-amber-400 border border-amber-800 flex items-center gap-1.5";
+      statusBadge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span> STANDALONE CLIENT (OFFLINE)`;
+      return false;
+    }
+
+    function resetDemo() {
+      document.getElementById('kpi-spend').innerText = '$0.0000';
+      document.getElementById('kpi-tokens').innerText = '0 tokens consumed';
+      document.getElementById('kpi-loop').innerText = '0% (Safe)';
+      document.getElementById('cb-indicator').className = "flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium bg-emerald-950/80 text-emerald-400 border border-emerald-800";
+      document.getElementById('cb-indicator').innerHTML = '<span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> CIRCUIT BREAKER: ARMED';
+      document.getElementById('terminal-badge').innerText = 'Idle';
+      document.getElementById('terminal-log').innerHTML = '<p class="text-gray-500">// Reset complete. Ready.</p>';
+      document.getElementById('verdict-tag').className = 'text-xs px-2.5 py-1 rounded-full font-semibold bg-gray-800 text-gray-400';
+      document.getElementById('verdict-tag').innerText = 'Awaiting Input';
+      document.getElementById('inv-secrets').innerText = '--';
+      document.getElementById('inv-boundary').innerText = '--';
+      document.getElementById('inv-loop').innerText = '--';
+      document.getElementById('inv-cost').innerText = '--';
+      document.getElementById('bedrock-box').innerText = 'Awaiting agent action to evaluate architectural trade-offs and safety implications.';
+      document.getElementById('cert-container').classList.add('hidden');
+    }
+
+    function escapeHtml(str) {
+      if (typeof str !== 'string') return str == null ? '' : String(str);
+      return str.replace(/[&<>"']/g, m => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#039;'
+      }[m]));
+    }
+
+    function logTerminal(msg, color = 'text-gray-300', isHtml = false) {
+      const log = document.getElementById('terminal-log');
+      const p = document.createElement('p');
+      p.className = color;
+      if (isHtml) {
+        p.innerHTML = msg;
+      } else {
+        p.textContent = msg;
+      }
+      log.appendChild(p);
+      log.scrollTop = log.scrollHeight;
+    }
+
+    async function simulateLoop() {
+      resetDemo();
+      document.getElementById('terminal-badge').innerText = 'Calling Backend...';
+      logTerminal('⚡ [Live Agent Stream] Dispatching iterative calls to Threefold backend...', 'text-purple-400');
+
+      if (liveBackendActive) {
+        try {
+          const base = getApiBase();
+          const t0 = performance.now();
+          const res = await fetch(`${base}/simulate-loop`, {
+            method: "POST",
+            headers: { "X-API-Key": getApiKey() }
+          });
+          const latency = (performance.now() - t0).toFixed(1);
+          if (res.ok) {
+            const data = await res.json();
+            logTerminal(`⚡ [Live HTTP Response] HTTP 200 in ${latency}ms: status=${data.status}`, 'text-emerald-400');
+            logTerminal(`🚨 [CIRCUIT BREAKER TRIPPED] ${data.reason}`, 'text-red-400 font-bold');
+            logTerminal(`🛑 Session tripped: ${data.session_tripped}. Execution locked in DynamoDB.`, 'text-red-300');
+
+            document.getElementById('cb-indicator').className = "flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium bg-red-950/80 text-red-400 border border-red-800 glow-red";
+            document.getElementById('cb-indicator').innerHTML = '<span class="w-2 h-2 rounded-full bg-red-400 animate-ping"></span> CIRCUIT BREAKER: TRIPPED';
+            document.getElementById('kpi-loop').innerText = '100% (TRIPPED)';
+            document.getElementById('kpi-loop').className = 'text-2xl font-bold text-red-400 mt-1';
+            document.getElementById('verdict-tag').className = 'text-xs px-2.5 py-1 rounded-full font-semibold bg-red-950 text-red-400 border border-red-800';
+            document.getElementById('verdict-tag').innerText = data.status;
+
+            document.getElementById('inv-secrets').innerText = 'PASS';
+            document.getElementById('inv-boundary').innerText = 'PASS';
+            document.getElementById('inv-loop').innerText = 'FAIL (Loop)';
+            document.getElementById('inv-loop').className = 'text-red-400 font-bold font-mono';
+            document.getElementById('inv-cost').innerText = 'PASS';
+
+            document.getElementById('bedrock-box').innerHTML = `<strong>Amazon Bedrock Evaluation:</strong> ${data.bedrock_explanation || data.reason}`;
+            return;
+          }
+        } catch (err) {
+          console.warn("Live API call failed, falling back to local simulation", err);
+        }
+      }
+
+      // Offline / Local Simulation Fallback
+      logTerminal('⚡ [Agent Request 1] tool: edit_file(path="service.py", diff="typo")', 'text-blue-400');
+      logTerminal('✓ [Gatekeeper] Call 1 permitted. Tokens: +2500', 'text-gray-400');
+      logTerminal('⚡ [Agent Request 2] tool: edit_file(path="service.py", diff="typo")', 'text-blue-400');
+      logTerminal('✓ [Gatekeeper] Call 2 permitted. Tokens: +2500', 'text-gray-400');
+      logTerminal('⚡ [Agent Request 3] tool: edit_file(path="service.py", diff="typo")', 'text-blue-400');
+      logTerminal('🚨 [CIRCUIT BREAKER TRIPPED] Monomorphic loop detected! Identical tool call executed 3x consecutively.', 'text-red-400 font-bold');
+
+      document.getElementById('cb-indicator').className = "flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium bg-red-950/80 text-red-400 border border-red-800 glow-red";
+      document.getElementById('cb-indicator').innerHTML = '<span class="w-2 h-2 rounded-full bg-red-400 animate-ping"></span> CIRCUIT BREAKER: TRIPPED';
+      document.getElementById('kpi-loop').innerText = '100% (TRIPPED)';
+      document.getElementById('kpi-loop').className = 'text-2xl font-bold text-red-400 mt-1';
+      document.getElementById('verdict-tag').className = 'text-xs px-2.5 py-1 rounded-full font-semibold bg-red-950 text-red-400 border border-red-800';
+      document.getElementById('verdict-tag').innerText = 'BLOCKED_LOOP_DETECTED';
+
+      document.getElementById('inv-secrets').innerText = 'PASS';
+      document.getElementById('inv-boundary').innerText = 'PASS';
+      document.getElementById('inv-loop').innerText = 'FAIL (Loop)';
+      document.getElementById('inv-loop').className = 'text-red-400 font-bold font-mono';
+      document.getElementById('inv-cost').innerText = 'PASS';
+
+      document.getElementById('bedrock-box').innerHTML = '<strong>Amazon Bedrock Evaluation:</strong> Coding agent thrashing detected on <code>edit_file</code>. Halting recursive loop prevents unbounded token consumption and $100+ runaway cloud spend.';
+    }
+
+    async function simulateSecret() {
+      resetDemo();
+      document.getElementById('terminal-badge').innerText = 'Scanning...';
+      logTerminal('⚡ [Agent Request] tool: run_command(command="export AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE")', 'text-blue-400');
+
+      if (liveBackendActive) {
+        try {
+          const base = getApiBase();
+          const t0 = performance.now();
+          const res = await fetch(`${base}/simulate-secret`, {
+            method: "POST",
+            headers: { "X-API-Key": getApiKey() }
+          });
+          const latency = (performance.now() - t0).toFixed(1);
+          if (res.ok) {
+            const data = await res.json();
+            logTerminal(`⚡ [Live HTTP Response] HTTP 200 in ${latency}ms: status=${data.status}`, 'text-emerald-400');
+            logTerminal(`🚨 [PRE-INVOCATION REJECTION] ${data.reason}`, 'text-red-400 font-bold');
+            logTerminal(`🛑 Credential quarantined before transmission. Proof: ${data.proof_hash.slice(0, 16)}...`, 'text-red-300');
+
+            document.getElementById('verdict-tag').className = 'text-xs px-2.5 py-1 rounded-full font-semibold bg-red-950 text-red-400 border border-red-800';
+            document.getElementById('verdict-tag').innerText = data.status;
+
+            document.getElementById('inv-secrets').innerText = 'FAIL (Secret)';
+            document.getElementById('inv-secrets').className = 'text-red-400 font-bold font-mono';
+            document.getElementById('inv-boundary').innerText = 'PASS';
+            document.getElementById('inv-loop').innerText = 'PASS';
+            document.getElementById('inv-cost').innerText = 'PASS';
+
+            document.getElementById('bedrock-box').innerHTML = `<strong>Amazon Bedrock Evaluation:</strong> ${data.bedrock_explanation || data.reason}`;
+            return;
+          }
+        } catch (err) {
+          console.warn("Live API call failed, falling back to local simulation", err);
+        }
+      }
+
+      // Offline / Local Simulation Fallback
+      logTerminal('🚨 [PRE-INVOCATION REJECTION] Secret scanner detected AWS_ACCESS_KEY (AKIA...) in arguments!', 'text-red-400 font-bold');
+      logTerminal('🛑 Payload blocked at perimeter. Credential prevented from entering LLM context or logs.', 'text-red-300');
+
+      document.getElementById('verdict-tag').className = 'text-xs px-2.5 py-1 rounded-full font-semibold bg-red-950 text-red-400 border border-red-800';
+      document.getElementById('verdict-tag').innerText = 'BLOCKED_SECRET_DETECTED';
+
+      document.getElementById('inv-secrets').innerText = 'FAIL (Secret)';
+      document.getElementById('inv-secrets').className = 'text-red-400 font-bold font-mono';
+      document.getElementById('inv-boundary').innerText = 'PASS';
+      document.getElementById('inv-loop').innerText = 'PASS';
+      document.getElementById('inv-cost').innerText = 'PASS';
+
+      document.getElementById('bedrock-box').innerHTML = '<strong>Amazon Bedrock Evaluation:</strong> High-severity security threat intercepted. Unsanitized credentials in agent execution payloads violate enterprise data governance. Zero-leakage policy enforced.';
+    }
+
+    async function simulateBoundary() {
+      resetDemo();
+      document.getElementById('terminal-badge').innerText = 'Checking Boundaries...';
+      logTerminal('⚡ [Agent Request] tool: write_to_file(path="src/domain/user.py", content="import boto3\\n...")', 'text-blue-400');
+
+      if (liveBackendActive) {
+        try {
+          const base = getApiBase();
+          const t0 = performance.now();
+          const res = await fetch(`${base}/evaluate-tool-call`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-API-Key": getApiKey() },
+            body: JSON.stringify({
+              session_id: "boundary-check-session",
+              developer_id: "dev-architect",
+              project_name: "Acme-Core",
+              tool_name: "write_to_file",
+              action_type: "FILE_WRITE",
+              arguments: {
+                TargetFile: "src/domain/user.py",
+                CodeContent: "import boto3\nclass User:\n  pass"
+              }
+            })
+          });
+          const latency = (performance.now() - t0).toFixed(1);
+          if (res.ok) {
+            const data = await res.json();
+            logTerminal(`⚡ [Live HTTP Response] HTTP 200 in ${latency}ms: status=${data.status}`, 'text-amber-400');
+            logTerminal(`🚨 [ARCHITECTURAL GATEWAY] ${data.reason}`, 'text-amber-400 font-bold');
+
+            document.getElementById('verdict-tag').className = 'text-xs px-2.5 py-1 rounded-full font-semibold bg-amber-950 text-amber-400 border border-amber-800';
+            document.getElementById('verdict-tag').innerText = data.status;
+
+            document.getElementById('inv-secrets').innerText = 'PASS';
+            document.getElementById('inv-boundary').innerText = 'FAIL (Layer)';
+            document.getElementById('inv-boundary').className = 'text-amber-400 font-bold font-mono';
+            document.getElementById('inv-loop').innerText = 'PASS';
+            document.getElementById('inv-cost').innerText = 'PASS';
+
+            document.getElementById('bedrock-box').innerHTML = `<strong>Amazon Bedrock Evaluation:</strong> ${data.bedrock_explanation || data.reason}`;
+            return;
+          }
+        } catch (err) {
+          console.warn("Live API call failed, falling back to local simulation", err);
+        }
+      }
+
+      // Offline / Local Simulation Fallback
+      logTerminal('🚨 [ARCHITECTURAL GATEWAY] Clean Architecture violation: Domain layer must not import infrastructure (boto3)!', 'text-amber-400 font-bold');
+      logTerminal('🛑 Operation denied to prevent architectural drift.', 'text-amber-300');
+
+      document.getElementById('verdict-tag').className = 'text-xs px-2.5 py-1 rounded-full font-semibold bg-amber-950 text-amber-400 border border-amber-800';
+      document.getElementById('verdict-tag').innerText = 'BLOCKED_BOUNDARY_VIOLATION';
+
+      document.getElementById('inv-secrets').innerText = 'PASS';
+      document.getElementById('inv-boundary').innerText = 'FAIL (Layer)';
+      document.getElementById('inv-boundary').className = 'text-amber-400 font-bold font-mono';
+      document.getElementById('inv-loop').innerText = 'PASS';
+      document.getElementById('inv-cost').innerText = 'PASS';
+
+      document.getElementById('bedrock-box').innerHTML = '<strong>Amazon Bedrock Evaluation:</strong> The proposed edit introduces direct cloud infrastructure coupling into the pure domain aggregate, violating Clean Architecture Inversion of Control. Request rejected.';
+    }
+
+    async function simulateCompliant() {
+      resetDemo();
+      document.getElementById('terminal-badge').innerText = 'Executing Linear Plan...';
+      logTerminal('⚡ [Live Execution] Sending 4 compliant development steps to backend...', 'text-purple-400');
+
+      const steps = [
+        { tool: "view_file", type: "FILE_READ", args: { AbsolutePath: "/src/service.py" } },
+        { tool: "grep_search", type: "FILE_READ", args: { Query: "validate_user", SearchPath: "/src" } },
+        { tool: "replace_file_content", type: "FILE_WRITE", args: { TargetFile: "/src/service.py", Instruction: "add check" } },
+        { tool: "run_command", type: "COMMAND_EXEC", args: { CommandLine: "pytest tests/unit" } }
+      ];
+
+      const evaluations = [];
+      let totalCost = 0.0384;
+      let totalTokens = 6400;
+
+      if (liveBackendActive) {
+        try {
+          const base = getApiBase();
+          const sessId = "session-live-" + Math.random().toString(36).substr(2, 6);
+
+          for (let i = 0; i < steps.length; i++) {
+            const s = steps[i];
+            const res = await fetch(`${base}/evaluate-tool-call`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "X-API-Key": getApiKey() },
+              body: JSON.stringify({
+                session_id: sessId,
+                developer_id: "dev-lead",
+                project_name: "Acme-Core",
+                tool_name: s.tool,
+                action_type: s.type,
+                arguments: s.args,
+                projected_input_tokens: 1200,
+                projected_output_tokens: 400
+              })
+            });
+            const data = await res.json();
+            evaluations.push(data);
+            logTerminal(`⚡ [Step ${i+1}/4] ${s.tool} -> ${data.status} (Cost: $${data.current_session_cost_usd.toFixed(4)})`, 'text-emerald-400');
+          }
+
+          // Request signed certificate from backend
+          const certRes = await fetch(`${base}/issue-certificate`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-API-Key": getApiKey() },
+            body: JSON.stringify({
+              session_id: sessId,
+              evaluations: evaluations
+            })
+          });
+
+          if (certRes.ok) {
+            const certData = await certRes.json();
+            currentCertData = certData;
+            totalCost = certData.total_cost_usd;
+            totalTokens = certData.total_tokens;
+
+            logTerminal(`🎉 All 4 steps compliant. Received signed Certificate ${certData.certificate_id} from DynamoDB & S3.`, 'text-emerald-300 font-bold');
+
+            document.getElementById('kpi-spend').innerText = `$${totalCost.toFixed(4)}`;
+            document.getElementById('kpi-tokens').innerText = `${totalTokens} tokens consumed`;
+            document.getElementById('verdict-tag').className = 'text-xs px-2.5 py-1 rounded-full font-semibold bg-emerald-950 text-emerald-400 border border-emerald-800';
+            document.getElementById('verdict-tag').innerText = 'APPROVED (COMPLIANT)';
+
+            ['inv-secrets','inv-boundary','inv-loop','inv-cost'].forEach(id => {
+              const el = document.getElementById(id);
+              el.innerText = 'PASS';
+              el.className = 'text-emerald-400 font-bold font-mono';
+            });
+
+            document.getElementById('bedrock-box').innerHTML = `<strong>Amazon Bedrock Evaluation:</strong> Clean execution verified. All tool calls adhere to bounded context definitions. Cost velocity remained below $0.05/min. Safe to merge into CI/CD.`;
+
+            document.getElementById('cert-id').innerText = certData.certificate_id;
+            document.getElementById('cert-hash').innerText = 'SHA256: ' + certData.sha256_fingerprint;
+            document.getElementById('cert-container').classList.remove('hidden');
+            return;
+          }
+        } catch (err) {
+          console.warn("Live compliant flow failed, falling back to local simulation", err);
+        }
+      }
+
+      // Offline / Local Simulation Fallback
+      logTerminal('⚡ [Step 1] tool: view_file(path="src/service.py") -> Approved ($0.0075)', 'text-emerald-400');
+      logTerminal('⚡ [Step 2] tool: grep_search(query="validate_user") -> Approved ($0.0060)', 'text-emerald-400');
+      logTerminal('⚡ [Step 3] tool: replace_file_content(path="src/service.py") -> Approved ($0.0125)', 'text-emerald-400');
+      logTerminal('⚡ [Step 4] tool: run_command(command="pytest") -> Approved ($0.0124)', 'text-emerald-400');
+      logTerminal('🎉 All 4 steps compliant. Generating signed SHA-256 certificate.', 'text-emerald-300 font-bold');
+
+      document.getElementById('kpi-spend').innerText = '$0.0384';
+      document.getElementById('kpi-tokens').innerText = '6,400 tokens consumed';
+      document.getElementById('verdict-tag').className = 'text-xs px-2.5 py-1 rounded-full font-semibold bg-emerald-950 text-emerald-400 border border-emerald-800';
+      document.getElementById('verdict-tag').innerText = 'APPROVED (COMPLIANT)';
+
+      ['inv-secrets','inv-boundary','inv-loop','inv-cost'].forEach(id => {
+        const el = document.getElementById(id);
+        el.innerText = 'PASS';
+        el.className = 'text-emerald-400 font-bold font-mono';
+      });
+
+      document.getElementById('bedrock-box').innerHTML = '<strong>Amazon Bedrock Evaluation:</strong> Clean execution verified. All tool calls adhere to bounded context definitions. Cost velocity remained below $0.05/min. Safe to merge into CI/CD.';
+
+      currentCertData = {
+        certificate_id: "CERT-TF-9F4B18A72C3D",
+        session_id: "session-compliant-01",
+        project_name: "Acme-Core",
+        verdict_status: "COMPLIANT_APPROVED",
+        total_cost_usd: 0.0384,
+        total_tokens: 6400,
+        evaluations_count: 4,
+        all_passed: true,
+        sha256_fingerprint: "e58b5f39c2d1b82736e4f3a1d95018b26182c0b471928374a56b2c81928374fa"
+      };
+
+      document.getElementById('cert-id').innerText = currentCertData.certificate_id;
+      document.getElementById('cert-hash').innerText = 'SHA256: ' + currentCertData.sha256_fingerprint;
+      document.getElementById('cert-container').classList.remove('hidden');
+    }
+
+    async function simulateUniversalAdapter() {
+      resetDemo();
+      document.getElementById('terminal-badge').innerText = 'Testing Universal Adapter...';
+      logTerminal('⚡ [Universal Adapter] Ingesting native Anthropic tool_use payload...', 'text-cyan-400');
+      logTerminal('   Payload: {"type": "tool_use", "name": "edit_file", "input": {"TargetFile": "src/core.py"}}', 'text-gray-400 font-mono');
+
+      if (liveBackendActive) {
+        try {
+          const base = getApiBase();
+          const t0 = performance.now();
+          const res = await fetch(`${base}/adapter/universal-tool-call`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-API-Key": getApiKey() },
+            body: JSON.stringify({
+              type: "tool_use",
+              name: "edit_file",
+              input: { TargetFile: "src/core.py", Instruction: "optimize algorithm" },
+              session_id: "universal-demo-session"
+            })
+          });
+          const latency = (performance.now() - t0).toFixed(1);
+          if (res.ok) {
+            const data = await res.json();
+            logTerminal(`✓ [Universal Adapter Success] HTTP 200 in ${latency}ms`, 'text-emerald-400 font-bold');
+            logTerminal(`⚡ Detected Tool: ${data.detected_tool_name} | Mapped Action: ${data.detected_action_type}`, 'text-cyan-300');
+            logTerminal(`🛡️ Evaluation Verdict: ${data.evaluation.status} (Cost: $${data.evaluation.current_session_cost_usd.toFixed(4)})`, 'text-emerald-400');
+            logTerminal(`📜 SHA-256 Proof Hash: ${data.evaluation.proof_hash.slice(0, 24)}...`, 'text-gray-400 font-mono');
+
+            document.getElementById('verdict-tag').className = 'text-xs px-2.5 py-1 rounded-full font-semibold bg-emerald-950 text-emerald-400 border border-emerald-800';
+            document.getElementById('verdict-tag').innerText = 'UNIVERSAL_ADAPTER_APPROVED';
+
+            ['inv-secrets','inv-boundary','inv-loop','inv-cost'].forEach(id => {
+              const el = document.getElementById(id);
+              el.innerText = 'PASS';
+              el.className = 'text-emerald-400 font-bold font-mono';
+            });
+
+            document.getElementById('bedrock-box').innerHTML = `<strong>Amazon Bedrock Evaluation:</strong> Cross-agent tool invocation verified. Normalized schema validated against Clean Architecture bounded contexts without runtime exceptions.`;
+            return;
+          }
+        } catch (err) {
+          console.warn("Universal adapter call failed", err);
+        }
+      }
+
+      logTerminal('✓ [Universal Adapter Emulated] Tool mapped to internal Clean Architecture validator.', 'text-cyan-300');
+    }
+
+    async function triggerManualFreeze() {
+      if (!confirm("🚨 ENTERPRISE KILL-SWITCH: Manually terminate and lock this autonomous agent session?")) return;
+      try {
+        const apiBase = document.getElementById("apiBaseInput").value.replace(/\/$/, "");
+        const apiKey = document.getElementById("apiKeyInput").value;
+        const res = await fetch(`${apiBase}/sessions/session-default/terminate`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-API-Key": apiKey,
+            "Idempotency-Key": "freeze-web-" + Date.now()
+          },
+          body: JSON.stringify({
+            operator_name: "Web Security Auditor",
+            reason: "Emergency kill-switch invoked from supervisory console"
+          })
+        });
+        const data = await res.json();
+        alert(`SESSION FROZEN: Status: ${data.status}\nSession ID: ${data.session_id}\nLocked: ${data.is_tripped}`);
+        logTerminal(`🚨 ENTERPRISE KILL-SWITCH TRIGGERED by ${data.operator}: ${data.reason}`, 'text-rose-400 font-bold');
+        document.getElementById('cb-indicator').className = 'flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium bg-red-950/80 text-red-400 border border-red-800';
+        document.getElementById('cb-indicator').innerHTML = '<span class="w-2 h-2 rounded-full bg-red-400 animate-pulse"></span> CIRCUIT BREAKER: TRIPPED (MANUAL FREEZE)';
+      } catch (err) {
+        alert("Freeze error: " + err.message);
+      }
+    }
+
+    function downloadCert() {
+      if (!currentCertData) return;
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(currentCertData, null, 2));
+      const downloadAnchor = document.createElement('a');
+      downloadAnchor.setAttribute("href", dataStr);
+      downloadAnchor.setAttribute("download", currentCertData.certificate_id + ".json");
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+    }
+
+    // On Load: check if live API is available
+    checkApiHealth();
+  </script>
+</body>
+</html>

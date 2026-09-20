@@ -1,0 +1,25 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Pytest / Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# AWS SAM build directory
+.aws-sam/
+
+# Environments & Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# IDE / OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
