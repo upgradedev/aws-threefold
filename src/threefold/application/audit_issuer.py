@@ -1,4 +1,4 @@
-"""Cryptographic certificate issuer for Threefold governance verification."""
+"""Certificate issuer for Threefold governance records, fingerprinted and unsigned."""
 from __future__ import annotations
 
 import hashlib
@@ -10,7 +10,11 @@ from threefold.domain.exceptions import EmptyAttestationException
 
 
 class AuditIssuer:
-    """Issues tamper-evident governance certificates for CI/CD pipelines and auditing."""
+    """Issues fingerprinted governance certificates over a session's verdicts.
+
+    Fingerprinted, not tamper-evident: the hash is unkeyed, so anyone who edits
+    the payload can recompute it. It catches corruption, not an adversary.
+    """
 
     @staticmethod
     def issue_certificate(

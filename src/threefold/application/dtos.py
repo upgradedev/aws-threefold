@@ -49,7 +49,11 @@ class EvaluationResultDTO:
 
 @dataclass
 class GovernanceCertificateDTO:
-    """Signed audit certificate summarizing compliant agent execution."""
+    """Audit certificate summarising a compliant agent execution.
+
+    The fingerprint is an unkeyed SHA-256 over the canonical payload. Nothing
+    signs it, so it detects corruption and casual edits rather than an adversary.
+    """
     certificate_id: str
     session_id: str
     developer_id: str

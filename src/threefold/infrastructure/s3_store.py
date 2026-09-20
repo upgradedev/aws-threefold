@@ -11,7 +11,12 @@ logger = logging.getLogger(__name__)
 
 
 class S3CertificateUploader:
-    """Uploads signed governance certificates to Amazon S3 for compliance and CI/CD gates."""
+    """Uploads a governance certificate to Amazon S3.
+
+    Nothing calls this today: the /issue-certificate route returns the document
+    and stores nothing, so the bucket the template provisions stays empty. The
+    class is kept as the shape archival would take, and it is not archival yet.
+    """
 
     def __init__(
         self,

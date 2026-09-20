@@ -56,7 +56,18 @@ def test_the_hook_is_reachable_without_a_key() -> None:
     """Putting the one artifact that matters behind a key nobody has is no use."""
     from threefold.infrastructure.security_middleware import validate_request_security
 
-    for path in ("/hooks/claude_code_hook.py", "/claude_code_hook.py"):
+    # The install page belongs here too: a dashboard whose every link answers 401
+    # is not a zero-setup visitor path.
+    for path in (
+        "/hooks/claude_code_hook.py",
+        "/claude_code_hook.py",
+        "/connect.html",
+        "/index.html",
+        "/sessions.html",
+        "/settings.html",
+        "/swagger.html",
+        "/testbook.html",
+    ):
         os.environ["ENFORCE_API_KEY"] = "true"
         try:
             allowed, problem = validate_request_security(headers={}, client_ip="203.0.113.7", path=path)

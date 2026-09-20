@@ -137,7 +137,7 @@ which puts Threefold in front of a real Claude Code session.
                                                                        ▼
                                                           ┌─────────────────────────┐
                                                           │ SHA-256 Audit Cert      │
-                                                          │ (DynamoDB & S3 Sealed)  │
+                                                          │ (returned, not stored)  │
                                                           └─────────────────────────┘
 ```
 
@@ -148,7 +148,7 @@ which puts Threefold in front of a real Claude Code session.
 - **Reasoning Engine:** Amazon Bedrock (Anthropic Claude Haiku 4.5 via the Converse API).
 - **Serverless Compute:** AWS Lambda (Python 3.11 on ARM64 Graviton2).
 - **Ingress & API:** Amazon API Gateway HTTP API with full CORS support.
-- **Audit Storage:** Amazon DynamoDB (Single-table session state) & Amazon S3 (Cryptographic evidence bundles).
+- **Audit Storage:** Amazon DynamoDB, single-table session state. The stack also provisions an S3 bucket for evidence bundles, and nothing writes to it: the certificate is returned in the response, and the session behind it is what persists.
 - **Frontend:** served by the same Lambda that answers the API, so one URL is the whole application. There is no CloudFront distribution in the stack.
 - **Standards:** Clean Architecture, Domain-Driven Design. The gates are pure standard-library Python with no model on the critical path, so the verdict does not wait on an LLM. No latency figure is quoted because none has been measured.
 

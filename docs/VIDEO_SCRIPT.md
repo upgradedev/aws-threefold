@@ -24,7 +24,7 @@
 ### Scene 2: The Architectural Axiom — "Deterministic Code Trips the Breaker, Bedrock Explains Why" (0:25 - 0:55)
 - **Visual:**
   - Architecture diagram showing:
-    `Agent Tool Invocation -> Universal Adapter (OpenAI / Anthropic) -> Deterministic Safety Invariants (Tokens, Loops, Boundaries, Secrets) -> Amazon Bedrock Reviewer -> DynamoDB & S3 Governance Certificate`.
+    `Agent Tool Invocation -> Universal Adapter (OpenAI / Anthropic) -> Deterministic Safety Invariants (Tokens, Loops, Boundaries, Secrets) -> Amazon Bedrock Reviewer -> Governance Certificate, returned to the caller, with the session in DynamoDB`.
   - Highlight that the deterministic gate decides, and Bedrock only explains the decision afterwards.
 - **Narration (Spoken):**
   > "Threefold is built on a clear architectural principle: *Deterministic code trips the circuit breaker; Amazon Bedrock explains why.*
@@ -65,11 +65,11 @@
     - Budget remaining updates smoothly ($14.92 / $15.00).
     - Status turns green: `APPROVED`.
     - Click **"📥 Export Governance Certificate"**.
-    - Open the downloaded JSON certificate showing the SHA-256 seal and list of verified invariants.
+    - Open the downloaded JSON certificate showing the SHA-256 fingerprint, the session it covers and how many verdicts it counts. It carries no list of invariants; the verdicts themselves are on the page behind it.
 - **Narration (Spoken):**
   > "Threefold is model-agnostic. With our Universal Multi-Agent Adapter, you can protect Claude Code, Cursor, Copilot, or OpenAI Swarm agents using their native payload schemas.
   > When an agent operates safely within boundaries, Threefold tracks the cost it was told about and issues a SHA-256 fingerprinted **Governance Certificate**.
-  > Teams can verify this certificate directly in their CI/CD deployment pipelines using our zero-dependency pre-commit hook script."
+  > Nothing verifies this certificate yet. The fingerprint is unkeyed, so it detects corruption rather than an adversary, and making a CI check refuse a pull request whose session has no valid certificate is the next piece of work."
 
 ---
 
@@ -91,6 +91,6 @@
 
 - [ ] Browser window 1: <https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/> (Threefold Interactive Console)
 - [ ] Browser window 2: `https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/swagger.html` (Swagger UI)
-- [ ] Terminal window: split pane showing pytest suite (`32 passed`), pre-commit hook execution, and live CloudWatch EMF logs
+- [ ] Terminal window: split pane showing pytest suite (`146 passed`), pre-commit hook execution, and live CloudWatch EMF logs
 - [ ] Audio: crisp microphone recording matching the scene timings
 - [ ] Final video duration: 2 minutes 35 seconds to 2 minutes 45 seconds (strictly < 3:00)

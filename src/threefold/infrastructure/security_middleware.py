@@ -112,11 +112,19 @@ def validate_request_security(
         )
 
     # 3. Public paths exemption
-    # The hook is handed out anonymously on purpose: a reader who cannot take the
-    # script cannot adopt the product, and a key requirement would put the one
-    # artifact that matters behind the one thing a visitor does not have.
+    # The pages and the hook are handed out anonymously on purpose: a reader who
+    # cannot open the install page or take the script cannot adopt the product,
+    # and a key requirement would put the artifacts that matter behind the one
+    # thing a visitor does not have. Only "/" used to be listed, so with keys
+    # enforced the dashboard opened and every link out of it answered 401.
     public_paths = {
         "/",
+        "/index.html",
+        "/connect.html",
+        "/sessions.html",
+        "/settings.html",
+        "/swagger.html",
+        "/testbook.html",
         "/status",
         "/health",
         "/docs",

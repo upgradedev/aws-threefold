@@ -69,25 +69,30 @@ hidden in a document that a judge would read as finished work.
 2. The `calls` count in the sessions listing saturates at 50, because the store
    keeps `history[-50:]`. Cost and tokens are cumulative and are not capped. The
    page says so rather than presenting 50 as a total.
-3. The certificate still covers verdicts the caller supplies. An empty list and
+3. Nothing writes to the S3 bucket the stack provisions. `S3CertificateUploader`
+   exists and is called by nothing, `EvidenceStore.create_sealed_bundle` only by
+   a test, so the bucket stays empty and the function carries an `s3:PutObject`
+   grant it never uses. Every document that claimed archival has been corrected;
+   the dead class and the unused grant are still there.
+4. The certificate still covers verdicts the caller supplies. An empty list and
    a session this service never governed are now both refused with 400, and the
    invariant sits in `AuditIssuer` so no caller can go around it, but the
    contents of the evaluations are still taken on the caller's word: a session
    with one real call can be certified with four invented ones. Issuing from the
    session's own stored history is the fix, and it is not done.
-4. Four of the five offline fallback panels still show canned prose. They now say
+5. Four of the five offline fallback panels still show canned prose. They now say
    "Simulated, offline demo, no model was reached" on their face, but the numbers
    inside them are invented and should be replaced with a real offline run.
-5. The loop detector compares signatures byte for byte. A signature is a SHA-256
+6. The loop detector compares signatures byte for byte. A signature is a SHA-256
    of the tool name and its sorted arguments, so a call that differs by one
    character is a different call and two semantically identical calls are not
    matched. Any repeating cycle of those signatures is caught, up to period six,
    which is what the audit table below means by an A, A, B cycle; what is missing
    is fuzzy or semantic matching. The README no longer claims entropy scanning,
    because there is no entropy code.
-6. No headline number exists yet. This is the largest remaining gap for judging:
+7. No headline number exists yet. This is the largest remaining gap for judging:
    the framing gate wants one comparative number against two named baselines.
-7. No video and no Builder Center article. Neither is required by the rules, but
+8. No video and no Builder Center article. Neither is required by the rules, but
    the Builder Center project itself is, and it is owner-gated.
 
 ## Audit and what was done about it, 2026-09-20
@@ -163,7 +168,15 @@ traffic.
    honest.
 4. `TokenCostCalculator` is never given a model id, so every session is priced
    at the default Sonnet-class rate rather than the model actually in use.
-5. The cost gate trusts caller-declared token counts. A caller declaring zero is
+5. The API enforces no key, and that is load-bearing in two directions. `STAGE`
+   is unset so the middleware defaults to `dev`, which is what lets an anonymous
+   judge and the AI scorer reach everything. It also means `POST /policy/config`
+   is anonymous, and that route writes through to DynamoDB under
+   `CONFIG#policy`, so a stranger can durably raise the loop threshold that is
+   this product's headline claim and every later container adopts it. Reads
+   should stay open; the write should not. Not fixed, and the trade-off belongs
+   to the owner because closing it wrong fails the ship gate's scorer row.
+6. The cost gate trusts caller-declared token counts. A caller declaring zero is
    not stopped. A proxy that meters real usage is the stronger control and this
    is not one.
 
