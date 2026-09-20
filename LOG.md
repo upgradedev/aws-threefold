@@ -52,5 +52,5 @@
 ## 2026-09-20T21:18:00+03:00 — Ledger reconciled with the last two passes
 - `STATE.md` gained two rows in what is measured: that every page reaches the operation it calls, walked on the live URL, and that a test rebuilds Swagger UI's anchors from the served document so a renamed route breaks a test rather than a link.
 - The test-suite row carries the rate limiter beside the count, because the count is what tipped it: the suite shares one sixty-token bucket and, past that many calls, unrelated tests failed with 429 depending on order. Stating the number without stating what it broke would have left the next person to rediscover it.
-- Corrected the commit count, which had been stale by two passes.
+- Corrected the commit count, which had been stale by two passes, and then removed it. A line stating a count inside a file that is itself committed is wrong again the moment it is written; it had been corrected three times in one session. `git log` holds the number, so the row now states what does not drift: `main` is local, there is no remote, and publishing is one command.
 - Documentation only. `STATE.md` and `LOG.md` sit outside `CodeUri: ../src`, so nothing shipped and the live stack stays on the commit verified at 21:06.
