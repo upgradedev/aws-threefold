@@ -99,3 +99,8 @@
 ## 2026-09-20T23:58:00+03:00 — The page says what it is before it shows numbers
 - `index.html` opened on four metric tiles for a session that did not exist yet, so a first-time reader met `$10.00` and `0% (Safe)` before meeting the problem. The only statement of purpose was a 12px line in the header.
 - A hero block now sits above the KPI strip, carrying the README's opening sentence verbatim, one paragraph on how the refusal works and who decides, and a link into the install path. Nothing new was written: the sentence was already in `README.md` and already true.
+
+## 2026-09-21T00:15:00+03:00 — Two things the page said that were not for the reader
+- The connection bar sat between the product name and the hero: an endpoint field, an API key box prefilled with `threefold-demo-key-2026`, an export button, a kill switch and a line reading "2026 AI Lens", all before a reader had been told what the product is. It is now a `<details>` whose summary carries the one thing a visitor needs, the live-connection badge, and the controls are one click behind it.
+- The prefilled key is gone. It was needed by nothing — the demo enforces no key — and a string that looks like a credential in a password field invites a reader to think one is required. Every call now builds its headers through `authHeaders()`, which omits `X-API-Key` entirely when the field is empty rather than sending it blank.
+- The scenario panel was headed "4 Guided Agent Scenarios" above five buttons. The heading no longer counts, and the subtitle says what is actually there: four scenarios and the universal adapter below them.

@@ -94,26 +94,41 @@
         </a>
       </div>
     </div>
-  <!-- LIVE API CONNECTION & STATUS BAR -->
-  <div class="bg-gray-950/90 border-b border-gray-800 px-4 py-2 text-xs flex flex-wrap items-center justify-between gap-3">
-    <div class="flex items-center gap-2 flex-wrap">
-      <span class="text-gray-400 font-medium">Sidecar REST:</span>
-      <input id="apiBaseInput" type="text" value="" class="bg-gray-900 border border-gray-700 rounded px-2 py-0.5 text-xs text-purple-300 font-mono w-44 focus:outline-none focus:border-purple-500" />
-      <span class="text-gray-400 font-medium ml-1">API Key:</span>
-      <input id="apiKeyInput" type="password" value="threefold-demo-key-2026" class="bg-gray-900 border border-gray-700 rounded px-2 py-0.5 text-xs text-sky-300 font-mono w-44 focus:outline-none focus:border-sky-500" />
-      <button id="btnCheckConnection" onclick="checkApiHealth()" class="px-2 py-0.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs border border-gray-700">Check</button>
-      <button id="btnExportCert" onclick="downloadCert()" class="px-2 py-0.5 rounded bg-purple-950 hover:bg-purple-900 text-purple-300 text-xs border border-purple-800 font-semibold">📥 Export Governance Cert</button>
-      <button id="btnEmergencyFreeze" onclick="triggerManualFreeze()" class="px-2 py-0.5 rounded bg-rose-950 hover:bg-rose-900 text-rose-300 text-xs border border-rose-800 font-semibold">🚨 Freeze Session</button>
-      <span id="apiConnectionStatus" class="px-2 py-0.5 rounded text-[11px] font-mono bg-amber-950 text-amber-400 border border-amber-800 flex items-center gap-1.5">
-        <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span> STANDALONE CLIENT
-      </span>
-      <span id="readinessStatusBadge" class="px-2 py-0.5 rounded text-[11px] font-mono bg-emerald-950 text-emerald-400 border border-emerald-800 flex items-center gap-1.5">
-        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> READY (/readyz)
-      </span>
-    </div>
-    <div class="text-gray-400 text-[11px] hidden md:block">
-      🛡️ <strong class="text-purple-400">2026 AI Lens:</strong> Zero-Trust API Guard · Real-time Circuit Breaker · CloudWatch EMF
-    </div>
+  <!-- LIVE API CONNECTION & STATUS BAR
+       A first-time reader used to meet an endpoint field, a prefilled key and
+       three operator buttons before meeting the product. What stays in the open
+       is the one thing that tells a visitor whether what they are about to press
+       is real; the controls are one click away, for whoever wants them. -->
+  <div class="bg-gray-950/90 border-b border-gray-800 px-4 py-2 text-xs">
+    <details id="connection-panel" class="group">
+      <summary class="flex flex-wrap items-center gap-3 cursor-pointer list-none marker:content-none">
+        <span id="apiConnectionStatus" class="px-2 py-0.5 rounded text-[11px] font-mono bg-amber-950 text-amber-400 border border-amber-800 flex items-center gap-1.5">
+          <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span> STANDALONE CLIENT
+        </span>
+        <span class="text-gray-400 group-open:hidden">Connection and operator controls</span>
+        <span class="text-gray-400 hidden group-open:inline">Connection and operator controls</span>
+        <span class="text-gray-600 group-open:hidden">▸</span>
+        <span class="text-gray-600 hidden group-open:inline">▾</span>
+      </summary>
+
+      <div class="flex flex-wrap items-center justify-between gap-3 pt-2 mt-2 border-t border-gray-800">
+        <div class="flex items-center gap-2 flex-wrap">
+          <span class="text-gray-400 font-medium">Sidecar REST:</span>
+          <input id="apiBaseInput" type="text" value="" class="bg-gray-900 border border-gray-700 rounded px-2 py-0.5 text-xs text-purple-300 font-mono w-44 focus:outline-none focus:border-purple-500" />
+          <span class="text-gray-400 font-medium ml-1">API Key:</span>
+          <input id="apiKeyInput" type="password" value="" placeholder="not needed for the demo" class="bg-gray-900 border border-gray-700 rounded px-2 py-0.5 text-xs text-sky-300 font-mono w-44 focus:outline-none focus:border-sky-500" />
+          <button id="btnCheckConnection" onclick="checkApiHealth()" class="px-2 py-0.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs border border-gray-700">Check</button>
+          <button id="btnExportCert" onclick="downloadCert()" class="px-2 py-0.5 rounded bg-purple-950 hover:bg-purple-900 text-purple-300 text-xs border border-purple-800 font-semibold">📥 Export Governance Cert</button>
+          <button id="btnEmergencyFreeze" onclick="triggerManualFreeze()" class="px-2 py-0.5 rounded bg-rose-950 hover:bg-rose-900 text-rose-300 text-xs border border-rose-800 font-semibold">🚨 Freeze Session</button>
+          <span id="readinessStatusBadge" class="px-2 py-0.5 rounded text-[11px] font-mono bg-emerald-950 text-emerald-400 border border-emerald-800 flex items-center gap-1.5">
+            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> READY (/readyz)
+          </span>
+        </div>
+        <div class="text-gray-400 text-[11px] hidden md:block">
+          🛡️ <strong class="text-purple-400">2026 AI Lens:</strong> Zero-Trust API Guard · Real-time Circuit Breaker · CloudWatch EMF
+        </div>
+      </div>
+    </details>
   </div>
   <main class="flex-1 max-w-7xl mx-auto px-4 py-6 w-full space-y-6">
 
@@ -174,8 +189,8 @@
     <div class="p-6 rounded-2xl bg-gray-900 border border-gray-800 space-y-4">
       <div class="flex items-center justify-between">
         <div>
-          <h2 class="text-base font-semibold text-white">4 Guided Agent Scenarios (Zero-Setup Live Demo)</h2>
-          <p class="text-xs text-gray-400">Trigger real-world developer scenarios to evaluate Threefold deterministic interception and Bedrock reasoning</p>
+          <h2 class="text-base font-semibold text-white">Guided Agent Scenarios (Zero-Setup Live Demo)</h2>
+          <p class="text-xs text-gray-400">Four scenarios, and the universal adapter below them. Each one calls the live service and shows what came back</p>
         </div>
         <button onclick="resetDemo()" class="text-xs text-gray-400 hover:text-white underline">Reset State</button>
       </div>
@@ -362,7 +377,16 @@
 
     function getApiKey() {
       const el = document.getElementById("apiKeyInput");
-      return el ? el.value.trim() : "threefold-demo-key-2026";
+      return el ? el.value.trim() : "";
+    }
+
+    // The demo needs no key, so none is sent unless someone typed one. An empty
+    // X-API-Key header is worse than no header: it looks like a failed attempt.
+    function authHeaders(extra) {
+      const headers = Object.assign({}, extra || {});
+      const key = getApiKey();
+      if (key) headers["X-API-Key"] = key;
+      return headers;
     }
 
     async function checkApiHealth() {
@@ -371,7 +395,7 @@
       try {
         const res = await fetch(`${base}/status`, {
           method: "GET",
-          headers: { "Accept": "application/json", "X-API-Key": getApiKey() }
+          headers: authHeaders({ "Accept": "application/json" })
         });
         if (res.ok) {
           const data = await res.json();
@@ -441,7 +465,7 @@
           const t0 = performance.now();
           const res = await fetch(`${base}/simulate-loop`, {
             method: "POST",
-            headers: { "X-API-Key": getApiKey() }
+            headers: authHeaders()
           });
           const latency = (performance.now() - t0).toFixed(1);
           if (res.ok) {
@@ -506,7 +530,7 @@
           const t0 = performance.now();
           const res = await fetch(`${base}/simulate-secret`, {
             method: "POST",
-            headers: { "X-API-Key": getApiKey() }
+            headers: authHeaders()
           });
           const latency = (performance.now() - t0).toFixed(1);
           if (res.ok) {
@@ -559,7 +583,7 @@
           const t0 = performance.now();
           const res = await fetch(`${base}/evaluate-tool-call`, {
             method: "POST",
-            headers: { "Content-Type": "application/json", "X-API-Key": getApiKey() },
+            headers: authHeaders({ "Content-Type": "application/json" }),
             body: JSON.stringify({
               session_id: "boundary-check-session",
               developer_id: "dev-architect",
@@ -637,7 +661,7 @@
             const s = steps[i];
             const res = await fetch(`${base}/evaluate-tool-call`, {
               method: "POST",
-              headers: { "Content-Type": "application/json", "X-API-Key": getApiKey() },
+              headers: authHeaders({ "Content-Type": "application/json" }),
               body: JSON.stringify({
                 session_id: sessId,
                 developer_id: "dev-lead",
@@ -658,7 +682,7 @@
           // Ask the service for a certificate over the four verdicts just issued
           const certRes = await fetch(`${base}/issue-certificate`, {
             method: "POST",
-            headers: { "Content-Type": "application/json", "X-API-Key": getApiKey() },
+            headers: authHeaders({ "Content-Type": "application/json" }),
             body: JSON.stringify({
               session_id: sessId,
               evaluations: evaluations
@@ -755,7 +779,7 @@
           const t0 = performance.now();
           const res = await fetch(`${base}/adapter/universal-tool-call`, {
             method: "POST",
-            headers: { "Content-Type": "application/json", "X-API-Key": getApiKey() },
+            headers: authHeaders({ "Content-Type": "application/json" }),
             body: JSON.stringify({
               type: "tool_use",
               name: "edit_file",
@@ -795,14 +819,12 @@
       if (!confirm("🚨 ENTERPRISE KILL-SWITCH: Manually terminate and lock this autonomous agent session?")) return;
       try {
         const apiBase = getApiBase();
-        const apiKey = document.getElementById("apiKeyInput").value;
         const res = await fetch(`${apiBase}/sessions/session-default/terminate`, {
           method: "POST",
-          headers: {
+          headers: authHeaders({
             "Content-Type": "application/json",
-            "X-API-Key": apiKey,
             "Idempotency-Key": "freeze-web-" + Date.now()
-          },
+          }),
           body: JSON.stringify({
             operator_name: "Web Security Auditor",
             reason: "Emergency kill-switch invoked from supervisory console"
