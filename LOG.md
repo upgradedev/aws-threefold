@@ -23,3 +23,10 @@
   - `docs/PROOF_OF_AWS_AGENT.md`: Verifiable coding agent traces, tool calls, and execution environment.
   - `docs/BUILDER_CENTER_ARTICLE.md`: Publication article draft for AWS Builder Center.
 - Created AWS SAM IaC template (`deploy/template.yml`) specifying ARM64 Graviton Lambdas, HTTP API Gateway, DynamoDB, and S3.
+
+## 2026-09-20T19:58:00+03:00 — Operator console, three pages, and the deploy that carried them
+- Added `src/threefold/web/{settings,sessions,connect}.html`, registered in `WEB_ASSETS`, and linked from the dashboard header. Each page reads the live API and shows nothing it did not obtain from it.
+- Found and fixed four defects the pages exposed: `/sessions/{id}` never URL-decoded the path; the function role had no `dynamodb:Scan`, so the sessions listing fell back to one container's memory; the evaluator built its breaker with a $2.50 cap while `/policy/config` reported $1.00; `Idempotency-Key` was missing from the API's allowed CORS headers.
+- Labelled `max_session_budget_usd` and `loop_history_window` on the settings page as stored but unenforced, because no gate reads them. Recorded as gap 1 in STATE.md.
+- Dev server switched to `ThreadingHTTPServer`: an open browser tab no longer blocks every other request on port 8001.
+- Tests 111 → 117. Deployed commit `b22db34` to `threefold-prod` in eu-west-1 with `cloudformation package` and `deploy`, the same commands the unrun pipeline uses. Verified on the live URL: three pages serve with the API base substituted, the listing returned 43 rows from the table to a cold container, the third identical call still halts, and a halted session still refuses unrelated work.

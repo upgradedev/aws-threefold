@@ -18,7 +18,7 @@ proof of a coding agent connected to the AWS console. Judging runs the weeks of
 | A visitor can run the demo | **PASS** | Walked in a browser: Scenario 1 dispatched three calls to the live backend, the third returned `BLOCKED_LOOP_DETECTED`, and the panel showed a genuine Haiku 4.5 sentence under the heading "Amazon Bedrock (Claude Haiku 4.5)" |
 | Reachable by the AI scorer | **PASS** | `STAGE` is unset so the middleware defaults to `dev` and enforces no key. Verified by unauthenticated request |
 | Proof of coding agent connected to AWS | **PASS** | `docs/PROOF_OF_AWS_AGENT.md` rewritten around the real session: the commands run, the two defects AWS surfaced, and the CloudTrail principal. Raw output in `docs/evidence/DEPLOYMENT_2026-09-20.md` |
-| Public repository | **BLOCKED, owner action** | Four commits on local `main`, no remote. One command, in `docs/RUNBOOK.md` step 2 |
+| Public repository | **BLOCKED, owner action** | Nineteen commits on local `main`, no remote. One command, in `docs/RUNBOOK.md` step 2 |
 | Continuous delivery | **WRITTEN, role missing** | `.github/workflows/{ci,deploy,keepalive}.yml`. Deploy assumes `threefold-github-deploy`, which does not exist yet. Policy documents are committed at `deploy/iam/`, creation is `docs/RUNBOOK.md` step 1 |
 | Builder Center project, two tags | **NOT DONE** | Owner-gated. Requires Builder Center profile, Join, then the Create Project form |
 
@@ -33,25 +33,35 @@ proof of a coding agent connected to the AWS console. Judging runs the weeks of
 | Every explanation names its source | Responses carry `explanation_source: "bedrock"` and `persistence: "dynamodb"`, and the UI prints the source as the heading rather than assuming Bedrock |
 | Numeric arguments survive the round trip | Three identical calls with `{"retries": 3, "timeout": 1.5, "flag": true}` still halted on the third, so reloading history does not change a call's signature |
 | Readiness can be alarmed on | `/readyz` answers 503 when a dependency is unreachable, 200 when both probes pass |
-| Test suite | 59 passed in 0.57s, hermetic under `THREEFOLD_OFFLINE=1` |
+| The operator console is served | `/settings.html`, `/sessions.html` and `/connect.html` each answer 200 `text/html` to an anonymous request, with the API base substituted. Walked in a browser against the live URL: the sessions page listed 43 real sessions, the policy page read the live policy, and the connect page's denial carried a Bedrock sentence |
+| The sessions listing reads the table, not one container | A Lambda cold-started by the deploy returned 43 rows to `/api/sessions` with an empty in-process store, so the rows came from the DynamoDB scan. `dynamodb:Scan` was missing from the function role before this deploy and the fallback would have hidden it |
+| A session id that must be escaped reads back | `GET /sessions/<urlencoded 'live console fixture <angle>'>` returns that session with its real project and call count, rather than creating an empty one |
+| Test suite | 117 passed in 3.8s, hermetic under `THREEFOLD_OFFLINE=1` |
 
 ## Known gaps, not yet fixed
 
 These are recorded because they are still false or missing in the tree. None is
 hidden in a document that a judge would read as finished work.
 
-1. The source tree has changes that are committed but not yet deployed: the demo
-   key moved to an environment variable and the gate was rewritten. The live
-   stack still runs the previous commit. A deploy is needed, and once the role
-   exists the pipeline does it on push.
-2. Four of the five offline fallback panels still show canned prose. They now say
+1. Two policy fields are stored, reported and enforced by nothing.
+   `max_session_budget_usd` and `loop_history_window` survive a cold start and
+   come back from `/policy/config`, but no gate reads them: the session ceiling
+   is the `budget_usd` each call declares, and the detector's cycle length is
+   compiled in at six. `/settings.html` labels both on its face. The other two
+   fields are wired, and since this deploy the breaker is built from the policy
+   rather than from its own $2.50 default, so the reported cap is the enforced
+   one on a cold container.
+2. The `calls` count in the sessions listing saturates at 50, because the store
+   keeps `history[-50:]`. Cost and tokens are cumulative and are not capped. The
+   page says so rather than presenting 50 as a total.
+3. Four of the five offline fallback panels still show canned prose. They now say
    "Simulated, offline demo, no model was reached" on their face, but the numbers
    inside them are invented and should be replaced with a real offline run.
-3. The loop detector catches byte-identical repeats only. The README no longer
+4. The loop detector catches byte-identical repeats only. The README no longer
    claims entropy scanning, because there is no entropy code.
-4. No headline number exists yet. This is the largest remaining gap for judging:
+5. No headline number exists yet. This is the largest remaining gap for judging:
    the framing gate wants one comparative number against two named baselines.
-5. No video and no Builder Center article. Neither is required by the rules, but
+6. No video and no Builder Center article. Neither is required by the rules, but
    the Builder Center project itself is, and it is owner-gated.
 
 ## Audit and what was done about it, 2026-09-20
