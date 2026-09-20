@@ -258,6 +258,7 @@ class DynamoDBSessionRepository:
                     "status": row.get("status", ""),
                     "rule": row.get("rule", "NONE"),
                     "target": row.get("target", ""),
+                    "reason": row.get("reason", ""),
                     "cost_usd": float(row.get("cost_usd", 0) or 0),
                 }
             )

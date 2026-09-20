@@ -209,3 +209,19 @@ def describe_target(request: Any) -> str:
         if looks_like_path(candidate):
             return candidate[:160]
     return ""
+
+
+def redact_secrets(text: str) -> str:
+    """Replaces anything the scanner recognises as a credential with its label.
+
+    A refusal reason quotes the command it refused, and a command that reaches a
+    protected path can carry a token in the same line. Storing that reason
+    verbatim would put the credential in the very record that exists to say it
+    was stopped, so every reason is passed through here before it is kept.
+    """
+    if not text:
+        return ""
+    redacted = text
+    for label, pattern in SecretScanner.PATTERNS:
+        redacted = pattern.sub(f"[{label} REDACTED]", redacted)
+    return redacted

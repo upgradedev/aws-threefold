@@ -15,7 +15,11 @@ from threefold.domain.models import (
 )
 from threefold.domain.circuit_breaker import CostCircuitBreaker, TokenCostCalculator
 from threefold.domain.loop_detector import LoopDetector
-from threefold.domain.boundary_guard import ArchitecturalBoundaryGuard, describe_target
+from threefold.domain.boundary_guard import (
+    ArchitecturalBoundaryGuard,
+    describe_target,
+    redact_secrets,
+)
 from threefold.application.dtos import (
     EvaluationResultDTO,
     PolicyConfigDTO,
@@ -241,6 +245,10 @@ class GovernanceEvaluator:
                     "action_type": str(request.action_type),
                     "status": result.status,
                     "rule": self._rule_that_fired(result),
+                    # The reason distinguishes a layer being crossed from a
+                    # credential store being reached. Both fail the same
+                    # invariant and a reader acts on them differently.
+                    "reason": redact_secrets(result.reason or "")[:240],
                     "target": describe_target(request),
                     "cost_usd": result.current_session_cost_usd,
                 }

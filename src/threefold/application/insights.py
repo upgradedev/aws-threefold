@@ -43,6 +43,51 @@ def _is_refusal(status: str) -> bool:
     return bool(status) and status.upper().startswith("BLOCKED")
 
 
+# A rule is an invariant; a category is what a reader recognises. The boundary
+# invariant covers two different worries — a layer being crossed and a
+# credential store being reached — and a console that reported them as one
+# number would tell a platform owner nothing he could act on differently.
+CATEGORY_BY_REASON = (
+    ("Clean Architecture violation", "LAYERING"),
+    ("protected path", "PROTECTED_PATH"),
+    ("credential store", "PROTECTED_PATH"),
+    ("Sensitive credential detected", "CREDENTIAL_IN_ARGUMENTS"),
+)
+
+CATEGORY_LABELS = {
+    "LAYERING": "Layer crossed",
+    "PROTECTED_PATH": "Credential store or protected path reached",
+    "CREDENTIAL_IN_ARGUMENTS": "Credential in the arguments",
+    "LOOP": "Repeating cycle",
+    "BUDGET": "Spend ceiling",
+    "HALTED_SESSION": "Session already halted",
+    "OTHER": "Other",
+    "NONE": "Allowed",
+}
+
+
+def categorise(row: Dict[str, Any]) -> str:
+    """Names what a reader would call this refusal."""
+    status = (row.get("status") or "").upper()
+    if not _is_refusal(status):
+        return "NONE"
+    if "LOOP" in status:
+        return "LOOP"
+    if "CIRCUIT_BREAKER" in status:
+        return "HALTED_SESSION"
+    if "BUDGET" in status or "COST" in status:
+        return "BUDGET"
+    reason = row.get("reason") or ""
+    for needle, category in CATEGORY_BY_REASON:
+        if needle.lower() in reason.lower():
+            return category
+    if "SECRET" in status:
+        return "CREDENTIAL_IN_ARGUMENTS"
+    if "BOUNDARY" in status:
+        return "LAYERING"
+    return "OTHER"
+
+
 def summarise(decisions: List[Dict[str, Any]], window_days: int) -> Dict[str, Any]:
     """Turns a list of ledger rows into the console's payload."""
     by_project: Dict[str, Dict[str, Any]] = defaultdict(
@@ -53,6 +98,7 @@ def summarise(decisions: List[Dict[str, Any]], window_days: int) -> Dict[str, An
     )
     by_day: Dict[str, Dict[str, int]] = defaultdict(lambda: {"decisions": 0, "refused": 0})
     rule_counts: Counter = Counter()
+    category_counts: Counter = Counter()
     refusals: List[Dict[str, Any]] = []
 
     for row in decisions:
@@ -82,6 +128,7 @@ def summarise(decisions: List[Dict[str, Any]], window_days: int) -> Dict[str, An
             entry["rules"][row.get("rule", "UNKNOWN")] += 1
             person["refused"] += 1
             rule_counts[row.get("rule", "UNKNOWN")] += 1
+            category_counts[categorise(row)] += 1
             if day:
                 by_day[day]["refused"] += 1
             refusals.append(row)
@@ -100,6 +147,10 @@ def summarise(decisions: List[Dict[str, Any]], window_days: int) -> Dict[str, An
             "projects": len(by_project),
             "developers": len(by_developer),
         },
+        "by_category": [
+            {"category": category, "label": CATEGORY_LABELS.get(category, category), "refusals": count}
+            for category, count in sorted(category_counts.items(), key=lambda kv: kv[1], reverse=True)
+        ],
         "by_rule": [
             {"rule": rule, "refusals": count}
             for rule, count in sorted(rule_counts.items(), key=lambda kv: kv[1], reverse=True)
