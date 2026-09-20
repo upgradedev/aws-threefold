@@ -149,3 +149,92 @@ def test_a_malformed_rule_is_dropped_rather_than_half_applied() -> None:
         ]
     )
     assert [rule["id"] for rule in cleaned] == ["good"]
+
+
+# Four defects an adversarial review found in the first version of this format,
+# each verified against the shipped code before it was fixed. They are pinned
+# here because three of them weakened or falsified a refusal rather than
+# breaking anything loudly.
+
+
+def test_a_clean_file_is_not_refused_for_another_file_in_the_same_call() -> None:
+    """The worst of the four: a refusal that named the wrong file.
+
+    A multi-file edit was judged as a cross product of every path against every
+    string, so one file's forbidden import refused a different, clean file, and
+    the reason asserted that the clean file contained an import it did not.
+    """
+    from threefold.domain.boundary_guard import ArchitecturalBoundaryGuard
+    from threefold.domain.models import ToolActionType, ToolInvocation
+
+    call = ToolInvocation(
+        tool_name="MultiEdit",
+        action_type=ToolActionType.FILE_WRITE,
+        arguments={
+            "edits": [
+                {"file_path": "src/domain/Price.java", "content": "package acme.domain;\npublic class Price {}"},
+                {"file_path": "src/infrastructure/Gateway.java", "content": "import java.sql.Connection;"},
+            ]
+        },
+    )
+    allowed, _ = ArchitecturalBoundaryGuard.evaluate_tool_boundary(call, rules=DEFAULT_RULES)
+    assert allowed, "A clean domain file was refused for a violation in another file"
+
+
+def test_the_violation_in_a_multi_file_call_is_still_caught_on_its_own_file() -> None:
+    from threefold.domain.boundary_guard import ArchitecturalBoundaryGuard
+    from threefold.domain.models import ToolActionType, ToolInvocation
+
+    call = ToolInvocation(
+        tool_name="MultiEdit",
+        action_type=ToolActionType.FILE_WRITE,
+        arguments={
+            "edits": [
+                {"file_path": "src/domain/Price.java", "content": "import java.sql.Connection;"},
+                {"file_path": "src/infrastructure/Gateway.java", "content": "import java.sql.Connection;"},
+            ]
+        },
+    )
+    allowed, reason = ArchitecturalBoundaryGuard.evaluate_tool_boundary(call, rules=DEFAULT_RULES)
+    assert not allowed
+    assert "Price.java" in reason, "The refusal must name the file that actually broke the rule"
+
+
+def test_the_package_itself_is_forbidden_and_not_only_what_is_under_it() -> None:
+    """A trailing `/**` has to mean "and anything below, including nothing".
+
+    `**/infrastructure/**` compiled to a pattern that required a further
+    segment, so `from myapp.infrastructure import Store` in a domain file was
+    approved: a silent weakening of the one gate with no incumbent.
+    """
+    assert evaluate("src/domain/models.py", "from myapp.infrastructure import Store", DEFAULT_RULES)[0] is False
+    assert evaluate("src/domain/models.py", "from myapp.infrastructure.store import X", DEFAULT_RULES)[0] is False
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "// import axios from 'axios';\nexport const x = 1;",
+        "/* import axios from 'axios'; */\nexport const x = 1;",
+    ],
+)
+def test_a_commented_out_import_is_not_a_dependency(content: str) -> None:
+    """A developer can see the line is dead, so refusing it destroys trust."""
+    assert evaluate(TS_DOMAIN, content, DEFAULT_RULES)[0] is True
+
+
+def test_a_real_import_beside_a_commented_one_is_still_refused() -> None:
+    assert evaluate(TS_DOMAIN, "// old way\nimport axios from 'axios';", DEFAULT_RULES)[0] is False
+
+
+def test_an_import_wrapped_across_lines_is_read() -> None:
+    """Most formatters wrap a long import, and the reader missed them."""
+    _, modules = declared_imports(TS_DOMAIN, "import {\n  getPrice,\n  putPrice,\n} from '../infrastructure/http';")
+    assert modules == ["../infrastructure/http"]
+    assert evaluate(TS_DOMAIN, "import {\n  getPrice,\n} from '../infrastructure/http';", DEFAULT_RULES)[0] is False
+
+
+def test_a_url_import_survives_comment_stripping() -> None:
+    """Stripping `//` blindly ate the scheme and made the dependency invisible."""
+    _, modules = declared_imports(TS_DOMAIN, "import x from 'https://cdn.test/mod.js';")
+    assert modules == ["https://cdn.test/mod.js"]

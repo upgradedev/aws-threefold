@@ -165,15 +165,20 @@ class ArchitecturalBoundaryGuard:
         #    guard that only inspects calls which admit to being writes is one
         #    omitted field away from silence.
         active_rules = rules if rules is not None else DEFAULT_RULES
-        for target in path_like:
+        pairs = iter_write_targets(arguments)
+        if not pairs and len(path_like) == 1:
+            # One path and loose content: everything in the call is meant for it.
+            pairs = [
+                (path_like[0], leaf)
+                for leaf in iter_string_leaves(arguments)
+                if leaf not in path_like
+            ]
+        for target, content in pairs:
             if not rules_for_path(target, active_rules):
                 continue
-            for leaf in iter_string_leaves(arguments):
-                if leaf in path_like:
-                    continue
-                allowed, reason = evaluate_layering(target, leaf, active_rules)
-                if not allowed:
-                    return False, f"Clean Architecture violation: {reason}"
+            allowed, reason = evaluate_layering(target, content, active_rules)
+            if not allowed:
+                return False, f"Clean Architecture violation: {reason}"
 
         # 4. Destructive or exfiltrating shell commands.
         if invocation.action_type == ToolActionType.COMMAND_EXEC or not path_like:
@@ -235,3 +240,42 @@ def redact_secrets(text: str) -> str:
     for label, pattern in SecretScanner.PATTERNS:
         redacted = pattern.sub(f"[{label} REDACTED]", redacted)
     return redacted
+
+
+CONTENT_KEYS = (
+    "content", "new_string", "new_str", "new_source", "text", "body",
+    "source", "code", "contents", "replacement", "patch", "diff",
+)
+PATH_KEYS = ("file_path", "path", "filepath", "target_file", "notebook_path", "absolutepath", "filename")
+
+
+def iter_write_targets(arguments: Any) -> List[Tuple[str, str]]:
+    """Pairs each path in a call with the content meant for THAT path.
+
+    A multi-file edit carries several pairs, and judging every path against
+    every string was a cross product: one file's forbidden import refused a
+    different, clean file, and the reason named the clean file and an import it
+    did not contain. A refusal that is wrong about which file it is refusing is
+    worse than a missed violation, because it cannot be argued with.
+    """
+    pairs: List[Tuple[str, str]] = []
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            path_value = ""
+            for key, value in node.items():
+                if isinstance(value, str) and isinstance(key, str):
+                    if key.lower() in PATH_KEYS and looks_like_path(value):
+                        path_value = value
+            if path_value:
+                for key, value in node.items():
+                    if isinstance(key, str) and isinstance(value, str) and key.lower() in CONTENT_KEYS:
+                        pairs.append((path_value, value))
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, (list, tuple, set)):
+            for item in node:
+                walk(item)
+
+    walk(arguments)
+    return pairs

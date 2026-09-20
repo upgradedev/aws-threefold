@@ -46,9 +46,29 @@ _CSHARP = re.compile(
 )
 
 # `import x from 'y'`, `import 'y'`, `export * from 'y'`, `require('y')`, `import('y')`
-_TS_FROM = re.compile(r"""(?:^|[\s;])(?:import|export)\b[^'"\n]{0,200}?from\s*['"](?P<module>[^'"\n]{1,200})['"]""", re.MULTILINE)
+# `[^'"]` rather than `[^'"\n]`: most formatters wrap a long
+# import across lines, and a pattern anchored to one line found nothing in the
+# most common formatting there is. Bounded so it cannot run away over a file.
+_TS_FROM = re.compile(r"""(?:^|[\s;])(?:import|export)\b[^'"]{0,300}?from\s*['"](?P<module>[^'"\n]{1,200})['"]""", re.MULTILINE)
 _TS_BARE = re.compile(r"""(?:^|[\s;])import\s*['"](?P<module>[^'"\n]{1,200})['"]""", re.MULTILINE)
 _TS_CALL = re.compile(r"""(?:require|import)\s*\(\s*['"](?P<module>[^'"\n]{1,200})['"]\s*\)""")
+
+
+
+# Comments are stripped before the patterns run. A commented-out import is not a
+# dependency, and refusing one is the kind of false refusal that gets a guard
+# uninstalled: the developer can see with their own eyes that the line is dead.
+_BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
+# Not preceded by a colon: stripping `//` blindly ate the scheme out of
+# `import x from "https://cdn/mod.js"`, which made a real dependency invisible.
+_LINE_COMMENT = re.compile(r"(?m)(?<!:)//.*$")
+_HASH_COMMENT = re.compile(r"(?m)#.*$")
+
+
+def _without_comments(content: str, language: str) -> str:
+    if language == "python":
+        return _HASH_COMMENT.sub("", content)
+    return _LINE_COMMENT.sub("", _BLOCK_COMMENT.sub("", content))
 
 
 def language_for(path: str) -> str:
@@ -66,7 +86,7 @@ def _python_imports(content: str) -> List[str]:
     except SyntaxError:
         return [
             (match.group("from") or match.group("import") or "").lstrip(".")
-            for match in _PYTHON_FALLBACK.finditer(content)
+            for match in _PYTHON_FALLBACK.finditer(_without_comments(content, "python"))
         ]
 
     modules: List[str] = []
@@ -96,13 +116,16 @@ def declared_imports(path: str, content: str) -> Tuple[str, List[str]]:
         return language, []
 
     if language == "python":
+        # ast ignores comments already; the fallback reader below does not.
         return language, _python_imports(content)
+
+    readable = _without_comments(content, language)
     if language == "java":
-        return language, _matches(_JAVA, content)
+        return language, _matches(_JAVA, readable)
     if language == "csharp":
-        return language, _matches(_CSHARP, content)
+        return language, _matches(_CSHARP, readable)
     if language == "typescript":
-        modules = _matches(_TS_FROM, content) + _matches(_TS_BARE, content) + _matches(_TS_CALL, content)
+        modules = _matches(_TS_FROM, readable) + _matches(_TS_BARE, readable) + _matches(_TS_CALL, readable)
         # Order is stable and duplicates are dropped, so a reason string reads the
         # same way twice for the same file.
         seen = set()

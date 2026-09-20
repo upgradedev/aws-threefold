@@ -40,6 +40,16 @@ def _compiled(pattern: str) -> re.Pattern:
     out = ["^"]
     index = 0
     text = normalise(pattern)
+
+    # A trailing `/**` means "and anything below, including nothing". Translated
+    # literally it compiled to `infrastructure/.*`, which needs a further
+    # segment, so `**/infrastructure/**` matched `myapp/infrastructure/store`
+    # and missed `myapp.infrastructure` itself. That silently unhooked the
+    # prohibition every shipped rule relies on.
+    tail = ""
+    if text.endswith("/**"):
+        text = text[:-3]
+        tail = "(?:/.*)?"
     while index < len(text):
         char = text[index]
         if text.startswith("**/", index):
@@ -57,6 +67,7 @@ def _compiled(pattern: str) -> re.Pattern:
         else:
             out.append(re.escape(char))
             index += 1
+    out.append(tail)
     out.append("$")
     return re.compile("".join(out), re.IGNORECASE)
 

@@ -132,3 +132,11 @@
 - `GET /rules` is open and `POST /rules` is closed with the operator key, on the same grounds as the policy write: an anonymous caller who could replace the rules could delete the gate rather than trip it. A rule set that would say nothing is refused with 400 rather than saved.
 - The console's coverage line is computed from the rules in force rather than fixed. It had said "Python only, blind to Java" — true when written, false the moment an architect saves a Java rule.
 - Tests 168 → 199.
+
+## 2026-09-21T03:05:00+03:00 — Four defects an adversarial review found in the rules I had just shipped
+- A design panel ran while the rules were being built and reported after the deploy. Its judge verified four defects against HEAD. All four reproduced.
+- **A refusal that named the wrong file.** A multi-file edit was judged as a cross product of every path against every string, so one file's forbidden import refused a different, clean file, and the reason asserted that the clean file imported something it did not. Each path is now paired with the content meant for that path. A refusal that is wrong about what it is refusing cannot be argued with, which makes it worse than a missed violation.
+- **A silent weakening of the gate.** `**/infrastructure/**` compiled to a pattern requiring a further segment, so `from myapp.infrastructure import Store` in a domain file was approved where the previous hardcoded rule refused it. A trailing `/**` now means "and anything below, including nothing", which is what every architect reads it as.
+- **A commented-out import was refused.** A developer can see with their own eyes that the line is dead, so that refusal costs more trust than the violation would have cost architecture. Comments are stripped before the patterns run, except a `//` preceded by a colon, because stripping that ate the scheme out of a URL import and made a real dependency invisible.
+- **Wrapped imports were invisible.** The TypeScript pattern was anchored to a single line, so the way most formatters break a long import found nothing at all.
+- Tests 199 → 207. Each defect is pinned, and so is the case that proves the fix did not overshoot: the real violation in a multi-file call is still caught, on its own file, and a real import beside a commented one is still refused.
