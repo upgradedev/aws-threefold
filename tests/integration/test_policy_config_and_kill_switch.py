@@ -16,7 +16,13 @@ from threefold.infrastructure.idempotency import global_idempotency_cache
 from threefold.interfaces.api_handlers import lambda_handler
 
 
-def test_readyz_endpoint_reports_subsystem_health() -> None:
+def test_readyz_reports_each_dependency_it_measured() -> None:
+    """The probe must report what it measured, not a fixed optimistic answer.
+
+    The suite runs with no AWS client bound, so both dependencies are genuinely
+    unreachable and the endpoint has to say so. A probe that answered READY here
+    would be reporting configuration rather than capability.
+    """
     event = {
         "httpMethod": "GET",
         "path": "/readyz",
@@ -25,12 +31,16 @@ def test_readyz_endpoint_reports_subsystem_health() -> None:
     response = lambda_handler(event)
     assert response["statusCode"] == 200
     body = json.loads(response["body"])
-    assert body["status"] == "READY"
     assert body["service"] == "Threefold"
-    sub_names = [s["name"] for s in body["subsystems"]]
-    assert "DynamoDBSessionsRepository" in sub_names
-    assert "AmazonBedrockClaude35Sonnet" in sub_names
-    assert "WebhookAlertDispatcher" in sub_names
+
+    subsystems = {s["name"]: s for s in body["subsystems"]}
+    assert set(subsystems) == {"SessionStore", "BedrockExplanationModel"}, (
+        "Only dependencies the probe actually exercises may be listed"
+    )
+    assert body["status"] == "DEGRADED"
+    for name, subsystem in subsystems.items():
+        assert subsystem["status"] == "DEGRADED", f"{name} is unreachable offline"
+        assert subsystem["details"], f"{name} must explain what it observed"
 
 
 def test_dynamic_policy_configuration() -> None:

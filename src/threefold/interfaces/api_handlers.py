@@ -68,8 +68,12 @@ def lambda_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]
         or "127.0.0.1"
     )
 
-    # Normalization: strip prefix if mounted under stage
+    # Normalization: API Gateway prefixes rawPath with the stage name when the API
+    # is deployed to a named stage (for example /prod/status), so strip it before routing.
     path = raw_path.split("?")[0].rstrip("/")
+    stage = event.get("requestContext", {}).get("stage", "")
+    if stage and stage != "$default" and (path == f"/{stage}" or path.startswith(f"/{stage}/")):
+        path = path[len(stage) + 1:]
     if not path:
         path = "/"
 
@@ -132,7 +136,7 @@ def lambda_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]
 
         # Route 1a: Deep Readiness Probe (/readyz)
         if path in ("/readyz", "/ready") and http_method == "GET":
-            readiness = _evaluator.check_readiness()
+            readiness = _evaluator.check_readiness(bedrock_client=_bedrock_client)
             return build_response(200, readiness.to_dict())
 
         # Route 1b: OpenAPI JSON Specification
@@ -192,8 +196,10 @@ def lambda_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]
                 budget_usd=budget_usd,
             )
             result = _evaluator.evaluate_tool_call(request)
-            explanation = _reviewer.review_action(request, result)
+            explanation, explanation_source = _reviewer.review_action(request, result)
             result.bedrock_explanation = explanation
+            result.explanation_source = explanation_source
+            result.persistence = getattr(_evaluator.session_repo, "persistence_mode", "memory")
 
             latency_ms = (time.time() - start_time) * 1000.0
             emit_threefold_emf_metrics(
@@ -258,7 +264,8 @@ def lambda_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]
                 budget_usd=float(body.get("budget_usd", 15.00)),
             )
             result = _evaluator.evaluate_tool_call(req)
-            result.bedrock_explanation = _reviewer.review_action(req, result)
+            result.bedrock_explanation, result.explanation_source = _reviewer.review_action(req, result)
+            result.persistence = getattr(_evaluator.session_repo, "persistence_mode", "memory")
 
             emit_threefold_emf_metrics(
                 {
@@ -288,7 +295,8 @@ def lambda_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]
             _evaluator.evaluate_tool_call(req)
             _evaluator.evaluate_tool_call(req)
             third_result = _evaluator.evaluate_tool_call(req)
-            third_result.bedrock_explanation = _reviewer.review_action(req, third_result)
+            third_result.bedrock_explanation, third_result.explanation_source = _reviewer.review_action(req, third_result)
+            third_result.persistence = getattr(_evaluator.session_repo, "persistence_mode", "memory")
 
             emit_threefold_emf_metrics(
                 {"LoopDetected": 1.0, "CircuitBreakerTripped": 1.0},
@@ -308,7 +316,8 @@ def lambda_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]
                 arguments={"command": "export AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE"},
             )
             result = _evaluator.evaluate_tool_call(req)
-            result.bedrock_explanation = _reviewer.review_action(req, result)
+            result.bedrock_explanation, result.explanation_source = _reviewer.review_action(req, result)
+            result.persistence = getattr(_evaluator.session_repo, "persistence_mode", "memory")
 
             emit_threefold_emf_metrics(
                 {"SecretLeakBlocked": 1.0},

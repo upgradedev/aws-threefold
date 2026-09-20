@@ -34,6 +34,11 @@ class EvaluationResultDTO:
     session_tripped: bool
     proof_hash: str
     bedrock_explanation: Optional[str] = None
+    # Names what produced bedrock_explanation: "bedrock" when the model answered,
+    # "deterministic_fallback" when it did not. Never inferred, always set by the caller.
+    explanation_source: Optional[str] = None
+    # Where the session state for this verdict actually landed: "dynamodb" or "memory".
+    persistence: Optional[str] = None
     timestamp: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )

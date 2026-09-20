@@ -1,15 +1,23 @@
-"""Semantic architectural reviewer powered by Amazon Bedrock Claude 3.5 Sonnet."""
+"""Turns a deterministic governance verdict into a sentence a human can read.
+
+The reviewer never changes a verdict. It asks Amazon Bedrock to phrase the
+decision, and when the model is not reachable it says so through the source
+label it returns alongside the text.
+"""
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Optional, Tuple
 from threefold.application.dtos import EvaluationResultDTO, ToolCallRequestDTO
 
 logger = logging.getLogger(__name__)
 
+SOURCE_BEDROCK = "bedrock"
+SOURCE_FALLBACK = "deterministic_fallback"
+
 
 class BedrockArchitecturalReviewer:
-    """Invokes Amazon Bedrock to explain risk and architectural impact for human operators."""
+    """Explains why a tool call was allowed or refused."""
 
     def __init__(self, bedrock_client: Optional[Any] = None) -> None:
         self.bedrock_client = bedrock_client
@@ -18,51 +26,47 @@ class BedrockArchitecturalReviewer:
         self,
         request: ToolCallRequestDTO,
         evaluation: EvaluationResultDTO,
-    ) -> str:
-        """Generates an architectural risk explanation using Bedrock or fallback."""
+    ) -> Tuple[str, str]:
+        """Returns ``(explanation, source)`` where source names what produced it."""
         if self.bedrock_client is not None:
             try:
                 return self.bedrock_client.review_agent_action(request, evaluation)
             except Exception as exc:
-                logger.warning("Bedrock invocation failed, falling back to deterministic explanation: %s", exc)
+                logger.warning("Bedrock invocation failed, explaining deterministically: %s", exc)
 
-        return self._fallback_explanation(request, evaluation)
+        return self._fallback_explanation(request, evaluation), SOURCE_FALLBACK
 
     def _fallback_explanation(
         self,
         request: ToolCallRequestDTO,
         evaluation: EvaluationResultDTO,
     ) -> str:
-        """Deterministic heuristic explanation of the evaluation result."""
+        """Plain restatement of the gate's decision, used when no model answered."""
         status = evaluation.status
         tool = request.tool_name
         cost = evaluation.current_session_cost_usd
 
         if status == "BLOCKED_SECRET_DETECTED":
             return (
-                f"[Threefold Security Alert] Tool '{tool}' was intercepted because sensitive "
-                "credentials or API keys were detected in the argument payload. "
-                "The payload was halted to prevent accidental commit or upstream leakage."
+                f"Tool '{tool}' was stopped because its arguments carried something shaped "
+                "like a credential. The call never left this process."
             )
-        elif status == "BLOCKED_BOUNDARY_VIOLATION":
+        if status == "BLOCKED_BOUNDARY_VIOLATION":
             return (
-                f"[Threefold Architecture Alert] Tool '{tool}' attempted to access or modify "
-                "a protected architectural path or violated Clean Architecture layer rules. "
-                "Action blocked to prevent architectural drift."
+                f"Tool '{tool}' targeted a protected path or crossed an architectural layer "
+                "it is not allowed to touch, so the call was refused."
             )
-        elif status == "BLOCKED_LOOP_DETECTED":
+        if status == "BLOCKED_LOOP_DETECTED":
             return (
-                f"[Threefold Circuit Breaker] Agent thrashing detected for tool '{tool}'. "
-                "The agent entered a recursive repetition cycle. Session execution halted "
-                "to prevent unbounded token consumption."
+                f"Tool '{tool}' was called with identical arguments once too often, so the "
+                f"session was halted at ${cost:.4f} rather than paying for the same answer again."
             )
-        elif status == "BLOCKED_CIRCUIT_BREAKER":
+        if status == "BLOCKED_CIRCUIT_BREAKER":
             return (
-                f"[Threefold Cost Cap Alert] Session cost (${cost:.4f}) reached the allocated "
-                f"budget limit of ${request.budget_usd:.2f}. Execution frozen to protect cloud budget."
+                f"The session reached its spending limit of ${request.budget_usd:.2f} at "
+                f"${cost:.4f}, so '{tool}' was refused and the session is frozen."
             )
-        else:
-            return (
-                f"[Threefold Verified] Tool '{tool}' complies with all architectural boundaries, "
-                f"contains zero secrets, and is within budget. Session spend: ${cost:.4f}."
-            )
+        return (
+            f"Tool '{tool}' cleared every gate: no credential in its arguments, no protected "
+            f"path, no repeated call, and the session is still inside budget at ${cost:.4f}."
+        )

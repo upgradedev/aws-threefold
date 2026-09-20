@@ -8,9 +8,13 @@ from threefold.domain.models import AgentSession, TokenUsage
 class TokenCostCalculator:
     """Calculates exact dollar cost using tiered model rates."""
 
-    # Default rates per 1 Million tokens (Claude 3.5 Sonnet)
+    # Published rates per 1 million tokens for the models a governed agent typically runs.
     DEFAULT_RATES: Dict[str, Dict[str, float]] = {
-        "anthropic.claude-3-5-sonnet-20241022-v2:0": {
+        "eu.anthropic.claude-haiku-4-5-20251001-v1:0": {
+            "input_per_m": 1.00,
+            "output_per_m": 5.00,
+        },
+        "eu.anthropic.claude-sonnet-4-5-20250929-v1:0": {
             "input_per_m": 3.00,
             "output_per_m": 15.00,
         },

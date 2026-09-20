@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import datetime
 import logging
-from typing import Dict, Optional
+import time
+from typing import Any, Dict, Optional
 from threefold.domain.models import (
     AgentSession,
     GovernanceVerdict,
@@ -28,6 +29,7 @@ from threefold.domain.events import (
     LoopDetectedEvent,
     SecretLeakInterceptedEvent,
 )
+from threefold.infrastructure.dynamo_repo import SessionConflictError
 
 logger = logging.getLogger(__name__)
 
@@ -50,52 +52,63 @@ class GovernanceEvaluator:
         else:
             from threefold.infrastructure.dynamo_repo import DynamoDBSessionRepository
             self.session_repo = DynamoDBSessionRepository()
-        self._sessions: Dict[str, AgentSession] = {}
 
     def update_policy(self, config: PolicyConfigDTO) -> None:
         """Update runtime policy configuration dynamically."""
         self.policy_config = config
-        self.cost_breaker.max_single_call_usd = config.max_single_call_usd
+        self.cost_breaker.max_single_invocation_cost = config.max_single_call_usd
         self.loop_detector.repetition_threshold = config.monomorphic_repetition_threshold
 
     def terminate_session(self, session_id: str, operator_name: str, reason: str) -> AgentSession:
         """Manual enterprise kill-switch to immediately freeze an agent session."""
         session = self.get_or_create_session(session_id)
         session.terminate_manually(operator=operator_name, reason=reason)
-        self.session_repo.save_session(session)
+        # An operator may halt a session that has already tripped itself, so this
+        # write deliberately overrides the terminal-state guard.
+        self.session_repo.save_session(session, force=True)
         return session
 
-    def check_readiness(self) -> ReadinessResponseDTO:
-        """Deep readiness probe inspecting downstream subsystem health."""
+    def check_readiness(self, bedrock_client: Optional[Any] = None) -> ReadinessResponseDTO:
+        """Readiness probe that actually exercises each dependency it reports on.
+
+        Every subsystem below is measured at call time. Nothing is reported
+        healthy on the strength of being configured.
+        """
         now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        subsystems = [
+        subsystems = []
+
+        started = time.perf_counter()
+        probe = getattr(self.session_repo, "probe", None)
+        if probe is None:
+            store_ok, store_detail = False, "Repository does not expose a read probe"
+        else:
+            store_ok, store_detail = probe()
+        subsystems.append(
             SubsystemHealthDTO(
-                name="DynamoDBSessionsRepository",
-                status="HEALTHY",
-                latency_ms=1.1,
-                details="Single-table session state storage online",
-            ),
+                name="SessionStore",
+                status="HEALTHY" if store_ok else "DEGRADED",
+                latency_ms=round((time.perf_counter() - started) * 1000, 2),
+                details=store_detail,
+            )
+        )
+
+        started = time.perf_counter()
+        if bedrock_client is None:
+            model_ok, model_detail = False, "No Bedrock client bound to this evaluator"
+        else:
+            model_ok, model_detail = bedrock_client.describe_availability()
+        subsystems.append(
             SubsystemHealthDTO(
-                name="AmazonBedrockClaude35Sonnet",
-                status="HEALTHY",
-                latency_ms=2.2,
-                details="Architectural reviewer model online",
-            ),
-            SubsystemHealthDTO(
-                name="S3CertificateArchive",
-                status="HEALTHY",
-                latency_ms=0.6,
-                details="Cryptographic governance certificates bucket online",
-            ),
-            SubsystemHealthDTO(
-                name="WebhookAlertDispatcher",
-                status="HEALTHY",
-                latency_ms=0.3,
-                details="Enterprise incident response dispatcher active",
-            ),
-        ]
+                name="BedrockExplanationModel",
+                status="HEALTHY" if model_ok else "DEGRADED",
+                latency_ms=round((time.perf_counter() - started) * 1000, 2),
+                details=model_detail,
+            )
+        )
+
+        overall = "READY" if all(s.status == "HEALTHY" for s in subsystems) else "DEGRADED"
         return ReadinessResponseDTO(
-            status="READY",
+            status=overall,
             service="Threefold",
             version="1.0.0",
             timestamp_utc=now_iso,
@@ -109,24 +122,22 @@ class GovernanceEvaluator:
         project_name: str = "Acme-Core",
         budget_usd: float = 10.00,
     ) -> AgentSession:
-        # Check in-memory cache first
-        if session_id in self._sessions:
-            return self._sessions[session_id]
+        """Loads the session from durable storage, or creates it.
 
-        # Check DynamoDB repository
+        There is deliberately no in-process session cache. A warm Lambda
+        container holding its own copy would keep approving calls on a session
+        that another container has already tripped.
+        """
         persistent_session = self.session_repo.get_session(session_id)
         if persistent_session is not None:
-            self._sessions[session_id] = persistent_session
             return persistent_session
 
-        # Create new session
         new_session = AgentSession(
             session_id=session_id,
             developer_id=developer_id,
             project_name=project_name,
             budget_usd=budget_usd,
         )
-        self._sessions[session_id] = new_session
         self.session_repo.save_session(new_session)
         return new_session
 
@@ -219,6 +230,7 @@ class GovernanceEvaluator:
                 )
             )
             session.trip_circuit_breaker(loop_reason)
+            self._persist_halt(session)
             verdict = GovernanceVerdict.create(
                 session_id=session.session_id,
                 status=VerdictStatus.BLOCKED_LOOP_DETECTED,
@@ -236,6 +248,8 @@ class GovernanceEvaluator:
         is_cost_safe, cost_reason = self.cost_breaker.evaluate_cost_risk(session, projected_usage)
         if not is_cost_safe:
             rule_evaluations["BUDGET_CIRCUIT_BREAKER_SAFE"] = False
+            # evaluate_cost_risk trips the session on a breach, so the halt is durable too.
+            self._persist_halt(session)
             verdict = GovernanceVerdict.create(
                 session_id=session.session_id,
                 status=VerdictStatus.BLOCKED_CIRCUIT_BREAKER,
@@ -245,10 +259,30 @@ class GovernanceEvaluator:
             )
             return self._to_dto(session, verdict)
 
-        # All Gates Passed: Update Session State
+        # All gates passed. The write happens before the verdict is issued: if a
+        # concurrent container has already halted this session, the write is
+        # refused and the caller is told the session is blocked, not approved.
         session.record_usage(projected_usage)
         session.record_tool_call(invocation)
-        self.session_repo.save_session(session)
+        try:
+            self.session_repo.save_session(session)
+        except SessionConflictError as exc:
+            logger.warning("Refusing to approve a session halted elsewhere: %s", exc)
+            stored = self.session_repo.get_session(session.session_id)
+            rule_evaluations["BUDGET_CIRCUIT_BREAKER_SAFE"] = False
+            blocked_reason = (
+                stored.trip_reason
+                if stored is not None and stored.trip_reason
+                else "Session was halted by another worker"
+            )
+            verdict = GovernanceVerdict.create(
+                session_id=session.session_id,
+                status=VerdictStatus.BLOCKED_CIRCUIT_BREAKER,
+                risk_level=RiskLevel.CRITICAL,
+                reason=f"Session execution frozen: {blocked_reason}",
+                rule_evaluations=rule_evaluations,
+            )
+            return self._to_dto(stored or session, verdict)
 
         verdict = GovernanceVerdict.create(
             session_id=session.session_id,
@@ -258,6 +292,17 @@ class GovernanceEvaluator:
             rule_evaluations=rule_evaluations,
         )
         return self._to_dto(session, verdict)
+
+    def _persist_halt(self, session: AgentSession) -> None:
+        """Writes a halted session through, so every worker observes the trip.
+
+        ``force`` is used because the session is already tripped in memory and the
+        terminal-state guard would otherwise refuse the very write that records it.
+        """
+        try:
+            self.session_repo.save_session(session, force=True)
+        except Exception as exc:  # pragma: no cover - defensive, storage is best effort
+            logger.error("Failed to persist circuit breaker halt: %s", exc)
 
     def _to_dto(self, session: AgentSession, verdict: GovernanceVerdict) -> EvaluationResultDTO:
         return EvaluationResultDTO(

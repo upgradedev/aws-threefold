@@ -2,6 +2,16 @@ AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: Threefold Serverless Backend - AWS Zero to Shipped 2026 (#workplace-efficiency)
 
+Parameters:
+  BedrockModelId:
+    Type: String
+    Default: eu.anthropic.claude-haiku-4-5-20251001-v1:0
+    Description: >-
+      Cross-region inference profile used to phrase governance verdicts. The eu.
+      profile routes the request across EU regions, so the function is granted
+      both the inference-profile ARN in this account and the underlying
+      foundation-model ARN, which is account-less by design.
+
 Globals:
   Function:
     Timeout: 15
@@ -14,6 +24,9 @@ Globals:
         TABLE_NAME: !Ref ThreefoldTable
         EVIDENCE_BUCKET: !Ref EvidenceBucket
         LOG_LEVEL: INFO
+        # AWS_REGION is supplied by the Lambda runtime and is reserved, so it is
+        # read from the environment in code rather than declared here.
+        BEDROCK_MODEL_ID: !Ref BedrockModelId
 
 Resources:
   ThreefoldHttpApi:
@@ -35,8 +48,9 @@ Resources:
             - Effect: Allow
               Action:
                 - bedrock:InvokeModel
-                - bedrock:Converse
-              Resource: 'arn:aws:bedrock:*::foundation-model/anthropic.claude-3-5-sonnet-*'
+              Resource:
+                - !Sub 'arn:aws:bedrock:*:${AWS::AccountId}:inference-profile/eu.anthropic.claude-*'
+                - 'arn:aws:bedrock:*::foundation-model/anthropic.claude-*'
             - Effect: Allow
               Action:
                 - dynamodb:PutItem
@@ -80,6 +94,18 @@ Resources:
             ApiId: !Ref ThreefoldHttpApi
             Path: /issue-certificate
             Method: POST
+        RootRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ThreefoldHttpApi
+            Path: /
+            Method: ANY
+        ProxyRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ThreefoldHttpApi
+            Path: /{proxy+}
+            Method: ANY
 
   ThreefoldTable:
     Type: AWS::DynamoDB::Table
