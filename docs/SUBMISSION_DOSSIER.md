@@ -28,7 +28,7 @@ Autonomous coding agents are rapidly transforming enterprise software engineerin
 2. **Cost Circuit Breaker & Real-Time Spend Tracking:** Models exact token-to-dollar pricing for foundation models, enforcing hard session budget caps and blocking single-invocation spend spikes.
 3. **N-Gram Thrashing & Infinite Loop Detection:** Tracks recent invocation sequences using monomorphic and ping-pong N-gram pattern matching, tripping the circuit breaker before tokens are burned.
 4. **Architectural Boundary & Secret Scanner:** Enforces Clean Architecture dependency rules (e.g., domain entities cannot import outer infrastructure frameworks) and blocks sensitive API keys or credentials from being committed or piped to shell commands.
-5. **Amazon Bedrock Architectural Explanations:** When a safety rule trips, Amazon Bedrock (Claude 3.5 Sonnet) reviews the incident and generates plain-language, contextual advice for the developer.
+5. **Amazon Bedrock Architectural Explanations:** When a safety rule trips, Amazon Bedrock (Claude Haiku 4.5) reviews the incident and generates plain-language, contextual advice for the developer.
 6. **Universal Multi-Agent Adapter:** Seamlessly parses both native OpenAI `function_call` and Anthropic `tool_use` schemas, enabling universal compatibility with any coding agent.
 7. **Signed Governance Certificates & Git Pre-Commit Hook:** Issues immutable SHA-256 signed audit certificates and includes a standalone pre-commit hook script (`scripts/pre-commit-gate.py`) for CI/CD gates.
 
@@ -36,7 +36,7 @@ Autonomous coding agents are rapidly transforming enterprise software engineerin
 
 ### 4. How We Built It
 - **Architecture:** Clean Architecture & Domain-Driven Design (DDD) with strict layer boundaries: Domain Core, Application Evaluators, Infrastructure Adapters, and Interfaces.
-- **AI Reasoning:** Amazon Bedrock Claude 3.5 Sonnet (`eu.anthropic.claude-3-5-sonnet-20241022-v2:0`) accessed via the Bedrock Converse API for contextual incident explanation.
+- **AI Reasoning:** Amazon Bedrock Claude Haiku 4.5 (`eu.anthropic.claude-haiku-4-5-20251001-v1:0`) accessed via the Bedrock Converse API for contextual incident explanation.
 - **State & Evidence Persistence:** Amazon DynamoDB single-table design with session history and budget attributes, and Amazon S3 for signed governance certificate bundles.
 - **Observability:** Real-time AWS CloudWatch Embedded Metric Format (EMF) emitting zero-overhead structured telemetry directly to stdout.
 - **Security & Resilience:** Zero-trust token-bucket rate limiting (60 req/min), API Key authentication, RFC 7807 Problem Details, and exponential backoff with full jitter retry decorators.

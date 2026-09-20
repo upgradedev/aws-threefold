@@ -8,7 +8,7 @@
 
 ## 1. Executive Summary & Design Philosophy
 
-As software development adopts autonomous AI coding agents (Bedrock Claude 3.5 Sonnet, AWS Q Developer, custom tool-augmented agent loops), developers face severe risks of runaway cloud costs, architectural degradation, and inadvertent secret leakage.
+As software development adopts autonomous AI coding agents (Claude Code, Amazon Q Developer, custom tool-augmented agent loops), developers face severe risks of runaway cloud costs, architectural degradation, and inadvertent secret leakage.
 
 When an autonomous coding agent encounters a compilation error or unexpected test failure, it frequently enters an **oscillating edit-fail loop**. In this thrashing state, the agent repeatedly views files, runs edits, and attempts tests, consuming tens of thousands of tokens and dozens of dollars per minute. Furthermore, without deterministic perimeter guardrails, agents routinely read local `.env` files containing production API keys, or inadvertently import heavy external infrastructure packages into clean domain models.
 
@@ -62,7 +62,7 @@ Threefold strictly implements **Clean Architecture** (Robert C. Martin) and **Do
 - **Aggregates & Value Objects:**
   - `AgentSession`: Aggregate root tracking total input/output tokens, cumulative USD expenditure, tool call audit history, and circuit breaker trip state.
   - `ToolInvocation`: Captures tool name, action type (`FILE_READ`, `FILE_WRITE`, `COMMAND_EXEC`), arguments, and deterministic SHA-256 canonical signature.
-  - `TokenUsage`: Value object calculating exact USD cost using distinct input/output rates ($3/M input, $15/M output for Claude 3.5 Sonnet).
+  - `TokenUsage`: Value object calculating exact USD cost using distinct input/output rates ($1/M input, $5/M output for Claude Haiku 4.5; the table also carries Sonnet 4.5 rates).
   - `GovernanceVerdict`: Value object encapsulating verdict status, risk level, pass/fail evaluation per rule, and proof hash.
 - **Engines:**
   - `CostCircuitBreaker`: Enforces single-invocation cost ceiling ($2.50) and cumulative budget ceiling ($10.00).
@@ -73,7 +73,7 @@ Threefold strictly implements **Clean Architecture** (Robert C. Martin) and **Do
 #### Layer 2: Application (`src/threefold/application/`)
 - **Use Cases & Orchestration:**
   - `GovernanceEvaluator`: Coordinates the 4 deterministic safety gates and updates the session aggregate.
-  - `BedrockArchitecturalReviewer`: For compliant operations, invokes Amazon Bedrock Claude 3.5 Sonnet to provide human-readable architectural reviews.
+  - `BedrockArchitecturalReviewer`: For compliant operations, invokes Amazon Bedrock Claude Haiku 4.5 to provide human-readable architectural reviews.
   - `AuditIssuer`: Assembles canonical audit records and computes 64-character SHA-256 cryptographic fingerprints for CI/CD gates.
 
 #### Layer 3: Infrastructure (`src/threefold/infrastructure/`)
@@ -97,7 +97,7 @@ Token pricing is non-uniform between prompt ingestion and generation. The cost f
 
 $$C(t_{in}, t_{out}) = \left(\frac{t_{in}}{10^6} \times P_{in}\right) + \left(\frac{t_{out}}{10^6} \times P_{out}\right)$$
 
-Where for Amazon Bedrock Claude 3.5 Sonnet:
+Where for Amazon Bedrock Claude Haiku 4.5:
 - $P_{in} = \$3.00$ per 1,000,000 tokens
 - $P_{out} = \$15.00$ per 1,000,000 tokens
 
@@ -127,7 +127,7 @@ sequenceDiagram
     participant Sec as Secret & Boundary Guard
     participant Loop as N-gram Loop Detector
     participant Breaker as Cost Circuit Breaker
-    participant Bedrock as Amazon Bedrock (Claude 3.5 Sonnet)
+    participant Bedrock as Amazon Bedrock (Claude Haiku 4.5)
     participant CI as CI/CD Pipeline & Audit Store
 
     Dev->>Proxy: POST /evaluate-tool-call {tool_name, arguments, tokens}

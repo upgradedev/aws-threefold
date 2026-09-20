@@ -9,7 +9,7 @@
 
 ## Introduction: The Hidden Risk of Autonomous Coding Agents
 
-In 2026, AI coding agents are no longer just completion tools—they are autonomous workers executing terminal commands, editing multi-file codebases, and orchestrating complex deployments. Using foundation models like **Anthropic Claude 3.5 Sonnet on Amazon Bedrock**, agents can solve difficult engineering problems in minutes.
+In 2026, AI coding agents are no longer just completion tools—they are autonomous workers executing terminal commands, editing multi-file codebases, and orchestrating complex deployments. Using foundation models on Amazon Bedrock, agents can solve difficult engineering problems in minutes.
 
 However, as software teams scale autonomous agent usage, engineering managers and developers face two dangerous failure modes:
 
@@ -30,7 +30,7 @@ Threefold adopts an **air-gapped hybrid architecture**:
    - *Boundary Guard:* Prohibits reading `.env` files or importing outer-layer dependencies into pure domain code.
    - *Loop & Thrashing Detector:* Hashes tool calls into N-gram signatures to detect monomorphic loops ($\ge 3$ identical calls) or ping-pong thrashing.
    - *Cost Circuit Breaker:* Calculates exact USD spend using tiered model pricing ($3/M in, $15/M out) and trips the breaker if budget ceilings are breached.
-2. **Cognitive Explanation (Amazon Bedrock):** When actions are approved or blocked, **Claude 3.5 Sonnet via the Bedrock Converse API** analyzes the architectural trade-offs, providing clear, human-readable explanations to the engineering lead.
+2. **Cognitive Explanation (Amazon Bedrock):** When actions are approved or blocked, **Claude Haiku 4.5 via the Bedrock Converse API** analyzes the architectural trade-offs, providing clear, human-readable explanations to the engineering lead.
 
 ```
  ┌──────────────────────┐          ┌──────────────────────┐          ┌──────────────────────┐
@@ -59,7 +59,7 @@ We integrated the Bedrock Converse API to deliver high-level architectural asses
 ```python
 # Extract from src/threefold/infrastructure/bedrock_client.py
 response = bedrock_runtime.converse(
-    modelId="anthropic.claude-3-5-sonnet-20241022-v2:0",
+    modelId="eu.anthropic.claude-haiku-4-5-20251001-v1:0",
     messages=[{"role": "user", "content": [{"text": user_content}]}],
     system=[{"text": "You are Threefold, an autonomous software governance agent..."}],
     inferenceConfig={"maxTokens": 256, "temperature": 0.2}

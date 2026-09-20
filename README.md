@@ -14,7 +14,7 @@ Built for the AWS Zero to Shipped hackathon. **Category:** `#workplace-efficienc
 
 ## The Problem
 
-As enterprise engineering teams and open-source contributors increasingly integrate autonomous coding agents (Claude 3.5 Sonnet, AWS Q Developer, custom LLM tool loops) directly into their terminal workflows and CI/CD pipelines, three severe engineering bottlenecks emerge:
+As enterprise engineering teams and open-source contributors increasingly integrate autonomous coding agents (Claude Code, Amazon Q Developer, custom LLM tool loops) directly into their terminal workflows and CI/CD pipelines, three severe engineering bottlenecks emerge:
 
 1. **Token Cost Runaways & Looping Traps:** Autonomous agents caught in repetitive edit-test-fail cycles consume tens of thousands of tokens and hundreds of cloud dollars within minutes.
 2. **Architectural Drift & Boundary Violations:** Coding agents inadvertently modify frozen core architecture, bypass Clean Architecture rules (e.g. importing infrastructure into pure domain entities), or edit unauthorized sensitive directories.
@@ -87,7 +87,7 @@ Open <https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/> and press a 
                      ▼                                                 ▼
         ┌─────────────────────────┐                       ┌─────────────────────────┐
         │  Session Frozen         │                       │ Amazon Bedrock Reviewer │
-        │  Execution Aborted      │                       │ (Claude 3.5 Sonnet)     │
+        │  Execution Aborted      │                       │ (Claude Haiku 4.5)     │
         └─────────────────────────┘                       └────────────┬────────────┘
                                                                        │
                                                                        ▼
@@ -101,7 +101,7 @@ Open <https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/> and press a 
 
 ## Technology Stack & AWS Services
 
-- **Reasoning Engine:** Amazon Bedrock (Anthropic Claude 3.5 Sonnet via Converse API).
+- **Reasoning Engine:** Amazon Bedrock (Anthropic Claude Haiku 4.5 via the Converse API).
 - **Serverless Compute:** AWS Lambda (Python 3.11 on ARM64 Graviton2).
 - **Ingress & API:** Amazon API Gateway HTTP API with full CORS support.
 - **Audit Storage:** Amazon DynamoDB (Single-table session state) & Amazon S3 (Cryptographic evidence bundles).
