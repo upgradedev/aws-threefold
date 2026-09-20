@@ -26,12 +26,17 @@
   <div id="swagger-ui"></div>
   <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
   <script>
+    // The server rewrites __THREEFOLD_BASE_PATH__ to the API Gateway stage prefix
+    // when it serves this page. The spec used to be requested from the origin with
+    // no prefix, which misses /prod and answers 404. Opened straight from disk the
+    // token survives, and the spec is the file sitting next to this one.
+    const SERVED_BASE_PATH = "__THREEFOLD_BASE_PATH__";
+    const SPEC_URL = SERVED_BASE_PATH.indexOf("THREEFOLD_BASE_PATH") !== -1
+      ? "openapi.json"
+      : location.origin + SERVED_BASE_PATH + "/openapi.json";
+
     window.onload = function() {
-      const isHttp = location.protocol.startsWith('http');
-      const isLocal = location.hostname === '127.0.0.1' || location.hostname === 'localhost';
-      const specUrl = (isHttp && isLocal && location.port === '8001')
-        ? '/openapi.json'
-        : (isHttp ? `${location.origin}/openapi.json` : '../docs/openapi.json');
+      const specUrl = SPEC_URL;
 
       SwaggerUIBundle({
         url: specUrl,

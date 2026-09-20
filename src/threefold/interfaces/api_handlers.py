@@ -207,17 +207,27 @@ def lambda_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]
             code = 200 if readiness.status == "READY" else 503
             return build_response(code, readiness.to_dict())
 
-        # Route 1b: OpenAPI JSON Specification
+        # Route 1b: OpenAPI JSON Specification. The spec lives beside the pages that
+        # read it, inside the deployment package. It used to be loaded from docs/,
+        # which sits outside CodeUri and is never uploaded, so every deployed
+        # request fell through to a two-line placeholder that read like a finished
+        # spec. There is no placeholder now: a missing file is reported as one.
         if path in ("/openapi.json", "/docs/openapi.json") and http_method == "GET":
-            openapi_spec_path = os.path.join(
-                os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))),
-                "docs",
-                "openapi.json",
-            )
-            if os.path.exists(openapi_spec_path):
-                with open(openapi_spec_path, "r", encoding="utf-8") as f:
-                    return build_response(200, json.load(f))
-            return build_response(200, {"openapi": "3.1.0", "info": {"title": "Threefold API", "version": "1.0.0"}})
+            openapi_spec_path = os.path.join(WEB_ROOT, "openapi.json")
+            if not os.path.isfile(openapi_spec_path):
+                logger.error("The OpenAPI document is missing from the package at %s", openapi_spec_path)
+                return build_response(
+                    500,
+                    rfc7807_error(
+                        500,
+                        "Specification Unavailable",
+                        "The OpenAPI document was not found in this deployment.",
+                        path,
+                        error_type="urn:threefold:error:spec-missing",
+                    ),
+                )
+            with open(openapi_spec_path, "r", encoding="utf-8") as f:
+                return build_response(200, json.load(f))
 
         # Route 2: Single Tool Call Evaluation (Core Governance Gate)
         if path == "/evaluate-tool-call" and http_method == "POST":

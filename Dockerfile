@@ -12,8 +12,9 @@ RUN addgroup --system --gid 1001 threefold && \
     adduser --system --uid 1001 --gid 1001 threefold
 
 COPY pyproject.toml /app/
+# The OpenAPI document travels with the pages that read it, under src/, so the
+# image and the Lambda package carry the same file from the same place.
 COPY src/ /app/src/
-COPY docs/openapi.json /app/docs/openapi.json
 COPY scripts/ /app/scripts/
 
 ENV PYTHONPATH="/app/src"
