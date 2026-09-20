@@ -18,7 +18,7 @@ proof of a coding agent connected to the AWS console. Judging runs the weeks of
 | A visitor can run the demo | **PASS** | Walked in a browser: Scenario 1 dispatched three calls to the live backend, the third returned `BLOCKED_LOOP_DETECTED`, and the panel showed a genuine Haiku 4.5 sentence under the heading "Amazon Bedrock (Claude Haiku 4.5)" |
 | Reachable by the AI scorer | **PASS** | `STAGE` is unset so the middleware defaults to `dev` and enforces no key. Verified by unauthenticated request |
 | Proof of coding agent connected to AWS | **PASS** | `docs/PROOF_OF_AWS_AGENT.md` rewritten around the real session: the commands run, the two defects AWS surfaced, and the CloudTrail principal. Raw output in `docs/evidence/DEPLOYMENT_2026-09-20.md` |
-| Public repository | **BLOCKED, owner action** | Nineteen commits on local `main`, no remote. One command, in `docs/RUNBOOK.md` step 2 |
+| Public repository | **BLOCKED, owner action** | Twenty commits on local `main`, no remote. One command, in `docs/RUNBOOK.md` step 2 |
 | Continuous delivery | **WRITTEN, role missing** | `.github/workflows/{ci,deploy,keepalive}.yml`. Deploy assumes `threefold-github-deploy`, which does not exist yet. Policy documents are committed at `deploy/iam/`, creation is `docs/RUNBOOK.md` step 1 |
 | Builder Center project, two tags | **NOT DONE** | Owner-gated. Requires Builder Center profile, Join, then the Create Project form |
 
@@ -54,14 +54,22 @@ hidden in a document that a judge would read as finished work.
 2. The `calls` count in the sessions listing saturates at 50, because the store
    keeps `history[-50:]`. Cost and tokens are cumulative and are not capped. The
    page says so rather than presenting 50 as a total.
-3. Four of the five offline fallback panels still show canned prose. They now say
+3. The live `/openapi.json` serves an empty stub, and `swagger.html` asks for the
+   wrong URL. Neither is new and neither was introduced by the console, but both
+   are on a link the console now points at. The spec is read from
+   `docs/openapi.json`, which is outside `CodeUri: ../src` and so is never
+   packaged, so the handler falls through to its two-line placeholder; and the
+   page requests `location.origin + '/openapi.json'`, which misses the `/prod`
+   stage. `docs/openapi.json` and `docs/openapi.yaml` themselves are accurate and
+   now document `/api/sessions` and the `Idempotency-Key` header.
+4. Four of the five offline fallback panels still show canned prose. They now say
    "Simulated, offline demo, no model was reached" on their face, but the numbers
    inside them are invented and should be replaced with a real offline run.
-4. The loop detector catches byte-identical repeats only. The README no longer
+5. The loop detector catches byte-identical repeats only. The README no longer
    claims entropy scanning, because there is no entropy code.
-5. No headline number exists yet. This is the largest remaining gap for judging:
+6. No headline number exists yet. This is the largest remaining gap for judging:
    the framing gate wants one comparative number against two named baselines.
-6. No video and no Builder Center article. Neither is required by the rules, but
+7. No video and no Builder Center article. Neither is required by the rules, but
    the Builder Center project itself is, and it is owner-gated.
 
 ## Audit and what was done about it, 2026-09-20

@@ -16,25 +16,106 @@
     }
   ],
   "paths": {
-    "/status": {
-      "get": {
-        "summary": "Health & Active Policy Rules",
-        "description": "Returns health status, active governance rules, and model configuration.",
+    "/adapter/universal-tool-call": {
+      "post": {
+        "summary": "Universal Multi-Agent Tool Adapter",
+        "description": "Evaluates tools in native OpenAI function_call or Anthropic tool_use JSON formats.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
-            "description": "Operational status and active rules",
+            "description": "Normalized evaluation result"
+          }
+        }
+      }
+    },
+    "/api/sessions": {
+      "get": {
+        "summary": "List Governed Sessions",
+        "description": "Returns the sessions the service has evaluated, newest first. This is the contract the sessions console renders. The listing scans the session table, which is honest at this scale only; a deployment with real traffic wants a secondary index on a recency key. The calls field counts retained history, which the store caps at the last fifty per session.",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Maximum rows to return. Clamped to between 1 and 200.",
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "minimum": 1,
+              "maximum": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Session summaries, with the persistence mode of the most recent write",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "service": {
-                      "type": "string",
-                      "example": "Threefold"
+                    "count": {
+                      "type": "integer"
                     },
-                    "status": {
+                    "persistence": {
                       "type": "string",
-                      "example": "HEALTHY"
+                      "enum": [
+                        "dynamodb",
+                        "memory"
+                      ],
+                      "description": "Where the most recent session write landed. It does not describe where the rows below were read from."
+                    },
+                    "sessions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "session_id": {
+                            "type": "string"
+                          },
+                          "developer_id": {
+                            "type": "string"
+                          },
+                          "project_name": {
+                            "type": "string"
+                          },
+                          "total_cost_usd": {
+                            "type": "number"
+                          },
+                          "total_input_tokens": {
+                            "type": "integer"
+                          },
+                          "total_output_tokens": {
+                            "type": "integer"
+                          },
+                          "is_tripped": {
+                            "type": "boolean"
+                          },
+                          "trip_reason": {
+                            "type": "string"
+                          },
+                          "is_terminated": {
+                            "type": "boolean"
+                          },
+                          "created_at": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "calls": {
+                            "type": "integer",
+                            "description": "Retained history length, capped at 50."
+                          }
+                        }
+                      }
                     }
                   }
                 }
@@ -103,49 +184,6 @@
         }
       }
     },
-    "/adapter/universal-tool-call": {
-      "post": {
-        "summary": "Universal Multi-Agent Tool Adapter",
-        "description": "Evaluates tools in native OpenAI function_call or Anthropic tool_use JSON formats.",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Normalized evaluation result"
-          }
-        }
-      }
-    },
-    "/simulate-loop": {
-      "post": {
-        "summary": "Simulate Thrashing Loop",
-        "description": "Simulates 3 consecutive identical file edits to demonstrate circuit-breaker tripping.",
-        "responses": {
-          "200": {
-            "description": "Loop interception verdict with Bedrock explanation"
-          }
-        }
-      }
-    },
-    "/simulate-secret": {
-      "post": {
-        "summary": "Simulate Secret Leakage",
-        "description": "Simulates an agent attempting to export AWS access keys, tripping the Secret Scanner.",
-        "responses": {
-          "200": {
-            "description": "Security block verdict"
-          }
-        }
-      }
-    },
     "/issue-certificate": {
       "post": {
         "summary": "Issue Cryptographic Governance Certificate",
@@ -153,77 +191,6 @@
         "responses": {
           "200": {
             "description": "Cryptographic certificate"
-          }
-        }
-      }
-    },
-    "/sessions/{session_id}": {
-      "get": {
-        "summary": "Inspect Session State",
-        "description": "Retrieves cumulative spend, token history, and circuit breaker status for an active session.",
-        "parameters": [
-          {
-            "name": "session_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Current session statistics"
-          }
-        }
-      }
-    },
-    "/sessions/{session_id}/terminate": {
-      "post": {
-        "summary": "Enterprise Emergency Kill Switch",
-        "description": "Immediately freezes and terminates an autonomous agent session, revoking further tool executions.",
-        "parameters": [
-          {
-            "name": "session_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "operator_name": {
-                    "type": "string"
-                  },
-                  "reason": {
-                    "type": "string"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Session frozen confirmation"
-          }
-        }
-      }
-    },
-    "/readyz": {
-      "get": {
-        "summary": "Deep Subsystem Readiness Probe",
-        "description": "Verifies downstream dependencies (DynamoDB, Bedrock, S3, Webhook Dispatcher).",
-        "responses": {
-          "200": {
-            "description": "Subsystems health breakdown"
           }
         }
       }
@@ -265,6 +232,136 @@
         "responses": {
           "200": {
             "description": "Updated policy configuration"
+          }
+        }
+      }
+    },
+    "/readyz": {
+      "get": {
+        "summary": "Deep Subsystem Readiness Probe",
+        "description": "Verifies downstream dependencies (DynamoDB, Bedrock, S3, Webhook Dispatcher).",
+        "responses": {
+          "200": {
+            "description": "Subsystems health breakdown"
+          }
+        }
+      }
+    },
+    "/sessions/{session_id}": {
+      "get": {
+        "summary": "Inspect Session State",
+        "description": "Retrieves cumulative spend, token history, and circuit breaker status for an active session.",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current session statistics"
+          }
+        }
+      }
+    },
+    "/sessions/{session_id}/terminate": {
+      "post": {
+        "summary": "Enterprise Emergency Kill Switch",
+        "description": "Immediately freezes and terminates an autonomous agent session, revoking further tool executions.",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Replays the first response for a repeated key instead of freezing twice. Allowed through CORS, so a page served from another origin may send it.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "operator_name": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Session frozen confirmation"
+          }
+        }
+      }
+    },
+    "/simulate-loop": {
+      "post": {
+        "summary": "Simulate Thrashing Loop",
+        "description": "Simulates 3 consecutive identical file edits to demonstrate circuit-breaker tripping.",
+        "responses": {
+          "200": {
+            "description": "Loop interception verdict with Bedrock explanation"
+          }
+        }
+      }
+    },
+    "/simulate-secret": {
+      "post": {
+        "summary": "Simulate Secret Leakage",
+        "description": "Simulates an agent attempting to export AWS access keys, tripping the Secret Scanner.",
+        "responses": {
+          "200": {
+            "description": "Security block verdict"
+          }
+        }
+      }
+    },
+    "/status": {
+      "get": {
+        "summary": "Health & Active Policy Rules",
+        "description": "Returns health status, active governance rules, and model configuration.",
+        "responses": {
+          "200": {
+            "description": "Operational status and active rules",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "service": {
+                      "type": "string",
+                      "example": "Threefold"
+                    },
+                    "status": {
+                      "type": "string",
+                      "example": "HEALTHY"
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }

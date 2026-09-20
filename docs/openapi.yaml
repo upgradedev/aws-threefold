@@ -109,6 +109,71 @@ paths:
         '200':
           description: Cryptographic certificate
 
+  /api/sessions:
+    get:
+      summary: List Governed Sessions
+      description: >-
+        Returns the sessions the service has evaluated, newest first. This is the
+        contract the sessions console renders. The listing scans the session table,
+        which is honest at this scale only; a deployment with real traffic wants a
+        secondary index on a recency key. The calls field counts retained history,
+        which the store caps at the last fifty per session.
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: Maximum rows to return. Clamped to between 1 and 200.
+          schema:
+            type: integer
+            default: 50
+            minimum: 1
+            maximum: 200
+      responses:
+        '200':
+          description: Session summaries, with the persistence mode of the most recent write
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count:
+                    type: integer
+                  persistence:
+                    type: string
+                    enum: [dynamodb, memory]
+                    description: >-
+                      Where the most recent session write landed. It does not describe
+                      where the rows below were read from.
+                  sessions:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        session_id:
+                          type: string
+                        developer_id:
+                          type: string
+                        project_name:
+                          type: string
+                        total_cost_usd:
+                          type: number
+                        total_input_tokens:
+                          type: integer
+                        total_output_tokens:
+                          type: integer
+                        is_tripped:
+                          type: boolean
+                        trip_reason:
+                          type: string
+                        is_terminated:
+                          type: boolean
+                        created_at:
+                          type: string
+                          format: date-time
+                        calls:
+                          type: integer
+                          description: Retained history length, capped at 50.
+
   /sessions/{session_id}:
     get:
       summary: Inspect Session State
@@ -131,6 +196,14 @@ paths:
         - name: session_id
           in: path
           required: true
+          schema:
+            type: string
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: >-
+            Replays the first response for a repeated key instead of freezing twice.
+            Allowed through CORS, so a page served from another origin may send it.
           schema:
             type: string
       requestBody:
