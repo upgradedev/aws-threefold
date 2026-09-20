@@ -132,6 +132,76 @@ class DynamoDBSessionRepository:
         )
         return session
 
+    def list_sessions(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """Returns recent sessions, newest first, for the dashboard.
+
+        A scan is honest at this scale and dishonest at any other. The table
+        holds one item per session with a thirty day ttl, so the working set is
+        small; a deployment with real traffic wants a secondary index on a
+        recency key instead, and this is where that change goes.
+        """
+        items: List[Dict[str, Any]] = []
+        if self._table is not None:
+            try:
+                response = self._table.scan(Limit=max(limit * 4, 100))
+                items = [i for i in response.get("Items", []) if i.get("SK") == "METADATA"]
+            except Exception as exc:
+                logger.warning("Failed to list sessions from DynamoDB: %s", exc)
+        if not items:
+            items = [
+                item for key, item in self._memory_store.items()
+                if key.endswith("#METADATA")
+            ]
+
+        summaries = []
+        for item in items:
+            pk = str(item.get("PK", ""))
+            if not pk.startswith("SESSION#") or pk.endswith("__probe__"):
+                continue
+            summaries.append(
+                {
+                    "session_id": pk[len("SESSION#"):],
+                    "developer_id": item.get("developer_id", ""),
+                    "project_name": item.get("project_name", ""),
+                    "total_cost_usd": float(item.get("total_cost_usd", 0) or 0),
+                    "total_input_tokens": int(item.get("total_input_tokens", 0) or 0),
+                    "total_output_tokens": int(item.get("total_output_tokens", 0) or 0),
+                    "is_tripped": bool(item.get("is_tripped", False)),
+                    "trip_reason": item.get("trip_reason") or "",
+                    "is_terminated": bool(item.get("is_terminated", False)),
+                    "created_at": item.get("created_at", ""),
+                    "calls": len(json.loads(item.get("history_json") or "[]")),
+                }
+            )
+        summaries.sort(key=lambda s: s["created_at"], reverse=True)
+        return summaries[:limit]
+
+    def load_policy(self) -> Optional[Dict[str, Any]]:
+        """Reads the saved policy, so settings outlive the container that set them."""
+        if self._table is not None:
+            try:
+                res = self._table.get_item(Key={"PK": "CONFIG#policy", "SK": "METADATA"})
+                item = res.get("Item")
+                if item:
+                    return {k: v for k, v in item.items() if k not in ("PK", "SK", "ttl")}
+            except Exception as exc:
+                logger.warning("Failed to read policy from DynamoDB: %s", exc)
+        return self._memory_store.get("CONFIG#policy#METADATA")
+
+    def save_policy(self, config: Dict[str, Any]) -> bool:
+        """Persists the policy. Settings that vanish on a cold start are not settings."""
+        item = {"PK": "CONFIG#policy", "SK": "METADATA"}
+        item.update({k: (str(v) if isinstance(v, float) else v) for k, v in config.items()})
+        if self._table is not None:
+            try:
+                self._table.put_item(Item=item)
+                self._memory_store["CONFIG#policy#METADATA"] = item
+                return True
+            except Exception as exc:
+                logger.warning("DynamoDB save_policy failed, writing to memory: %s", exc)
+        self._memory_store["CONFIG#policy#METADATA"] = item
+        return True
+
     def save_session(self, session: AgentSession, force: bool = False) -> bool:
         """Persists complete session state to DynamoDB.
 

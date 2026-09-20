@@ -52,12 +52,59 @@ class GovernanceEvaluator:
         else:
             from threefold.infrastructure.dynamo_repo import DynamoDBSessionRepository
             self.session_repo = DynamoDBSessionRepository()
+        if policy_config is None:
+            self._adopt_saved_policy()
 
-    def update_policy(self, config: PolicyConfigDTO) -> None:
-        """Update runtime policy configuration dynamically."""
+    def _adopt_saved_policy(self) -> None:
+        """Applies the stored policy, so a cold container does not start on defaults."""
+        loader = getattr(self.session_repo, "load_policy", None)
+        if loader is None:
+            return
+        try:
+            saved = loader()
+        except Exception as exc:  # pragma: no cover - storage is best effort
+            logger.warning("Could not read the saved policy: %s", exc)
+            return
+        if not saved:
+            return
+        try:
+            self._apply(
+                PolicyConfigDTO(
+                    max_single_call_usd=float(saved.get("max_single_call_usd", 1.00)),
+                    max_session_budget_usd=float(saved.get("max_session_budget_usd", 10.00)),
+                    loop_history_window=int(saved.get("loop_history_window", 6)),
+                    monomorphic_repetition_threshold=int(
+                        saved.get("monomorphic_repetition_threshold", 3)
+                    ),
+                )
+            )
+        except (TypeError, ValueError) as exc:
+            logger.warning("Saved policy was unreadable, keeping defaults: %s", exc)
+
+    def _apply(self, config: PolicyConfigDTO) -> None:
         self.policy_config = config
         self.cost_breaker.max_single_invocation_cost = config.max_single_call_usd
         self.loop_detector.repetition_threshold = config.monomorphic_repetition_threshold
+
+    def update_policy(self, config: PolicyConfigDTO) -> None:
+        """Applies a policy and stores it.
+
+        A setting that lives only in the memory of whichever container answered
+        is not a setting. It would apply to some requests and not others, which
+        is worse than having no setting at all.
+        """
+        self._apply(config)
+        saver = getattr(self.session_repo, "save_policy", None)
+        if saver is not None:
+            try:
+                saver(config.to_dict())
+            except Exception as exc:  # pragma: no cover - storage is best effort
+                logger.warning("Could not persist the policy: %s", exc)
+
+    def list_sessions(self, limit: int = 50):
+        """Recent sessions for the dashboard."""
+        lister = getattr(self.session_repo, "list_sessions", None)
+        return lister(limit=limit) if lister else []
 
     def terminate_session(self, session_id: str, operator_name: str, reason: str) -> AgentSession:
         """Manual enterprise kill-switch to immediately freeze an agent session."""

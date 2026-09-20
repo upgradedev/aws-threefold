@@ -177,6 +177,24 @@ def lambda_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]
                 },
             )
 
+        # Route 0a: the sessions the service has actually governed. The dashboard
+        # reads this; a browser asking for /sessions gets the page above instead.
+        if path in ("/api/sessions", "/sessions.json") and http_method == "GET":
+            limit = 50
+            try:
+                limit = int((event.get("queryStringParameters") or {}).get("limit", 50))
+            except (TypeError, ValueError):
+                limit = 50
+            sessions = _evaluator.list_sessions(limit=max(1, min(limit, 200)))
+            return build_response(
+                200,
+                {
+                    "sessions": sessions,
+                    "count": len(sessions),
+                    "persistence": getattr(_evaluator.session_repo, "persistence_mode", "memory"),
+                },
+            )
+
         # Route 1a: Deep Readiness Probe (/readyz)
         if path in ("/readyz", "/ready") and http_method == "GET":
             readiness = _evaluator.check_readiness(bedrock_client=_bedrock_client)
