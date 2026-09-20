@@ -54,6 +54,45 @@ hidden in a document that a judge would read as finished work.
 5. No video and no Builder Center article. Neither is required by the rules, but
    the Builder Center project itself is, and it is owner-gated.
 
+## Audit, 2026-09-20
+
+What a judge would find, written down before they find it.
+
+**The two gaps that are not scores.** There is no Builder Center project and no
+public repository. Until both exist there is no submission, however good the
+code is, and neither is a thing an agent may do unsupervised. Both are one
+command each in `docs/RUNBOOK.md`.
+
+**The differentiator is prose, not code.** Every reviewer who has looked at this
+named the same thing as the novel idea: a governance certificate that a CI check
+refuses to merge without. Nothing in this repository verifies a certificate.
+`ARCHITECTURE.md` used to state the requirement as fact and now states it as the
+next piece of work. The same is true of the dogfooding story: a Claude Code hook
+pointing at the deployed API would make the interception real rather than
+simulated, and it does not exist.
+
+**The demo intercepts nothing.** `/simulate-loop` and `/simulate-secret` build
+their own payloads server side. The gates are real and the halt is durable, but
+no agent is being stopped, so the panels show a rehearsal rather than a capture.
+
+**What the loop detector does and does not catch.** Three checks: identical
+signature repeated, ping-pong between two calls, and a repeating three-step
+cycle. All three compare a SHA-256 of the tool name and sorted arguments, so ten
+different edits to the same file are not a loop by this definition, although the
+README's "edit-test-fail cycles" invites the reader to expect otherwise.
+
+**Numbers that were never measured have been removed** rather than defended. The
+sub-millisecond gate, the 0.5ms evaluation and the 180ms cold start are gone,
+and the Well-Architected page no longer contradicts itself about whether any
+latency was measured. Nothing replaced them, because there is still no
+benchmark. There is also still no headline comparative number against a named
+baseline, which is the largest remaining gap for scoring.
+
+**Other live weaknesses, unfixed and known.** The cost breaker trusts the token
+counts the caller declares, so a caller reporting zero passes. The boundary
+guard is bypassable by moving a path into a differently named argument. Five
+regular expressions do the secret scanning, against tools that carry hundreds.
+
 ## Cost and teardown
 
 PAY_PER_REQUEST DynamoDB, one 256 MB arm64 Lambda, an HTTP API and an empty S3
