@@ -283,9 +283,11 @@ def test_a_codex_shell_command_is_sent_as_a_command(payloads, stub, run_hook) ->
     assert body["session_id"] == "acme-codex-1"
 
 
-def test_a_codex_command_given_as_a_list_of_words_is_joined(hook) -> None:
+def test_a_codex_command_given_as_a_list_of_words_is_quoted_back_into_one_line(hook) -> None:
+    """Joined with spaces, bash's script became its first word alone: `bash -lc ls src`
+    runs `ls` and hands `src` to it as $0. Quoted, it is the command Codex runs."""
     call = hook.normalise({"tool_name": "shell", "tool_input": {"command": ["bash", "-lc", "ls src"]}}, "codex")
-    assert call.arguments() == {"command": "bash -lc ls src"}
+    assert call.arguments() == {"command": "bash -lc 'ls src'"}
 
 
 def test_the_codex_patch_the_hook_sends_is_one_the_service_can_judge(hook, machine) -> None:

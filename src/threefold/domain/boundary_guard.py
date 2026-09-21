@@ -18,10 +18,19 @@ from threefold.domain.layering_rules import (
     evaluate as evaluate_layering,
     observed as observed_layering,
     rules_for_path,
+    violations,
 )
-from threefold.domain.imports import language_for
+from threefold.domain.imports import LANGUAGE_BY_SUFFIX, language_for
 from threefold.domain.models import ToolActionType, ToolInvocation
-from threefold.domain.shell_writes import ShellAnalysis, analyse as analyse_shell, is_governance_path
+from threefold.domain.shell_writes import (
+    ShellAnalysis,
+    ShellWrite,
+    analyse as analyse_shell,
+    display as shell_display,
+    is_governance_path,
+    pattern_is_governance,
+    pattern_matches_glob,
+)
 
 MAX_PATHLIKE_LENGTH = 400
 
@@ -516,34 +525,223 @@ def governance_reason(target: str, route: str = "", deletes: bool = False) -> st
     )
 
 
+def _pattern_governance_reason(write: ShellWrite) -> str:
+    verb = "removes" if write.deletes else "writes"
+    where = shell_display(write.target)
+    if write.tree:
+        return (
+            f"Target path '{_tree_root(where)}' is protected by architectural governance: this call {verb} a "
+            f"directory tree there by {write.route}, and the tree could hold the files that decide whether the "
+            "agent's hooks run"
+        )
+    return (
+        f"Target path '{where}' is protected by architectural governance: it is named with a shell expansion or a "
+        f"glob, it could be a file that decides whether the agent's hooks run, and this call {verb} it by "
+        f"{write.route}. Name the path literally"
+    )
+
+
+def _tree_root(where: str) -> str:
+    return where.rsplit("/", 1)[0] if "/" in where else "."
+
+
 def _enforcing(rules: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return [rule for rule in rules if rule.get("mode", ENFORCE) == ENFORCE]
 
 
-def _readable_by_a_rule(target: str) -> bool:
-    """Whether a Write to this path would have its imports read at all.
+# --- judging one write a command makes ---------------------------------------------
 
-    Telling an agent to "use Write or Edit so the rule can read it" is only
-    true for a file type the rules can read. A Markdown file under domain/ is
-    allowed as a Write, so it is allowed through `cp` as well.
+# The words that begin an import in each language the rules read.
+_IMPORT_WORDS = {
+    "python": ("import", "from"),
+    "java": ("import",),
+    "csharp": ("using",),
+    "typescript": ("import", "from", "require", "export"),
+}
+_WORD = re.compile(r"[A-Za-z0-9_@\-]+")
+
+
+def _pieces(patterns: Any) -> set:
+    found = set()
+    for pattern in patterns or ():
+        for piece in re.split(r"[./*]+", str(pattern)):
+            piece = piece.strip("@").lower()
+            if len(piece) >= 3:
+                found.add(piece)
+    return found
+
+
+def _fragment_could_import(content: str, rule: Dict[str, Any], language: str) -> bool:
+    """Whether text that replaces part of a line could complete an import the rule forbids.
+
+    `sed -i 's/json/boto3/'` turns `import json` into `import boto3`, and the
+    replacement on its own is not an import at all. So a replacement that names
+    a module the rule forbids, or brings an import keyword into a line whose
+    other parts cannot be read, is judged as content that cannot be read. One
+    that does neither, `s/old_name/new_name/`, is judged as it is. A module the
+    rule also allows by name, such as C#'s `System`, is not counted.
     """
-    return language_for(target) is not None
+    words = {word.strip("@").lower() for word in _WORD.findall(content)}
+    if any(keyword in words for keyword in _IMPORT_WORDS.get(language, ())):
+        return True
+    forbidden = _pieces(rule.get("forbid_imports")) - _pieces(rule.get("allow_imports"))
+    return bool(words & forbidden)
+
+
+def _finding(rule: Dict[str, Any], path: str, reason: str, module: str = "", pattern: str = "") -> Dict[str, str]:
+    return {
+        "rule_id": rule["id"],
+        "mode": rule.get("mode", ENFORCE),
+        "module": module,
+        "pattern": pattern,
+        "reason": reason,
+        "path": path,
+    }
+
+
+def _unreadable_finding(rule: Dict[str, Any], write: ShellWrite, fragment: bool = False) -> Dict[str, str]:
+    target = write.target or ""
+    if rule.get("mode", ENFORCE) == ENFORCE:
+        what = (
+            f"changes part of a line in it by {write.route} to text that could complete an import the rule "
+            "forbids, while the rest of the line cannot be read"
+            if fragment else f"writes it by {write.route} with content the rule cannot read"
+        )
+        reason = f"Clean Architecture violation: layering rule '{rule['id']}' covers '{target}', and this command {what}: {UNREADABLE_WRITE}"
+        return _finding(rule, target, reason)
+    if not fragment:
+        return _unreadable_observation(rule, target, write.route)
+    reason = (
+        f"Layering rule '{rule['id']}' would refuse this write: the command changes part of a line in '{target}' by "
+        f"{write.route} to text that could complete an import the rule forbids, while the rest of the line cannot "
+        f"be read, and would be told to {UNREADABLE_WRITE}"
+    )
+    return _finding(rule, target, reason)
+
+
+def _unreadable_pattern_finding(rule: Dict[str, Any], write: ShellWrite, fragment: bool = False) -> Dict[str, str]:
+    where = shell_display(write.target)
+    enforce = rule.get("mode", ENFORCE) == ENFORCE
+    lead = "Clean Architecture violation: layering rule" if enforce else "Layering rule"
+    verb = "refuses" if enforce else "would refuse"
+    if write.tree:
+        reason = (
+            f"{lead} '{rule['id']}' {verb} this write: the command brings a directory tree into "
+            f"'{_tree_root(where)}' by {write.route}, and the rule could cover a file in it whose content it cannot "
+            f"read: {UNREADABLE_WRITE}"
+        )
+    else:
+        what = (
+            "changes part of a line there to text that could complete an import the rule forbids"
+            if fragment else "writes there with content the rule cannot read"
+        )
+        reason = (
+            f"{lead} '{rule['id']}' {verb} this write: the command names '{where}' with a shell expansion or a "
+            f"glob that is only resolved when it runs, the rule could cover it, and the command {what} by "
+            f"{write.route}: name the file literally, or {UNREADABLE_WRITE}"
+        )
+    return _finding(rule, where, reason)
+
+
+def _suffixes_within(target: str, rule: Dict[str, Any]) -> List[str]:
+    """The readable file types a shape could be while a rule covers it; empty if it never could."""
+    globs = rule.get("when_path_matches") or ()
+    if not any(pattern_matches_glob(target, glob) for glob in globs):
+        return []
+    return [suffix for suffix in LANGUAGE_BY_SUFFIX if any(pattern_matches_glob(target, glob, suffix) for glob in globs)]
+
+
+def _pattern_findings(write: ShellWrite, rules: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+    """The rules a write to a shape rather than a path breaks or would break.
+
+    Content that cannot be read is judged as it would be for a path the rule
+    covers. Content that can be read is judged once per file type the shape
+    could be, by the rule's own lists, so `echo done > "$LOG"` is approved and
+    `D=src/domain; echo 'import boto3' > $D/x.py` is refused naming the rule.
+    """
+    where = shell_display(write.target)
+    findings: List[Dict[str, str]] = []
+    for rule in rules:
+        suffixes = _suffixes_within(write.target or "", rule)
+        if not suffixes:
+            continue
+        if write.content is None:
+            findings.append(_unreadable_pattern_finding(rule, write))
+            continue
+        probe = dict(rule, when_path_matches=["**"])
+        for suffix in suffixes:
+            found, _ = violations("threefold-shape" + suffix, write.content, [probe])
+            if found:
+                item = found[0]
+                enforce = item["mode"] == ENFORCE
+                description = rule.get("description") or rule["id"]
+                reason = (
+                    f"Layering rule '{rule['id']}' {'refuses' if enforce else 'would refuse'} this write: "
+                    f"{description}. '{where}' is named with a shell expansion or a glob and could be a file the "
+                    f"rule covers, and the content imports '{item['module']}', which matches '{item['pattern']}'"
+                )
+                if enforce:
+                    reason = f"Clean Architecture violation: {reason} (written by {write.route})"
+                findings.append(_finding(rule, where, reason, item["module"], item["pattern"]))
+                break
+            if write.fragment and _fragment_could_import(write.content, rule, LANGUAGE_BY_SUFFIX[suffix]):
+                findings.append(_unreadable_pattern_finding(rule, write, fragment=True))
+                break
+    return findings
+
+
+def _write_findings(write: ShellWrite, rules: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+    """Every rule one of a command's writes breaks or would break, enforcing and watching alike.
+
+    shell_refusal takes the first that enforces and shell_observations the
+    ones that watch, so the two can never judge the same write differently.
+    """
+    if write.pattern:
+        return _pattern_findings(write, rules)
+    target = write.target or ""
+    covering = rules_for_path(target, rules)
+    if not covering:
+        return []
+    language = language_for(target)
+    if write.content is None:
+        # Telling an agent to "use Write or Edit so the rule can read it" is
+        # only true for a file type the rules can read. A Markdown file under
+        # domain/ is allowed as a Write, so it is allowed through `cp` as well.
+        return [_unreadable_finding(rule, write) for rule in covering] if language else []
+    found, _ = violations(target, write.content, rules)
+    findings = []
+    for item in found:
+        reason = item["reason"]
+        if item["mode"] == ENFORCE:
+            reason = f"Clean Architecture violation: {reason} (written by {write.route})"
+        findings.append(dict(item, reason=reason, path=target))
+    if write.fragment and language:
+        judged = {item["rule_id"] for item in found}
+        findings.extend(
+            _unreadable_finding(rule, write, fragment=True)
+            for rule in covering
+            if rule["id"] not in judged and _fragment_could_import(write.content, rule, language)
+        )
+    return findings
 
 
 def shell_refusal(analysis: ShellAnalysis, rules: List[Dict[str, Any]]) -> Optional[str]:
     """Why a command's writes are refused, or None. Judged the way a Write would be.
 
-    Three decisions the contract leaves to this function, each deliberate:
+    Four decisions the contract leaves to this function, each deliberate:
 
     - A deletion is judged only as a governance path. `rm src/domain/x.py`
       writes no import, and telling an agent to delete a file "with Write or
       Edit" is advice it cannot follow.
-    - A write whose files cannot be known, `git apply fix.patch` or `patch <
-      fix.patch`, is refused while any enforce rule is active. The patch lives
-      on the developer's machine, and two calls, one writing the patch into
-      /tmp and one applying it, would otherwise carry any import into any
-      domain file. `git checkout` and `git merge` are not treated so: what they
-      write was committed, and the pre-commit check has already read it.
+    - A write whose files cannot be known, `git apply fix.patch`, `patch <
+      fix.patch` or `open(path, 'w')` with a computed path, is refused while any
+      enforce rule is active. The patch lives on the developer's machine, and
+      two calls, one writing the patch into /tmp and one applying it, would
+      otherwise carry any import into any domain file. `git checkout` and `git
+      merge` are not treated so: what they write was committed, and the
+      pre-commit check has already read it.
+    - A write to a shape, a target with an expansion or a glob in it, is judged
+      against every rule that could cover a file of that shape.
     - A command too long to read to the end is refused while any enforce rule
       is active, for the same reason: padding must not be a way past the gate.
 
@@ -553,7 +751,12 @@ def shell_refusal(analysis: ShellAnalysis, rules: List[Dict[str, Any]]) -> Optio
     for reason in analysis.tampering:
         return f"Command turns the repository's hooks off: {reason}. Refused as a protected-path call"
     for write in analysis.writes:
-        if write.target is not None and is_governance_path(write.target, deletes=write.deletes):
+        if write.target is None:
+            continue
+        if write.pattern:
+            if pattern_is_governance(write.target, write.deletes, write.tree):
+                return _pattern_governance_reason(write)
+        elif is_governance_path(write.target, deletes=write.deletes):
             return governance_reason(write.target, write.route, write.deletes)
     enforced = _enforcing(rules)
     if analysis.truncated and enforced:
@@ -567,26 +770,15 @@ def shell_refusal(analysis: ShellAnalysis, rules: List[Dict[str, Any]]) -> Optio
         if write.target is None:
             if enforced:
                 return (
-                    f"Clean Architecture violation: this command writes files by {write.route} from a patch "
-                    "this service cannot see, so neither the files nor what is written to them can be checked "
-                    f"against rule '{enforced[0]['id']}': {UNREADABLE_WRITE}"
+                    f"Clean Architecture violation: this command writes by {write.route} to files it does not name "
+                    "in a way that can be read (a patch kept in a file, or a path worked out when it runs), so neither "
+                    f"the files nor what is written to them can be checked against rule '{enforced[0]['id']}': "
+                    f"{UNREADABLE_WRITE}"
                 )
             continue
-        covering = rules_for_path(write.target, rules)
-        if not covering:
-            continue
-        if write.content is None:
-            refusing = _enforcing(covering)
-            if refusing and _readable_by_a_rule(write.target):
-                return (
-                    f"Clean Architecture violation: layering rule '{refusing[0]['id']}' covers "
-                    f"'{write.target}', and this command writes it by {write.route} with content the rule "
-                    f"cannot read: {UNREADABLE_WRITE}"
-                )
-            continue
-        allowed, reason = evaluate_layering(write.target, write.content, rules)
-        if not allowed:
-            return f"Clean Architecture violation: {reason} (written by {write.route})"
+        for finding in _write_findings(write, rules):
+            if finding["mode"] == ENFORCE:
+                return finding["reason"]
     return None
 
 
@@ -608,10 +800,11 @@ def _unreadable_observation(rule: Dict[str, Any], target: str, how: str) -> Dict
 def shell_observations(analysis: ShellAnalysis, rules: List[Dict[str, Any]]) -> List[Dict[str, str]]:
     """What the observe rules would have refused among a command's writes.
 
-    The mirror of shell_refusal for rules that only watch: readable content is
-    judged as a Write's would be, and content that cannot be read is recorded
-    against each watching rule that covers the path, so a rule rolled out in
-    observe mode shows the `cp` into domain/ it would stop as well as the Write.
+    The mirror of shell_refusal for rules that only watch, built from the same
+    findings: readable content is judged as a Write's would be, and content
+    that cannot be read is recorded against each watching rule that covers the
+    path, so a rule rolled out in observe mode shows the `cp` into domain/ it
+    would stop as well as the Write.
     """
     watching = [rule for rule in rules if rule.get("mode") == OBSERVE]
     if not watching:
@@ -624,13 +817,6 @@ def shell_observations(analysis: ShellAnalysis, rules: List[Dict[str, Any]]) -> 
             continue
         if write.target is None:
             found.extend(_unreadable_observation(rule, "", write.route) for rule in watching)
-        elif write.content is None:
-            if _readable_by_a_rule(write.target):
-                found.extend(
-                    _unreadable_observation(rule, write.target, write.route)
-                    for rule in rules_for_path(write.target, watching)
-                )
         else:
-            for item in observed_layering(write.target, write.content, rules):
-                found.append(dict(item, path=write.target))
+            found.extend(item for item in _write_findings(write, rules) if item["mode"] == OBSERVE)
     return found

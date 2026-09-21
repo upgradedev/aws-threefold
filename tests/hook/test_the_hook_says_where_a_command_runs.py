@@ -16,7 +16,9 @@ from __future__ import annotations
 import json
 from typing import Any, Dict
 
-from threefold.domain.boundary_guard import ArchitecturalBoundaryGuard, write_pairs
+import pytest
+
+from threefold.domain.boundary_guard import UNREADABLE_WRITE, ArchitecturalBoundaryGuard, write_pairs
 from threefold.domain.models import ToolActionType, ToolInvocation
 
 
@@ -45,7 +47,29 @@ def test_a_codex_workdir_below_the_root_is_sent_as_where_the_command_runs(machin
     arguments = _sent(stub)["arguments"]
     assert arguments["cwd"] == "src/domain"
     allowed, reason = _judged(arguments)
-    assert not allowed and "python-domain-stays-pure" in reason
+    # Refused for the import it writes, which is only readable when bash's
+    # script arrives whole: with the words joined by spaces the redirect was
+    # read as bash's own, and refused only as output nobody could read.
+    assert not allowed and "imports 'boto3'" in reason
+
+
+@pytest.mark.parametrize(
+    "script, reason",
+    [
+        ("cp /tmp/acme.py src/domain/x.py", UNREADABLE_WRITE),
+        ("git commit --no-verify -m x", "--no-verify"),
+        ("python -c \"open('src/domain/x.py','w').write('import boto3')\"", "python-domain-stays-pure"),
+    ],
+)
+def test_a_codex_command_given_as_words_reaches_the_service_as_the_script_bash_runs(script, reason, machine, stub, run_hook) -> None:
+    """Joined with spaces, `bash -lc cp /tmp/acme.py src/domain/x.py` gives bash
+    the script `cp` and nothing the service could read a write in. Only the
+    service's verdict on what actually arrived shows the difference."""
+    run_hook(_codex(machine, script, str(machine.project)), ["--agent", "codex"])
+    arguments = _sent(stub)["arguments"]
+    allowed, why = _judged(arguments)
+    assert not allowed
+    assert reason in why
 
 
 def test_an_antigravity_cwd_below_the_root_is_sent_the_same_way(machine, payloads, stub, run_hook) -> None:

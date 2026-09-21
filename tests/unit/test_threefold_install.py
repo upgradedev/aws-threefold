@@ -16,6 +16,7 @@ import importlib.util
 import io
 import json
 import os
+import socket
 import subprocess
 import sys
 from pathlib import Path
@@ -63,6 +64,15 @@ def machine(tmp_path, monkeypatch):
     for variable, value in (("GIT_AUTHOR_NAME", "Acme Dev"), ("GIT_AUTHOR_EMAIL", "dev@acme.example"),
                             ("GIT_COMMITTER_NAME", "Acme Dev"), ("GIT_COMMITTER_EMAIL", "dev@acme.example")):
         monkeypatch.setenv(variable, value)
+    # The installed pre-commit check asks the service for the project's rules.
+    # Home names a port nothing listens on, so a commit made by a test falls
+    # back to the shipped rules instead of reaching the public stack.
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        closed = f"http://127.0.0.1:{probe.getsockname()[1]}/prod/"
+    (home / ".threefold").mkdir()
+    (home / ".threefold" / "config.json").write_text(json.dumps({"endpoint": closed}), encoding="utf-8")
+    monkeypatch.setenv("THREEFOLD_TIMEOUT", "0.5")
     repo = tmp_path / "acme-ledger"
     repo.mkdir()
     assert _git(repo, "init", "-q").returncode == 0
@@ -297,6 +307,95 @@ def test_a_dry_run_of_an_uninstall_writes_nothing_either(machine) -> None:
     result = run(machine, "--uninstall", "--dry-run")
     assert snapshot(machine.repo, machine.home) == before
     assert "would remove the pre-commit hook" in result.out
+
+
+# --- files git tracks, and files that were there before ------------------------------------------
+
+def _commit(machine, relative: str, text: str) -> None:
+    path = machine.repo / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(text.encode("utf-8"))
+    assert _git(machine.repo, "add", relative).returncode == 0
+    assert _git(machine.repo, "commit", "-q", "-m", f"chore: acme {relative}").returncode == 0
+
+
+def test_a_settings_file_git_tracks_is_left_alone_and_the_output_says_what_to_do(machine) -> None:
+    """A committed .codex/hooks.json is the normal case. Writing the hook into
+    it put this machine's Python and home folder into the next commit, and
+    .git/info/exclude has no effect on a tracked file."""
+    committed = '{"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "acme-lint"}]}]}}'
+    _commit(machine, ".codex/hooks.json", committed)
+    result = run(machine)
+    assert result.code == 0, result.out
+    assert ".codex/hooks.json is tracked by git" in result.out
+    assert (machine.repo / ".codex" / "hooks.json").read_text(encoding="utf-8") == committed
+    assert _git(machine.repo, "status", "--porcelain", "--", ".codex").stdout == ""
+    exclude = (machine.repo / ".git" / "info" / "exclude").read_text(encoding="utf-8").splitlines()
+    assert "/.codex/hooks.json" not in exclude
+    assert "/.claude/settings.local.json" in exclude, "the untracked files are still installed"
+
+    run(machine, "--uninstall")
+    assert (machine.repo / ".codex" / "hooks.json").read_text(encoding="utf-8") == committed
+
+
+def test_a_repository_config_git_tracks_is_left_alone(machine) -> None:
+    committed = '{"project": "Acme-Team", "mode": "enforce"}\n'
+    _commit(machine, ".threefold.json", committed)
+    result = run(machine)
+    assert result.code == 0, result.out
+    assert ".threefold.json is tracked by git" in result.out
+    assert (machine.repo / ".threefold.json").read_bytes() == committed.encode("utf-8")
+    assert _git(machine.repo, "status", "--porcelain", "--", ".threefold.json").stdout == ""
+
+
+def test_uninstall_puts_a_file_that_was_there_before_back_byte_for_byte(machine) -> None:
+    """Parsed JSON coming back equal is not the file coming back: indentation,
+    line endings and the missing final newline were all rewritten before."""
+    original = b'{\r\n    "permissions": {"allow": ["Bash(npm test)"]},\r\n    "hooks": {}\r\n}'
+    settings_path = machine.repo / ".claude" / "settings.local.json"
+    settings_path.parent.mkdir()
+    settings_path.write_bytes(original)
+    exclude = machine.repo / ".git" / "info" / "exclude"
+    exclude_before = exclude.read_bytes().rstrip(b"\n") + b"\n# acme: a last line with no newline"
+    exclude.write_bytes(exclude_before)
+    run(machine)
+    assert settings_path.read_bytes() != original
+    run(machine, "--uninstall")
+    assert settings_path.read_bytes() == original
+    assert exclude.read_bytes() == exclude_before
+
+
+def test_a_file_changed_by_hand_since_the_install_keeps_the_change_and_loses_only_the_hook(machine) -> None:
+    path = machine.repo / ".claude" / "settings.local.json"
+    path.parent.mkdir()
+    path.write_text(json.dumps({"permissions": {"allow": []}}), encoding="utf-8")
+    run(machine)
+    document = settings(machine, ".claude/settings.local.json")
+    document["permissions"]["allow"].append("Bash(acme-build)")
+    path.write_text(json.dumps(document), encoding="utf-8")
+    result = run(machine, "--uninstall")
+    assert "changed since the install" in result.out
+    after = settings(machine, ".claude/settings.local.json")
+    assert after["permissions"]["allow"] == ["Bash(acme-build)"]
+    assert "hooks" not in after
+
+
+def test_an_endpoint_and_key_file_are_paired_at_home_so_the_hook_sends_the_key_there(machine) -> None:
+    key_file = machine.tmp / "acme.key"
+    key_file.write_text("acme-operator-key-value", encoding="utf-8")
+    run(machine, "--endpoint", "https://acme.example/dogfood", "--api-key-file", str(key_file))
+    home_config = json.loads((machine.threefold_home / "config.json").read_text(encoding="utf-8"))
+    assert home_config["trusted_endpoints"] == [{"endpoint": "https://acme.example/dogfood/", "api_key_file": key_file.resolve().as_posix()}]
+
+    spec = importlib.util.spec_from_file_location("threefold_hook_for_install", installer.HOOK_SOURCE)
+    hook = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(hook)
+    resolved = hook.resolve_settings({"cwd": str(machine.repo)})
+    assert (resolved.endpoint, resolved.api_key) == ("https://acme.example/dogfood/", "acme-operator-key-value")
+
+    run(machine, "--endpoint", "https://acme.example/dogfood", "--api-key-file", str(key_file))
+    again = json.loads((machine.threefold_home / "config.json").read_text(encoding="utf-8"))
+    assert len(again["trusted_endpoints"]) == 1, "a second install pairs nothing twice"
 
 
 # --- the project name -------------------------------------------------------------------------

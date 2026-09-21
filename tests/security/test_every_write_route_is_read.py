@@ -98,6 +98,31 @@ BENIGN: List[str] = [
     "export ACME_ENV=dev && python app.py",
     "python -c \"open('build/out.txt','w').write('ok')\"",
     "cp docs/acme.md src/domain/README.md",
+    # Reading the hooks setting is not changing it.
+    "git config core.hooksPath",
+    "git config --show-origin core.hooksPath",
+    # Expansions and globs where nothing a rule reads can be at stake.
+    "rm -rf build/*",
+    'echo done > "$LOG"',
+    "echo x > $OUT/report.txt",
+    'for f in src/*.py; do wc -l "$f"; done',
+    'git config user.email "$ACME_EMAIL"',
+    "echo $((1+2)) > build/n.txt",
+    "sed -i 's/old_name/new_name/g' $ACME_FILE",
+    # Compound commands whose parts write nothing a rule covers.
+    "if [ -f build/app ]; then echo built; fi",
+    "case $ACME_ENV in dev) echo dev;; *) echo other;; esac",
+    "acme_build() { make -C build; }; acme_build",
+    # Directory trees that stay inside the project, or leave it.
+    "cp -r build/ dist/",
+    "TMP=$(mktemp -d) && cp -r src $TMP/ && ls $TMP",
+    "mv build/a build/b",
+    "cp -r src /tmp/acme-backup",
+    "git clean -fd",
+    "git clean -fdx build/",
+    "ln -s ../README.md docs/README.md",
+    "find . -name '*.py' -exec wc -l {} +",
+    "python -c \"import json; d=json.load(open('package.json')); json.dump(d, open('package.json','w'))\"",
 ]
 
 # Routes whose write a layering rule judges: refused while the rule enforces,
@@ -140,6 +165,56 @@ LAYERING_PROBES: List[str] = [
     "echo 'import boto3' 1> src/domain/x.py",
     "echo 'import javax.persistence.Entity;' > src/main/java/acme/domain/Order.java",
     "bash -c \"echo 'import boto3' > src/domain/x.py\"",
+    # What the shell expands when the command runs is not the text it is spelled with.
+    'M=boto3; echo "import $M" > src/domain/x.py',
+    'echo "import $(echo boto3)" > src/domain/x.py',
+    "echo import `echo boto3` > src/domain/x.py",
+    "cat > src/domain/x.py <<EOF\nimport $M\nEOF",
+    "cat > src/domain/x.py <<EOF\n$(printf 'import boto3')\nEOF",
+    "python -c \"open('src/domain/x.py','w').write('import $M')\"",
+    "D=src/domain; echo 'import boto3' > $D/x.py",
+    "D=src/domain; cd $D && echo 'import boto3' > x.py",
+    "echo 'import boto3' > src/d?main/x.py",
+    "echo 'import boto3' > src/domai[n]/x.py",
+    "echo 'import boto3' | tee src/{domain,app}/x.py",
+    # Compound commands: the keyword in front hid the command.
+    "if true; then cp /tmp/acme.py src/domain/x.py; fi",
+    "true && { cp /tmp/acme.py src/domain/x.py; }",
+    "! cp /tmp/acme.py src/domain/x.py",
+    "if true; then python -c \"open('src/domain/x.py','w').write('import boto3')\"; fi",
+    "for i in 1; do echo 'import boto3'; done > src/domain/x.py",
+    "{ echo 'import boto3'; } > src/domain/x.py",
+    # Escapes echo -e, printf and sed expand.
+    "echo -e 'import\\x20boto3' > src/domain/x.py",
+    "printf 'import\\040boto3\\n' > src/domain/x.py",
+    "printf '\\151mport boto3' > src/domain/x.py",
+    "printf '%b' 'import\\x20boto3' > src/domain/x.py",
+    "sed -i 's/^/\\x69mport boto3/' src/domain/x.py",
+    "sed -i 's/^/\\LIMPORT BOTO3/' src/domain/x.py",
+    "sed -i -e '1i\\' -e 'import boto3' src/domain/x.py",
+    "sed -i 's/json/boto3/' src/domain/x.py",
+    "sed -i 's/^/import /' src/domain/x.py",
+    "sed -n 'w src/domain/x.py' /tmp/acme.py",
+    # A backslash between letters is a separator to Windows and nothing to bash.
+    "echo 'import boto3' > src/dom\\ain/x.py",
+    "echo 'import boto3' > src/domain/acme.p\\y",
+    # A redirect left open on the shell.
+    "exec 3> src/domain/x.py; echo 'import boto3' >&3",
+    "exec > src/domain/x.py; echo 'import boto3'",
+    # The narrower routes.
+    "patch -p1 -d src/domain <<'EOF'\n--- a/x.py\n+++ b/x.py\n@@ -0,0 +1 @@\n+import boto3\nEOF",
+    "cp /tmp/acme/* src/domain/",
+    "cp -r /tmp/acme/. src/domain/",
+    "cp -r /tmp/acme/domain src/",
+    "mv /tmp/acme src/domain",
+    "busybox cp /tmp/acme.py src/domain/x.py",
+    "node -pe \"require('fs').writeFileSync('src/domain/x.ts', 'import axios from \\\"axios\\\"')\"",
+    "python -c \"open(file='src/domain/x.py', mode='w').write('import boto3')\"",
+    "python -c \"from pathlib import Path as P; P('src/domain/x.py').write_text('import boto3')\"",
+    "python -c \"import sys; open(sys.stdin.readline().strip(), 'w').write('import boto3')\"",
+    "find src/domain -name '*.py' | xargs sed -i '1i import boto3'",
+    "find src/domain -name '*.py' -exec sed -i '1i import boto3' {} +",
+    "$PYTHON -c \"open('src/domain/x.py','w').write('import boto3')\"",
 ]
 
 # Routes that turn the hooks off. No layering rule decides these, so they are
@@ -160,6 +235,17 @@ GOVERNANCE_PROBES: List[str] = [
     "cp /tmp/empty.json .codex/hooks.json",
     "rm -rf .claude",
     "printf '[core]\n\thooksPath = /dev/null\n' >> .git/config",
+    "D=.claude; echo '{}' > $D/settings.json",
+    "echo '{}' > .claude/setting\\s.json",
+    "if true; then rm .threefold.json; fi",
+    "true && { rm .codex/hooks.json; }",
+    "rm -rf .claude/*",
+    "export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null; git commit -m x",
+    "git -c include.path=/tmp/acme.gitconfig commit -m wip",
+    "GIT_CONFIG_GLOBAL=/tmp/acme.gitconfig git commit -m wip",
+    "git clean -fdx",
+    "cp -r /tmp/acme-empty/. ./",
+    "rsync -a --delete /tmp/acme-empty/ ./",
 ]
 
 

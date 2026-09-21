@@ -24,14 +24,23 @@ What it does, in order:
 5. Lists every working-tree file it wrote in `.git/info/exclude`, never in
    `.gitignore`: the repository's own ignore rules are its owners' to change.
 
+A file git already tracks is never written. Codex and Antigravity project hook
+files are usually committed, and the entry names this machine's Python and
+home folder, so writing it would put those paths in the next `git commit -a`;
+.git/info/exclude cannot keep a tracked file out. The output says which file
+was left alone and what to add by hand instead. With `--endpoint` and
+`--api-key-file` together, the pair is also written to THREEFOLD_HOME/config.json,
+which is what lets the hook send the key to an endpoint a repository names.
+
 The mode defaults to observe. A rule set introduced to a team for the first
 time should show what it would stop for a week before it stops anything.
 
 `--uninstall` removes exactly what an install added, from a record kept in the
-git directory, and restores a `.threefold.json` or a pre-commit hook that was
-there before. The shared copies in THREEFOLD_HOME stay, because other
-repositories may be using them. `--dry-run` prints every step and writes
-nothing at all.
+git directory. A file that was there before is put back byte for byte, from
+the copy the record keeps, as long as it still holds exactly what the install
+wrote; one changed by hand since keeps the change and loses only the install's
+entry. The shared copies in THREEFOLD_HOME stay, because other repositories
+may be using them. `--dry-run` prints every step and writes nothing at all.
 
 Codex reads a project's hooks only when that project is trusted in Codex. This
 script does not edit `~/.codex/config.toml` to trust it: that is a decision
@@ -42,6 +51,8 @@ Standard library only.
 from __future__ import annotations
 
 import argparse
+import base64
+import hashlib
 import json
 import os
 import re
@@ -68,6 +79,8 @@ AGENT_SETTINGS = {
 }
 
 CONFIG_FILE = ".threefold.json"
+HOME_CONFIG = "config.json"
+EXCLUDE_KEY = "git:info/exclude"
 MANIFEST_NAME = "threefold-install.json"
 PRE_COMMIT_MARKER = "# threefold pre-commit: installed by threefold_install.py"
 CHAINED_NAME = "pre-commit.before-threefold"
@@ -168,11 +181,22 @@ def _write_text(path: Path, text: str) -> Callable[[], None]:
     return action
 
 
+def _write_bytes(path: Path, data: bytes) -> Callable[[], None]:
+    def action() -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+    return action
+
+
 def _copy(source: Path, target: Path) -> Callable[[], None]:
     def action() -> None:
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, target)
     return action
+
+
+def _digest(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
 
 
 def load_manifest(path: Path) -> Dict[str, Any]:
@@ -184,15 +208,37 @@ def load_manifest(path: Path) -> Dict[str, Any]:
 
 
 def _merged_manifest(old: Dict[str, Any]) -> Dict[str, Any]:
+    originals = dict(old.get("originals") or {})
+    # A record written before originals were kept had the old config as text.
+    if old.get("previous_config") is not None and CONFIG_FILE not in originals:
+        originals[CONFIG_FILE] = base64.b64encode(str(old["previous_config"]).encode("utf-8")).decode("ascii")
     return {
-        "version": 1,
+        "version": 2,
         "created_files": list(old.get("created_files") or []),
         "created_dirs": list(old.get("created_dirs") or []),
-        "previous_config": old.get("previous_config"),
         "entries": list(old.get("entries") or []),
         "pre_commit": old.get("pre_commit") or {"action": "none"},
         "exclude_lines": list(old.get("exclude_lines") or []),
+        # The bytes of each file that was there before the install changed it,
+        # and a digest of what the install last wrote there. An uninstall puts
+        # the old bytes back when the file still holds exactly the install's.
+        "originals": originals,
+        "installed": dict(old.get("installed") or {}),
     }
+
+
+def _planned_write(manifest: Dict[str, Any], key: str, path: Path, data: bytes) -> Callable[[], None]:
+    """A write the manifest remembers: the bytes before the first install touched it, and what went in."""
+    if path.is_file() and key not in manifest["originals"] and key not in manifest["created_files"]:
+        manifest["originals"][key] = base64.b64encode(path.read_bytes()).decode("ascii")
+    manifest["installed"][key] = _digest(data)
+    return _write_bytes(path, data)
+
+
+def is_tracked(root: Path, relative: str) -> bool:
+    """Whether git tracks this file. An install writes the developer's own paths, which must not be committed."""
+    code, _ = git(root, "ls-files", "--error-unmatch", "--", relative, check=False)
+    return code == 0
 
 
 # --- install ------------------------------------------------------------------------------
@@ -241,8 +287,11 @@ def install(args: argparse.Namespace, root: Path, home: Path, out: Any) -> int:
 
     # The repository's configuration. Never the key: only where to read it.
     config: Dict[str, Any] = {"project": args.project, "mode": args.mode}
+    endpoint = ""
+    key_file: Optional[Path] = None
     if args.endpoint:
-        config["endpoint"] = args.endpoint if args.endpoint.endswith("/") else args.endpoint + "/"
+        endpoint = args.endpoint if args.endpoint.endswith("/") else args.endpoint + "/"
+        config["endpoint"] = endpoint
     if args.api_key_file:
         key_file = Path(os.path.expanduser(args.api_key_file)).resolve()
         if not key_file.is_file():
@@ -250,20 +299,43 @@ def install(args: argparse.Namespace, root: Path, home: Path, out: Any) -> int:
         config["api_key_file"] = forward(key_file)
     config_path = root / CONFIG_FILE
     config_text = dump_json(config)
-    if config_path.is_file() and config_path.read_text(encoding="utf-8-sig") == config_text:
+    if is_tracked(root, CONFIG_FILE):
+        # Writing it would put this machine's key path in a committed file,
+        # and an uninstall could never tell the team's version from ours.
+        plan.add(
+            f"{CONFIG_FILE} is tracked by git, so it was left as it is: the committed file decides the project and "
+            f"the mode here. Change it in a commit, or set THREEFOLD_PROJECT, if it should say {args.project}"
+        )
+    elif config_path.is_file() and config_path.read_text(encoding="utf-8-sig") == config_text:
         plan.add(f"{CONFIG_FILE} is current")
+        written.append(CONFIG_FILE)
     else:
-        if config_path.exists() and CONFIG_FILE not in manifest["created_files"] and manifest["previous_config"] is None:
-            manifest["previous_config"] = config_path.read_text(encoding="utf-8-sig")
-        elif not config_path.exists() and CONFIG_FILE not in manifest["created_files"]:
+        if not config_path.exists() and CONFIG_FILE not in manifest["created_files"]:
             manifest["created_files"].append(CONFIG_FILE)
-        plan.add(f"write {CONFIG_FILE} for {args.project} in {args.mode} mode", _write_text(config_path, config_text))
-    written.append(CONFIG_FILE)
+        plan.add(
+            f"write {CONFIG_FILE} for {args.project} in {args.mode} mode",
+            _planned_write(manifest, CONFIG_FILE, config_path, config_text.encode("utf-8")),
+        )
+        written.append(CONFIG_FILE)
+
+    if endpoint and key_file is not None:
+        trusted_endpoint_step(plan, home, endpoint, key_file)
 
     # One entry per agent, merged into whatever the file already holds.
     for agent in agents:
         relative, matcher = AGENT_SETTINGS[agent]
         path = root / relative
+        if is_tracked(root, relative):
+            # Codex and Antigravity project hooks are usually committed. The
+            # entry names this machine's Python and home folder, so adding it
+            # would put them in the next commit, and .git/info/exclude cannot
+            # keep a tracked file out of `git commit -a`.
+            plan.add(
+                f"{relative} is tracked by git, so the hook for {agent} was not added to it: the entry holds this "
+                f"machine's paths and would be committed. Add `{hook_command(home, agent)}` in that agent's own "
+                "settings outside the repository instead"
+            )
+            continue
         document = read_json_object(path) if path.exists() else {}
         hooks = document.setdefault("hooks", {})
         if not isinstance(hooks, dict):
@@ -293,7 +365,10 @@ def install(args: argparse.Namespace, root: Path, home: Path, out: Any) -> int:
             if relative not in manifest["created_files"]:
                 manifest["created_files"].append(relative)
         manifest["entries"].append({"file": relative, "command": command})
-        plan.add(f"register the hook for {agent} in {relative}", _write_text(path, dump_json(document)))
+        plan.add(
+            f"register the hook for {agent} in {relative}",
+            _planned_write(manifest, relative, path, dump_json(document).encode("utf-8")),
+        )
 
     pre_commit_step(plan, root, home, manifest)
     exclude_step(plan, root, written, manifest)
@@ -303,6 +378,33 @@ def install(args: argparse.Namespace, root: Path, home: Path, out: Any) -> int:
     if "codex" in agents:
         print(f"threefold: {CODEX_TRUST_NOTE}", file=out)
     return 0
+
+
+def trusted_endpoint_step(plan: Plan, home: Path, endpoint: str, key_file: Path) -> None:
+    """Pairs the endpoint with its key file in THREEFOLD_HOME/config.json.
+
+    The hook sends a key to an endpoint named only in .threefold.json when the
+    owner has paired the two at home, and never otherwise, so a cloned
+    repository cannot aim the owner's key at a server of its choosing. This is
+    the owner saying, once, that this endpoint is theirs.
+    """
+    path = home / HOME_CONFIG
+    document = read_json_object(path) if path.exists() else {}
+    pairs = document.get("trusted_endpoints")
+    if pairs is None:
+        pairs = []
+    if not isinstance(pairs, list):
+        raise InstallError(f"{forward(path)} has a \"trusted_endpoints\" that is not a list, so it was left alone")
+    entry = {"endpoint": endpoint, "api_key_file": forward(key_file)}
+    if entry in pairs:
+        plan.add(f"{endpoint} is already paired with its key file in {forward(path)}")
+        return
+    document["trusted_endpoints"] = pairs + [entry]
+    plan.add(
+        f"pair {endpoint} with its key file in {forward(path)}, so the hook sends the key there and nowhere a "
+        "repository names on its own",
+        _write_text(path, dump_json(document)),
+    )
 
 
 def pre_commit_script(home: Path) -> str:
@@ -371,16 +473,13 @@ def exclude_step(plan: Plan, root: Path, written: Sequence[str], manifest: Dict[
     for line in lines:
         if line not in manifest["exclude_lines"]:
             manifest["exclude_lines"].append(line)
-
-    def action() -> None:
-        exclude.parent.mkdir(parents=True, exist_ok=True)
-        text = exclude.read_text(encoding="utf-8") if exclude.is_file() else ""
-        if text and not text.endswith("\n"):
-            text += "\n"
-        with open(exclude, "w", encoding="utf-8", newline="\n") as handle:
-            handle.write(text + "\n".join(lines) + "\n")
-
-    plan.add(f"list {', '.join(missing)} in .git/info/exclude", action)
+    current = exclude.read_bytes() if exclude.is_file() else b""
+    if current and not current.endswith(b"\n"):
+        current += b"\n"
+    if not exclude.is_file() and EXCLUDE_KEY not in manifest["created_files"]:
+        manifest["created_files"].append(EXCLUDE_KEY)
+    data = current + ("\n".join(lines) + "\n").encode("utf-8")
+    plan.add(f"list {', '.join(missing)} in .git/info/exclude", _planned_write(manifest, EXCLUDE_KEY, exclude, data))
 
 
 # --- uninstall ------------------------------------------------------------------------------
@@ -436,6 +535,13 @@ def uninstall(args: argparse.Namespace, root: Path, home: Path, out: Any) -> int
         path = root / relative
         if not path.is_file():
             continue
+        original = _restorable(manifest, relative, path)
+        if original is not None:
+            plan.add(f"put {relative} back exactly as it was before the install", _write_bytes(path, original))
+            continue
+        if relative in created and _unchanged_since_install(manifest, relative, path):
+            plan.add(f"delete {relative}, which the install created", path.unlink)
+            continue
         try:
             document = read_json_object(path)
         except InstallError as error:
@@ -447,13 +553,18 @@ def uninstall(args: argparse.Namespace, root: Path, home: Path, out: Any) -> int
         if relative in created and not remaining:
             plan.add(f"delete {relative}, which the install created", path.unlink)
         else:
-            plan.add(f"remove the hook entry from {relative}", _write_text(path, dump_json(remaining)))
+            # Changed by hand since the install, so the old bytes would lose
+            # that change: only the entry the install added comes out.
+            plan.add(f"remove the hook entry from {relative}, which has changed since the install", _write_text(path, dump_json(remaining)))
 
     config_path = root / CONFIG_FILE
-    if manifest["previous_config"] is not None:
-        plan.add(f"restore the {CONFIG_FILE} that was there before", _write_text(config_path, manifest["previous_config"]))
+    original = _restorable(manifest, CONFIG_FILE, config_path)
+    if original is not None:
+        plan.add(f"restore the {CONFIG_FILE} that was there before", _write_bytes(config_path, original))
     elif CONFIG_FILE in created and config_path.is_file():
         plan.add(f"delete {CONFIG_FILE}", config_path.unlink)
+    elif CONFIG_FILE in manifest["originals"] and config_path.is_file():
+        plan.add(f"note: {CONFIG_FILE} has changed since the install, so it was left as it is rather than put back")
     elif not exact and config_path.is_file():
         plan.add(f"note: {CONFIG_FILE} was left in place, because without the install record nothing says the install wrote it")
 
@@ -466,7 +577,12 @@ def uninstall(args: argparse.Namespace, root: Path, home: Path, out: Any) -> int
             plan.add("remove the pre-commit hook", hook_path.unlink)
 
     exclude = git_path(root, "info/exclude")
-    if exclude.is_file():
+    original = _restorable(manifest, EXCLUDE_KEY, exclude)
+    if original is not None:
+        plan.add("put .git/info/exclude back exactly as it was before the install", _write_bytes(exclude, original))
+    elif EXCLUDE_KEY in created and _unchanged_since_install(manifest, EXCLUDE_KEY, exclude):
+        plan.add("delete .git/info/exclude, which the install created", exclude.unlink)
+    elif exclude.is_file():
         lines = exclude.read_text(encoding="utf-8").splitlines()
         if exact:
             ours = set(manifest["exclude_lines"])
@@ -490,11 +606,30 @@ def uninstall(args: argparse.Namespace, root: Path, home: Path, out: Any) -> int
     if manifest_path.is_file():
         plan.add("delete the install record", manifest_path.unlink)
     plan.add(
-        f"note: the shared copies in {forward(home)} were kept, because other repositories may use them; "
-        "delete them by hand once none does"
+        f"note: the shared copies in {forward(home)}, and any endpoint paired with a key file in its "
+        f"{HOME_CONFIG}, were kept, because other repositories may use them; delete them by hand once none does"
     )
     plan.run()
     return 0
+
+
+def _unchanged_since_install(manifest: Dict[str, Any], key: str, path: Path) -> bool:
+    return path.is_file() and manifest["installed"].get(key) == _digest(path.read_bytes())
+
+
+def _restorable(manifest: Dict[str, Any], key: str, path: Path) -> Optional[bytes]:
+    """The bytes a file held before the install, when it still holds exactly what the install wrote."""
+    original = manifest["originals"].get(key)
+    if original is None or not path.is_file():
+        return None
+    # A record from before digests were kept restored unconditionally, and
+    # still does; a digest that no longer matches means someone changed it.
+    if key in manifest["installed"] and not _unchanged_since_install(manifest, key, path):
+        return None
+    try:
+        return base64.b64decode(original)
+    except ValueError:
+        return None
 
 
 # --- entry point -----------------------------------------------------------------------------

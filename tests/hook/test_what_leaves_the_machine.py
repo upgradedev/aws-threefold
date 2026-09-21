@@ -161,11 +161,28 @@ def test_a_data_file_is_held_back_by_its_extension(relative, payloads, stub, run
 
 @pytest.mark.parametrize(
     "relative",
-    ["data/loader.py", "src/datasets/split.py", "outputs/run1/log.txt", "node_modules/acme/index.js", ".git/info/attributes", ".venv/lib/site.py"],
+    [
+        "data/loader.py", "src/datasets/split.py", "outputs/run1/log.txt", "node_modules/acme/index.js",
+        ".git/hooks/pre-commit", ".venv/lib/site.py", ".git/info/attributes", ".git/config",
+    ],
 )
 @pytest.mark.parametrize("agent", AGENTS)
-def test_a_file_under_a_data_directory_is_held_back(agent, relative, payloads, stub, run_hook, held_back_lines) -> None:
+def test_a_file_under_a_data_directory_is_held_back(agent, relative, payloads, stub, run_hook, held_back_lines, monkeypatch) -> None:
+    """Run in observe mode, where nothing is refused, so holding back is the
+    only thing that can keep a call here. In enforce mode the hook scripts and
+    .git/config are refused before this check, and the next test pins that
+    they are not sent there either."""
+    monkeypatch.setenv("THREEFOLD_MODE", "observe")
     _held_back(stub, run_hook, payloads.write(agent, relative), held_back_lines, "data-file", ["--agent", agent])
+
+
+@pytest.mark.parametrize("relative", [".git/hooks/pre-commit", ".git/config"])
+@pytest.mark.parametrize("agent", AGENTS)
+def test_in_enforce_mode_the_files_under_git_that_run_the_hooks_are_refused_and_still_never_sent(agent, relative, payloads, stub, run_hook) -> None:
+    code, out, _ = run_hook(payloads.write(agent, relative, "[core]\n\thooksPath = /dev/null\n"), ["--agent", agent])
+    assert code == 0
+    assert "deny" in out
+    assert stub.requests == []
 
 
 def test_the_data_directories_are_read_inside_the_project_not_above_it(machine, stub, run_hook, held_back_lines) -> None:

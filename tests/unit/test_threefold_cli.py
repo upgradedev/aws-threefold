@@ -18,6 +18,7 @@ import importlib.util
 import io
 import json
 import os
+import socket
 import subprocess
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -54,6 +55,13 @@ def _git(repo: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True)
 
 
+def _closed_endpoint() -> str:
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    return f"http://127.0.0.1:{port}/prod/"
+
+
 @pytest.fixture
 def repo(tmp_path, monkeypatch):
     for name in list(os.environ):
@@ -72,6 +80,12 @@ def repo(tmp_path, monkeypatch):
     for variable, value in (("GIT_AUTHOR_NAME", "Acme Dev"), ("GIT_AUTHOR_EMAIL", "dev@acme.example"),
                             ("GIT_COMMITTER_NAME", "Acme Dev"), ("GIT_COMMITTER_EMAIL", "dev@acme.example")):
         monkeypatch.setenv(variable, value)
+    # A project with no endpoint of its own is asked for its rules at the
+    # endpoint the hook would use. Home names a port nothing listens on, so no
+    # test here can reach the public stack by falling through to the default.
+    (home / ".threefold").mkdir()
+    (home / ".threefold" / "config.json").write_text(json.dumps({"endpoint": _closed_endpoint()}), encoding="utf-8")
+    monkeypatch.setenv("THREEFOLD_TIMEOUT", "0.5")
     root = tmp_path / "acme-ledger"
     root.mkdir()
     _git(root, "init", "-q", "-b", "main")
@@ -87,6 +101,12 @@ def write(root: Path, relative: str, content: str, stage: bool = True) -> None:
     path.write_text(content, encoding="utf-8")
     if stage:
         _git(root, "add", relative)
+
+
+def commit_rules(root: Path, document: Any, message: str = "chore: acme rules") -> None:
+    """The rule file as the check reads it: committed, never from the working tree."""
+    write(root, ".threefold/rules.json", json.dumps(document))
+    _git(root, "commit", "-q", "-m", message)
 
 
 def configure(root: Path, **fields: Any) -> None:
@@ -145,8 +165,7 @@ def test_a_clean_commit_passes_quietly(repo) -> None:
 
 def test_a_rule_that_only_observes_never_fails_a_commit_even_in_enforce_mode(repo) -> None:
     configure(repo, project="Acme-Ledger", mode="enforce")
-    (repo / ".threefold").mkdir()
-    (repo / ".threefold" / "rules.json").write_text(json.dumps([dict(CUSTOM_RULE, mode="observe")]), encoding="utf-8")
+    commit_rules(repo, [dict(CUSTOM_RULE, mode="observe")])
     write(repo, "src/core/invoice.py", "import acme_legacy\n")
     result = check(repo)
     assert result.code == 0
@@ -186,9 +205,8 @@ def test_ci_with_a_base_that_does_not_exist_is_an_error_not_a_pass(repo) -> None
 
 # --- where the rules come from --------------------------------------------------------------
 
-def test_the_repositorys_rule_file_is_used_when_no_endpoint_is_configured(repo) -> None:
-    (repo / ".threefold").mkdir()
-    (repo / ".threefold" / "rules.json").write_text(json.dumps({"rules": [CUSTOM_RULE]}), encoding="utf-8")
+def test_the_repositorys_committed_rule_file_is_used_when_no_service_answers(repo) -> None:
+    commit_rules(repo, {"rules": [CUSTOM_RULE]})
     write(repo, "src/core/invoice.py", "import acme_legacy\n")
     write(repo, "src/domain/acme_user.py", "import boto3\n")
     result = check(repo)
@@ -236,8 +254,14 @@ def service():
 
 
 def test_the_projects_rules_are_fetched_from_the_configured_endpoint(repo, service, tmp_path) -> None:
+    """The key goes with the request because home pairs that endpoint with that
+    key file, as the installer writes it; a repository's endpoint alone gets none."""
     key = tmp_path / "acme.key"
     key.write_text("acme-operator-key", encoding="utf-8")
+    home_config = tmp_path / "home" / ".threefold" / "config.json"
+    document = json.loads(home_config.read_text(encoding="utf-8"))
+    document["trusted_endpoints"] = [{"endpoint": service.endpoint, "api_key_file": str(key)}]
+    home_config.write_text(json.dumps(document), encoding="utf-8")
     configure(repo, project="Acme-Ledger", mode="enforce", endpoint=service.endpoint, api_key_file=str(key))
     write(repo, "src/core/invoice.py", "import acme_legacy\n")
     result = check(repo)
@@ -251,8 +275,7 @@ def test_the_projects_rules_are_fetched_from_the_configured_endpoint(repo, servi
 def test_a_service_that_cannot_answer_falls_back_to_the_rule_file_and_says_why(repo, service) -> None:
     service.status = 503
     configure(repo, project="Acme-Ledger", mode="enforce", endpoint=service.endpoint)
-    (repo / ".threefold").mkdir()
-    (repo / ".threefold" / "rules.json").write_text(json.dumps([CUSTOM_RULE]), encoding="utf-8")
+    commit_rules(repo, [CUSTOM_RULE])
     write(repo, "src/core/invoice.py", "import acme_legacy\n")
     result = check(repo)
     assert result.code == 1
@@ -260,8 +283,76 @@ def test_a_service_that_cannot_answer_falls_back_to_the_rule_file_and_says_why(r
     assert ".threefold/rules.json" in result.out
 
 
-def test_without_a_configured_endpoint_nothing_is_fetched(repo, service) -> None:
+def test_a_project_with_no_endpoint_of_its_own_is_asked_for_its_rules_at_the_default_one(repo, monkeypatch, tmp_path) -> None:
+    """The hook sends such a project's calls to the default endpoint, so its
+    rules live there. Reading them anywhere else let the hook and this check
+    name different rules for the same write."""
+    (tmp_path / "home" / ".threefold" / "config.json").unlink()
+    asked: List[Any] = []
+
+    def fetch(endpoint, project, api_key, timeout):
+        asked.append((endpoint, project))
+        return [CUSTOM_RULE], ""
+
+    monkeypatch.setattr(cli, "fetch_rules", fetch)
     configure(repo, project="Acme-Ledger", mode="enforce")
+    write(repo, "src/core/invoice.py", "import acme_legacy\n")
+    result = check(repo)
+    hook = cli.load_hook()
+    assert asked == [(hook.DEFAULT_ENDPOINT, "Acme-Ledger")]
+    assert result.code == 1 and "[acme-core-no-legacy]" in result.out
+
+
+def test_without_a_project_nothing_is_fetched(repo, service) -> None:
     write(repo, "src/domain/acme_user.py", "import boto3\n")
     check(repo)
     assert service.requests == []
+
+
+# --- the rules are the committed ones, not the change's ----------------------------------------
+
+LENIENT_RULE = dict(CUSTOM_RULE, forbid_imports=["acme_nothing"])
+
+
+def test_check_reads_the_committed_rule_file_not_the_working_copy(repo) -> None:
+    commit_rules(repo, [CUSTOM_RULE])
+    (repo / ".threefold" / "rules.json").write_text(json.dumps([LENIENT_RULE]), encoding="utf-8")
+    write(repo, "src/core/invoice.py", "import acme_legacy\n")
+    result = check(repo)
+    assert result.code == 1
+    assert "[acme-core-no-legacy]" in result.out
+    assert "not the committed one" in result.out
+
+
+def test_a_commit_that_loosens_the_rules_is_judged_by_the_rules_before_it(repo) -> None:
+    commit_rules(repo, [CUSTOM_RULE])
+    write(repo, ".threefold/rules.json", json.dumps([LENIENT_RULE]))
+    write(repo, "src/core/invoice.py", "import acme_legacy\n")
+    result = check(repo)
+    assert result.code == 1
+    assert "this commit changes .threefold/rules.json" in result.out
+
+
+def test_ci_takes_its_rules_from_the_base_and_reports_a_changed_rule_file(repo) -> None:
+    """A branch that turns the rule to observe and adds the import passed with
+    exit 0 when the rules came from the branch itself."""
+    commit_rules(repo, [CUSTOM_RULE])
+    _git(repo, "checkout", "-q", "-b", "feature/acme-loosen")
+    commit_rules(repo, [dict(CUSTOM_RULE, mode="observe")], "chore: acme rules watch only")
+    write(repo, "src/core/invoice.py", "import acme_legacy\n")
+    _git(repo, "commit", "-q", "-m", "feat: acme invoice")
+    out = io.StringIO()
+    code = cli.main(["ci", "--base", "main", "--repo", str(repo), "--mode", "enforce"], out)
+    assert code == 1
+    assert "REFUSED src/core/invoice.py [acme-core-no-legacy]" in out.getvalue()
+    assert f"REFUSED .threefold/rules.json [{cli.RULE_FILE_ID}]" in out.getvalue()
+
+
+def test_ci_with_an_unchanged_rule_file_reports_nothing_about_it(repo) -> None:
+    commit_rules(repo, [CUSTOM_RULE])
+    _git(repo, "checkout", "-q", "-b", "feature/acme-docs")
+    write(repo, "docs/notes.md", "notes\n")
+    _git(repo, "commit", "-q", "-m", "docs: notes")
+    out = io.StringIO()
+    assert cli.main(["ci", "--base", "main", "--repo", str(repo)], out) == 0
+    assert cli.RULE_FILE_ID not in out.getvalue()

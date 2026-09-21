@@ -20,6 +20,15 @@ nobody has taught it, and a guard that refuses ordinary work is a guard that
 gets uninstalled. The price is paid knowingly: `python script.py` can write
 anything, and nothing here pretends to see inside it.
 
+The same invariant covers what the shell decides only when the command runs: a
+variable, a substitution, a glob, an escape sequence. `M=boto3; echo "import
+$M" > src/domain/x.py` wrote `import boto3` while this module read the content
+as `import $M` and approved it. Such a part is never read as the text it is
+spelled with. While scanning, each is swapped for a private-use code point, so
+a word that carries one is known to be unreadable wherever it ends up: as
+content it is UNKNOWN, and as a target it is a pattern, which the gate asks
+"could this be a file a rule covers?" rather than reading as a literal path.
+
 Everything is bounded, because commands arrive from an agent and the gate sits
 in front of every call. The scan jumps between shell metacharacters with one
 compiled pattern, heredoc bodies are consumed by a line search without being
@@ -31,11 +40,15 @@ than approve the part it did.
 from __future__ import annotations
 
 import ast
+import fnmatch
 import posixpath
 import re
 import shlex
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+
+from threefold.domain.path_match import _segments as _glob_segments
 
 UNKNOWN: Optional[str] = None
 
@@ -55,11 +68,54 @@ MAX_NESTED_SCRIPTS = 3
 MAX_CODE_CHARS = 200_000
 PYTHON_PARSE_LIMIT = 100_000
 
+# What the shell decides only when the command runs. Each stands in a word for
+# the part it replaces, so the word's other characters are still read.
+#
+# EXPANSION replaces a whole `$NAME`, `${...}`, `$((...))`, `$(...)`, backtick
+# or `{a,b}` brace group: what it becomes can be any text, slashes included.
+EXPANSION = ""
+# The three characters an unquoted glob is made of. A quoted `*` stays a `*`.
+STAR = ""
+QUESTION = ""
+BRACKET = ""
+# An unquoted backslash between two word characters. Bash drops it and keeps
+# the letter; an agent on Windows means a separator. Which one ran is not known,
+# so a target that carries one is judged both ways.
+BACKSLASH = ""
+# Any single name, dot files included. Used only inside this module, for "a
+# file directly beneath this directory".
+_ANY_NAME = ""
+
 # What a `$(...)`, a backtick or a `( ... )` group leaves behind in the command
 # around it. The inner command is read on its own; the outer one sees a word it
 # cannot know, which is what a substitution is until it runs.
-PLACEHOLDER = "__threefold_substitution__"
-_UNKNOWN_PART = "__threefold_unknown__"
+PLACEHOLDER = EXPANSION
+_UNKNOWN_PART = EXPANSION
+
+_OPAQUE = (EXPANSION, STAR, QUESTION, BRACKET, _ANY_NAME)
+_GLOB_CHARACTERS = str.maketrans({"*": STAR, "?": QUESTION, "[": BRACKET})
+_DISPLAY = str.maketrans({EXPANSION: "${...}", STAR: "*", QUESTION: "?", BRACKET: "[", BACKSLASH: "\\", _ANY_NAME: "*"})
+# `{a,b}` and `{1..3}` unquoted: one word becomes several. The class stops at
+# the next brace or space, so an unclosed group cannot make the search quadratic.
+_BRACE_GROUP = re.compile(r"\{[^{}\s]*(?:,|\.\.)[^{}\s]*\}")
+_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def is_opaque(text: Optional[str]) -> bool:
+    """Whether a word or a path carries a part the shell decides only when it runs."""
+    return bool(text) and any(marker in text for marker in _OPAQUE)
+
+
+def display(text: Optional[str]) -> str:
+    """A word as a person would recognise it, with each unreadable part shown as written."""
+    return (text or "").translate(_DISPLAY)
+
+
+def _unquoted(chunk: str) -> str:
+    """Unquoted text with its brace groups and glob characters marked, at C speed."""
+    if "{" in chunk:
+        chunk = _BRACE_GROUP.sub(EXPANSION, chunk)
+    return chunk.translate(_GLOB_CHARACTERS)
 
 # Characters inside quotes that shlex must not read as operators. `echo '>' x`
 # is an echo of a greater-than sign, and without this a quoted `>` became a
@@ -75,15 +131,25 @@ class ShellWrite:
 
     `target` is None only for a write whose targets cannot be read at all, such
     as `git apply fix.patch`, where the patch lives on a machine the service
-    cannot see. `content` is UNKNOWN (None) when the route is recognised but
-    what it writes is not in the command. `deletes` marks a path removed or
-    moved away rather than written.
+    cannot see, or `open(path, 'w')` with a path computed when the code runs.
+    `content` is UNKNOWN (None) when the route is recognised but what it writes
+    is not in the command. `deletes` marks a path removed or moved away rather
+    than written.
+
+    `pattern` marks a target that carries an unreadable part (see is_opaque):
+    it is a shape the file will have, not a path. `tree` marks a pattern that
+    stands for every file of a directory tree copied, moved or linked in.
+    `fragment` marks content that replaces part of a line whose other parts are
+    not in the command, as `sed -i 's/json/boto3/'` does.
     """
 
     target: Optional[str]
     content: Optional[str]
     route: str
     deletes: bool = False
+    pattern: bool = False
+    tree: bool = False
+    fragment: bool = False
 
 
 @dataclass
@@ -153,6 +219,250 @@ def is_governance_path(path: str, deletes: bool = False) -> bool:
     return deletes and parts[-1] in _GOVERNANCE_DIRECTORIES
 
 
+# --- what a pattern could name ---------------------------------------------------
+#
+# A target with an unreadable part is a shape, not a path. The gate asks two
+# questions of it: could it be one of the files above, and could it be a file a
+# layering rule covers. Both are answered by asking whether some path matches
+# the target's shape and a glob at once, segment by segment as path_match
+# matches, so a rule is read the same way whether it meets a path or a shape.
+#
+# A segment is None for "any number of whole segments" (a `**` in a rule, an
+# expansion in a command) or a glob: a tuple of tokens, each a lower-cased
+# character, _ONE for any one character or _RUN for any run of them, with a
+# flag saying the shell's own rule applies that a leading dot is matched only
+# by a dot.
+
+_ONE = "\x00?"
+_RUN = "\x00*"
+_Glob = Tuple[Tuple[str, ...], bool]
+_Shape = Tuple[Optional[_Glob], ...]
+MAX_SHAPE_STATES = 20_000
+
+
+def _glob_of(segment: str, shell: bool) -> _Glob:
+    """One segment as tokens. `shell` reads the markers of a command; otherwise `*` and `?` of a rule."""
+    tokens: List[str] = []
+    index = 0
+    length = len(segment)
+    while index < length:
+        char = segment[index]
+        if shell and char in (STAR, _ANY_NAME):
+            tokens.append(_RUN)
+        elif shell and char == QUESTION:
+            tokens.append(_ONE)
+        elif shell and char == BRACKET:
+            close = segment.find("]", index + 2)
+            if close == -1:
+                tokens.append("[")
+            else:
+                tokens.append(_ONE)
+                index = close
+        elif not shell and char == "*":
+            tokens.append(_RUN)
+        elif not shell and char == "?":
+            tokens.append(_ONE)
+        else:
+            tokens.append(char.lower())
+        index += 1
+    dot_rule = shell and bool(segment) and segment[0] in (STAR, QUESTION, BRACKET)
+    return tuple(tokens), dot_rule
+
+
+@lru_cache(maxsize=4096)
+def _globs_meet(globs: Tuple[_Glob, ...]) -> bool:
+    """Whether one non-empty segment exists that every glob matches.
+
+    A table over the globs' positions, each state visited once, capped: past
+    the cap the answer is yes, because the question is only ever asked to find
+    out whether a write could be refused, and "could" is the safe side.
+    """
+    start = (tuple(0 for _ in globs), False)
+    seen = {start}
+    stack = [start]
+    dot_rule = any(rule for _, rule in globs)
+    while stack:
+        if len(seen) > MAX_SHAPE_STATES:
+            return True
+        positions, started = stack.pop()
+        if started and all(position == len(tokens) for position, (tokens, _) in zip(positions, globs)):
+            return True
+        following: List[Tuple[Tuple[int, ...], bool]] = []
+        for index, (position, (tokens, _)) in enumerate(zip(positions, globs)):
+            if position < len(tokens) and tokens[position] == _RUN:
+                following.append((positions[:index] + (position + 1,) + positions[index + 1:], started))
+        required: Optional[str] = None
+        moved: List[int] = []
+        possible = True
+        for position, (tokens, _) in zip(positions, globs):
+            if position == len(tokens):
+                possible = False
+                break
+            token = tokens[position]
+            if token == _RUN:
+                moved.append(position)
+            elif token == _ONE:
+                moved.append(position + 1)
+            else:
+                if required is not None and required != token:
+                    possible = False
+                    break
+                required = token
+                moved.append(position + 1)
+        if possible and not (dot_rule and not started and required == "."):
+            following.append((tuple(moved), True))
+        for state in following:
+            if state not in seen:
+                seen.add(state)
+                stack.append(state)
+    return False
+
+
+@lru_cache(maxsize=4096)
+def _shapes_meet(shapes: Tuple[_Shape, ...]) -> bool:
+    """Whether one path exists that every shape matches, segment by segment."""
+    start = tuple(0 for _ in shapes)
+    seen = {start}
+    stack = [start]
+    while stack:
+        if len(seen) > MAX_SHAPE_STATES:
+            return True
+        state = stack.pop()
+        if all(position == len(shape) for position, shape in zip(state, shapes)):
+            return True
+        following: List[Tuple[int, ...]] = []
+        for index, (position, shape) in enumerate(zip(state, shapes)):
+            if position < len(shape) and shape[position] is None:
+                following.append(state[:index] + (position + 1,) + state[index + 1:])
+        globs: List[_Glob] = []
+        moved: List[int] = []
+        possible = True
+        for position, shape in zip(state, shapes):
+            if position == len(shape):
+                possible = False
+                break
+            unit = shape[position]
+            if unit is None:
+                moved.append(position)
+            else:
+                globs.append(unit)
+                moved.append(position + 1)
+        if possible and globs and _globs_meet(tuple(globs)):
+            following.append(tuple(moved))
+        for candidate in following:
+            if candidate not in seen:
+                seen.add(candidate)
+                stack.append(candidate)
+    return False
+
+
+def _target_shape(pattern: str) -> _Shape:
+    """A command's target as a shape. A segment with an expansion in it can be any number of segments."""
+    units: List[Optional[_Glob]] = []
+    for segment in pattern.replace("\\", "/").split("/"):
+        if segment in ("", "."):
+            continue
+        if EXPANSION in segment:
+            units.append(None)
+            tail = segment.rsplit(EXPANSION, 1)[1]
+            if tail:
+                # `$NAME.py` ends in `.py` whatever NAME holds.
+                units.append(_glob_of(_ANY_NAME + tail, shell=True))
+        else:
+            units.append(_glob_of(segment, shell=True))
+    return tuple(units)
+
+
+@lru_cache(maxsize=1024)
+def _rule_shape(glob: str) -> _Shape:
+    return tuple(None if segment == "**" else _glob_of(segment, shell=False) for segment in _glob_segments(glob))
+
+
+def pattern_matches_glob(pattern: str, glob: str, suffix: str = "") -> bool:
+    """Whether some path the shell could make of `pattern` is covered by `glob` and ends with `suffix`.
+
+    Matched without case, as path_match matches, and never for an empty
+    target, which is the directory the command stands in rather than a file.
+    """
+    target = _target_shape(pattern)
+    if not target or len(pattern) > 1_024:
+        return bool(target)
+    shapes = [target, _rule_shape(glob)]
+    if suffix:
+        shapes.append((None, _glob_of(_ANY_NAME + suffix.lower(), shell=True)))
+    return _shapes_meet(tuple(shapes))
+
+
+# The governance paths as globs: the named files, the two directories whose
+# every file counts, and, for a deletion, the directories that hold them.
+_GOVERNANCE_FILES_GLOBS = (
+    "**/.claude/settings.json", "**/.claude/settings.local.json", "**/.codex/hooks.json", "**/.codex/config.toml",
+    "**/.agents/hooks.json", "**/.git/config", "**/.threefold.json",
+)
+_GOVERNANCE_HOMES_GLOBS = ("**/.git/hooks/**", "**/.threefold/**")
+_GOVERNANCE_DIRECTORY_GLOBS = ("**/.claude", "**/.codex", "**/.agents", "**/.git", "**/.threefold")
+_GOVERNANCE_FINAL_NAMES = ("settings.json", "settings.local.json", "hooks.json", "config.toml", "config", ".threefold.json")
+_GOVERNANCE_DIRECTORY_NAMES = (".claude", ".codex", ".agents", ".git", ".threefold")
+
+
+def _segment_could_be(segment: str, name: str) -> bool:
+    return _globs_meet((_glob_of(segment, shell=True), _glob_of(name, shell=False)))
+
+
+def pattern_is_governance(pattern: str, deletes: bool = False, tree: bool = False) -> bool:
+    """Whether a target with unreadable parts could be one of the files that decide whether the hooks run.
+
+    Without expansions, only globs: `.claude/setting?.json` is the settings
+    file, and `rm -rf build/*` is not `.threefold.json`, because the shell's `*`
+    never matches a leading dot.
+
+    With expansions, an expansion could supply any part of any path, and
+    reading it that freely would make `> "$OUT/report.txt"` a write into
+    .git/hooks and refuse it in every mode. So the literal part has to carry
+    what makes the path a governance path: the file's own name
+    (`$D/settings.json`, whatever D is), a `.threefold` or `.git/hooks`
+    directory it passes through, or the settings directory an expansion is
+    written into (`.claude/$F`).
+
+    A `tree` is the files beneath a copied directory. The agents read their
+    settings at the project root, so a tree is asked about the root's files:
+    `cp -r /tmp/x/. ./` could bring a .claude/settings.json, `cp -r /tmp/x src/`
+    brings one nobody reads. A tree from inside the project brings files that
+    were already governed where they stood, and is not asked at all.
+    """
+    directories = _GOVERNANCE_DIRECTORY_GLOBS if deletes else ()
+    if tree:
+        if pattern.endswith(_ANY_NAME):
+            return False
+        anchored = _GOVERNANCE_FILES_GLOBS + _GOVERNANCE_HOMES_GLOBS + directories
+        return any(pattern_matches_glob(pattern, glob[3:]) for glob in anchored)
+    segments = [segment for segment in pattern.replace("\\", "/").split("/") if segment not in ("", ".")]
+    if not segments:
+        return False
+    if not any(EXPANSION in segment for segment in segments):
+        return any(pattern_matches_glob(pattern, glob) for glob in _GOVERNANCE_FILES_GLOBS + _GOVERNANCE_HOMES_GLOBS + directories)
+    last = segments[-1]
+    if EXPANSION not in last:
+        names = _GOVERNANCE_FINAL_NAMES + (_GOVERNANCE_DIRECTORY_NAMES if deletes else ())
+        if any(_segment_could_be(last, name) for name in names):
+            if any(pattern_matches_glob(pattern, glob) for glob in _GOVERNANCE_FILES_GLOBS + directories):
+                return True
+    for index, segment in enumerate(segments):
+        if EXPANSION in segment:
+            continue
+        following = segments[index + 1] if index + 1 < len(segments) else ""
+        if _segment_could_be(segment, ".threefold") or (
+            _segment_could_be(segment, ".git") and following and EXPANSION not in following and _segment_could_be(following, "hooks")
+        ):
+            if any(pattern_matches_glob(pattern, glob) for glob in _GOVERNANCE_HOMES_GLOBS):
+                return True
+    if EXPANSION in last and len(segments) > 1 and EXPANSION not in segments[-2]:
+        directory = "/".join(segments[:-1])
+        if any(pattern_matches_glob(directory, glob) for glob in ("**/.claude", "**/.codex", "**/.agents", "**/.git")):
+            return True
+    return False
+
+
 # --- scanning: separators, groups and heredocs ----------------------------------
 
 class _Segment:
@@ -220,6 +530,25 @@ def _matching(text: str, start: int, opener: str, closer: str, depth: int) -> in
     return index
 
 
+def _expansion_end(text: str, at: int) -> Optional[int]:
+    """Where a `$` expansion that starts at `at` ends, or None when this `$` is a plain dollar sign.
+
+    `$(` is not handled here: a substitution holds a command, and the scanner
+    reads that command rather than skipping it.
+    """
+    following = text[at + 1:at + 2]
+    if not following:
+        return None
+    if text.startswith("$((", at):
+        return _matching(text, at + 3, "(", ")", 2)
+    if following == "{":
+        return _matching(text, at + 2, "{", "}", 1)
+    if following.isdigit() or following in "@*#?$!-":
+        return at + 2
+    name = _NAME.match(text, at + 1)
+    return name.end() if name else None
+
+
 def _ansi_c(text: str, start: int) -> Tuple[str, int]:
     """Reads `$'...'` from the quote at `start`. Returns (decoded text, index after it)."""
     out: List[str] = []
@@ -254,8 +583,12 @@ def _ansi_c(text: str, start: int) -> Tuple[str, int]:
     return "".join(out), length
 
 
-def _heredoc_opener(text: str, start: int) -> Tuple[str, bool, int]:
-    """Reads `<<DELIM`, `<<-DELIM`, `<< 'DELIM'` from `start`. Returns (delimiter, strip tabs, end)."""
+def _heredoc_opener(text: str, start: int) -> Tuple[str, bool, bool, int]:
+    """Reads `<<DELIM`, `<<-DELIM`, `<< 'DELIM'` from `start`. Returns (delimiter, strip tabs, quoted, end).
+
+    A delimiter with any quoting in it makes the body literal; an unquoted one
+    has its body expanded by the shell, which is what `quoted` records.
+    """
     index = start + 2
     length = len(text)
     strip = index < length and text[index] == "-"
@@ -264,23 +597,53 @@ def _heredoc_opener(text: str, start: int) -> Tuple[str, bool, int]:
     while index < length and text[index] in " \t":
         index += 1
     word: List[str] = []
+    quoted = False
     while index < length and text[index] not in " \t\n;|&<>()" and len(word) < 256:
         char = text[index]
         if char in "'\"":
+            quoted = True
             end = text.find(char, index + 1)
             end = length if end == -1 else end
             word.append(text[index + 1:end])
             index = end + 1
         elif char == "\\" and index + 1 < length:
+            quoted = True
             word.append(text[index + 1])
             index += 2
         else:
             word.append(char)
             index += 1
-    return "".join(word), strip, min(index, length)
+    return "".join(word), strip, quoted, min(index, length)
 
 
-def _read_heredocs(text: str, index: int, pending: List[Tuple[_Segment, int, str, bool]]) -> int:
+# What the shell expands in the body of a heredoc whose delimiter is unquoted.
+# Each closer is optional and each class stops at the next `$` or backtick, so
+# every match consumes what it scans and the pass stays linear.
+_BODY_EXPANSION = re.compile(
+    r"\\([$`\\\n])|\$(?:\{[^}$`]*\}?|\([^)$`]*\)?\)?|[A-Za-z_][A-Za-z0-9_]*|[0-9@*#?$!-])|`[^`]*`?"
+)
+
+
+def _expanded_body(body: str) -> str:
+    """An unquoted heredoc's body with each expansion marked, as the shell would leave it unread.
+
+    `cat > x.py <<EOF` with `import $M` in it writes whatever M holds. The
+    escapes the shell honours in such a body are applied, so `\\$` stays a
+    dollar sign rather than becoming an expansion.
+    """
+    if "$" not in body and "`" not in body and "\\" not in body:
+        return body
+
+    def replace(match: "re.Match[str]") -> str:
+        escaped = match.group(1)
+        if escaped is not None:
+            return "" if escaped == "\n" else escaped
+        return EXPANSION
+
+    return _BODY_EXPANSION.sub(replace, body)
+
+
+def _read_heredocs(text: str, index: int, pending: List[Tuple[_Segment, int, str, bool, bool]]) -> int:
     """Consumes the bodies owed after a newline, in the order their openers appeared.
 
     Found by one regular-expression search per body rather than a Python loop
@@ -288,7 +651,7 @@ def _read_heredocs(text: str, index: int, pending: List[Tuple[_Segment, int, str
     speed. A body with no closing line runs to the end, as bash reads it.
     """
     length = len(text)
-    for segment, slot, delimiter, strip in pending:
+    for segment, slot, delimiter, strip, quoted in pending:
         pattern = re.compile(
             r"^" + (r"\t*" if strip else "") + re.escape(delimiter) + r"\r?$", re.MULTILINE
         )
@@ -300,7 +663,8 @@ def _read_heredocs(text: str, index: int, pending: List[Tuple[_Segment, int, str
             index = min(found.end() + 1, length)
         if strip:
             body = re.sub(r"(?m)^\t+", "", body)
-        segment.heredocs[slot] = body[:-1] if body.endswith("\n") else body
+        body = body[:-1] if body.endswith("\n") else body
+        segment.heredocs[slot] = body if quoted else _expanded_body(body)
     return index
 
 
@@ -313,7 +677,7 @@ def _scan(text: str, budget: _Budget) -> List[Any]:
     """
     events: List[Any] = []
     frames = [_Frame("top")]
-    pending: List[Tuple[_Segment, int, str, bool]] = []
+    pending: List[Tuple[_Segment, int, str, bool, bool]] = []
     index, length = 0, len(text)
 
     def finish(frame: _Frame, piped_next: bool) -> None:
@@ -367,26 +731,27 @@ def _scan(text: str, budget: _Budget) -> List[Any]:
                 index = at + 1
                 if not push("backtick"):
                     break
-            elif text.startswith("$((", at):
-                end = _matching(text, at + 3, "(", ")", 2)
-                parts.append(text[at:end].translate(_PROTECT))
-                index = end
-            elif text.startswith("$(", at):
+            elif text.startswith("$(", at) and not text.startswith("$((", at):
                 index = at + 2
                 if not push("subst"):
                     break
             else:
-                parts.append("$")
-                index = at + 1
+                end = _expansion_end(text, at)
+                if end is None:
+                    parts.append("$")
+                    index = at + 1
+                else:
+                    parts.append(EXPANSION)
+                    index = end
             continue
 
         found = _COMMAND_SPECIAL.search(text, index)
         if found is None:
-            parts.append(text[index:])
+            parts.append(_unquoted(text[index:]))
             index = length
             break
         at = found.start()
-        parts.append(text[index:at])
+        parts.append(_unquoted(text[index:at]))
         char = text[at]
         index = at + 1
 
@@ -395,11 +760,11 @@ def _scan(text: str, budget: _Budget) -> List[Any]:
             if following == "\n":
                 index = at + 2  # a line continuation joins the lines
             elif following and _WINDOWS_SEPARATOR_AFTER.match(following) and _WINDOWS_SEPARATOR_BEFORE.match(_last_char(parts) or " "):
-                # `src\domain\x.py` unquoted: bash would drop the backslashes and
-                # name `srcdomainx.py`, but an agent on Windows means a path, and
-                # reading it as the shell does would hide a domain write from the
-                # rules. The separator is kept as the path it plainly is.
-                parts.append("/")
+                # `src\domain\x.py` unquoted: an agent on Windows means a path,
+                # and bash drops the backslash and names `srcdomainx.py`. Either
+                # may be what runs, and `.claude/setting\s.json` is the settings
+                # file under the second reading, so both are kept and judged.
+                parts.append(BACKSLASH)
             else:
                 # `\>` is a literal greater-than sign, not a redirect, so it is
                 # protected like a quoted one.
@@ -417,23 +782,22 @@ def _scan(text: str, budget: _Budget) -> List[Any]:
             parts.append('"')
             frame.quoted = True
         elif char == "$":
-            if text.startswith("$((", at):
-                end = _matching(text, at + 3, "(", ")", 2)
-                parts.append(text[at:end])
-                index = end
-            elif text.startswith("$(", at):
+            if text.startswith("$(", at) and not text.startswith("$((", at):
                 index = at + 2
                 if not push("subst"):
                     break
-            elif text.startswith("${", at):
-                end = _matching(text, at + 2, "{", "}", 1)
-                parts.append(text[at:end])
-                index = end
             elif text.startswith("$'", at):
                 decoded, index = _ansi_c(text, at + 1)
                 parts.append(shlex.quote(decoded).translate(_PROTECT))
+            elif text.startswith('$"', at):
+                pass  # a translated string: the quotes that follow are read as quotes
             else:
-                parts.append("$")
+                end = _expansion_end(text, at)
+                if end is None:
+                    parts.append("$")
+                else:
+                    parts.append(EXPANSION)
+                    index = end
         elif char == "`":
             if frame.kind == "backtick":
                 pop()
@@ -483,11 +847,11 @@ def _scan(text: str, budget: _Budget) -> List[Any]:
                 parts.append("<<<")
                 index = at + 3
             elif text.startswith("<<", at):
-                delimiter, strip, end = _heredoc_opener(text, at)
+                delimiter, strip, quoted, end = _heredoc_opener(text, at)
                 if delimiter and len(pending) < MAX_HEREDOCS:
                     segment = frame.segment
                     segment.heredocs.append(None)
-                    pending.append((segment, len(segment.heredocs) - 1, delimiter, strip))
+                    pending.append((segment, len(segment.heredocs) - 1, delimiter, strip, quoted))
                 parts.append(text[at:end])
                 index = end
             else:
@@ -575,7 +939,7 @@ def _tokens(segment: _Segment, budget: _Budget) -> Optional[List[str]]:
 class _Simple:
     """One simple command: its words, its assignments and where its streams go."""
 
-    __slots__ = ("argv", "assignments", "outputs", "stdin_file", "stdin_text", "has_stdin")
+    __slots__ = ("argv", "assignments", "outputs", "stdin_file", "stdin_text", "has_stdin", "heredoc")
 
     def __init__(self) -> None:
         self.argv: List[str] = []
@@ -584,6 +948,7 @@ class _Simple:
         self.stdin_file: Optional[str] = None
         self.stdin_text: Optional[str] = None
         self.has_stdin = False
+        self.heredoc = False
 
 
 def _parse_simple(tokens: List[str], segment: _Segment) -> _Simple:
@@ -605,8 +970,14 @@ def _parse_simple(tokens: List[str], segment: _Segment) -> _Simple:
                 if following is None or following.isdigit() or following == "-":
                     continue
                 simple.outputs.append((following, "&", token))
-            elif token in ("<&", "<>"):
+            elif token == "<&":
                 continue
+            elif token == "<>":
+                # Opened for reading and writing. On standard input nothing is
+                # written to it; on any other stream, `1<> file`, it is a write
+                # that does not truncate.
+                if fd != "0" and following is not None:
+                    simple.outputs.append((following, fd, token))
             elif token == "<":
                 simple.stdin_file = following
                 simple.has_stdin = True
@@ -614,6 +985,7 @@ def _parse_simple(tokens: List[str], segment: _Segment) -> _Simple:
                 simple.stdin_text = segment.heredocs[heredoc] if heredoc < len(segment.heredocs) else None
                 heredoc += 1
                 simple.has_stdin = True
+                simple.heredoc = True
             elif token == "<<<":
                 simple.stdin_text = (following or "") + "\n"
                 simple.has_stdin = True
@@ -631,7 +1003,7 @@ def _parse_simple(tokens: List[str], segment: _Segment) -> _Simple:
 
 def program_name(word: str) -> str:
     """`/usr/bin/python3.11` and `C:/Python/python.exe` are both a program called python3.11 / python."""
-    name = word.replace("\\", "/").rsplit("/", 1)[-1].lower()
+    name = word.replace(BACKSLASH, "/").replace("\\", "/").rsplit("/", 1)[-1].lower()
     return name[:-4] if name.endswith(".exe") else name
 
 
@@ -669,9 +1041,62 @@ def _unwrap(argv: List[str], assignments: List[str]) -> List[str]:
             argv = argv[index + 1:]
         elif name == "stdbuf":
             argv = argv[_skip_options(argv, 1, ("-i", "-o", "-e")):]
+        elif name == "busybox" and len(argv) > 1 and not argv[1].startswith("-"):
+            # `busybox cp a b` is cp. Read as a shell, its applet name was taken
+            # for a script and the copy was never seen.
+            argv = argv[1:]
         else:
             return argv
     return argv
+
+
+# Words that open, continue or close a compound command. `if true; then cp a
+# b; fi` splits into `if true`, `then cp a b` and `fi`, and the middle one's
+# first word is `then`, which no writer is called; the cp inside was never read.
+_RESERVED_OPENERS = frozenset(("then", "do", "else", "elif", "if", "while", "until", "!", "{", "time"))
+# A closer that carries a redirect or a pipe sends the whole compound's output
+# there: `for ...; do echo x; done > file`.
+_RESERVED_CLOSERS = frozenset(("}", "fi", "done", "esac"))
+
+
+def _strip_reserved(argv: List[str], assignments: List[str], state: "_State") -> Tuple[List[str], bool]:
+    """The simple command inside a compound one's opening words, and whether it was a closer.
+
+    Also takes off a function definition's head, since its body is read as
+    though it runs, and a case arm's pattern.
+    """
+    closer = False
+    for _ in range(16):
+        if not argv:
+            break
+        word = argv[0]
+        if word in _RESERVED_OPENERS:
+            argv = argv[1:]
+        elif word in _RESERVED_CLOSERS:
+            closer = True
+            if word == "esac" and state.case_depth:
+                state.case_depth -= 1
+            argv = argv[1:]
+        elif word == "case":
+            # `case $x in a) cmd` arrives as one segment: skip to past `in`,
+            # and the first arm's pattern goes with the check below.
+            state.case_depth += 1
+            argv = argv[argv.index("in") + 1:] if "in" in argv else []
+            if argv and argv[0].endswith(")"):
+                argv = argv[1:]
+        elif state.case_depth and (word.endswith(")") or word == EXPANSION):
+            argv = argv[1:]  # the pattern of a later arm, `b)` or `(b)`
+        elif word == "function" and len(argv) > 1:
+            argv = argv[3:] if len(argv) > 2 and argv[2] == "()" else argv[2:]
+        elif word.endswith("()") and len(word) > 2:
+            argv = argv[1:]
+        elif len(argv) > 1 and argv[1] == "()":
+            argv = argv[2:]
+        else:
+            break
+    while argv and _ASSIGNMENT.match(argv[0]):
+        assignments.append(argv.pop(0))
+    return argv, closer
 
 
 # --- the state one analysis carries -------------------------------------------------
@@ -679,7 +1104,7 @@ def _unwrap(argv: List[str], assignments: List[str]) -> List[str]:
 class _State:
     """Where the command is, what it has written so far, and what it has found."""
 
-    __slots__ = ("cwd", "stack", "known", "result", "budget", "depth")
+    __slots__ = ("cwd", "stack", "known", "result", "budget", "depth", "case_depth")
 
     def __init__(self, cwd: str, known: Dict[str, Optional[str]], result: ShellAnalysis, budget: _Budget, depth: int) -> None:
         self.cwd = cwd
@@ -688,6 +1113,7 @@ class _State:
         self.result = result
         self.budget = budget
         self.depth = depth
+        self.case_depth = 0
 
     def child(self) -> "_State":
         """A new shell: it shares what has been written, not where it stands."""
@@ -711,32 +1137,90 @@ def resolve(path: Optional[str], cwd: str = "") -> Optional[str]:
     lowered = candidate.lower()
     if lowered in _SPECIAL_TARGETS or lowered.startswith(("/dev/", "/proc/self/fd/")):
         return None
-    if cwd and not (candidate.startswith(("/", "~")) or re.match(r"^[A-Za-z]:/", candidate)):
+    if cwd and not _is_absolute(candidate):
         candidate = cwd.rstrip("/") + "/" + candidate
+    if is_opaque(candidate) or BACKSLASH in candidate:
+        return _normalise_pattern(candidate)
     return posixpath.normpath(candidate)
 
 
-def _write(state: _State, target: Optional[str], content: Optional[str], route: str, deletes: bool = False) -> None:
-    if len(state.result.writes) >= MAX_WRITES:
-        state.budget.truncated = True
-        return
+def _is_absolute(path: str) -> bool:
+    return path.startswith(("/", "~")) or bool(re.match(r"^[A-Za-z]:/", path))
+
+
+def _normalise_pattern(path: str) -> str:
+    """normpath for a path with unreadable parts, which normpath would get wrong.
+
+    `$D/..` is not the directory `$D` came from when D holds `a/b`, so a `..`
+    after a segment that can stand for several is not collapsed: the whole path
+    becomes one expansion, which the gate reads as "could be anywhere".
+    """
+    absolute = path.startswith("/")
+    parts: List[str] = []
+    for segment in path.split("/"):
+        if segment in ("", "."):
+            continue
+        if segment == "..":
+            if parts and (EXPANSION in parts[-1] or BACKSLASH in parts[-1]):
+                return EXPANSION
+            if parts and parts[-1] != "..":
+                parts.pop()
+            elif not absolute:
+                parts.append("..")
+            continue
+        parts.append(segment)
+    joined = "/".join(parts)
+    return ("/" + joined) if absolute else (joined or ".")
+
+
+def _readings(path: str) -> List[str]:
+    """Each path a target could be: a backslash between letters is a separator or nothing."""
+    if BACKSLASH not in path:
+        return [path]
+    readings = []
+    for separator in ("/", ""):
+        reading = path.replace(BACKSLASH, separator)
+        reading = _normalise_pattern(reading) if is_opaque(reading) else posixpath.normpath(reading)
+        if reading not in readings:
+            readings.append(reading)
+    return readings
+
+
+def _write(state: _State, target: Optional[str], content: Optional[str], route: str, deletes: bool = False,
+           tree: bool = False, fragment: bool = False) -> None:
+    # Content that carries a part the shell decides at run time is content
+    # nobody can read before it runs, whatever the rest of it says.
+    if content is not None and (is_opaque(content) or BACKSLASH in content):
+        content = UNKNOWN
     if target is None:
+        if len(state.result.writes) >= MAX_WRITES:
+            state.budget.truncated = True
+            return
         state.result.writes.append(ShellWrite(None, content, route, deletes))
         return
     resolved = resolve(target, state.cwd)
     if resolved is None:
         return
-    state.result.writes.append(ShellWrite(resolved, content, route, deletes))
-    if deletes:
-        state.known.pop(resolved, None)
-    else:
-        state.known[resolved] = content
+    for reading in _readings(resolved):
+        if len(state.result.writes) >= MAX_WRITES:
+            state.budget.truncated = True
+            return
+        pattern = is_opaque(reading)
+        state.result.writes.append(ShellWrite(reading, content, route, deletes, pattern, tree and pattern, fragment))
+        if pattern:
+            continue
+        if deletes:
+            state.known.pop(reading, None)
+        else:
+            state.known[reading] = content
 
 
 def _known(state: _State, path: str) -> Optional[str]:
     """What this command itself wrote to `path` earlier, or UNKNOWN."""
     resolved = resolve(path, state.cwd)
-    return state.known.get(resolved) if resolved is not None else UNKNOWN
+    if resolved is None or is_opaque(resolved) or BACKSLASH in resolved:
+        return UNKNOWN
+    return state.known.get(resolved)
 
 
 def _looks_like_file(path: str) -> bool:
@@ -750,22 +1234,146 @@ def _basename(path: str) -> str:
 
 # --- content of the simple writers -------------------------------------------------
 
-def _unescape(text: str) -> str:
-    """The backslash escapes echo -e, printf and sed replacements understand."""
-    return re.sub(r"\\([ntr\\])", lambda match: {"n": "\n", "t": "\t", "r": "\r", "\\": "\\"}[match.group(1)], text)
+_SIMPLE_ESCAPES = {"a": "\a", "b": "\b", "e": "\x1b", "E": "\x1b", "f": "\f", "n": "\n", "r": "\r", "t": "\t", "v": "\v", "\\": "\\"}
 
 
-def _echo(args: List[str]) -> str:
+def _decode_escapes(text: str, flavour: str) -> Tuple[Optional[str], bool]:
+    """Backslash escapes as echo -e and %b ("echo") or a printf format ("printf") expand them.
+
+    Returns (text, stopped): `stopped` is a `\\c`, after which echo and printf
+    print nothing more. A backslash this does not know makes the result UNKNOWN
+    rather than a guess: the shells disagree about the rare ones, and a guess
+    is how `printf '\\151mport boto3'` was read as clean content that wrote
+    `import boto3`.
+    """
+    if "\\" not in text:
+        return text, False
+    out: List[str] = []
+    index = 0
+    length = len(text)
+    while index < length:
+        slash = text.find("\\", index)
+        if slash == -1:
+            out.append(text[index:])
+            break
+        out.append(text[index:slash])
+        code = text[slash + 1:slash + 2]
+        index = slash + 2
+        if not code:
+            return UNKNOWN, False  # a backslash at the very end
+        if code in _SIMPLE_ESCAPES:
+            out.append(_SIMPLE_ESCAPES[code])
+        elif code == "c" and flavour == "echo":
+            return "".join(out), True
+        elif flavour == "printf" and code in "\"'?":
+            out.append(code)
+        elif code in ("x", "u", "U"):
+            width = {"x": 2, "u": 4, "U": 8}[code]
+            digits = re.match(r"[0-9A-Fa-f]{1,%d}" % width, text[index:index + width])
+            if not digits:
+                return UNKNOWN, False
+            value = int(digits.group(0), 16)
+            if value > 0x10FFFF:
+                return UNKNOWN, False
+            out.append(chr(value))
+            index += len(digits.group(0))
+        elif code == "0" and flavour == "echo":
+            digits = re.match(r"[0-7]{0,3}", text[index:index + 3]).group(0)
+            out.append(chr(int(digits or "0", 8)))
+            index += len(digits)
+        elif code in "01234567" and flavour == "printf":
+            digits = re.match(r"[0-7]{1,3}", text[slash + 1:slash + 4]).group(0)
+            out.append(chr(int(digits, 8) & 0xFF))
+            index = slash + 1 + len(digits)
+        else:
+            return UNKNOWN, False
+    return "".join(out), False
+
+
+def _echo(args: List[str]) -> Optional[str]:
+    """What echo prints. With a backslash in it and no -e, UNKNOWN when the shells disagree.
+
+    Bash's echo prints `import\\x20boto3` as written and zsh's expands it to
+    `import boto3`. Which shell runs the command is not in the command, so text
+    whose two readings differ is read as neither.
+    """
     newline = True
+    expand = False
     index = 0
     while index < len(args) and re.fullmatch(r"-[neE]+", args[index]):
-        if "n" in args[index]:
-            newline = False
+        for letter in args[index][1:]:
+            if letter == "n":
+                newline = False
+            else:
+                expand = letter == "e"
         index += 1
-    return _unescape(" ".join(args[index:])) + ("\n" if newline else "")
+    text = " ".join(args[index:])
+    if "\\" not in text:
+        return text + ("\n" if newline else "")
+    decoded, stopped = _decode_escapes(text, "echo")
+    if decoded is UNKNOWN:
+        return UNKNOWN
+    if expand:
+        return decoded + ("\n" if newline and not stopped else "")
+    if decoded != text or stopped:
+        return UNKNOWN
+    return text + ("\n" if newline else "")
+
+
+_PRINTF_CONVERSION = re.compile(r"%([-+ #0']*)(\d*|\*)(?:\.(\d*|\*))?([a-zA-Z%])")
+
+
+def _shell_number(value: str) -> Optional[int]:
+    """A printf numeric argument as the shell reads it: decimal, 0x hex, 0 octal or 'c for a character code."""
+    value = value.strip()
+    if value[:1] in ("'", '"'):
+        return ord(value[1]) if len(value) > 1 else 0
+    try:
+        if re.fullmatch(r"[-+]?0[xX][0-9A-Fa-f]+", value):
+            return int(value, 16)
+        if re.fullmatch(r"[-+]?0[0-7]+", value):
+            return int(value, 8)
+        if re.fullmatch(r"[-+]?\d+", value):
+            return int(value)
+    except ValueError:
+        return None
+    return None
+
+
+def _printf_conversion(match: "re.Match[str]", values: List[str]) -> Tuple[Optional[str], bool]:
+    """One `%...` of a printf format with its argument. Returns (text or UNKNOWN, stopped)."""
+    flags, width, precision, kind = match.groups()
+    if kind == "%":
+        return "%", False
+    if "*" in (width, precision or "") or "'" in flags:
+        return UNKNOWN, False
+    value = values.pop(0) if values else ""
+    spec = "%" + flags + width + ("." + precision if precision is not None else "")
+    if kind == "s":
+        return (spec + "s") % value, False
+    if kind == "b":
+        decoded, stopped = _decode_escapes(value, "echo")
+        return ((spec + "s") % decoded if decoded is not None else UNKNOWN), stopped
+    if kind == "c":
+        return ("%" + flags.replace("0", "") + width + "s") % value[:1], False
+    if kind in "dioxXu":
+        number = _shell_number(value) if value else 0
+        if number is None or (kind in "oxXu" and number < 0) or ("#" in flags and kind == "o"):
+            return UNKNOWN, False
+        return (spec + ("d" if kind in "iu" else kind)) % number, False
+    if kind in "eEfFgG":
+        try:
+            number = float(value) if value else 0.0
+        except ValueError:
+            return UNKNOWN, False
+        return (spec + kind) % number, False
+    # %q quotes for the shell, %a is hex floating point, %(...)T is a date:
+    # each prints text that is not the argument as written.
+    return UNKNOWN, False
 
 
 def _printf(args: List[str]) -> Optional[str]:
+    """What printf prints, conversions and escapes applied the way the shell applies them."""
     index = 0
     if args[:1] == ["--"]:
         index = 1
@@ -774,20 +1382,30 @@ def _printf(args: List[str]) -> Optional[str]:
     if index >= len(args):
         return ""
     template, values = args[index], list(args[index + 1:])
-    conversion = re.compile(r"%(?:%|[-+ #0]*\d*(?:\.\d+)?[sbdiouxXcqfeEgG])")
-    if not conversion.search(template.replace("%%", "")):
-        return _unescape(template.replace("%%", "%"))
     out: List[str] = []
+    # The format is used again while arguments remain, and once whatever happens.
     for _ in range(len(values) + 1):
-        def substitute(match: "re.Match[str]") -> str:
-            if match.group(0) == "%%":
-                return "%"
-            return values.pop(0) if values else ""
-
-        out.append(conversion.sub(substitute, template))
-        if not values or sum(len(piece) for piece in out) > MAX_CODE_CHARS:
+        consumed = len(values)
+        position = 0
+        for match in _PRINTF_CONVERSION.finditer(template):
+            literal, stopped = _decode_escapes(template[position:match.start()], "printf")
+            if literal is UNKNOWN:
+                return UNKNOWN
+            out.append(literal)
+            converted, stopped = _printf_conversion(match, values)
+            if converted is UNKNOWN:
+                return UNKNOWN
+            out.append(converted)
+            if stopped:
+                return "".join(out)
+            position = match.end()
+        literal, _ = _decode_escapes(template[position:], "printf")
+        if literal is UNKNOWN:
+            return UNKNOWN
+        out.append(literal)
+        if not values or len(values) == consumed or sum(len(piece) for piece in out) > MAX_CODE_CHARS:
             break
-    return _unescape("".join(out))
+    return "".join(out)
 
 
 def _sed_address(script: str, index: int) -> int:
@@ -843,59 +1461,174 @@ def _sed_delimited(script: str, index: int, delimiter: str) -> Tuple[str, int]:
     return "".join(out), index + 1
 
 
-def sed_added_text(script: str) -> Optional[str]:
-    """What a sed script adds to a file: its replacements and its a/i/c text. UNKNOWN if it can add anything else.
+_SED_CONTROL = {"n": "\n", "t": "\t", "a": "\a", "f": "\f", "v": "\v", "r": "\r"}
 
-    Deleting lines and printing add nothing. `y` transliterates, `r` reads
-    another file in and `e` runs a command, so the text they add is not in the
-    script and the answer is UNKNOWN rather than a guess.
+
+def _sed_text(text: str, replacement: bool) -> Optional[str]:
+    """A sed replacement (or a/i/c text) with GNU sed's escapes applied, or UNKNOWN.
+
+    In a replacement `&` and `\\1` are the text that was matched, which is in
+    the file rather than the command, so either makes the result UNKNOWN; so
+    does an escape this does not know. `\\L`, `\\U`, `\\l`, `\\u` and `\\E`
+    change case, which is how `\\LIMPORT BOTO3` becomes an import.
+    """
+    out: List[str] = []
+    case = ""       # "L" or "U" until \E
+    once = ""       # "l" or "u" for the next character only
+
+    def emit(piece: str) -> None:
+        nonlocal once
+        for char in piece:
+            if once:
+                char = char.lower() if once == "l" else char.upper()
+                once = ""
+            elif case:
+                char = char.lower() if case == "L" else char.upper()
+            out.append(char)
+
+    index = 0
+    length = len(text)
+    while index < length:
+        char = text[index]
+        if char == "&" and replacement:
+            return UNKNOWN
+        if char != "\\":
+            emit(char)
+            index += 1
+            continue
+        code = text[index + 1:index + 2]
+        index += 2
+        if not code:
+            return UNKNOWN
+        if code in _SED_CONTROL:
+            emit(_SED_CONTROL[code])
+        elif code in "\\&\n/":
+            emit(code)
+        elif code in "LU":
+            case, once = code, ""
+        elif code in "lu":
+            once = code
+        elif code == "E":
+            case = once = ""
+        elif code == "c" and index < length:
+            emit(chr(ord(text[index].upper()) ^ 0x40))
+            index += 1
+        elif code in "dox":
+            digits = re.match({"d": r"[0-9]{1,3}", "o": r"[0-7]{1,3}", "x": r"[0-9A-Fa-f]{1,2}"}[code], text[index:index + 3])
+            if not digits:
+                return UNKNOWN
+            emit(chr(int(digits.group(0), {"d": 10, "o": 8, "x": 16}[code]) & 0xFF))
+            index += len(digits.group(0))
+        elif not replacement and code == " ":
+            emit(" ")
+        else:
+            return UNKNOWN  # a back-reference, or an escape nobody can be sure of
+    return "".join(out)
+
+
+def _sed_whole_line(pattern: str) -> bool:
+    """Whether an `s` pattern always matches a whole line, so its replacement is the whole line."""
+    return pattern.startswith("^") and pattern.endswith("$") and not pattern.endswith("\\$")
+
+
+def _sed_line_text(script: str, index: int) -> Tuple[str, int]:
+    """The text of an a, i or c command from just after the letter. Returns (raw text, index after it).
+
+    `1i\\` followed by a newline puts the text on the next line, and a line
+    ending in a backslash continues onto the next one, as GNU sed reads them.
+    """
+    while index < len(script) and script[index] in " \t":
+        index += 1
+    if script.startswith("\\\n", index):
+        index += 2
+    elif script.startswith("\\", index):
+        index += 1
+    lines: List[str] = []
+    while True:
+        end = script.find("\n", index)
+        line = script[index:] if end == -1 else script[index:end]
+        index = len(script) if end == -1 else end + 1
+        trailing = len(line) - len(line.rstrip("\\"))
+        if trailing % 2 == 1 and end != -1:
+            lines.append(line[:-1])
+            continue
+        lines.append(line)
+        return "\n".join(lines), index
+
+
+def _sed_script(script: str) -> Tuple[Optional[str], bool, List[str]]:
+    """What a sed script adds, whether any of it replaces part of a line, and the files its `w` writes.
+
+    Returns (added text or UNKNOWN, fragment, files). Deleting lines and
+    printing add nothing. `y` transliterates, `r` reads another file in and `e`
+    runs a command, so the text they add is not in the script and the answer is
+    UNKNOWN rather than a guess. `w file`, as a command or an `s` flag, writes
+    that file whether or not -i is given.
     """
     added: List[str] = []
+    files: List[str] = []
+    fragment = False
+    unknown = False
     index = 0
     steps = 0
-    while index < len(script):
+    length = len(script)
+    while index < length:
         steps += 1
         if steps > 1_000:
-            return UNKNOWN
-        while index < len(script) and script[index] in " \t\n;{}":
+            return UNKNOWN, fragment, files
+        while index < length and script[index] in " \t\n;{}":
             index += 1
-        if index >= len(script):
+        if index >= length:
             break
         index = _sed_address(script, index)
-        if index >= len(script):
+        if index >= length:
             break
         command = script[index]
         index += 1
         if command == "s":
-            if index >= len(script):
-                return UNKNOWN
+            if index >= length:
+                return UNKNOWN, fragment, files
             delimiter = script[index]
-            _, index = _sed_delimited(script, index + 1, delimiter)
+            pattern, index = _sed_delimited(script, index + 1, delimiter)
             replacement, index = _sed_delimited(script, index, delimiter)
-            flags_end = index
-            while flags_end < len(script) and script[flags_end] not in ";\n}":
-                flags_end += 1
-            flags = script[index:flags_end]
-            if "e" in flags or "w" in flags:
-                return UNKNOWN
-            added.append(_unescape(replacement.replace("\\&", "&")))
-            index = flags_end
+            while index < length and script[index] in "gpiImM0123456789":
+                index += 1
+            if index < length and script[index] == "e":
+                return UNKNOWN, fragment, files
+            if index < length and script[index] == "w":
+                end = script.find("\n", index)
+                files.append(script[index + 1:end if end != -1 else length].strip())
+                index = length if end == -1 else end
+            text = _sed_text(replacement, replacement=True)
+            if text is UNKNOWN:
+                unknown = True
+            else:
+                added.append(text)
+                fragment = fragment or not _sed_whole_line(pattern)
         elif command in "aic":
-            rest = script[index:]
-            if rest.startswith("\\"):
-                rest = rest[1:].lstrip("\n")
-            end = rest.find("\n")
-            line = rest if end == -1 else rest[:end]
-            added.append(_unescape(line.strip()))
-            index = len(script) if end == -1 else index + (len(script[index:]) - len(rest)) + end
+            raw, index = _sed_line_text(script, index)
+            text = _sed_text(raw, replacement=False)
+            if text is UNKNOWN:
+                unknown = True
+            else:
+                added.append(text)
+        elif command in "wW":
+            end = script.find("\n", index)
+            files.append(script[index:end if end != -1 else length].strip())
+            index = length if end == -1 else end
         elif command in "dDpPnNqQgGhHxlz=":
             continue
         elif command in "btT:":
-            while index < len(script) and script[index] not in ";\n":
+            while index < length and script[index] not in ";\n":
                 index += 1
         else:
-            return UNKNOWN
-    return "\n".join(added)
+            return UNKNOWN, fragment, files
+    return (UNKNOWN if unknown else "\n".join(added)), fragment, [name for name in files if name]
+
+
+def sed_added_text(script: str) -> Optional[str]:
+    """What a sed script adds to a file: its replacements and its a/i/c text. UNKNOWN if it can add anything else."""
+    return _sed_script(script)[0]
 
 
 # --- the writers, one by one ----------------------------------------------------------
@@ -983,20 +1716,19 @@ def _sed(args: List[str], state: _State) -> None:
         else:
             files.append(arg)
         index += 1
+    # GNU sed joins every -e script with a newline and reads the result as one
+    # program, so `-e '1i\' -e 'import boto3'` is an insert of `import boto3`.
+    # Read one by one, the second was taken for an `i` command.
+    if any(script is None for script in scripts):
+        content, fragment, written = UNKNOWN, False, []
+    else:
+        content, fragment, written = _sed_script("\n".join(script for script in scripts if script is not None))
+    for target in written:
+        _write(state, target, UNKNOWN, "sed w")
     if not in_place:
         return
-    content: Optional[str] = ""
-    pieces = []
-    for script in scripts:
-        added = sed_added_text(script) if script is not None else UNKNOWN
-        if added is UNKNOWN:
-            content = UNKNOWN
-            break
-        pieces.append(added)
-    if content is not UNKNOWN:
-        content = "\n".join(pieces)
     for target in files:
-        _write(state, target, content, "sed -i")
+        _write(state, target, content, "sed -i", fragment=fragment)
 
 
 def _perl(args: List[str], state: _State) -> None:
@@ -1042,7 +1774,8 @@ def _perl(args: List[str], state: _State) -> None:
     if not in_place:
         return
     content: Optional[str] = UNKNOWN
-    pieces = []
+    fragment = False
+    pieces: Optional[List[str]] = []
     for script in scripts:
         if script is None:
             pieces = None
@@ -1054,18 +1787,85 @@ def _perl(args: List[str], state: _State) -> None:
                 pieces = None
                 break
             delimiter = match.group(1)
-            _, after = _sed_delimited(part, 2, delimiter)
+            pattern, after = _sed_delimited(part, 2, delimiter)
             replacement, end = _sed_delimited(part, after, delimiter)
-            if not re.fullmatch(r"[gimsx]*", part[end:]):
+            text = _perl_text(replacement) if re.fullmatch(r"[gimsxo]*", part[end:]) else UNKNOWN
+            if text is UNKNOWN:
                 pieces = None
                 break
-            pieces.append(_unescape(replacement))
+            pieces.append(text)
+            fragment = fragment or not _sed_whole_line(pattern)
         if pieces is None:
             break
     if pieces is not None:
         content = "\n".join(pieces)
     for target in files:
-        _write(state, target, content, "perl -i")
+        _write(state, target, content, "perl -i", fragment=fragment)
+
+
+_PERL_SIMPLE = {"t": "\t", "n": "\n", "r": "\r", "f": "\f", "b": "\b", "a": "\a", "e": "\x1b", "\\": "\\", "/": "/"}
+
+
+def _perl_text(text: str) -> Optional[str]:
+    """A Perl replacement read as the double-quoted string it is, or UNKNOWN.
+
+    `$` and `@` interpolate a variable or a match, which is not in the command.
+    Escapes are applied where they are certain, and case changes with them;
+    anything else is UNKNOWN rather than a guess.
+    """
+    if "$" in text or "@" in text:
+        return UNKNOWN
+    out: List[str] = []
+    case = ""
+    once = ""
+
+    def emit(piece: str) -> None:
+        nonlocal once
+        for char in piece:
+            if once:
+                char = char.lower() if once == "l" else char.upper()
+                once = ""
+            elif case:
+                char = char.lower() if case == "L" else char.upper()
+            out.append(char)
+
+    index = 0
+    length = len(text)
+    while index < length:
+        char = text[index]
+        if char != "\\":
+            emit(char)
+            index += 1
+            continue
+        code = text[index + 1:index + 2]
+        index += 2
+        if not code:
+            return UNKNOWN
+        if code in _PERL_SIMPLE:
+            emit(_PERL_SIMPLE[code])
+        elif code in "LU":
+            case, once = code, ""
+        elif code in "lu":
+            once = code
+        elif code == "E":
+            case = once = ""
+        elif code == "x":
+            braced = re.match(r"\{([0-9A-Fa-f]{1,6})\}", text[index:index + 8])
+            digits = braced or re.match(r"[0-9A-Fa-f]{1,2}", text[index:index + 2])
+            if not digits:
+                return UNKNOWN
+            emit(chr(int(digits.group(1) if braced else digits.group(0), 16)))
+            index += len(digits.group(0))
+        elif code == "0":
+            digits = re.match(r"0[0-7]{0,2}", text[index - 1:index + 2]).group(0)
+            emit(chr(int(digits, 8)))
+            index += len(digits) - 1
+        elif code == "c" and index < length:
+            emit(chr(ord(text[index].upper()) ^ 0x40))
+            index += 1
+        else:
+            return UNKNOWN  # \1 is a back-reference; anything else is not certain
+    return "".join(out)
 
 
 def _awk(args: List[str], state: _State) -> None:
@@ -1106,14 +1906,36 @@ _COPY_VALUE_OPTIONS = {
 }
 
 
+_RECURSIVE_LETTERS = {"cp": "rRa", "rsync": "ra"}
+
+
+def _inside_project(path: str, state: _State) -> bool:
+    """Whether a source is a literal path inside the project: relative, readable, not climbing out."""
+    resolved = resolve(path, state.cwd)
+    return bool(resolved) and not is_opaque(resolved) and BACKSLASH not in resolved and not _is_absolute(resolved) \
+        and resolved != ".." and not resolved.startswith("../")
+
+
 def _copy_like(name: str, args: List[str], state: _State, route: Optional[str] = None) -> None:
-    """cp, mv, install, ln and rsync: the destination is written, and for mv the source goes."""
+    """cp, mv, install, ln and rsync: the destination is written, and for mv the source goes.
+
+    A copy that can bring a whole directory with it (`cp -r`, `rsync -a`, `mv`
+    of what may be a directory, `ln -s` to one) also writes every file beneath
+    its destination, which is recorded as a tree. From outside the project, or
+    from a source nobody can name, anything can be in that tree. From inside
+    the project, the files were already there and already governed where they
+    stood, so what matters is only whether the destination itself sits where a
+    rule reaches: `cp -r src/infra src/domain/`, not `cp -r build/ dist/`.
+    """
     route = route or name
     values = set(_COPY_VALUE_OPTIONS.get(name, ()))
     operands: List[str] = []
     target_directory: Optional[str] = None
     no_target_directory = False
     directories_only = False
+    recursive = False
+    symbolic = False
+    deletes_extra = False
     literal = False
     index = 0
     while index < len(args):
@@ -1133,6 +1955,16 @@ def _copy_like(name: str, args: List[str], state: _State, route: Optional[str] =
             directories_only = True
         elif arg in values:
             index += 1
+        elif arg in ("--recursive", "--archive"):
+            recursive = True
+        elif arg == "--symbolic":
+            symbolic = True
+        elif name == "rsync" and (arg == "--del" or arg.startswith("--delete")):
+            deletes_extra = True
+        elif not arg.startswith("--"):
+            letters = arg[1:]
+            recursive = recursive or any(letter in _RECURSIVE_LETTERS.get(name, "") for letter in letters)
+            symbolic = symbolic or (name == "ln" and "s" in letters)
         index += 1
     if directories_only:
         return
@@ -1140,11 +1972,14 @@ def _copy_like(name: str, args: List[str], state: _State, route: Optional[str] =
         # host:path is another machine; C:/path is a drive letter, not a host.
         operands = [op for op in operands if not re.match(r"^[^/\\]+:", op) or re.match(r"^[A-Za-z]:[/\\]", op)]
 
+    destination: Optional[str] = None
     if name == "ln" and len(operands) == 1 and not target_directory:
         sources, destinations = operands, [[_basename(operands[0])]]
+        destination = "."
     elif target_directory:
         sources = operands
         destinations = [[target_directory.rstrip("/") + "/" + _basename(source)] for source in sources]
+        destination = target_directory
     elif len(operands) >= 2:
         sources, destination = operands[:-1], operands[-1]
         if len(sources) > 1 or destination.endswith("/") or destination in (".", ".."):
@@ -1163,6 +1998,46 @@ def _copy_like(name: str, args: List[str], state: _State, route: Optional[str] =
         content = UNKNOWN if name in ("ln", "rsync") else _known(state, source)
         for target in targets:
             _write(state, target, content, route)
+
+    # The tree. A destination that plainly names a file brings no directory
+    # with it, and one outside the project (absolute or under ~) is not the
+    # project's: a tree copied out to /tmp is a backup, not a write.
+    carries_tree = recursive or name == "mv" or (name == "ln" and symbolic)
+    single_file = len(sources) == 1 and not target_directory and _looks_like_file(destination or "")
+    if carries_tree and destination is not None and not single_file:
+        outside = not all(_inside_project(source, state) for source in sources)
+        tail = EXPANSION if outside else _ANY_NAME
+        base = destination.replace("\\", "/").rstrip("/") or "/"
+        into_directory = bool(target_directory) or destination.endswith("/") or destination in (".", "..") or len(sources) > 1
+        roots: List[str] = []
+        for source in sources:
+            name_of = _basename(source)
+            # `rsync -a src/ dest` and `cp -r src/. dest` bring the contents,
+            # not the directory, so the tree starts at the destination itself.
+            contents = name_of in ("", ".") or (name == "rsync" and source.endswith("/"))
+            if name == "ln" and len(operands) == 1 and not target_directory:
+                roots.append(name_of)
+            elif contents:
+                roots.append(base)
+            elif into_directory:
+                roots.append(base + "/" + name_of)
+            else:
+                roots.extend((base, base + "/" + name_of))
+        for place in dict.fromkeys(roots):
+            if not place or _is_absolute(place):
+                continue
+            # From inside the project the question is only where the tree
+            # lands. When that is an expansion, `cp -r src "$TMP/"`, it cannot
+            # be answered, and the files it carries were governed where they
+            # stood, so the tree is not recorded rather than refused on a guess.
+            if not outside and is_opaque(resolve(place, state.cwd)):
+                continue
+            _write(state, place + "/" + tail, UNKNOWN, route, tree=True)
+    if deletes_extra and destination is not None and not _is_absolute(destination):
+        # `rsync --delete` removes whatever the destination has that the source
+        # lacks, which at the project root includes the hooks' own files.
+        _write(state, destination.rstrip("/") + "/" + EXPANSION, UNKNOWN, route, deletes=True, tree=True)
+
     if name == "mv" or (name == "rsync" and "--remove-source-files" in args):
         for source in sources:
             _write(state, source, UNKNOWN, route, deletes=True)
@@ -1347,7 +2222,8 @@ def _apply_diff(state: _State, text: Optional[str], route: str, strip: int, reve
         _write(state, None, UNKNOWN, route)
         return
     for path, added, deletes in diff_writes(text, strip, reverse):
-        _write(state, prefix + path, UNKNOWN if deletes else added, route, deletes=deletes)
+        target = path if _is_absolute(path) else prefix + path
+        _write(state, target, UNKNOWN if deletes else added, route, deletes=deletes)
 
 
 def _git_apply(args: List[str], stdin: Optional[str], has_stdin: bool, state: _State) -> None:
@@ -1386,6 +2262,7 @@ def _patch(args: List[str], stdin: Optional[str], has_stdin: bool, state: _State
     reverse = False
     patch_file: Optional[str] = None
     output: Optional[str] = None
+    directory = ""
     operands: List[str] = []
     takes_value = ("-p", "-i", "-o", "-d", "-D", "-F", "-r", "-B", "-V", "-Y", "-z", "-g", "-x", "--input", "--output", "--directory", "--strip")
     index = 0
@@ -1400,10 +2277,20 @@ def _patch(args: List[str], stdin: Optional[str], has_stdin: bool, state: _State
             strip = int(arg[2:])
         elif name == "--strip" and value.isdigit():
             strip = int(value)
-        elif name in ("--input", "--output") and value:
-            patch_file, output = (value, output) if name == "--input" else (patch_file, value)
-        elif re.fullmatch(r"-[io].+", arg):
-            patch_file, output = (arg[2:], output) if arg[1] == "i" else (patch_file, arg[2:])
+        elif name in ("--input", "--output", "--directory") and value:
+            if name == "--input":
+                patch_file = value
+            elif name == "--output":
+                output = value
+            else:
+                directory = value
+        elif re.fullmatch(r"-[iod].+", arg):
+            if arg[1] == "i":
+                patch_file = arg[2:]
+            elif arg[1] == "o":
+                output = arg[2:]
+            else:
+                directory = arg[2:]
         elif arg in takes_value and index + 1 < len(args):
             value = args[index + 1]
             if arg == "-p" and value.isdigit():
@@ -1412,22 +2299,30 @@ def _patch(args: List[str], stdin: Optional[str], has_stdin: bool, state: _State
                 patch_file = value
             elif arg in ("-o", "--output"):
                 output = value
+            elif arg in ("-d", "--directory"):
+                directory = value
             index += 1
         elif not arg.startswith("-") or arg == "-":
             operands.append(arg)
         index += 1
     if patch_file is None and len(operands) >= 2:
         patch_file = operands[1]
+    # `patch -d DIR` changes into DIR before doing anything else, so every
+    # path it reads or writes, the patch file included, starts there.
+    prefix = directory.rstrip("/") + "/" if directory else ""
+    if patch_file and not _is_absolute(patch_file.replace("\\", "/")):
+        patch_file = prefix + patch_file
     text = _known(state, patch_file) if patch_file else (stdin if has_stdin else UNKNOWN)
     explicit = output or (operands[0] if operands else None)
     if explicit:
+        explicit = explicit if _is_absolute(explicit.replace("\\", "/")) else prefix + explicit
         if text is None:
             _write(state, explicit, UNKNOWN, "patch")
         else:
             added = "\n".join(entry[1] for entry in diff_writes(text, strip, reverse))
             _write(state, explicit, added, "patch")
         return
-    _apply_diff(state, text, "patch", strip, reverse)
+    _apply_diff(state, text, "patch", strip, reverse, prefix)
 
 
 # --- git: writes and the hooks it can be told to skip ----------------------------------
@@ -1438,28 +2333,121 @@ _COMMIT_VALUES = (
     "--fixup", "--squash", "--template", "--cleanup", "--trailer", "--author", "--date", "--pathspec-from-file",
 )
 _CONFIG_READS = ("--get", "--get-all", "--get-regexp", "--get-urlmatch", "--list", "-l", "get", "list")
+_CONFIG_WRITES = (
+    "--unset", "--unset-all", "--add", "--replace-all", "--rename-section", "--remove-section", "--edit", "-e",
+    "set", "unset", "edit", "rename-section", "remove-section",
+)
+# Options of `git config` that take a value of their own and name no key.
+_CONFIG_VALUES = ("-f", "--file", "--blob", "-t", "--type", "--default", "--comment", "--value", "--fixed-value")
+# The files the installer lists in .git/info/exclude, which `git clean -x`
+# removes with the rest of what is ignored.
+_IGNORED_GOVERNANCE = (".threefold.json", ".claude/settings.local.json", ".codex/hooks.json", ".agents/hooks.json")
 
 
 def _is_hooks_path(key: str) -> bool:
-    return key.strip().lower().startswith("core.hookspath")
+    """A setting that decides which hooks git runs, or one whose name cannot be read.
+
+    `include.path` and `includeIf.*.path` pull in another configuration file,
+    which can set core.hooksPath where no command shows it.
+    """
+    lowered = key.strip().lower()
+    if is_opaque(lowered):
+        return True
+    return lowered.startswith("core.hookspath") or lowered.startswith("include.path") or (
+        lowered.startswith("includeif.") and ".path" in lowered
+    )
+
+
+def git_environment_tampering(name: str, value: str) -> Optional[str]:
+    """Why setting this environment variable turns git's hooks off, or None.
+
+    Checked for every assignment in the command, not only on the git command
+    itself: `export GIT_CONFIG_KEY_0=core.hooksPath ...; git commit` sets it one
+    command earlier.
+    """
+    if name == "GIT_CONFIG_PARAMETERS" and ("core.hookspath" in value.lower() or "include" in value.lower() or is_opaque(value)):
+        return "GIT_CONFIG_PARAMETERS sets core.hooksPath"
+    if re.fullmatch(r"GIT_CONFIG_KEY_\d+", name) and _is_hooks_path(value):
+        return f"{name} sets core.hooksPath"
+    if name in ("GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_CONFIG"):
+        return f"{name} points git at a configuration file the service cannot read"
+    return None
+
+
+def _config_operands(rest: List[str]) -> List[str]:
+    """The words of a `git config` that are neither options nor option values, subcommand word dropped."""
+    operands: List[str] = []
+    index = 0
+    while index < len(rest):
+        arg = rest[index]
+        if arg in _CONFIG_VALUES:
+            index += 2
+            continue
+        if not arg.startswith("-"):
+            operands.append(arg)
+        index += 1
+    if operands and operands[0] in ("get", "list", "set", "unset", "edit", "rename-section", "remove-section"):
+        operands = operands[1:]
+    return operands
+
+
+def _config_is_read(rest: List[str]) -> bool:
+    """Whether a `git config` only reads: `git config core.hooksPath`, `--get`, `--list`.
+
+    With no action named, one operand is a read and two are a write, so
+    `git config core.hooksPath` looks and `git config core.hooksPath x` sets.
+    """
+    if any(arg in _CONFIG_WRITES or arg.startswith(("--unset", "--replace-all", "--add")) for arg in rest):
+        return False
+    if any(arg in _CONFIG_READS for arg in rest):
+        return True
+    return len(_config_operands(rest)) == 1
+
+
+def _git_clean(rest: List[str], state: _State) -> None:
+    """`git clean -x` or `-X` removes ignored files, and the installer's files are ignored ones."""
+    letters = "".join(arg[1:] for arg in rest if arg.startswith("-") and not arg.startswith("--"))
+    if "n" in letters or "--dry-run" in rest or not ("x" in letters or "X" in letters):
+        return
+    excluded: List[str] = []
+    pathspecs: List[str] = []
+    index = 0
+    while index < len(rest):
+        arg = rest[index]
+        if arg == "-e" and index + 1 < len(rest):
+            excluded.append(rest[index + 1])
+            index += 2
+            continue
+        if arg.startswith("--exclude="):
+            excluded.append(arg.split("=", 1)[1])
+        elif arg.startswith("-e") and len(arg) > 2 and not arg.startswith("--"):
+            excluded.append(arg[2:])
+        elif not arg.startswith("-"):
+            pathspecs.append(arg)
+        index += 1
+    if pathspecs and not any(is_opaque(spec) or (resolve(spec, state.cwd) or "") in (".", "") or spec.startswith(":/") for spec in pathspecs):
+        return  # a subdirectory only; the hooks' files live at the root
+    for relative in _IGNORED_GOVERNANCE:
+        # With -x, an -e pattern still counts as ignored and keeps its file;
+        # with -X it only adds to what is removed.
+        kept = "X" not in letters and any(
+            fnmatch.fnmatch(relative, pattern.lstrip("/")) or fnmatch.fnmatch(_basename(relative), pattern.lstrip("/"))
+            or relative.startswith(pattern.strip("/") + "/")
+            for pattern in excluded
+        )
+        if not kept:
+            _write(state, relative, UNKNOWN, "git clean -x", deletes=True)
 
 
 def _git(args: List[str], assignments: List[str], stdin: Optional[str], has_stdin: bool, state: _State) -> None:
     tampering = state.result.tampering
-    for assignment in assignments:
-        name, _, value = assignment.partition("=")
-        if name == "GIT_CONFIG_PARAMETERS" and "core.hookspath" in value.lower():
-            tampering.append("GIT_CONFIG_PARAMETERS sets core.hooksPath")
-        elif re.fullmatch(r"GIT_CONFIG_KEY_\d+", name) and _is_hooks_path(value):
-            tampering.append(f"{name} sets core.hooksPath")
-
     index = 0
     while index < len(args):
         arg = args[index]
         if arg == "-c" or arg == "--config-env":
             value = args[index + 1] if index + 1 < len(args) else ""
             if _is_hooks_path(value):
-                tampering.append(f"git {arg} {value.split('=', 1)[0]}=... points the hooks somewhere else")
+                tampering.append(f"git {arg} {display(value.split('=', 1)[0])}=... points the hooks somewhere else")
             index += 2
             continue
         if arg.startswith("-c") and len(arg) > 2 and _is_hooks_path(arg[2:]):
@@ -1498,8 +2486,12 @@ def _git(args: List[str], assignments: List[str], stdin: Optional[str], has_stdi
                         break
             position += 1
     elif subcommand == "config":
-        if not any(arg in _CONFIG_READS for arg in rest) and any(_is_hooks_path(arg) for arg in rest if not arg.startswith("-")):
+        if "--edit" in rest or "-e" in rest or "edit" in rest[:1]:
+            tampering.append("git config --edit can set core.hooksPath where no command shows it")
+        elif not _config_is_read(rest) and _is_hooks_path((_config_operands(rest) or [""])[0]):
             tampering.append("git config core.hooksPath points the hooks somewhere else")
+    elif subcommand == "clean":
+        _git_clean(rest, state)
     elif subcommand == "apply":
         _git_apply(rest, stdin, has_stdin, state)
     elif subcommand == "rm":
@@ -1512,8 +2504,12 @@ def _git(args: List[str], assignments: List[str], stdin: Optional[str], has_stdi
 
 # --- code handed to an interpreter --------------------------------------------------------
 
-def _call_name(node: ast.AST) -> str:
-    """`open`, `os.remove`, `shutil.copy`: the dotted name a call is made through."""
+def _call_name(node: ast.AST, aliases: Optional[Dict[str, str]] = None) -> str:
+    """`open`, `os.remove`, `shutil.copy`: the dotted name a call is made through.
+
+    With `aliases`, a name imported or bound under another one is read as the
+    one it stands for: after `from pathlib import Path as P`, `P(...)` is Path.
+    """
     parts: List[str] = []
     while isinstance(node, ast.Attribute):
         parts.append(node.attr)
@@ -1522,7 +2518,12 @@ def _call_name(node: ast.AST) -> str:
         parts.append(node.id)
     elif parts:
         parts.append("?")
-    return ".".join(reversed(parts))
+    name = ".".join(reversed(parts))
+    if aliases:
+        head, dot, tail = name.partition(".")
+        if head in aliases:
+            name = aliases[head] + dot + tail
+    return name
 
 
 class _PythonReader:
@@ -1546,6 +2547,9 @@ class _PythonReader:
     LINKERS = frozenset(("os.link", "os.symlink"))
     REMOVERS = frozenset(("os.remove", "os.unlink", "os.rmdir", "os.removedirs", "shutil.rmtree"))
 
+    # Modules whose functions are named "module.function" in the sets above.
+    ALIASED_MODULES = frozenset(("os", "os.path", "shutil", "io", "codecs", "builtins"))
+
     def __init__(self, tree: ast.AST, argv: Sequence[str]) -> None:
         self.tree = tree
         self.argv = list(argv)
@@ -1554,6 +2558,53 @@ class _PythonReader:
             for child in ast.iter_child_nodes(parent):
                 self.parents[id(child)] = parent
         self.bindings = self._bindings()
+        self.aliases = self._aliases()
+
+    def _aliases(self) -> Dict[str, str]:
+        """Names that stand for a known function or module under another spelling.
+
+        `from pathlib import Path as P; P('src/domain/x.py').write_text(...)`
+        was found as a write with no path, and a write with no path was dropped.
+        """
+        aliases: Dict[str, str] = {}
+        for node in ast.walk(self.tree):
+            if isinstance(node, ast.ImportFrom) and node.module and not node.level:
+                for alias in node.names:
+                    if alias.name == "*":
+                        continue
+                    local = alias.asname or alias.name
+                    if node.module == "pathlib":
+                        target = alias.name
+                    elif node.module in self.ALIASED_MODULES:
+                        target = f"{node.module}.{alias.name}"
+                    else:
+                        continue
+                    if target != local:
+                        aliases[local] = target
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.asname and alias.asname != alias.name:
+                        aliases[alias.asname] = alias.name
+        # A name bound once to another name: `W = Path`, `o = open`.
+        for name, value in self.bindings.items():
+            if name not in aliases and isinstance(value, (ast.Name, ast.Attribute)):
+                target = _call_name(value, aliases)
+                if target and target != name and "?" not in target:
+                    aliases[name] = target
+        return aliases
+
+    def name_of(self, node: ast.AST) -> str:
+        return _call_name(node, self.aliases)
+
+    @staticmethod
+    def argument(call: ast.Call, position: int, *names: str) -> Optional[ast.AST]:
+        """A call's argument by position or by keyword: `open(file=..., mode=...)` is still an open."""
+        if len(call.args) > position and not any(isinstance(arg, ast.Starred) for arg in call.args[:position + 1]):
+            return call.args[position]
+        for keyword in call.keywords:
+            if keyword.arg in names:
+                return keyword.value
+        return None
 
     def _bindings(self) -> Dict[str, Optional[ast.AST]]:
         """Names assigned exactly once, to what. A name assigned twice is not trusted."""
@@ -1593,14 +2644,14 @@ class _PythonReader:
         if isinstance(node, ast.Name):
             bound = self.bindings.get(node.id)
             return self.text(bound, depth + 1) if bound is not None else (None, False)
-        if isinstance(node, ast.Subscript) and _call_name(node.value) == "sys.argv":
+        if isinstance(node, ast.Subscript) and self.name_of(node.value) == "sys.argv":
             index = node.slice
             if isinstance(index, ast.Constant) and isinstance(index.value, int) and 1 <= index.value <= len(self.argv):
                 return self.argv[index.value - 1], True
             return None, False
         if isinstance(node, ast.Call):
-            name = _call_name(node.func)
-            if name in self.PATH_WRAPPERS or name.endswith(".Path"):
+            name = self.name_of(node.func)
+            if name in self.PATH_WRAPPERS or name.endswith(".Path") or name.split(".")[-1] in self.PATH_WRAPPERS and name.startswith("pathlib."):
                 return self._joined(node.args, depth)
             if name == "os.path.join":
                 return self._joined(node.args, depth)
@@ -1669,7 +2720,7 @@ class _PythonReader:
                         understood += 1
                 elif isinstance(attribute, ast.keyword) and attribute.arg == "file":
                     printed = self.parents.get(id(attribute))
-                    if isinstance(printed, ast.Call) and _call_name(printed.func) == "print":
+                    if isinstance(printed, ast.Call) and self.name_of(printed.func) == "print":
                         values = [self.content(argument) for argument in printed.args]
                         if any(value is UNKNOWN for value in values):
                             return UNKNOWN
@@ -1684,50 +2735,68 @@ class _PythonReader:
         return self.content(argument)
 
     def writes(self) -> List[Tuple[Optional[str], Optional[str], str, bool]]:
+        """Every write the code makes. A path that cannot be worked out is None.
+
+        None is kept only for calls that can be nothing but a file write: open()
+        for writing, write_text, shutil and os by their full names. A method that
+        merely shares a name with one, such as `df.rename(columns)`, is reported
+        only when its path can be read, so a pandas call is never a refusal.
+        """
         found: List[Tuple[Optional[str], Optional[str], str, bool]] = []
+        argument = self.argument
 
         def path_of(node: Optional[ast.AST]) -> Optional[str]:
             value, _ = self.text(node)
             return value
 
+        def unambiguous(path: Optional[str], content: Optional[str], route: str, deletes: bool = False) -> None:
+            found.append((path, content, route, deletes))
+
+        def if_named(path: Optional[str], content: Optional[str], route: str, deletes: bool = False) -> None:
+            if path is not None:
+                found.append((path, content, route, deletes))
+
         for node in ast.walk(self.tree):
             if not isinstance(node, ast.Call):
                 continue
-            name = _call_name(node.func)
+            name = self.name_of(node.func)
             method = node.func.attr if isinstance(node.func, ast.Attribute) else ""
             receiver = node.func.value if isinstance(node.func, ast.Attribute) else None
-            if name in self.OPENERS and node.args:
-                if any(letter in self._mode(node, 1) for letter in "wax+"):
-                    found.append((path_of(node.args[0]), self._handle_content(node), "python open()", False))
-            elif method == "open" and receiver is not None and name not in self.OPENERS:
-                if any(letter in self._mode(node, 0) for letter in "wax+") and path_of(receiver) is not None:
-                    found.append((path_of(receiver), self._handle_content(node), "python Path.open()", False))
+            if name in self.OPENERS:
+                target = argument(node, 0, "file", "filename")
+                if target is not None and any(letter in self._mode(node, 1) for letter in "wax+"):
+                    unambiguous(path_of(target), self._handle_content(node), "python open()")
+            elif method == "open" and receiver is not None:
+                if any(letter in self._mode(node, 0) for letter in "wax+"):
+                    if_named(path_of(receiver), self._handle_content(node), "python Path.open()")
             elif method in ("write_text", "write_bytes") and receiver is not None:
-                found.append((path_of(receiver), self.content(node.args[0]) if node.args else UNKNOWN, f"python {method}()", False))
+                data = argument(node, 0, "data")
+                unambiguous(path_of(receiver), self.content(data) if data is not None else UNKNOWN, f"python {method}()")
             elif method == "touch" and receiver is not None:
-                found.append((path_of(receiver), "", "python touch()", False))
-            elif name in self.COPIERS and len(node.args) >= 2:
-                found.append((path_of(node.args[1]), UNKNOWN, f"python {name}()", False))
-            elif name in self.MOVERS and len(node.args) >= 2 and "." in name:
-                found.append((path_of(node.args[1]), UNKNOWN, f"python {name}()", False))
-                found.append((path_of(node.args[0]), UNKNOWN, f"python {name}()", True))
-            elif method in ("rename", "replace") and receiver is not None and len(node.args) == 1 and not node.keywords:
+                if_named(path_of(receiver), "", "python touch()")
+            elif name in self.COPIERS and argument(node, 1, "dst") is not None:
+                report = unambiguous if "." in name else if_named
+                report(path_of(argument(node, 1, "dst")), UNKNOWN, f"python {name}()")
+            elif name in self.MOVERS and "." in name and argument(node, 1, "dst") is not None:
+                unambiguous(path_of(argument(node, 1, "dst")), UNKNOWN, f"python {name}()")
+                if_named(path_of(argument(node, 0, "src")), UNKNOWN, f"python {name}()", True)
+            elif method in ("rename", "replace") and receiver is not None and len(node.args) + len(node.keywords) == 1:
                 # Path.rename(target) takes one argument; str.replace takes two,
                 # and every `line.replace('\n', '')` in a one-liner is not a move.
-                found.append((path_of(node.args[0]), UNKNOWN, f"python Path.{method}()", False))
-                found.append((path_of(receiver), UNKNOWN, f"python Path.{method}()", True))
-            elif name in self.LINKERS and len(node.args) >= 2:
-                found.append((path_of(node.args[1]), UNKNOWN, f"python {name}()", False))
+                if_named(path_of(argument(node, 0, "target")), UNKNOWN, f"python Path.{method}()")
+                if_named(path_of(receiver), UNKNOWN, f"python Path.{method}()", True)
+            elif name in self.LINKERS and argument(node, 1, "dst") is not None:
+                unambiguous(path_of(argument(node, 1, "dst")), UNKNOWN, f"python {name}()")
             elif method in ("symlink_to", "hardlink_to") and receiver is not None:
-                found.append((path_of(receiver), UNKNOWN, f"python Path.{method}()", False))
-            elif name in self.REMOVERS and node.args:
-                found.append((path_of(node.args[0]), UNKNOWN, f"python {name}()", True))
+                if_named(path_of(receiver), UNKNOWN, f"python Path.{method}()")
+            elif name in self.REMOVERS and argument(node, 0, "path") is not None:
+                if_named(path_of(argument(node, 0, "path")), UNKNOWN, f"python {name}()", True)
             elif method in ("unlink", "rmdir") and receiver is not None and not name.startswith("os."):
-                found.append((path_of(receiver), UNKNOWN, f"python Path.{method}()", True))
-            elif name == "os.open" and len(node.args) >= 2:
-                flags = ast.dump(node.args[1])
+                if_named(path_of(receiver), UNKNOWN, f"python Path.{method}()", True)
+            elif name == "os.open" and argument(node, 1, "flags") is not None:
+                flags = ast.dump(argument(node, 1, "flags"))
                 if any(flag in flags for flag in ("O_WRONLY", "O_RDWR", "O_CREAT", "O_APPEND", "O_TRUNC")):
-                    found.append((path_of(node.args[0]), UNKNOWN, "python os.open()", False))
+                    unambiguous(path_of(argument(node, 0, "path")), UNKNOWN, "python os.open()")
         return found
 
 
@@ -1843,32 +2912,41 @@ def node_writes(code: str) -> List[Tuple[Optional[str], Optional[str], str, bool
         first = arguments[0][1] if arguments and arguments[0][0] == "literal" else None
         second = arguments[1][1] if len(arguments) > 1 and arguments[1][0] == "literal" else None
         route = f"node {function}()"
+        # A path that is not a literal is reported as None, so the write is
+        # judged as one whose file cannot be named rather than dropped. Only
+        # for the names that belong to fs alone: `rename` and `unlink` are
+        # methods of half the objects in JavaScript.
         if function in ("writeFileSync", "appendFileSync", "writeFile", "appendFile", "outputFileSync", "outputFile"):
-            if first is not None:
-                found.append((first, second, route, False))
+            found.append((first, second, route, False))
         elif function == "createWriteStream":
-            if first is not None:
-                found.append((first, UNKNOWN, route, False))
+            found.append((first, UNKNOWN, route, False))
         elif function in ("copyFileSync", "copyFile", "cpSync", "symlinkSync", "linkSync"):
-            if second is not None:
-                found.append((second, UNKNOWN, route, False))
+            found.append((second, UNKNOWN, route, False))
         elif function in ("renameSync", "rename"):
-            if second is not None:
+            if second is not None or function == "renameSync":
                 found.append((second, UNKNOWN, route, False))
             if first is not None:
                 found.append((first, UNKNOWN, route, True))
         elif function == "truncateSync":
-            if first is not None:
-                found.append((first, "", route, False))
+            found.append((first, "", route, False))
         elif first is not None:
             found.append((first, UNKNOWN, route, True))
     return found
 
 
 def _record(state: _State, writes: Iterable[Tuple[Optional[str], Optional[str], str, bool]]) -> None:
+    """Records an interpreter's writes. One whose path cannot be read is kept, with no path.
+
+    Dropping it was how `P('src/domain/x.py').write_text(...)` under an alias
+    passed, while `git apply fix.patch`, just as unnamed, was refused. A
+    deletion with no path is not kept: removing an unnamed file is judged by
+    nothing but the governance paths, and those need a name.
+    """
     for target, content, route, deletes in writes:
         if target:
             _write(state, target, content, route, deletes)
+        elif not deletes:
+            _write(state, None, content, route)
 
 
 def _interpreter_code(args: List[str], stdin: Optional[str], has_stdin: bool, state: _State, eval_flags: Sequence[str],
@@ -1886,6 +2964,9 @@ def _interpreter_code(args: List[str], stdin: Optional[str], has_stdin: bool, st
             return (args[index + 1] if index + 1 < len(args) else ""), args[index + 2:]
         if "-c" in eval_flags and re.fullmatch(r"-c.+", arg):
             return arg[2:], args[index + 1:]
+        # node -pe, -ep: short flags run together, one of them taking the code.
+        if "-e" in eval_flags and re.fullmatch(r"-[a-zA-Z]*[ep][a-zA-Z]*", arg) and not re.search(r"[rC]", arg):
+            return (args[index + 1] if index + 1 < len(args) else ""), args[index + 2:]
         if arg == "-m":
             return None, []
         if arg == "-":
@@ -1903,7 +2984,7 @@ def _interpreter_code(args: List[str], stdin: Optional[str], has_stdin: bool, st
 
 PYTHONS = re.compile(r"^(?:python[\d.]*|py|pypy[\d.]*)$")
 NODES = frozenset(("node", "nodejs", "bun"))
-SHELLS = frozenset(("bash", "sh", "zsh", "dash", "ksh", "ash", "busybox"))
+SHELLS = frozenset(("bash", "sh", "zsh", "dash", "ksh", "ash", "mksh"))
 
 
 def _shell_script(args: List[str], stdin: Optional[str], has_stdin: bool, state: _State) -> Optional[str]:
@@ -1976,12 +3057,121 @@ def _powershell(name: str, args: List[str], stdin: Optional[str], state: _State)
     return UNKNOWN
 
 
+# --- commands that run other commands on words they find -------------------------------------
+
+_XARGS_VALUES = ("-a", "-d", "-E", "-e", "-I", "-L", "-l", "-n", "-P", "-s", "--arg-file", "--delimiter", "--eof",
+                 "--replace", "--max-lines", "--max-args", "--max-procs", "--max-chars", "--process-slot-var")
+
+
+def _xargs(args: List[str], state: _State) -> None:
+    """`xargs CMD ARGS`: CMD runs with ARGS and words read from input, which nobody can name.
+
+    `find src/domain -name '*.py' | xargs sed -i '1i import boto3'` edits every
+    file find prints. Each word xargs supplies is an expansion, so the edit is
+    judged as a write to any file the rule could cover.
+    """
+    replace: Optional[str] = None
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if arg in ("-I", "--replace") and index + 1 < len(args):
+            replace = args[index + 1]
+            index += 2
+            continue
+        if arg.startswith("--replace="):
+            replace = arg.split("=", 1)[1] or "{}"
+        elif arg == "-i" or (arg.startswith("-i") and not arg.startswith("--")):
+            replace = arg[2:] or "{}"
+        elif arg.startswith("-I") and len(arg) > 2:
+            replace = arg[2:]
+        elif arg in _XARGS_VALUES:
+            index += 2
+            continue
+        elif not arg.startswith("-"):
+            break
+        index += 1
+    command = args[index:] or ["echo"]
+    if replace:
+        command = [word.replace(replace, EXPANSION) for word in command]
+    else:
+        command = command + [EXPANSION]
+    _run_nested(command, state.child())
+
+
+def _find(args: List[str], state: _State) -> None:
+    """`find ROOT ... -exec CMD {} ;`: CMD runs on every file found under ROOT."""
+    roots: List[str] = []
+    index = 0
+    while index < len(args) and (args[index] in ("-H", "-L", "-P", "-D") or args[index].startswith("-O")):
+        index += 2 if args[index] == "-D" else 1
+    while index < len(args) and not args[index].startswith("-") and args[index] not in ("(", "!", ","):
+        roots.append(args[index])
+        index += 1
+    root = (roots[0] if roots else ".").rstrip("/") or "/"
+    while index < len(args):
+        arg = args[index]
+        if arg in ("-exec", "-execdir", "-ok", "-okdir"):
+            end = index + 1
+            while end < len(args) and args[end] not in (";", "+"):
+                end += 1
+            found = root + "/" + EXPANSION if arg in ("-exec", "-ok") else "./" + EXPANSION
+            command = [word.replace("{}", found) for word in args[index + 1:end]]
+            if command:
+                child = state.child()
+                if arg in ("-execdir", "-okdir"):
+                    child.cwd = resolve(root + "/" + EXPANSION, state.cwd) or EXPANSION
+                _run_nested(command, child)
+            index = end + 1
+            continue
+        if arg in ("-fprint", "-fprint0", "-fls", "-fprintf") and index + 1 < len(args):
+            _write(state, args[index + 1], UNKNOWN, f"find {arg}")
+            index += 2
+            continue
+        index += 1
+
+
+def _run_nested(argv: List[str], state: _State) -> None:
+    """Runs a command another command hands its words to, with nothing on its input."""
+    if state.depth > MAX_NESTED_SCRIPTS:
+        state.budget.truncated = True
+        return
+    unwrapped = _unwrap(list(argv), [])
+    if unwrapped:
+        state.result.commands.append(tuple(unwrapped))
+        _run(program_name(unwrapped[0]), unwrapped, _Simple(), UNKNOWN, state)
+
+
+def _code_of_an_unknown_program(args: List[str], state: _State) -> None:
+    """`$PYTHON -c "..."`, `"$(which node)" -e "..."`: the program is not in the command, its code is.
+
+    What the code writes is read as shell, as Python and as JavaScript, and
+    whichever it is finds its writes; the others find nothing in text that is
+    not theirs.
+    """
+    for index, arg in enumerate(args[:-1]):
+        if arg in ("-c", "-e", "--eval", "-p", "--print") or re.fullmatch(r"-[a-zA-Z]*[ce]", arg):
+            code = args[index + 1]
+            _record(state, python_writes(code, args[index + 2:]))
+            _record(state, node_writes(code))
+            _analyse_into(code, state.child())
+            return
+
+
 # --- the analysis -------------------------------------------------------------------------------
 
 def _run(name: str, argv: List[str], simple: _Simple, stdin: Optional[str], state: _State) -> Optional[str]:
     """Records what one simple command writes and returns what it prints, or UNKNOWN."""
     args = argv[1:]
     has_stdin = simple.has_stdin or stdin is not None
+    if is_opaque(argv[0]):
+        _code_of_an_unknown_program(args, state)
+        return UNKNOWN
+    if name == "xargs":
+        _xargs(args, state)
+        return UNKNOWN
+    if name == "find":
+        _find(args, state)
+        return UNKNOWN
     if name == "echo":
         return _echo(args)
     if name == "printf":
@@ -2090,6 +3280,25 @@ def _run(name: str, argv: List[str], simple: _Simple, stdin: Optional[str], stat
     return UNKNOWN
 
 
+_DECLARERS = frozenset(("export", "declare", "typeset", "local", "readonly"))
+
+
+def _check_git_environment(assignments: List[str], argv: List[str], state: _State) -> None:
+    """Environment that turns git's hooks off, wherever in the command it is set.
+
+    A prefix (`VAR=x git commit`), a bare assignment and an `export` all count:
+    the git command may come several segments later.
+    """
+    words = list(assignments)
+    if argv and program_name(argv[0]) in _DECLARERS:
+        words.extend(word for word in argv[1:] if _ASSIGNMENT.match(word))
+    for word in words:
+        name, _, value = word.partition("=")
+        reason = git_environment_tampering(name, value)
+        if reason and reason not in state.result.tampering:
+            state.result.tampering.append(reason)
+
+
 def _analyse_into(text: str, state: _State) -> None:
     if state.depth > MAX_NESTED_SCRIPTS:
         # A script inside a script inside a script: past this, what it writes
@@ -2118,7 +3327,14 @@ def _analyse_into(text: str, state: _State) -> None:
             printed[-1] = UNKNOWN
             continue
         simple = _parse_simple(tokens, event)
-        argv = _unwrap(simple.argv, simple.assignments)
+        argv, closer = _strip_reserved(simple.argv, simple.assignments, state)
+        # `exec 3> file` and `exec > file` run no command: the redirect stays
+        # open on the shell itself, and whatever the rest of the command prints
+        # to it lands in the file.
+        on_the_shell = bool(argv) and program_name(argv[0]) == "exec"
+        argv = _unwrap(argv, simple.assignments)
+        on_the_shell = on_the_shell and not argv
+        _check_git_environment(simple.assignments, argv, state)
         if argv:
             state.result.commands.append(tuple(argv))
         if simple.stdin_text is not None:
@@ -2132,16 +3348,27 @@ def _analyse_into(text: str, state: _State) -> None:
         name = program_name(argv[0]) if argv else ""
         if argv:
             output = _run(name, argv, simple, stdin, state)
+        elif closer or on_the_shell:
+            # `done > file`, `} | tee file`: what arrives is the output of the
+            # whole compound command, which is not this segment's to know.
+            output = UNKNOWN
         else:
             output = ""  # `> file` alone empties the file
         for target, fd, operator in simple.outputs:
-            if fd in ("1", "&"):
+            if on_the_shell:
+                content = UNKNOWN
+            elif fd in ("1", "&"):
                 content = output
             else:
                 # Another stream. echo and printf never write to it, so what
                 # arrives there is nothing; any other program's is unknown.
-                content = "" if name in ("echo", "printf") or not argv else UNKNOWN
-            route = "heredoc" if simple.stdin_text is not None and name in ("cat", "") else f"redirect {operator}"
+                content = "" if name in ("echo", "printf") or not (argv or closer) else UNKNOWN
+            if on_the_shell:
+                route = f"exec {operator}"
+            elif simple.heredoc and name in ("cat", ""):
+                route = "heredoc"
+            else:
+                route = f"redirect {operator}"
             _write(state, target, content, route)
         if any(fd in ("1", "&") for _, fd, _ in simple.outputs):
             output = ""

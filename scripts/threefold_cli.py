@@ -14,10 +14,17 @@ a commit is judged here instead, by the same engine and the same rules:
         every file changed between REF and HEAD, at HEAD
 
 The rules are the project's own: fetched from `GET {endpoint}rules?project=...`
-when an endpoint is configured, else `<repository>/.threefold/rules.json` when
-present, else the rules Threefold ships. The project, endpoint, mode and key
-are resolved exactly as the hook resolves them (environment, then
-.threefold.json, then THREEFOLD_HOME/config.json), by the hook's own code.
+whenever a project is configured, from the configured endpoint or the default
+one the hook itself sends to, else `.threefold/rules.json` as committed, else
+the rules Threefold ships. The project, endpoint, mode and key are resolved
+exactly as the hook resolves them (environment, then .threefold.json, then
+THREEFOLD_HOME/config.json), by the hook's own code.
+
+The rule file is read from a commit, never from the working tree: `check`
+reads it at HEAD and `ci` at the merge base. A backstop that took its rules
+from the change it was judging would pass a branch that deletes a forbidden
+module from the list and adds the import in the same commit. `ci` reports a
+change to the rule file as a finding of its own, so a person sees it.
 
 In observe mode it prints what would be refused and exits 0. In enforce mode it
 exits 1 when a rule that enforces is broken, naming the rule by the id the hook
@@ -126,32 +133,86 @@ def fetch_rules(endpoint: str, project: str, api_key: Optional[str], timeout: fl
     return usable, ""
 
 
-def local_rules(root: Path) -> Tuple[Optional[List[Dict[str, Any]]], List[str]]:
-    path = root / LOCAL_RULES
-    if not path.is_file():
+def local_rules(root: Path, ref: Optional[str]) -> Tuple[Optional[List[Dict[str, Any]]], List[str]]:
+    """The rule file as the commit `ref` has it, or (None, notes) when that commit has none."""
+    if not ref:
         return None, []
     try:
-        document = json.loads(path.read_bytes()[:MAX_RULES_BYTES].decode("utf-8-sig"))
-    except (OSError, ValueError, UnicodeDecodeError):
+        raw = git(root, "show", f"{ref}:{LOCAL_RULES.as_posix()}")
+    except GitError:
+        return None, []
+    try:
+        document = json.loads(raw[:MAX_RULES_BYTES].decode("utf-8-sig"))
+    except (ValueError, UnicodeDecodeError):
         return None, [f"{LOCAL_RULES.as_posix()} is not readable JSON and was ignored."]
     usable, problems = validate_rules(document)
     notes = [f"{LOCAL_RULES.as_posix()}: rule {item['id'] or item['index']} ignored: {item['reason']}" for item in problems]
     return (usable or None), notes
 
 
-def choose_rules(root: Path, settings: Any, timeout: float) -> Tuple[List[Dict[str, Any]], str, List[str]]:
-    """The rules to judge by, where they came from, and any notes on the way."""
+def choose_rules(root: Path, settings: Any, timeout: float, ref: Optional[str] = "HEAD") -> Tuple[List[Dict[str, Any]], str, List[str]]:
+    """The rules to judge by, where they came from, and any notes on the way.
+
+    A project on the default endpoint is asked for its rules there too. The
+    hook sends to that endpoint, so reading them anywhere else would let the
+    hook and this check name different rules for the same write.
+    """
     notes: List[str] = []
-    if settings.endpoint_source != "default" and settings.project:
+    if settings.project:
         fetched, why = fetch_rules(settings.endpoint, settings.project, settings.api_key, timeout)
         if fetched is not None:
             return fetched, f"the service's rules for {settings.project}", notes
         notes.append(f"could not fetch the rules for {settings.project}: {why}.")
-    found, problems = local_rules(root)
+    found, problems = local_rules(root, ref)
     notes.extend(problems)
     if found is not None:
-        return found, LOCAL_RULES.as_posix(), notes
+        return found, f"{LOCAL_RULES.as_posix()} at {ref}", notes
     return list(DEFAULT_RULES), "the rules Threefold ships", notes
+
+
+def head_commit(root: Path) -> Optional[str]:
+    """HEAD, or None in a repository with no commit yet."""
+    try:
+        return git(root, "rev-parse", "--verify", "-q", "HEAD").decode("utf-8").strip() or None
+    except GitError:
+        return None
+
+
+def rule_file_notes(root: Path, staged: Sequence[Tuple[str, str]]) -> List[str]:
+    """Why a rule file in the working tree or the commit being made is not the one used."""
+    name = LOCAL_RULES.as_posix()
+    if any(path == name for path, _ in staged):
+        return [f"this commit changes {name}; it is judged by the rules committed before it, and the new ones apply from the next commit."]
+    if (root / LOCAL_RULES).is_file():
+        try:
+            committed = git(root, "show", f"HEAD:{name}")
+        except GitError:
+            committed = None
+        if committed != (root / LOCAL_RULES).read_bytes():
+            return [f"{name} in the working tree is not the committed one, so it is not used; commit it to adopt it."]
+    return []
+
+
+RULE_FILE_ID = "threefold-rule-file"
+
+
+def rule_file_finding(root: Path, base: str) -> List[Dict[str, str]]:
+    """A change to the rule file under review, as a finding of its own."""
+    name = LOCAL_RULES.as_posix()
+    changed = _names(git(root, "diff", "--name-only", "-z", f"{base}...HEAD", "--", name))
+    if not changed:
+        return []
+    return [{
+        "path": name,
+        "rule_id": RULE_FILE_ID,
+        "mode": ENFORCE,
+        "module": "",
+        "pattern": "",
+        "reason": (
+            f"this change edits the rules it would be judged by. It was judged by the rules at the merge base with "
+            f"{base} instead, and a change to the rules is reviewed by a person on its own"
+        ),
+    }]
 
 
 def judge(files: Sequence[Tuple[str, str]], rules: List[Dict[str, Any]]) -> List[Dict[str, str]]:
@@ -193,9 +254,18 @@ def main(argv: Optional[Sequence[str]] = None, out: Any = None) -> int:
             sub.add_argument("--base", required=True, help="the ref to compare HEAD against, such as origin/main")
     args = parser.parse_args(argv)
 
+    extra: List[Dict[str, str]] = []
     try:
         root = repository_root(Path(args.repo).resolve())
-        files = staged_files(root) if args.command == "check" else changed_files(root, args.base)
+        if args.command == "check":
+            files = staged_files(root)
+            ref = head_commit(root)
+            notes = rule_file_notes(root, files)
+        else:
+            files = changed_files(root, args.base)
+            ref = git(root, "merge-base", args.base, "HEAD").decode("utf-8").strip()
+            notes = []
+            extra = rule_file_finding(root, args.base)
     except (GitError, OSError) as error:
         print(f"threefold: {error}", file=out)
         return 2
@@ -203,12 +273,12 @@ def main(argv: Optional[Sequence[str]] = None, out: Any = None) -> int:
     hook = load_hook()
     settings = hook.resolve_settings({"cwd": str(root)})
     mode = args.mode or settings.mode
-    rules, source, notes = choose_rules(root, settings, hook.timeout_seconds())
-    for note in list(settings.notes) + notes:
+    rules, source, chosen = choose_rules(root, settings, hook.timeout_seconds(), ref)
+    for note in list(settings.notes) + chosen + notes:
         print(f"threefold: {note}", file=out)
     what = "staged file(s)" if args.command == "check" else f"file(s) changed since {args.base}"
     print(f"threefold: judging {len(files)} {what} against {source}, {mode} mode.", file=out)
-    return report(judge(files, rules), mode, out)
+    return report(extra + judge(files, rules), mode, out)
 
 
 if __name__ == "__main__":

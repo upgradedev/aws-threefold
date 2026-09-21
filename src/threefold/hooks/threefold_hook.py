@@ -75,15 +75,22 @@ relative to that root, whenever that is not the root itself: a Codex workdir,
 an Antigravity Cwd, or Claude Code standing in a subdirectory. Without it the
 service would read `> user.py` run in src/domain as a write at the root.
 
-A key set in the environment or in THREEFOLD_HOME is sent only to the endpoint
-named there (or the default), never to a different one a repository's
-`.threefold.json` names: a cloned repository must not be able to point the
-hook, and the owner's key with it, at a server of its choosing.
+A key is never sent to an endpoint only a repository's `.threefold.json` names,
+wherever the key came from, including an api_key_file that same file names:
+a cloned repository must not be able to point the hook, and the owner's key
+with it, at a server of its choosing. The exception is an endpoint the owner
+has paired with that key file in THREEFOLD_HOME/config.json:
+
+    {"trusted_endpoints": [{"endpoint": "https://...", "api_key_file": "owner.key"}]}
+
+which the install script writes when it is given both.
 
 In enforce mode a write to the files that decide whether the hooks run
 (`.claude/settings*.json`, `.codex/hooks.json`, `.codex/config.toml`,
 `.agents/hooks.json`, `.threefold.json`, `.git/hooks/`, `.git/config`) is refused before
 anything is sent, so turning governance off does not depend on the network.
+In observe mode the same write is sent as its path with the content left out,
+except under `.git`, which is a data directory and is not sent at all.
 
 Standard library only and a single file, because it is downloaded alone and run
 by whatever Python the developer already has.
@@ -96,6 +103,7 @@ import http.client
 import json
 import os
 import re
+import shlex
 import socket
 import sys
 import urllib.error
@@ -243,11 +251,17 @@ def _string_leaves(value: Any) -> Iterator[str]:
 
 
 def _command_text(value: Any) -> str:
-    """A command as one string. Codex sends a shell command as a list of words."""
+    """A command as one string. Codex sends a shell command as a list of words.
+
+    The words are quoted back into one line, not joined with spaces. Joined,
+    `["bash", "-lc", "cp /tmp/acme.py src/domain/x.py"]` reached the service
+    as `bash -lc cp /tmp/acme.py src/domain/x.py`, where bash's script is just
+    `cp`, and every write in a Codex command went unread.
+    """
     if isinstance(value, str):
         return value
     if isinstance(value, (list, tuple)) and all(isinstance(word, str) for word in value):
-        return " ".join(value)
+        return shlex.join(value)
     return ""
 
 
@@ -904,28 +918,58 @@ def resolve_settings(payload: Dict[str, Any]) -> Settings:
     settings.mode = mode or "enforce"
 
     key: Optional[str] = None
-    key_source = ""
+    key_file: Optional[str] = None
+    key_label = ""
     if _env("THREEFOLD_API_KEY"):
-        key, key_source = _env("THREEFOLD_API_KEY"), "env"
+        key = _env("THREEFOLD_API_KEY")
     elif _env("THREEFOLD_API_KEY_FILE"):
-        key = _read_key_file(os.path.abspath(os.path.expanduser(_env("THREEFOLD_API_KEY_FILE"))), "THREEFOLD_API_KEY_FILE", settings.notes)
-        key_source = "env"
+        key_file, key_label = os.path.abspath(os.path.expanduser(_env("THREEFOLD_API_KEY_FILE"))), "THREEFOLD_API_KEY_FILE"
     else:
-        for source, label, document, base in layers:
+        for _, label, document, base in layers:
             if "api_key" in document:
                 settings.notes.append(f"{label} holds a key itself; only api_key_file is read, and the key was not sent.")
             path = _key_path(document.get("api_key_file"), base)
             if path:
-                key, key_source = _read_key_file(path, label, settings.notes), source
+                key_file, key_label = path, label
                 break
-    if key and key_source in ("env", "home") and settings.endpoint_source == "repo" and settings.endpoint != home_endpoint:
-        settings.notes.append(
-            f"{CONFIG_FILE_NAME} names a different endpoint from yours, so the API key from "
-            f"{'the environment' if key_source == 'env' else 'THREEFOLD_HOME'} was not sent to it."
-        )
-        key = None
+    # An endpoint the repository chose, and nobody else did, gets no key unless
+    # the owner has paired that endpoint with that key file at home. Checking
+    # only keys from the environment or home missed the route a cloned
+    # repository actually has: its own .threefold.json naming its own server
+    # and, as api_key_file, the owner's key file.
+    chosen_by_repository = settings.endpoint_source == "repo" and settings.endpoint != home_endpoint
+    if chosen_by_repository and (key or key_file):
+        if key_file is None or not _paired(home_config, settings.endpoint, key_file, home):
+            settings.notes.append(
+                f"{CONFIG_FILE_NAME} names an endpoint that is not yours, and THREEFOLD_HOME/config.json does not "
+                "pair it with that key file in trusted_endpoints, so the API key was not sent to it."
+            )
+            key, key_file = None, None
+    if key_file:
+        key = _read_key_file(key_file, key_label, settings.notes)
     settings.api_key = key
     return settings
+
+
+def _paired(home_config: Dict[str, Any], endpoint_url: str, key_file: str, home: str) -> bool:
+    """Whether THREEFOLD_HOME/config.json lists this endpoint with this key file in `trusted_endpoints`.
+
+    The installer writes the pair when it is given both, so an owner's own
+    second stack keeps working while a repository's choice of server does not
+    inherit the owner's key.
+    """
+    pairs = home_config.get("trusted_endpoints")
+    if not isinstance(pairs, list):
+        return False
+    wanted = _canonical(key_file)
+    for entry in pairs:
+        if not isinstance(entry, dict):
+            continue
+        url = entry.get("endpoint")
+        path = _key_path(entry.get("api_key_file"), home)
+        if isinstance(url, str) and _with_slash(url.strip()) == endpoint_url and path and _canonical(path) == wanted:
+            return True
+    return False
 
 
 def is_governance_path(path: str, deletes: bool = False) -> bool:
@@ -1064,11 +1108,12 @@ def held_back_category(call: NormalisedCall, payload: Dict[str, Any], raw_text: 
             return "agent-config"
         if not _is_within(resolved, canonical_root):
             return "outside-root"
-        # A hook script under .git/hooks sits in a data directory by name, but it
-        # is the file that decides whether the pre-commit check runs. Holding it
-        # back would leave an observe-mode rollout blind to exactly that write.
-        relative = os.path.relpath(resolved, canonical_root)
-        if call.action_type == FILE_WRITE and _is_data_file(resolved, canonical_root) and not is_governance_path(relative):
+        # Everything under .git is held back, the hook scripts and .git/config
+        # included. Those two decide whether the hooks run, but .git/config also
+        # holds remote URLs, which can carry a token or a repository name, and
+        # the day-one contract never sends a data directory. In enforce mode a
+        # write to either has already been refused before this is reached.
+        if call.action_type == FILE_WRITE and _is_data_file(resolved, canonical_root):
             return "data-file"
 
     if call.command is not None:
@@ -1168,6 +1213,20 @@ def _relative_to_root(call: NormalisedCall, root: str, cwd: Optional[str] = None
         where = os.path.relpath(runs_in, real_root).replace(os.sep, "/")
         call.command_cwd = "" if where == "." else where
         call.command = _shorten(call.command, root, os.path.relpath(real_root, runs_in).replace(os.sep, "/"))
+
+
+def _strip_governance_content(call: NormalisedCall) -> None:
+    """In observe mode, a write to the hooks' own files goes as its path alone.
+
+    The service refuses such a write by where it lands, never by what it says,
+    so the content adds nothing to the record a rollout reads, and an agent's
+    settings file can hold more about the developer than about the project.
+    Runs after _relative_to_root, so every path is already relative to the root.
+    """
+    for entry in call.files:
+        if is_governance_path(entry.get("file_path", "")) and entry.get("content"):
+            entry["content"] = ""
+            entry["note"] = "content not sent: this file decides whether the agent's hooks run"
 
 
 def record_held_back(home: str, category: str) -> None:
@@ -1404,6 +1463,8 @@ def handle(raw_text: Optional[str], forced_agent: Optional[str] = None) -> Tuple
         project_root(payload),
         command_directory(call, payload) if call.command is not None else None,
     )
+    if settings.mode == "observe":
+        _strip_governance_content(call)
     body = build_request(call, payload, agent, project, dry_run=settings.mode == "observe")
     try:
         code, document, phrase = post_evaluation(body, settings.endpoint, settings.api_key)

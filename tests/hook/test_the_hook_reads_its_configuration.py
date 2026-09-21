@@ -268,6 +268,63 @@ def test_the_owners_key_is_sent_when_the_repository_names_the_owners_own_endpoin
     assert _sent(stub)["headers"].get("x-api-key") == "acme-owner-key"
 
 
+def _owner_key(machine) -> Path:
+    key_file = machine.threefold_home / "owner.key"
+    key_file.parent.mkdir(parents=True, exist_ok=True)
+    key_file.write_text("tfk-acme-owner-key-0123456789", encoding="utf-8")
+    _write_json(machine.threefold_home / "config.json", {"project": "Acme-Ledger", "api_key_file": "owner.key"})
+    return key_file
+
+
+def test_a_repository_cannot_name_its_own_endpoint_and_the_owners_key_file_together(machine, payloads, stub, run_hook, monkeypatch, unconfigured) -> None:
+    """The route the environment-only check missed: the key comes from the
+    repository's own file, so it was never counted as the owner's, and went to
+    the server the same file chose."""
+    monkeypatch.delenv("THREEFOLD_ENDPOINT")
+    _owner_key(machine)
+    _write_json(machine.project / ".threefold.json", {"endpoint": stub.endpoint, "api_key_file": "~/.threefold/owner.key"})
+    _, _, err = run_hook(payloads.write("claude-code"))
+    request = _sent(stub)
+    assert "x-api-key" not in request["headers"]
+    assert "was not sent" in err
+    assert "tfk-acme-owner-key" not in err + json.dumps(request)
+
+
+def test_a_key_file_inside_the_repository_is_not_sent_to_the_repositorys_own_endpoint_either(machine, payloads, stub, run_hook, monkeypatch, unconfigured) -> None:
+    monkeypatch.delenv("THREEFOLD_ENDPOINT")
+    (machine.project / "acme.key").write_text("acme-repository-key", encoding="utf-8")
+    _write_json(machine.project / ".threefold.json", {"project": "Acme-Ledger", "endpoint": stub.endpoint, "api_key_file": "acme.key"})
+    run_hook(payloads.write("claude-code"))
+    assert "x-api-key" not in _sent(stub)["headers"]
+
+
+def test_an_endpoint_the_owner_paired_with_the_key_file_at_home_gets_the_key(machine, payloads, stub, run_hook, monkeypatch, unconfigured) -> None:
+    """How an owner's own second stack keeps working: the installer writes the pair."""
+    monkeypatch.delenv("THREEFOLD_ENDPOINT")
+    key_file = _owner_key(machine)
+    _write_json(machine.threefold_home / "config.json", {
+        "project": "Acme-Ledger",
+        "trusted_endpoints": [{"endpoint": stub.endpoint, "api_key_file": str(key_file)}],
+    })
+    _write_json(machine.project / ".threefold.json", {"endpoint": stub.endpoint, "api_key_file": str(key_file)})
+    run_hook(payloads.write("claude-code"))
+    assert _sent(stub)["headers"].get("x-api-key") == "tfk-acme-owner-key-0123456789"
+
+
+def test_a_pair_for_a_different_key_file_does_not_let_this_one_through(machine, payloads, stub, run_hook, monkeypatch, unconfigured) -> None:
+    monkeypatch.delenv("THREEFOLD_ENDPOINT")
+    key_file = _owner_key(machine)
+    other = machine.tmp / "other.key"
+    other.write_text("acme-other-key-value", encoding="utf-8")
+    _write_json(machine.threefold_home / "config.json", {
+        "project": "Acme-Ledger",
+        "trusted_endpoints": [{"endpoint": stub.endpoint, "api_key_file": str(other)}],
+    })
+    _write_json(machine.project / ".threefold.json", {"endpoint": stub.endpoint, "api_key_file": str(key_file)})
+    run_hook(payloads.write("claude-code"))
+    assert "x-api-key" not in _sent(stub)["headers"]
+
+
 def test_settings_never_show_the_key_in_their_repr(hook, machine, monkeypatch) -> None:
     monkeypatch.setenv("THREEFOLD_API_KEY", "acme-secret-in-repr")
     settings = hook.resolve_settings({"cwd": str(machine.project)})
@@ -294,16 +351,34 @@ def test_a_patch_that_deletes_the_repository_config_is_refused(payloads, stub, r
     assert stub.requests == []
 
 
-@pytest.mark.parametrize("relative", [".claude/settings.local.json", ".git/hooks/pre-commit"])
-def test_in_observe_mode_the_same_write_is_sent_as_a_dry_run(relative, machine, payloads, stub, run_hook, unconfigured) -> None:
-    """Observe mode stops nothing, and the hook script under .git is sent rather
-    than held back as data, so the rollout sees the attempt."""
+@pytest.mark.parametrize("agent", AGENTS)
+@pytest.mark.parametrize("relative", [".claude/settings.local.json", ".codex/hooks.json", ".threefold.json"])
+def test_in_observe_mode_the_same_write_is_sent_as_its_path_alone(agent, relative, machine, payloads, stub, run_hook, unconfigured) -> None:
+    """Observe mode stops nothing and the rollout sees the attempt, but the
+    service judges such a write by where it lands, so what it says stays here."""
     _write_json(machine.project / ".threefold.json", {"project": "Acme-Ledger", "mode": "observe"})
-    code, out, _ = run_hook(payloads.write("claude-code", relative, "{}"))
+    content = '{"env": {"ACME_NOTE": "acme-private-remark"}}'
+    code, out, _ = run_hook(payloads.write(agent, relative, content), ["--agent", agent])
     assert (code, out) == (0, "")
-    body = _sent(stub)["body"]
-    assert body["dry_run"] is True
-    assert body["arguments"]["file_path"] == relative
+    request = _sent(stub)
+    assert request["body"]["dry_run"] is True
+    assert request["body"]["arguments"]["file_path"] == relative
+    assert request["body"]["arguments"]["content"] == ""
+    assert "acme-private-remark" not in json.dumps(request)
+
+
+@pytest.mark.parametrize("relative", [".git/hooks/pre-commit", ".git/config"])
+def test_in_observe_mode_nothing_under_git_is_sent_even_the_files_that_run_the_hooks(relative, machine, payloads, stub, run_hook, held_back_lines, unconfigured) -> None:
+    """.git is a data directory and .git/config holds remote URLs, which can
+    carry a token or a repository's real name. Enforce mode refuses the write
+    before anything is sent; observe mode holds it back, as day one did."""
+    _write_json(machine.project / ".threefold.json", {"project": "Acme-Ledger", "mode": "observe"})
+    content = '[remote "origin"]\n\turl = https://acme-bot:acme-token-value@example.invalid/acme-ledger.git\n'
+    code, out, err = run_hook(payloads.write("claude-code", relative, content))
+    assert (code, out) == (0, "")
+    assert stub.requests == []
+    assert held_back_lines()[-1].endswith(" data-file")
+    assert "acme-token-value" not in err
 
 
 def test_an_ordinary_settings_file_elsewhere_in_the_project_is_not_protected(payloads, stub, run_hook) -> None:
