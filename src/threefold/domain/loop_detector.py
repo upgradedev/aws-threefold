@@ -1,8 +1,88 @@
-"""Cycle detection over tool-call signatures."""
+"""Cycle detection over tool-call signatures, and which calls are only looking."""
 from __future__ import annotations
 
-from typing import List, Tuple
-from threefold.domain.models import ToolInvocation
+from typing import List, Sequence, Tuple
+from threefold.domain.boundary_guard import CONTENT_KEYS, READ_TOOLS, analysed, shell_command
+from threefold.domain.models import ToolActionType, ToolInvocation
+from threefold.domain.shell_writes import program_name
+
+# Programs that only look. Waiting on CI is a loop by shape, the same `gh run
+# view` every thirty seconds, and halting a developer's session for it punishes
+# the agent for doing what it was told. So a repeat of one of these is recorded
+# and never trips anything; what counts as one is kept narrow on purpose,
+# because every name here is a name the loop gate stops refusing.
+_READ_PROGRAMS = frozenset(
+    (
+        "ls", "cat", "head", "tail", "pwd", "sleep", "cd", "pushd", "popd",
+        "grep", "egrep", "fgrep", "rg", "wc", "stat", "file", "tree", "which", "true",
+        # PowerShell, which Antigravity runs on Windows.
+        "dir", "type", "get-content", "gc", "get-childitem", "gci", "get-location", "start-sleep", "select-string",
+    )
+)
+_GIT_READS = frozenset(("status", "log", "diff", "show"))
+_GH_READS = {"run": frozenset(("view", "list", "watch")), "pr": frozenset(("checks", "view"))}
+_GIT_GLOBAL_VALUES = frozenset(("-C", "-c", "--git-dir", "--work-tree", "--namespace"))
+# find is a read until it is told to act on what it finds.
+_FIND_ACTIONS = frozenset(("-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprint0", "-fprintf", "-fls"))
+_WATCH_VALUES = frozenset(("-n", "--interval", "-d", "--differences", "-q", "--equexit"))
+
+
+def _git_reads(argv: Sequence[str]) -> bool:
+    index = 1
+    while index < len(argv) and argv[index].startswith("-"):
+        index += 2 if argv[index] in _GIT_GLOBAL_VALUES else 1
+    if index >= len(argv) or argv[index] not in _GIT_READS:
+        return False
+    # `git diff --output=patch.txt` writes a file, and so does `git log --output`.
+    return not any(arg == "--output" or arg.startswith("--output=") for arg in argv[index + 1:])
+
+
+def _gh_reads(argv: Sequence[str]) -> bool:
+    words = [arg for arg in argv[1:] if not arg.startswith("-")]
+    return len(words) >= 2 and words[1] in _GH_READS.get(words[0], ())
+
+
+def _polls(argv: Sequence[str]) -> bool:
+    """Whether one simple command, wrappers already removed, only reads or waits."""
+    if not argv:
+        return False
+    name = program_name(argv[0])
+    if name == "git":
+        return _git_reads(argv)
+    if name == "gh":
+        return _gh_reads(argv)
+    if name == "find":
+        return not any(arg in _FIND_ACTIONS for arg in argv[1:])
+    if name == "watch":
+        index = 1
+        while index < len(argv) and argv[index].startswith("-"):
+            index += 2 if argv[index] in _WATCH_VALUES else 1
+        return index < len(argv) and _polls(argv[index:])
+    return name in _READ_PROGRAMS
+
+
+def is_read_or_poll(invocation: ToolInvocation) -> bool:
+    """Whether a call only reads or waits, so repeating it is polling rather than a runaway.
+
+    A read tool, or a call declared as a read, counts when it carries no content
+    to write. A command counts when every simple command in it is one of the
+    reads above and it writes nothing at all: `git diff > changes.diff` is a
+    write, and a pipeline into `python` is not a read whatever came before it.
+    A command too long to be read to the end is never a poll, because the part
+    not read is where the write would be.
+    """
+    command = shell_command(invocation)
+    if command is None:
+        declared_read = invocation.action_type == ToolActionType.FILE_READ
+        read_tool = str(invocation.tool_name or "").lower() in READ_TOOLS
+        if not (declared_read or read_tool):
+            return False
+        arguments = invocation.arguments if isinstance(invocation.arguments, dict) else {}
+        return not any(isinstance(key, str) and key.lower() in CONTENT_KEYS for key in arguments)
+    analysis = analysed(command)
+    if analysis.truncated or analysis.writes or analysis.tampering or not analysis.commands:
+        return False
+    return all(_polls(argv) for argv in analysis.commands)
 
 
 class LoopDetector:

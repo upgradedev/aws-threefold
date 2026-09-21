@@ -8,16 +8,32 @@ be stepped around by renaming a field.
 from __future__ import annotations
 
 import re
+from functools import lru_cache
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 from threefold.domain.layering_rules import (
     DEFAULT_RULES,
+    ENFORCE,
+    OBSERVE,
     evaluate as evaluate_layering,
     observed as observed_layering,
     rules_for_path,
 )
+from threefold.domain.imports import language_for
 from threefold.domain.models import ToolActionType, ToolInvocation
+from threefold.domain.shell_writes import ShellAnalysis, analyse as analyse_shell, is_governance_path
 
 MAX_PATHLIKE_LENGTH = 400
+
+# The words the contract fixes for a write the rules cannot read. An agent told
+# only "refused" retries the same route; told this, it has somewhere to go.
+UNREADABLE_WRITE = "use Write or Edit so the rule can read it"
+
+# Where a command sits in a call's arguments. The same names describe_target
+# reads, so the ledger and the gate agree on what "the command" is.
+COMMAND_KEYS = ("command", "cmd", "script", "shell")
+SHELL_TOOLS = frozenset(
+    ("bash", "shell", "local_shell", "exec_command", "unified_exec", "container.exec", "run_command", "powershell")
+)
 
 
 def iter_string_leaves(value: Any) -> Iterator[str]:
@@ -157,6 +173,26 @@ class ArchitecturalBoundaryGuard:
                 if pattern.search(candidate):
                     return False, f"Target path '{candidate}' is protected by architectural governance"
 
+        active_rules = rules if rules is not None else DEFAULT_RULES
+
+        # 2b. The files that decide whether the hooks run at all. The layering
+        #     rules have nothing to say about `{}` written into
+        #     .claude/settings.json, and that write is the one that turns every
+        #     other check off, so it is refused whatever the rules are.
+        for target in governed_write_targets(invocation):
+            if is_governance_path(target):
+                return False, governance_reason(target)
+
+        # 2c. What a shell command writes. A command was only ever read for the
+        #     paths it named, so `cat > src/domain/user.py <<'EOF'` carried
+        #     `import boto3` past a gate that would have refused the same text
+        #     sent as a Write.
+        command = shell_command(invocation)
+        if command is not None:
+            refusal = shell_refusal(analysed(command), active_rules)
+            if refusal:
+                return False, refusal
+
         # 3. The layering rules. These are declared rather than compiled in, so
         #    the rule that has no incumbent can be the architecture of whoever is
         #    running this rather than the one example it shipped with. The check
@@ -165,7 +201,6 @@ class ArchitecturalBoundaryGuard:
         #    FILE_WRITE: the declared action type is a hint from the agent, and a
         #    guard that only inspects calls which admit to being writes is one
         #    omitted field away from silence.
-        active_rules = rules if rules is not None else DEFAULT_RULES
         for target, content in write_pairs(arguments):
             if not rules_for_path(target, active_rules):
                 continue
@@ -327,4 +362,231 @@ def observe_layering(invocation: ToolInvocation, rules: Optional[List[Dict[str, 
     for target, content in write_pairs(invocation.arguments or {}):
         for item in observed_layering(target, content, active_rules):
             found.append(dict(item, path=target))
+    command = shell_command(invocation)
+    if command is not None:
+        found.extend(shell_observations(analysed(command), active_rules))
+    return found
+
+
+# --- what a shell command writes -------------------------------------------------
+
+# Tools that only read. A call to one of them names a settings file without
+# writing it, and refusing `Read .claude/settings.json` would refuse the agent
+# looking at the configuration it is being asked about.
+READ_TOOLS = frozenset(
+    (
+        "read", "grep", "glob", "ls", "notebookread", "webfetch", "websearch",
+        "read_file", "list_dir", "list_directory", "grep_search", "find_by_name",
+        "view_file", "view_file_outline", "view_code_item", "codebase_search", "search_files",
+    )
+)
+
+MAX_CACHED_COMMAND = 65_536
+
+
+def shell_command(invocation: ToolInvocation) -> Any:
+    """The command a call runs, as text or as a list of words, or None if it runs none.
+
+    The declared action type is a hint, as it is for the layering rules: a call
+    that carries `command` is read as the command it is whatever it says it is.
+    The other keys (`cmd`, `script`, `shell`) are read only when the call does
+    say it runs a command, because a write's `script` can be a file's content.
+    """
+    arguments = invocation.arguments
+    if not isinstance(arguments, dict):
+        return None
+    declared = (
+        invocation.action_type == ToolActionType.COMMAND_EXEC
+        or str(invocation.tool_name or "").lower() in SHELL_TOOLS
+    )
+    for key in COMMAND_KEYS:
+        if not (declared or key == "command"):
+            continue
+        value = arguments.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+        if isinstance(value, (list, tuple)) and value and all(isinstance(word, str) for word in value):
+            return list(value)
+    return None
+
+
+def analysed(command: Any) -> ShellAnalysis:
+    """The writes one command makes, read once per command rather than once per gate.
+
+    The boundary check, the observe pass and the loop gate each ask about the
+    same command in the same request. The result is shared, so no caller may
+    change it. Long commands are not kept, so the cache cannot hold megabytes.
+    """
+    key = tuple(command) if isinstance(command, list) else command
+    size = sum(len(word) for word in key) if isinstance(key, tuple) else len(key or "")
+    if size > MAX_CACHED_COMMAND:
+        return analyse_shell(command)
+    return _analysed(key)
+
+
+@lru_cache(maxsize=128)
+def _analysed(key: Any) -> ShellAnalysis:
+    return analyse_shell(list(key) if isinstance(key, tuple) else key)
+
+
+def _named_paths(value: Any) -> Iterator[str]:
+    """Every path given under a path-shaped key, however deep."""
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if isinstance(key, str) and key.lower() in PATH_KEYS and isinstance(item, str) and looks_like_path(item):
+                yield item
+            else:
+                yield from _named_paths(item)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            yield from _named_paths(item)
+
+
+def governed_write_targets(invocation: ToolInvocation) -> List[str]:
+    """The paths a call other than a shell command writes, for the governance check.
+
+    A shell command's targets come from reading the command, in shell_refusal.
+    A call declared as a read, or made by a read tool, that carries no content
+    writes nothing, so it is not refused for naming a settings file.
+    """
+    if shell_command(invocation) is not None:
+        return []
+    arguments = invocation.arguments or {}
+    pairs = write_pairs(arguments)
+    reading = (
+        invocation.action_type == ToolActionType.FILE_READ
+        or str(invocation.tool_name or "").lower() in READ_TOOLS
+    )
+    if reading and not pairs:
+        return []
+    targets = [target for target, _ in pairs] + list(_named_paths(arguments))
+    return list(dict.fromkeys(targets))
+
+
+def governance_reason(target: str, route: str = "", deletes: bool = False) -> str:
+    verb = "removes" if deletes else "writes"
+    how = f" by {route}" if route else ""
+    return (
+        f"Target path '{target}' is protected by architectural governance: it decides whether "
+        f"the agent's hooks run, and this call {verb} it{how}"
+    )
+
+
+def _enforcing(rules: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return [rule for rule in rules if rule.get("mode", ENFORCE) == ENFORCE]
+
+
+def _readable_by_a_rule(target: str) -> bool:
+    """Whether a Write to this path would have its imports read at all.
+
+    Telling an agent to "use Write or Edit so the rule can read it" is only
+    true for a file type the rules can read. A Markdown file under domain/ is
+    allowed as a Write, so it is allowed through `cp` as well.
+    """
+    return language_for(target) is not None
+
+
+def shell_refusal(analysis: ShellAnalysis, rules: List[Dict[str, Any]]) -> Optional[str]:
+    """Why a command's writes are refused, or None. Judged the way a Write would be.
+
+    Three decisions the contract leaves to this function, each deliberate:
+
+    - A deletion is judged only as a governance path. `rm src/domain/x.py`
+      writes no import, and telling an agent to delete a file "with Write or
+      Edit" is advice it cannot follow.
+    - A write whose files cannot be known, `git apply fix.patch` or `patch <
+      fix.patch`, is refused while any enforce rule is active. The patch lives
+      on the developer's machine, and two calls, one writing the patch into
+      /tmp and one applying it, would otherwise carry any import into any
+      domain file. `git checkout` and `git merge` are not treated so: what they
+      write was committed, and the pre-commit check has already read it.
+    - A command too long to read to the end is refused while any enforce rule
+      is active, for the same reason: padding must not be a way past the gate.
+
+    Under observe rules alone each of these is recorded instead, by
+    shell_observations.
+    """
+    for reason in analysis.tampering:
+        return f"Command turns the repository's hooks off: {reason}. Refused as a protected-path call"
+    for write in analysis.writes:
+        if write.target is not None and is_governance_path(write.target, deletes=write.deletes):
+            return governance_reason(write.target, write.route, write.deletes)
+    enforced = _enforcing(rules)
+    if analysis.truncated and enforced:
+        return (
+            "Clean Architecture violation: this command is too long to be read to the end for the "
+            f"files it writes, and an enforce rule is active: {UNREADABLE_WRITE}"
+        )
+    for write in analysis.writes:
+        if write.deletes:
+            continue
+        if write.target is None:
+            if enforced:
+                return (
+                    f"Clean Architecture violation: this command writes files by {write.route} from a patch "
+                    "this service cannot see, so neither the files nor what is written to them can be checked "
+                    f"against rule '{enforced[0]['id']}': {UNREADABLE_WRITE}"
+                )
+            continue
+        covering = rules_for_path(write.target, rules)
+        if not covering:
+            continue
+        if write.content is None:
+            refusing = _enforcing(covering)
+            if refusing and _readable_by_a_rule(write.target):
+                return (
+                    f"Clean Architecture violation: layering rule '{refusing[0]['id']}' covers "
+                    f"'{write.target}', and this command writes it by {write.route} with content the rule "
+                    f"cannot read: {UNREADABLE_WRITE}"
+                )
+            continue
+        allowed, reason = evaluate_layering(write.target, write.content, rules)
+        if not allowed:
+            return f"Clean Architecture violation: {reason} (written by {write.route})"
+    return None
+
+
+def _unreadable_observation(rule: Dict[str, Any], target: str, how: str) -> Dict[str, str]:
+    where = f"'{target}'" if target else "files it cannot name"
+    return {
+        "rule_id": rule["id"],
+        "mode": OBSERVE,
+        "module": "",
+        "pattern": "",
+        "reason": (
+            f"Layering rule '{rule['id']}' would refuse this write: the command writes {where} by {how} "
+            f"with content the rule cannot read, and would be told to {UNREADABLE_WRITE}"
+        ),
+        "path": target,
+    }
+
+
+def shell_observations(analysis: ShellAnalysis, rules: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+    """What the observe rules would have refused among a command's writes.
+
+    The mirror of shell_refusal for rules that only watch: readable content is
+    judged as a Write's would be, and content that cannot be read is recorded
+    against each watching rule that covers the path, so a rule rolled out in
+    observe mode shows the `cp` into domain/ it would stop as well as the Write.
+    """
+    watching = [rule for rule in rules if rule.get("mode") == OBSERVE]
+    if not watching:
+        return []
+    found: List[Dict[str, str]] = []
+    if analysis.truncated:
+        found.extend(_unreadable_observation(rule, "", "a command too long to read") for rule in watching)
+    for write in analysis.writes:
+        if write.deletes:
+            continue
+        if write.target is None:
+            found.extend(_unreadable_observation(rule, "", write.route) for rule in watching)
+        elif write.content is None:
+            if _readable_by_a_rule(write.target):
+                found.extend(
+                    _unreadable_observation(rule, write.target, write.route)
+                    for rule in rules_for_path(write.target, watching)
+                )
+        else:
+            for item in observed_layering(write.target, write.content, rules):
+                found.append(dict(item, path=write.target))
     return found
