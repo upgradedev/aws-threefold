@@ -1077,6 +1077,34 @@ def read_never_send(home: str) -> List[str]:
     return terms
 
 
+SHORT_TERM = 4
+
+
+def term_occurs(text: str, term: str) -> bool:
+    """Whether a never-send term occurs in text, ignoring case.
+
+    A term of four characters or fewer counts only where it starts a word, that
+    is, where no letter comes before it. As a plain substring a three-letter
+    acronym matched inside ordinary identifiers such as isspace and classpath,
+    and held back calls that mentioned nothing; measured on the owner's
+    repositories that was 136 files, of which 38 had the acronym starting a
+    word. What follows is not checked, so XYZ, xyz-api, XyzBilling, acme_xyz
+    and a lower-case package name such as xyzbilling all still count. A longer
+    term is matched anywhere, as before.
+    """
+    folded = text.casefold()
+    if len(term) > SHORT_TERM or len(folded) != len(text):
+        # A casefold that changes the length (ß becomes ss) would misplace the
+        # neighbour check, so such text falls back to the stricter substring.
+        return term in folded
+    start = folded.find(term)
+    while start != -1:
+        if not (start and text[start - 1].isalpha()):
+            return True
+        start = folded.find(term, start + 1)
+    return False
+
+
 def mentions_never_send(raw_text: str, payload: Any, terms: Sequence[str]) -> bool:
     """Whether any term appears anywhere in what the agent sent, ignoring case.
 
@@ -1086,9 +1114,9 @@ def mentions_never_send(raw_text: str, payload: Any, terms: Sequence[str]) -> bo
     """
     if not terms:
         return False
-    haystacks = [raw_text.casefold()]
-    haystacks.extend(leaf.casefold() for leaf in _string_leaves(payload))
-    return any(term in haystack for term in terms for haystack in haystacks)
+    haystacks = [raw_text]
+    haystacks.extend(_string_leaves(payload))
+    return any(term_occurs(haystack, term) for term in terms for haystack in haystacks)
 
 
 def held_back_category(call: NormalisedCall, payload: Dict[str, Any], raw_text: str, home: str) -> Optional[str]:

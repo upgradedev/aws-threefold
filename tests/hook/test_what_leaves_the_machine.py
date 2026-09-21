@@ -353,3 +353,26 @@ def test_the_local_credential_shapes_are_the_services_shapes(hook) -> None:
     local = [(label, pattern.pattern, pattern.flags) for label, pattern in hook.SECRET_PATTERNS]
     service = [(label, pattern.pattern, pattern.flags) for label, pattern in SecretScanner.PATTERNS]
     assert local == service
+
+
+# A short term is a word, not a substring. A three-letter acronym matched as a
+# substring inside ordinary identifiers held back calls that mentioned nothing;
+# the terms here are synthetic, as the clean-room rule requires.
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["QZX", "the qzx api", "qzx-billing", "QzxBilling", "acme_qzx", '"qzx"', "qzxbilling", "path/qzx/x.py", "\nQZX"],
+)
+def test_a_short_term_that_starts_a_word_is_a_mention(hook, text: str) -> None:
+    assert hook.term_occurs(text, "qzx")
+
+
+@pytest.mark.parametrize("text", ["aqzxb", "isqzxpace", "classqzx", "reqzx"])
+def test_a_short_term_inside_another_word_is_not_a_mention(hook, text: str) -> None:
+    assert not hook.term_occurs(text, "qzx")
+
+
+def test_a_longer_term_is_still_matched_anywhere(hook) -> None:
+    assert hook.term_occurs("myacmecorpthing", "acmecorp")
+    assert hook.term_occurs("ACMECORP", "acmecorp")

@@ -68,14 +68,21 @@ def _assert_no_term(text: str) -> None:
         assert term.casefold() not in text.casefold(), f"the output named a never-send term: {text!r}"
 
 
-def test_matching_files_are_counted_and_the_advice_is_to_exclude(machine) -> None:
+def test_matching_files_are_counted_and_the_advice_says_what_goes_unjudged(machine) -> None:
+    """The hook holds back a call, not a file, so matches cost coverage, not safety.
+
+    The first wording said every write to a matching file would be held back and
+    advised excluding the repository, which is not what the hook does: an Edit
+    elsewhere in that file carries only its own lines and is sent.
+    """
     put(machine.repo, "src/app.py", "# built for ORION-INTERNAL billing\nx = 1\n")
     put(machine.repo, "docs/notes.md", "the projekt-zeta cutover\n")
     put(machine.repo, "src/clean.py", "y = 2\n")
     result = scan("--repo", str(machine.repo))
     assert result.code == 0
     assert "2 of 3 text files mention a never-send term" in result.out
-    assert "Recommendation: exclude" in result.out
+    assert "calls carrying those terms go unjudged" in result.out
+    assert "exclude" not in result.out
     _assert_no_term(result.out)
 
 

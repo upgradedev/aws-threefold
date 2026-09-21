@@ -3,11 +3,13 @@
 
     threefold_preflight.py --repo PATH [--repo PATH ...] [--show-paths]
 
-The hook never sends a call that mentions a term from
-THREEFOLD_HOME/never_send.txt. That keeps the term on the machine, and it also
-means every write to a file that mentions one goes unjudged. A repository
-where many files do is one where governance would be mostly silence, and is
-better left out until those files are dealt with.
+The hook never sends a call whose own text mentions a term from
+THREEFOLD_HOME/never_send.txt. That keeps the term on the machine. It holds
+back the call, not the file: an Edit elsewhere in a file that mentions a term
+carries only its own lines and is sent, while a Write of the whole file is not.
+So a repository with matching files is still safe to govern; what it loses is
+coverage of the calls that carry a term, and this count says how much of the
+repository that could touch.
 
 For each repository this prints one line: how many text files mention a term,
 in their content or in their path, out of how many were read, and a
@@ -48,9 +50,12 @@ def load_hook() -> Any:
     raise SystemExit("threefold: the hook is not beside this script or in ../src.")
 
 
+_HOOK = None
+
+
 def _mentions(text: str, terms: Sequence[str]) -> bool:
-    folded = text.casefold()
-    return any(term in folded for term in terms)
+    # The hook's own matcher, so a count here is what the hook would hold back.
+    return any(_HOOK.term_occurs(text, term) for term in terms)
 
 
 def scan(repo: Path, terms: Sequence[str], hook: Any) -> Tuple[int, int, List[str]]:
@@ -93,7 +98,9 @@ def main(argv: Optional[Sequence[str]] = None, out: Any = None) -> int:
     parser.add_argument("--show-paths", action="store_true", help="list the matching files by relative path")
     args = parser.parse_args(argv)
 
+    global _HOOK
     hook = load_hook()
+    _HOOK = hook
     home = hook.threefold_home()
     terms = hook.read_never_send(home)
     if not terms:
@@ -112,7 +119,10 @@ def main(argv: Optional[Sequence[str]] = None, out: Any = None) -> int:
             continue
         read, count, paths = scan(repo, terms, hook)
         if count:
-            advice = "exclude: the hook would hold back every write to these files, so govern it after they are dealt with"
+            advice = (
+                "install if you accept that calls carrying those terms go unjudged; "
+                "to govern them too, remove the terms from those files first"
+            )
         else:
             advice = "install: nothing in it would be held back"
         print(f"threefold: {label}: {count} of {read} text files mention a never-send term. Recommendation: {advice}.", file=out)
