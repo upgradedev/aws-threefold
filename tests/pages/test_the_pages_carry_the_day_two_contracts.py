@@ -286,6 +286,21 @@ def test_a_save_after_a_failed_read_never_sends_the_previous_projects_rules(tmp_
   loadExample('java');
   await save();
   out.exampleSave = calls.filter(c => c.method === 'POST').pop();
+
+  // The other way to change what a save lands on: the shared set, whose read fails too.
+  answer = () => (ALPHA_OWN);
+  el('project-input').value = 'Acme-Alpha';
+  chooseProject();
+  await tick();
+  answer = (url, init) => (init && init.method === 'POST')
+    ? { status: 200, body: { status: 'RULES_UPDATED', count: 1, refresh_seconds: 30 } }
+    : { status: 503, body: { detail: 'unavailable' } };
+  const postsBeforeShared = calls.filter(c => c.method === 'POST').length;
+  showSharedSet();
+  await tick();
+  await save();
+  out.postsAfterSharedFailedRead = calls.filter(c => c.method === 'POST').length - postsBeforeShared;
+  out.saidAfterSharedFailedRead = el('save-result').innerHTML;
 """.replace("ALPHA_OWN", _ALPHA_OWN),
         tmp_path,
     )
@@ -299,6 +314,9 @@ def test_a_save_after_a_failed_read_never_sends_the_previous_projects_rules(tmp_
     example = out["exampleSave"]
     assert example["body"]["project"] == "Acme-Beta"
     assert [rule["id"] for rule in example["body"]["rules"]] == ["billing-domain-stays-pure"]
+
+    assert out["postsAfterSharedFailedRead"] == 0, "Acme-Alpha's rules were sent as the shared set"
+    assert "Acme-Alpha" in out["saidAfterSharedFailedRead"] and "the shared set" in out["saidAfterSharedFailedRead"]
 
 
 def test_a_save_while_the_next_projects_rules_are_still_being_read_sends_nothing(tmp_path: Path) -> None:
@@ -639,6 +657,9 @@ def test_the_spec_documents_resume_behind_the_operator_key() -> None:
     assert {"200", "400", "401", "403", "404", "409"} <= set(resume["responses"])
     assert "session-not-found" in resume["responses"]["404"]["description"]
     assert "session-not-halted" in resume["responses"]["409"]["description"]
+    # The handler caches a resume's answer under the key, so a retried request
+    # gets the first 200 back instead of a 409 for a session no longer halted.
+    assert any(p["name"] == "Idempotency-Key" and p["in"] == "header" for p in resume["parameters"])
 
     body = resume["requestBody"]
     assert body["required"] is True
