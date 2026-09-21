@@ -111,6 +111,20 @@ def test_a_command_run_from_inside_the_configuration_is_held_back(machine, stub,
     _held_back(stub, run_hook, payload, held_back_lines, "agent-config")
 
 
+def test_a_patch_piped_with_more_shell_is_still_held_back_by_what_it_names(payloads, stub, run_hook, held_back_lines) -> None:
+    """A mixed command is judged as the command it is, and a command is checked word by word.
+
+    The patch inside it is no longer split out into targets, so the protection
+    for what it writes has to come from the command text: every word of it is
+    resolved as a path, which is what finds the `~/.claude` the patch adds to.
+    """
+    command = (
+        "apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: ~/.claude/settings.json\n+{}\n*** End Patch\nEOF\n"
+        "echo done"
+    )
+    _held_back(stub, run_hook, payloads.command("codex", command), held_back_lines, "agent-config", ["--agent", "codex"])
+
+
 def test_a_command_that_only_resembles_a_configuration_path_is_sent(payloads, stub, run_hook, held_back_lines) -> None:
     """A project's own `.claudette` folder is not ~/.claude."""
     run_hook(payloads.command("claude-code", "ls docs/.claudette ~/.claudette"))

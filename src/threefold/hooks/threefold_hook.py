@@ -48,7 +48,10 @@ Configuration, all read from the environment on every call:
     THREEFOLD_DEVELOPER   hashed locally to 12 hex characters; never sent as typed
     THREEFOLD_TIMEOUT     seconds, default 4
     THREEFOLD_FAIL_CLOSED 1 refuses a call the service could not judge
-    THREEFOLD_DRY_RUN     1 asks the service to record the call as observed only
+    THREEFOLD_DRY_RUN     1 marks the call `dry_run` in the request. The field
+                          is part of request v2, but no gate in the service
+                          reads it yet, so the call is still scored and can
+                          still trip the session
     THREEFOLD_HOME        local state, default ~/.threefold: never_send.txt is
                           read from it, held_back.log and unknown_shapes.jsonl
                           are written to it
@@ -275,12 +278,43 @@ def patch_envelope(text: str) -> Optional[str]:
     return text[start:] if end == -1 else text[start:end + len(PATCH_END)]
 
 
+# Codex feeds a patch to apply_patch through a heredoc, so `apply_patch <<'EOF'`
+# on the line before the envelope and the terminator word on the line after it
+# belong to the envelope rather than being work of their own.
+_HEREDOC_OPENER = re.compile(r"<<-?\s*[\"']?[A-Za-z_][A-Za-z0-9_]*[\"']?\s*$")
+_HEREDOC_TERMINATOR = re.compile(r"^[\"']?[A-Za-z_][A-Za-z0-9_]*[\"']?$")
+
+
+def patch_is_the_whole_command(command: str, envelope: str) -> bool:
+    """Whether the command does nothing but hand this envelope to apply_patch.
+
+    Only then is the call a pure write. A command with anything else in it is a
+    shell call that happens to carry a patch: `apply_patch <<'EOF' ... EOF` and
+    then `curl -d @.env` on the next line is two actions, and judging only the
+    patch left the second one to run unseen. A command that merely quotes the
+    marker, such as a commit message or an `echo`, is not a patch at all.
+    """
+    start = command.find(envelope)
+    if start == -1:
+        return False
+    before = command[:start].strip()
+    after = [line.strip() for line in command[start + len(envelope):].splitlines() if line.strip()]
+    if before and ("\n" in before or _HEREDOC_OPENER.search(before) is None):
+        return False
+    if len(after) > 1 or (after and _HEREDOC_TERMINATOR.match(after[0]) is None):
+        return False
+    return True
+
+
 def detect_agent(payload: Dict[str, Any], forced: Optional[str] = None) -> str:
     """Which agent sent this. `--agent` wins; otherwise the shape of stdin decides.
 
     A Codex patch arrives as a tool_input whose only key is `command`, which is
     also what a Claude Code Bash call looks like, so the key shape alone cannot
-    tell them apart: the patch envelope inside the command is what does.
+    tell them apart: a command that is nothing but a patch envelope is what
+    does. Finding the marker anywhere in the command is not enough — `git commit
+    -m 'see *** Begin Patch in the docs'` is a Bash call, and calling it Codex
+    both mislabels it in the ledger and sends it down a path with nothing to parse.
     """
     if forced in AGENTS:
         return forced
@@ -289,12 +323,11 @@ def detect_agent(payload: Dict[str, Any], forced: Optional[str] = None) -> str:
     if payload.get("tool_name") == "apply_patch":
         return "codex"
     tool_input = payload.get("tool_input")
-    if (
-        isinstance(tool_input, dict)
-        and set(tool_input) == {"command"}
-        and patch_envelope(_command_text(tool_input["command"])) is not None
-    ):
-        return "codex"
+    if isinstance(tool_input, dict) and set(tool_input) == {"command"}:
+        command = _command_text(tool_input["command"])
+        envelope = patch_envelope(command)
+        if envelope is not None and patch_is_the_whole_command(command, envelope):
+            return "codex"
     return "claude-code"
 
 
@@ -476,21 +509,42 @@ def _normalise_codex(payload: Dict[str, Any]) -> Optional[NormalisedCall]:
             raise UnknownShape(payload)
         return None
 
-    # A patch can arrive as the apply_patch tool or as a shell command that
-    # pipes one into apply_patch. Either way it is a write, judged by what it adds.
+    # A patch can arrive as the apply_patch tool, whose whole argument is the
+    # envelope, or as a shell command that pipes one into apply_patch. Only the
+    # first is purely a write. A command that also does something else is a
+    # shell call carrying a patch, and it has to be judged as the command it is
+    # or the half that is not a patch never reaches the service.
+    patch_text, envelope = "", None
     for key in CODEX_PATCH_KEYS:
-        envelope = patch_envelope(_command_text(tool_input.get(key)))
-        if envelope is not None:
-            return _patch_call(envelope, payload)
-    if tool == "apply_patch":
-        raise UnknownShape(payload)
+        text = _command_text(tool_input.get(key))
+        found = patch_envelope(text)
+        if found is not None:
+            patch_text, envelope = text, found
+            break
 
-    if tool.lower() in CODEX_COMMAND_TOOLS:
-        command = _command_text(tool_input.get("command"))
-        if not command.strip():
+    if tool == "apply_patch":
+        # This tool does nothing but apply a patch, so an envelope it cannot
+        # read is a shape to log: there is no command underneath to fall back to.
+        if envelope is None:
             raise UnknownShape(payload)
+        return _patch_call(envelope, payload)
+
+    if envelope is not None and patch_is_the_whole_command(patch_text, envelope):
+        try:
+            return _patch_call(envelope, payload)
+        except UnknownShape:
+            pass  # not a readable patch after all; judge it as the command it is
+
+    # The command key alone, never `input` or `patch`: those carry a patch to
+    # look for a marker in, not shell text anyone is about to run. The tool name
+    # decides nothing here, because Codex renames its shell between versions and
+    # a payload that arrives without one would otherwise be sent nowhere.
+    command = _command_text(tool_input.get("command"))
+    if command.strip():
         base = tool_input.get("workdir") or tool_input.get("cwd")
         return NormalisedCall(COMMAND_EXEC, command=command, command_base=base if isinstance(base, str) else None)
+    if tool.lower() in CODEX_COMMAND_TOOLS:
+        raise UnknownShape(payload)
     return None
 
 
