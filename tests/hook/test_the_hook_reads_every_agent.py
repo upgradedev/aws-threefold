@@ -385,3 +385,25 @@ def test_the_login_name_and_folder_name_are_never_sent(machine, payloads, stub, 
     assert machine.project.name == "acme-folder-name"
     assert "acme-folder-name" not in sent
     assert _sent(stub)["project_name"] == "Acme-Payments"
+
+
+def test_a_command_is_sent_without_the_path_above_the_project(machine, payloads, stub, run_hook) -> None:
+    """Half of what a hook sees is commands, and a command names its paths in full."""
+    run_hook(payloads.command("claude-code", f"pytest {machine.project / 'tests'} -q"))
+    command = _sent(stub)["arguments"]["command"]
+    assert "acme-folder-name" not in command
+    assert str(machine.tmp) not in command
+    assert command.replace("\\", "/") == "pytest ./tests -q"
+
+
+def test_a_command_naming_the_home_directory_is_sent_with_a_tilde(machine, payloads, stub, run_hook, verdict) -> None:
+    """The service still sees ~/.aws, which is what its protected-path rule refuses."""
+    run_hook(payloads.command("claude-code", f"cat {machine.home / '.aws' / 'credentials'}"))
+    command = _sent(stub)["arguments"]["command"]
+    assert str(machine.home) not in command
+    assert command.replace("\\", "/") == "cat ~/.aws/credentials"
+
+
+def test_a_call_with_no_session_of_its_own_still_names_one(hook, machine, stub, run_hook) -> None:
+    run_hook({"cwd": str(machine.project), "tool_name": "Bash", "tool_input": {"command": "ls"}})
+    assert _sent(stub)["session_id"] == "claude-code-local"

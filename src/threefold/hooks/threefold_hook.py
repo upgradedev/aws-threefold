@@ -760,8 +760,30 @@ def find_credential(call: NormalisedCall) -> Optional[str]:
     return None
 
 
+def _shorten(text: str, root: str) -> str:
+    """Replaces the project's own absolute path with `.` and the home directory with `~`.
+
+    A command has to be sent as it will run, so it cannot be turned into
+    relative paths the way a target can. What can go is the part of it that is
+    nobody's business: the path above the project, which on most machines
+    begins with the developer's login name. A `cat` of the credentials file
+    spelled out in full reaches the service as `cat ~/.aws/credentials`, which
+    its protected-path rule refuses exactly as it did before.
+    """
+    replacements = []
+    for base, shorthand in ((root, "."), (os.path.expanduser("~"), "~")):
+        for candidate in (base, os.path.abspath(base), os.path.realpath(base)):
+            if candidate and candidate not in (os.sep, "/"):
+                replacements.append((candidate.replace("\\", "/"), shorthand))
+                replacements.append((candidate.replace("/", "\\"), shorthand))
+    flags = re.IGNORECASE if os.name == "nt" else 0
+    for absolute, shorthand in sorted(set(replacements), key=lambda pair: len(pair[0]), reverse=True):
+        text = re.sub(re.escape(absolute), shorthand, text, flags=flags)
+    return text
+
+
 def _relative_to_root(call: NormalisedCall, root: str) -> None:
-    """Rewrites every target as a path from the project root, with forward slashes.
+    """Takes the machine out of the call: targets relative to the project, paths shortened.
 
     By the time this runs every target is inside the root, so nothing is lost,
     and what is gained is that the service never sees the absolute path, which
@@ -778,6 +800,8 @@ def _relative_to_root(call: NormalisedCall, root: str) -> None:
         note = entry.get("note", "")
         if note.startswith("moved from "):
             entry["note"] = "moved from " + relative(note[len("moved from "):])
+    if call.command is not None:
+        call.command = _shorten(call.command, root)
 
 
 def record_held_back(home: str, category: str) -> None:
@@ -809,11 +833,14 @@ class ServiceUnavailable(Exception):
 
 def build_request(call: NormalisedCall, payload: Dict[str, Any], agent: str, project: str) -> Dict[str, Any]:
     """Request v2 for POST /evaluate-tool-call."""
-    session = payload.get("conversationId") if agent == "antigravity" else payload.get("session_id")
-    if not session:
+    if agent == "antigravity":
+        session = payload.get("conversationId") or payload.get("session_id")
+    else:
         session = payload.get("session_id") or payload.get("conversationId")
     return {
-        "session_id": str(session or _env("THREEFOLD_SESSION") or f"{agent}-local"),
+        # A call with no session of its own still belongs to a session, or the
+        # loop detector and the cost ceiling have nothing to count against.
+        "session_id": str(session or f"{agent}-local"),
         "project_name": project,
         "developer": developer_id(),
         "tool_name": call.tool_name,
