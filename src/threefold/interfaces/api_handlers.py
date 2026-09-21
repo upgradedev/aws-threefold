@@ -562,6 +562,18 @@ def _route(event: Dict[str, Any], http_method: str, request_id: str) -> Dict[str
                 raise InvalidRequestError(
                     "evaluations must be a list of verdict objects.", "evaluations"
                 )
+            # The issuer reads each verdict's invariants, not only its status,
+            # so their shape is the caller's to get right: anything but an
+            # object reached `.values()` as a server error, and the string
+            # "false" would have counted as an invariant that held.
+            for e in evaluations:
+                invariants = e.get("rule_evaluations") or {}
+                if not isinstance(invariants, dict) or not all(
+                    isinstance(held, bool) for held in invariants.values()
+                ):
+                    raise InvalidRequestError(
+                        "rule_evaluations must map each invariant to true or false.", "evaluations"
+                    )
             session = _evaluator.get_or_create_session(session_id)
 
             parsed_evals = []
@@ -574,10 +586,15 @@ def _route(event: Dict[str, Any], http_method: str, request_id: str) -> Dict[str
                         status=e.get("status", "APPROVED"),
                         risk_level=e.get("risk_level", "LOW"),
                         reason=e.get("reason", "OK"),
-                        rule_evaluations=e.get("rule_evaluations", {}),
+                        rule_evaluations=e.get("rule_evaluations") or {},
                         current_session_cost_usd=float(e.get("current_session_cost_usd", 0.0)),
                         session_tripped=bool(e.get("session_tripped", False)),
                         proof_hash=e.get("proof_hash", "hash"),
+                        # Carried through, because it is what tells the issuer
+                        # the gate was watching rather than enforcing. Dropping
+                        # it here turned a session governed in dry run into a
+                        # compliant one on the way in.
+                        dry_run=bool(e.get("dry_run", False)),
                     )
                 )
 

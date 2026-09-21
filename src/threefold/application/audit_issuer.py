@@ -6,6 +6,7 @@ import json
 from typing import List
 from threefold.domain.models import AgentSession
 from threefold.application.dtos import EvaluationResultDTO, GovernanceCertificateDTO
+from threefold.application.labels import developer_hash, project_label
 from threefold.domain.exceptions import EmptyAttestationException
 
 
@@ -40,15 +41,36 @@ class AuditIssuer:
                 "nothing of its own to certify",
             )
 
-        all_passed = all(e.status == "APPROVED" for e in evaluations) and not session.is_tripped
+        # A status alone does not say a call was governed. A dry run is recorded
+        # as APPROVED with whatever failed left in rule_evaluations, exactly so
+        # that a reader of the verdict can see the gate would have refused it, so
+        # a certificate that read the status only attested compliance for a
+        # session in which nothing was enforced. An invariant holds only where
+        # the verdict says true, so a truthy stand-in such as "false" is not one.
+        enforced = all(
+            e.status == "APPROVED"
+            and not e.dry_run
+            and all(held is True for held in (e.rule_evaluations or {}).values())
+            for e in evaluations
+        )
+        all_passed = enforced and not session.is_tripped
         status = "COMPLIANT_APPROVED" if all_passed else "NON_COMPLIANT_REJECTED"
 
         total_tokens = session.total_input_tokens + session.total_output_tokens
 
+        # The same two rules the listing and the insights apply, applied here
+        # because a certificate is handed to anyone who names a session id, and
+        # those ids are published by the open listing. Labelling here rather
+        # than in the handler keeps the fingerprint over exactly what the reader
+        # is shown: a hash covering a raw name nobody sees would attest to a
+        # document that does not exist.
+        shown_developer = developer_hash(session.developer_id)
+        shown_project = project_label(session.project_name)
+
         canonical_data = {
             "session_id": session.session_id,
-            "developer_id": session.developer_id,
-            "project_name": session.project_name,
+            "developer_id": shown_developer,
+            "project_name": shown_project,
             "status": status,
             "total_cost_usd": session.total_cost_usd,
             "total_tokens": total_tokens,
@@ -64,8 +86,8 @@ class AuditIssuer:
         return GovernanceCertificateDTO(
             certificate_id=certificate_id,
             session_id=session.session_id,
-            developer_id=session.developer_id,
-            project_name=session.project_name,
+            developer_id=shown_developer,
+            project_name=shown_project,
             verdict_status=status,
             total_cost_usd=session.total_cost_usd,
             total_tokens=total_tokens,

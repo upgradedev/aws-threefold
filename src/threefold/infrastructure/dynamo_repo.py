@@ -21,6 +21,12 @@ SESSION_TTL_SECONDS = 30 * 24 * 3600
 # the function's timeout can afford.
 MAX_SCAN_PAGES = 50
 
+# The smallest page the listing ever asks for. Following LastEvaluatedKey and
+# capping each page are separate protections and the listing needs both: without
+# a Limit every page reads up to a megabyte, so one anonymous GET /api/sessions
+# could pull MAX_SCAN_PAGES megabytes out of the table.
+MIN_SCAN_PAGE_SIZE = 100
+
 
 class SessionConflictError(RuntimeError):
     """Raised when a write is refused because the stored session is already tripped.
@@ -159,7 +165,7 @@ class DynamoDBSessionRepository:
         items: List[Dict[str, Any]] = []
         if self._table is not None:
             try:
-                items = self._scan_session_metadata()
+                items = self._scan_session_metadata(limit)
             except Exception as exc:
                 logger.warning("Failed to list sessions from DynamoDB: %s", exc)
                 items = []
@@ -192,18 +198,22 @@ class DynamoDBSessionRepository:
         summaries.sort(key=lambda s: s["created_at"], reverse=True)
         return summaries[:limit]
 
-    def _scan_session_metadata(self) -> List[Dict[str, Any]]:
+    def _scan_session_metadata(self, limit: int = 50) -> List[Dict[str, Any]]:
         """Every session metadata item, across as many scan pages as it takes.
 
         Expressed as strings rather than with boto3's Attr helper so this module
-        keeps its single lazy import of boto3. Bounded by MAX_SCAN_PAGES so a
-        table far past the size this listing was designed for costs a bounded
-        read rather than a timeout, and the log says it was cut short.
+        keeps its single lazy import of boto3. Bounded twice: each page carries a
+        Limit, so no single page reads a megabyte on behalf of an anonymous
+        caller, and MAX_SCAN_PAGES caps how many pages a table far past the size
+        this listing was designed for may cost. The log says when it was cut
+        short. The Limit applies before the filter, so it is several times the
+        number of sessions asked for, most rows in this table being decisions.
         """
         items: List[Dict[str, Any]] = []
         kwargs: Dict[str, Any] = {
             "FilterExpression": "SK = :metadata",
             "ExpressionAttributeValues": {":metadata": "METADATA"},
+            "Limit": max(limit * 4, MIN_SCAN_PAGE_SIZE),
         }
         for _ in range(MAX_SCAN_PAGES):
             response = self._table.scan(**kwargs)

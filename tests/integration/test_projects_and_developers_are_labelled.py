@@ -69,12 +69,12 @@ def _ledger_row(session_id: str) -> dict:
     return rows[0]
 
 
-def _emf(captured: str) -> dict:
+def _emf(captured: str, metric: str = "ToolCallsEvaluated") -> dict:
     """The metric record the handler wrote to stdout for a tool call."""
     for line in captured.splitlines():
-        if line.startswith("{") and "ToolCallsEvaluated" in line:
+        if line.startswith("{") and metric in line:
             return json.loads(line)
-    raise AssertionError("No EMF record was emitted")
+    raise AssertionError(f"No EMF record carrying {metric} was emitted")
 
 
 def test_a_name_outside_the_pattern_is_stored_as_unlabelled_and_the_caller_is_told() -> None:
@@ -111,6 +111,36 @@ def test_the_metric_dimension_carries_the_label_rather_than_the_request(capsys) 
     _evaluate("labels-metric", project_name=RAW_PROJECT)
     record = _emf(capsys.readouterr().out)
     assert record["Project"] == "unlabelled"
+
+
+def test_the_universal_adapter_logs_the_tool_name_rather_than_dimensioning_on_it(capsys) -> None:
+    """The same cardinality rule as Project: a caller's string is not a dimension.
+
+    A tool name arrives from the caller, so used as a dimension every invented
+    name was a new CloudWatch metric, and a new charge. Kept as a property it is
+    still searchable in Logs Insights. The dimension set is asserted too, because
+    moving a key out of it silently retires any alarm that was keyed on it.
+    """
+    response = lambda_handler(
+        {
+            "rawPath": "/prod/adapter/universal-tool-call",
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps(
+                {
+                    "session_id": "labels-universal",
+                    "name": "acme-invented-tool-name",
+                    "arguments": json.dumps({"path": "README.md"}),
+                }
+            ),
+            "requestContext": {"http": {"method": "POST"}, "stage": "prod"},
+        }
+    )
+    assert response["statusCode"] == 200, response["body"]
+
+    record = _emf(capsys.readouterr().out, "UniversalToolEvaluated")
+    assert record["_aws"]["CloudWatchMetrics"][0]["Dimensions"] == [["Format"]]
+    assert record["Format"] == "Universal"
+    assert record["Tool"] == "acme-invented-tool-name", "The tool name is still recorded"
 
 
 def test_the_pattern_is_the_one_the_stack_was_deployed_with(monkeypatch) -> None:

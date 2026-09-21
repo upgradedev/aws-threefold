@@ -113,6 +113,44 @@ def test_evaluations_that_are_not_verdict_objects_are_refused() -> None:
     assert problem["invalid_params"][0]["name"] == "evaluations"
 
 
+@pytest.mark.parametrize(
+    "invariants",
+    ['"all good"', "[true]", '{"SECRET_LEAKAGE_FREE": "false"}', '{"SECRET_LEAKAGE_FREE": 1}'],
+)
+def test_invariants_that_are_not_true_or_false_are_refused(invariants: str) -> None:
+    """The issuer reads a verdict's invariants now, so their shape is checked at the door.
+
+    The session is a governed one, so nothing else stands between these and the
+    issuer: without the check a string reached `.values()` as a 500, and the
+    string "false" certified the session as compliant.
+    """
+    session_id = "bodies-invariants"
+    status, _, _ = _post(
+        "/evaluate-tool-call",
+        json.dumps({"session_id": session_id, "project_name": "Acme-Bodies", "tool_name": "view_file"}),
+    )
+    assert status == 200
+    raw = '{"session_id": "%s", "evaluations": [{"rule_evaluations": %s}]}' % (session_id, invariants)
+    status, problem, _ = _post("/issue-certificate", raw)
+    assert status == 400, problem
+    assert problem["type"] == "urn:threefold:error:bad-request"
+    assert "rule_evaluations" in problem["detail"]
+
+
+def test_a_verdict_that_sends_no_invariants_is_still_accepted() -> None:
+    """The dashboard and older callers send a status and a hash and nothing else."""
+    session_id = "bodies-no-invariants"
+    _post(
+        "/evaluate-tool-call",
+        json.dumps({"session_id": session_id, "project_name": "Acme-Bodies", "tool_name": "view_file"}),
+    )
+    for evaluation in ("{}", '{"rule_evaluations": null}'):
+        raw = '{"session_id": "%s", "evaluations": [%s]}' % (session_id, evaluation)
+        status, cert, _ = _post("/issue-certificate", raw)
+        assert status == 200, cert
+        assert cert["all_passed"] is True
+
+
 def test_a_base64_body_is_parsed_after_it_is_decoded() -> None:
     """It was measured decoded and parsed encoded, so the fields were all defaults."""
     body = json.dumps({"session_id": "bodies-base64", "project_name": "Acme-Base64", "tool_name": "view_file"})

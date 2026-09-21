@@ -145,17 +145,43 @@ def test_the_prompt_carries_no_developer_and_no_credential(model: _Stub) -> None
     assert "acme-dev-private" not in sent, "A developer must not be named to the model"
 
 
-def test_a_credential_at_the_truncation_boundary_is_redacted_before_it_is_cut(model: _Stub) -> None:
-    """Truncating first would cut the key in half, and half a key matches no pattern."""
-    padding = "x" * (MAX_PROMPT_ARGUMENTS_CHARS - 20)
+def _command_cut_after(chars_of_key: int) -> dict:
+    """An argument whose JSON puts the truncation point `chars_of_key` into the key.
+
+    Computed from the serialised form rather than guessed, because the cut is
+    measured against `json.dumps(arguments)` and the dictionary syntax around
+    the command counts towards it.
+    """
+    before_the_key = json.dumps({"command": "echo " + EXAMPLE_KEY}).index(EXAMPLE_KEY)
+    padding = "x" * (MAX_PROMPT_ARGUMENTS_CHARS - chars_of_key - before_the_key)
+    return {"command": f"echo {padding}{EXAMPLE_KEY}"}
+
+
+@pytest.mark.parametrize("chars_of_key", [8, 11, 14, 17, 19])
+def test_a_credential_at_the_truncation_boundary_is_redacted_before_it_is_cut(
+    model: _Stub, chars_of_key: int
+) -> None:
+    """Truncating first would cut the key in half, and half a key matches no pattern.
+
+    Parametrised across the boundary because a single padding does not pin the
+    order. With the cut two characters into the key, truncating first leaks "AK",
+    which no assertion looking for a recognisable prefix can see, so that padding
+    passed against an implementation with the order reversed.
+    """
     _evaluate(
-        "bedrock-boundary",
+        f"bedrock-boundary-{chars_of_key}",
         tool_name="run_command",
         action_type="COMMAND_EXEC",
-        arguments={"command": f"echo {padding}{EXAMPLE_KEY}"},
+        arguments=_command_cut_after(chars_of_key),
     )
     sent = json.dumps(model.prompts[0])
+    assert EXAMPLE_KEY not in sent, "The whole key was sent to a third party"
     assert "AKIAIOSF" not in sent, "A prefix of the key survived the cut"
+    # The label is longer than the key it replaces, so a key that straddles the
+    # boundary leaves a label that straddles it too. What has to be there is the
+    # start of the label, in the place the key was: something was redacted
+    # rather than the argument merely going missing.
+    assert "[AWS_ACC" in sent, "Nothing was redacted where the key was cut"
 
 
 def test_a_huge_argument_is_cut_to_about_two_kilobytes(model: _Stub) -> None:

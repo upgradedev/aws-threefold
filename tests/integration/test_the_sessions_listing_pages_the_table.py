@@ -17,7 +17,11 @@ from typing import Any, Dict, List
 
 import pytest
 
-from threefold.infrastructure.dynamo_repo import MAX_SCAN_PAGES, DynamoDBSessionRepository
+from threefold.infrastructure.dynamo_repo import (
+    MAX_SCAN_PAGES,
+    MIN_SCAN_PAGE_SIZE,
+    DynamoDBSessionRepository,
+)
 
 PAGE_SIZE = 100
 
@@ -111,6 +115,26 @@ def test_the_scan_asks_for_metadata_rows_and_follows_the_pages(table: _FakeTable
     assert all(scan["FilterExpression"] == "SK = :metadata" for scan in table.scans)
     assert "ExclusiveStartKey" not in table.scans[0]
     assert [scan["ExclusiveStartKey"]["offset"] for scan in table.scans[1:]] == [100, 200, 300, 400, 500]
+
+
+def test_every_scan_page_asks_for_a_bounded_number_of_rows(table: _FakeTable) -> None:
+    """Paging to the end and capping each page are two protections, not one.
+
+    `/api/sessions` is an anonymous read on the demo stack. A page with no Limit
+    reads up to a megabyte, so dropping it while adding pagination turned one
+    unauthenticated request into up to MAX_SCAN_PAGES megabytes of reads.
+    """
+    _repository(table).list_sessions(limit=250)
+    assert all(scan.get("Limit") for scan in table.scans), "A scan page was left unbounded"
+    assert all(scan["Limit"] == 1000 for scan in table.scans), (
+        "A page is four times the sessions asked for, because the filter runs after the page is read"
+    )
+
+
+def test_a_small_listing_still_asks_for_a_page_worth_of_rows(table: _FakeTable) -> None:
+    """Most rows in this table are decisions, so a page of four is nearly all filtered away."""
+    _repository(table).list_sessions(limit=5)
+    assert all(scan["Limit"] == MIN_SCAN_PAGE_SIZE for scan in table.scans)
 
 
 def test_a_page_with_no_sessions_in_it_does_not_end_the_scan() -> None:
