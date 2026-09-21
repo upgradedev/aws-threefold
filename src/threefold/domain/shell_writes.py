@@ -113,6 +113,8 @@ _GOVERNANCE_PAIRS = frozenset(
         (".codex", "hooks.json"),
         (".codex", "config.toml"),
         (".agents", "hooks.json"),
+        # Where `git config core.hooksPath` is kept, written directly.
+        (".git", "config"),
     )
 )
 _GOVERNANCE_FILES = frozenset((".threefold.json",))

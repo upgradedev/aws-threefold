@@ -40,21 +40,44 @@ Without `--agent` the hook works out which agent called it from the shape of
 what arrives on stdin, which is right for Antigravity and for Codex patches but
 labels a Codex shell command as Claude Code, so pass the flag.
 
-Configuration, all read from the environment on every call:
+Configuration is read on every call. The project, the endpoint, the mode and
+the API key are each taken from the first of these that sets them:
 
-    THREEFOLD_PROJECT     required. Unset, the hook sends nothing at all.
+    1. the environment variable below
+    2. `.threefold.json` in the project root: the nearest directory holding a
+       `.threefold.json` or a `.git`, walking up from the agent's cwd (or, for
+       Antigravity, its first workspace)
+    3. `config.json` in THREEFOLD_HOME
+
+Both files hold `project`, `endpoint`, `mode` and `api_key_file`, a path to a
+file whose content is the key, never the key itself; a relative path is read
+from the directory of the file that names it. The install script writes
+`.threefold.json` and lists it in `.git/info/exclude`.
+
+    THREEFOLD_PROJECT     required, here or in a file. Unset, nothing is sent.
     THREEFOLD_ENDPOINT    the service, default the public /prod/ stack
+    THREEFOLD_MODE        `enforce` (the default) or `observe`, which sends
+                          every call as `dry_run`: recorded, never refused,
+                          never able to trip the session
+    THREEFOLD_DRY_RUN     1 is the older spelling of THREEFOLD_MODE=observe
     THREEFOLD_API_KEY     sent as X-API-Key when set
+    THREEFOLD_API_KEY_FILE a file holding the key, read at call time
     THREEFOLD_DEVELOPER   hashed locally to 12 hex characters; never sent as typed
     THREEFOLD_TIMEOUT     seconds, default 4
     THREEFOLD_FAIL_CLOSED 1 refuses a call the service could not judge
-    THREEFOLD_DRY_RUN     1 marks the call `dry_run` in the request. The field
-                          is part of request v2, but no gate in the service
-                          reads it yet, so the call is still scored and can
-                          still trip the session
-    THREEFOLD_HOME        local state, default ~/.threefold: never_send.txt is
-                          read from it, held_back.log and unknown_shapes.jsonl
-                          are written to it
+    THREEFOLD_HOME        local state, default ~/.threefold: never_send.txt and
+                          config.json are read from it, held_back.log and
+                          unknown_shapes.jsonl are written to it
+
+A key set in the environment or in THREEFOLD_HOME is sent only to the endpoint
+named there (or the default), never to a different one a repository's
+`.threefold.json` names: a cloned repository must not be able to point the
+hook, and the owner's key with it, at a server of its choosing.
+
+In enforce mode a write to the files that decide whether the hooks run
+(`.claude/settings*.json`, `.codex/hooks.json`, `.codex/config.toml`,
+`.agents/hooks.json`, `.threefold.json`, `.git/hooks/`, `.git/config`) is refused before
+anything is sent, so turning governance off does not depend on the network.
 
 Standard library only and a single file, because it is downloaded alone and run
 by whatever Python the developer already has.
@@ -136,6 +159,36 @@ DATA_DIRECTORIES = frozenset(
 AGENT_CONFIG_DIRECTORIES = (".claude", ".codex", ".gemini")
 
 HELD_BACK_CATEGORIES = ("outside-root", "agent-config", "data-file", "never-send", "no-project")
+
+CONFIG_FILE_NAME = ".threefold.json"
+HOME_CONFIG_NAME = "config.json"
+MODES = ("enforce", "observe")
+MAX_CONFIG_BYTES = 65_536
+MAX_KEY_BYTES = 1_024
+MAX_WALK_UP = 64
+
+# What a Threefold key looks like: one line of token characters. A file that
+# is anything else (a PEM block, a YAML file of tokens, a credentials file) is
+# not sent, because api_key_file can be named by a repository's own
+# .threefold.json and a header is a way out of the machine.
+_API_KEY_SHAPE = re.compile(r"^[A-Za-z0-9._~+/=\-]{8,512}$")
+
+# Copied from threefold.domain.shell_writes, because this file is downloaded
+# alone. A test compares the two predicates over the same paths, so the hook
+# and the service cannot disagree about which files govern the hooks.
+_GOVERNANCE_PAIRS = frozenset(
+    (
+        (".claude", "settings.json"),
+        (".claude", "settings.local.json"),
+        (".codex", "hooks.json"),
+        (".codex", "config.toml"),
+        (".agents", "hooks.json"),
+        # Where `git config core.hooksPath` is kept, written directly.
+        (".git", "config"),
+    )
+)
+_GOVERNANCE_FILES = frozenset((".threefold.json",))
+_GOVERNANCE_DIRECTORIES = frozenset((".claude", ".codex", ".agents", ".git", ".threefold"))
 
 # Copied from threefold.domain.boundary_guard.SecretScanner.PATTERNS, because
 # this file is downloaded alone and cannot import it. A test compares the two
@@ -222,10 +275,13 @@ def threefold_home() -> str:
     return os.path.abspath(os.path.expanduser(_env("THREEFOLD_HOME") or os.path.join("~", ".threefold")))
 
 
-def endpoint() -> str:
-    """The service base URL. It always ends with a slash, so paths join onto it."""
-    base = _env("THREEFOLD_ENDPOINT") or DEFAULT_ENDPOINT
+def _with_slash(base: str) -> str:
     return base if base.endswith("/") else base + "/"
+
+
+def endpoint() -> str:
+    """The service base URL from the environment alone. It always ends with a slash."""
+    return _with_slash(_env("THREEFOLD_ENDPOINT") or DEFAULT_ENDPOINT)
 
 
 def timeout_seconds() -> float:
@@ -672,6 +728,189 @@ def project_root(payload: Dict[str, Any]) -> str:
     return os.getcwd()
 
 
+# --- configuration: environment, then the repository, then home -------------------
+
+def config_root(payload: Dict[str, Any]) -> Optional[str]:
+    """The directory whose .threefold.json governs this call, or None.
+
+    The nearest directory at or above the agent's working directory that holds
+    a `.threefold.json` or a `.git`. A `.git` ends the search even without a
+    config file, so a repository nested in a governed one is not governed by
+    its parent's settings by accident. This is only where configuration is
+    found: what may leave the machine is still decided against project_root.
+    """
+    current = project_root(payload)
+    for _ in range(MAX_WALK_UP):
+        if os.path.isfile(os.path.join(current, CONFIG_FILE_NAME)) or os.path.exists(os.path.join(current, ".git")):
+            return current
+        parent = os.path.dirname(current)
+        if parent == current:
+            return None
+        current = parent
+    return None
+
+
+def read_config(path: str) -> Dict[str, Any]:
+    """A configuration file as a dictionary, or empty if it is missing, too large or not an object."""
+    try:
+        with open(path, "rb") as handle:
+            raw = handle.read(MAX_CONFIG_BYTES + 1)
+    except OSError:
+        return {}
+    if len(raw) > MAX_CONFIG_BYTES:
+        return {}
+    try:
+        document = json.loads(raw.decode("utf-8-sig"))
+    except (ValueError, UnicodeDecodeError, RecursionError):
+        return {}
+    return document if isinstance(document, dict) else {}
+
+
+class Settings:
+    """What one call is sent under, and where each part came from. Never holds a key in its repr."""
+
+    __slots__ = ("project", "endpoint", "endpoint_source", "mode", "api_key", "notes")
+
+    def __init__(self) -> None:
+        self.project = ""
+        self.endpoint = DEFAULT_ENDPOINT
+        self.endpoint_source = "default"
+        self.mode = "enforce"
+        self.api_key: Optional[str] = None
+        self.notes: List[str] = []
+
+    def __repr__(self) -> str:
+        return f"Settings(project={self.project!r}, endpoint={self.endpoint!r}, mode={self.mode!r})"
+
+
+def _read_key_file(path: str, label: str, notes: List[str]) -> Optional[str]:
+    """The key a file holds, read now, stripped, and checked to look like a key.
+
+    Nothing about the content ever reaches a note: not the key, not a line of
+    a file that turned out not to be one.
+    """
+    try:
+        with open(path, "rb") as handle:
+            raw = handle.read(MAX_KEY_BYTES + 1)
+    except OSError:
+        notes.append(f"the API key file named by {label} could not be read, so no key was sent.")
+        return None
+    try:
+        key = raw.decode("utf-8-sig").strip()
+    except UnicodeDecodeError:
+        key = ""
+    if len(raw) > MAX_KEY_BYTES or not _API_KEY_SHAPE.match(key) or any(p.search(key) for _, p in SECRET_PATTERNS):
+        notes.append(f"the file named by {label} does not hold a Threefold key, so nothing from it was sent.")
+        return None
+    return key
+
+
+def _key_path(value: Any, base: str) -> Optional[str]:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    path = os.path.expanduser(value.strip())
+    return path if os.path.isabs(path) else os.path.join(base, path)
+
+
+def resolve_settings(payload: Dict[str, Any]) -> Settings:
+    """The project, endpoint, mode and API key for this call, first source wins.
+
+    The order is the contract: the environment, then the repository's
+    .threefold.json, then THREEFOLD_HOME/config.json. A value of the wrong type
+    or an unknown mode is skipped with a note rather than trusted, so a typo in
+    one layer falls through to the next instead of deciding what is enforced.
+    """
+    settings = Settings()
+    home = threefold_home()
+    root = config_root(payload)
+    repo_dir = root or ""
+    repo = read_config(os.path.join(root, CONFIG_FILE_NAME)) if root else {}
+    home_config = read_config(os.path.join(home, HOME_CONFIG_NAME))
+    layers = (("repo", CONFIG_FILE_NAME, repo, repo_dir), ("home", "THREEFOLD_HOME/config.json", home_config, home))
+
+    project = _env("THREEFOLD_PROJECT")
+    for _, _, document, _ in layers:
+        if project:
+            break
+        value = document.get("project")
+        project = value.strip() if isinstance(value, str) else ""
+    settings.project = project
+
+    home_endpoint = DEFAULT_ENDPOINT
+    value = home_config.get("endpoint")
+    if isinstance(value, str) and value.strip().lower().startswith(("https://", "http://")):
+        home_endpoint = _with_slash(value.strip())
+    if _env("THREEFOLD_ENDPOINT"):
+        settings.endpoint, settings.endpoint_source = endpoint(), "env"
+    else:
+        for source, label, document, _ in layers:
+            value = document.get("endpoint")
+            if value is None:
+                continue
+            if isinstance(value, str) and value.strip().lower().startswith(("https://", "http://")):
+                settings.endpoint, settings.endpoint_source = _with_slash(value.strip()), source
+                break
+            settings.notes.append(f"the endpoint in {label} is not an http(s) URL and was ignored.")
+
+    mode = _env("THREEFOLD_MODE").lower()
+    if mode and mode not in MODES:
+        settings.notes.append(f"THREEFOLD_MODE must be enforce or observe; {mode[:20]!r} was ignored.")
+        mode = ""
+    if not mode and _flag("THREEFOLD_DRY_RUN"):
+        mode = "observe"
+    for _, label, document, _ in layers:
+        if mode:
+            break
+        value = document.get("mode")
+        if value is None:
+            continue
+        if isinstance(value, str) and value.strip().lower() in MODES:
+            mode = value.strip().lower()
+        else:
+            settings.notes.append(f"the mode in {label} must be enforce or observe, and was ignored.")
+    settings.mode = mode or "enforce"
+
+    key: Optional[str] = None
+    key_source = ""
+    if _env("THREEFOLD_API_KEY"):
+        key, key_source = _env("THREEFOLD_API_KEY"), "env"
+    elif _env("THREEFOLD_API_KEY_FILE"):
+        key = _read_key_file(os.path.abspath(os.path.expanduser(_env("THREEFOLD_API_KEY_FILE"))), "THREEFOLD_API_KEY_FILE", settings.notes)
+        key_source = "env"
+    else:
+        for source, label, document, base in layers:
+            if "api_key" in document:
+                settings.notes.append(f"{label} holds a key itself; only api_key_file is read, and the key was not sent.")
+            path = _key_path(document.get("api_key_file"), base)
+            if path:
+                key, key_source = _read_key_file(path, label, settings.notes), source
+                break
+    if key and key_source in ("env", "home") and settings.endpoint_source == "repo" and settings.endpoint != home_endpoint:
+        settings.notes.append(
+            f"{CONFIG_FILE_NAME} names a different endpoint from yours, so the API key from "
+            f"{'the environment' if key_source == 'env' else 'THREEFOLD_HOME'} was not sent to it."
+        )
+        key = None
+    settings.api_key = key
+    return settings
+
+
+def is_governance_path(path: str, deletes: bool = False) -> bool:
+    """Whether writing (or removing) this project-relative path touches the hooks' own files."""
+    parts = [part.lower() for part in re.split(r"[\\/]+", path or "") if part and part != "."]
+    if not parts:
+        return False
+    if parts[-1] in _GOVERNANCE_FILES:
+        return True
+    if len(parts) >= 2 and (parts[-2], parts[-1]) in _GOVERNANCE_PAIRS:
+        return True
+    if any(parts[index] == ".git" and parts[index + 1] == "hooks" for index in range(len(parts) - 1)):
+        return True
+    if ".threefold" in parts:
+        return True
+    return deletes and parts[-1] in _GOVERNANCE_DIRECTORIES
+
+
 def protected_directories(home: str) -> List[str]:
     """Each agent's configuration and memory, and Threefold's own home, as written."""
     user_home = os.path.expanduser("~")
@@ -792,7 +1031,11 @@ def held_back_category(call: NormalisedCall, payload: Dict[str, Any], raw_text: 
             return "agent-config"
         if not _is_within(resolved, canonical_root):
             return "outside-root"
-        if call.action_type == FILE_WRITE and _is_data_file(resolved, canonical_root):
+        # A hook script under .git/hooks sits in a data directory by name, but it
+        # is the file that decides whether the pre-commit check runs. Holding it
+        # back would leave an observe-mode rollout blind to exactly that write.
+        relative = os.path.relpath(resolved, canonical_root)
+        if call.action_type == FILE_WRITE and _is_data_file(resolved, canonical_root) and not is_governance_path(relative):
             return "data-file"
 
     if call.command is not None:
@@ -802,6 +1045,27 @@ def held_back_category(call: NormalisedCall, payload: Dict[str, Any], raw_text: 
 
     if mentions_never_send(raw_text, payload, read_never_send(home)):
         return "never-send"
+    return None
+
+
+def governance_target(call: NormalisedCall, payload: Dict[str, Any], home: str) -> Optional[str]:
+    """The first project-relative path this call writes or removes that governs the hooks, if any.
+
+    Only targets inside the project count. The agents' own directories under
+    the home folder are the developer's, and the day-one contract keeps those
+    calls on the machine unjudged rather than refused.
+    """
+    root = project_root(payload)
+    canonical_root = _canonical(root)
+    canonical_protected = [_canonical(directory) for directory in protected_directories(home)]
+    removed = set(call.touched) | {entry["file_path"] for entry in call.files if "deleted" in entry.get("note", "")}
+    for target in call.targets():
+        resolved = _resolve(target, root)
+        if not _is_within(resolved, canonical_root) or any(_is_within(resolved, d) for d in canonical_protected):
+            continue
+        relative = os.path.relpath(resolved, canonical_root).replace(os.sep, "/")
+        if is_governance_path(relative, deletes=target in removed):
+            return relative
     return None
 
 
@@ -885,8 +1149,10 @@ class ServiceUnavailable(Exception):
     """The service could not judge the call: no connection, a timeout, or no usable answer."""
 
 
-def build_request(call: NormalisedCall, payload: Dict[str, Any], agent: str, project: str) -> Dict[str, Any]:
-    """Request v2 for POST /evaluate-tool-call."""
+def build_request(
+    call: NormalisedCall, payload: Dict[str, Any], agent: str, project: str, dry_run: Optional[bool] = None
+) -> Dict[str, Any]:
+    """Request v2 for POST /evaluate-tool-call. `dry_run` defaults to what the environment says."""
     if agent == "antigravity":
         session = payload.get("conversationId") or payload.get("session_id")
     else:
@@ -903,7 +1169,7 @@ def build_request(call: NormalisedCall, payload: Dict[str, Any], agent: str, pro
         "agent": agent,
         "origin": "hook",
         "explain": False,
-        "dry_run": _flag("THREEFOLD_DRY_RUN"),
+        "dry_run": _flag("THREEFOLD_DRY_RUN") if dry_run is None else bool(dry_run),
     }
 
 
@@ -923,20 +1189,27 @@ def _describe_failure(error: BaseException, timeout: float) -> str:
     return type(reason).__name__ if isinstance(reason, BaseException) else str(reason)[:120]
 
 
-def post_evaluation(body: Dict[str, Any]) -> Tuple[int, Any, str]:
+_FROM_ENVIRONMENT = object()
+
+
+def post_evaluation(body: Dict[str, Any], base: Optional[str] = None, api_key: Any = _FROM_ENVIRONMENT) -> Tuple[int, Any, str]:
     """Sends one request and returns (status code, parsed body or None, reason phrase).
+
+    `base` and `api_key` come from resolve_settings; left out, they are read
+    from the environment as they were before configuration files existed.
 
     HTTPError is caught before URLError on purpose: it is a subclass, and a
     handler written the other way round files every 400 under "unreachable" and
     fails open on requests the service actually refused.
     """
     headers = {"Content-Type": "application/json"}
-    api_key = _env("THREEFOLD_API_KEY")
+    if api_key is _FROM_ENVIRONMENT:
+        api_key = _env("THREEFOLD_API_KEY")
     if api_key:
         headers["X-API-Key"] = api_key
     timeout = timeout_seconds()
     request = urllib.request.Request(
-        endpoint() + "evaluate-tool-call",
+        (base or endpoint()) + "evaluate-tool-call",
         data=json.dumps(body).encode("utf-8"),
         headers=headers,
         method="POST",
@@ -977,7 +1250,7 @@ def client_error_reason(code: int, problem: Any, phrase: str) -> str:
     if detail and detail != title:
         text = f"{text} {detail}"
     if code in (401, 403):
-        text = f"{text} Check THREEFOLD_API_KEY."
+        text = f"{text} Check THREEFOLD_API_KEY, or api_key_file in .threefold.json."
     return text
 
 
@@ -1037,16 +1310,21 @@ def handle(raw_text: Optional[str], forced_agent: Optional[str] = None) -> Tuple
         return None, []
 
     home = threefold_home()
-    project = _env("THREEFOLD_PROJECT")
+    settings = resolve_settings(payload)
+    notes = list(settings.notes)
+    project = settings.project
     if not project:
         # Never a folder name or a login in its place: either would put a name on
         # the public ledger that nobody chose to publish.
         record_held_back(home, "no-project")
-        return None, ["THREEFOLD_PROJECT is not set, so this project is not governed and nothing was sent."]
+        return None, notes + [
+            f"THREEFOLD_PROJECT is not set, and no {CONFIG_FILE_NAME} or THREEFOLD_HOME/config.json names a "
+            "project, so this project is not governed and nothing was sent."
+        ]
 
     if isinstance(call, UnknownShape):
         record_unknown_shape(home, agent, call.keys)
-        return None, [f"this {agent} tool call has a shape the hook cannot read; its key names were logged and nothing was sent."]
+        return None, notes + [f"this {agent} tool call has a shape the hook cannot read; its key names were logged and nothing was sent."]
 
     credential = find_credential(call)
     if credential:
@@ -1054,30 +1332,44 @@ def handle(raw_text: Optional[str], forced_agent: Optional[str] = None) -> Tuple
             agent,
             f"Threefold refused this call before it left the machine: it contains a credential ({credential}). "
             "Nothing was sent. Read the value from the environment or a secret store instead of writing it.",
-        ), []
+        ), notes
+
+    if settings.mode == "enforce":
+        # Observe mode sends the call instead, as a dry run, so a rollout sees
+        # the attempt without stopping it.
+        governing = governance_target(call, payload, home)
+        if governing:
+            return deny(
+                agent,
+                f"Threefold refused this call before it left the machine: it changes {governing}, which decides "
+                "whether the agent's hooks run. Nothing was sent. A person changes that file, not the agent.",
+            ), notes
 
     category = held_back_category(call, payload, raw_text or "", home)
     if category:
         record_held_back(home, category)
-        return None, []
+        return None, notes
 
     _relative_to_root(call, project_root(payload))
-    body = build_request(call, payload, agent, project)
+    body = build_request(call, payload, agent, project, dry_run=settings.mode == "observe")
     try:
-        code, document, phrase = post_evaluation(body)
+        code, document, phrase = post_evaluation(body, settings.endpoint, settings.api_key)
     except ServiceUnavailable as failure:
-        return _unjudged(agent, str(failure))
+        output, lines = _unjudged(agent, str(failure))
+        return output, notes + lines
 
     if code == 429 or code >= 500:
-        return _unjudged(agent, f"HTTP {code}")
+        output, lines = _unjudged(agent, f"HTTP {code}")
+        return output, notes + lines
     if 400 <= code < 500:
-        return deny(agent, client_error_reason(code, document, phrase)), []
+        return deny(agent, client_error_reason(code, document, phrase)), notes
     if code == 200 and isinstance(document, dict):
         status = str(document.get("status") or "")
         if status.startswith("BLOCKED"):
-            return deny(agent, refusal_reason(document)), []
-        return None, []
-    return _unjudged(agent, f"an answer it could not read, HTTP {code}")
+            return deny(agent, refusal_reason(document)), notes
+        return None, notes
+    output, lines = _unjudged(agent, f"an answer it could not read, HTTP {code}")
+    return output, notes + lines
 
 
 def _agent_hint(raw_text: Optional[str], forced: Optional[str]) -> str:

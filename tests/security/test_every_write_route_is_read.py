@@ -159,6 +159,7 @@ GOVERNANCE_PROBES: List[str] = [
     "sed -i 's/threefold//' .claude/settings.local.json",
     "cp /tmp/empty.json .codex/hooks.json",
     "rm -rf .claude",
+    "printf '[core]\n\thooksPath = /dev/null\n' >> .git/config",
 ]
 
 
@@ -313,6 +314,7 @@ def test_a_command_is_read_whatever_action_type_the_caller_declared() -> None:
         {"file_path": ".agents/hooks.json", "content": "{}"},
         {"file_path": ".threefold.json", "content": '{"mode": "observe"}'},
         {"file_path": ".git/hooks/pre-commit", "content": "exit 0"},
+        {"file_path": ".git/config", "content": "[core]\n\thooksPath = /dev/null"},
         {"edits": [{"file_path": "src/app.py", "content": "x = 1"}, {"file_path": ".codex/config.toml", "content": ""}]},
     ],
 )

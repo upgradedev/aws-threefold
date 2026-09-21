@@ -260,7 +260,7 @@ def test_running_a_script_file_is_not_read_into() -> None:
     [
         ".claude/settings.json", ".claude/settings.local.json", ".codex/hooks.json", ".codex/config.toml",
         ".agents/hooks.json", ".threefold.json", ".git/hooks/pre-commit", "./.git/hooks/post-merge",
-        "nested/checkout/.claude/settings.json", ".threefold/rules.json", ".CLAUDE/Settings.JSON",
+        "nested/checkout/.claude/settings.json", ".threefold/rules.json", ".CLAUDE/Settings.JSON", ".git/config",
     ],
 )
 def test_the_files_that_decide_whether_hooks_run_are_governance_paths(path: str) -> None:

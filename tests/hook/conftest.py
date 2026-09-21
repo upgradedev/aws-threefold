@@ -56,6 +56,10 @@ def machine(monkeypatch, tmp_path):
     home.mkdir()
     project = tmp_path / "work" / "acme-folder-name"
     project.mkdir(parents=True)
+    # The hook walks up from the agent's cwd to the nearest .threefold.json or
+    # .git. This marker stops that walk inside the test's own directory, so no
+    # file above it on the real machine can configure a test.
+    (tmp_path / ".git").mkdir()
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.setenv("THREEFOLD_HOME", str(home / ".threefold"))

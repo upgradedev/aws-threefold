@@ -161,7 +161,7 @@ def test_a_data_file_is_held_back_by_its_extension(relative, payloads, stub, run
 
 @pytest.mark.parametrize(
     "relative",
-    ["data/loader.py", "src/datasets/split.py", "outputs/run1/log.txt", "node_modules/acme/index.js", ".git/hooks/pre-commit", ".venv/lib/site.py"],
+    ["data/loader.py", "src/datasets/split.py", "outputs/run1/log.txt", "node_modules/acme/index.js", ".git/info/attributes", ".venv/lib/site.py"],
 )
 @pytest.mark.parametrize("agent", AGENTS)
 def test_a_file_under_a_data_directory_is_held_back(agent, relative, payloads, stub, run_hook, held_back_lines) -> None:
