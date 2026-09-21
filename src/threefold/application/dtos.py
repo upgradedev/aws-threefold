@@ -127,6 +127,15 @@ class ToolCallRequestDTO:
             developer = body.get("developer_id")
         if developer is None or developer == "":
             developer = "anonymous"
+        origin = _closed_set(body, "origin", KNOWN_ORIGINS, warnings)
+        # A hook declares no token counts: it sees a tool call, not the model's
+        # usage. Pricing it at the page defaults charged every call about 1.3
+        # cents, so a working session hit the $10 ceiling after some 740 calls
+        # and was halted for spend it never made. The spend gate judges declared
+        # usage only, and an undeclared hook call costs nothing here.
+        if origin == "hook":
+            default_input_tokens = 0
+            default_output_tokens = 0
         return cls(
             session_id=body.get("session_id", default_session_id),
             developer_id=str(developer)[:120],
@@ -138,7 +147,7 @@ class ToolCallRequestDTO:
             projected_output_tokens=_number(body, "projected_output_tokens", default_output_tokens, int),
             budget_usd=_number(body, "budget_usd", default_budget_usd, float),
             agent=_closed_set(body, "agent", KNOWN_AGENTS, warnings),
-            origin=_closed_set(body, "origin", KNOWN_ORIGINS, warnings),
+            origin=origin,
             explain=_flag(body, "explain", True),
             dry_run=_flag(body, "dry_run", False),
             warnings=warnings,

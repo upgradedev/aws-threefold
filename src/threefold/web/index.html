@@ -412,9 +412,15 @@
     function renderExplanation(data) {
       const source = data && data.explanation_source;
       const text = (data && (data.bedrock_explanation || data.reason)) || "No explanation returned.";
+      // Three sources, three sentences: the model answered; the model was not
+      // asked, because an approval never is; the model was asked and failed.
       const label = source === "bedrock"
         ? "Amazon Bedrock (Claude Haiku 4.5)"
-        : "Deterministic explanation, no model was reached";
+        : source === "deterministic"
+          ? "Deterministic explanation, the model is not asked for this verdict"
+          : source === "deterministic_fallback"
+            ? "Deterministic explanation, the model was asked and did not answer"
+            : "Deterministic explanation";
       document.getElementById('bedrock-box').innerHTML =
         `<strong>${label}:</strong> ${escapeHtml(text)}`;
     }

@@ -4,19 +4,13 @@ openapi: 3.1.0
 info:
   title: Threefold Governance Sidecar API
   version: 1.0.0
-  description: >
+  description: >-
     Autonomous coding agent governance sidecar and cost circuit-breaker. Deterministic code decides: it scans arguments
     for credential shapes, refuses writes that cross a Clean Architecture boundary, halts a session that repeats
     a cycle of tool calls, and caps projected spend. Amazon Bedrock (Claude Haiku 4.5) only phrases the verdict,
     and every response says which of the two produced the sentence it carries, in explanation_source. Certificates
     are SHA-256 fingerprints over a session's verdicts: they detect corruption, not an adversary, because nothing
     signs them.
-
-
-    Everything here is answered by the stack under servers unless it is marked x-threefold-state: contracted, not
-    yet deployed. That mark means the field or route is the agreed request contract and the deployed handler does
-    not honour it yet, and the description says so in its first sentence. Nothing in this document is a claim about
-    behaviour without that mark.
   contact:
     name: Threefold
     url: https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/
@@ -41,10 +35,7 @@ paths:
           description: >-
             Normalized evaluation result, with the same verdict fields POST /evaluate-tool-call returns under evaluation
         '400':
-          description: >-
-            Contracted, not answered by the deployed stack yet. A body that is not a JSON object answers 500 on
-            the deployed stack today.
-          x-threefold-state: contracted, not yet deployed
+          description: The body is not a JSON object.
   /api/sessions:
     get:
       summary: List Governed Sessions
@@ -136,20 +127,15 @@ paths:
                 project_name:
                   type: string
                   description: >-
-                    Contracted, not answered by the deployed stack yet. The deployed handler defaults this to Acme-Core
-                    when it is absent, and a name outside the stack's AllowedProjectPattern (default ^Acme-[A-Za-z0-9-]{1,40}$)
-                    is stored and used as a metric dimension as itself rather than as unlabelled. The v2 contract
-                    makes the field required, maps a non-matching name to unlabelled and reports that in warnings.
-                    Send an alias rather than a real project name either way.
-                  x-threefold-state: contracted, not yet deployed
+                    Required. A name that does not match the stack's AllowedProjectPattern (default ^Acme-[A-Za-z0-9-]{1,40}$),
+                    or no name at all, is stored, counted and used as the metric dimension as 'unlabelled', and
+                    the response says so in warnings.
                 developer:
                   type: string
                   description: >-
-                    Contracted, not answered by the deployed stack yet. The deployed handler reads developer_id
-                    and ignores this. Contracted to be either anonymous or a 12-character hex hash computed on the
-                    caller's own machine, never a user name, and any developer value is shown in public only as
-                    a short hash.
-                  x-threefold-state: contracted, not yet deployed
+                    Either 'anonymous' or a 12-character hex hash computed on the caller's machine, never a user
+                    name. developer_id is still accepted from older callers. Pages that list decisions show any
+                    developer value only as a short hash.
                 developer_id:
                   type: string
                   description: What this field was called before the v2 request. New callers send developer.
@@ -176,11 +162,8 @@ paths:
                   - ci
                   - page
                   description: >-
-                    Contracted, not answered by the deployed stack yet. The deployed handler ignores it, so a stored
-                    row does not say which caller it came from. Contracted to name the caller, so that a refusal
-                    recorded against pre-commit is read as having happened at commit time rather than at the moment
-                    of the edit.
-                  x-threefold-state: contracted, not yet deployed
+                    Which caller sent the call: claude-code, codex, antigravity, pre-commit, ci or page. Stored
+                    on the ledger row. Any other value is recorded as 'unknown' and reported in warnings.
                 origin:
                   type: string
                   enum:
@@ -188,25 +171,19 @@ paths:
                   - page
                   - ci
                   description: >-
-                    Contracted, not answered by the deployed stack yet. The deployed handler ignores it. Contracted
-                    to separate a hook's call from a button press on one of these pages, so a visitor is never counted
-                    as an agent being governed.
-                  x-threefold-state: contracted, not yet deployed
+                    hook, page or ci. Stored on the ledger row. Any other value is recorded as 'unknown' and reported
+                    in warnings.
                 explain:
                   type: boolean
                   description: >-
-                    Contracted, not answered by the deployed stack yet. The deployed handler ignores it and explains
-                    every verdict the same way, whoever asked. Contracted to decide whether the model is asked for
-                    a sentence beside the deterministic verdict: the hooks send false, the pages send true.
-                  x-threefold-state: contracted, not yet deployed
+                    Whether a refusal gets a sentence from Amazon Bedrock. Default true, which is what the pages
+                    send. Hooks send false, and the verdict then carries the deterministic reason with explanation_source
+                    'deterministic' and no model call. An approved call is never sent to the model.
                 dry_run:
                   type: boolean
                   description: >-
-                    Contracted, not answered by the deployed stack yet. The deployed handler ignores it, so a call
-                    sent with dry_run is evaluated like any other, can be refused, and can trip the session. Contracted
-                    to mean a call the agent is considering rather than making: recorded as observed, never refused,
-                    never a trip.
-                  x-threefold-state: contracted, not yet deployed
+                    Default false. When true the call is evaluated and recorded as observed: it is never refused
+                    and never trips the session, and the rule that would have refused it is returned under observations.
                 projected_input_tokens:
                   type: integer
                 projected_output_tokens:
@@ -266,16 +243,12 @@ paths:
                     items:
                       type: string
                     description: >-
-                      Contracted, not answered by the deployed stack yet. The deployed response carries no warnings
-                      key at all. Contracted to report what the service changed or ignored about a request, so a
-                      caller is never left assuming it was taken as sent: a project_name that did not match the
-                      pattern and was counted as unlabelled belongs here.
-                    x-threefold-state: contracted, not yet deployed
+                      What the service changed or ignored on the way in, for example a project name stored as 'unlabelled'.
+                      Always present, empty when nothing was changed.
         '400':
           description: >-
-            A number in the body cannot be used: a negative token count, or a budget of zero or less. A body that
-            is not a JSON object is contracted to answer 400 here too and answers 500 on the deployed stack today.
-          x-threefold-state: 'partly deployed: the non-object body is contracted, not yet deployed'
+            The body is not a JSON object, or a number in it cannot be used: a negative token count, or a budget
+            of zero or less.
   /issue-certificate:
     post:
       summary: Issue Governance Certificate
@@ -330,9 +303,8 @@ paths:
     get:
       summary: Deep Subsystem Readiness Probe
       description: >-
-        Verifies downstream dependencies (DynamoDB, Bedrock, S3, Webhook Dispatcher). HEAD is contracted so an uptime
-        check need not download the breakdown on every probe; the deployed stack answers 404 to it today, so use
-        GET.
+        Verifies downstream dependencies (DynamoDB, Bedrock, S3, Webhook Dispatcher). HEAD answers with the same
+        status and no body, so an uptime check need not download the breakdown on every probe.
       responses:
         '200':
           description: Subsystems health breakdown
@@ -403,11 +375,11 @@ paths:
     get:
       summary: The hook itself
       description: >-
-        Contracted, not answered by the deployed stack yet. The stack serves the hook at /hooks/claude_code_hook.py
-        today and answers 404 here. This is the path the one script moves to: it puts Threefold in front of Claude
-        Code, Codex or Antigravity, served as readable text rather than as a download a reader cannot inspect, and
-        answered without a key even where reads are private, because a product nobody can obtain is a demo. Which
-        agent is calling is told to the script on its own command line, with --agent.
+        The hook itself: one standard-library script that puts Threefold in front of Claude Code, Codex or Antigravity,
+        served as readable text rather than as a download a reader cannot inspect, and answered without a key even
+        where reads are private, because a product nobody can obtain is a demo. The agent is detected from the shape
+        of its input, or named with --agent. The same file is served at /hooks/claude_code_hook.py and /claude_code_hook.py,
+        so an install copied earlier keeps working.
       responses:
         '200':
           description: The script, as text/plain
@@ -415,13 +387,12 @@ paths:
             text/plain:
               schema:
                 type: string
-      x-threefold-state: contracted, not yet deployed
   /status:
     get:
       summary: Health & Active Policy Rules
       description: >-
-        Returns health status, active governance rules, and model configuration. HEAD is contracted for a monitor
-        that wants the code and not the body; the deployed stack answers 404 to it today, so use GET.
+        Returns health status, active governance rules, and model configuration. HEAD answers with the same status
+        and no body, for a monitor that wants the code and not the body.
       responses:
         '200':
           description: Operational status and active rules

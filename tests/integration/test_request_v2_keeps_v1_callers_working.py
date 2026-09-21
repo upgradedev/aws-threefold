@@ -259,3 +259,24 @@ def test_the_console_counts_a_dry_run_as_observed_not_refused() -> None:
     project = next(p for p in json.loads(response["body"])["by_project"] if p["project"] == "Acme-DryRun")
     assert project["refused"] == 0
     assert project["observed"] == 1
+
+
+def test_a_hook_call_that_declares_no_tokens_costs_nothing() -> None:
+    """Priced at the page defaults, a busy session was halted for spend it never made.
+
+    About 1.3 cents a call against a $10 ceiling meant a working session was
+    refused after some 740 tool calls. A hook sees tool calls, not model usage,
+    so an undeclared hook call is free and the spend gate judges declared usage.
+    """
+    from threefold.application.dtos import ToolCallRequestDTO
+
+    hook = ToolCallRequestDTO.from_payload({"project_name": "Acme-Hook", "origin": "hook", "tool_name": "Bash"})
+    assert hook.projected_input_tokens == 0 and hook.projected_output_tokens == 0
+
+    declared = ToolCallRequestDTO.from_payload(
+        {"project_name": "Acme-Hook", "origin": "hook", "projected_input_tokens": 900, "projected_output_tokens": 100}
+    )
+    assert (declared.projected_input_tokens, declared.projected_output_tokens) == (900, 100)
+
+    page = ToolCallRequestDTO.from_payload({"project_name": "Acme-Page", "origin": "page"})
+    assert page.projected_input_tokens == 2000, "Callers that are not hooks keep the old defaults"
