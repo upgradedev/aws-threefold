@@ -4,8 +4,12 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Threefold — Architecture Rules</title>
-  <!-- Tailwind CSS via CDN for zero-dependency portability, as on the dashboard -->
-  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Tailwind CSS via CDN, pinned to an exact version: an unpinned major is a
+       script that can change under a page that did not change, and it runs on the
+       same origin as the operator key this browser may hold. No integrity hash: the
+       Play CDN answers with no Access-Control-Allow-Origin header, so a browser
+       would refuse a script carrying one and the page would lose every style. -->
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
   <script>
       // The server rewrites __THREEFOLD_BASE_PATH__ to the API Gateway stage prefix
       // when it serves this page, so the base is exact rather than guessed from the

@@ -86,7 +86,7 @@ Threefold strictly implements **Clean Architecture** (Robert C. Martin) and **Do
 - **Delivery:**
   - `api_handlers.py`: AWS Lambda proxy handler supporting REST operations (`/status`, `/evaluate-tool-call`, `/simulate-loop`, `/simulate-secret`, `/issue-certificate`).
   - `deploy/template.yml`: AWS SAM serverless definition specifying Graviton ARM64 Lambdas, HTTP API Gateway, DynamoDB, and S3.
-  - `src/threefold/web/index.html` & `src/threefold/web/testbook.html`: Zero-dependency browser dashboard and testbook running Tailwind CSS via CDN.
+  - `src/threefold/web/index.html`: Zero-dependency browser dashboard running Tailwind CSS from a pinned CDN build, with `connect.html`, `console.html`, `rules.html`, `sessions.html`, `settings.html` and `swagger.html` beside it.
 
 ---
 

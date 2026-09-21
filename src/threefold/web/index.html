@@ -4,8 +4,12 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Threefold — Autonomous Coding Agent Governance & Cost Circuit-Breaker</title>
-  <!-- Tailwind CSS & Lucide Icons via CDN for zero-dependency portability -->
-  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Tailwind CSS via CDN, pinned to an exact version: an unpinned major is a
+       script that can change under a page that did not change, and it runs on the
+       same origin as the operator key this browser may hold. No integrity hash: the
+       Play CDN answers with no Access-Control-Allow-Origin header, so a browser
+       would refuse a script carrying one and the page would lose every style. -->
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
   <script>
       // The server rewrites __THREEFOLD_BASE_PATH__ to the API Gateway stage prefix
       // when it serves this page, so the base is exact rather than guessed from the
@@ -122,7 +126,9 @@
           <input id="apiKeyInput" type="password" value="" placeholder="not needed for the demo" class="bg-gray-900 border border-gray-700 rounded px-2 py-0.5 text-xs text-sky-300 font-mono w-44 focus:outline-none focus:border-sky-500" />
           <button id="btnCheckConnection" onclick="checkApiHealth()" class="px-2 py-0.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs border border-gray-700">Check</button>
           <button id="btnExportCert" onclick="downloadCert()" class="px-2 py-0.5 rounded bg-purple-950 hover:bg-purple-900 text-purple-300 text-xs border border-purple-800 font-semibold">📥 Export Governance Cert</button>
-          <button id="btnEmergencyFreeze" onclick="triggerManualFreeze()" class="px-2 py-0.5 rounded bg-rose-950 hover:bg-rose-900 text-rose-300 text-xs border border-rose-800 font-semibold">🚨 Freeze Session</button>
+          <button id="btnEmergencyFreeze" onclick="triggerManualFreeze()" disabled
+                  title="Run a scenario first, so there is a session of your own to freeze."
+                  class="px-2 py-0.5 rounded bg-rose-950 hover:bg-rose-900 text-rose-300 text-xs border border-rose-800 font-semibold disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-rose-950">🚨 Freeze Session</button>
           <!-- This badge used to read READY in the markup whatever the service was
                doing. It now starts unknown and is set from the answer /status
                actually gave, by checkApiHealth below. -->
@@ -355,8 +361,23 @@
     let currentCertData = null;
     let liveBackendActive = false;
     // The session the last scenario ran under, so the freeze button acts on a
-    // session this visitor made rather than on one every visitor shares.
+    // session this visitor made rather than on one every visitor shares. Before
+    // a scenario has run there is no session of this visitor's at all, so the
+    // button starts disabled: the terminate route creates whatever id it is
+    // given, so a freeze with a fresh id would not re-lock an old row, it would
+    // write a new tripped one into the ledger the sessions page presents as the
+    // work this service has actually governed.
     let lastSessionId = null;
+
+    // The one place that records a session, so the button and the id can never
+    // disagree about whether there is something to freeze.
+    function setLastSession(sessionId) {
+      if (!sessionId) return;
+      lastSessionId = sessionId;
+      const button = document.getElementById('btnEmergencyFreeze');
+      button.disabled = false;
+      button.title = 'Freeze ' + sessionId + ', the session the last scenario ran under.';
+    }
 
     // Every session id this page sends is new per click. A fixed id was shared by
     // every visitor, so one visitor's third identical call halted that session
@@ -533,7 +554,7 @@
           if (res.ok) {
             const data = await res.json();
             // The service names this session itself, one per request.
-            if (data.session_id) lastSessionId = data.session_id;
+            setLastSession(data.session_id);
             logTerminal(`⚡ [Live HTTP Response] HTTP 200 in ${latency}ms: status=${data.status}`, 'text-emerald-400');
             logTerminal(`🚨 [CIRCUIT BREAKER TRIPPED] ${data.reason}`, 'text-red-400 font-bold');
             logTerminal(`🛑 Session tripped: ${data.session_tripped}. Execution locked in DynamoDB.`, 'text-red-300');
@@ -599,7 +620,7 @@
           const latency = (performance.now() - t0).toFixed(1);
           if (res.ok) {
             const data = await res.json();
-            if (data.session_id) lastSessionId = data.session_id;
+            setLastSession(data.session_id);
             logTerminal(`⚡ [Live HTTP Response] HTTP 200 in ${latency}ms: status=${data.status}`, 'text-emerald-400');
             logTerminal(`🚨 [PRE-INVOCATION REJECTION] ${data.reason}`, 'text-red-400 font-bold');
             logTerminal(`🛑 Credential quarantined before transmission. Proof: ${data.proof_hash.slice(0, 16)}...`, 'text-red-300');
@@ -647,7 +668,7 @@
           const base = getApiBase();
           const t0 = performance.now();
           const sessionId = newSessionId();
-          lastSessionId = sessionId;
+          setLastSession(sessionId);
           const res = await fetch(`${base}/evaluate-tool-call`, {
             method: "POST",
             headers: authHeaders({ "Content-Type": "application/json" }),
@@ -721,7 +742,7 @@
         try {
           const base = getApiBase();
           const sessId = newSessionId();
-          lastSessionId = sessId;
+          setLastSession(sessId);
 
           let lastEvaluation = null;
           for (let i = 0; i < steps.length; i++) {
@@ -844,7 +865,7 @@
           const base = getApiBase();
           const t0 = performance.now();
           const sessionId = newSessionId();
-          lastSessionId = sessionId;
+          setLastSession(sessionId);
           const res = await fetch(`${base}/adapter/universal-tool-call`, {
             method: "POST",
             headers: authHeaders({ "Content-Type": "application/json" }),
@@ -885,12 +906,18 @@
 
     // The freeze used to target session-default, one id every visitor shared. A
     // freeze is terminal and nothing undoes it, so one press broke that session
-    // for everyone after. It now freezes the session this page last ran, and a
-    // new one of its own when no scenario has run yet.
+    // for everyone after. It now freezes the session this page last ran, and
+    // nothing at all before one has run: minting an id here would create the row
+    // it then locks, so every press would leave another tripped session behind.
+    // The button is disabled until then; this guard holds if a click arrives anyway.
     async function triggerManualFreeze() {
-      const target = lastSessionId || newSessionId();
+      const target = lastSessionId;
+      if (!target) {
+        alert("Nothing to freeze yet.\n\nRun a scenario below first. The freeze acts on the session that scenario ran under, and pressing it before one has run would create an empty session only to lock it.");
+        return;
+      }
       if (!confirm("🚨 ENTERPRISE KILL-SWITCH: Manually terminate and lock session " + target + "?\n\n" +
-        (lastSessionId ? "This is the session the last scenario on this page ran under." : "No scenario has run yet, so this freezes a new, empty session."))) return;
+        "This is the session the last scenario on this page ran under.")) return;
       try {
         const apiBase = getApiBase();
         const res = await fetch(`${apiBase}/sessions/${encodeURIComponent(target)}/terminate`, {

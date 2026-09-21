@@ -52,7 +52,7 @@ Threefold is engineered to meet the highest standards of the **AWS Well-Architec
 |---|---|
 | **No model on the critical path** | Cost calculation, secret scanning and loop signature hashing are standard-library Python, so a blocked call returns without waiting on Bedrock. The overhead has not been benchmarked and no figure is claimed. |
 | **ARM64 Graviton2 Execution** | AWS Lambda functions run on Graviton2 (ARM64) processors, delivering 34% better price-performance. |
-| **Single origin** | The dashboard and testbook are served by the API's own Lambda, so there is one URL and no separate origin to keep in step. No CDN is deployed, and no latency figure is claimed because none was measured. |
+| **Single origin** | The dashboard and the pages beside it are served by the API's own Lambda, so there is one URL and no separate origin to keep in step. No CDN of ours is deployed; the pages do load Tailwind and Swagger UI from public CDNs, pinned to exact versions. No latency figure is claimed because none was measured. |
 
 ---
 

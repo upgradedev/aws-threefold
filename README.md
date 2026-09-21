@@ -4,8 +4,6 @@
 
 Built for the AWS Zero to Shipped hackathon. **Category:** `#workplace-efficiency` · **Lane:** `#community`
 
-[![CI](https://github.com/upgradedev/threefold-aws/actions/workflows/ci.yml/badge.svg)](https://github.com/upgradedev/threefold-aws/actions/workflows/ci.yml)
-[![Deploy](https://github.com/upgradedev/threefold-aws/actions/workflows/deploy.yml/badge.svg)](https://github.com/upgradedev/threefold-aws/actions/workflows/deploy.yml)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://python.org)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green)](LICENSE)
 

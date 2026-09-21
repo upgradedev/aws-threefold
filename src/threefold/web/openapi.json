@@ -3,10 +3,10 @@
   "info": {
     "title": "Threefold Governance Sidecar API",
     "version": "1.0.0",
-    "description": "Autonomous coding agent governance sidecar and cost circuit-breaker. Deterministic code decides: it scans arguments for credential shapes, refuses writes that cross a Clean Architecture boundary, halts a session that repeats a cycle of tool calls, and caps projected spend. Amazon Bedrock (Claude Haiku 4.5) only phrases the verdict, and every response says which of the two produced the sentence it carries, in explanation_source. Certificates are SHA-256 fingerprints over a session's verdicts: they detect corruption, not an adversary, because nothing signs them.\n",
+    "description": "Autonomous coding agent governance sidecar and cost circuit-breaker. Deterministic code decides: it scans arguments for credential shapes, refuses writes that cross a Clean Architecture boundary, halts a session that repeats a cycle of tool calls, and caps projected spend. Amazon Bedrock (Claude Haiku 4.5) only phrases the verdict, and every response says which of the two produced the sentence it carries, in explanation_source. Certificates are SHA-256 fingerprints over a session's verdicts: they detect corruption, not an adversary, because nothing signs them.\n\nEverything here is answered by the stack under servers unless it is marked x-threefold-state: contracted, not yet deployed. That mark means the field or route is the agreed request contract and the deployed handler does not honour it yet, and the description says so in its first sentence. Nothing in this document is a claim about behaviour without that mark.\n",
     "contact": {
-      "name": "Threefold Team",
-      "url": "https://github.com/upgradedev/threefold-aws"
+      "name": "Threefold",
+      "url": "https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/"
     }
   },
   "servers": [
@@ -39,7 +39,8 @@
             "description": "Normalized evaluation result, with the same verdict fields POST /evaluate-tool-call returns under evaluation"
           },
           "400": {
-            "description": "The body is not a JSON object"
+            "description": "Contracted, not answered by the deployed stack yet. A body that is not a JSON object answers 500 on the deployed stack today.",
+            "x-threefold-state": "contracted, not yet deployed"
           }
         }
       }
@@ -144,7 +145,6 @@
                 "type": "object",
                 "required": [
                   "session_id",
-                  "project_name",
                   "tool_name"
                 ],
                 "properties": {
@@ -154,11 +154,13 @@
                   },
                   "project_name": {
                     "type": "string",
-                    "description": "The project this call belongs to, as an alias rather than its real name. A name that does not match the stack's AllowedProjectPattern (default ^Acme-[A-Za-z0-9-]{1,40}$) is stored, counted and used as a metric dimension as unlabelled, and warnings in the response says so."
+                    "description": "Contracted, not answered by the deployed stack yet. The deployed handler defaults this to Acme-Core when it is absent, and a name outside the stack's AllowedProjectPattern (default ^Acme-[A-Za-z0-9-]{1,40}$) is stored and used as a metric dimension as itself rather than as unlabelled. The v2 contract makes the field required, maps a non-matching name to unlabelled and reports that in warnings. Send an alias rather than a real project name either way.",
+                    "x-threefold-state": "contracted, not yet deployed"
                   },
                   "developer": {
                     "type": "string",
-                    "description": "Either anonymous or a 12-character hex hash computed on the caller's own machine. Never a user name, and any developer value is shown in public only as a short hash."
+                    "description": "Contracted, not answered by the deployed stack yet. The deployed handler reads developer_id and ignores this. Contracted to be either anonymous or a 12-character hex hash computed on the caller's own machine, never a user name, and any developer value is shown in public only as a short hash.",
+                    "x-threefold-state": "contracted, not yet deployed"
                   },
                   "developer_id": {
                     "type": "string",
@@ -189,7 +191,8 @@
                       "ci",
                       "page"
                     ],
-                    "description": "Which caller this is. A refusal recorded against pre-commit happened at commit time, not at the moment of the edit."
+                    "description": "Contracted, not answered by the deployed stack yet. The deployed handler ignores it, so a stored row does not say which caller it came from. Contracted to name the caller, so that a refusal recorded against pre-commit is read as having happened at commit time rather than at the moment of the edit.",
+                    "x-threefold-state": "contracted, not yet deployed"
                   },
                   "origin": {
                     "type": "string",
@@ -197,15 +200,19 @@
                       "hook",
                       "page",
                       "ci"
-                    ]
+                    ],
+                    "description": "Contracted, not answered by the deployed stack yet. The deployed handler ignores it. Contracted to separate a hook's call from a button press on one of these pages, so a visitor is never counted as an agent being governed.",
+                    "x-threefold-state": "contracted, not yet deployed"
                   },
                   "explain": {
                     "type": "boolean",
-                    "description": "Whether to ask the model for a sentence beside the deterministic verdict. The hooks send false; the pages send true."
+                    "description": "Contracted, not answered by the deployed stack yet. The deployed handler ignores it and explains every verdict the same way, whoever asked. Contracted to decide whether the model is asked for a sentence beside the deterministic verdict: the hooks send false, the pages send true.",
+                    "x-threefold-state": "contracted, not yet deployed"
                   },
                   "dry_run": {
                     "type": "boolean",
-                    "description": "A call the agent is considering rather than making. It is recorded as observed, is never refused, and never trips a session."
+                    "description": "Contracted, not answered by the deployed stack yet. The deployed handler ignores it, so a call sent with dry_run is evaluated like any other, can be refused, and can trip the session. Contracted to mean a call the agent is considering rather than making: recorded as observed, never refused, never a trip.",
+                    "x-threefold-state": "contracted, not yet deployed"
                   },
                   "projected_input_tokens": {
                     "type": "integer"
@@ -287,7 +294,8 @@
                       "items": {
                         "type": "string"
                       },
-                      "description": "What the service changed or ignored about the request, so a caller is never left assuming it was taken as sent. A project_name that did not match the pattern and was counted as unlabelled is reported here."
+                      "description": "Contracted, not answered by the deployed stack yet. The deployed response carries no warnings key at all. Contracted to report what the service changed or ignored about a request, so a caller is never left assuming it was taken as sent: a project_name that did not match the pattern and was counted as unlabelled belongs here.",
+                      "x-threefold-state": "contracted, not yet deployed"
                     }
                   }
                 }
@@ -295,7 +303,8 @@
             }
           },
           "400": {
-            "description": "The body is not a JSON object, or a number in it cannot be used: a negative token count, or a budget of zero or less"
+            "description": "A number in the body cannot be used: a negative token count, or a budget of zero or less. A body that is not a JSON object is contracted to answer 400 here too and answers 500 on the deployed stack today.",
+            "x-threefold-state": "partly deployed: the non-object body is contracted, not yet deployed"
           }
         }
       }
@@ -369,22 +378,10 @@
     "/readyz": {
       "get": {
         "summary": "Deep Subsystem Readiness Probe",
-        "description": "Verifies downstream dependencies (DynamoDB, Bedrock, S3, Webhook Dispatcher).",
+        "description": "Verifies downstream dependencies (DynamoDB, Bedrock, S3, Webhook Dispatcher). HEAD is contracted so an uptime check need not download the breakdown on every probe; the deployed stack answers 404 to it today, so use GET.",
         "responses": {
           "200": {
             "description": "Subsystems health breakdown"
-          }
-        }
-      },
-      "head": {
-        "summary": "Readiness, without the body",
-        "description": "The same status code as GET, with no body. An uptime check that only wants the code should use this rather than downloading the breakdown on every probe.",
-        "responses": {
-          "200": {
-            "description": "Ready"
-          },
-          "503": {
-            "description": "A dependency could not be reached"
           }
         }
       }
@@ -486,7 +483,7 @@
     "/hooks/threefold_hook.py": {
       "get": {
         "summary": "The hook itself",
-        "description": "Serves the one script that puts Threefold in front of Claude Code, Codex or Antigravity, as readable text rather than as a download a reader cannot inspect. It is answered without a key even where reads are private: a product nobody can obtain is a demo. Which agent is calling is told to the script on its own command line, with --agent.",
+        "description": "Contracted, not answered by the deployed stack yet. The stack serves the hook at /hooks/claude_code_hook.py today and answers 404 here. This is the path the one script moves to: it puts Threefold in front of Claude Code, Codex or Antigravity, served as readable text rather than as a download a reader cannot inspect, and answered without a key even where reads are private, because a product nobody can obtain is a demo. Which agent is calling is told to the script on its own command line, with --agent.",
         "responses": {
           "200": {
             "description": "The script, as text/plain",
@@ -498,22 +495,14 @@
               }
             }
           }
-        }
-      },
-      "head": {
-        "summary": "The hook's headers, without the file",
-        "description": "The same status and headers as GET, with no body.",
-        "responses": {
-          "200": {
-            "description": "The script is served here"
-          }
-        }
+        },
+        "x-threefold-state": "contracted, not yet deployed"
       }
     },
     "/status": {
       "get": {
         "summary": "Health & Active Policy Rules",
-        "description": "Returns health status, active governance rules, and model configuration.",
+        "description": "Returns health status, active governance rules, and model configuration. HEAD is contracted for a monitor that wants the code and not the body; the deployed stack answers 404 to it today, so use GET.",
         "responses": {
           "200": {
             "description": "Operational status and active rules",
@@ -534,15 +523,6 @@
                 }
               }
             }
-          }
-        }
-      },
-      "head": {
-        "summary": "Health, without the body",
-        "description": "The same status code and headers as GET, with no body. The dashboard's status badge reads the GET; a monitor that wants only the code should use this.",
-        "responses": {
-          "200": {
-            "description": "The service answered"
           }
         }
       }

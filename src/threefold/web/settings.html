@@ -4,8 +4,12 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Threefold — Policy Settings</title>
-  <!-- Tailwind CSS via CDN for zero-dependency portability, as on the dashboard -->
-  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Tailwind CSS via CDN, pinned to an exact version: an unpinned major is a
+       script that can change under a page that did not change, and it runs on the
+       same origin as the operator key this browser may hold. No integrity hash: the
+       Play CDN answers with no Access-Control-Allow-Origin header, so a browser
+       would refuse a script carrying one and the page would lose every style. -->
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
   <script>
       // The server rewrites __THREEFOLD_BASE_PATH__ to the API Gateway stage prefix
       // when it serves this page, so the base is exact rather than guessed from the
@@ -142,13 +146,28 @@
 
         <!-- The key lives in this browser's localStorage and nowhere else. The
              field is never filled from storage and the key is never printed, so a
-             screen share or a screenshot of this page cannot carry it. -->
+             screen share or a screenshot of this page cannot carry it. What the
+             panel below has to say out loud is the other half: localStorage is
+             readable by every script on this origin, and these pages load two
+             bundles from a CDN, so a page that only reassured the reader would be
+             leaving out the thing that decides whether storing it is safe. -->
         <div id="operator-key" class="p-3 rounded-xl bg-gray-950 border border-gray-800 space-y-2">
           <p class="text-xs font-semibold text-gray-200">Operator key for this browser</p>
           <p class="text-[11px] text-gray-400">
             Kept in this browser's localStorage under <span class="font-mono text-purple-300">threefold-operator-key</span> and
             sent as <span class="font-mono">X-API-Key</span> on the requests the console, rules, sessions and settings pages make
             to the API. It is not shown again after you store it. A key typed into a page's own field is used before this one.
+          </p>
+          <p class="text-[11px] text-amber-300/90">
+            Any script these pages load can read what is stored here, and that includes the Tailwind bundle every page loads
+            from <span class="font-mono">cdn.tailwindcss.com</span> and the Swagger UI bundle the API page loads from
+            <span class="font-mono">unpkg.com</span>. Both are pinned to an exact version, and Swagger UI is checked against a
+            hash, but a third party still serves them. Store the key only on a machine you trust, and clear it when you are done.
+          </p>
+          <p class="text-[11px] text-gray-400">
+            The stored key is sent only to the host that served this page. Point the <span class="font-mono">Sidecar REST</span>
+            field at another host and it is held back, so only a key you type into <span class="font-mono">API Key</span> goes
+            there.
           </p>
           <div class="flex flex-wrap items-center gap-2">
             <input id="operatorKeyInput" type="password" value="" autocomplete="off" placeholder="paste the key to store it"
@@ -355,6 +374,20 @@
       try { return (window.localStorage.getItem(OPERATOR_KEY_STORAGE) || '').trim(); } catch (err) { return ''; }
     }
 
+    // localStorage belongs to an origin, but the Sidecar REST field above can be
+    // pointed at any host, so a key stored for this page would otherwise be sent
+    // to whatever is typed there. The stored key goes out only when the target is
+    // the origin that served this page. A key typed into the API Key field is the
+    // reader's own choice for that request and always goes. A base that will not
+    // parse is not this origin, so it gets nothing.
+    function baseIsThisOrigin(base) {
+      try {
+        return new URL(base, location.href).origin === location.origin;
+      } catch (err) {
+        return false;
+      }
+    }
+
     // Reports whether a key is stored, never what it is.
     function renderOperatorKeyState(note) {
       let text;
@@ -401,7 +434,8 @@
 
     function authHeaders(extra) {
       const headers = Object.assign({ "Accept": "application/json" }, extra || {});
-      const key = document.getElementById("apiKeyInput").value.trim() || storedOperatorKey();
+      const typed = document.getElementById("apiKeyInput").value.trim();
+      const key = typed || (baseIsThisOrigin(getApiBase()) ? storedOperatorKey() : "");
       if (key) headers["X-API-Key"] = key;
       return headers;
     }

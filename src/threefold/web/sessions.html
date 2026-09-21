@@ -4,8 +4,12 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Threefold — Governed Sessions</title>
-  <!-- Tailwind CSS via CDN for zero-dependency portability, as on the dashboard -->
-  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Tailwind CSS via CDN, pinned to an exact version: an unpinned major is a
+       script that can change under a page that did not change, and it runs on the
+       same origin as the operator key this browser may hold. No integrity hash: the
+       Play CDN answers with no Access-Control-Allow-Origin header, so a browser
+       would refuse a script carrying one and the page would lose every style. -->
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
   <script>
       // The server rewrites __THREEFOLD_BASE_PATH__ to the API Gateway stage prefix
       // when it serves this page, so the base is exact rather than guessed from the
@@ -276,9 +280,24 @@
       try { return (window.localStorage.getItem(OPERATOR_KEY_STORAGE) || '').trim(); } catch (err) { return ''; }
     }
 
+    // localStorage belongs to an origin, but the Sidecar REST field above can be
+    // pointed at any host, so a key stored for this page would otherwise be sent
+    // to whatever is typed there. The stored key goes out only when the target is
+    // the origin that served this page. A key typed into the API Key field is the
+    // reader's own choice for that request and always goes. A base that will not
+    // parse is not this origin, so it gets nothing.
+    function baseIsThisOrigin(base) {
+      try {
+        return new URL(base, location.href).origin === location.origin;
+      } catch (err) {
+        return false;
+      }
+    }
+
     function authHeaders(extra) {
       const headers = Object.assign({ "Accept": "application/json" }, extra || {});
-      const key = document.getElementById("apiKeyInput").value.trim() || storedOperatorKey();
+      const typed = document.getElementById("apiKeyInput").value.trim();
+      const key = typed || (baseIsThisOrigin(getApiBase()) ? storedOperatorKey() : "");
       if (key) headers["X-API-Key"] = key;
       return headers;
     }
