@@ -98,9 +98,12 @@ none of it is ever committed. `--api-key-file` names a file holding the key, for
 a stack that enforces one; the key itself is never written into the repository.
 Codex reads a project's hooks only once that project is trusted in Codex.
 
-Roll it out in `observe` first: every call is judged and recorded but never
-refused, so the enforcement console shows what would have been stopped while
-nobody is. When that record reads right, run the installer again with
+Roll it out in `observe` first: every call the hook sends goes as `dry_run`,
+which the service judges and records but never refuses, so the enforcement
+console shows what would have been stopped while nobody is. A call carrying a
+credential is still refused on your machine and never sent, in either mode, and
+a call the hook holds back is neither sent nor recorded. When that record reads
+right, run the installer again with
 `--mode enforce`, or set `"mode": "enforce"` in `.threefold.json`; `--uninstall`
 takes it all out again.
 

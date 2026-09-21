@@ -14,9 +14,11 @@ skip where Node is absent; the rest need nothing but the standard library.
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -55,7 +57,8 @@ def _deployed_project_pattern() -> str:
 
 # A stub of the few browser objects the two pages touch. Every element is a
 # plain object made on first use, and fetch records each request and answers
-# with whatever the scenario has set in `answer`.
+# with whatever the scenario has set in `answer`. An answer may be a promise, so
+# a scenario can hold one read back and let a later one finish first.
 _BROWSER_STUB = r"""
 const elements = {};
 function el(id) {
@@ -79,15 +82,20 @@ let answer = () => ({ status: 200, body: { rules: [], count: 0, is_default: true
 globalThis.fetch = async (url, init) => {
   init = init || {};
   calls.push({ url, method: init.method || 'GET', headers: init.headers || {}, body: init.body ? JSON.parse(init.body) : null });
-  const reply = answer(url, init);
+  const reply = await answer(url, init);
   return { ok: reply.status < 400, status: reply.status, json: async () => reply.body };
 };
+function held() { let release; const promise = new Promise(r => { release = r; }); return { promise, release }; }
 const tick = async () => { for (let i = 0; i < 5; i++) await new Promise(r => setTimeout(r, 0)); };
 """
 
 
-def _run_page(path: str, scenario: str, tmp_path: Path) -> dict:
-    """Runs the page's inline scripts, as served, then the scenario, under Node."""
+def _run_page(path: str, scenario: str, tmp_path: Path, before: str = "") -> dict:
+    """Runs the page's inline scripts, as served, then the scenario, under Node.
+
+    `before` runs ahead of the page's own script, for what the page reads as it
+    loads, such as the address it was opened at.
+    """
     node = shutil.which("node")
     if not node:
         pytest.skip("Node is not on PATH, so the page's script cannot be run here")
@@ -96,6 +104,8 @@ def _run_page(path: str, scenario: str, tmp_path: Path) -> dict:
     program = tmp_path / "page.js"
     program.write_text(
         _BROWSER_STUB
+        + before
+        + "\n;\n"
         + "\n;\n".join(scripts)
         + "\n;\n(async () => {\n  const out = {};\n  await tick();\n"
         + scenario
@@ -236,7 +246,159 @@ def test_the_rules_page_never_sends_a_name_outside_the_pattern(tmp_path: Path) -
     assert out["stillOn"] == "Acme-Billing", "A refused name must not become what a save lands on"
 
 
+# Acme-Alpha has saved a rule of its own, so a copy of it turning up in a save
+# for another project can only have come from the editor.
+_ALPHA_OWN = "{ status: 200, body: { rules: [{ id: 'alpha-own', when_path_matches: ['**/alpha/**'], forbid_imports: ['boto3'] }], count: 1, is_default: false } }"
+
+
+def test_a_save_after_a_failed_read_never_sends_the_previous_projects_rules(tmp_path: Path) -> None:
+    """The name on screen moves on at once; the editor moves on only when the new read succeeds.
+
+    Found by running the page: Acme-Beta's read answered 503, the button read
+    "Save for Acme-Beta", and the save sent Acme-Alpha's own rule under Beta's
+    name, quietly giving Beta a copy of Alpha's gate.
+    """
+    out = _run_page(
+        "/rules.html",
+        r"""
+  store['threefold-operator-key'] = 'op-key-123';
+  answer = () => (ALPHA_OWN);
+  el('project-input').value = 'Acme-Alpha';
+  chooseProject();
+  await tick();
+  out.alphaEditor = el('editor').value;
+
+  answer = (url, init) => (init && init.method === 'POST')
+    ? { status: 200, body: { status: 'RULES_UPDATED', count: 1, refresh_seconds: 30 } }
+    : { status: 503, body: { detail: 'unavailable' } };
+  el('project-input').value = 'Acme-Beta';
+  chooseProject();
+  await tick();
+  out.badge = el('scope-badge').innerText;
+  out.button = el('save-button').innerText;
+  await save();
+  out.saidAfterFailedRead = el('save-result').innerHTML;
+  resetEditor();
+  await save();
+  out.saidAfterReset = el('save-result').innerHTML;
+  out.postsBeforeExample = calls.filter(c => c.method === 'POST').length;
+
+  loadExample('java');
+  await save();
+  out.exampleSave = calls.filter(c => c.method === 'POST').pop();
+""".replace("ALPHA_OWN", _ALPHA_OWN),
+        tmp_path,
+    )
+    assert "alpha-own" in out["alphaEditor"]
+    assert out["badge"] == "NOT READ" and "Acme-Beta" in out["button"], "The scenario found: Beta on the button, Alpha in the editor"
+    assert out["postsBeforeExample"] == 0, "Acme-Alpha's rules were sent under Acme-Beta's name"
+    assert "Acme-Alpha" in out["saidAfterFailedRead"] and "Nothing was sent" in out["saidAfterFailedRead"]
+    assert "Nothing was sent" in out["saidAfterReset"], "Back to what is in force puts Alpha's rules back; it must not make them Beta's"
+
+    # An example belongs to no project, so a failed read does not lock Beta out.
+    example = out["exampleSave"]
+    assert example["body"]["project"] == "Acme-Beta"
+    assert [rule["id"] for rule in example["body"]["rules"]] == ["billing-domain-stays-pure"]
+
+
+def test_a_save_while_the_next_projects_rules_are_still_being_read_sends_nothing(tmp_path: Path) -> None:
+    out = _run_page(
+        "/rules.html",
+        r"""
+  store['threefold-operator-key'] = 'op-key-123';
+  answer = () => (ALPHA_OWN);
+  el('project-input').value = 'Acme-Alpha';
+  chooseProject();
+  await tick();
+
+  const betaRead = held();
+  answer = (url, init) => (init && init.method === 'POST')
+    ? { status: 200, body: { status: 'RULES_UPDATED', count: 1, refresh_seconds: 30 } }
+    : betaRead.promise;
+  el('project-input').value = 'Acme-Beta';
+  chooseProject();
+  await tick();
+  await save();
+  out.postsWhileReading = calls.filter(c => c.method === 'POST').length;
+  out.said = el('save-result').innerHTML;
+
+  betaRead.release({ status: 200, body: { rules: [{ id: 'beta-own', when_path_matches: ['**/beta/**'], forbid_imports: ['boto3'] }], count: 1, is_default: false } });
+  await tick();
+  await save();
+  out.saveOnceRead = calls.filter(c => c.method === 'POST').pop();
+""".replace("ALPHA_OWN", _ALPHA_OWN),
+        tmp_path,
+    )
+    assert out["postsWhileReading"] == 0, "Acme-Alpha's rules were sent under Acme-Beta's name while Beta's were being read"
+    assert "Acme-Alpha" in out["said"] and "Nothing was sent" in out["said"]
+
+    # Once Beta's own rules are in the editor, the save goes through with them.
+    assert out["saveOnceRead"]["body"]["project"] == "Acme-Beta"
+    assert [rule["id"] for rule in out["saveOnceRead"]["body"]["rules"]] == ["beta-own"]
+
+
+def test_a_link_naming_a_project_opens_the_page_on_that_projects_rules(tmp_path: Path) -> None:
+    linked = _run_page(
+        "/rules.html",
+        r"""
+  out.firstRead = calls[0].url;
+  out.field = el('project-input').value;
+  out.button = el('save-button').innerText;
+""",
+        tmp_path,
+        before="location.search = '?project=Acme-Linked';",
+    )
+    assert linked["firstRead"] == "https://example.test/prod/rules?project=Acme-Linked"
+    assert linked["field"] == "Acme-Linked"
+    assert linked["button"] == "Save for Acme-Linked"
+
+    # A link is held to the same pattern as a typed name, so markup in it is never read or saved under.
+    refused = _run_page(
+        "/rules.html",
+        r"""
+  out.firstRead = calls[0].url;
+  out.field = el('project-input').value;
+""",
+        tmp_path,
+        before="location.search = '?project=Acme-Linked%3Cscript%3E';",
+    )
+    assert refused["firstRead"] == "https://example.test/prod/rules"
+    assert refused["field"] == ""
+
+
+def test_only_the_latest_read_is_drawn_when_answers_arrive_out_of_order(tmp_path: Path) -> None:
+    """Switching twice quickly must not let the slower first answer draw last.
+
+    It would show one project's rules under the other's name, and put them in
+    the editor that the save sends.
+    """
+    out = _run_page(
+        "/rules.html",
+        r"""
+  const reads = {};
+  answer = url => { const read = held(); reads[url] = read; return read.promise; };
+  el('project-input').value = 'Acme-Slow';
+  chooseProject();
+  el('project-input').value = 'Acme-Fast';
+  chooseProject();
+  await tick();
+  reads['https://example.test/prod/rules?project=Acme-Fast'].release({ status: 200, body: { rules: [{ id: 'fast-own', when_path_matches: ['**'], forbid_imports: ['boto3'] }], count: 1, is_default: false } });
+  await tick();
+  reads['https://example.test/prod/rules?project=Acme-Slow'].release({ status: 200, body: { rules: [{ id: 'slow-own', when_path_matches: ['**'], forbid_imports: ['boto3'] }], count: 1, is_default: false } });
+  await tick();
+  out.list = el('rules-list').innerHTML;
+  out.badge = el('scope-badge').innerText;
+  out.editor = el('editor').value;
+""",
+        tmp_path,
+    )
+    assert "fast-own" in out["list"] and "slow-own" not in out["list"]
+    assert "Acme-Fast" in out["badge"]
+    assert "fast-own" in out["editor"] and "slow-own" not in out["editor"]
+
+
 def test_the_rules_page_escapes_what_the_service_returns(tmp_path: Path) -> None:
+    """refresh_seconds reaches the save message from two answers, the save's and the last read's."""
     out = _run_page(
         "/rules.html",
         r"""
@@ -245,11 +407,32 @@ def test_the_rules_page_escapes_what_the_service_returns(tmp_path: Path) -> None
   chooseProject();
   await tick();
   out.list = el('rules-list').innerHTML;
+
+  store['threefold-operator-key'] = 'op-key-123';
+  const rules = { status: 200, body: { rules: [{ id: 'billing-only', when_path_matches: ['**'], forbid_imports: ['boto3'] }], count: 1, is_default: false } };
+  answer = (url, init) => (init && init.method === 'POST')
+    ? { status: 200, body: { status: 'RULES_UPDATED', count: 1, refresh_seconds: '<img src=x onerror=alert(1)>' } }
+    : rules;
+  load();
+  await tick();
+  await save();
+  out.savedFromTheSaveAnswer = el('save-result').innerHTML;
+
+  answer = (url, init) => (init && init.method === 'POST')
+    ? { status: 200, body: { status: 'RULES_UPDATED', count: 1 } }
+    : { status: 200, body: Object.assign({}, rules.body, { refresh_seconds: '<svg onload=alert(2)>' }) };
+  load();
+  await tick();
+  await save();
+  out.savedFromTheReadAnswer = el('save-result').innerHTML;
 """,
         tmp_path,
     )
     assert "<img" not in out["list"] and "&lt;img" in out["list"]
     assert "<b>bold" not in out["list"] and "<i>**" not in out["list"]
+
+    assert "Saved 1 rule" in out["savedFromTheSaveAnswer"] and "<img" not in out["savedFromTheSaveAnswer"]
+    assert "Saved 1 rule" in out["savedFromTheReadAnswer"] and "<svg" not in out["savedFromTheReadAnswer"]
 
 
 # -------------------------------------------------------------- connect.html
@@ -304,6 +487,90 @@ def test_the_installer_command_carries_every_flag_and_the_endpoint_in_the_bar(tm
     assert re.match(_deployed_project_pattern(), config["project"])
     assert "--mode enforce" in out["enforce"]
     assert "--uninstall" in out["uninstall"]
+    assert "a call carrying a credential is still refused on this machine" in install
+
+
+def _plain(html: str) -> str:
+    """The words a reader sees, with tags dropped and line breaks folded."""
+    return " ".join(re.sub(r"<[^>]+>", "", html).split())
+
+
+def _hook_decision_in_observe_on_a_credential(tmp_path: Path) -> str | None:
+    """Runs the hook as an agent does, in observe, on a Write that carries a credential.
+
+    Observe is set both ways it can be: the day-1 variable and the day-2
+    per-repository file. The machine is a temporary directory and the endpoint
+    answers nothing, so no owner file is read and nothing leaves.
+    """
+    home = tmp_path / "home"
+    project = tmp_path / "acme-probe"
+    home.mkdir()
+    project.mkdir()
+    endpoint = "http://127.0.0.1:9"
+    (project / ".threefold.json").write_text(
+        json.dumps({"project": "Acme-Probe", "endpoint": endpoint, "mode": "observe"}), encoding="utf-8"
+    )
+    env = {
+        name: value
+        for name, value in os.environ.items()
+        if not name.startswith("THREEFOLD_") and name.upper() not in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY")
+    }
+    env.update(
+        HOME=str(home),
+        USERPROFILE=str(home),
+        THREEFOLD_HOME=str(home / ".threefold"),
+        THREEFOLD_PROJECT="Acme-Probe",
+        THREEFOLD_ENDPOINT=endpoint,
+        THREEFOLD_DRY_RUN="1",
+        PYTHONIOENCODING="utf-8",
+    )
+    payload = {
+        "session_id": "acme-probe-1",
+        "cwd": str(project),
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Write",
+        "tool_input": {"file_path": str(project / "src" / "settings.py"), "content": "KEY = '" + "AKIA" + "ACMEEXAMPLE00000'\n"},
+    }
+    ran = subprocess.run(
+        [sys.executable, str(ROOT / "src" / "threefold" / "hooks" / "threefold_hook.py"), "--agent", "claude-code"],
+        input=json.dumps(payload),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=60,
+        env=env,
+        cwd=str(project),
+    )
+    if not ran.stdout.strip():
+        return None
+    return json.loads(ran.stdout)["hookSpecificOutput"]["permissionDecision"]
+
+
+def test_observe_mode_is_described_as_the_hook_runs_it(tmp_path: Path) -> None:
+    """In observe the service refuses nothing, but the hook still refuses a credential.
+
+    The pages said no call is refused in observe. The hook refuses a call
+    carrying a credential before it builds any request, dry run or not, since
+    the contract says such a call never leaves the machine; and a call it holds
+    back is neither sent nor recorded. The hook is run here, so if observe ever
+    does let a credential through, this test says the pages must change with it.
+    """
+    assert _hook_decision_in_observe_on_a_credential(tmp_path) == "deny"
+
+    page = _page("/connect.html")
+    section = _plain(_section(page, "govern-your-repositories"))
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    install = _plain(readme.split("## Install it in front of your own agent", 1)[1].split("\n## ", 1)[0])
+    for where, words in (("connect.html", section), ("README.md", install)):
+        assert "a call carrying a credential is still refused on your machine and never sent" in words.lower(), where
+        assert "neither sent nor recorded" in words, f"{where} does not say a held-back call is neither sent nor recorded"
+    for claim in (
+        "none is refused",
+        "judged and recorded, never refused, and never halts",
+        "every call is judged and recorded but never refused",
+    ):
+        assert claim not in _plain(page) and claim not in _plain(readme), f"Still claimed: {claim!r}"
 
 
 def _measured_per_agent() -> dict[str, str]:
@@ -362,10 +629,31 @@ def test_the_spec_documents_rules_per_project() -> None:
 
 
 def test_the_spec_documents_resume_behind_the_operator_key() -> None:
+    """Documented with no body, Try it out on this route could only ever get a 400.
+
+    The service requires operator_name and reason, refusing either when missing
+    or over its limit, and answers 409 for a session that is not halted.
+    """
     resume = _spec()["paths"]["/sessions/{session_id}/resume"]["post"]
     assert {"OperatorApiKey": []} in resume["security"]
-    assert {"200", "401", "403", "404"} <= set(resume["responses"])
+    assert {"200", "400", "401", "403", "404", "409"} <= set(resume["responses"])
     assert "session-not-found" in resume["responses"]["404"]["description"]
+    assert "session-not-halted" in resume["responses"]["409"]["description"]
+
+    body = resume["requestBody"]
+    assert body["required"] is True
+    schema = body["content"]["application/json"]["schema"]
+    assert set(schema["required"]) == {"operator_name", "reason"}
+    for field, limit in (("operator_name", 120), ("reason", 240)):
+        documented = schema["properties"][field]
+        assert documented["type"] == "string" and documented["maxLength"] == limit, f"{field} as the service reads it"
+    example = body["content"]["application/json"]["example"]
+    assert set(example) == {"operator_name", "reason"}
+    assert len(example["operator_name"]) <= 120 and len(example["reason"]) <= 240
+
+    answered = resume["responses"]["200"]["content"]["application/json"]["schema"]["properties"]
+    assert answered["status"]["enum"] == ["SESSION_RESUMED"]
+    assert {"session_id", "operator", "reason", "resumed_at", "previous_trip_reason", "is_tripped"} <= set(answered)
 
 
 def test_the_spec_says_a_hooks_loop_refuses_the_call_without_halting_the_session() -> None:

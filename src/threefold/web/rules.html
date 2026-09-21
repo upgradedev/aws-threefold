@@ -236,6 +236,14 @@ public class Order { }</textarea>
     // twice quickly would otherwise let the slower first answer overwrite the
     // second, showing one project's rules under another's name.
     let loadTicket = 0;
+    // Whose rules `inForce` holds, and whose rules the draft in the editor was
+    // written for. null is nobody yet. currentProject changes the moment a name is
+    // accepted, but the list and the editor change only when that project's read
+    // succeeds, so until then, or for good if the read fails, the editor still
+    // holds the previous project's rules. Saving them under the new name would
+    // quietly give one project a copy of another's gate.
+    let inForceProject = null;
+    let draftProject = null;
 
     function escapeHtml(str) {
       // Everything is made a string first and then escaped. Returning a non-string
@@ -376,6 +384,7 @@ public class Order { }</textarea>
 
     async function load() {
       const ticket = ++loadTicket;
+      const asked = currentProject;
       setScope('bg-gray-950 text-gray-400 border-gray-800', 'Reading…');
       try {
         const res = await fetch(rulesUrl(), { headers: authHeaders() });
@@ -383,9 +392,11 @@ public class Order { }</textarea>
         if (ticket !== loadTicket) return;
         if (!res.ok) throw new Error('HTTP ' + res.status);
         inForce = data.rules || [];
+        inForceProject = asked;
         renderRules(inForce);
         document.getElementById('languages').innerText = (data.extensions_read || data.languages_read || []).join(', ');
-        refreshSeconds = data.refresh_seconds || refreshSeconds;
+        // A number or nothing: this value is later written into the save message.
+        refreshSeconds = Number(data.refresh_seconds) || refreshSeconds;
         document.getElementById('unsupported').innerText = data.unsupported || '';
         describeOrigin(data);
         resetEditor();
@@ -403,14 +414,24 @@ public class Order { }</textarea>
       }
     }
 
+    // The draft becomes the rules last read, and so belongs to the project they
+    // were read for, which after a failed read is not the one on screen.
     function resetEditor() {
       document.getElementById('editor').value = JSON.stringify({ rules: inForce }, null, 2);
+      draftProject = inForceProject;
       validate();
     }
 
+    // An example belongs to no project, so a draft started from one is written
+    // for the project on screen, even one whose rules could not be read.
     function loadExample(name) {
       document.getElementById('editor').value = JSON.stringify({ rules: EXAMPLES[name] }, null, 2);
+      draftProject = currentProject;
       validate();
+    }
+
+    function whose(project) {
+      return project ? project + '’s' : 'the shared set’s';
     }
 
     // Only the shape is checked here: that the text is JSON and holds a list of
@@ -503,6 +524,17 @@ public class Order { }</textarea>
 
     async function save() {
       const out = document.getElementById('save-result');
+      // Checked before the draft itself: a draft that is valid but was read for
+      // another project is the dangerous one, not a draft with problems.
+      if (draftProject !== currentProject) {
+        const held = draftProject === null
+          ? 'The editor holds no rules that were read for anything yet'
+          : 'The editor still holds ' + whose(draftProject) + ' rules';
+        out.innerHTML = '<p class="text-red-400">' + escapeHtml(held + '; ' + whose(currentProject) +
+          ' have not been read yet. Nothing was sent. Wait for them to be read, or start from an example, which is then a draft for ' +
+          (currentProject || 'the shared set') + '.') + '</p>';
+        return;
+      }
       const rules = validate();
       if (!rules) { out.innerHTML = '<p class="text-red-400">Nothing was sent: the draft has problems listed above.</p>'; return; }
       const headers = authHeaders({ 'Content-Type': 'application/json' }, document.getElementById('api-key').value);
@@ -535,7 +567,7 @@ public class Order { }</textarea>
         out.innerHTML = '<p class="text-emerald-400">Saved ' + escapeHtml(d.count) + ' rule' + (d.count === 1 ? '' : 's') +
           (target ? ' for ' + escapeHtml(target) + ' alone' : ' as the shared set') + '. ' +
           (d.count === 1 ? 'It applies' : 'They apply') + ' from the next call on the server that took the save, and on every other server within ' +
-          (d.refresh_seconds || refreshSeconds) + ' seconds.</p>';
+          escapeHtml(Number(d.refresh_seconds) || refreshSeconds) + ' seconds.</p>';
         await load();
       } catch (err) {
         out.innerHTML = '<p class="text-red-400">' + escapeHtml(String(err)) + '</p>';

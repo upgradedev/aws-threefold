@@ -453,7 +453,7 @@
     "/sessions/{session_id}/resume": {
       "post": {
         "summary": "Resume a halted session",
-        "description": "Lifts the halt on a recorded session, so its next call is evaluated again instead of refused with BLOCKED_CIRCUIT_BREAKER. Requires the operator key even where reads are anonymous, because it undoes a halt the gate or an operator made. Never creates a session.",
+        "description": "Lifts the halt on a recorded session, so its next call is evaluated again instead of refused with BLOCKED_CIRCUIT_BREAKER. Requires the operator key even where reads are anonymous, because it undoes a halt the gate or an operator made. The body names who cleared the halt and why, and both are kept on the session as the record of it. History and spend are kept too, so a session past its budget, or repeating the call that halted it, halts again. Never creates a session.",
         "security": [
           {
             "OperatorApiKey": []
@@ -467,11 +467,101 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Replays the first response for a repeated key instead of resuming twice.",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
+        "requestBody": {
+          "required": true,
+          "description": "The record of who cleared the halt and why. Both are required, because that record is the reason this route needs the operator key; a value over its length is refused rather than cut, since a shortened record says something its author did not.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "operator_name",
+                  "reason"
+                ],
+                "properties": {
+                  "operator_name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120,
+                    "description": "Who cleared the halt."
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 240,
+                    "description": "Why it was cleared."
+                  }
+                }
+              },
+              "example": {
+                "operator_name": "Acme platform on-call",
+                "reason": "Budget raised for the Acme-Billing migration; resuming the same session."
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
-            "description": "The session is no longer halted"
+            "description": "The session is no longer halted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "SESSION_RESUMED"
+                      ]
+                    },
+                    "session_id": {
+                      "type": "string"
+                    },
+                    "operator": {
+                      "type": "string",
+                      "description": "The operator_name that was sent."
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "resumed_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "previous_trip_reason": {
+                      "type": "string",
+                      "description": "The halt this resume cleared, as the session recorded it; empty when it recorded none."
+                    },
+                    "is_tripped": {
+                      "type": "boolean"
+                    },
+                    "total_cost_usd": {
+                      "type": "number"
+                    },
+                    "budget_usd": {
+                      "type": "number"
+                    },
+                    "note": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "operator_name or reason is missing, is not text, or is longer than its limit (urn:threefold:error:bad-request, naming the field); nothing was changed"
           },
           "401": {
             "description": "No key was presented"
@@ -481,6 +571,9 @@
           },
           "404": {
             "description": "No session with this id has been recorded (urn:threefold:error:session-not-found), so there is nothing to resume and nothing is created"
+          },
+          "409": {
+            "description": "The session is running, not halted (urn:threefold:error:session-not-halted), so there is nothing to clear and nothing was changed"
           }
         }
       }
