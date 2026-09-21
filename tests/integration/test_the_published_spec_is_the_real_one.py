@@ -34,7 +34,15 @@ def test_the_spec_route_answers_the_document_itself() -> None:
 def test_the_spec_documents_the_routes_the_console_is_built_on() -> None:
     """Each page reads one of these. A contract that omits them is not the contract."""
     spec = json.loads(_get("/openapi.json")["body"])
-    for route in ("/api/sessions", "/sessions/{session_id}", "/policy/config", "/evaluate-tool-call"):
+    for route in (
+        "/api/sessions",
+        "/sessions/{session_id}",
+        "/policy/config",
+        "/evaluate-tool-call",
+        "/api/insights",
+        "/rules",
+        "/rules/explain",
+    ):
         assert route in spec["paths"], f"{route} is served but undocumented"
 
 

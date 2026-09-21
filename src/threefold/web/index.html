@@ -80,6 +80,9 @@
         <a href="console.html" class="text-xs px-3 py-1.5 rounded-md bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700 transition">
           Enforcement Console ↗
         </a>
+        <a href="rules.html" class="text-xs px-3 py-1.5 rounded-md bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700 transition">
+          Architecture Rules ↗
+        </a>
         <a href="sessions.html" class="text-xs px-3 py-1.5 rounded-md bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700 transition">
           Sessions ↗
         </a>
@@ -434,7 +437,10 @@
     }
 
     function escapeHtml(str) {
-      if (typeof str !== 'string') return str == null ? '' : String(str);
+      // Everything is made a string first and then escaped. Returning a non-string
+      // as String(value) unescaped let a tool_name sent as an array reach the page
+      // as markup.
+      if (typeof str !== 'string') str = str == null ? '' : String(str);
       return str.replace(/[&<>"']/g, m => ({
         '&': '&amp;',
         '<': '&lt;',

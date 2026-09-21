@@ -1,81 +1,25 @@
+# Generated from src/threefold/web/openapi.json, which is the document the deployment serves.
+# Edit that file and regenerate this one; do not edit this one by hand.
 openapi: 3.1.0
 info:
   title: Threefold Governance Sidecar API
   version: 1.0.0
   description: >
-    Autonomous coding agent governance sidecar and cost circuit-breaker. Deterministic
-    code decides: it scans arguments for credential shapes, refuses writes that cross a
-    Clean Architecture boundary, halts a session that repeats a cycle of tool calls, and
-    caps projected spend. Amazon Bedrock (Claude Haiku 4.5) only phrases the verdict, and
-    every response says which of the two produced the sentence it carries, in
-    explanation_source. Certificates are SHA-256 fingerprints over a session's verdicts:
-    they detect corruption, not an adversary, because nothing signs them.
+    Autonomous coding agent governance sidecar and cost circuit-breaker. Deterministic code decides: it scans arguments
+    for credential shapes, refuses writes that cross a Clean Architecture boundary, halts a session that repeats
+    a cycle of tool calls, and caps projected spend. Amazon Bedrock (Claude Haiku 4.5) only phrases the verdict,
+    and every response says which of the two produced the sentence it carries, in explanation_source. Certificates
+    are SHA-256 fingerprints over a session's verdicts: they detect corruption, not an adversary, because nothing
+    signs them.
   contact:
     name: Threefold Team
     url: https://github.com/upgradedev/threefold-aws
 servers:
-  - url: https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod
-    description: Live deployment, eu-west-1. Answers an anonymous request with no key.
-  - url: http://127.0.0.1:8001
-    description: Local runtime, started by make run.
-
+- url: https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod
+  description: Live deployment, eu-west-1. Answers an anonymous request with no key.
+- url: http://127.0.0.1:8001
+  description: Local runtime, started by make run.
 paths:
-  /status:
-    get:
-      summary: Health & Active Policy Rules
-      description: Returns health status, active governance rules, and model configuration.
-      responses:
-        '200':
-          description: Operational status and active rules
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  service:
-                    type: string
-                    example: Threefold
-                  status:
-                    type: string
-                    example: HEALTHY
-
-  /evaluate-tool-call:
-    post:
-      summary: Evaluate Agent Tool Call
-      description: Evaluates an individual tool invocation against secret scanners, loops, boundary guards, and budget.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - session_id
-                - tool_name
-              properties:
-                session_id:
-                  type: string
-                developer_id:
-                  type: string
-                project_name:
-                  type: string
-                tool_name:
-                  type: string
-                action_type:
-                  type: string
-                  enum: [FILE_READ, FILE_WRITE, COMMAND_EXEC]
-                arguments:
-                  type: object
-                projected_input_tokens:
-                  type: integer
-                projected_output_tokens:
-                  type: integer
-                budget_usd:
-                  type: number
-      responses:
-        '200':
-          description: Evaluation verdict, risk assessment, and Bedrock explanation
-
   /adapter/universal-tool-call:
     post:
       summary: Universal Multi-Agent Tool Adapter
@@ -89,50 +33,24 @@ paths:
       responses:
         '200':
           description: Normalized evaluation result
-
-  /simulate-loop:
-    post:
-      summary: Simulate Thrashing Loop
-      description: Simulates 3 consecutive identical file edits to demonstrate circuit-breaker tripping.
-      responses:
-        '200':
-          description: Loop interception verdict with Bedrock explanation
-
-  /simulate-secret:
-    post:
-      summary: Simulate Secret Leakage
-      description: Simulates an agent attempting to export AWS access keys, tripping the Secret Scanner.
-      responses:
-        '200':
-          description: Security block verdict
-
-  /issue-certificate:
-    post:
-      summary: Issue Cryptographic Governance Certificate
-      description: Issues a signed SHA-256 Governance Certificate for CI/CD PR gating.
-      responses:
-        '200':
-          description: Cryptographic certificate
-
   /api/sessions:
     get:
       summary: List Governed Sessions
       description: >-
-        Returns the sessions the service has evaluated, newest first. This is the
-        contract the sessions console renders. The listing scans the session table,
-        which is honest at this scale only; a deployment with real traffic wants a
-        secondary index on a recency key. The calls field counts retained history,
-        which the store caps at the last fifty per session.
+        Returns the sessions the service has evaluated, newest first. This is the contract the sessions console
+        renders. The listing scans the session table, which is honest at this scale only; a deployment with real
+        traffic wants a secondary index on a recency key. The calls field counts retained history, which the store
+        caps at the last fifty per session.
       parameters:
-        - name: limit
-          in: query
-          required: false
-          description: Maximum rows to return. Clamped to between 1 and 200.
-          schema:
-            type: integer
-            default: 50
-            minimum: 1
-            maximum: 200
+      - name: limit
+        in: query
+        required: false
+        description: Maximum rows to return. Clamped to between 1 and 200.
+        schema:
+          type: integer
+          default: 50
+          minimum: 1
+          maximum: 200
       responses:
         '200':
           description: Session summaries, with the persistence mode of the most recent write
@@ -145,10 +63,12 @@ paths:
                     type: integer
                   persistence:
                     type: string
-                    enum: [dynamodb, memory]
+                    enum:
+                    - dynamodb
+                    - memory
                     description: >-
-                      Where the most recent session write landed. It does not describe
-                      where the rows below were read from.
+                      Where the most recent session write landed. It does not describe where the rows below were
+                      read from.
                   sessions:
                     type: array
                     items:
@@ -178,62 +98,53 @@ paths:
                         calls:
                           type: integer
                           description: Retained history length, capped at 50.
-
-  /sessions/{session_id}:
-    get:
-      summary: Inspect Session State
-      description: Retrieves cumulative spend, token history, and circuit breaker status for an active session.
-      parameters:
-        - name: session_id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Current session statistics
-
-  /sessions/{session_id}/terminate:
+  /evaluate-tool-call:
     post:
-      summary: Enterprise Emergency Kill Switch
-      description: Immediately freezes and terminates an autonomous agent session, revoking further tool executions.
-      parameters:
-        - name: session_id
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: Idempotency-Key
-          in: header
-          required: false
-          description: >-
-            Replays the first response for a repeated key instead of freezing twice.
-            Allowed through CORS, so a page served from another origin may send it.
-          schema:
-            type: string
+      summary: Evaluate Agent Tool Call
+      description: Evaluates an individual tool invocation against secret scanners, loops, boundary guards, and
+        budget.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
+              required:
+              - session_id
+              - tool_name
               properties:
-                operator_name:
+                session_id:
                   type: string
-                reason:
+                developer_id:
                   type: string
+                project_name:
+                  type: string
+                tool_name:
+                  type: string
+                action_type:
+                  type: string
+                  enum:
+                  - FILE_READ
+                  - FILE_WRITE
+                  - COMMAND_EXEC
+                arguments:
+                  type: object
+                projected_input_tokens:
+                  type: integer
+                projected_output_tokens:
+                  type: integer
+                budget_usd:
+                  type: number
       responses:
         '200':
-          description: Session frozen confirmation
-
-  /readyz:
-    get:
-      summary: Deep Subsystem Readiness Probe
-      description: Verifies downstream dependencies (DynamoDB, Bedrock, S3, Webhook Dispatcher).
+          description: Evaluation verdict, risk assessment, and Bedrock explanation
+  /issue-certificate:
+    post:
+      summary: Issue Cryptographic Governance Certificate
+      description: Issues a signed SHA-256 Governance Certificate for CI/CD PR gating.
       responses:
         '200':
-          description: Subsystems health breakdown
-
+          description: Cryptographic certificate
   /policy/config:
     get:
       summary: Get Dynamic Policy Configuration
@@ -244,13 +155,10 @@ paths:
     post:
       summary: Update Dynamic Policy Configuration
       description: >-
-        Adjusts the runtime governance thresholds. This write is durable: it lands in
-        DynamoDB and every container that starts afterwards adopts it, so it requires
-        the operator key even on a deployment where reads are anonymous. The handler
-        rebuilds the whole policy from the body, so send all four fields;
-        blocked_patterns is not accepted and is discarded.
-      security:
-        - OperatorApiKey: []
+        Adjusts the runtime governance thresholds. This write is durable: it lands in DynamoDB and every container
+        that starts afterwards adopts it, so it requires the operator key even on a deployment where reads are anonymous.
+        The handler rebuilds the whole policy from the body, so send all four fields; blocked_patterns is not accepted
+        and is discarded.
       requestBody:
         required: true
         content:
@@ -267,17 +175,285 @@ paths:
       responses:
         '200':
           description: Updated policy configuration
-
-components:
-  securitySchemes:
-    ApiKeyAuth:
-      type: apiKey
-      in: header
-      name: X-API-Key
-    BearerAuth:
-      type: http
-      scheme: bearer
-
+        '401':
+          description: No key was presented, and this deployment requires one for policy writes
+        '403':
+          description: The key was rejected, or this deployment has configured no policy-write key at all
+      security:
+      - OperatorApiKey: []
+  /readyz:
+    get:
+      summary: Deep Subsystem Readiness Probe
+      description: Verifies downstream dependencies (DynamoDB, Bedrock, S3, Webhook Dispatcher).
+      responses:
+        '200':
+          description: Subsystems health breakdown
+  /sessions/{session_id}:
+    get:
+      summary: Inspect Session State
+      description: >-
+        Retrieves cumulative spend, history length and circuit breaker status for a session that has been recorded.
+        Reading never creates a session.
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Current session statistics
+        '404':
+          description: No session with this id has been recorded (urn:threefold:error:session-not-found)
+  /sessions/{session_id}/terminate:
+    post:
+      summary: Enterprise Emergency Kill Switch
+      description: Immediately freezes and terminates an autonomous agent session, revoking further tool executions.
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: Idempotency-Key
+        in: header
+        required: false
+        description: >-
+          Replays the first response for a repeated key instead of freezing twice. Allowed through CORS, so a page
+          served from another origin may send it.
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                operator_name:
+                  type: string
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: Session frozen confirmation
+  /simulate-loop:
+    post:
+      summary: Simulate Thrashing Loop
+      description: Simulates 3 consecutive identical file edits to demonstrate circuit-breaker tripping.
+      responses:
+        '200':
+          description: Loop interception verdict with Bedrock explanation
+  /simulate-secret:
+    post:
+      summary: Simulate Secret Leakage
+      description: Simulates an agent attempting to export AWS access keys, tripping the Secret Scanner.
+      responses:
+        '200':
+          description: Security block verdict
+  /status:
+    get:
+      summary: Health & Active Policy Rules
+      description: Returns health status, active governance rules, and model configuration.
+      responses:
+        '200':
+          description: Operational status and active rules
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  service:
+                    type: string
+                    example: Threefold
+                  status:
+                    type: string
+                    example: HEALTHY
+  /api/insights:
+    get:
+      summary: What the gates decided, by project, kind of problem and rule
+      description: >-
+        Aggregates the decision ledger over a window for the Enforcement Console. A refusal and an observation are
+        counted apart: an observation is a call that ran and that a rule in observe mode would have refused. Rows
+        keep the target of a call and never its arguments.
+      parameters:
+      - name: days
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 30
+          default: 7
+      responses:
+        '200':
+          description: >-
+            totals (decisions, refused, approved, refusal_rate, observed, projects, developers), by_category, by_rule,
+            by_observed_rule, by_project, by_developer, by_day, recent_refusals, recent_observations, coverage
+  /rules:
+    get:
+      summary: The layering rules in force
+      description: Open, because a reader has to be able to see the architecture they are held to.
+      responses:
+        '200':
+          description: rules, count, is_default, languages_read, extensions_read, refresh_seconds, unsupported
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rules:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/LayeringRule'
+                  count:
+                    type: integer
+                  is_default:
+                    type: boolean
+                  languages_read:
+                    type: array
+                    items:
+                      type: string
+                  unsupported:
+                    type: string
+                  extensions_read:
+                    type: array
+                    items:
+                      type: string
+                  refresh_seconds:
+                    type: number
+                    description: How long a server may go on using the rules it holds before reading them again.
+    post:
+      summary: Replace the layering rules
+      description: >-
+        Replaces the whole set and stores it. The save is all or nothing: if any rule cannot be used, nothing is
+        saved and the 400 names each rule and why. The server that takes the save applies the rules from its next
+        call; every other server reads them again within refresh_seconds. Requires the operator key even where reads
+        are anonymous, because the rules are the gate rather than a setting on it.
+      security:
+      - OperatorApiKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - rules
+              properties:
+                rules:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/LayeringRule'
+                  maxItems: 50
+      responses:
+        '200':
+          description: RULES_UPDATED, with the rules as stored and refresh_seconds
+        '400':
+          description: At least one rule cannot be used; nothing was saved (urn:threefold:error:unusable-rule)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  type:
+                    type: string
+                  title:
+                    type: string
+                  detail:
+                    type: string
+                  problems:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        index:
+                          type:
+                          - integer
+                          - 'null'
+                          description: Position of the rule in what was sent.
+                        id:
+                          type:
+                          - string
+                          - 'null'
+                        reason:
+                          type: string
+        '401':
+          description: No key was presented
+        '403':
+          description: The key was rejected, or this deployment has configured no operator key at all
+  /rules/explain:
+    post:
+      summary: Try the rules on a file without saving or recording anything
+      description: >-
+        Reads the imports in the content and judges them against the layering rules in force, or against a draft
+        sent in the body. Only the layering rules are tried: a write this answers ALLOW for can still be refused
+        for a credential, a protected path, a loop or its cost. No verdict is issued, no ledger row is written and
+        a draft is never put in force, which is why it is open.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - path
+              properties:
+                path:
+                  type: string
+                  example: src/main/java/com/acme/billing/domain/Order.java
+                  description: >-
+                    At most 400 characters, on one line, with no spaces: the same test the gate applies before it
+                    judges a path.
+                content:
+                  type: string
+                  example: import javax.persistence.Entity;
+                rules:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/LayeringRule'
+                  description: A draft to try instead of the rules in force.
+      responses:
+        '200':
+          description: >-
+            language, imports, rules_considered (draft | in force), applicable_rules, verdict (REFUSE | OBSERVE
+            | ALLOW), violations, note, scope
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  verdict:
+                    type: string
+                    enum:
+                    - REFUSE
+                    - OBSERVE
+                    - ALLOW
+                  language:
+                    type:
+                    - string
+                    - 'null'
+                  imports:
+                    type: array
+                    items:
+                      type: string
+                  applicable_rules:
+                    type: array
+                    items:
+                      type: string
+                  violations:
+                    type: array
+                    items:
+                      type: object
+                  note:
+                    type: string
+                  scope:
+                    type: string
+                    const: layering rules only
+        '400':
+          description: >-
+            The body is not a JSON object, has no path, has a path the gate would never judge (urn:threefold:error:nothing-to-explain),
+            or carries a draft with a rule that cannot be used (urn:threefold:error:unusable-rule, with problems)
 components:
   securitySchemes:
     OperatorApiKey:
@@ -285,5 +461,48 @@ components:
       in: header
       name: X-API-Key
       description: >-
-        Operator key for writes that outlive the request. Reading needs none. A
-        deployment that has configured no key refuses policy writes outright with 403.
+        Operator key for writes that outlive the request. Reading needs none. A deployment that has configured no
+        key refuses policy writes outright with 403.
+  schemas:
+    LayeringRule:
+      type: object
+      required:
+      - id
+      - when_path_matches
+      - forbid_imports
+      properties:
+        id:
+          type: string
+          description: What a refusal quotes. Must be unique within the set.
+        description:
+          type: string
+          description: The sentence a developer reads when stopped.
+        mode:
+          type: string
+          enum:
+          - enforce
+          - observe
+          default: enforce
+          description: >-
+            enforce refuses the write. observe lets it run and records that the rule would have refused it. A missing
+            or null mode means enforce. Any other value makes the whole save fail with 400, naming the rule.
+        when_path_matches:
+          type: array
+          items:
+            type: string
+          description: >-
+            A list of globs over the file path, at most 40, each at most 300 characters. ** crosses folders, * and
+            ? stay inside one. Case is ignored.
+        forbid_imports:
+          type: array
+          items:
+            type: string
+          description: >-
+            A list of at most 40 patterns. A dotted or slashed module prefix forbids it and everything beneath it,
+            never a sibling that only shares its first letters. Globs are allowed.
+        allow_imports:
+          type: array
+          items:
+            type: string
+          description: >-
+            Exceptions, a list of at most 40. When an allow and a forbid both match, the more specific pattern decides.

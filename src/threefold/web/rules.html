@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Threefold — Architecture Rules</title>
+  <!-- Tailwind CSS via CDN for zero-dependency portability, as on the dashboard -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+      // The server rewrites __THREEFOLD_BASE_PATH__ to the API Gateway stage prefix
+      // when it serves this page, so the base is exact rather than guessed from the
+      // URL, which is ambiguous when the trailing slash is missing. Opening the file
+      // straight from disk leaves the token in place and falls back to a local server.
+      const SERVED_BASE_PATH = "__THREEFOLD_BASE_PATH__";
+      const DEFAULT_API_BASE = SERVED_BASE_PATH.indexOf("THREEFOLD_BASE_PATH") !== -1
+        ? "http://localhost:8001"
+        : location.origin + SERVED_BASE_PATH;
+      const PAGE_BASE = SERVED_BASE_PATH.indexOf("THREEFOLD_BASE_PATH") !== -1
+        ? ""
+        : location.origin + SERVED_BASE_PATH + "/";
+
+    tailwind.config = { darkMode: 'class' }
+  </script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+    body { font-family: 'Inter', sans-serif; background-color: #0a0d18; color: #f3f4f6; }
+    .font-mono { font-family: 'JetBrains Mono', monospace; }
+    textarea { tab-size: 2; }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+  <header class="border-b border-gray-800 bg-gray-950/80 backdrop-blur sticky top-0 z-40">
+    <div class="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-4">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-lg bg-gradient-to-br from-indigo-500 via-purple-600 to-pink-600 flex items-center justify-center font-bold text-white text-xl shadow-lg shadow-purple-500/20">
+          🏛️
+        </div>
+        <div>
+          <h1 class="text-lg font-bold tracking-tight text-white">Architecture Rules</h1>
+          <p class="text-xs text-gray-400">What each layer of your code may not depend on, enforced at the moment an agent writes the file</p>
+        </div>
+      </div>
+      <nav id="page-nav" class="flex items-center gap-2 text-xs"></nav>
+    </div>
+  </header>
+
+  <main class="flex-1 max-w-7xl mx-auto px-4 py-6 w-full space-y-6">
+
+    <!-- WHAT A RULE IS, IN ONE BREATH -->
+    <section class="p-6 rounded-2xl bg-gray-900 border border-gray-800 space-y-3">
+      <h2 class="text-lg text-white leading-snug">
+        A rule names some files, what they may not import, and what they may import anyway.
+      </h2>
+      <p class="text-xs text-gray-400 max-w-4xl">
+        When an agent asks to write a file a rule covers, Threefold reads the imports in the text it is about to write (for an
+        edit, the new text, not the text being replaced) and refuses the write if one is forbidden. Imports are read from files
+        ending <span id="languages" class="font-mono text-purple-300">…</span>.
+        A rule in <span class="text-amber-300 font-semibold">observe</span> mode never refuses: it records what it would have
+        stopped, so you can introduce it to every team and read a week of the console before anyone is stopped.
+      </p>
+      <p id="unsupported" class="text-[11px] text-gray-500 max-w-4xl"></p>
+    </section>
+
+    <div class="grid grid-cols-1 lg:grid-cols-5 gap-6">
+
+      <!-- THE RULES IN FORCE -->
+      <section class="lg:col-span-3 rounded-2xl bg-gray-900 border border-gray-800 p-5 space-y-3">
+        <div class="flex items-center justify-between gap-3 flex-wrap border-b border-gray-800 pb-3">
+          <div>
+            <h2 class="text-sm font-semibold text-white">Rules in force <span class="ml-1"><a data-anchor="#/default/get_rules" href="swagger.html" class="text-[10px] font-mono text-purple-400 hover:text-purple-300 underline">GET /rules ↗</a></span></h2>
+            <p id="rules-origin" class="text-[11px] text-gray-500"></p>
+          </div>
+          <a id="console-link" href="console.html" class="text-[11px] text-purple-300 hover:text-purple-200 underline">what they refused this week ↗</a>
+        </div>
+        <div id="rules-list" class="space-y-3"><p class="text-xs text-gray-500">Reading the rules…</p></div>
+      </section>
+
+      <!-- TRY ONE -->
+      <section class="lg:col-span-2 rounded-2xl bg-gray-900 border border-gray-800 p-5 space-y-3">
+        <div class="border-b border-gray-800 pb-3">
+          <h2 class="text-sm font-semibold text-white">Try the rules on a file <span class="ml-1"><a data-anchor="#/default/post_rules_explain" href="swagger.html" class="text-[10px] font-mono text-purple-400 hover:text-purple-300 underline">POST /rules/explain ↗</a></span></h2>
+          <p class="text-[11px] text-gray-500">Nothing is saved and nothing is recorded. Paste a path and what an agent might write there.</p>
+        </div>
+        <label class="block">
+          <span class="text-[11px] uppercase tracking-wider text-gray-400">Path</span>
+          <input id="try-path" type="text" value="src/main/java/com/acme/billing/domain/Order.java"
+                 class="mt-1 w-full bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-purple-500" />
+        </label>
+        <label class="block">
+          <span class="text-[11px] uppercase tracking-wider text-gray-400">Content</span>
+          <textarea id="try-content" rows="6"
+                    class="mt-1 w-full bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-purple-500">package com.acme.billing.domain;
+
+import java.util.List;
+import javax.persistence.Entity;
+
+@Entity
+public class Order { }</textarea>
+        </label>
+        <div class="flex flex-wrap gap-2">
+          <button onclick="tryRules(false)" class="px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold">Try against the rules in force</button>
+          <button onclick="tryRules(true)" class="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-200 text-xs border border-gray-700">Try against my draft</button>
+        </div>
+        <div id="try-result" class="text-xs"></div>
+      </section>
+    </div>
+
+    <!-- EDIT -->
+    <section class="rounded-2xl bg-gray-900 border border-gray-800 p-5 space-y-3">
+      <div class="flex items-center justify-between gap-3 flex-wrap border-b border-gray-800 pb-3">
+        <div>
+          <h2 class="text-sm font-semibold text-white">Edit the rules <span class="ml-1"><a data-anchor="#/default/post_rules" href="swagger.html" class="text-[10px] font-mono text-purple-400 hover:text-purple-300 underline">POST /rules ↗</a></span></h2>
+          <p class="text-[11px] text-gray-500">
+            The whole set is saved at once and replaces what is in force. Written as data so it can be reviewed the way code is.
+          </p>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <button onclick="loadExample('java')" class="text-[11px] px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700">Java example</button>
+          <button onclick="loadExample('dotnet')" class="text-[11px] px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700">.NET example</button>
+          <button onclick="loadExample('web')" class="text-[11px] px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700">TypeScript example</button>
+          <button onclick="resetEditor()" class="text-[11px] px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700">Back to what is in force</button>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <textarea id="editor" rows="22" spellcheck="false"
+                  class="lg:col-span-2 w-full bg-gray-950 border border-gray-800 rounded-xl px-3 py-2 text-[11px] text-gray-200 font-mono focus:outline-none focus:border-purple-500"></textarea>
+        <div class="space-y-3 text-[11px] text-gray-400">
+          <div class="p-3 rounded-xl bg-gray-950 border border-gray-800 space-y-1">
+            <p class="text-gray-200 font-semibold">Each rule</p>
+            <p><span class="font-mono text-purple-300">id</span> — what a refusal quotes.</p>
+            <p><span class="font-mono text-purple-300">description</span> — the sentence a developer reads when stopped.</p>
+            <p><span class="font-mono text-purple-300">mode</span> — <span class="font-mono">enforce</span> (default) or <span class="font-mono">observe</span>.</p>
+            <p><span class="font-mono text-purple-300">when_path_matches</span> — globs; <span class="font-mono">**</span> crosses folders, <span class="font-mono">*</span> does not. Case is ignored.</p>
+            <p><span class="font-mono text-purple-300">forbid_imports</span> — <span class="font-mono">System.Data</span> forbids it and everything under it, never <span class="font-mono">System.DataAnnotations</span>.</p>
+            <p><span class="font-mono text-purple-300">allow_imports</span> — exceptions. The more specific pattern wins.</p>
+          </div>
+          <div id="validation" class="p-3 rounded-xl bg-gray-950 border border-gray-800"></div>
+          <label class="block">
+            <span class="uppercase tracking-wider">Operator key</span>
+            <input id="api-key" type="password" placeholder="needed to save, not to read or try"
+                   class="mt-1 w-full bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-xs text-sky-300 font-mono focus:outline-none focus:border-sky-500" />
+          </label>
+          <button onclick="save()" id="save-button" class="w-full px-3 py-2 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold">Save and put in force</button>
+          <div id="save-result"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="border-t border-gray-800 py-4 text-center text-xs text-gray-500">
+    Threefold · AWS Zero to Shipped Hackathon 2026 · Built with Amazon Bedrock &amp; AWS Serverless
+  </footer>
+
+  <script>
+    const NAV = [
+      { href: 'console.html', label: 'Enforcement Console' },
+      { href: 'index.html', label: 'Dashboard' },
+      { href: 'sessions.html', label: 'Sessions' },
+      { href: 'settings.html', label: 'Policy' },
+      { href: 'connect.html', label: 'Connect an agent' },
+      { href: 'swagger.html', label: 'OpenAPI 3.1' }
+    ];
+
+    // Examples use synthetic names, as the clean-room rule requires. Each starts
+    // in observe mode, because a rule written from an example should be watched
+    // for a week before it is allowed to stop anyone.
+    const EXAMPLES = {
+      java: [{
+        id: 'billing-domain-stays-pure',
+        description: 'Billing domain classes may not reach persistence or the container',
+        mode: 'observe',
+        when_path_matches: ['**/billing/domain/**/*.java'],
+        forbid_imports: ['javax.persistence', 'jakarta.persistence', 'java.sql', 'javax.ejb', '**.infrastructure.**'],
+        allow_imports: ['java.util', 'java.time', 'javax.validation.constraints']
+      }],
+      dotnet: [{
+        id: 'catalog-domain-stays-pure',
+        description: 'Catalog domain types may not reach ADO.NET, EF or HTTP',
+        mode: 'observe',
+        when_path_matches: ['**/Catalog/Domain/**/*.cs'],
+        forbid_imports: ['System.Data', 'Microsoft.EntityFrameworkCore', 'System.Net.Http', '**.Infrastructure.**'],
+        allow_imports: ['System', 'System.Collections', 'System.Linq']
+      }],
+      web: [{
+        id: 'components-do-no-network',
+        description: 'A component takes its data from a hook, never from a client',
+        mode: 'observe',
+        when_path_matches: ['web/src/components/**/*.tsx'],
+        forbid_imports: ['axios', 'node-fetch', '@aws-sdk/*', '**/api/*'],
+        allow_imports: []
+      }]
+    };
+
+    let inForce = [];
+    let refreshSeconds = 30;
+
+    function escapeHtml(str) {
+      // Everything is made a string first and then escaped. Returning a non-string
+      // as String(value) unescaped let a tool_name sent as an array reach the page
+      // as markup.
+      if (typeof str !== 'string') str = str == null ? '' : String(str);
+      return str.replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[m]));
+    }
+
+    function renderNav() {
+      document.getElementById('page-nav').innerHTML = NAV.map(item =>
+        '<a href="' + PAGE_BASE + item.href + '" class="px-3 py-1.5 rounded-md bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700 transition">' + item.label + '</a>'
+      ).join('');
+      document.getElementById('console-link').href = PAGE_BASE + 'console.html';
+      document.querySelectorAll('a[data-anchor]').forEach(a => { a.href = PAGE_BASE + 'swagger.html' + a.getAttribute('data-anchor'); });
+    }
+
+    function chips(values, tone) {
+      if (!values || !values.length) return '<span class="text-gray-600">—</span>';
+      return values.map(v => '<span class="inline-block px-1.5 py-0.5 mr-1 mb-1 rounded font-mono text-[10px] border ' + tone + '">' + escapeHtml(v) + '</span>').join('');
+    }
+
+    function renderRules(rules) {
+      const holder = document.getElementById('rules-list');
+      if (!rules.length) {
+        holder.innerHTML = '<p class="text-xs text-gray-500">No rule is in force.</p>';
+        return;
+      }
+      holder.innerHTML = rules.map(rule => {
+        const observing = (rule.mode || 'enforce') === 'observe';
+        return '<div class="p-4 rounded-xl bg-gray-950 border ' + (observing ? 'border-amber-900/60' : 'border-gray-800') + ' space-y-2">' +
+          '<div class="flex items-center justify-between gap-2 flex-wrap">' +
+            '<span class="font-mono text-xs text-white">' + escapeHtml(rule.id) + '</span>' +
+            '<span class="px-2 py-0.5 rounded text-[10px] font-semibold border ' +
+              (observing ? 'bg-amber-950 text-amber-300 border-amber-800' : 'bg-red-950 text-red-300 border-red-800') + '">' +
+              (observing ? 'OBSERVE · records, never refuses' : 'ENFORCE · refuses the write') + '</span>' +
+          '</div>' +
+          '<p class="text-xs text-gray-300">' + escapeHtml(rule.description || '') + '</p>' +
+          '<div class="text-[11px] text-gray-500">Files ' + chips(rule.when_path_matches, 'bg-gray-900 text-purple-300 border-gray-700') + '</div>' +
+          '<div class="text-[11px] text-gray-500">May not import ' + chips(rule.forbid_imports, 'bg-red-950/40 text-red-300 border-red-900/60') + '</div>' +
+          '<div class="text-[11px] text-gray-500">Allowed anyway ' + chips(rule.allow_imports, 'bg-emerald-950/40 text-emerald-300 border-emerald-900/60') + '</div>' +
+        '</div>';
+      }).join('');
+    }
+
+    async function load() {
+      try {
+        const res = await fetch(DEFAULT_API_BASE + '/rules', { headers: { Accept: 'application/json' } });
+        const data = await res.json();
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        inForce = data.rules || [];
+        renderRules(inForce);
+        document.getElementById('languages').innerText = (data.extensions_read || data.languages_read || []).join(', ');
+        refreshSeconds = data.refresh_seconds || refreshSeconds;
+        document.getElementById('unsupported').innerText = data.unsupported || '';
+        document.getElementById('rules-origin').innerText = data.is_default
+          ? 'These are the rules Threefold ships with. Replace them with your own below.'
+          : data.count + ' rule' + (data.count === 1 ? '' : 's') + ' saved for this deployment.';
+        resetEditor();
+      } catch (err) {
+        document.getElementById('rules-list').innerHTML =
+          '<p class="text-xs text-red-400">The rules could not be read, so none are shown. ' + escapeHtml(String(err)) + '</p>';
+      }
+    }
+
+    function resetEditor() {
+      document.getElementById('editor').value = JSON.stringify({ rules: inForce }, null, 2);
+      validate();
+    }
+
+    function loadExample(name) {
+      document.getElementById('editor').value = JSON.stringify({ rules: EXAMPLES[name] }, null, 2);
+      validate();
+    }
+
+    // Only the shape is checked here: that the text is JSON and holds a list of
+    // rules. Every field is judged by the service, which refuses a save whole and
+    // names each rule it cannot use. A second copy of those checks in the page
+    // drifted from the first and said "Ready to save" for drafts the service
+    // then changed or refused.
+    function validate() {
+      const box = document.getElementById('validation');
+      let parsed;
+      try {
+        parsed = JSON.parse(document.getElementById('editor').value);
+      } catch (err) {
+        box.innerHTML = '<span class="text-red-400">Not valid JSON: ' + escapeHtml(err.message) + '</span>';
+        return null;
+      }
+      const rules = Array.isArray(parsed) ? parsed : (parsed && parsed.rules);
+      if (!Array.isArray(rules) || !rules.length) {
+        box.innerHTML = '<span class="text-red-400">Expected {"rules": [ ... ]} with at least one rule.</span>';
+        return null;
+      }
+      box.innerHTML = '<p class="text-gray-300">' + rules.length + ' rule' + (rules.length === 1 ? '' : 's') + ' in the draft. ' +
+        '<span class="text-gray-500">Each field is checked by the service when you try the draft or save it.</span></p>';
+      return rules;
+    }
+
+    function renderProblems(target, heading, problems) {
+      target.innerHTML = '<p class="text-red-400 font-semibold mb-1">' + escapeHtml(heading) + '</p>' +
+        (problems || []).map(p =>
+          '<p class="text-red-300">• ' + escapeHtml(p.id ? '"' + p.id + '"' : (p.index == null ? 'The draft' : 'Rule ' + (p.index + 1))) +
+          ': ' + escapeHtml(p.reason) + '</p>'
+        ).join('');
+    }
+
+    async function tryRules(useDraft) {
+      const out = document.getElementById('try-result');
+      const body = {
+        path: document.getElementById('try-path').value,
+        content: document.getElementById('try-content').value
+      };
+      if (useDraft) {
+        const draft = validate();
+        if (!draft) { out.innerHTML = '<p class="text-red-400">The draft is not a list of rules yet; see beside the editor.</p>'; return; }
+        body.rules = draft;
+      }
+      out.innerHTML = '<p class="text-gray-500">Reading…</p>';
+      try {
+        const res = await fetch(DEFAULT_API_BASE + '/rules/explain', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify(body)
+        });
+        const d = await res.json();
+        if (!res.ok) {
+          if (d.problems && d.problems.length) {
+            renderProblems(out, 'The draft was not tried: the service cannot use these rules', d.problems);
+            renderProblems(document.getElementById('validation'), 'Would not save as written', d.problems);
+          } else {
+            out.innerHTML = '<p class="text-red-400">' + escapeHtml(d.detail || ('HTTP ' + res.status)) + '</p>';
+          }
+          return;
+        }
+        const tone = d.verdict === 'REFUSE' ? 'bg-red-950 text-red-300 border-red-800'
+          : d.verdict === 'OBSERVE' ? 'bg-amber-950 text-amber-300 border-amber-800'
+          : 'bg-emerald-950 text-emerald-300 border-emerald-800';
+        const words = d.verdict === 'REFUSE' ? 'The agent would be refused'
+          : d.verdict === 'OBSERVE' ? 'The write would run, and be recorded as something a rule would stop'
+          : 'No layering rule refuses this file';
+        out.innerHTML =
+          '<div class="p-3 rounded-xl bg-gray-950 border border-gray-800 space-y-2">' +
+            '<span class="inline-block px-2 py-0.5 rounded text-[11px] font-semibold border ' + tone + '">' + escapeHtml(d.verdict) + '</span> ' +
+            '<span class="text-gray-300">' + escapeHtml(words) + '</span>' +
+            '<p class="text-[11px] text-gray-500">Against ' + (d.rules_considered === 'draft' ? 'your draft' : 'the rules in force') +
+              ' · read as ' + escapeHtml(d.language || 'a file type Threefold does not read') + '</p>' +
+            '<p class="text-[11px] text-gray-400">Imports found: ' + (d.imports.length ? chips(d.imports, 'bg-gray-900 text-gray-300 border-gray-700') : '<span class="text-gray-600">none</span>') + '</p>' +
+            '<p class="text-[11px] text-gray-400">Rules covering this path: ' + (d.applicable_rules.length ? chips(d.applicable_rules, 'bg-gray-900 text-purple-300 border-gray-700') : '<span class="text-gray-600">none</span>') + '</p>' +
+            (d.violations.length
+              ? d.violations.map(v => '<p class="text-[11px] ' + (v.mode === 'observe' ? 'text-amber-300' : 'text-red-300') + '">• ' + escapeHtml(v.reason) + '</p>').join('')
+              : '<p class="text-[11px] text-gray-500">' + escapeHtml(d.note) + '</p>') +
+            '<p class="text-[10px] text-gray-600">Only the layering rules are tried here. The real call can still be refused for a credential, a protected path, a repeating loop or its cost.</p>' +
+          '</div>';
+      } catch (err) {
+        out.innerHTML = '<p class="text-red-400">The service could not be reached. ' + escapeHtml(String(err)) + '</p>';
+      }
+    }
+
+    async function save() {
+      const out = document.getElementById('save-result');
+      const rules = validate();
+      if (!rules) { out.innerHTML = '<p class="text-red-400">Nothing was sent: the draft has problems listed above.</p>'; return; }
+      const key = document.getElementById('api-key').value.trim();
+      const headers = { 'Content-Type': 'application/json', Accept: 'application/json' };
+      if (key) headers['X-API-Key'] = key;
+      const button = document.getElementById('save-button');
+      button.disabled = true;
+      out.innerHTML = '<p class="text-gray-500">Saving…</p>';
+      try {
+        const res = await fetch(DEFAULT_API_BASE + '/rules', { method: 'POST', headers, body: JSON.stringify({ rules }) });
+        const d = await res.json();
+        if (!res.ok) {
+          let words = d.detail || ('Refused with HTTP ' + res.status);
+          if (d.problems && d.problems.length) {
+            renderProblems(out, 'Nothing was saved: the service cannot use these rules', d.problems);
+            renderProblems(document.getElementById('validation'), 'Would not save as written', d.problems);
+            return;
+          }
+          if (d.type === 'urn:threefold:error:policy-write-disabled') words = 'This deployment has no operator key configured, so its rules can be read and tried but not changed.';
+          else if (res.status === 401) words = 'Saving needs the operator key. Reading and trying do not.';
+          else if (res.status === 403) words = 'That key was not accepted.';
+          out.innerHTML = '<p class="text-red-400">' + escapeHtml(words) + ' Nothing changed.</p>';
+          return;
+        }
+        // Lambda runs several containers, each holding the rules it read. The one
+        // that took the save uses them at once; the others read them again within
+        // the refresh interval the service reports.
+        out.innerHTML = '<p class="text-emerald-400">Saved ' + d.count + ' rule' + (d.count === 1 ? '' : 's') + '. ' +
+          (d.count === 1 ? 'It applies' : 'They apply') + ' from the next call on the server that took the save, and on every other server within ' +
+          (d.refresh_seconds || refreshSeconds) + ' seconds.</p>';
+        await load();
+      } catch (err) {
+        out.innerHTML = '<p class="text-red-400">' + escapeHtml(String(err)) + '</p>';
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    document.addEventListener('input', event => { if (event.target && event.target.id === 'editor') validate(); });
+    renderNav();
+    load();
+  </script>
+</body>
+</html>

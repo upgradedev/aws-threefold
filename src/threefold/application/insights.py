@@ -95,7 +95,7 @@ def categorise(row: Dict[str, Any]) -> str:
 def summarise(decisions: List[Dict[str, Any]], window_days: int) -> Dict[str, Any]:
     """Turns a list of ledger rows into the console's payload."""
     by_project: Dict[str, Dict[str, Any]] = defaultdict(
-        lambda: {"decisions": 0, "refused": 0, "developers": set(), "rules": Counter(), "categories": Counter(), "last_seen": ""}
+        lambda: {"decisions": 0, "refused": 0, "observed": 0, "developers": set(), "rules": Counter(), "categories": Counter(), "last_seen": ""}
     )
     by_developer: Dict[str, Dict[str, Any]] = defaultdict(
         lambda: {"decisions": 0, "refused": 0, "projects": set(), "last_seen": ""}
@@ -103,6 +103,8 @@ def summarise(decisions: List[Dict[str, Any]], window_days: int) -> Dict[str, An
     by_day: Dict[str, Dict[str, int]] = defaultdict(lambda: {"decisions": 0, "refused": 0})
     rule_counts: Counter = Counter()
     category_counts: Counter = Counter()
+    observed_counts: Counter = Counter()
+    observations: List[Dict[str, Any]] = []
     refusals: List[Dict[str, Any]] = []
 
     for row in decisions:
@@ -126,6 +128,17 @@ def summarise(decisions: List[Dict[str, Any]], window_days: int) -> Dict[str, An
         if day:
             by_day[day]["decisions"] += 1
 
+        watched_by = row.get("observed_rules") or ([row["observed_rule"]] if row.get("observed_rule") else [])
+        if watched_by and not refused:
+            # A rule in observe mode would have refused this, and it ran anyway.
+            # Counted on its own line: adding it to refusals would report a
+            # stopped call that was not stopped. The call counts once; each rule
+            # that would have refused it counts once towards its own total.
+            entry["observed"] += 1
+            for rule_id in watched_by:
+                observed_counts[rule_id] += 1
+            observations.append(row)
+
         if refused:
             entry["refused"] += 1
             entry["rules"][row.get("rule", "UNKNOWN")] += 1
@@ -148,6 +161,7 @@ def summarise(decisions: List[Dict[str, Any]], window_days: int) -> Dict[str, An
             "refused": refused_total,
             "approved": total - refused_total,
             "refusal_rate": round(refused_total / total, 4) if total else 0.0,
+            "observed": len(observations),
             "projects": len(by_project),
             "developers": len(by_developer),
         },
@@ -155,6 +169,11 @@ def summarise(decisions: List[Dict[str, Any]], window_days: int) -> Dict[str, An
             {"category": category, "label": CATEGORY_LABELS.get(category, category), "refusals": count}
             for category, count in sorted(category_counts.items(), key=lambda kv: kv[1], reverse=True)
         ],
+        "by_observed_rule": [
+            {"rule": rule, "would_refuse": count}
+            for rule, count in sorted(observed_counts.items(), key=lambda kv: kv[1], reverse=True)
+        ],
+        "recent_observations": observations[:25],
         "by_rule": [
             {"rule": rule, "refusals": count}
             for rule, count in sorted(rule_counts.items(), key=lambda kv: kv[1], reverse=True)
@@ -166,6 +185,7 @@ def summarise(decisions: List[Dict[str, Any]], window_days: int) -> Dict[str, An
                     "decisions": data["decisions"],
                     "refused": data["refused"],
                     "refusal_rate": round(data["refused"] / data["decisions"], 4) if data["decisions"] else 0.0,
+                    "observed": data["observed"],
                     "developers": len(data["developers"]),
                     "top_rule": data["rules"].most_common(1)[0][0] if data["rules"] else "",
                     "top_category": data["categories"].most_common(1)[0][0] if data["categories"] else "",
@@ -217,17 +237,37 @@ def describe_layering(rules: List[Dict[str, Any]], languages_read: List[str]) ->
             "watches": "Nothing: no layering rule is configured",
             "blind_to": "Every layering question, until a rule is saved",
         }
-    ids = ", ".join(rule.get("id", "?") for rule in rules[:6])
-    paths = sorted({pattern for rule in rules for pattern in rule.get("when_path_matches", [])})
+    # An observing rule refuses nothing, so counting it as "in force" beside the
+    # enforcing ones would overstate what a zero on this console means.
+    enforcing = [rule for rule in rules if rule.get("mode", "enforce") != "observe"]
+    observing = [rule for rule in rules if rule.get("mode", "enforce") == "observe"]
+
+    def _listed(items: List[str], limit: int = 6) -> str:
+        # A shortened list says it is shortened. Six of nine patterns printed
+        # as if they were all of them told a reader the other three were not
+        # watched.
+        shown = ", ".join(items[:limit])
+        return shown + (f" and {len(items) - limit} more" if len(items) > limit else "")
+
+    def _named(group: List[Dict[str, Any]]) -> str:
+        return _listed([rule.get("id", "?") for rule in group])
+
+    paths = sorted({pattern for rule in enforcing for pattern in rule.get("when_path_matches", [])})
+    watches = (
+        f"{len(enforcing)} rule(s) refusing ({_named(enforcing)}), over paths matching {_listed(paths)}"
+        if enforcing
+        else "No rule refuses anything: every layering rule here only observes"
+    )
+    if observing:
+        watches += f"; {len(observing)} more only recording what it would refuse ({_named(observing)})"
+    # Extensions rather than language names: "typescript" hid that .js, .jsx
+    # and .mjs files are read by the same reader.
+    watches += f". Imports are read from files ending {', '.join(languages_read)}"
     return {
         "rule": "ARCHITECTURAL_BOUNDARY_SAFE",
-        "watches": (
-            f"{len(rules)} rule(s) in force ({ids}), over paths matching "
-            f"{', '.join(paths[:6])}. Imports are read from "
-            f"{', '.join(languages_read)} source"
-        ),
+        "watches": watches,
         "blind_to": (
-            "Any path no rule covers, any language not in that list, and the "
+            "Any path no refusing rule covers, any file type not in that list, and the "
             "dependencies a file does not declare: an import is read from the "
             "file's own statements, not resolved, followed or injected"
         ),

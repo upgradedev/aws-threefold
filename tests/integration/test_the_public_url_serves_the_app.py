@@ -68,6 +68,7 @@ def test_the_testbook_is_reachable() -> None:
         ("/sessions.html", "Threefold — Governed Sessions"),
         ("/connect.html", "Threefold — Connect a Coding Agent"),
         ("/console.html", "Threefold — Enforcement Console"),
+        ("/rules.html", "Threefold — Architecture Rules"),
     ],
 )
 def test_the_operator_pages_are_reachable(path: str, title: str) -> None:
@@ -78,9 +79,20 @@ def test_the_operator_pages_are_reachable(path: str, title: str) -> None:
     assert f"<title>{title}</title>" in response["body"]
 
 
-@pytest.mark.parametrize("path", ["/settings.html", "/sessions.html", "/connect.html", "/console.html"])
+@pytest.mark.parametrize("path", ["/settings.html", "/sessions.html", "/connect.html", "/console.html", "/rules.html"])
 def test_the_operator_pages_are_told_the_api_base(path: str) -> None:
     """Each page calls the API itself, so each one needs the stage prefix injected."""
     response = _get(path)
     assert "__THREEFOLD_BASE_PATH__" not in response["body"], "The token must be substituted"
     assert 'const SERVED_BASE_PATH = "/prod";' in response["body"]
+
+
+@pytest.mark.parametrize(
+    "path", ["/", "/settings.html", "/sessions.html", "/connect.html", "/console.html", "/rules.html"]
+)
+def test_every_page_escapes_values_that_are_not_strings(path: str) -> None:
+    """escapeHtml returned String(value) unescaped for a non-string, so a tool_name sent
+    as a list reached the console as markup."""
+    body = _get(path)["body"]
+    assert "if (typeof str !== 'string') return str == null ? '' : String(str);" not in body
+    assert "if (typeof str !== 'string') str = str == null ? '' : String(str);" in body

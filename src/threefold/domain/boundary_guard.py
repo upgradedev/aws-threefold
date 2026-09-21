@@ -12,6 +12,7 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple
 from threefold.domain.layering_rules import (
     DEFAULT_RULES,
     evaluate as evaluate_layering,
+    observed as observed_layering,
     rules_for_path,
 )
 from threefold.domain.models import ToolActionType, ToolInvocation
@@ -165,15 +166,7 @@ class ArchitecturalBoundaryGuard:
         #    guard that only inspects calls which admit to being writes is one
         #    omitted field away from silence.
         active_rules = rules if rules is not None else DEFAULT_RULES
-        pairs = iter_write_targets(arguments)
-        if not pairs and len(path_like) == 1:
-            # One path and loose content: everything in the call is meant for it.
-            pairs = [
-                (path_like[0], leaf)
-                for leaf in iter_string_leaves(arguments)
-                if leaf not in path_like
-            ]
-        for target, content in pairs:
+        for target, content in write_pairs(arguments):
             if not rules_for_path(target, active_rules):
                 continue
             allowed, reason = evaluate_layering(target, content, active_rules)
@@ -249,6 +242,13 @@ CONTENT_KEYS = (
 PATH_KEYS = ("file_path", "path", "filepath", "target_file", "notebook_path", "absolutepath", "filename")
 
 
+# What an edit takes out rather than puts in. A MultiEdit carries its path at the
+# top and its edits beneath, with no path of their own, so nothing paired and the
+# fallback judged every string in the call against the path, including the text
+# being deleted: removing a forbidden import was refused for containing it.
+REMOVED_KEYS = ("old_string", "old_str", "old", "original", "search", "find", "before")
+
+
 def iter_write_targets(arguments: Any) -> List[Tuple[str, str]]:
     """Pairs each path in a call with the content meant for THAT path.
 
@@ -257,25 +257,70 @@ def iter_write_targets(arguments: Any) -> List[Tuple[str, str]]:
     different, clean file, and the reason named the clean file and an import it
     did not contain. A refusal that is wrong about which file it is refusing is
     worse than a missed violation, because it cannot be argued with.
+
+    Content with no path beside it belongs to the nearest path above it, which
+    is how a MultiEdit's edits reach the file they edit.
     """
     pairs: List[Tuple[str, str]] = []
 
-    def walk(node: Any) -> None:
+    def walk(node: Any, inherited: str) -> None:
         if isinstance(node, dict):
             path_value = ""
             for key, value in node.items():
                 if isinstance(value, str) and isinstance(key, str):
                     if key.lower() in PATH_KEYS and looks_like_path(value):
                         path_value = value
-            if path_value:
+            owner = path_value or inherited
+            if owner:
                 for key, value in node.items():
                     if isinstance(key, str) and isinstance(value, str) and key.lower() in CONTENT_KEYS:
-                        pairs.append((path_value, value))
+                        pairs.append((owner, value))
             for value in node.values():
-                walk(value)
+                walk(value, owner)
         elif isinstance(node, (list, tuple, set)):
             for item in node:
-                walk(item)
+                walk(item, inherited)
 
-    walk(arguments)
+    walk(arguments, "")
     return pairs
+
+
+def _written_leaves(value: Any) -> Iterator[str]:
+    """Every string in a call except the ones an edit is removing."""
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            if isinstance(key, str) and key.lower() in REMOVED_KEYS:
+                continue
+            yield from _written_leaves(item)
+    elif isinstance(value, (list, tuple, set)):
+        for item in value:
+            yield from _written_leaves(item)
+
+
+def write_pairs(arguments: Any) -> List[Tuple[str, str]]:
+    """Each path in a call with the content meant for it, however the call is shaped."""
+    pairs = iter_write_targets(arguments)
+    if pairs:
+        return pairs
+    path_like = [leaf for leaf in iter_string_leaves(arguments) if looks_like_path(leaf)]
+    if len(path_like) == 1:
+        # One path and loose content: everything written in the call is meant for it.
+        return [(path_like[0], leaf) for leaf in _written_leaves(arguments) if leaf not in path_like]
+    return []
+
+
+def observe_layering(invocation: ToolInvocation, rules: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, str]]:
+    """What the rules in observe mode would have refused in this call.
+
+    Kept apart from the refusing pass on purpose: the path that decides whether a
+    call runs is the path an earlier review found four defects in, and watching
+    must not be able to change what is refused.
+    """
+    active_rules = rules if rules is not None else DEFAULT_RULES
+    found: List[Dict[str, str]] = []
+    for target, content in write_pairs(invocation.arguments or {}):
+        for item in observed_layering(target, content, active_rules):
+            found.append(dict(item, path=target))
+    return found

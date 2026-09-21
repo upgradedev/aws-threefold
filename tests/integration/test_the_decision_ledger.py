@@ -173,7 +173,7 @@ def test_the_console_is_told_what_the_gates_cannot_see() -> None:
     # fixed, because a fixed one went stale the moment an architect saved their
     # own and a coverage line that lies is worse than none.
     architecture = [c for c in coverage if c["rule"] == "ARCHITECTURAL_BOUNDARY_SAFE"][0]
-    assert "rule(s) in force" in architecture["watches"], "It must say what is actually enforced"
+    assert "rule(s) refusing" in architecture["watches"], "It must say what is actually enforced"
     assert "domain" in architecture["watches"], "And over which paths"
     assert "not resolved" in architecture["blind_to"], "And how shallow the reading is"
 
@@ -296,3 +296,22 @@ def test_a_refusal_row_carries_its_own_category() -> None:
     for row in rows:
         assert row.get("category"), "Every refusal row must carry the category the server assigned"
         assert row.get("category_label"), "And the label a reader sees"
+
+
+def test_identity_fields_are_stored_as_strings_whatever_was_sent() -> None:
+    """They are rendered on open pages; a list sent as tool_name reached one as markup."""
+    evaluator = GovernanceEvaluator()
+    request = ToolCallRequestDTO(
+        session_id="ledger-shapes",
+        developer_id="ledger-dev",
+        project_name="Acme-Ledger",
+        tool_name=["<img src=x onerror=alert(1)>"],
+        action_type="FILE_READ",
+        arguments={"path": "README.md"},
+        projected_input_tokens=10,
+        projected_output_tokens=10,
+        budget_usd=5.0,
+    )
+    evaluator.evaluate_tool_call(request)
+    row = next(r for r in evaluator.list_decisions(days=1) if r["session_id"] == "ledger-shapes")
+    assert isinstance(row["tool_name"], str)

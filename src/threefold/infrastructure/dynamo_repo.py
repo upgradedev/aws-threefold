@@ -264,6 +264,11 @@ class DynamoDBSessionRepository:
                     "rule": row.get("rule", "NONE"),
                     "target": row.get("target", ""),
                     "reason": row.get("reason", ""),
+                    "observed_rule": row.get("observed_rule", ""),
+                    # Rows written before every rule was kept carry one name only.
+                    "observed_rules": list(row.get("observed_rules") or ([row["observed_rule"]] if row.get("observed_rule") else [])),
+                    "observed_reason": row.get("observed_reason", ""),
+                    "observed_target": row.get("observed_target", ""),
                     "cost_usd": float(row.get("cost_usd", 0) or 0),
                 }
             )

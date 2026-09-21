@@ -1,6 +1,6 @@
 # Threefold — State Ledger
 
-**Last updated:** 2026-09-20
+**Last updated:** 2026-09-21
 **Hackathon:** AWS Zero to Shipped, submissions close 2026-10-02 23:59 PDT
 **Category:** `#workplace-efficiency` · **Lane:** `#community` (hedge to `#commercial-potential` / `#startup` decided 2026-09-28)
 **Entries permitted:** one. The Rules tab, ELIGIBILITY section, reads "Limit one entry per person." Threefold is that entry.
@@ -46,7 +46,7 @@ it, treat the later date as the one that governs teardown.
 | A visitor can take the hook | The deployment serves it at `/hooks/claude_code_hook.py`, anonymously, as readable text. Downloaded from the live URL and run: an ordinary read came back `allow`, a `from boto3 import client` write into a domain file came back `deny` with a Bedrock sentence. Before this, `connect.html` told the reader to `git clone <repository>` — a literal placeholder, since the repository is not published — and the install path ended there |
 | A certificate cannot attest to nothing | `POST /issue-certificate` with `{"evaluations": []}` used to answer 200 with `verdict_status: COMPLIANT_APPROVED` and `all_passed: true`, because `all()` over an empty list is true. It now answers 400 `Nothing To Certify`, as does a session this service has no record of governing. Verified against the live stack, and the dashboard's Scenario 4 still issues its certificate |
 | The policy cannot be rewritten by a stranger | `POST /policy/config` and its `/policy` alias now require an operator key even where reads need none, because the write lands in DynamoDB and every later container adopts it. With no key configured, which is how the stack deploys, the write is refused outright with 403 `Policy Is Read Only Here`; with one configured, a missing key is 401 and a wrong key is 403. Verified against the live stack, and `GET /policy/config` still answers 200 to an anonymous request |
-| Test suite | 134 passed in 6.2s, hermetic under `THREEFOLD_OFFLINE=1`, and no longer order-dependent. Every test reaches `lambda_handler` from one address and shared a sixty-token rate-limit bucket, so once the suite grew past that count, unrelated tests began failing with 429 depending on the order they ran in. `tests/conftest.py` resets the bucket per test; the rate limiter's own tests build their own instance, so nothing is hidden |
+| Test suite | 286 passed in 2.4s. It is hermetic now: `THREEFOLD_OFFLINE` used to be set in a session fixture, which runs after the handler module has built its AWS clients at collection time, so the suite had been trying real endpoints (56 s per run, one readiness test failing on HEAD) until 2026-09-21. It never reached live data, because the default table name it would have used does not exist. Each test still starts with a full rate-limit bucket, and the rate limiter's own tests build their own instance |
 
 ## Known gaps, not yet fixed
 
@@ -162,12 +162,22 @@ traffic.
    at the default Sonnet-class rate rather than the model actually in use.
 5. The API still enforces no key on reads, deliberately: `STAGE` is unset so an
    anonymous judge and the AI scorer reach everything, which is the ship gate's
-   scorer row. The one write that outlived its caller is now closed. Everything
-   else a visitor can POST — evaluating a call, the scenarios, the certificate,
-   the kill switch — is still open and is bounded by the session it names.
+   scorer row. The two writes that outlive their caller, the policy and the
+   layering rules, are closed. Everything else a visitor can POST (evaluating a
+   call, the scenarios, the certificate, the kill switch) is still open and is
+   bounded by the session it names. If `STAGE=prod` or `ENFORCE_API_KEY` is ever
+   set, the reads the pages make stay open by method and those POSTs need the
+   key. A test pins both halves by setting the environment, which is what the
+   middleware reads.
 6. The cost gate trusts caller-declared token counts. A caller declaring zero is
    not stopped. A proxy that meters real usage is the stronger control and this
    is not one.
+7. A saved policy reaches only the container that took it. The layering rules
+   are read again by every container after 30 seconds, so the rules page can say
+   when a save applies everywhere. The policy is still adopted only at cold
+   start, so after a `POST /policy/config` other warm containers keep the old
+   thresholds until they are recycled. The fix is the rules fix applied to
+   `_adopt_saved_policy`.
 
 ## Cost and teardown
 

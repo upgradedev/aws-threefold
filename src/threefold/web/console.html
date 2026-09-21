@@ -98,6 +98,7 @@
                 <th class="text-left font-medium py-2 pr-3">Project</th>
                 <th class="text-right font-medium py-2 pr-3">Decisions</th>
                 <th class="text-right font-medium py-2 pr-3">Refused</th>
+                <th class="text-right font-medium py-2 pr-3" title="Calls that ran and that a rule in observe mode would have refused">Would refuse</th>
                 <th class="text-left font-medium py-2 pr-3">Rate</th>
                 <th class="text-left font-medium py-2 pr-3">Most often</th>
                 <th class="text-right font-medium py-2 pr-3">People</th>
@@ -111,8 +112,9 @@
 
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
+        <div class="lg:col-span-2 space-y-6">
         <!-- WHAT WAS REFUSED, ROW BY ROW -->
-        <section class="lg:col-span-2 rounded-2xl bg-gray-900 border border-gray-800 p-5 space-y-3">
+        <section class="rounded-2xl bg-gray-900 border border-gray-800 p-5 space-y-3">
           <div class="flex items-center justify-between gap-3 flex-wrap border-b border-gray-800 pb-3">
             <h2 class="text-sm font-semibold text-white">What was refused</h2>
             <span id="stream-scope" class="text-[11px] text-gray-500"></span>
@@ -124,6 +126,20 @@
             intercepted.
           </p>
         </section>
+
+        <!-- WHAT A RULE IN OBSERVE MODE WOULD HAVE STOPPED -->
+        <section id="observed-section" class="rounded-2xl bg-gray-900 border border-amber-900/50 p-5 space-y-3">
+          <div class="flex items-center justify-between gap-3 flex-wrap border-b border-gray-800 pb-3">
+            <div>
+              <h2 class="text-sm font-semibold text-white">What a rule in observe mode would have refused</h2>
+              <p class="text-[11px] text-gray-500">These calls ran. Read them before switching the rule to enforce: each one is a developer who would have been stopped.</p>
+            </div>
+            <a id="rules-link" href="rules.html" class="text-[11px] text-amber-300 hover:text-amber-200 underline">the rules ↗</a>
+          </div>
+          <div id="observed-rules" class="flex flex-wrap gap-2"></div>
+          <div id="observations" class="space-y-2"></div>
+        </section>
+        </div>
 
         <!-- BY CATEGORY, AND WHAT EACH GATE DOES NOT WATCH -->
         <div class="space-y-6">
@@ -142,6 +158,7 @@
               <p class="text-[11px] text-gray-500">Read this before reading a zero above as safety.</p>
             </div>
             <div id="coverage" class="space-y-3"></div>
+            <a id="coverage-rules-link" href="rules.html" class="inline-block text-[11px] text-purple-300 hover:text-purple-200 underline">Read, try or change the layering rules ↗</a>
           </section>
         </div>
       </div>
@@ -166,6 +183,7 @@
   <script>
     const NAV = [
       { href: 'index.html', label: 'Dashboard' },
+      { href: 'rules.html', label: 'Architecture Rules' },
       { href: 'sessions.html', label: 'Sessions' },
       { href: 'settings.html', label: 'Policy' },
       { href: 'connect.html', label: 'Connect an agent' },
@@ -174,9 +192,13 @@
     const WINDOWS = [{ days: 1, label: '24 hours' }, { days: 7, label: '7 days' }, { days: 30, label: '30 days' }];
 
     let state = { days: 7, data: null, filter: null };
+    let coverageHome = null;
 
     function escapeHtml(str) {
-      if (typeof str !== 'string') return str == null ? '' : String(str);
+      // Everything is made a string first and then escaped. Returning a non-string
+      // as String(value) unescaped let a tool_name sent as an array reach the page
+      // as markup.
+      if (typeof str !== 'string') str = str == null ? '' : String(str);
       return str.replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[m]));
     }
 
@@ -184,8 +206,10 @@
       document.getElementById('page-nav').innerHTML = NAV.map(item =>
         '<a href="' + PAGE_BASE + item.href + '" class="px-3 py-1.5 rounded-md bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700 transition">' + item.label + '</a>'
       ).join('');
-      document.getElementById('api-link').href = PAGE_BASE + 'swagger.html';
+      document.getElementById('api-link').href = PAGE_BASE + 'swagger.html#/default/get_api_insights';
       document.getElementById('empty-connect').href = PAGE_BASE + 'connect.html';
+      document.getElementById('rules-link').href = PAGE_BASE + 'rules.html';
+      document.getElementById('coverage-rules-link').href = PAGE_BASE + 'rules.html';
       document.getElementById('empty-curl').textContent =
         'curl -O ' + DEFAULT_API_BASE + '/hooks/claude_code_hook.py';
     }
@@ -272,14 +296,15 @@
         (t.refused ? ' of them.' : '.');
       document.getElementById('standing-sub').innerText =
         rate + '% refusal rate · ' + t.developers + ' developer' + (t.developers === 1 ? '' : 's') +
-        ' · every refusal happened before the tool call ran, not after it landed.';
+        ' · every refusal happened before the tool call ran, not after it landed.' +
+        (t.observed ? ' · ' + t.observed + ' more ran that a rule in observe mode would have refused.' : '');
     }
 
     function renderProjects() {
       const rows = state.data.by_project || [];
       const body = document.getElementById('projects-body');
       if (!rows.length) {
-        body.innerHTML = '<tr><td colspan="7" class="py-4 text-gray-500">No project has been seen in this window.</td></tr>';
+        body.innerHTML = '<tr><td colspan="8" class="py-4 text-gray-500">No project has been seen in this window.</td></tr>';
         return;
       }
       body.innerHTML = rows.map((p, index) => {
@@ -290,6 +315,7 @@
           '<td class="py-2 pr-3 font-mono text-purple-300">' + escapeHtml(p.project) + '</td>' +
           '<td class="py-2 pr-3 text-right font-mono text-gray-300">' + p.decisions + '</td>' +
           '<td class="py-2 pr-3 text-right font-mono ' + (p.refused ? 'text-red-400' : 'text-gray-500') + '">' + p.refused + '</td>' +
+          '<td class="py-2 pr-3 text-right font-mono ' + (p.observed ? 'text-amber-300' : 'text-gray-600') + '">' + (p.observed || 0) + '</td>' +
           '<td class="py-2 pr-3">' +
             '<div class="flex items-center gap-2">' +
               '<div class="h-1.5 w-20 rounded-full bg-gray-950 border border-gray-800 overflow-hidden">' +
@@ -341,6 +367,61 @@
       ).join('');
     }
 
+    // The streams below carry the newest rows across every project, not every
+    // row. Filtered to one project, an empty stream can mean "none of the newest"
+    // rather than "none", and the project's own row says which.
+    function projectRow(name) {
+      return (state.data.by_project || []).find(p => p.project === name) || null;
+    }
+
+    function filteredEmpty(kind, count) {
+      const project = escapeHtml(state.filter);
+      if (!count) return 'Nothing in ' + project + ' ' + (kind === 'refused' ? 'was refused' : 'would have been refused') + ' in this window.';
+      return project + ' has ' + count + ' ' + (kind === 'refused' ? 'refusal' : 'observation') + (count === 1 ? '' : 's') +
+        ' in this window, older than the newest ones listed here across all projects. Its row above counts all of them.';
+    }
+
+    function renderObservations() {
+      const section = document.getElementById('observed-section');
+      const counts = state.data.by_observed_rule || [];
+      const all = state.data.recent_observations || [];
+      const rows = state.filter ? all.filter(r => r.project_name === state.filter) : all;
+      if (!counts.length) {
+        // Nothing observed is only worth a line when some rule is observing.
+        section.classList.add('hidden');
+        return;
+      }
+      section.classList.remove('hidden');
+      document.getElementById('observed-rules').innerHTML = counts.map(c =>
+        '<span class="px-2 py-1 rounded-lg text-[11px] font-mono bg-amber-950 text-amber-300 border border-amber-800">' +
+          escapeHtml(c.rule) + ' · would refuse ' + c.would_refuse +
+        '</span>'
+      ).join('');
+      const holder = document.getElementById('observations');
+      if (!rows.length) {
+        const row = projectRow(state.filter);
+        holder.innerHTML = '<p class="text-xs text-gray-500">' + filteredEmpty('observed', row ? row.observed : 0) + '</p>';
+        return;
+      }
+      holder.innerHTML = rows.map(r =>
+        '<div class="p-3 rounded-xl bg-gray-950 border border-gray-800">' +
+          '<div class="flex items-center justify-between gap-3 flex-wrap">' +
+            '<div class="flex items-center gap-2">' +
+              '<span class="px-2 py-0.5 rounded text-[11px] font-semibold border bg-amber-950 text-amber-300 border-amber-800">RAN · OBSERVED</span>' +
+              '<span class="text-xs text-gray-300 font-mono">' + escapeHtml(r.tool_name || 'tool') + '</span>' +
+              '<span class="text-xs text-gray-500 font-mono break-all">' + escapeHtml(r.observed_target || r.target || '') + '</span>' +
+            '</div>' +
+            '<span class="text-[11px] text-gray-500 font-mono">' + escapeHtml(timeAgo(r.timestamp)) + '</span>' +
+          '</div>' +
+          '<p class="text-[11px] text-gray-400 mt-1">' + escapeHtml(r.observed_reason || '') + '</p>' +
+          ((r.observed_rules || []).length > 1
+            ? '<p class="text-[11px] text-amber-300/80 mt-1">Also watched by ' + escapeHtml(r.observed_rules.slice(1).join(', ')) + '</p>'
+            : '') +
+          '<p class="text-[11px] text-gray-600 mt-1 font-mono">' + escapeHtml(r.project_name || '') + ' · ' + escapeHtml(r.developer_id || '') + '</p>' +
+        '</div>'
+      ).join('');
+    }
+
     function visibleRefusals() {
       const rows = state.data.recent_refusals || [];
       return state.filter ? rows.filter(r => r.project_name === state.filter) : rows;
@@ -354,8 +435,9 @@
 
       const holder = document.getElementById('refusals');
       if (!rows.length) {
+        const row = state.filter ? projectRow(state.filter) : null;
         holder.innerHTML = '<p class="text-xs text-gray-500">' +
-          (state.filter ? 'Nothing was refused in ' + escapeHtml(state.filter) + ' in this window.' : 'Nothing was refused in this window.') +
+          (state.filter ? filteredEmpty('refused', row ? row.refused : 0) : 'Nothing was refused in this window.') +
           '</p>';
         return;
       }
@@ -436,16 +518,24 @@
       const empty = !d.totals.decisions;
       document.getElementById('empty-state').classList.toggle('hidden', !empty);
       document.getElementById('body').classList.toggle('hidden', empty);
+      const coverageSection = document.getElementById('coverage').closest('section');
+      if (!coverageHome) coverageHome = { parent: coverageSection.parentNode, next: coverageSection.nextSibling };
       if (empty) {
         renderCoverage();
-        document.getElementById('empty-state').appendChild(document.getElementById('coverage').closest('section'));
+        document.getElementById('empty-state').appendChild(coverageSection);
         return;
+      }
+      // Moved into the empty state, it stayed there after switching to a window
+      // with data, and the link to the rules went with it.
+      if (coverageSection.parentNode !== coverageHome.parent) {
+        coverageHome.parent.insertBefore(coverageSection, coverageHome.next);
       }
 
       renderProjects();
       renderCategories();
       renderCoverage();
       renderRefusals();
+      renderObservations();
     }
 
     renderNav();

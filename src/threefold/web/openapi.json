@@ -265,7 +265,7 @@
     "/sessions/{session_id}": {
       "get": {
         "summary": "Inspect Session State",
-        "description": "Retrieves cumulative spend, token history, and circuit breaker status for an active session.",
+        "description": "Retrieves cumulative spend, history length and circuit breaker status for a session that has been recorded. Reading never creates a session.",
         "parameters": [
           {
             "name": "session_id",
@@ -279,6 +279,9 @@
         "responses": {
           "200": {
             "description": "Current session statistics"
+          },
+          "404": {
+            "description": "No session with this id has been recorded (urn:threefold:error:session-not-found)"
           }
         }
       }
@@ -380,6 +383,261 @@
           }
         }
       }
+    },
+    "/api/insights": {
+      "get": {
+        "summary": "What the gates decided, by project, kind of problem and rule",
+        "description": "Aggregates the decision ledger over a window for the Enforcement Console. A refusal and an observation are counted apart: an observation is a call that ran and that a rule in observe mode would have refused. Rows keep the target of a call and never its arguments.",
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 30,
+              "default": 7
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "totals (decisions, refused, approved, refusal_rate, observed, projects, developers), by_category, by_rule, by_observed_rule, by_project, by_developer, by_day, recent_refusals, recent_observations, coverage"
+          }
+        }
+      }
+    },
+    "/rules": {
+      "get": {
+        "summary": "The layering rules in force",
+        "description": "Open, because a reader has to be able to see the architecture they are held to.",
+        "responses": {
+          "200": {
+            "description": "rules, count, is_default, languages_read, extensions_read, refresh_seconds, unsupported",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "rules": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/LayeringRule"
+                      }
+                    },
+                    "count": {
+                      "type": "integer"
+                    },
+                    "is_default": {
+                      "type": "boolean"
+                    },
+                    "languages_read": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "unsupported": {
+                      "type": "string"
+                    },
+                    "extensions_read": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "refresh_seconds": {
+                      "type": "number",
+                      "description": "How long a server may go on using the rules it holds before reading them again."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Replace the layering rules",
+        "description": "Replaces the whole set and stores it. The save is all or nothing: if any rule cannot be used, nothing is saved and the 400 names each rule and why. The server that takes the save applies the rules from its next call; every other server reads them again within refresh_seconds. Requires the operator key even where reads are anonymous, because the rules are the gate rather than a setting on it.",
+        "security": [
+          {
+            "OperatorApiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "rules"
+                ],
+                "properties": {
+                  "rules": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/LayeringRule"
+                    },
+                    "maxItems": 50
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "RULES_UPDATED, with the rules as stored and refresh_seconds"
+          },
+          "400": {
+            "description": "At least one rule cannot be used; nothing was saved (urn:threefold:error:unusable-rule)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "problems": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "index": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ],
+                            "description": "Position of the rule in what was sent."
+                          },
+                          "id": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "reason": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No key was presented"
+          },
+          "403": {
+            "description": "The key was rejected, or this deployment has configured no operator key at all"
+          }
+        }
+      }
+    },
+    "/rules/explain": {
+      "post": {
+        "summary": "Try the rules on a file without saving or recording anything",
+        "description": "Reads the imports in the content and judges them against the layering rules in force, or against a draft sent in the body. Only the layering rules are tried: a write this answers ALLOW for can still be refused for a credential, a protected path, a loop or its cost. No verdict is issued, no ledger row is written and a draft is never put in force, which is why it is open.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "path"
+                ],
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "example": "src/main/java/com/acme/billing/domain/Order.java",
+                    "description": "At most 400 characters, on one line, with no spaces: the same test the gate applies before it judges a path."
+                  },
+                  "content": {
+                    "type": "string",
+                    "example": "import javax.persistence.Entity;"
+                  },
+                  "rules": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/LayeringRule"
+                    },
+                    "description": "A draft to try instead of the rules in force."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "language, imports, rules_considered (draft | in force), applicable_rules, verdict (REFUSE | OBSERVE | ALLOW), violations, note, scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "verdict": {
+                      "type": "string",
+                      "enum": [
+                        "REFUSE",
+                        "OBSERVE",
+                        "ALLOW"
+                      ]
+                    },
+                    "language": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "imports": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "applicable_rules": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "violations": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "note": {
+                      "type": "string"
+                    },
+                    "scope": {
+                      "type": "string",
+                      "const": "layering rules only"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not a JSON object, has no path, has a path the gate would never judge (urn:threefold:error:nothing-to-explain), or carries a draft with a rule that cannot be used (urn:threefold:error:unusable-rule, with problems)"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -389,6 +647,56 @@
         "in": "header",
         "name": "X-API-Key",
         "description": "Operator key for writes that outlive the request. Reading needs none. A deployment that has configured no key refuses policy writes outright with 403."
+      }
+    },
+    "schemas": {
+      "LayeringRule": {
+        "type": "object",
+        "required": [
+          "id",
+          "when_path_matches",
+          "forbid_imports"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "What a refusal quotes. Must be unique within the set."
+          },
+          "description": {
+            "type": "string",
+            "description": "The sentence a developer reads when stopped."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "enforce",
+              "observe"
+            ],
+            "default": "enforce",
+            "description": "enforce refuses the write. observe lets it run and records that the rule would have refused it. A missing or null mode means enforce. Any other value makes the whole save fail with 400, naming the rule."
+          },
+          "when_path_matches": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "A list of globs over the file path, at most 40, each at most 300 characters. ** crosses folders, * and ? stay inside one. Case is ignored."
+          },
+          "forbid_imports": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "A list of at most 40 patterns. A dotted or slashed module prefix forbids it and everything beneath it, never a sibling that only shares its first letters. Globs are allowed."
+          },
+          "allow_imports": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Exceptions, a list of at most 40. When an allow and a forbid both match, the more specific pattern decides."
+          }
+        }
       }
     }
   }

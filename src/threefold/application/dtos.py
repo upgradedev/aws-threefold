@@ -39,6 +39,11 @@ class EvaluationResultDTO:
     explanation_source: Optional[str] = None
     # Where the session state for this verdict actually landed: "dynamodb" or "memory".
     persistence: Optional[str] = None
+    # What rules in observe mode would have refused. The call still ran; this is
+    # the record an architect reads before turning a rule to enforce.
+    observations: Optional[List[str]] = None
+    observed_rules: Optional[List[str]] = None
+    observed_target: Optional[str] = None
     timestamp: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )

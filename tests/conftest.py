@@ -9,6 +9,12 @@ from __future__ import annotations
 import os
 import pytest
 
+# Set on import as well as in the fixture below. The handler module builds its
+# repository and Bedrock client when a test file imports it, which happens at
+# collection, before any fixture runs, so a flag set only in a fixture arrived
+# after the clients had already bound to whatever credentials the machine had.
+os.environ["THREEFOLD_OFFLINE"] = "1"
+
 
 @pytest.fixture(autouse=True, scope="session")
 def _force_offline_clients():

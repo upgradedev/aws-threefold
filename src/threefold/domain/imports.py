@@ -58,17 +58,38 @@ _TS_CALL = re.compile(r"""(?:require|import)\s*\(\s*['"](?P<module>[^'"\n]{1,200
 # Comments are stripped before the patterns run. A commented-out import is not a
 # dependency, and refusing one is the kind of false refusal that gets a guard
 # uninstalled: the developer can see with their own eyes that the line is dead.
-_BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
+#
+# Block comments are removed by a scan rather than by `/\*.*?\*/`: with no
+# closing marker that expression restarts at every `/*` and runs to the end of
+# the content each time, which a review measured at 7 seconds for 60 KB of
+# repeated openers sent to the open /rules/explain route.
 # Not preceded by a colon: stripping `//` blindly ate the scheme out of
 # `import x from "https://cdn/mod.js"`, which made a real dependency invisible.
 _LINE_COMMENT = re.compile(r"(?m)(?<!:)//.*$")
 _HASH_COMMENT = re.compile(r"(?m)#.*$")
 
 
+def _without_block_comments(content: str) -> str:
+    """Drops every `/* ... */`, in one pass. An unclosed one runs to the end."""
+    kept = []
+    position = 0
+    while True:
+        start = content.find("/*", position)
+        if start == -1:
+            kept.append(content[position:])
+            break
+        kept.append(content[position:start])
+        end = content.find("*/", start + 2)
+        if end == -1:
+            break
+        position = end + 2
+    return "".join(kept)
+
+
 def _without_comments(content: str, language: str) -> str:
     if language == "python":
         return _HASH_COMMENT.sub("", content)
-    return _LINE_COMMENT.sub("", _BLOCK_COMMENT.sub("", content))
+    return _LINE_COMMENT.sub("", _without_block_comments(content))
 
 
 def language_for(path: str) -> str:
@@ -80,14 +101,30 @@ def language_for(path: str) -> str:
     return ""
 
 
+# Above this size Python content is read by the line reader instead of parsed.
+# A review sent a 1 MB list literal and `ast.parse` peaked at 747 MB, three times
+# the function's memory, and deeply nested content raised RecursionError, which
+# is not a SyntaxError and escaped as a 500. A source file this large is rare,
+# and the line reader still sees every import statement in it.
+PYTHON_PARSE_LIMIT = 100_000
+
+
+def _python_line_imports(content: str) -> List[str]:
+    return [
+        (match.group("from") or match.group("import") or "").lstrip(".")
+        for match in _PYTHON_FALLBACK.finditer(_without_comments(content, "python"))
+    ]
+
+
 def _python_imports(content: str) -> List[str]:
+    if len(content) > PYTHON_PARSE_LIMIT:
+        return _python_line_imports(content)
     try:
         tree = ast.parse(content)
-    except SyntaxError:
-        return [
-            (match.group("from") or match.group("import") or "").lstrip(".")
-            for match in _PYTHON_FALLBACK.finditer(_without_comments(content, "python"))
-        ]
+    except (SyntaxError, ValueError, RecursionError, MemoryError):
+        # Content arrives mid-edit and is often not valid Python. Reading it by
+        # line rather than failing is what keeps a half-written file judged.
+        return _python_line_imports(content)
 
     modules: List[str] = []
     for node in ast.walk(tree):

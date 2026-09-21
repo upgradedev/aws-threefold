@@ -15,10 +15,11 @@ from threefold.domain.models import (
 )
 from threefold.domain.circuit_breaker import CostCircuitBreaker, TokenCostCalculator
 from threefold.domain.loop_detector import LoopDetector
-from threefold.domain.layering_rules import DEFAULT_RULES, normalise_rules
+from threefold.domain.layering_rules import DEFAULT_RULES, normalise_rules, validate_rules
 from threefold.domain.boundary_guard import (
     ArchitecturalBoundaryGuard,
     describe_target,
+    observe_layering,
     redact_secrets,
 )
 from threefold.application.dtos import (
@@ -37,6 +38,22 @@ from threefold.domain.events import (
 from threefold.infrastructure.dynamo_repo import SessionConflictError
 
 logger = logging.getLogger(__name__)
+
+# How long a container trusts the rules it holds before reading them again.
+# Lambda runs several warm containers, each of which loaded the rules on its own
+# cold start, so a save reached only the container that took it and the rules
+# page said "in force from the next tool call" while the others went on
+# enforcing the old set until they happened to be recycled. One read per
+# container per half minute is the price of that sentence being true.
+RULES_REFRESH_SECONDS = 30.0
+
+
+class UnusableRulesError(ValueError):
+    """A save that would have dropped or changed a rule, with the reasons."""
+
+    def __init__(self, message: str, problems: list) -> None:
+        super().__init__(message)
+        self.problems = problems
 
 
 class GovernanceEvaluator:
@@ -72,6 +89,7 @@ class GovernanceEvaluator:
         # are read from storage rather than compiled in. A deployment that has
         # never been given any enforces the shipped set.
         self.layering_rules = self._adopt_saved_rules()
+        self._rules_read_at = time.monotonic()
 
     def _adopt_saved_policy(self) -> None:
         """Applies the stored policy, so a cold container does not start on defaults."""
@@ -111,15 +129,33 @@ class GovernanceEvaluator:
         cleaned = normalise_rules(saved) if saved else []
         return cleaned or list(DEFAULT_RULES)
 
+    def refresh_rules_if_stale(self) -> None:
+        """Reads the stored rules again when this container's copy is old."""
+        if time.monotonic() - self._rules_read_at < RULES_REFRESH_SECONDS:
+            return
+        self.layering_rules = self._adopt_saved_rules()
+        self._rules_read_at = time.monotonic()
+
     def update_rules(self, raw_rules) -> list:
-        """Replaces the layering rules and stores them."""
-        cleaned = normalise_rules(raw_rules)
+        """Replaces the layering rules and stores them, or changes nothing.
+
+        The save is refused whole when any rule in it cannot be used. Keeping the
+        usable ones answered 200 with a rule missing, and the only sign was a
+        count one lower than the architect sent.
+        """
+        cleaned, problems = validate_rules(raw_rules)
+        if problems:
+            raise UnusableRulesError(
+                f"{len(problems)} rule(s) cannot be used, so nothing was saved.", problems
+            )
         if not cleaned:
-            raise ValueError(
-                "No usable rule was supplied. A rule needs at least one path pattern "
-                "under when_path_matches and at least one pattern under forbid_imports."
+            raise UnusableRulesError(
+                "No rule was supplied. A rule needs at least one path pattern under "
+                "when_path_matches and at least one pattern under forbid_imports.",
+                [],
             )
         self.layering_rules = cleaned
+        self._rules_read_at = time.monotonic()
         saver = getattr(self.session_repo, "save_rules", None)
         if saver is not None:
             try:
@@ -252,6 +288,7 @@ class GovernanceEvaluator:
         reached the session write. Nothing could answer which rule refused what,
         for whom, last week, which is the only question a platform owner has.
         """
+        self.refresh_rules_if_stale()
         result = self._decide(request)
         self._record_decision(request, result)
         return result
@@ -272,10 +309,13 @@ class GovernanceEvaluator:
                 {
                     "verdict_id": result.verdict_id,
                     "timestamp": result.timestamp,
-                    "session_id": request.session_id,
-                    "developer_id": request.developer_id,
-                    "project_name": request.project_name,
-                    "tool_name": request.tool_name,
+                    # Stored as short strings whatever the caller sent. These are
+                    # rendered on pages anyone can open, and a tool_name sent as a
+                    # list reached one of them as markup.
+                    "session_id": str(request.session_id or "")[:160],
+                    "developer_id": str(request.developer_id or "")[:120],
+                    "project_name": str(request.project_name or "")[:120],
+                    "tool_name": str(request.tool_name or "")[:120],
                     "action_type": str(request.action_type),
                     "status": result.status,
                     "rule": self._rule_that_fired(result),
@@ -283,6 +323,18 @@ class GovernanceEvaluator:
                     # credential store being reached. Both fail the same
                     # invariant and a reader acts on them differently.
                     "reason": redact_secrets(result.reason or "")[:240],
+                    # A call that ran but that a rule in observe mode would have
+                    # refused. The status stays APPROVED, because it was.
+                    # Every observing rule is kept, not the first: an architect
+                    # staging three rules at once decides each rollout from
+                    # these counts, and keeping one would undercount the rest.
+                    "observed_rules": list(getattr(result, "observed_rules", None) or []),
+                    "observed_rule": (getattr(result, "observed_rules", None) or [""])[0],
+                    "observed_reason": redact_secrets((result.observations or [""])[0])[:240],
+                    # The file the observation is about. The row's target is the
+                    # first path in the call, which in a multi-file edit can be a
+                    # different file from the one the rule would have refused.
+                    "observed_target": (getattr(result, "observed_target", "") or "")[:160],
                     "target": describe_target(request),
                     "cost_usd": result.current_session_cost_usd,
                 }
@@ -459,7 +511,16 @@ class GovernanceEvaluator:
             reason="All deterministic governance invariants satisfied",
             rule_evaluations=rule_evaluations,
         )
-        return self._to_dto(session, verdict)
+        approved = self._to_dto(session, verdict)
+        watched = observe_layering(invocation, rules=self.layering_rules)
+        if watched:
+            approved.observations = [item["reason"] for item in watched]
+            # One rule watching two files of a multi-file edit is one rule that
+            # would have refused this call, not two, and counting it twice
+            # inflated the number an architect decides a rollout from.
+            approved.observed_rules = list(dict.fromkeys(item["rule_id"] for item in watched))
+            approved.observed_target = watched[0].get("path", "")
+        return approved
 
     def _persist_halt(self, session: AgentSession) -> None:
         """Writes a halted session through, so every worker observes the trip.

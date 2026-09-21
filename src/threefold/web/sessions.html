@@ -212,6 +212,7 @@
     const NAV = [
       { href: 'index.html', label: 'Dashboard' },
       { href: 'console.html', label: 'Enforcement Console' },
+      { href: 'rules.html', label: 'Architecture Rules' },
       { href: 'settings.html', label: 'Policy Settings' },
       { href: 'connect.html', label: 'Connect an agent' },
       { href: 'testbook.html', label: 'Judge Testbook' },
@@ -249,7 +250,10 @@
     }
 
     function escapeHtml(str) {
-      if (typeof str !== 'string') return str == null ? '' : String(str);
+      // Everything is made a string first and then escaped. Returning a non-string
+      // as String(value) unescaped let a tool_name sent as an array reach the page
+      // as markup.
+      if (typeof str !== 'string') str = str == null ? '' : String(str);
       return str.replace(/[&<>"']/g, m => ({
         '&': '&amp;',
         '<': '&lt;',

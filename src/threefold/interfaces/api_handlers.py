@@ -16,10 +16,17 @@ from urllib.parse import unquote
 from threefold.application.audit_issuer import AuditIssuer
 from threefold.application.bedrock_reviewer import BedrockArchitecturalReviewer
 from threefold.application.dtos import PolicyConfigDTO, ToolCallRequestDTO
-from threefold.application.evaluator import GovernanceEvaluator
+from threefold.application.evaluator import RULES_REFRESH_SECONDS, GovernanceEvaluator, UnusableRulesError
 from threefold.application.insights import summarise, with_layering_coverage
-from threefold.domain.imports import LANGUAGE_BY_SUFFIX
-from threefold.domain.layering_rules import DEFAULT_RULES, UNSUPPORTED
+from threefold.domain.imports import LANGUAGE_BY_SUFFIX, declared_imports
+from threefold.domain.boundary_guard import MAX_PATHLIKE_LENGTH, looks_like_path
+from threefold.domain.layering_rules import (
+    DEFAULT_RULES,
+    UNSUPPORTED,
+    rules_for_path,
+    validate_rules,
+    violations as layering_violations,
+)
 from threefold.domain.exceptions import EmptyAttestationException
 from threefold.infrastructure.bedrock_client import BedrockGovernanceClient
 from threefold.infrastructure.idempotency import global_idempotency_cache
@@ -68,6 +75,7 @@ WEB_ASSETS = {
     "/sessions.html": "sessions.html",
     "/connect.html": "connect.html",
     "/console.html": "console.html",
+    "/rules.html": "rules.html",
 }
 
 
@@ -180,6 +188,11 @@ def lambda_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]
         or headers.get("X-Idempotency-Key")
         or headers.get("x-idempotency-key")
     )
+    # Keyed by method and route as well as the caller's key. Keyed by the key
+    # alone, an anonymous POST /rules/explain carrying the key another caller had
+    # used on a write was answered with that write's stored response.
+    if idempotency_key:
+        idempotency_key = f"{http_method} {path} {idempotency_key}"
     if idempotency_key and http_method == "POST":
         cached = global_idempotency_cache.get(idempotency_key)
         if cached:
@@ -264,10 +277,11 @@ def lambda_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]
             days = max(1, min(days, 30))
             decisions = _evaluator.list_decisions(days=days, limit=2000)
             payload = summarise(decisions, days)
+            _evaluator.refresh_rules_if_stale()
             payload = with_layering_coverage(
                 payload,
                 _evaluator.layering_rules,
-                sorted(set(LANGUAGE_BY_SUFFIX.values())),
+                sorted(LANGUAGE_BY_SUFFIX),
             )
             payload["persistence"] = getattr(_evaluator.session_repo, "persistence_mode", "memory")
             return build_response(200, payload)
@@ -543,7 +557,21 @@ def lambda_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]
             # nobody has ever used. Reading it back would then create an empty session
             # and report that as the caller's, which is worse than an error.
             target_session_id = unquote(path.replace("/sessions/", "").strip())
-            session = _evaluator.get_or_create_session(target_session_id)
+            # Read, never created. This route is open to anonymous readers, and a
+            # read that stored a fresh session for any id it was asked about let
+            # anyone write rows to the table by guessing.
+            session = _evaluator.session_repo.get_session(target_session_id)
+            if session is None:
+                return build_response(
+                    404,
+                    rfc7807_error(
+                        404,
+                        "No Such Session",
+                        f"No session named {target_session_id!r} has been recorded.",
+                        path,
+                        error_type="urn:threefold:error:session-not-found",
+                    ),
+                )
             return build_response(200, {
                 "session_id": session.session_id,
                 "project_name": session.project_name,
@@ -584,6 +612,7 @@ def lambda_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]
         # has to be able to see the architecture they are being held to; writing
         # them is not, because they are the gate rather than a setting on it.
         if path in ("/rules", "/rules/layering") and http_method == "GET":
+            _evaluator.refresh_rules_if_stale()
             rules = _evaluator.layering_rules
             return build_response(
                 200,
@@ -592,26 +621,107 @@ def lambda_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]
                     "count": len(rules),
                     "is_default": rules == DEFAULT_RULES,
                     "languages_read": sorted(set(LANGUAGE_BY_SUFFIX.values())),
+                    "extensions_read": sorted(LANGUAGE_BY_SUFFIX),
+                    "refresh_seconds": RULES_REFRESH_SECONDS,
                     "unsupported": UNSUPPORTED,
+                },
+            )
+
+        # Route 6d: try the rules on a file without saving or recording anything.
+        # An architect writing a rule needs to know whether it fires on the file in
+        # front of them before ten teams find out, and a draft rule set can be sent
+        # in the body so nothing has to be saved to be tried. Open, because it
+        # changes nothing: no verdict is issued and no ledger row is written.
+        if path == "/rules/explain" and http_method == "POST":
+            body = _parse_body(event)
+
+            def _cannot_explain(detail):
+                return build_response(
+                    400,
+                    rfc7807_error(
+                        400, "Nothing To Explain", detail, path,
+                        error_type="urn:threefold:error:nothing-to-explain",
+                    ),
+                )
+
+            if not isinstance(body, dict):
+                return _cannot_explain("Send a JSON object with the path of the file and its content.")
+            target = body.get("path")
+            content = body.get("content") or ""
+            if not isinstance(target, str) or not target.strip():
+                return _cannot_explain("Send the path of the file and its content.")
+            if not isinstance(content, str):
+                return _cannot_explain("content must be a string.")
+            # The same test the gate applies before it judges a path at all. A
+            # path the gate would never evaluate used to be judged here, so the
+            # page said REFUSE for a write the gate then approved.
+            if not looks_like_path(target):
+                return _cannot_explain(
+                    "The gate does not treat this as a file path, so it would never judge it: a path "
+                    f"is at most {MAX_PATHLIKE_LENGTH} characters, on one line, with no spaces."
+                )
+            draft = body.get("rules")
+            if draft is not None:
+                rules, problems = validate_rules(draft)
+                if problems or not rules:
+                    # A draft whose rules were silently dropped explained as
+                    # "no rule covers this path", which was true only of the
+                    # rules that survived.
+                    problem = rfc7807_error(
+                        400,
+                        "No Usable Rule",
+                        f"{len(problems) or 'No'} rule(s) in the draft cannot be used, so it was not tried.",
+                        path,
+                        error_type="urn:threefold:error:unusable-rule",
+                    )
+                    problem["problems"] = problems
+                    return build_response(400, problem)
+            else:
+                _evaluator.refresh_rules_if_stale()
+                rules = _evaluator.layering_rules
+            language, modules = declared_imports(target, content)
+            found, note = layering_violations(target, content, rules)
+            enforced = [item for item in found if item["mode"] == "enforce"]
+            watched = [item for item in found if item["mode"] == "observe"]
+            return build_response(
+                200,
+                {
+                    "path": target,
+                    "language": language or None,
+                    "imports": modules,
+                    "rules_considered": "draft" if draft is not None else "in force",
+                    "applicable_rules": [rule["id"] for rule in rules_for_path(target, rules)],
+                    "verdict": "REFUSE" if enforced else ("OBSERVE" if watched else "ALLOW"),
+                    "violations": found,
+                    "note": note,
+                    # Only the layering rules are tried here. A write this answers
+                    # ALLOW for can still be refused for a credential, a protected
+                    # path, a loop or its cost.
+                    "scope": "layering rules only",
                 },
             )
 
         if path in ("/rules", "/rules/layering") and http_method == "POST":
             body = _parse_body(event)
+            submitted = body.get("rules", body) if isinstance(body, dict) else body
             try:
-                saved = _evaluator.update_rules(body.get("rules", body))
-            except ValueError as invalid:
-                return build_response(
+                saved = _evaluator.update_rules(submitted)
+            except UnusableRulesError as invalid:
+                problem = rfc7807_error(
                     400,
-                    rfc7807_error(
-                        400,
-                        "No Usable Rule",
-                        str(invalid),
-                        path,
-                        error_type="urn:threefold:error:unusable-rule",
-                    ),
+                    "No Usable Rule",
+                    str(invalid),
+                    path,
+                    error_type="urn:threefold:error:unusable-rule",
                 )
-            res_dict = {"status": "RULES_UPDATED", "count": len(saved), "rules": saved}
+                problem["problems"] = invalid.problems
+                return build_response(400, problem)
+            res_dict = {
+                "status": "RULES_UPDATED",
+                "count": len(saved),
+                "rules": saved,
+                "refresh_seconds": RULES_REFRESH_SECONDS,
+            }
             if idempotency_key:
                 global_idempotency_cache.set(idempotency_key, 200, res_dict)
             emit_threefold_emf_metrics({"LayeringRulesUpdated": 1.0}, namespace="Threefold/Audits")

@@ -43,7 +43,11 @@ def _restore_the_rules_the_handler_holds():
     from threefold.interfaces.api_handlers import _evaluator
 
     before = list(_evaluator.layering_rules)
+    stored = _evaluator.session_repo.load_rules()
     yield
+    # The stored copy is restored too: a container now reads the rules again
+    # after a refresh interval, and would otherwise adopt what a test saved.
+    _evaluator.session_repo.save_rules(stored if stored is not None else before)
     _evaluator.layering_rules = before
 
 
@@ -210,3 +214,67 @@ def test_a_rule_that_says_nothing_is_refused_rather_than_saved() -> None:
     )
     assert status == 400
     assert body["type"] == "urn:threefold:error:unusable-rule"
+
+
+# With STAGE=prod every path not listed as public needs a key. The pages were
+# listed and the reads they make were not, so each screen opened and then every
+# fetch answered 401. Nothing in the suite noticed, because the event's stage is
+# not what the middleware reads: the environment's is.
+PUBLIC_READS = [
+    ("GET", "/rules.html", None),
+    ("GET", "/console.html", None),
+    ("GET", "/rules", None),
+    ("GET", "/api/insights", None),
+    ("GET", "/api/sessions", None),
+    ("GET", "/policy/config", None),
+    ("GET", "/sessions/perimeter-probe", None),
+    ("POST", "/rules/explain", {"path": "src/domain/models.py", "content": "import boto3"}),
+]
+STILL_CLOSED = [
+    ("POST", "/rules", {"rules": []}),
+    ("POST", "/policy/config", {}),
+    ("POST", "/sessions/perimeter-probe/terminate", {"operator_name": "probe", "reason": "probe"}),
+    ("POST", "/evaluate-tool-call", {"session_id": "perimeter-probe", "tool_name": "Read"}),
+]
+
+
+@pytest.mark.parametrize("method, path, body", PUBLIC_READS)
+def test_what_the_pages_read_stays_open_when_keys_are_enforced(monkeypatch, method, path, body) -> None:
+    monkeypatch.setenv("STAGE", "prod")
+    event = {
+        "rawPath": f"/prod{path}",
+        "headers": {"Content-Type": "application/json"},
+        "requestContext": {"http": {"method": method}, "stage": "prod"},
+    }
+    if body is not None:
+        event["body"] = json.dumps(body)
+    # The raw status: a page answers HTML, which the JSON helper cannot read.
+    status = lambda_handler(event)["statusCode"]
+    assert status not in (401, 403), f"{method} {path} answered {status} to an anonymous reader"
+
+
+@pytest.mark.parametrize("method, path, body", STILL_CLOSED)
+def test_opening_the_reads_left_every_write_closed(monkeypatch, method, path, body) -> None:
+    monkeypatch.setenv("STAGE", "prod")
+    status, _ = _call(method, path, body)
+    assert status in (401, 403), f"{method} {path} answered {status} with no key"
+
+
+def test_reading_a_session_that_does_not_exist_creates_nothing(monkeypatch) -> None:
+    """An open read that stored a session for any id let anyone write rows by guessing."""
+    from threefold.interfaces.api_handlers import _evaluator
+
+    monkeypatch.setenv("STAGE", "prod")
+    status, body = _call("GET", "/sessions/never-recorded-probe")
+    assert status == 404
+    assert body["type"] == "urn:threefold:error:session-not-found"
+    assert _evaluator.session_repo.get_session("never-recorded-probe") is None
+
+
+def test_the_readiness_probe_is_not_opened_with_the_reads(monkeypatch) -> None:
+    """No page reads it, and it reports the table name, region and raw client errors."""
+    monkeypatch.setenv("STAGE", "prod")
+    response = lambda_handler(
+        {"rawPath": "/prod/readyz", "headers": {}, "requestContext": {"http": {"method": "GET"}, "stage": "prod"}}
+    )
+    assert response["statusCode"] == 401

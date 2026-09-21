@@ -202,6 +202,7 @@ def validate_request_security(
         "/index.html",
         "/connect.html",
         "/console.html",
+        "/rules.html",
         "/sessions.html",
         "/settings.html",
         "/swagger.html",
@@ -215,6 +216,36 @@ def validate_request_security(
         "/claude_code_hook.py",
     }
     if path in public_paths:
+        return True, None
+
+    # 4b. The reads those pages make. Opening a page and refusing the data it is
+    # built on is the same regression as refusing the page, one step later: the
+    # console and the rules screen rendered and then every fetch answered 401
+    # the moment STAGE or ENFORCE_API_KEY was set. Only reads are listed, by
+    # method, and each of them changes nothing: GET /sessions/{id} answers 404
+    # for an id it has not seen rather than creating it. Writes to the same
+    # paths were decided in step 3. When keys are enforced, the kill switch
+    # under /sessions/{id}/terminate needs one like every other unlisted call;
+    # a deployment that enforces no key, as the demo stack does, answers it
+    # anonymously, and STATE.md says so.
+    # /readyz is not here: no page reads it, and it reports the table name,
+    # region, model id and raw client errors.
+    public_reads = {
+        "/api/insights",
+        "/api/sessions",
+        "/rules",
+        "/rules/layering",
+        "/policy/config",
+        "/policy",
+    }
+    verb = method.upper()
+    if verb == "GET" and (
+        path in public_reads or (path.startswith("/sessions/") and path.count("/") == 2)
+    ):
+        return True, None
+    # Trying a rule changes nothing and records nothing, so it is a read that
+    # happens to need a body.
+    if verb == "POST" and path == "/rules/explain":
         return True, None
 
     # 5. Authentication enforcement

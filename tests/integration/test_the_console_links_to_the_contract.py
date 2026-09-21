@@ -43,7 +43,7 @@ def _spec_anchors() -> set[str]:
     return anchors
 
 
-CONSOLE_PAGES = ["/", "/settings.html", "/sessions.html", "/connect.html"]
+CONSOLE_PAGES = ["/", "/settings.html", "/sessions.html", "/connect.html", "/console.html", "/rules.html"]
 
 
 @pytest.mark.parametrize("page", CONSOLE_PAGES)
@@ -73,6 +73,8 @@ def test_the_pages_link_to_the_operations_they_actually_call() -> None:
             "post_sessions__session_id__terminate",
         },
         "/connect.html": {"post_evaluate_tool_call"},
+        "/console.html": {"get_api_insights"},
+        "/rules.html": {"get_rules", "post_rules", "post_rules_explain"},
     }
     for page, operations in expected.items():
         linked = set(re.findall(r"#/default/([A-Za-z0-9_]+)", _get(page)["body"]))
