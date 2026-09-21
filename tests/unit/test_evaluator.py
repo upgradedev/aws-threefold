@@ -33,10 +33,10 @@ def test_evaluator_trips_on_loop():
     req = ToolCallRequestDTO(
         session_id="session-eval-2",
         developer_id="dev-alex",
-        project_name="PaymentService",
-        tool_name="view_file",
-        action_type="FILE_READ",
-        arguments={"AbsolutePath": "/src/pay.py"},
+        project_name="Acme-Payments",
+        tool_name="edit_file",
+        action_type="FILE_WRITE",
+        arguments={"TargetFile": "src/pay.py", "Instruction": "fix typo"},
     )
     # Call 1 & 2 succeed
     evaluator.evaluate_tool_call(req)
@@ -45,6 +45,26 @@ def test_evaluator_trips_on_loop():
     res3 = evaluator.evaluate_tool_call(req)
     assert res3.status == "BLOCKED_LOOP_DETECTED"
     assert res3.session_tripped is True
+
+
+def test_repeating_a_read_is_recorded_rather_than_halting_the_session():
+    """Reading the same file three times is polling, not a runaway.
+
+    The first version halted a session for it, so an agent re-reading a file
+    while it waited on a build was locked out of its own session.
+    """
+    evaluator = GovernanceEvaluator()
+    req = ToolCallRequestDTO(
+        session_id="session-eval-read",
+        developer_id="dev-alex",
+        project_name="Acme-Payments",
+        tool_name="view_file",
+        action_type="FILE_READ",
+        arguments={"AbsolutePath": "/src/pay.py"},
+    )
+    results = [evaluator.evaluate_tool_call(req) for _ in range(4)]
+    assert all(result.status == "APPROVED" for result in results)
+    assert results[-1].session_tripped is False
 
 
 def test_audit_issuer_generates_valid_certificate():
