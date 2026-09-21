@@ -249,3 +249,59 @@ def test_a_save_reaches_a_container_that_did_not_take_it() -> None:
     elsewhere._rules_read_at -= evaluator_module.RULES_REFRESH_SECONDS + 1
     result = _write(elsewhere, "observe-elsewhere", HTTP_IMPORT)
     assert result.observed_rules == ["catalog-no-http"], "The other container still enforced the old rules"
+
+
+def test_a_failed_re_read_keeps_the_rules_a_container_holds() -> None:
+    """Falling back to the shipped set on a transient error would silently
+    replace an architect's rules on every warm container, every thirty seconds."""
+    from threefold.application import evaluator as evaluator_module
+    from threefold.infrastructure.dynamo_repo import DynamoDBSessionRepository
+
+    class _Unreachable(DynamoDBSessionRepository):
+        failing = False
+
+        def load_rules(self):
+            if self.failing:
+                raise ConnectionError("simulated DynamoDB outage")
+            return super().load_rules()
+
+    repo = _Unreachable()
+    container = GovernanceEvaluator(session_repo=repo)
+    container.update_rules([WATCHING])
+    repo.failing = True
+    container._rules_read_at -= evaluator_module.RULES_REFRESH_SECONDS + 1
+    container.refresh_rules_if_stale()
+    assert [rule["id"] for rule in container.layering_rules] == ["catalog-no-http"]
+
+
+def test_a_live_read_that_fails_raises_rather_than_reporting_nothing_saved() -> None:
+    from threefold.infrastructure.dynamo_repo import DynamoDBSessionRepository
+
+    class _Table:
+        def get_item(self, **_):
+            raise ConnectionError("simulated DynamoDB outage")
+
+    repo = DynamoDBSessionRepository(boto3_resource=type("R", (), {"Table": lambda self, name: _Table()})())
+    try:
+        repo.load_rules()
+    except ConnectionError:
+        return
+    raise AssertionError("A failed read answered as if nothing had been saved")
+
+
+def test_text_nested_beside_a_write_is_not_attributed_to_the_file() -> None:
+    """Passing the path into every nested object refused a file for text nobody wrote to it."""
+    from threefold.domain.boundary_guard import ArchitecturalBoundaryGuard
+    from threefold.domain.models import ToolActionType, ToolInvocation
+
+    call = ToolInvocation(
+        tool_name="adapter",
+        action_type=ToolActionType.FILE_WRITE,
+        arguments={
+            "file_path": "src/domain/models.py",
+            "content": "class Price:\n    pass\n",
+            "response": {"body": "import boto3"},
+        },
+    )
+    allowed, reason = ArchitecturalBoundaryGuard.evaluate_tool_boundary(call, rules=DEFAULT_RULES)
+    assert allowed, f"Refused for nested text that was not written to the file: {reason}"

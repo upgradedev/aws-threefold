@@ -9,6 +9,9 @@ as a product that documents nothing rather than as a deployment that is broken.
 from __future__ import annotations
 
 import json
+from pathlib import Path
+
+import pytest
 
 from threefold.interfaces.api_handlers import lambda_handler
 
@@ -101,3 +104,12 @@ def test_the_spec_names_the_model_the_template_deploys() -> None:
     description = json.loads(_get("/openapi.json")["body"])["info"]["description"].lower()
     assert tier in description, f"The spec does not name {tier}, which is what the template deploys"
     assert f"{major}.{minor}" in description, f"The spec does not name version {major}.{minor}"
+
+
+def test_the_yaml_twin_says_what_the_served_document_says() -> None:
+    """The twins disagreed within one change while both were kept by hand."""
+    yaml = pytest.importorskip("yaml")
+    root = Path(__file__).resolve().parents[2]
+    served = json.loads((root / "src/threefold/web/openapi.json").read_text(encoding="utf-8"))
+    twin = yaml.safe_load((root / "docs/openapi.yaml").read_text(encoding="utf-8"))
+    assert twin == served, "Run scripts/generate_openapi_yaml.py after editing openapi.json"

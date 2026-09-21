@@ -258,8 +258,12 @@ def iter_write_targets(arguments: Any) -> List[Tuple[str, str]]:
     did not contain. A refusal that is wrong about which file it is refusing is
     worse than a missed violation, because it cannot be argued with.
 
-    Content with no path beside it belongs to the nearest path above it, which
-    is how a MultiEdit's edits reach the file they edit.
+    Content with no path beside it belongs to the path of the object holding
+    the list it sits in, which is how a MultiEdit's edits reach the file they
+    edit. Only a list passes its owner's path down. An object nested under a
+    path, such as `{"file_path": ..., "response": {"body": ...}}`, is not an edit
+    of that file, and pairing it would refuse the file for text nobody wrote to
+    it.
     """
     pairs: List[Tuple[str, str]] = []
 
@@ -276,7 +280,7 @@ def iter_write_targets(arguments: Any) -> List[Tuple[str, str]]:
                     if isinstance(key, str) and isinstance(value, str) and key.lower() in CONTENT_KEYS:
                         pairs.append((owner, value))
             for value in node.values():
-                walk(value, owner)
+                walk(value, owner if isinstance(value, (list, tuple)) else "")
         elif isinstance(node, (list, tuple, set)):
             for item in node:
                 walk(item, inherited)

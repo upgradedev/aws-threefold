@@ -130,11 +130,31 @@ class GovernanceEvaluator:
         return cleaned or list(DEFAULT_RULES)
 
     def refresh_rules_if_stale(self) -> None:
-        """Reads the stored rules again when this container's copy is old."""
+        """Reads the stored rules again when this container's copy is old.
+
+        A read that fails keeps the rules this container already holds. The
+        cold-start path falls back to the shipped set because it has nothing
+        else, but a warm container that did the same on a transient error would
+        swap an architect's rules for the defaults every thirty seconds, and
+        nothing would say so.
+        """
         if time.monotonic() - self._rules_read_at < RULES_REFRESH_SECONDS:
             return
-        self.layering_rules = self._adopt_saved_rules()
         self._rules_read_at = time.monotonic()
+        loader = getattr(self.session_repo, "load_rules", None)
+        if loader is None:
+            return
+        try:
+            saved = loader()
+        except Exception as exc:  # pragma: no cover - storage is best effort
+            logger.warning("Could not re-read the layering rules; keeping the ones held: %s", exc)
+            return
+        if not saved:
+            self.layering_rules = list(DEFAULT_RULES)
+            return
+        cleaned = normalise_rules(saved)
+        if cleaned:
+            self.layering_rules = cleaned
 
     def update_rules(self, raw_rules) -> list:
         """Replaces the layering rules and stores them, or changes nothing.

@@ -122,3 +122,10 @@ def test_an_idempotency_key_does_not_replay_another_routes_answer() -> None:
     status, body = _explain({"path": "src/domain/x.py", "content": "import boto3"}, headers)
     assert status == 200
     assert body.get("verdict") == "REFUSE", "Explain answered with another route's cached response"
+
+
+def test_the_line_reader_sees_every_module_in_one_import_statement() -> None:
+    """Python over the parse limit is read by line, and the gate still applies to it."""
+    padding = "x=[" + "a," * 60000 + "]\n"
+    _, modules = declared_imports("src/domain/x.py", padding + "import os, boto3 as aws\n")
+    assert "boto3" in modules and "os" in modules

@@ -238,3 +238,24 @@ def test_a_url_import_survives_comment_stripping() -> None:
     """Stripping `//` blindly ate the scheme and made the dependency invisible."""
     _, modules = declared_imports(TS_DOMAIN, "import x from 'https://cdn.test/mod.js';")
     assert modules == ["https://cdn.test/mod.js"]
+
+
+# Two decisions a differential fuzz of the segment matcher against the regex one
+# surfaced. Every other one of 19,983 pattern and path pairs agreed.
+
+
+def test_a_double_star_inside_a_segment_is_refused_rather_than_narrowed() -> None:
+    """`src**` crossed folders under the regex matcher; read as `*` it would cover fewer files."""
+    from threefold.domain.layering_rules import validate_rules
+
+    for field, pattern in (("when_path_matches", "src**/x.py"), ("forbid_imports", "com.acme**")):
+        rule = {"id": "r", "when_path_matches": ["**/domain/**"], "forbid_imports": ["java.sql"], field: [pattern]}
+        _, problems = validate_rules([rule])
+        assert problems and "inside a segment" in problems[0]["reason"], field
+    assert not validate_rules(DEFAULT_RULES)[1], "Every shipped rule must still validate"
+
+
+def test_repeated_trailing_double_stars_include_the_folder_itself() -> None:
+    """`abc/**/**` means what `abc/**` means: the folder and anything below it."""
+    assert matches("Domain/models.py/abc", "domain/**/abc/**/**") is True
+    assert matches("Domain/models.py/abc", "domain/**/abc/**") is True

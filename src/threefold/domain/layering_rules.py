@@ -155,6 +155,21 @@ def _pattern_list(entry: Dict[str, Any], field: str, required: bool) -> Tuple[Li
     too_long = [item for item in value if len(item) > MAX_PATTERN_LENGTH]
     if too_long:
         return [], f"{field} has a pattern longer than {MAX_PATTERN_LENGTH} characters"
+    # `**` has one meaning, a whole segment standing for any number of folders.
+    # Written inside a segment, as `src**`, the first matcher let it cross
+    # folders and the segment matcher that replaced it could not without
+    # guessing, so it is refused with the way to say it instead of being
+    # quietly read as something narrower.
+    separators = "/." if field != "when_path_matches" else "/"
+    for item in value:
+        segments = [item]
+        for separator in separators:
+            segments = [piece for segment in segments for piece in segment.split(separator)]
+        if any("**" in segment and segment != "**" for segment in segments):
+            return [], (
+                f"{field} pattern {item!r} uses ** inside a segment; ** must stand alone "
+                "between separators, as in src/** or **/domain/**"
+            )
     return [item.strip() for item in value], ""
 
 

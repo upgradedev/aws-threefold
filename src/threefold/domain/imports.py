@@ -32,7 +32,7 @@ LANGUAGE_BY_SUFFIX = {
 }
 
 _PYTHON_FALLBACK = re.compile(
-    r"^[ \t]*(?:from[ \t]+(?P<from>[.\w]+)[ \t]+import\b|import[ \t]+(?P<import>[.\w]+))",
+    r"^[ \t]*(?:from[ \t]+(?P<from>[.\w]+)[ \t]+import\b|import[ \t]+(?P<import>[^\n#;]+))",
     re.MULTILINE,
 )
 
@@ -110,10 +110,19 @@ PYTHON_PARSE_LIMIT = 100_000
 
 
 def _python_line_imports(content: str) -> List[str]:
-    return [
-        (match.group("from") or match.group("import") or "").lstrip(".")
-        for match in _PYTHON_FALLBACK.finditer(_without_comments(content, "python"))
-    ]
+    modules: List[str] = []
+    for match in _PYTHON_FALLBACK.finditer(_without_comments(content, "python")):
+        if match.group("from"):
+            modules.append(match.group("from").lstrip("."))
+            continue
+        # `import a, boto3 as b` names two modules. Taking only the first let
+        # the second through on every file read this way, which includes every
+        # Python file over the parse limit.
+        for name in match.group("import").split(","):
+            module = name.strip().split(" ")[0].strip("()")
+            if module:
+                modules.append(module.lstrip("."))
+    return modules
 
 
 def _python_imports(content: str) -> List[str]:

@@ -1,5 +1,5 @@
 # Generated from src/threefold/web/openapi.json, which is the document the deployment serves.
-# Edit that file and regenerate this one; do not edit this one by hand.
+# Edit that file and run scripts/generate_openapi_yaml.py; do not edit this one by hand.
 openapi: 3.1.0
 info:
   title: Threefold Governance Sidecar API

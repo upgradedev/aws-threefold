@@ -302,15 +302,22 @@ class DynamoDBSessionRepository:
         return True
 
     def load_rules(self) -> Optional[List[Dict[str, Any]]]:
-        """Reads the saved layering rules, so a cold container enforces the same ones."""
+        """Reads the saved layering rules, so a cold container enforces the same ones.
+
+        A failed read raises rather than answering None. None means "nothing was
+        ever saved", and a warm container that re-reads the rules would take it
+        as an instruction to go back to the shipped set.
+        """
         if self._table is not None:
             try:
                 res = self._table.get_item(Key={"PK": "CONFIG#rules", "SK": "METADATA"})
-                item = res.get("Item")
-                if item and item.get("rules_json"):
-                    return json.loads(item["rules_json"])
             except Exception as exc:
                 logger.warning("Failed to read layering rules from DynamoDB: %s", exc)
+                raise
+            item = res.get("Item")
+            if item and item.get("rules_json"):
+                return json.loads(item["rules_json"])
+            return None
         stored = self._memory_store.get("CONFIG#rules#METADATA")
         if stored and stored.get("rules_json"):
             return json.loads(stored["rules_json"])
