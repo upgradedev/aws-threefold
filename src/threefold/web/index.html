@@ -95,9 +95,6 @@
         <a href="swagger.html" class="text-xs px-3 py-1.5 rounded-md bg-purple-950 hover:bg-purple-900 text-purple-300 border border-purple-800 transition">
           OpenAPI 3.1 ↗
         </a>
-        <a href="testbook.html" class="text-xs px-3 py-1.5 rounded-md bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700 transition">
-          Judge Testbook ↗
-        </a>
       </div>
     </div>
   <!-- LIVE API CONNECTION & STATUS BAR
@@ -126,8 +123,11 @@
           <button id="btnCheckConnection" onclick="checkApiHealth()" class="px-2 py-0.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs border border-gray-700">Check</button>
           <button id="btnExportCert" onclick="downloadCert()" class="px-2 py-0.5 rounded bg-purple-950 hover:bg-purple-900 text-purple-300 text-xs border border-purple-800 font-semibold">📥 Export Governance Cert</button>
           <button id="btnEmergencyFreeze" onclick="triggerManualFreeze()" class="px-2 py-0.5 rounded bg-rose-950 hover:bg-rose-900 text-rose-300 text-xs border border-rose-800 font-semibold">🚨 Freeze Session</button>
-          <span id="readinessStatusBadge" class="px-2 py-0.5 rounded text-[11px] font-mono bg-emerald-950 text-emerald-400 border border-emerald-800 flex items-center gap-1.5">
-            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> READY (/readyz)
+          <!-- This badge used to read READY in the markup whatever the service was
+               doing. It now starts unknown and is set from the answer /status
+               actually gave, by checkApiHealth below. -->
+          <span id="statusRouteBadge" class="px-2 py-0.5 rounded text-[11px] font-mono bg-gray-900 text-gray-400 border border-gray-700 flex items-center gap-1.5">
+            <span class="w-1.5 h-1.5 rounded-full bg-gray-500"></span> CHECKING /status…
           </span>
         </div>
         <div class="text-gray-400 text-[11px] hidden md:block">
@@ -354,6 +354,35 @@
   <script>
     let currentCertData = null;
     let liveBackendActive = false;
+    // The session the last scenario ran under, so the freeze button acts on a
+    // session this visitor made rather than on one every visitor shares.
+    let lastSessionId = null;
+
+    // Every session id this page sends is new per click. A fixed id was shared by
+    // every visitor, so one visitor's third identical call halted that session
+    // for whoever came next, and a halted session refuses everything after it.
+    // randomUUID exists only in a secure context, and a copy of this page served
+    // over plain http from another host is not one, so there are two fallbacks.
+    function newSessionId() {
+      const c = window.crypto;
+      if (c && typeof c.randomUUID === 'function') return 'sim-' + c.randomUUID();
+      let hex = '';
+      if (c && typeof c.getRandomValues === 'function') {
+        c.getRandomValues(new Uint8Array(16)).forEach(b => { hex += b.toString(16).padStart(2, '0'); });
+      } else {
+        for (let i = 0; i < 32; i++) hex += Math.floor(Math.random() * 16).toString(16);
+      }
+      return 'sim-' + hex.slice(0, 8) + '-' + hex.slice(8, 12) + '-' + hex.slice(12, 16) + '-' + hex.slice(16, 20) + '-' + hex.slice(20, 32);
+    }
+
+    // What every call from this page says about itself under the v2 request
+    // contract: it came from a page, not from a hook, and it asks for the model's
+    // sentence, which a hook does not. Without these the ledger would count a
+    // visitor pressing a button as an agent being governed. The developer is
+    // anonymous under both the v2 name and the one it had before, because a
+    // visitor is exactly that, and invented names like "dev-architect" read on
+    // the console as people who were governed.
+    const PAGE_CALLER = { agent: 'page', origin: 'page', explain: true, developer: 'anonymous', developer_id: 'anonymous' };
 
 
     // The label must name what actually produced the sentence. A deterministic
@@ -395,25 +424,49 @@
       return headers;
     }
 
+    // Says what the last request to /status got back, with its HTTP status, and
+    // nothing else. The badge it replaces printed READY from the markup, so it
+    // read the same whether the service was up, down or never asked.
+    function setStatusRouteBadge(tone, text) {
+      const badge = document.getElementById("statusRouteBadge");
+      if (!badge) return;
+      const tones = {
+        live: ["bg-emerald-950 text-emerald-400 border-emerald-800", "bg-emerald-400"],
+        unreachable: ["bg-red-950 text-red-400 border-red-800", "bg-red-400"],
+        checking: ["bg-gray-900 text-gray-400 border-gray-700", "bg-gray-500"]
+      };
+      const [box, dot] = tones[tone] || tones.checking;
+      badge.className = "px-2 py-0.5 rounded text-[11px] font-mono border flex items-center gap-1.5 " + box;
+      badge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full ' + dot + '"></span> ' + escapeHtml(text);
+    }
+
     async function checkApiHealth() {
       const base = getApiBase();
       const statusBadge = document.getElementById("apiConnectionStatus");
+      setStatusRouteBadge("checking", "CHECKING /status…");
+      let problem = "no answer";
       try {
+        const t0 = performance.now();
         const res = await fetch(`${base}/status`, {
           method: "GET",
           headers: authHeaders({ "Accept": "application/json" })
         });
+        const latency = Math.round(performance.now() - t0);
         if (res.ok) {
+          problem = "HTTP " + res.status + ", not JSON";
           const data = await res.json();
           liveBackendActive = true;
           statusBadge.className = "px-2 py-0.5 rounded text-[11px] font-mono bg-emerald-950 text-emerald-400 border border-emerald-800 flex items-center gap-1.5";
-          statusBadge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> LIVE API CONNECTED (${data.service})`;
+          statusBadge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> LIVE API CONNECTED (${escapeHtml(data.service)})`;
+          setStatusRouteBadge("live", `LIVE · /status ${res.status} ${data.status || ""} · ${latency} ms`);
           return true;
         }
+        problem = "HTTP " + res.status;
       } catch (err) {}
       liveBackendActive = false;
       statusBadge.className = "px-2 py-0.5 rounded text-[11px] font-mono bg-amber-950 text-amber-400 border border-amber-800 flex items-center gap-1.5";
       statusBadge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span> STANDALONE CLIENT (OFFLINE)`;
+      setStatusRouteBadge("unreachable", `UNREACHABLE · /status ${problem}`);
       return false;
     }
 
@@ -479,6 +532,8 @@
           const latency = (performance.now() - t0).toFixed(1);
           if (res.ok) {
             const data = await res.json();
+            // The service names this session itself, one per request.
+            if (data.session_id) lastSessionId = data.session_id;
             logTerminal(`⚡ [Live HTTP Response] HTTP 200 in ${latency}ms: status=${data.status}`, 'text-emerald-400');
             logTerminal(`🚨 [CIRCUIT BREAKER TRIPPED] ${data.reason}`, 'text-red-400 font-bold');
             logTerminal(`🛑 Session tripped: ${data.session_tripped}. Execution locked in DynamoDB.`, 'text-red-300');
@@ -544,6 +599,7 @@
           const latency = (performance.now() - t0).toFixed(1);
           if (res.ok) {
             const data = await res.json();
+            if (data.session_id) lastSessionId = data.session_id;
             logTerminal(`⚡ [Live HTTP Response] HTTP 200 in ${latency}ms: status=${data.status}`, 'text-emerald-400');
             logTerminal(`🚨 [PRE-INVOCATION REJECTION] ${data.reason}`, 'text-red-400 font-bold');
             logTerminal(`🛑 Credential quarantined before transmission. Proof: ${data.proof_hash.slice(0, 16)}...`, 'text-red-300');
@@ -590,12 +646,13 @@
         try {
           const base = getApiBase();
           const t0 = performance.now();
+          const sessionId = newSessionId();
+          lastSessionId = sessionId;
           const res = await fetch(`${base}/evaluate-tool-call`, {
             method: "POST",
             headers: authHeaders({ "Content-Type": "application/json" }),
-            body: JSON.stringify({
-              session_id: "boundary-check-session",
-              developer_id: "dev-architect",
+            body: JSON.stringify(Object.assign({
+              session_id: sessionId,
               project_name: "Acme-Core",
               tool_name: "write_to_file",
               action_type: "FILE_WRITE",
@@ -603,7 +660,7 @@
                 TargetFile: "src/domain/user.py",
                 CodeContent: "import boto3\nclass User:\n  pass"
               }
-            })
+            }, PAGE_CALLER))
           });
           const latency = (performance.now() - t0).toFixed(1);
           if (res.ok) {
@@ -663,7 +720,8 @@
       if (liveBackendActive) {
         try {
           const base = getApiBase();
-          const sessId = "session-live-" + Math.random().toString(36).substr(2, 6);
+          const sessId = newSessionId();
+          lastSessionId = sessId;
 
           let lastEvaluation = null;
           for (let i = 0; i < steps.length; i++) {
@@ -671,16 +729,15 @@
             const res = await fetch(`${base}/evaluate-tool-call`, {
               method: "POST",
               headers: authHeaders({ "Content-Type": "application/json" }),
-              body: JSON.stringify({
+              body: JSON.stringify(Object.assign({
                 session_id: sessId,
-                developer_id: "dev-lead",
                 project_name: "Acme-Core",
                 tool_name: s.tool,
                 action_type: s.type,
                 arguments: s.args,
                 projected_input_tokens: 1200,
                 projected_output_tokens: 400
-              })
+              }, PAGE_CALLER))
             });
             const data = await res.json();
             lastEvaluation = data;
@@ -786,15 +843,17 @@
         try {
           const base = getApiBase();
           const t0 = performance.now();
+          const sessionId = newSessionId();
+          lastSessionId = sessionId;
           const res = await fetch(`${base}/adapter/universal-tool-call`, {
             method: "POST",
             headers: authHeaders({ "Content-Type": "application/json" }),
-            body: JSON.stringify({
+            body: JSON.stringify(Object.assign({
               type: "tool_use",
               name: "edit_file",
               input: { TargetFile: "src/core.py", Instruction: "optimize algorithm" },
-              session_id: "universal-demo-session"
-            })
+              session_id: sessionId
+            }, PAGE_CALLER))
           });
           const latency = (performance.now() - t0).toFixed(1);
           if (res.ok) {
@@ -824,11 +883,17 @@
       logTerminal('✓ [Universal Adapter Emulated] Tool mapped to internal Clean Architecture validator.', 'text-cyan-300');
     }
 
+    // The freeze used to target session-default, one id every visitor shared. A
+    // freeze is terminal and nothing undoes it, so one press broke that session
+    // for everyone after. It now freezes the session this page last ran, and a
+    // new one of its own when no scenario has run yet.
     async function triggerManualFreeze() {
-      if (!confirm("🚨 ENTERPRISE KILL-SWITCH: Manually terminate and lock this autonomous agent session?")) return;
+      const target = lastSessionId || newSessionId();
+      if (!confirm("🚨 ENTERPRISE KILL-SWITCH: Manually terminate and lock session " + target + "?\n\n" +
+        (lastSessionId ? "This is the session the last scenario on this page ran under." : "No scenario has run yet, so this freezes a new, empty session."))) return;
       try {
         const apiBase = getApiBase();
-        const res = await fetch(`${apiBase}/sessions/session-default/terminate`, {
+        const res = await fetch(`${apiBase}/sessions/${encodeURIComponent(target)}/terminate`, {
           method: "POST",
           headers: authHeaders({
             "Content-Type": "application/json",

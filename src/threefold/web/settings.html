@@ -76,7 +76,7 @@
         <span class="text-gray-400 font-medium">Sidecar REST:</span>
         <input id="apiBaseInput" type="text" value="" class="bg-gray-900 border border-gray-700 rounded px-2 py-0.5 text-xs text-purple-300 font-mono w-56 focus:outline-none focus:border-purple-500" />
         <span class="text-gray-400 font-medium ml-1">API Key:</span>
-        <input id="apiKeyInput" type="password" value="" placeholder="needed to save, not to read" class="bg-gray-900 border border-gray-700 rounded px-2 py-0.5 text-xs text-sky-300 font-mono w-44 focus:outline-none focus:border-sky-500" />
+        <input id="apiKeyInput" type="password" value="" placeholder="needed to save; blank uses the stored key" class="bg-gray-900 border border-gray-700 rounded px-2 py-0.5 text-xs text-sky-300 font-mono w-44 focus:outline-none focus:border-sky-500" />
         <button onclick="loadPolicy()" class="px-2 py-0.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs border border-gray-700">Reload from API</button>
         <span id="apiConnectionStatus" class="px-2 py-0.5 rounded text-[11px] font-mono bg-amber-950 text-amber-400 border border-amber-800 flex items-center gap-1.5">
           <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span> NOT READ YET
@@ -130,13 +130,33 @@
         </p>
 
         <div class="p-3 rounded-xl bg-sky-950/20 border border-sky-900/40">
-          <p class="text-xs font-semibold text-sky-300">Reading is open. Saving needs a key.</p>
+          <p class="text-xs font-semibold text-sky-300">Saving needs a key. On the public demo, reading does not.</p>
           <p class="text-[11px] text-gray-400 mt-1">
             A saved policy is written to DynamoDB and adopted by every container that starts afterwards, so an anonymous write
-            would change the thresholds this product leads with for everyone who came after it. Reads stay open, because a
-            reader has to be able to see what is enforced. Put the operator key in the <span class="font-mono">API Key</span>
-            field above before saving. A deployment that has configured no key refuses writes outright and says so.
+            would change the thresholds this product leads with for everyone who came after it. The public demo keeps reads
+            open, because a reader has to be able to see what is enforced; a stack deployed with private reads needs the key
+            for those too. Put the operator key in the <span class="font-mono">API Key</span> field above, or store it in this
+            browser below. A deployment that has configured no key refuses writes outright and says so.
           </p>
+        </div>
+
+        <!-- The key lives in this browser's localStorage and nowhere else. The
+             field is never filled from storage and the key is never printed, so a
+             screen share or a screenshot of this page cannot carry it. -->
+        <div id="operator-key" class="p-3 rounded-xl bg-gray-950 border border-gray-800 space-y-2">
+          <p class="text-xs font-semibold text-gray-200">Operator key for this browser</p>
+          <p class="text-[11px] text-gray-400">
+            Kept in this browser's localStorage under <span class="font-mono text-purple-300">threefold-operator-key</span> and
+            sent as <span class="font-mono">X-API-Key</span> on the requests the console, rules, sessions and settings pages make
+            to the API. It is not shown again after you store it. A key typed into a page's own field is used before this one.
+          </p>
+          <div class="flex flex-wrap items-center gap-2">
+            <input id="operatorKeyInput" type="password" value="" autocomplete="off" placeholder="paste the key to store it"
+                   class="flex-1 min-w-[12rem] bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-sky-300 font-mono focus:outline-none focus:border-sky-500" />
+            <button onclick="storeOperatorKey()" class="px-2 py-1 rounded bg-sky-950 hover:bg-sky-900 text-sky-300 text-xs border border-sky-800">Store</button>
+            <button onclick="clearOperatorKey()" class="px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs border border-gray-700">Clear</button>
+          </div>
+          <p id="operator-key-state" class="text-[11px] text-gray-500"></p>
         </div>
 
         <div class="space-y-3">
@@ -284,7 +304,6 @@
       { href: 'rules.html', label: 'Architecture Rules' },
       { href: 'sessions.html', label: 'Sessions' },
       { href: 'connect.html', label: 'Connect an agent' },
-      { href: 'testbook.html', label: 'Judge Testbook' },
       { href: 'swagger.html', label: 'OpenAPI 3.1' }
     ];
 
@@ -328,9 +347,61 @@
       return configured || DEFAULT_API_BASE;
     }
 
+    // The operator key this browser keeps for the console, rules, sessions and
+    // settings pages. Every access is guarded: storage throws when site data is
+    // blocked, and the page has to work without it, as the public demo does.
+    const OPERATOR_KEY_STORAGE = 'threefold-operator-key';
+    function storedOperatorKey() {
+      try { return (window.localStorage.getItem(OPERATOR_KEY_STORAGE) || '').trim(); } catch (err) { return ''; }
+    }
+
+    // Reports whether a key is stored, never what it is.
+    function renderOperatorKeyState(note) {
+      let text;
+      try {
+        text = (window.localStorage.getItem(OPERATOR_KEY_STORAGE) || '').trim()
+          ? 'A key is stored in this browser. It is not shown.'
+          : 'No key is stored in this browser.';
+      } catch (err) {
+        text = 'This browser blocks site storage, so no key can be kept here. Type it in the API Key field above instead.';
+      }
+      document.getElementById('operator-key-state').textContent = note ? text + ' ' + note : text;
+    }
+
+    function storeOperatorKey() {
+      const input = document.getElementById('operatorKeyInput');
+      const key = input.value.trim();
+      // Emptied whatever happens next, so the key does not sit in the field.
+      input.value = '';
+      if (!key) {
+        renderOperatorKeyState('Nothing was typed, so nothing changed.');
+        return;
+      }
+      try {
+        window.localStorage.setItem(OPERATOR_KEY_STORAGE, key);
+      } catch (err) {
+        // The state line already says storage is blocked here, and repeating it
+        // as a second sentence read like two different problems.
+        renderOperatorKeyState();
+        return;
+      }
+      renderOperatorKeyState('Stored. The policy below was read again with it.');
+      loadPolicy();
+    }
+
+    function clearOperatorKey() {
+      try {
+        window.localStorage.removeItem(OPERATOR_KEY_STORAGE);
+      } catch (err) {
+        renderOperatorKeyState();
+        return;
+      }
+      renderOperatorKeyState('Cleared.');
+    }
+
     function authHeaders(extra) {
       const headers = Object.assign({ "Accept": "application/json" }, extra || {});
-      const key = document.getElementById("apiKeyInput").value.trim();
+      const key = document.getElementById("apiKeyInput").value.trim() || storedOperatorKey();
       if (key) headers["X-API-Key"] = key;
       return headers;
     }
@@ -391,6 +462,10 @@
           tag.className = 'text-xs px-2.5 py-1 rounded-full font-semibold bg-red-950 text-red-400 border border-red-800';
           tag.innerText = 'READ FAILED';
           showRaw(data);
+          if (res.status === 401 || res.status === 403) {
+            document.getElementById('save-status').innerHTML =
+              '<span class="text-amber-400">This stack keeps its reads private. Store the operator key in this browser, below.</span>';
+          }
           return;
         }
         renderPolicy(data);
@@ -466,7 +541,7 @@
           if (data && data.type === 'urn:threefold:error:policy-write-disabled') {
             explanation = 'This deployment has no policy-write key configured, so the policy is read only here. The values above are unchanged.';
           } else if (res.status === 401) {
-            explanation = 'Saving needs the operator key. Put it in the API Key field above; reading needed none. The policy is unchanged.';
+            explanation = 'Saving needs the operator key. Put it in the API Key field above, or store it in this browser. The policy is unchanged.';
           } else if (res.status === 403) {
             explanation = 'That key was not accepted. The policy is unchanged.';
           }
@@ -507,6 +582,7 @@
 
     renderNav();
     linkToSpec();
+    renderOperatorKeyState();
     document.getElementById('apiBaseInput').value = DEFAULT_API_BASE;
     loadPolicy();
   </script>

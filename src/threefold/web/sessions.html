@@ -76,7 +76,7 @@
         <span class="text-gray-400 font-medium">Sidecar REST:</span>
         <input id="apiBaseInput" type="text" value="" class="bg-gray-900 border border-gray-700 rounded px-2 py-0.5 text-xs text-purple-300 font-mono w-56 focus:outline-none focus:border-purple-500" />
         <span class="text-gray-400 font-medium ml-1">API Key:</span>
-        <input id="apiKeyInput" type="password" value="" placeholder="only if the stack enforces one" class="bg-gray-900 border border-gray-700 rounded px-2 py-0.5 text-xs text-sky-300 font-mono w-40 focus:outline-none focus:border-sky-500" />
+        <input id="apiKeyInput" type="password" value="" placeholder="blank uses the stored key, if any" class="bg-gray-900 border border-gray-700 rounded px-2 py-0.5 text-xs text-sky-300 font-mono w-40 focus:outline-none focus:border-sky-500" />
         <span class="text-gray-400 font-medium ml-1">Limit:</span>
         <select id="limitSelect" onchange="loadSessions()" class="bg-gray-900 border border-gray-700 rounded px-2 py-0.5 text-xs text-gray-200 font-mono focus:outline-none focus:border-purple-500">
           <option value="25">25</option>
@@ -215,7 +215,6 @@
       { href: 'rules.html', label: 'Architecture Rules' },
       { href: 'settings.html', label: 'Policy Settings' },
       { href: 'connect.html', label: 'Connect an agent' },
-      { href: 'testbook.html', label: 'Judge Testbook' },
       { href: 'swagger.html', label: 'OpenAPI 3.1' }
     ];
 
@@ -268,9 +267,18 @@
       return configured || DEFAULT_API_BASE;
     }
 
+    // A stack deployed with private reads refuses the listing without the
+    // operator key. A key typed in the bar above is used first; otherwise the
+    // one stored on the settings page, which lives in this browser only. Storage
+    // that is blocked or empty means no header, which the public demo expects.
+    const OPERATOR_KEY_STORAGE = 'threefold-operator-key';
+    function storedOperatorKey() {
+      try { return (window.localStorage.getItem(OPERATOR_KEY_STORAGE) || '').trim(); } catch (err) { return ''; }
+    }
+
     function authHeaders(extra) {
       const headers = Object.assign({ "Accept": "application/json" }, extra || {});
-      const key = document.getElementById("apiKeyInput").value.trim();
+      const key = document.getElementById("apiKeyInput").value.trim() || storedOperatorKey();
       if (key) headers["X-API-Key"] = key;
       return headers;
     }
@@ -490,8 +498,7 @@
         '</div>' +
         '<p class="text-[11px] text-gray-500 mt-3">' +
           'Read from <a href="' + specHref('spec-link-session') + '" class="font-mono text-purple-300 hover:text-purple-200 underline">GET /sessions/{id} ↗</a>. ' +
-          'This endpoint creates a session record when the id is unknown, so a detail panel is never empty and an id typed by ' +
-          'hand becomes a real, zero-cost session.' +
+          'Reading never creates a session: an id the service has not recorded answers 404 and nothing is written.' +
         '</p>';
 
       document.getElementById('detail-actions').classList.remove('hidden');

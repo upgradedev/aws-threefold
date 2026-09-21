@@ -35,21 +35,27 @@ already moved on to the next file.
 Threefold checks at the moment the agent asks to write it, which is the only
 moment the edit can still be refused. It parses the content, so
 `from boto3 import client` is caught as surely as `import boto3`, and a comment
-that merely mentions the rule is not. When the answer is no, the tool call does
-not happen.
+that merely mentions the rule is not. When the answer is no, the agent is handed
+a refusal before the tool call runs.
 
 ```
-$ cat call.json | python3 claude_code_hook.py
-{"permissionDecision": "deny",
- "permissionDecisionReason": "Threefold refused this call. Clean Architecture
-  violation: domain file 'src/domain/user.py' cannot depend on an outer layer
-  (from boto3 import ...)"}
+$ cat call.json | python threefold_hook.py --agent claude-code
+{"hookSpecificOutput": {
+   "hookEventName": "PreToolUse",
+   "permissionDecision": "deny",
+   "permissionDecisionReason": "Threefold refused this call. Clean Architecture
+    violation: domain file 'src/domain/user.py' cannot depend on an outer layer
+    (from boto3 import ...)"}}
 ```
 
-That is a real Claude Code hook against the live service, not a mock. Point
-your own agent at it with [`claude_code_hook.py`](src/threefold/hooks/claude_code_hook.py),
-which the deployment serves at
-<https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/hooks/claude_code_hook.py>.
+That is the hook talking to the live service, not a mock. It is one file,
+[`threefold_hook.py`](src/threefold/hooks/threefold_hook.py), for three agents,
+and the deployment serves it at
+<https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/hooks/threefold_hook.py>.
+On an approval it prints nothing, so the agent's own permission flow runs
+unchanged. Whether a deny actually stops the write is being verified for each
+agent, and the install page says so per agent rather than claiming enforcement
+that has not been shown.
 
 ## Three more gates, honestly described
 
@@ -73,22 +79,113 @@ above rather than in four different places.
 
 ---
 
+## Install it in front of your own agent
+
+One file for three agents. The deployment serves it, so there is nothing to
+clone, no package to install and no account to make.
+
+```bash
+curl -O https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/hooks/threefold_hook.py
+
+# Required: the alias this project is sent under, never its real name
+export THREEFOLD_PROJECT="Acme-Billing"
+```
+
+Then register it, in the project you want governed, with the absolute path to
+the script on your machine. `--agent` is what tells the one file which agent is
+calling it.
+
+**Claude Code** — `.claude/settings.local.json`
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash",
+        "hooks": [
+          { "type": "command", "command": "python /absolute/path/to/threefold_hook.py --agent claude-code" }
+        ]
+      }
+    ]
+  }
+}
+```
+
+**Codex** — `.codex/hooks.json`
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "apply_patch|Edit|Write|Bash",
+        "hooks": [
+          { "type": "command", "command": "python /absolute/path/to/threefold_hook.py --agent codex" }
+        ]
+      }
+    ]
+  }
+}
+```
+
+**Antigravity** — `.agents/hooks.json`
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "write_to_file|replace_file_content|multi_replace_file_content|run_command",
+        "hooks": [
+          { "type": "command", "command": "python /absolute/path/to/threefold_hook.py --agent antigravity" }
+        ]
+      }
+    ]
+  }
+}
+```
+
+| Variable | Needed | Effect |
+|---|---|---|
+| `THREEFOLD_PROJECT` | required | The name this project is sent under. Use an alias, never the real name: it is what the console and the metrics show. |
+| `THREEFOLD_DEVELOPER` | optional | Who you are, for the per-developer counts. Hashed on your machine; only the 12-character hash is sent. Unset, the hook sends `anonymous`. |
+| `THREEFOLD_FAIL_CLOSED` | optional | `1` refuses the call when the service cannot be reached. Unset, an unreachable service means the hook prints nothing and exits 0. |
+| `THREEFOLD_HOME` | optional | Where the hook's local files live, `~/.threefold` unless set. `never_send.txt` goes there, holding the terms you never want sent. |
+| `THREEFOLD_ENDPOINT` | optional | The service the hook asks. |
+
+**What leaves your machine.** For a call it sends, the hook sends one
+`POST /evaluate-tool-call`: the session id, your project alias, `anonymous` or a
+hash of `THREEFOLD_DEVELOPER`, the tool name, the action type and the call's
+arguments, which for a write carry the text being written, plus which agent this
+is and that it came from a hook. It never sends a tool call whose target is
+outside the project root, anything under `~/.claude`, `~/.codex` or `~/.gemini`,
+data files by extension and by directory, or any call containing a term from
+your own `never_send.txt`. A call held back is not sent, so it is not checked.
+The never-send list, your project aliases and the list of governed repositories
+stay in `~/.threefold/`.
+
+---
+
 ## 4 Guided User Journeys (Zero-Setup Live Demo)
 
 Open <https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/> and press a button. The same page is in the repository at [`src/threefold/web/index.html`](src/threefold/web/index.html), which the Lambda serves.
 
-Three more pages are served beside it, each one reading the live API rather than
-a fixture: [`/sessions.html`](src/threefold/web/sessions.html) lists the sessions
-the service has actually governed and reads any one of them back,
+Four more pages are served beside it, each one reading the live API rather than
+a fixture: [`/console.html`](src/threefold/web/console.html) is the enforcement
+console, what was refused across the projects and what the gates do not watch;
+[`/rules.html`](src/threefold/web/rules.html) reads, tries and saves the layering
+rules; [`/sessions.html`](src/threefold/web/sessions.html) lists the sessions the
+service has actually governed and reads any one of them back;
 [`/settings.html`](src/threefold/web/settings.html) reads and writes the policy
-thresholds the gates enforce, and [`/connect.html`](src/threefold/web/connect.html)
-is the installation path for [`claude_code_hook.py`](src/threefold/hooks/claude_code_hook.py),
-which puts Threefold in front of a real Claude Code session.
+thresholds. [`/connect.html`](src/threefold/web/connect.html) is the install
+path above, with the same three blocks, what leaves your machine, and what has
+and has not been shown for each agent.
 
 1. **Journey 1 · Runaway Tool Loop Interception:**  
    Click **Runaway Tool Loop**. The simulator sends 3 identical tool calls. Threefold detects the monomorphic loop on iteration 3, instantly trips the circuit breaker, locks the session, and halts token expenditure.
 2. **Journey 2 · Secret Leakage Pre-Invocation Rejection:**  
-   Click **Secret Leak Intercept**. An agent attempts to execute a shell command exporting an AWS Access Key (`AKIAIOSFODNN7EXAMPLE`). Threefold rejects the call before it leaves the local environment.
+   Click **Secret Leak Intercept**. An agent attempts to execute a shell command exporting an AWS Access Key (`AKIAIOSFODNN7EXAMPLE`). Threefold refuses the call before the command runs.
 3. **Journey 3 · Clean Architecture Drift Prevention:**  
    Click **Clean Architecture Drift**. An agent attempts to write `import boto3` inside `src/domain/user.py`. Threefold blocks the write with a Clean Architecture violation alert.
 4. **Journey 4 · Compliant Execution & Certificate:**  
@@ -163,10 +260,8 @@ The suite is hermetic: `THREEFOLD_OFFLINE=1` keeps every AWS client out of the t
 THREEFOLD_OFFLINE=1 python -m pytest tests -v
 ```
 
-```
-$ THREEFOLD_OFFLINE=1 python -m pytest tests -q
-134 passed
-```
+The count is deliberately not printed here: `pytest` prints it, and a number
+written into prose is wrong again the moment a test is added.
 
 - **Unit Tests:** cost arithmetic, single-invocation caps, monomorphic loops, ping-pong loops, secret regex matching, and Clean Architecture imports.
 - **Integration Tests:** AWS Lambda API Gateway proxy routing, query normalization, and error handling.

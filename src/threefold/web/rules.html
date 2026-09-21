@@ -139,7 +139,7 @@ public class Order { }</textarea>
           <div id="validation" class="p-3 rounded-xl bg-gray-950 border border-gray-800"></div>
           <label class="block">
             <span class="uppercase tracking-wider">Operator key</span>
-            <input id="api-key" type="password" placeholder="needed to save, not to read or try"
+            <input id="api-key" type="password" placeholder="needed to save; blank uses the key stored on the settings page"
                    class="mt-1 w-full bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-xs text-sky-300 font-mono focus:outline-none focus:border-sky-500" />
           </label>
           <button onclick="save()" id="save-button" class="w-full px-3 py-2 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold">Save and put in force</button>
@@ -204,6 +204,21 @@ public class Order { }</textarea>
       return str.replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[m]));
     }
 
+    // A stack deployed with private reads refuses even GET /rules without the
+    // operator key. The key is set on the settings page and kept in this browser
+    // only. Storage that is blocked or empty means no header, which is what the
+    // public demo expects. A key typed into the field beside Save wins over it.
+    const OPERATOR_KEY_STORAGE = 'threefold-operator-key';
+    function storedOperatorKey() {
+      try { return (window.localStorage.getItem(OPERATOR_KEY_STORAGE) || '').trim(); } catch (err) { return ''; }
+    }
+    function authHeaders(extra, typedKey) {
+      const headers = Object.assign({ Accept: 'application/json' }, extra || {});
+      const key = (typedKey || '').trim() || storedOperatorKey();
+      if (key) headers['X-API-Key'] = key;
+      return headers;
+    }
+
     function renderNav() {
       document.getElementById('page-nav').innerHTML = NAV.map(item =>
         '<a href="' + PAGE_BASE + item.href + '" class="px-3 py-1.5 rounded-md bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700 transition">' + item.label + '</a>'
@@ -242,7 +257,7 @@ public class Order { }</textarea>
 
     async function load() {
       try {
-        const res = await fetch(DEFAULT_API_BASE + '/rules', { headers: { Accept: 'application/json' } });
+        const res = await fetch(DEFAULT_API_BASE + '/rules', { headers: authHeaders() });
         const data = await res.json();
         if (!res.ok) throw new Error('HTTP ' + res.status);
         inForce = data.rules || [];
@@ -255,8 +270,13 @@ public class Order { }</textarea>
           : data.count + ' rule' + (data.count === 1 ? '' : 's') + ' saved for this deployment.';
         resetEditor();
       } catch (err) {
+        const refused = /HTTP 40[13]/.test(String(err));
         document.getElementById('rules-list').innerHTML =
-          '<p class="text-xs text-red-400">The rules could not be read, so none are shown. ' + escapeHtml(String(err)) + '</p>';
+          '<p class="text-xs text-red-400">The rules could not be read, so none are shown. ' + escapeHtml(String(err)) + '</p>' +
+          (refused
+            ? '<p class="text-[11px] text-gray-400 mt-1">This stack keeps its reads private. <a href="' + PAGE_BASE +
+              'settings.html#operator-key" class="text-purple-300 hover:text-purple-200 underline">Store the operator key in this browser ↗</a></p>'
+            : '');
       }
     }
 
@@ -317,7 +337,7 @@ public class Order { }</textarea>
       try {
         const res = await fetch(DEFAULT_API_BASE + '/rules/explain', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          headers: authHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify(body)
         });
         const d = await res.json();
@@ -358,9 +378,7 @@ public class Order { }</textarea>
       const out = document.getElementById('save-result');
       const rules = validate();
       if (!rules) { out.innerHTML = '<p class="text-red-400">Nothing was sent: the draft has problems listed above.</p>'; return; }
-      const key = document.getElementById('api-key').value.trim();
-      const headers = { 'Content-Type': 'application/json', Accept: 'application/json' };
-      if (key) headers['X-API-Key'] = key;
+      const headers = authHeaders({ 'Content-Type': 'application/json' }, document.getElementById('api-key').value);
       const button = document.getElementById('save-button');
       button.disabled = true;
       out.innerHTML = '<p class="text-gray-500">Saving…</p>';
@@ -375,7 +393,7 @@ public class Order { }</textarea>
             return;
           }
           if (d.type === 'urn:threefold:error:policy-write-disabled') words = 'This deployment has no operator key configured, so its rules can be read and tried but not changed.';
-          else if (res.status === 401) words = 'Saving needs the operator key. Reading and trying do not.';
+          else if (res.status === 401) words = 'Saving needs the operator key. Type it beside Save, or store it on the settings page.';
           else if (res.status === 403) words = 'That key was not accepted.';
           out.innerHTML = '<p class="text-red-400">' + escapeHtml(words) + ' Nothing changed.</p>';
           return;

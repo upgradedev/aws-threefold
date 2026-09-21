@@ -76,7 +76,7 @@
       </p>
       <pre class="text-[11px] font-mono text-gray-300 bg-gray-950 border border-gray-800 rounded-xl p-3 overflow-x-auto" id="empty-curl"></pre>
       <a id="empty-connect" href="connect.html" class="inline-block text-xs font-semibold px-3 py-1.5 rounded-lg bg-emerald-950 hover:bg-emerald-900 text-emerald-300 border border-emerald-800 transition">
-        The three-step install ↗
+        Install the hook: one file, three agents ↗
       </a>
     </section>
 
@@ -191,7 +191,9 @@
     ];
     const WINDOWS = [{ days: 1, label: '24 hours' }, { days: 7, label: '7 days' }, { days: 30, label: '30 days' }];
 
-    let state = { days: 7, data: null, filter: null };
+    // Thirty days, the longest window the page offers. A deployment that governs
+    // a few sessions a week opened on an empty week and read as idle.
+    let state = { days: 30, data: null, filter: null };
     let coverageHome = null;
 
     function escapeHtml(str) {
@@ -200,6 +202,21 @@
       // as markup.
       if (typeof str !== 'string') str = str == null ? '' : String(str);
       return str.replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[m]));
+    }
+
+    // A stack deployed with private reads answers this page's request with 401
+    // unless it carries the operator key. The key is set on the settings page and
+    // kept in this browser only. Storage that is blocked or empty means no
+    // header, which is what the public demo expects.
+    const OPERATOR_KEY_STORAGE = 'threefold-operator-key';
+    function storedOperatorKey() {
+      try { return (window.localStorage.getItem(OPERATOR_KEY_STORAGE) || '').trim(); } catch (err) { return ''; }
+    }
+    function authHeaders(extra) {
+      const headers = Object.assign({ Accept: 'application/json' }, extra || {});
+      const key = storedOperatorKey();
+      if (key) headers['X-API-Key'] = key;
+      return headers;
     }
 
     function renderNav() {
@@ -211,7 +228,7 @@
       document.getElementById('rules-link').href = PAGE_BASE + 'rules.html';
       document.getElementById('coverage-rules-link').href = PAGE_BASE + 'rules.html';
       document.getElementById('empty-curl').textContent =
-        'curl -O ' + DEFAULT_API_BASE + '/hooks/claude_code_hook.py';
+        'curl -O ' + DEFAULT_API_BASE + '/hooks/threefold_hook.py';
     }
 
     function renderWindowPicker() {
@@ -260,10 +277,18 @@
 
     async function load() {
       try {
-        const res = await fetch(DEFAULT_API_BASE + '/api/insights?days=' + state.days, { headers: { Accept: 'application/json' } });
+        const res = await fetch(DEFAULT_API_BASE + '/api/insights?days=' + state.days, { headers: authHeaders() });
         if (!res.ok) {
+          // A private stack refuses the read without a key, and the fix is one
+          // field away, so the refusal says where that field is.
+          const needsKey = res.status === 401 || res.status === 403;
           document.getElementById('standing-line').innerHTML =
-            '<span class="text-red-400">The console could not read the ledger: HTTP ' + res.status + '.</span>';
+            '<span class="text-red-400">The console could not read the ledger: HTTP ' + res.status + '.</span>' +
+            (needsKey
+              ? ' <a href="' + PAGE_BASE + 'settings.html#operator-key" class="text-sm text-purple-300 hover:text-purple-200 underline">' +
+                (storedOperatorKey() ? 'The operator key stored in this browser was not accepted.' : 'This stack needs the operator key. Set it on the settings page.') +
+                ' ↗</a>'
+              : '');
           return;
         }
         state.data = await res.json();

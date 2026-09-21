@@ -60,13 +60,13 @@
         <div>
           <div class="flex items-center gap-2">
             <h1 class="text-lg font-bold tracking-tight text-white">Connect a Coding Agent</h1>
-            <a id="hook-badge" href="hooks/claude_code_hook.py" target="_blank" rel="noopener"
+            <a id="hook-badge" href="hooks/threefold_hook.py" target="_blank" rel="noopener"
                title="Read the script this deployment serves"
                class="px-2 py-0.5 rounded text-xs font-semibold bg-purple-950 hover:bg-purple-900 text-purple-400 border border-purple-800 font-mono transition">
-              claude_code_hook.py ↗
+              threefold_hook.py ↗
             </a>
           </div>
-          <p class="text-xs text-gray-400">Put Threefold in front of a real Claude Code session, not in front of a demo payload</p>
+          <p class="text-xs text-gray-400">One script in front of Claude Code, Codex or Antigravity, asking this service about each write and command before it runs</p>
         </div>
       </div>
       <nav id="page-nav" class="flex items-center gap-2 text-xs"></nav>
@@ -90,29 +90,32 @@
 
   <main class="flex-1 max-w-7xl mx-auto px-4 py-6 w-full space-y-6">
 
-    <!-- WHAT THIS IS -->
+    <!-- WHAT THIS IS. The earlier copy said the agent "obeys the decision" and that
+         a refusal "never executes". Neither had been shown for every agent, so the
+         claim now stops at what the hook does, and what each agent does with a
+         refusal is stated per agent further down. -->
     <div class="p-5 rounded-2xl bg-gray-900 border border-gray-800 space-y-2">
       <h2 class="text-base font-semibold text-white">What the hook changes</h2>
       <p class="text-xs text-gray-400">
         The scenarios on the dashboard build their own payloads and then refuse them. That proves the gates run; it intercepts
-        nobody. This hook is the difference: Claude Code calls it
-        <span class="text-purple-300">before</span> every matched tool call, hands it the call it is about to make, and obeys the
-        decision that comes back. A refusal here stops an edit at the moment of the edit, not in a pipeline twenty minutes later.
+        nobody. This hook is the difference: the agent runs it <span class="text-purple-300">before</span> every matched tool
+        call and hands it the call it is about to make. The hook asks this service and, on a refusal, answers in the format that
+        agent reads as a deny. On an approval it prints nothing, so the agent's own permission prompts run exactly as before.
       </p>
       <div class="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2">
         <div class="p-3 rounded-xl bg-gray-950 border border-gray-800">
-          <p class="text-xs font-semibold text-purple-300">1 · Claude Code proposes a tool call</p>
-          <p class="text-[11px] text-gray-400 mt-1">Write, Edit, Bash or Read, matched by the hook configuration.</p>
+          <p class="text-xs font-semibold text-purple-300">1 · The agent proposes a tool call</p>
+          <p class="text-[11px] text-gray-400 mt-1">A write, an edit or a shell command, picked out by the matcher in that agent's hook file.</p>
         </div>
         <div class="p-3 rounded-xl bg-gray-950 border border-gray-800">
           <p class="text-xs font-semibold text-purple-300">2 · The hook asks this service</p>
           <p class="text-[11px] text-gray-400 mt-1">One
             <a id="spec-link-evaluate" href="swagger.html" class="font-mono text-purple-300 hover:text-purple-200 underline">POST /evaluate-tool-call ↗</a>,
-            standard library only, no dependencies to install.</p>
+            standard library only, no dependencies to install. Some calls are never sent; the list is below.</p>
         </div>
         <div class="p-3 rounded-xl bg-gray-950 border border-gray-800">
-          <p class="text-xs font-semibold text-purple-300">3 · The agent obeys the verdict</p>
-          <p class="text-[11px] text-gray-400 mt-1">An approval runs. A refusal never executes, and the reason carries the model's sentence when one was produced.</p>
+          <p class="text-xs font-semibold text-purple-300">3 · A refusal is handed back as a deny</p>
+          <p class="text-[11px] text-gray-400 mt-1">Whether each agent then stops the write is being verified, agent by agent. Until it is, read a deny as a verdict the agent was shown, not as proof the write did not happen.</p>
         </div>
       </div>
     </div>
@@ -122,61 +125,78 @@
       <!-- INSTALLATION -->
       <div class="rounded-2xl bg-gray-900 border border-gray-800 p-5 space-y-4">
         <div class="flex items-center justify-between border-b border-gray-800 pb-3">
-          <h2 class="text-sm font-semibold text-white">Install, three steps</h2>
-          <span class="text-xs px-2.5 py-1 rounded-full font-semibold bg-purple-950 text-purple-400 border border-purple-800">~2 minutes</span>
+          <h2 class="text-sm font-semibold text-white">Install: one file, three agents</h2>
+          <span class="text-xs px-2.5 py-1 rounded-full font-semibold bg-purple-950 text-purple-400 border border-purple-800">three steps</span>
         </div>
 
         <div>
           <p class="text-xs font-semibold text-gray-200">Step 1 · Take the script</p>
           <p class="text-xs text-gray-400 mt-1">
             This deployment serves it. No repository, no account, no package manager: the same stack you just watched refuse a
-            call hands you the file that does the refusing.
+            call hands you the file that asks it. The same file serves every agent; <span class="font-mono">--agent</span> tells it
+            which one is calling.
           </p>
           <div class="flex flex-wrap items-center gap-2 mt-2">
-            <a id="hook-download" href="hooks/claude_code_hook.py" download="claude_code_hook.py"
+            <a id="hook-download" href="hooks/threefold_hook.py" download="threefold_hook.py"
                class="px-3 py-1.5 rounded-lg bg-emerald-950 hover:bg-emerald-900 text-emerald-300 text-xs border border-emerald-800 font-semibold transition">
-              ⬇ Download claude_code_hook.py
+              ⬇ Download threefold_hook.py
             </a>
-            <a id="hook-view" href="hooks/claude_code_hook.py" target="_blank" rel="noopener"
+            <a id="hook-view" href="hooks/threefold_hook.py" target="_blank" rel="noopener"
                class="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-200 text-xs border border-gray-700 transition">
               Read it first ↗
             </a>
-            <span class="text-[11px] text-gray-500">5 KB, standard library only, nothing to install</span>
+            <a id="spec-link-hook" href="swagger.html" title="Open this route in the published OpenAPI document"
+               class="text-[11px] font-mono text-purple-300 hover:text-purple-200 underline">GET /hooks/threefold_hook.py ↗</a>
           </div>
           <div class="relative">
             <pre class="code mt-2 p-3 rounded-xl bg-gray-950 border border-gray-800 text-[11px] font-mono text-gray-300" id="fetch-snippet"></pre>
             <button onclick="copyText('fetch-snippet', this)" class="absolute top-3 right-2 text-[11px] px-2 py-0.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700">Copy</button>
           </div>
           <p class="text-[11px] text-gray-500 mt-1">
-            The script takes no flags. It reads one JSON object on stdin and writes one decision on stdout, which is the whole of
-            its interface, so the second line above is both the smoke test and exactly what Claude Code will do to it. It is
-            served as readable text rather than as a download you cannot inspect, because a file that sits in front of an agent's
-            tool calls is one you should read before you run.
+            It reads one tool call as JSON on stdin and writes at most one decision on stdout, which is the whole of its
+            interface, so the second command above is also exactly what the agent does to it. It is served as readable text
+            rather than as a download you cannot inspect, because a file that sits in front of an agent's tool calls is one you
+            should read before you run.
           </p>
         </div>
 
         <div>
-          <p class="text-xs font-semibold text-gray-200">Step 2 · Register it as a PreToolUse hook</p>
+          <p class="text-xs font-semibold text-gray-200">Step 2 · Register it with your agent</p>
           <p class="text-xs text-gray-400 mt-1">
-            Add this to <span class="font-mono text-purple-300">.claude/settings.json</span> in the project you want governed, with
-            the absolute path to the script on your machine.
+            In the project you want governed, add the block for your agent, with the absolute path to the script on your
+            machine. The matcher decides which tool calls reach the hook: the ones below are writes, edits and shell commands,
+            so reads are never sent.
           </p>
+
+          <p class="text-[11px] font-semibold text-purple-300 mt-3">Claude Code · <span class="font-mono">.claude/settings.local.json</span></p>
           <div class="relative">
-            <pre class="code mt-2 p-3 rounded-xl bg-gray-950 border border-gray-800 text-[11px] font-mono text-gray-300" id="settings-snippet"></pre>
-            <button onclick="copyText('settings-snippet', this)" class="absolute top-3 right-2 text-[11px] px-2 py-0.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700">Copy</button>
+            <pre class="code mt-1 p-3 rounded-xl bg-gray-950 border border-gray-800 text-[11px] font-mono text-gray-300" id="settings-claude-code"></pre>
+            <button onclick="copyText('settings-claude-code', this)" class="absolute top-3 right-2 text-[11px] px-2 py-0.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700">Copy</button>
+          </div>
+
+          <p class="text-[11px] font-semibold text-purple-300 mt-3">Codex · <span class="font-mono">.codex/hooks.json</span></p>
+          <div class="relative">
+            <pre class="code mt-1 p-3 rounded-xl bg-gray-950 border border-gray-800 text-[11px] font-mono text-gray-300" id="settings-codex"></pre>
+            <button onclick="copyText('settings-codex', this)" class="absolute top-3 right-2 text-[11px] px-2 py-0.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700">Copy</button>
+          </div>
+
+          <p class="text-[11px] font-semibold text-purple-300 mt-3">Antigravity · <span class="font-mono">.agents/hooks.json</span></p>
+          <div class="relative">
+            <pre class="code mt-1 p-3 rounded-xl bg-gray-950 border border-gray-800 text-[11px] font-mono text-gray-300" id="settings-antigravity"></pre>
+            <button onclick="copyText('settings-antigravity', this)" class="absolute top-3 right-2 text-[11px] px-2 py-0.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700">Copy</button>
           </div>
           <p class="text-[11px] text-gray-500 mt-1">
-            The matcher decides what is governed. <span class="font-mono">Write|Edit</span> alone governs the file writes and lets
-            reads through; the four above are what the project tested.
+            The three blocks share one layout. The file each agent reads, its matcher and the <span class="font-mono">--agent</span>
+            name are what this project fixed for it; check the layout against your agent's own hook documentation, above all for
+            Antigravity, before you rely on it.
           </p>
         </div>
 
         <div>
-          <p class="text-xs font-semibold text-gray-200">Step 3 · Point it at a service</p>
+          <p class="text-xs font-semibold text-gray-200">Step 3 · Tell the hook which project this is</p>
           <p class="text-xs text-gray-400 mt-1">
-            With no environment set, the hook calls the deployment it was written against. Set
-            <span class="font-mono text-purple-300">THREEFOLD_ENDPOINT</span> to use another one, including a local
-            <span class="font-mono">make run</span> on port 8001.
+            Set these in the environment the agent is started from. Only <span class="font-mono text-purple-300">THREEFOLD_PROJECT</span>
+            is required. Each one is described in the table below.
           </p>
           <div class="relative">
             <pre class="code mt-2 p-3 rounded-xl bg-gray-950 border border-gray-800 text-[11px] font-mono text-gray-300" id="env-snippet"></pre>
@@ -193,10 +213,20 @@
         </div>
 
         <p class="text-xs text-gray-400">
-          Each button sends exactly the body the hook builds for that tool call, to the endpoint in the bar above, and then
-          translates the answer into the JSON Claude Code would act on. Nothing here is canned: if the service is unreachable the
-          panel says so instead of showing a verdict.
+          Each button sends the call to the endpoint in the bar above, under a new session id, and then writes the answer the
+          way the hook writes it for the agent you pick. Nothing here is canned: if the service is unreachable the panel says so
+          instead of showing a verdict. The body is marked as coming from this page and asks for the model's sentence, which the
+          hook does not, so the service's own answer below can carry a sentence the agent would not be shown.
         </p>
+
+        <label class="flex items-center gap-2 text-xs text-gray-400">
+          Write the answer as
+          <select id="agentSelect" onchange="renderDecision()" class="bg-gray-950 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 font-mono focus:outline-none focus:border-purple-500">
+            <option value="claude-code" selected>Claude Code</option>
+            <option value="codex">Codex</option>
+            <option value="antigravity">Antigravity</option>
+          </select>
+        </label>
 
         <div class="grid grid-cols-1 gap-2">
           <button onclick="probe('domain_write')" class="p-3 rounded-xl bg-gray-950 border border-gray-800 hover:border-red-500 text-left transition group">
@@ -204,15 +234,15 @@
               <span class="text-xs font-bold text-red-400">Write · architectural boundary</span>
               <span class="text-base">🛡️</span>
             </div>
-            <p class="text-xs text-gray-300 mt-1 font-mono break-all">Write src/threefold/domain/models.py ← "from boto3 import client"</p>
+            <p class="text-xs text-gray-300 mt-1 font-mono break-all">Write src/acme_billing/domain/invoice.py ← "from boto3 import client"</p>
           </button>
 
-          <button onclick="probe('credential_read')" class="p-3 rounded-xl bg-gray-950 border border-gray-800 hover:border-amber-500 text-left transition group">
+          <button onclick="probe('credential_command')" class="p-3 rounded-xl bg-gray-950 border border-gray-800 hover:border-amber-500 text-left transition group">
             <div class="flex items-center justify-between">
-              <span class="text-xs font-bold text-amber-400">Bash · credential path</span>
+              <span class="text-xs font-bold text-amber-400">Bash · credential in the command</span>
               <span class="text-base">🔑</span>
             </div>
-            <p class="text-xs text-gray-300 mt-1 font-mono break-all">Bash cat ~/.aws/credentials</p>
+            <p class="text-xs text-gray-300 mt-1 font-mono break-all">Bash export AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE</p>
           </button>
 
           <button onclick="probe('ordinary_edit')" class="p-3 rounded-xl bg-gray-950 border border-gray-800 hover:border-emerald-500 text-left transition group">
@@ -225,7 +255,7 @@
         </div>
 
         <div>
-          <p class="text-xs font-medium text-gray-400 uppercase">What Claude Code receives on stdout</p>
+          <p class="text-xs font-medium text-gray-400 uppercase">What <span id="agent-label">Claude Code</span> receives on stdout</p>
           <pre class="code mt-2 p-3 rounded-xl bg-gray-950 border border-gray-800 text-[11px] font-mono text-gray-300 max-h-64 overflow-y-auto" id="hook-output">Press a button above.</pre>
         </div>
 
@@ -235,6 +265,100 @@
         </div>
       </div>
     </div>
+
+    <!-- WHAT LEAVES YOUR MACHINE. This transcribes the contract in STATE.md and
+         stops there. A reassurance the hook cannot back is worse than none, so
+         nothing is added that the contract does not fix. -->
+    <section id="what-leaves" class="rounded-2xl bg-gray-900 border border-gray-800 p-5 space-y-4">
+      <div class="border-b border-gray-800 pb-3">
+        <h2 class="text-sm font-semibold text-white">What leaves your machine</h2>
+        <p class="text-[11px] text-gray-500">What the hook sends, what it holds back, and why. Read this before Step 2.</p>
+      </div>
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 text-xs">
+        <div class="p-4 rounded-xl bg-gray-950 border border-gray-800 space-y-2">
+          <p class="font-semibold text-emerald-300">Sent, for a call that passes the checks on the right</p>
+          <p class="text-gray-400">One <span class="font-mono">POST /evaluate-tool-call</span> with these fields and no others:</p>
+          <ul class="text-[11px] text-gray-400 space-y-1 list-disc pl-4">
+            <li><span class="font-mono text-gray-200">session_id</span></li>
+            <li><span class="font-mono text-gray-200">project_name</span>: your <span class="font-mono">THREEFOLD_PROJECT</span> alias. A name that does not match the stack's pattern (<span class="font-mono">Acme-</span> and up to 40 letters, digits or dashes by default) is stored and counted as <span class="font-mono">unlabelled</span>, and the answer says so in <span class="font-mono">warnings</span>.</li>
+            <li><span class="font-mono text-gray-200">developer</span>: <span class="font-mono">anonymous</span>, or a 12-character hex hash computed on your machine. Never a user name. Any developer value is shown in public only as a short hash.</li>
+            <li><span class="font-mono text-gray-200">tool_name</span>, <span class="font-mono text-gray-200">action_type</span> and <span class="font-mono text-gray-200">arguments</span>. For a write, the arguments include the text being written: that text is what the gates read.</li>
+            <li><span class="font-mono text-gray-200">agent</span>: <span class="font-mono">claude-code</span>, <span class="font-mono">codex</span> or <span class="font-mono">antigravity</span>; <span class="font-mono text-gray-200">origin</span>: <span class="font-mono">hook</span>; <span class="font-mono text-gray-200">explain</span>: <span class="font-mono">false</span>, so the hook does not ask for the model's sentence.</li>
+          </ul>
+        </div>
+        <div class="p-4 rounded-xl bg-gray-950 border border-gray-800 space-y-2">
+          <p class="font-semibold text-amber-300">Never sent</p>
+          <ul class="text-[11px] text-gray-400 space-y-2 list-disc pl-4">
+            <li>A tool call whose target does not resolve inside the project root. <span class="text-gray-500">The service governs the project, not the rest of your disk.</span></li>
+            <li>Paths under an agent's own configuration or memory: <span class="font-mono text-gray-300">~/.claude</span>, <span class="font-mono text-gray-300">~/.codex</span>, <span class="font-mono text-gray-300">~/.gemini</span>. <span class="text-gray-500">Those hold your instructions and history for the agent, not project code.</span></li>
+            <li>Data files, recognised by extension and by directory. <span class="text-gray-500">The gates judge code; a data file is where records live.</span></li>
+            <li>Any call containing a term from your never-send list. <span class="text-gray-500">You name what must not leave, in <span class="font-mono">never_send.txt</span>, and the hook checks it before it sends anything.</span></li>
+          </ul>
+          <p class="text-[11px] text-amber-300/80 border-t border-gray-800 pt-2">A call held back is not sent, so it is not checked.</p>
+        </div>
+        <div class="p-4 rounded-xl bg-gray-950 border border-gray-800 space-y-2">
+          <p class="font-semibold text-sky-300">Kept on your machine</p>
+          <p class="text-[11px] text-gray-400">
+            The never-send list, your project aliases and the list of governed repositories live in
+            <span class="font-mono text-gray-200">~/.threefold/</span>, or wherever <span class="font-mono">THREEFOLD_HOME</span>
+            points. They are read there by the hook. Of the three, only the alias you set for this project appears in a request,
+            as <span class="font-mono">project_name</span>.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- PER AGENT: WHAT IS SHOWN AND WHAT IS NOT YET -->
+    <section class="rounded-2xl bg-gray-900 border border-gray-800 p-5 space-y-3">
+      <div class="border-b border-gray-800 pb-3">
+        <h2 class="text-sm font-semibold text-white">What each agent does with a deny, as far as it has been shown</h2>
+        <p class="text-[11px] text-gray-500">The hook's side is fixed. The agent's side is what is still being checked.</p>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-xs">
+          <thead>
+            <tr class="text-gray-400 uppercase tracking-wider text-[11px] border-b border-gray-800">
+              <th class="text-left font-medium py-2 pr-3">Agent</th>
+              <th class="text-left font-medium py-2 pr-3">Tool calls sent</th>
+              <th class="text-left font-medium py-2 pr-3">What the hook prints on a refusal</th>
+              <th class="text-left font-medium py-2">Does the deny stop the write?</th>
+            </tr>
+          </thead>
+          <tbody class="text-gray-300">
+            <tr class="border-b border-gray-800/60">
+              <td class="py-2 pr-3 font-semibold">Claude Code</td>
+              <td class="py-2 pr-3 font-mono text-[11px] text-gray-400">Write, Edit, MultiEdit, NotebookEdit, Bash</td>
+              <td class="py-2 pr-3 font-mono text-[11px] text-gray-400">hookSpecificOutput.permissionDecision "deny", with a reason</td>
+              <td class="py-2"><span class="px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-950 text-amber-300 border border-amber-800">being verified</span></td>
+            </tr>
+            <tr class="border-b border-gray-800/60">
+              <td class="py-2 pr-3 font-semibold">Codex</td>
+              <td class="py-2 pr-3 font-mono text-[11px] text-gray-400">apply_patch, Edit, Write, Bash</td>
+              <td class="py-2 pr-3 font-mono text-[11px] text-gray-400">hookSpecificOutput.permissionDecision "deny", with a reason</td>
+              <td class="py-2"><span class="px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-950 text-amber-300 border border-amber-800">being verified</span></td>
+            </tr>
+            <tr>
+              <td class="py-2 pr-3 font-semibold">Antigravity</td>
+              <td class="py-2 pr-3 font-mono text-[11px] text-gray-400">write_to_file, replace_file_content, multi_replace_file_content, run_command</td>
+              <td class="py-2 pr-3 font-mono text-[11px] text-gray-400">{"decision": "deny", "reason": …}</td>
+              <td class="py-2"><span class="px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-950 text-amber-300 border border-amber-800">being verified</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-[11px] text-gray-400">
+        <p class="p-3 rounded-xl bg-gray-950 border border-gray-800">
+          On an approval the hook prints nothing, for every agent, so the agent's own permission flow still runs. Until a deny
+          has been shown to stop the write for an agent, a refusal recorded for that agent says what the agent was told, not
+          what it did.
+        </p>
+        <p class="p-3 rounded-xl bg-gray-950 border border-gray-800">
+          An edit that gets past the hook and is refused only at commit time, by the pre-commit gate, is recorded with agent
+          <span class="font-mono text-gray-200">pre-commit</span>. It is reported as a commit-time refusal, never as an edit
+          the hook stopped.
+        </p>
+      </div>
+    </section>
 
     <!-- CONTRACT AND CONFIGURATION -->
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -246,52 +370,47 @@
             <thead>
               <tr class="text-gray-400 uppercase tracking-wider text-[11px] border-b border-gray-800">
                 <th class="text-left font-medium py-2 pr-3">Variable</th>
-                <th class="text-left font-medium py-2 pr-3">Default</th>
+                <th class="text-left font-medium py-2 pr-3">Needed</th>
                 <th class="text-left font-medium py-2">Effect</th>
               </tr>
             </thead>
             <tbody class="text-gray-300">
               <tr class="border-b border-gray-800/60">
-                <td class="py-2 pr-3 font-mono text-purple-300">THREEFOLD_ENDPOINT</td>
-                <td class="py-2 pr-3 font-mono text-gray-400">the shipped deployment</td>
-                <td class="py-2 text-gray-400">Base URL the hook posts to.</td>
+                <td class="py-2 pr-3 font-mono text-purple-300">THREEFOLD_PROJECT</td>
+                <td class="py-2 pr-3 font-mono text-gray-400">required</td>
+                <td class="py-2 text-gray-400">The name this project is sent under, as <span class="font-mono">project_name</span>. Use an alias in the <span class="font-mono">Acme-</span> style, never the real name: it is what the console and the metrics show.</td>
+              </tr>
+              <tr class="border-b border-gray-800/60">
+                <td class="py-2 pr-3 font-mono text-purple-300">THREEFOLD_DEVELOPER</td>
+                <td class="py-2 pr-3 font-mono text-gray-400">optional</td>
+                <td class="py-2 text-gray-400">Who you are, for the per-developer counts. The hook hashes it on your machine and sends only the 12-character hash; unset, it sends <span class="font-mono">anonymous</span>.</td>
               </tr>
               <tr class="border-b border-gray-800/60">
                 <td class="py-2 pr-3 font-mono text-purple-300">THREEFOLD_FAIL_CLOSED</td>
-                <td class="py-2 pr-3 font-mono text-gray-400">unset, so it fails open</td>
-                <td class="py-2 text-gray-400">Set to 1 to refuse the call when the service cannot be reached.</td>
+                <td class="py-2 pr-3 font-mono text-gray-400">optional</td>
+                <td class="py-2 text-gray-400">Set to <span class="font-mono">1</span> to refuse the call when the service cannot be reached. Unset, an unreachable service means the hook prints nothing and exits 0.</td>
               </tr>
               <tr class="border-b border-gray-800/60">
-                <td class="py-2 pr-3 font-mono text-purple-300">THREEFOLD_TIMEOUT</td>
-                <td class="py-2 pr-3 font-mono text-gray-400">6</td>
-                <td class="py-2 text-gray-400">Seconds to wait before the call is treated as unreachable.</td>
-              </tr>
-              <tr class="border-b border-gray-800/60">
-                <td class="py-2 pr-3 font-mono text-purple-300">THREEFOLD_BUDGET_USD</td>
-                <td class="py-2 pr-3 font-mono text-gray-400">25</td>
-                <td class="py-2 text-gray-400">Session budget declared to the cost gate.</td>
-              </tr>
-              <tr class="border-b border-gray-800/60">
-                <td class="py-2 pr-3 font-mono text-purple-300">THREEFOLD_INPUT_TOKENS<br />THREEFOLD_OUTPUT_TOKENS</td>
-                <td class="py-2 pr-3 font-mono text-gray-400">0</td>
-                <td class="py-2 text-gray-400">Projected token counts. Left at zero, the cost gate has nothing to weigh, which is why the loop and boundary gates are what stop things here.</td>
+                <td class="py-2 pr-3 font-mono text-purple-300">THREEFOLD_HOME</td>
+                <td class="py-2 pr-3 font-mono text-gray-400">optional</td>
+                <td class="py-2 text-gray-400">Where the hook's local files live, <span class="font-mono">~/.threefold</span> unless set. <span class="font-mono">never_send.txt</span> goes there and holds the terms you never want sent: a call containing any of them is never sent.</td>
               </tr>
               <tr>
-                <td class="py-2 pr-3 font-mono text-purple-300">THREEFOLD_SESSION</td>
-                <td class="py-2 pr-3 font-mono text-gray-400">claude-code-local</td>
-                <td class="py-2 text-gray-400">Used when Claude Code sends no session id. The session id is what the loop detector counts against.</td>
+                <td class="py-2 pr-3 font-mono text-purple-300">THREEFOLD_ENDPOINT</td>
+                <td class="py-2 pr-3 font-mono text-gray-400">optional</td>
+                <td class="py-2 text-gray-400">The service the hook asks. The snippets on this page set it to the endpoint in the bar above.</td>
               </tr>
             </tbody>
           </table>
         </div>
 
         <div class="p-3 rounded-xl bg-amber-950/20 border border-amber-900/40">
-          <p class="text-xs font-semibold text-amber-300">It fails open, and says so</p>
+          <p class="text-xs font-semibold text-amber-300">It fails open, and silently</p>
           <p class="text-[11px] text-gray-400 mt-1">
-            If the service times out or the network drops, the hook returns <span class="font-mono">allow</span> with a reason that
-            states the call was never checked. That is a deliberate trade: a guard that bricks the agent on a hiccup gets
-            uninstalled by lunchtime. Where the risk is worth the interruption, set
-            <span class="font-mono text-amber-300">THREEFOLD_FAIL_CLOSED=1</span> and the same failure denies instead.
+            If the service times out or the network drops, the hook prints nothing and exits 0, so the agent carries on as if
+            Threefold were not installed, and nothing on screen says the call went unchecked. That is a deliberate trade: a guard
+            that bricks the agent on a hiccup gets uninstalled by lunchtime. Where the risk is worth the interruption, set
+            <span class="font-mono text-amber-300">THREEFOLD_FAIL_CLOSED=1</span> and the same failure refuses the call instead.
           </p>
         </div>
       </div>
@@ -311,43 +430,39 @@
   "session_id": "0f3c…",
   "tool_name": "Write",
   "tool_input": {
-    "file_path": "src/threefold/domain/models.py",
+    "file_path": "src/acme_billing/domain/invoice.py",
     "content": "from boto3 import client"
   }
 }</pre>
+          <p class="text-[11px] text-gray-500 mt-1">Codex and Antigravity hand over the same call in their own tool names; <span class="font-mono">--agent</span> tells the hook which shape to read.</p>
         </div>
 
         <div>
-          <p class="text-xs font-medium text-gray-400 uppercase">The hook writes this on stdout</p>
-          <pre class="code mt-2 p-3 rounded-xl bg-gray-950 border border-gray-800 text-[11px] font-mono text-gray-300">{
+          <p class="text-xs font-medium text-gray-400 uppercase">The hook writes this on stdout when it refuses</p>
+          <p class="text-[11px] text-gray-500 mt-1">Claude Code and Codex:</p>
+          <pre class="code mt-1 p-3 rounded-xl bg-gray-950 border border-gray-800 text-[11px] font-mono text-gray-300">{
   "hookSpecificOutput": {
     "hookEventName": "PreToolUse",
     "permissionDecision": "deny",
     "permissionDecisionReason": "Threefold refused this call. …"
   }
 }</pre>
+          <p class="text-[11px] text-gray-500 mt-2">Antigravity:</p>
+          <pre class="code mt-1 p-3 rounded-xl bg-gray-950 border border-gray-800 text-[11px] font-mono text-gray-300">{
+  "decision": "deny",
+  "reason": "Threefold refused this call. …"
+}</pre>
+          <p class="text-[11px] text-gray-500 mt-2">When it approves, and when the service cannot be reached without <span class="font-mono">THREEFOLD_FAIL_CLOSED=1</span>: nothing at all, and exit 0.</p>
         </div>
 
         <div>
-          <p class="text-xs font-medium text-gray-400 uppercase">Tool names, mapped to the service's vocabulary</p>
-          <div class="grid grid-cols-2 gap-2 mt-2 text-[11px] font-mono">
-            <div class="p-2 rounded bg-gray-950 border border-gray-800 flex items-center justify-between">
-              <span class="text-gray-300">Read, NotebookRead</span><span class="text-purple-300">FILE_READ</span>
+          <p class="text-xs font-medium text-gray-400 uppercase">Tool calls, in the service's vocabulary</p>
+          <div class="grid grid-cols-1 gap-2 mt-2 text-[11px] font-mono">
+            <div class="p-2 rounded bg-gray-950 border border-gray-800 flex items-center justify-between gap-3">
+              <span class="text-gray-300">Write, Edit, MultiEdit, NotebookEdit, apply_patch, write_to_file, replace_file_content, multi_replace_file_content</span><span class="text-purple-300">FILE_WRITE</span>
             </div>
-            <div class="p-2 rounded bg-gray-950 border border-gray-800 flex items-center justify-between">
-              <span class="text-gray-300">Write, Edit, MultiEdit</span><span class="text-purple-300">FILE_WRITE</span>
-            </div>
-            <div class="p-2 rounded bg-gray-950 border border-gray-800 flex items-center justify-between">
-              <span class="text-gray-300">NotebookEdit</span><span class="text-purple-300">FILE_WRITE</span>
-            </div>
-            <div class="p-2 rounded bg-gray-950 border border-gray-800 flex items-center justify-between">
-              <span class="text-gray-300">Bash</span><span class="text-purple-300">COMMAND_EXEC</span>
-            </div>
-            <div class="p-2 rounded bg-gray-950 border border-gray-800 flex items-center justify-between">
-              <span class="text-gray-300">WebFetch, WebSearch</span><span class="text-purple-300">WEB_SEARCH</span>
-            </div>
-            <div class="p-2 rounded bg-gray-950 border border-gray-800 flex items-center justify-between">
-              <span class="text-gray-300">anything else</span><span class="text-purple-300">UNKNOWN</span>
+            <div class="p-2 rounded bg-gray-950 border border-gray-800 flex items-center justify-between gap-3">
+              <span class="text-gray-300">Bash, run_command</span><span class="text-purple-300">COMMAND_EXEC</span>
             </div>
           </div>
         </div>
@@ -359,9 +474,10 @@
             <button onclick="copyText('curl-snippet', this)" class="absolute top-3 right-2 text-[11px] px-2 py-0.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700">Copy</button>
           </div>
           <p class="text-[11px] text-gray-500 mt-1">
-            Piping the JSON into the script gives the hook decision; sending it to the endpoint gives the verdict the hook
-            translates. A refused call never enters the session's history, so repeating the boundary violation is refused for that
-            reason every time and never reaches the loop gate. The third command is the one that halts a session.
+            Each command makes its own session id when it runs, so two people pasting the same text never share a session and
+            one reader's third call cannot halt the session the next reader lands on. A refused call never enters the session's
+            history, so repeating the boundary violation is refused for that reason every time and never reaches the loop gate.
+            The last command is the one that halts a session.
           </p>
         </div>
       </div>
@@ -380,23 +496,43 @@
       { href: 'rules.html', label: 'Architecture Rules' },
       { href: 'sessions.html', label: 'Sessions' },
       { href: 'settings.html', label: 'Policy Settings' },
-      { href: 'testbook.html', label: 'Judge Testbook' },
       { href: 'swagger.html', label: 'OpenAPI 3.1' }
     ];
 
-    // Each case is the tool call as Claude Code would present it, before the hook
-    // translates it. The translation below is the hook's own, not a paraphrase.
+    const HOOK_PATH = 'hooks/threefold_hook.py';
+
+    // What this project fixed for each agent: the tools that reach the hook, and
+    // the name the hook is told it is serving. The file each block goes in is
+    // beside the block itself.
+    const AGENTS = {
+      'claude-code': {
+        label: 'Claude Code',
+        matcher: 'Write|Edit|MultiEdit|NotebookEdit|Bash'
+      },
+      codex: {
+        label: 'Codex',
+        matcher: 'apply_patch|Edit|Write|Bash'
+      },
+      antigravity: {
+        label: 'Antigravity',
+        matcher: 'write_to_file|replace_file_content|multi_replace_file_content|run_command'
+      }
+    };
+
+    // Each case is the tool call as Claude Code would present it. Only the shape
+    // of the answer differs per agent, so the picker changes how the verdict is
+    // written back, not what is sent.
     const CASES = {
       domain_write: {
         tool_name: 'Write',
         tool_input: {
-          file_path: 'src/threefold/domain/models.py',
-          content: 'from boto3 import client\n\nclient("dynamodb").put_item(TableName="sessions", Item={})\n'
+          file_path: 'src/acme_billing/domain/invoice.py',
+          content: 'from boto3 import client\n\nclient("dynamodb").put_item(TableName="invoices", Item={})\n'
         }
       },
-      credential_read: {
+      credential_command: {
         tool_name: 'Bash',
-        tool_input: { command: 'cat ~/.aws/credentials' }
+        tool_input: { command: 'export AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE' }
       },
       ordinary_edit: {
         tool_name: 'Edit',
@@ -409,16 +545,16 @@
     };
 
     const ACTION_TYPES = {
-      Read: 'FILE_READ',
-      NotebookRead: 'FILE_READ',
       Write: 'FILE_WRITE',
       Edit: 'FILE_WRITE',
       MultiEdit: 'FILE_WRITE',
       NotebookEdit: 'FILE_WRITE',
-      Bash: 'COMMAND_EXEC',
-      WebFetch: 'WEB_SEARCH',
-      WebSearch: 'WEB_SEARCH'
+      Bash: 'COMMAND_EXEC'
     };
+
+    // The last verdict the service returned, so switching the agent re-renders it
+    // rather than asking the service again.
+    let lastVerdict = null;
 
     function renderNav() {
       document.getElementById('page-nav').innerHTML = NAV.map(item =>
@@ -426,14 +562,16 @@
       ).join('');
     }
 
-    // The nav carries the document itself; these carry the one operation the hook
-    // calls, so a reader lands on the contract rather than on its front page. The
-    // anchor is the one Swagger UI generates for a spec without operationIds.
+    // The nav carries the document itself; these carry the operations this page
+    // is about, so a reader lands on the contract rather than on its front page.
+    // The anchor is the one Swagger UI generates for a spec without operationIds.
     function linkToSpec() {
       ['spec-link-evaluate', 'spec-link-evaluate-2'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.href = PAGE_BASE + 'swagger.html#/default/post_evaluate_tool_call';
       });
+      const hook = document.getElementById('spec-link-hook');
+      if (hook) hook.href = PAGE_BASE + 'swagger.html#/default/get_hooks_threefold_hook_py';
     }
 
     // The script is served by this deployment, under the same stage prefix as the
@@ -441,7 +579,7 @@
     function linkToHook() {
       ['hook-download', 'hook-view', 'hook-badge'].forEach(id => {
         const el = document.getElementById(id);
-        if (el) el.href = PAGE_BASE + 'hooks/claude_code_hook.py';
+        if (el) el.href = PAGE_BASE + HOOK_PATH;
       });
     }
 
@@ -457,6 +595,22 @@
         '"': '&quot;',
         "'": '&#039;'
       }[m]));
+    }
+
+    // Every probe runs under a new session id. A fixed one was shared by every
+    // visitor, so one visitor's repeated press could halt it for the next, and a
+    // halted session refuses everything after it. randomUUID exists only in a
+    // secure context, so there are two fallbacks for a copy served over plain http.
+    function newSessionId() {
+      const c = window.crypto;
+      if (c && typeof c.randomUUID === 'function') return 'sim-' + c.randomUUID();
+      let hex = '';
+      if (c && typeof c.getRandomValues === 'function') {
+        c.getRandomValues(new Uint8Array(16)).forEach(b => { hex += b.toString(16).padStart(2, '0'); });
+      } else {
+        for (let i = 0; i < 32; i++) hex += Math.floor(Math.random() * 16).toString(16);
+      }
+      return 'sim-' + hex.slice(0, 8) + '-' + hex.slice(8, 12) + '-' + hex.slice(12, 16) + '-' + hex.slice(16, 20) + '-' + hex.slice(20, 32);
     }
 
     function getApiBase() {
@@ -492,99 +646,125 @@
       });
     }
 
+    // One registration block per agent, in the layout the three share.
+    function agentSettings(name) {
+      const agent = AGENTS[name];
+      return JSON.stringify({
+        hooks: {
+          PreToolUse: [
+            {
+              matcher: agent.matcher,
+              hooks: [
+                { type: 'command', command: 'python /absolute/path/to/threefold_hook.py --agent ' + name }
+              ]
+            }
+          ]
+        }
+      }, null, 2);
+    }
+
+    // A body the reader can paste into a shell with a session id the shell makes
+    // at run time. An id written into the page at load would be the same for
+    // everyone who copied it, which is the shared session this replaces.
+    function shellBody(testCase) {
+      // Replaced through a function, so nothing in the shell quoting is read as a
+      // replacement pattern.
+      return JSON.stringify(requestBody(testCase, '__SESSION__')).replace('"__SESSION__"', () => '"\'"$SESSION"\'"');
+    }
+
     // Every snippet is written from the endpoint field, so a reader never copies a
     // command pointing somewhere this page has not tried to reach.
     function renderSnippets() {
       const endpoint = getApiBase();
+      const makeSession = 'SESSION="sim-$(python -c \'import uuid; print(uuid.uuid4())\')"';
 
       document.getElementById('fetch-snippet').textContent =
-        'curl -O ' + endpoint + '/hooks/claude_code_hook.py\n\n' +
-        '# one JSON object on stdin, one decision on stdout\n' +
-        'echo \'{"tool_name":"Read","tool_input":{"file_path":"README.md"}}\' \\\n' +
-        '  | THREEFOLD_ENDPOINT=' + endpoint + ' python3 claude_code_hook.py';
+        'curl -O ' + endpoint + '/' + HOOK_PATH + '\n\n' +
+        '# one tool call on stdin; a refusal prints a deny, an approval prints nothing\n' +
+        'echo \'' + JSON.stringify(CASES.domain_write) + '\' \\\n' +
+        '  | THREEFOLD_PROJECT=Acme-Demo THREEFOLD_ENDPOINT=' + endpoint + ' python threefold_hook.py --agent claude-code';
 
-      document.getElementById('settings-snippet').textContent =
-        '{\n' +
-        '  "hooks": {\n' +
-        '    "PreToolUse": [\n' +
-        '      {\n' +
-        '        "matcher": "Write|Edit|Bash|Read",\n' +
-        '        "hooks": [\n' +
-        '          {\n' +
-        '            "type": "command",\n' +
-        '            "command": "python3 /absolute/path/to/claude_code_hook.py"\n' +
-        '          }\n' +
-        '        ]\n' +
-        '      }\n' +
-        '    ]\n' +
-        '  }\n' +
-        '}';
+      Object.keys(AGENTS).forEach(name => {
+        document.getElementById('settings-' + name).textContent = agentSettings(name);
+      });
 
       document.getElementById('env-snippet').textContent =
-        '# The endpoint this page is talking to\n' +
-        'export THREEFOLD_ENDPOINT="' + endpoint + '"\n\n' +
-        '# Refuse the call instead of allowing it when the service is unreachable\n' +
+        '# Required: the alias this project is sent under, never its real name\n' +
+        'export THREEFOLD_PROJECT="Acme-Billing"\n\n' +
+        '# Optional: hashed on this machine before it is sent; unset sends "anonymous"\n' +
+        'export THREEFOLD_DEVELOPER="any-stable-name-for-you"\n\n' +
+        '# Optional: refuse the call when the service cannot be reached\n' +
         'export THREEFOLD_FAIL_CLOSED=1\n\n' +
-        '# Against a local server: make run, then\n' +
-        'export THREEFOLD_ENDPOINT="http://localhost:8001"';
+        '# Optional: where never_send.txt lives, with the terms you never want sent\n' +
+        'export THREEFOLD_HOME="$HOME/.threefold"\n\n' +
+        '# The endpoint this page is talking to\n' +
+        'export THREEFOLD_ENDPOINT="' + endpoint + '"';
 
       document.getElementById('curl-snippet').textContent =
-        '# The verdict the service returns for a call the boundary gate refuses\n' +
+        '# The verdict the service returns for a write the boundary gate refuses\n' +
+        makeSession + '\n' +
         'curl -s -X POST ' + endpoint + '/evaluate-tool-call \\\n' +
         "  -H 'Content-Type: application/json' \\\n" +
-        '  -d \'' + JSON.stringify(hookRequestBody(CASES.domain_write, 'demo-session')) + '\'\n\n' +
-        '# The decision Claude Code would act on, from the script itself\n' +
+        '  -d \'' + shellBody(CASES.domain_write) + '\'\n\n' +
+        '# The decision the agent would get, from the script itself\n' +
         'echo \'' + JSON.stringify(CASES.domain_write) + '\' \\\n' +
-        '  | THREEFOLD_ENDPOINT=' + endpoint + ' python3 claude_code_hook.py\n\n' +
+        '  | THREEFOLD_PROJECT=Acme-Demo THREEFOLD_ENDPOINT=' + endpoint + ' python threefold_hook.py --agent claude-code\n\n' +
         '# The loop gate needs calls that PASS. Send the ordinary edit three times\n' +
-        '# under one session id: the third answers BLOCKED_LOOP_DETECTED.\n' +
+        '# under one new session id: the third answers BLOCKED_LOOP_DETECTED.\n' +
+        makeSession + '\n' +
         'for i in 1 2 3; do curl -s -X POST ' + endpoint + '/evaluate-tool-call \\\n' +
         "  -H 'Content-Type: application/json' \\\n" +
-        '  -d \'' + JSON.stringify(hookRequestBody(CASES.ordinary_edit, 'loop-demo-session')) + '\' \\\n' +
+        '  -d \'' + shellBody(CASES.ordinary_edit) + '\' \\\n' +
         '  | python -c \'import sys,json;print(json.load(sys.stdin)["status"])\'; done';
     }
 
-    // The same body the hook builds, field for field.
-    function hookRequestBody(testCase, sessionId) {
+    // The v2 request, as this page sends it. It is marked as coming from a page,
+    // with agent and origin both "page" and explain true, so the ledger never
+    // counts a visitor pressing a button as an agent being governed. The hook
+    // sends the same fields with its own agent name, origin "hook" and explain
+    // false.
+    function requestBody(testCase, sessionId) {
       return {
         session_id: sessionId,
-        developer_id: 'connect-page',
-        project_name: 'threefold',
+        project_name: 'Acme-Demo',
+        // Under the v2 name and the one it had before, so the console shows a
+        // visitor as anonymous whichever of the two the ledger keeps.
+        developer: 'anonymous',
+        developer_id: 'anonymous',
         tool_name: testCase.tool_name,
         action_type: ACTION_TYPES[testCase.tool_name] || 'UNKNOWN',
         arguments: testCase.tool_input,
-        projected_input_tokens: 0,
-        projected_output_tokens: 0,
-        budget_usd: 25.0
+        agent: 'page',
+        origin: 'page',
+        explain: true
       };
     }
 
-    // The hook's own translation of a verdict into a permission decision.
-    function hookDecision(verdict) {
-      if ((verdict.status || 'APPROVED') === 'APPROVED') {
-        return {
-          hookSpecificOutput: {
-            hookEventName: 'PreToolUse',
-            permissionDecision: 'allow',
-            permissionDecisionReason: 'Threefold: every gate passed.'
-          }
-        };
-      }
-      const reason = verdict.reason || verdict.status;
-      const explanation = verdict.bedrock_explanation || '';
-      const source = verdict.explanation_source || 'unknown';
-      let detail = 'Threefold refused this call. ' + reason;
-      if (explanation) {
-        const label = source === 'bedrock' ? 'Bedrock' : 'Deterministic explanation';
-        detail = detail + '\n' + label + ': ' + explanation;
-      }
+    // The hook's reply for one agent, per the contract: a deny in that agent's
+    // shape, or nothing at all. The reason here is built from the gate's reason
+    // alone, because the hook asks for no model sentence.
+    function hookDecision(verdict, agentName) {
+      if ((verdict.status || 'APPROVED') === 'APPROVED') return null;
+      const reason = 'Threefold refused this call. ' + (verdict.reason || verdict.status);
+      if (agentName === 'antigravity') return { decision: 'deny', reason: reason };
       return {
         hookSpecificOutput: {
           hookEventName: 'PreToolUse',
           permissionDecision: 'deny',
-          permissionDecisionReason: detail
+          permissionDecisionReason: reason
         }
       };
+    }
+
+    function renderDecision() {
+      const agentName = document.getElementById('agentSelect').value;
+      document.getElementById('agent-label').textContent = AGENTS[agentName].label;
+      if (!lastVerdict) return;
+      const decision = hookDecision(lastVerdict, agentName);
+      document.getElementById('hook-output').textContent = decision
+        ? JSON.stringify(decision, null, 2)
+        : '(nothing: the hook prints no output on an approval, and exits 0)\n\n' +
+          '// ' + AGENTS[agentName].label + ' then runs its own permission flow as if the hook were not there.';
     }
 
     async function probe(caseName) {
@@ -592,16 +772,15 @@
       const tag = document.getElementById('probe-tag');
       tag.className = 'text-xs px-2.5 py-1 rounded-full font-semibold bg-gray-800 text-gray-400';
       tag.innerText = 'Calling…';
+      lastVerdict = null;
       document.getElementById('hook-output').textContent = 'Waiting for the service…';
 
-      // A fresh session id per press, so a second press is not read as a repeat by
-      // the loop detector and mistaken for the boundary gate firing.
-      const sessionId = 'connect-page-' + caseName + '-' + Date.now();
+      const sessionId = newSessionId();
       try {
         const res = await fetch(getApiBase() + '/evaluate-tool-call', {
           method: 'POST',
           headers: authHeaders({ 'Content-Type': 'application/json' }),
-          body: JSON.stringify(hookRequestBody(testCase, sessionId))
+          body: JSON.stringify(requestBody(testCase, sessionId))
         });
         const data = await res.json();
         document.getElementById('raw-response').textContent = JSON.stringify(data, null, 2);
@@ -610,29 +789,26 @@
           tag.className = 'text-xs px-2.5 py-1 rounded-full font-semibold bg-red-950 text-red-400 border border-red-800';
           tag.innerText = 'HTTP ' + res.status;
           document.getElementById('hook-output').textContent =
-            'The service answered ' + res.status + '. The hook treats a non-answer as unreachable and, by default, allows the call.';
+            'The service answered ' + res.status + '. The hook treats a non-answer as unreachable: it prints nothing and exits 0, ' +
+            'unless THREEFOLD_FAIL_CLOSED=1, when it refuses the call.';
           return;
         }
-        const decision = hookDecision(data);
-        const denied = decision.hookSpecificOutput.permissionDecision === 'deny';
-        document.getElementById('hook-output').textContent = JSON.stringify(decision, null, 2);
+        lastVerdict = data;
+        renderDecision();
+        const denied = (data.status || 'APPROVED') !== 'APPROVED';
         setConnection(true, 'LIVE · ' + (data.status || 'ANSWERED'));
         tag.className = denied
           ? 'text-xs px-2.5 py-1 rounded-full font-semibold bg-red-950 text-red-400 border border-red-800'
           : 'text-xs px-2.5 py-1 rounded-full font-semibold bg-emerald-950 text-emerald-400 border border-emerald-800';
-        tag.innerText = denied ? 'DENIED' : 'ALLOWED';
+        tag.innerText = denied ? 'DENIED' : 'NOTHING PRINTED';
       } catch (err) {
         setConnection(false, 'UNREACHABLE');
         tag.className = 'text-xs px-2.5 py-1 rounded-full font-semibold bg-amber-950 text-amber-400 border border-amber-800';
         tag.innerText = 'UNREACHABLE';
         document.getElementById('raw-response').textContent = JSON.stringify({ error: String(err) }, null, 2);
-        document.getElementById('hook-output').textContent = JSON.stringify({
-          hookSpecificOutput: {
-            hookEventName: 'PreToolUse',
-            permissionDecision: 'allow',
-            permissionDecisionReason: 'Threefold was unreachable, so this call was not checked: ' + String(err)
-          }
-        }, null, 2) + '\n\n// This is the fail-open path, shown because the service could not be reached from this page.';
+        document.getElementById('hook-output').textContent =
+          '(nothing: the service could not be reached, so the hook prints no output and exits 0)\n\n' +
+          '// This is the fail-open path. With THREEFOLD_FAIL_CLOSED=1 the hook refuses the call instead.';
       }
     }
 

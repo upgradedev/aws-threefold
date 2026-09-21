@@ -32,7 +32,10 @@ paths:
               type: object
       responses:
         '200':
-          description: Normalized evaluation result
+          description: >-
+            Normalized evaluation result, with the same verdict fields POST /evaluate-tool-call returns under evaluation
+        '400':
+          description: The body is not a JSON object
   /api/sessions:
     get:
       summary: List Governed Sessions
@@ -101,8 +104,11 @@ paths:
   /evaluate-tool-call:
     post:
       summary: Evaluate Agent Tool Call
-      description: Evaluates an individual tool invocation against secret scanners, loops, boundary guards, and
-        budget.
+      description: >-
+        Evaluates one tool invocation against the credential scanner, the layering rules, the loop detector and
+        the budget. A hook sends this before the tool call runs, and the pages send it too; agent, origin and explain
+        say which of the two a row came from, so a visitor pressing a button on the dashboard is never counted as
+        an agent being governed.
       requestBody:
         required: true
         content:
@@ -111,14 +117,28 @@ paths:
               type: object
               required:
               - session_id
+              - project_name
               - tool_name
               properties:
                 session_id:
                   type: string
-                developer_id:
-                  type: string
+                  description: >-
+                    What the loop detector counts against. A caller that shares one id between users shares a halt
+                    with them.
                 project_name:
                   type: string
+                  description: >-
+                    The project this call belongs to, as an alias rather than its real name. A name that does not
+                    match the stack's AllowedProjectPattern (default ^Acme-[A-Za-z0-9-]{1,40}$) is stored, counted
+                    and used as a metric dimension as unlabelled, and warnings in the response says so.
+                developer:
+                  type: string
+                  description: >-
+                    Either anonymous or a 12-character hex hash computed on the caller's own machine. Never a user
+                    name, and any developer value is shown in public only as a short hash.
+                developer_id:
+                  type: string
+                  description: What this field was called before the v2 request. New callers send developer.
                 tool_name:
                   type: string
                 action_type:
@@ -129,6 +149,37 @@ paths:
                   - COMMAND_EXEC
                 arguments:
                   type: object
+                  description: >-
+                    The call's own arguments. For a write these carry the text being written, which is what the
+                    layering rules read.
+                agent:
+                  type: string
+                  enum:
+                  - claude-code
+                  - codex
+                  - antigravity
+                  - pre-commit
+                  - ci
+                  - page
+                  description: >-
+                    Which caller this is. A refusal recorded against pre-commit happened at commit time, not at
+                    the moment of the edit.
+                origin:
+                  type: string
+                  enum:
+                  - hook
+                  - page
+                  - ci
+                explain:
+                  type: boolean
+                  description: >-
+                    Whether to ask the model for a sentence beside the deterministic verdict. The hooks send false;
+                    the pages send true.
+                dry_run:
+                  type: boolean
+                  description: >-
+                    A call the agent is considering rather than making. It is recorded as observed, is never refused,
+                    and never trips a session.
                 projected_input_tokens:
                   type: integer
                 projected_output_tokens:
@@ -137,14 +188,78 @@ paths:
                   type: number
       responses:
         '200':
-          description: Evaluation verdict, risk assessment, and Bedrock explanation
+          description: Evaluation verdict, the invariants it was measured against, and the explanation with its
+            source
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    description: APPROVED, or the name of what refused it.
+                  reason:
+                    type: string
+                  risk_level:
+                    type: string
+                  rule_evaluations:
+                    type: object
+                    description: Each invariant and whether this call satisfied it.
+                  session_tripped:
+                    type: boolean
+                  current_session_cost_usd:
+                    type: number
+                  proof_hash:
+                    type: string
+                  explanation_source:
+                    type: string
+                    description: >-
+                      What produced bedrock_explanation: bedrock when the model answered, deterministic_fallback
+                      when it did not.
+                  bedrock_explanation:
+                    type:
+                    - string
+                    - 'null'
+                  persistence:
+                    type: string
+                    enum:
+                    - dynamodb
+                    - memory
+                  observations:
+                    type: array
+                    items:
+                      type: string
+                    description: What a rule in observe mode would have refused. The call still ran.
+                  observed_rules:
+                    type: array
+                    items:
+                      type: string
+                  warnings:
+                    type: array
+                    items:
+                      type: string
+                    description: >-
+                      What the service changed or ignored about the request, so a caller is never left assuming
+                      it was taken as sent. A project_name that did not match the pattern and was counted as unlabelled
+                      is reported here.
+        '400':
+          description: >-
+            The body is not a JSON object, or a number in it cannot be used: a negative token count, or a budget
+            of zero or less
   /issue-certificate:
     post:
-      summary: Issue Cryptographic Governance Certificate
-      description: Issues a signed SHA-256 Governance Certificate for CI/CD PR gating.
+      summary: Issue Governance Certificate
+      description: >-
+        Issues a SHA-256 fingerprinted Governance Certificate over a session's verdicts. The fingerprint is unkeyed:
+        it detects corruption and casual edits, not an adversary, because nothing signs it and nothing in CI requires
+        one before a merge.
       responses:
         '200':
-          description: Cryptographic certificate
+          description: The certificate, returned rather than archived
+        '400':
+          description: >-
+            The body is not a JSON object, or there is nothing to certify: an empty list of evaluations, or a session
+            this service has no record of governing
   /policy/config:
     get:
       summary: Get Dynamic Policy Configuration
@@ -188,6 +303,16 @@ paths:
       responses:
         '200':
           description: Subsystems health breakdown
+    head:
+      summary: Readiness, without the body
+      description: >-
+        The same status code as GET, with no body. An uptime check that only wants the code should use this rather
+        than downloading the breakdown on every probe.
+      responses:
+        '200':
+          description: Ready
+        '503':
+          description: A dependency could not be reached
   /sessions/{session_id}:
     get:
       summary: Inspect Session State
@@ -251,6 +376,27 @@ paths:
       responses:
         '200':
           description: Security block verdict
+  /hooks/threefold_hook.py:
+    get:
+      summary: The hook itself
+      description: >-
+        Serves the one script that puts Threefold in front of Claude Code, Codex or Antigravity, as readable text
+        rather than as a download a reader cannot inspect. It is answered without a key even where reads are private:
+        a product nobody can obtain is a demo. Which agent is calling is told to the script on its own command line,
+        with --agent.
+      responses:
+        '200':
+          description: The script, as text/plain
+          content:
+            text/plain:
+              schema:
+                type: string
+    head:
+      summary: The hook's headers, without the file
+      description: The same status and headers as GET, with no body.
+      responses:
+        '200':
+          description: The script is served here
   /status:
     get:
       summary: Health & Active Policy Rules
@@ -269,6 +415,14 @@ paths:
                   status:
                     type: string
                     example: HEALTHY
+    head:
+      summary: Health, without the body
+      description: >-
+        The same status code and headers as GET, with no body. The dashboard's status badge reads the GET; a monitor
+        that wants only the code should use this.
+      responses:
+        '200':
+          description: The service answered
   /api/insights:
     get:
       summary: What the gates decided, by project, kind of problem and rule
