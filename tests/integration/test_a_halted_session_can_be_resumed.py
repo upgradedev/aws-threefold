@@ -85,6 +85,24 @@ def test_a_resume_records_who_why_when_and_the_halt_it_cleared() -> None:
     assert stored.resumed_at
 
 
+def test_a_resumed_session_no_longer_carries_the_reason_it_was_halted_for() -> None:
+    """The sessions console shows trip_reason, and a running session must not show an old halt.
+
+    The halt it cleared is kept, under resumed_from, so nothing is lost by
+    clearing it here.
+    """
+    repo = DynamoDBSessionRepository()
+    evaluator = GovernanceEvaluator(session_repo=repo)
+    _halt(evaluator, "resume-reason-cleared")
+    assert repo.get_session("resume-reason-cleared").trip_reason
+
+    evaluator.resume_session("resume-reason-cleared", "Acme On-call", "flaky test")
+    assert repo.get_session("resume-reason-cleared").trip_reason is None
+    listed = next(row for row in repo.list_sessions(limit=1000) if row["session_id"] == "resume-reason-cleared")
+    assert listed["is_tripped"] is False
+    assert listed["trip_reason"] == ""
+
+
 def test_the_record_survives_the_approved_calls_after_it() -> None:
     """An approval rewrites the whole session row, and a record it dropped would be no record."""
     repo = DynamoDBSessionRepository()
@@ -186,6 +204,28 @@ def test_the_route_resumes_a_halted_session(handler_evaluator) -> None:
     assert "identical" in body["previous_trip_reason"]
     assert body["resumed_at"]
     assert handler_evaluator.session_repo.get_session("route-resume-ok").is_tripped is False
+
+
+def test_the_routes_note_does_not_promise_a_hook_session_a_halt_it_never_gets(handler_evaluator) -> None:
+    """A hook's loop is refused call by call and never halts, and the note an operator reads must say so.
+
+    The hook session here was halted by the kill switch, which is how a hook
+    session is halted now that its loops are not. After the resume the repeat
+    is refused and the session stays open, which is what the note has to say.
+    """
+    session_id = "route-resume-hook"
+    handler_evaluator.evaluate_tool_call(_repeat(session_id, origin="hook"))
+    handler_evaluator.terminate_session(session_id, "Acme Security", "suspicious actuation")
+
+    status, body = _post(f"/sessions/{session_id}/resume", WHO, OPERATOR)
+    assert status == 200
+    assert "page or scenario session that repeats the call that halted it halts again" in body["note"]
+    assert "A hook session's repeat is refused but does not halt it" in body["note"]
+
+    verdicts = [handler_evaluator.evaluate_tool_call(_repeat(session_id, origin="hook")) for _ in range(3)]
+    assert verdicts[-1].status == "BLOCKED_LOOP_DETECTED"
+    assert verdicts[-1].session_tripped is False
+    assert handler_evaluator.session_repo.get_session(session_id).is_tripped is False
 
 
 def test_the_route_decodes_the_session_id_as_the_read_does(handler_evaluator) -> None:

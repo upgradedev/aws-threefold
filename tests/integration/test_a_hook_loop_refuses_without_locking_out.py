@@ -131,8 +131,41 @@ def test_a_dry_run_hook_loop_is_approved_and_still_halts_nothing(evaluator, no_c
     third = evaluator.evaluate_tool_call(request)
     assert third.status == "APPROVED"
     assert third.dry_run is True
-    assert "not halted" in third.observations[0]
+    assert "never halts the session" in third.observations[0], "It still says what enforcing would not do"
     assert evaluator.session_repo.get_session("hook-loop-dry").is_tripped is False
+
+
+def test_a_dry_run_hook_loop_never_says_a_refusal_happened(evaluator, no_classifier) -> None:
+    """Observe mode sends every call as a dry run, and the call it approved was not refused.
+
+    The reason, the observation and the ledger row all said "this repeat was
+    refused" on an APPROVED call, which is the one thing a dry run exists not
+    to have done.
+    """
+    request = _call("hook-loop-dry-words", "hook")
+    request.dry_run = True
+    verdicts = [evaluator.evaluate_tool_call(request) for _ in range(3)]
+    third = verdicts[-1]
+    assert third.status == "APPROVED"
+    assert "would have been refused" in third.reason
+    for text in (third.reason, third.observations[0]):
+        assert "was refused" not in text
+        assert "was not halted" not in text
+
+    row = next(
+        row for row in evaluator.list_decisions()
+        if row["session_id"] == "hook-loop-dry-words" and row["verdict_id"] == third.verdict_id
+    )
+    assert "was refused" not in row["reason"]
+    assert "was refused" not in row["observed_reason"]
+
+
+def test_an_enforced_hook_loop_says_this_repeat_was_refused(evaluator, no_classifier) -> None:
+    """The past tense belongs to the call that was refused, and only to it."""
+    request = _call("hook-loop-enforced-words", "hook")
+    third = [evaluator.evaluate_tool_call(request) for _ in range(3)][-1]
+    assert third.status == "BLOCKED_LOOP_DETECTED"
+    assert "This repeat was refused and the session was not halted" in third.reason
 
 
 # ---------------------------------------------------------------- who keeps the halt
@@ -238,6 +271,55 @@ def test_a_repeated_poll_is_on_the_ledger_but_not_counted_as_would_refuse(evalua
     assert summarise(rows, 7)["totals"]["observed"] == 0, (
         "The console's observed column means a rule would have refused the call"
     )
+
+
+WATCHING = {
+    "id": "acme-watch",
+    "description": "Watched services may not make HTTP calls yet",
+    "mode": "observe",
+    "when_path_matches": ["**/acme/watched/**/*.py"],
+    "forbid_imports": ["requests"],
+}
+WATCHED_WRITE = {"file_path": "src/acme/watched/client.py", "content": "import requests\n"}
+
+
+@pytest.fixture
+def watched_write_is_a_poll(monkeypatch, no_classifier):
+    """Classes the watched write as a poll, which no real classifier would.
+
+    Only a write can carry a layering observation, and only a read or a poll
+    carries the repeat note, so the one call that has both has to be a write
+    the stub calls a poll. What is under test is the order the two notes are
+    kept in, not whether a write is a read.
+    """
+
+    def _classifier(invocation) -> bool:
+        return (invocation.arguments or {}).get("file_path") == WATCHED_WRITE["file_path"]
+
+    monkeypatch.setattr(loop_detector_module, "is_read_or_poll", _classifier, raising=False)
+
+
+def test_the_repeat_note_comes_after_the_rules_observation_so_the_ledger_names_the_right_reason(
+    evaluator, watched_write_is_a_poll
+) -> None:
+    """The ledger keeps the first observation beside the first observed rule.
+
+    With the note first, the console would show the read-or-poll note under
+    acme-watch's name, as though the rule had said it.
+    """
+    evaluator.update_rules([WATCHING], project="Acme-Loops")
+    request = _call("hook-poll-watched", "hook", tool="Write", arguments=WATCHED_WRITE)
+    third = [evaluator.evaluate_tool_call(request) for _ in range(3)][-1]
+
+    assert third.status == "APPROVED"
+    assert third.observed_rules == ["acme-watch"]
+    assert third.observations[0].startswith("Layering rule 'acme-watch'")
+    assert third.observations[-1].startswith(READ_OR_POLL_REPEAT)
+
+    row = next(row for row in evaluator.list_decisions() if row["verdict_id"] == third.verdict_id)
+    assert row["observed_rule"] == "acme-watch"
+    assert row["observed_reason"].startswith("Layering rule 'acme-watch'")
+    assert READ_OR_POLL_REPEAT not in row["observed_reason"]
 
 
 def test_a_missing_classifier_counts_as_never_a_read(evaluator, no_classifier) -> None:

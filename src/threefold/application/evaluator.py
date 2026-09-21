@@ -762,13 +762,22 @@ class GovernanceEvaluator:
                 session.trip_circuit_breaker(loop_reason)
                 if may_halt:
                     self._persist_halt(session)
-            else:
+            elif may_halt:
                 # Nothing is written: the refused call stays out of the history
                 # as every refusal does, so the same call is refused again while
                 # a different one is judged on its own.
                 reason = (
                     f"{loop_reason}. This repeat was refused and the session was not halted, "
                     "so the next different call is judged normally."
+                )
+            else:
+                # A dry run refuses nothing, and _as_observed already says the
+                # call would have been refused. Saying "this repeat was refused"
+                # as well put a refusal that never happened on an approved call
+                # and into the ledger, so a dry run states the policy instead.
+                reason = (
+                    f"{loop_reason}. A hook's repeat is refused on its own and never halts the "
+                    "session, so the next different call is judged normally."
                 )
             verdict = GovernanceVerdict.create(
                 session_id=session.session_id,

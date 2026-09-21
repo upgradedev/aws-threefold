@@ -744,10 +744,15 @@ def _route(event: Dict[str, Any], http_method: str, request_id: str) -> Dict[str
                 "is_tripped": resumed.is_tripped,
                 "total_cost_usd": resumed.total_cost_usd,
                 "budget_usd": resumed.budget_usd,
+                # Split by who sends the calls, because the loop gate treats them
+                # apart: a hook session's repeat is refused and never halts it, so
+                # telling an operator it "halts again" described a lockout that
+                # cannot happen.
                 "note": (
                     "The halt is cleared and the history and spend are kept, so the gates still "
-                    "apply: a session past its budget, or repeating the call that halted it, "
-                    "halts again."
+                    "apply: a session past its budget halts again on its next call that costs "
+                    "anything, and a page or scenario session that repeats the call that halted "
+                    "it halts again. A hook session's repeat is refused but does not halt it."
                 ),
             }
             if idempotency_key:
@@ -766,12 +771,7 @@ def _route(event: Dict[str, Any], http_method: str, request_id: str) -> Dict[str
             if project is not None and not isinstance(project, str):
                 raise InvalidRequestError("project must be given once.", "project")
             rules, source = _evaluator.rules_in_force(project)
-            warnings = []
-            if project is not None and not is_labelled(project):
-                warnings.append(
-                    "project does not match this deployment's AllowedProjectPattern, so no rules "
-                    "can be saved for it and its calls are judged by the shared rules."
-                )
+            warnings = _project_warnings(project)
             return build_response(
                 200,
                 {
@@ -820,9 +820,15 @@ def _route(event: Dict[str, Any], http_method: str, request_id: str) -> Dict[str
                 return _cannot_explain("Send the path of the file and its content.")
             if not isinstance(content, str):
                 return _cannot_explain("content must be a string.")
-            project = body.get("project") or None
-            if project is not None and not isinstance(project, str):
-                return _cannot_explain("project must be a string.")
+            # Present means a project was named, as it does on the save: null,
+            # a number or a list used to be read as "no project" and judged by
+            # the shared set without a word. "" is text, so it is a name
+            # outside the pattern and gets the same warning GET /rules gives.
+            project = body.get("project")
+            if "project" in body and not isinstance(project, str):
+                return _cannot_explain(
+                    "project must be a string. Leave it out to judge by the shared rules."
+                )
             # The same test the gate applies before it judges a path at all. A
             # path the gate would never evaluate used to be judged here, so the
             # page said REFUSE for a write the gate then approved.
@@ -865,6 +871,7 @@ def _route(event: Dict[str, Any], http_method: str, request_id: str) -> Dict[str
                     "rules_considered": "draft" if draft is not None else "in force",
                     "rules_source": source,
                     "project": project,
+                    "warnings": _project_warnings(project),
                     "applicable_rules": [rule["id"] for rule in rules_for_path(target, rules)],
                     "verdict": "REFUSE" if enforced else ("OBSERVE" if watched else "ALLOW"),
                     "violations": found,
@@ -884,7 +891,18 @@ def _route(event: Dict[str, Any], http_method: str, request_id: str) -> Dict[str
             # Without a project the shared set is replaced, as it always was.
             # With one, only that project's set is, and a name the stack would
             # store as "unlabelled" is refused by the evaluator as a 400.
-            project = body.get("project") if isinstance(body, dict) else None
+            # "Without" means the key is absent. A project picker left unset
+            # sends null, and reading that as "no project" replaced every
+            # team's rules for a caller who meant to change one project's.
+            project = None
+            if isinstance(body, dict) and "project" in body:
+                project = body["project"]
+                if not isinstance(project, str):
+                    raise InvalidRequestError(
+                        "project must be a project name matching this deployment's "
+                        "AllowedProjectPattern. Leave it out to replace the shared rules.",
+                        "project",
+                    )
             try:
                 saved = _evaluator.update_rules(submitted, project=project)
             except UnusableRulesError as invalid:
@@ -968,6 +986,23 @@ def _route(event: Dict[str, Any], http_method: str, request_id: str) -> Dict[str
     except Exception:
         logger.exception("Internal error processing request %s on %s", request_id, path)
         return build_response(500, _internal_error(path, request_id))
+
+
+def _project_warnings(project: Any) -> list:
+    """What a reader of the rules should know about the project they named.
+
+    Shared by GET /rules and POST /rules/explain so the two cannot disagree
+    about any name that reaches it: explain used to judge a name outside the
+    pattern by the shared set in silence, while GET warned about the same
+    name. An empty name reaches it only from explain, because GET reads an
+    empty query value as no project at all.
+    """
+    if project is None or is_labelled(project):
+        return []
+    return [
+        "project does not match this deployment's AllowedProjectPattern, so no rules "
+        "can be saved for it and its calls are judged by the shared rules."
+    ]
 
 
 def _required_text(body: Dict[str, Any], name: str, limit: int) -> str:

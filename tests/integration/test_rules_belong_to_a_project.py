@@ -307,6 +307,25 @@ def test_reading_a_project_with_no_rules_of_its_own_returns_the_shared_set_and_s
     assert body["warnings"] == []
 
 
+def test_a_project_with_no_rules_of_its_own_reads_as_default_even_when_a_shared_set_is_saved(handler) -> None:
+    """With a project, is_default means "nothing saved for this project", not "the shipped set".
+
+    The one case where the two readings part: an operator has saved a shared
+    set and the project asked about has none of its own. `source` says the
+    shared set came back, so is_default does not have to.
+    """
+    status, _ = _call(handler, "POST", "/rules", {"rules": [BILLING_CORE]}, OPERATOR)
+    assert status == 200
+
+    status, body = _call(handler, "GET", "/rules", query={"project": "Acme-Routes-Shared"})
+    assert status == 200
+    assert body["project"] == "Acme-Routes-Shared"
+    assert body["is_default"] is True
+    assert body["source"] == "shared"
+    assert [rule["id"] for rule in body["rules"]] == ["acme-billing-core-no-http"]
+    assert body["rules"] == handler._evaluator.layering_rules
+
+
 def test_a_project_save_is_read_back_for_that_project_only(handler) -> None:
     status, saved = _call(
         handler, "POST", "/rules", {"project": "Acme-Routes-Own", "rules": [BILLING_CORE]}, OPERATOR
@@ -359,12 +378,15 @@ def test_a_save_without_a_project_still_replaces_the_shared_set(handler) -> None
     assert shared["is_default"] is False
 
 
-@pytest.mark.parametrize("project", ["not-an-acme-name", "", 7, ["Acme-Listed"]])
+@pytest.mark.parametrize("project", ["not-an-acme-name", "", 7, ["Acme-Listed"], None])
 def test_a_save_for_a_project_outside_the_pattern_is_refused(handler, project) -> None:
+    """Null among them: a project picker left unset sends it, and it replaced every team's rules."""
+    stored_before = handler._evaluator.session_repo.load_rules()
     status, problem = _call(handler, "POST", "/rules", {"project": project, "rules": [BILLING_CORE]}, OPERATOR)
     assert status == 400
     assert problem["invalid_params"][0]["name"] == "project"
     assert handler._evaluator.layering_rules == DEFAULT_RULES, "A refused project save must not land on the shared set"
+    assert handler._evaluator.session_repo.load_rules() == stored_before, "nor in the table"
 
 
 def test_a_project_save_still_needs_the_operator_key(handler) -> None:
@@ -410,10 +432,40 @@ def test_a_draft_is_still_what_explain_tries_when_one_is_sent_with_a_project(han
     assert body["rules_source"] == "draft"
 
 
-def test_explain_refuses_a_project_that_is_not_text(handler) -> None:
-    status, problem = _call(handler, "POST", "/rules/explain", {"path": LEDGER, "content": "", "project": 7})
+@pytest.mark.parametrize("project", [7, None, False, 0, ["Acme-Listed"]])
+def test_explain_refuses_a_project_that_is_not_text(handler, project) -> None:
+    """Null, false and 0 were read as "no project" and judged by the shared set without a word."""
+    status, problem = _call(handler, "POST", "/rules/explain", {"path": LEDGER, "content": "", "project": project})
     assert status == 400
     assert problem["type"] == "urn:threefold:error:nothing-to-explain"
+
+
+@pytest.mark.parametrize("project", ["not-an-acme-name", ""])
+def test_explain_warns_about_a_project_outside_the_pattern_as_the_read_does(handler, project) -> None:
+    """The same name got a warning from GET /rules and silence from explain."""
+    status, body = _call(
+        handler, "POST", "/rules/explain", {"path": LEDGER, "content": HTTP_IMPORT, "project": project}
+    )
+    assert status == 200
+    assert body["project"] == project
+    assert body["rules_source"] == "shipped"
+    assert len(body["warnings"]) == 1
+    assert "AllowedProjectPattern" in body["warnings"][0]
+
+    status, read = _call(handler, "GET", "/rules", query={"project": "not-an-acme-name"})
+    assert body["warnings"] == read["warnings"]
+
+
+def test_explain_has_nothing_to_warn_about_for_a_project_in_the_pattern_or_none(handler) -> None:
+    status, named = _call(
+        handler, "POST", "/rules/explain",
+        {"path": LEDGER, "content": HTTP_IMPORT, "project": "Acme-Routes-Explain-Quiet"},
+    )
+    assert status == 200
+    assert named["warnings"] == []
+    status, unnamed = _call(handler, "POST", "/rules/explain", {"path": LEDGER, "content": HTTP_IMPORT})
+    assert status == 200
+    assert unnamed["warnings"] == []
 
 
 def test_the_console_coverage_still_describes_the_shared_rules(handler) -> None:
