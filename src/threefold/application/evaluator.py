@@ -1,6 +1,7 @@
 """Deterministic governance evaluator coordinating all safety gates."""
 from __future__ import annotations
 
+import copy
 import datetime
 import logging
 import time
@@ -46,6 +47,17 @@ logger = logging.getLogger(__name__)
 # enforcing the old set until they happened to be recycled. One read per
 # container per half minute is the price of that sentence being true.
 RULES_REFRESH_SECONDS = 30.0
+
+# How a refusal that comes from the session's own state, rather than from a
+# gate, begins. Both wear the same status, so this prefix is what tells a call
+# into an already halted session apart from the breach that halted it.
+FROZEN_SESSION_REASON = "Session execution frozen"
+
+# The cost gate has a sentence of its own for a session that is already halted.
+# The pre-check above means it cannot be reached through this evaluator today,
+# but a breaker that a caller supplies can return it, and reading that as a
+# spend problem is the mislabel this whole distinction exists to avoid.
+HALTED_SESSION_REASONS = (FROZEN_SESSION_REASON, "Session already tripped")
 
 
 class UnusableRulesError(ValueError):
@@ -309,7 +321,7 @@ class GovernanceEvaluator:
         for whom, last week, which is the only question a platform owner has.
         """
         self.refresh_rules_if_stale()
-        result = self._decide(request)
+        result = self._decide(request, dry_run=bool(getattr(request, "dry_run", False)))
         self._record_decision(request, result)
         return result
 
@@ -337,6 +349,11 @@ class GovernanceEvaluator:
                     "project_name": str(request.project_name or "")[:120],
                     "tool_name": str(request.tool_name or "")[:120],
                     "action_type": str(request.action_type),
+                    # Which agent, and whether a hook, a page or CI sent it. Both
+                    # arrive from closed sets, so they are safe to count by.
+                    "agent": str(getattr(request, "agent", "") or "unknown")[:40],
+                    "origin": str(getattr(request, "origin", "") or "unknown")[:40],
+                    "dry_run": bool(getattr(request, "dry_run", False)),
                     "status": result.status,
                     "rule": self._rule_that_fired(result),
                     # The reason distinguishes a layer being crossed from a
@@ -370,16 +387,24 @@ class GovernanceEvaluator:
         state, not by a gate. The verdict marks the budget invariant false for
         every one of them, whatever did the halting, so a loop-halted session
         would file all of its later refusals under budget and the console would
-        report a cost problem where there was a thrashing problem.
+        report a cost problem where there was a thrashing problem. The breach
+        that halts a session in the first place is the cost gate's, and it wears
+        that name: it is told apart by the reason, which is the only thing that
+        distinguishes the two on one status.
         """
-        if (result.status or "").upper() == "BLOCKED_CIRCUIT_BREAKER":
+        status = (result.status or "").upper()
+        # A dry run keeps the invariant that failed marked false, because it did
+        # fail, but nothing refused the call, so no rule fired.
+        if status == "APPROVED":
+            return "NONE"
+        if status == "BLOCKED_CIRCUIT_BREAKER" and (result.reason or "").startswith(HALTED_SESSION_REASONS):
             return "SESSION_ALREADY_HALTED"
         for rule, passed in (result.rule_evaluations or {}).items():
             if not passed:
                 return rule
         return "NONE"
 
-    def _decide(self, request: ToolCallRequestDTO) -> EvaluationResultDTO:
+    def _decide(self, request: ToolCallRequestDTO, dry_run: bool = False) -> EvaluationResultDTO:
         """Evaluates tool invocation against all deterministic safety gates."""
         session = self.get_or_create_session(
             session_id=request.session_id,
@@ -387,7 +412,57 @@ class GovernanceEvaluator:
             project_name=request.project_name,
             budget_usd=request.budget_usd,
         )
+        if not dry_run:
+            return self._run_gates(request, session, may_halt=True)
+        # The loop and cost gates trip the session object they are handed, so a
+        # dry run hands them a copy and never writes a halt: a call that is only
+        # being watched must not stop the real session it belongs to. A call the
+        # gates approve is recorded as any approved call is, so the loop gate
+        # still sees the history it needs on the next dry run.
+        halted_before = session.is_tripped
+        found = self._run_gates(request, copy.deepcopy(session), may_halt=False)
+        return self._as_observed(found, halted_before)
 
+    def _as_observed(self, found: EvaluationResultDTO, halted_before: bool) -> EvaluationResultDTO:
+        """Turns what the gates found in a dry run into an approval that records it.
+
+        A fresh verdict rather than an edited one, so the proof hash covers the
+        status and reason the caller is actually given.
+        """
+        if found.status == VerdictStatus.APPROVED.value:
+            found.dry_run = True
+            return found
+        rule = self._rule_that_fired(found)
+        verdict = GovernanceVerdict.create(
+            session_id=found.session_id,
+            status=VerdictStatus.APPROVED,
+            risk_level=RiskLevel(found.risk_level),
+            reason=f"Dry run, not enforced. This call would have been refused: {found.reason}",
+            # Left as the gates found them. The invariant did fail; it was only
+            # not enforced, and a certificate over this verdict should say so.
+            rule_evaluations=found.rule_evaluations,
+        )
+        observed = EvaluationResultDTO(
+            verdict_id=verdict.verdict_id,
+            session_id=found.session_id,
+            status=verdict.status.value,
+            risk_level=verdict.risk_level.value,
+            reason=verdict.reason,
+            rule_evaluations=verdict.rule_evaluations,
+            current_session_cost_usd=found.current_session_cost_usd,
+            session_tripped=halted_before,
+            proof_hash=verdict.proof_hash,
+            timestamp=verdict.timestamp,
+            dry_run=True,
+        )
+        observed.observations = [found.reason]
+        observed.observed_rules = [rule]
+        return observed
+
+    def _run_gates(
+        self, request: ToolCallRequestDTO, session: AgentSession, may_halt: bool
+    ) -> EvaluationResultDTO:
+        """The gates themselves. `may_halt` is false only for a dry run."""
         rule_evaluations: Dict[str, bool] = {
             "SECRET_LEAKAGE_FREE": True,
             "ARCHITECTURAL_BOUNDARY_SAFE": True,
@@ -402,7 +477,7 @@ class GovernanceEvaluator:
                 session_id=session.session_id,
                 status=VerdictStatus.BLOCKED_CIRCUIT_BREAKER,
                 risk_level=RiskLevel.CRITICAL,
-                reason=f"Session execution frozen: {session.trip_reason}",
+                reason=f"{FROZEN_SESSION_REASON}: {session.trip_reason}",
                 rule_evaluations=rule_evaluations,
             )
             return self._to_dto(session, verdict)
@@ -470,7 +545,8 @@ class GovernanceEvaluator:
                 )
             )
             session.trip_circuit_breaker(loop_reason)
-            self._persist_halt(session)
+            if may_halt:
+                self._persist_halt(session)
             verdict = GovernanceVerdict.create(
                 session_id=session.session_id,
                 status=VerdictStatus.BLOCKED_LOOP_DETECTED,
@@ -489,7 +565,8 @@ class GovernanceEvaluator:
         if not is_cost_safe:
             rule_evaluations["BUDGET_CIRCUIT_BREAKER_SAFE"] = False
             # evaluate_cost_risk trips the session on a breach, so the halt is durable too.
-            self._persist_halt(session)
+            if may_halt:
+                self._persist_halt(session)
             verdict = GovernanceVerdict.create(
                 session_id=session.session_id,
                 status=VerdictStatus.BLOCKED_CIRCUIT_BREAKER,
@@ -519,7 +596,7 @@ class GovernanceEvaluator:
                 session_id=session.session_id,
                 status=VerdictStatus.BLOCKED_CIRCUIT_BREAKER,
                 risk_level=RiskLevel.CRITICAL,
-                reason=f"Session execution frozen: {blocked_reason}",
+                reason=f"{FROZEN_SESSION_REASON}: {blocked_reason}",
                 rule_evaluations=rule_evaluations,
             )
             return self._to_dto(stored or session, verdict)

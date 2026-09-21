@@ -13,7 +13,20 @@ import json
 import pytest
 
 from threefold.infrastructure.idempotency import global_idempotency_cache
-from threefold.interfaces.api_handlers import lambda_handler
+from threefold.interfaces.api_handlers import _evaluator, lambda_handler
+
+
+@pytest.fixture(autouse=True)
+def _restore_the_policy_this_file_writes():
+    """The policy is a setting, and this file changes it for everything after it.
+
+    The handler's evaluator is module level and the write is durable, so a
+    repetition threshold saved here governed tests in other files and the
+    failure landed somewhere unrelated, in whatever order the suite ran.
+    """
+    before = _evaluator.policy_config
+    yield
+    _evaluator.update_policy(before)
 
 
 def test_readyz_reports_each_dependency_it_measured() -> None:

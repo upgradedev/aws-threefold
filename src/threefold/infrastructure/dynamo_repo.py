@@ -17,6 +17,10 @@ DECISION_PARTITION = "DECISION"
 
 SESSION_TTL_SECONDS = 30 * 24 * 3600
 
+# Each scan page is at most 1 MB, so this bounds the sessions listing at a read
+# the function's timeout can afford.
+MAX_SCAN_PAGES = 50
+
 
 class SessionConflictError(RuntimeError):
     """Raised when a write is refused because the stored session is already tripped.
@@ -144,14 +148,21 @@ class DynamoDBSessionRepository:
         holds one item per session with a thirty day ttl, so the working set is
         small; a deployment with real traffic wants a secondary index on a
         recency key instead, and this is where that change goes.
+
+        The scan follows LastEvaluatedKey to the end. It used to read one page
+        of a few hundred items and keep the sessions among them, but the same
+        table holds a ledger row for every decision, so once decisions
+        outnumbered that page the listing lost sessions and nothing said so.
+        The filter runs after DynamoDB has read each page, so a page can come
+        back with no sessions in it and still not be the last one.
         """
         items: List[Dict[str, Any]] = []
         if self._table is not None:
             try:
-                response = self._table.scan(Limit=max(limit * 4, 100))
-                items = [i for i in response.get("Items", []) if i.get("SK") == "METADATA"]
+                items = self._scan_session_metadata()
             except Exception as exc:
                 logger.warning("Failed to list sessions from DynamoDB: %s", exc)
+                items = []
         if not items:
             items = [
                 item for key, item in self._memory_store.items()
@@ -180,6 +191,32 @@ class DynamoDBSessionRepository:
             )
         summaries.sort(key=lambda s: s["created_at"], reverse=True)
         return summaries[:limit]
+
+    def _scan_session_metadata(self) -> List[Dict[str, Any]]:
+        """Every session metadata item, across as many scan pages as it takes.
+
+        Expressed as strings rather than with boto3's Attr helper so this module
+        keeps its single lazy import of boto3. Bounded by MAX_SCAN_PAGES so a
+        table far past the size this listing was designed for costs a bounded
+        read rather than a timeout, and the log says it was cut short.
+        """
+        items: List[Dict[str, Any]] = []
+        kwargs: Dict[str, Any] = {
+            "FilterExpression": "SK = :metadata",
+            "ExpressionAttributeValues": {":metadata": "METADATA"},
+        }
+        for _ in range(MAX_SCAN_PAGES):
+            response = self._table.scan(**kwargs)
+            items.extend(i for i in response.get("Items", []) if i.get("SK") == "METADATA")
+            last_key = response.get("LastEvaluatedKey")
+            if not last_key:
+                return items
+            kwargs["ExclusiveStartKey"] = last_key
+        logger.warning(
+            "Session listing stopped after %d scan pages with more left; the oldest sessions may be missing",
+            MAX_SCAN_PAGES,
+        )
+        return items
 
     # ------------------------------------------------------------------ ledger
 
@@ -260,6 +297,10 @@ class DynamoDBSessionRepository:
                     "project_name": row.get("project_name", ""),
                     "tool_name": row.get("tool_name", ""),
                     "action_type": row.get("action_type", ""),
+                    # Rows written before request v2 carry neither, and say so.
+                    "agent": row.get("agent", "unknown") or "unknown",
+                    "origin": row.get("origin", "unknown") or "unknown",
+                    "dry_run": bool(row.get("dry_run", False)),
                     "status": row.get("status", ""),
                     "rule": row.get("rule", "NONE"),
                     "target": row.get("target", ""),

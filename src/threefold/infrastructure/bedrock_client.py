@@ -12,6 +12,7 @@ import logging
 import os
 from typing import Any, Optional, Tuple
 from threefold.application.dtos import EvaluationResultDTO, ToolCallRequestDTO
+from threefold.domain.boundary_guard import redact_secrets
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +21,41 @@ DEFAULT_REGION = "eu-west-1"
 
 SOURCE_BEDROCK = "bedrock"
 SOURCE_FALLBACK = "deterministic_fallback"
+
+# How long a verdict may wait for its sentence. The default botocore client
+# waits 60 seconds to read and retries three times, which put a refusal behind
+# minutes of a model that was not answering. The explanation is decoration on a
+# decision already made, so one short attempt and then the labelled fallback.
+CLIENT_TIMEOUTS = {
+    "connect_timeout": 1,
+    "read_timeout": 2.5,
+    "retries": {"max_attempts": 1, "mode": "standard"},
+}
+
+# About 2 KB of the call's arguments is enough for a model to phrase a verdict,
+# and it bounds what one request can send to a third party and be billed for.
+MAX_PROMPT_ARGUMENTS_CHARS = 2048
+
+
+def _client_config() -> Optional[Any]:
+    """The botocore Config carrying CLIENT_TIMEOUTS, or None where botocore is absent."""
+    try:
+        from botocore.config import Config
+    except Exception:  # pragma: no cover - the Lambda runtime always ships botocore
+        return None
+    return Config(**CLIENT_TIMEOUTS)
+
+
+def prompt_safe(text: str, limit: int = MAX_PROMPT_ARGUMENTS_CHARS) -> str:
+    """Redacts credentials, then truncates, in that order.
+
+    Truncating first could cut a credential in half, and half a key no longer
+    matches the pattern that would have redacted it, so its prefix would leave.
+    """
+    redacted = redact_secrets(text or "")
+    if len(redacted) <= limit:
+        return redacted
+    return redacted[:limit] + f" [truncated, {len(redacted) - limit} more characters not sent]"
 
 
 class BedrockGovernanceClient:
@@ -43,11 +79,15 @@ class BedrockGovernanceClient:
         self._client = None
 
         if boto3_session is not None:
-            self._client = boto3_session.client("bedrock-runtime", region_name=self.region_name)
+            self._client = boto3_session.client(
+                "bedrock-runtime", region_name=self.region_name, config=_client_config()
+            )
         elif not self._offline:
             try:
                 import boto3
-                self._client = boto3.client("bedrock-runtime", region_name=self.region_name)
+                self._client = boto3.client(
+                    "bedrock-runtime", region_name=self.region_name, config=_client_config()
+                )
             except Exception as exc:
                 self.last_error = str(exc)
                 logger.info("Bedrock client unavailable, explanations will be deterministic: %s", exc)
@@ -102,13 +142,17 @@ class BedrockGovernanceClient:
             "Explain the decision to a human engineer in at most two sentences."
         )
 
+        # Nothing leaves for the model that the ledger would not keep: no
+        # developer, credentials redacted, and the arguments cut to about 2 KB.
+        # The reason is redacted too, because a protected-path refusal quotes
+        # the command it refused.
         user_content = (
-            f"Developer: {request.developer_id}\n"
-            f"Project: {request.project_name}\n"
-            f"Tool requested: {request.tool_name} ({request.action_type})\n"
-            f"Arguments: {json.dumps(request.arguments, default=str)}\n"
+            f"Project: {prompt_safe(str(request.project_name), 120)}\n"
+            f"Tool requested: {prompt_safe(str(request.tool_name), 120)} "
+            f"({prompt_safe(str(request.action_type), 40)})\n"
+            f"Arguments: {prompt_safe(json.dumps(request.arguments, default=str))}\n"
             f"Deterministic verdict: {evaluation.status}\n"
-            f"Deterministic reason: {evaluation.reason}\n"
+            f"Deterministic reason: {prompt_safe(evaluation.reason or '', 600)}\n"
             f"Session cost so far: ${evaluation.current_session_cost_usd:.4f}\n\n"
             "Explain why this decision protects the developer, in at most two sentences."
         )

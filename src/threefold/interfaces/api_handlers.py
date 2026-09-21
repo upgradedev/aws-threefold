@@ -9,15 +9,18 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import time
+import uuid
 from typing import Any, Dict
 from urllib.parse import unquote
 
 from threefold.application.audit_issuer import AuditIssuer
 from threefold.application.bedrock_reviewer import BedrockArchitecturalReviewer
-from threefold.application.dtos import PolicyConfigDTO, ToolCallRequestDTO
+from threefold.application.dtos import InvalidRequestError, PolicyConfigDTO, ToolCallRequestDTO
 from threefold.application.evaluator import RULES_REFRESH_SECONDS, GovernanceEvaluator, UnusableRulesError
 from threefold.application.insights import summarise, with_layering_coverage
+from threefold.application.labels import project_label, public_row
 from threefold.domain.imports import LANGUAGE_BY_SUFFIX, declared_imports
 from threefold.domain.boundary_guard import MAX_PATHLIKE_LENGTH, looks_like_path
 from threefold.domain.layering_rules import (
@@ -54,14 +57,18 @@ CORS_HEADERS = {
 
 WEB_ROOT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web")
 
-# The Claude Code hook is the one artifact that turns this service from a demo
-# into something in front of a real agent, so the deployment hands it out rather
+# The hook is the one artifact that turns this service from a demo into
+# something in front of a real agent, so the deployment hands it out rather
 # than telling a reader to find a repository. It lives under the packaged tree
 # for that reason: anything outside CodeUri never reaches the function.
 HOOKS_ROOT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "hooks")
+# One script now serves every agent. The two claude_code_hook.py paths are the
+# names it was published under, kept so an install command copied before the
+# rename still fetches a working hook rather than a 404.
 SERVED_SCRIPTS = {
-    "/hooks/claude_code_hook.py": "claude_code_hook.py",
-    "/claude_code_hook.py": "claude_code_hook.py",
+    "/hooks/threefold_hook.py": "threefold_hook.py",
+    "/hooks/claude_code_hook.py": "threefold_hook.py",
+    "/claude_code_hook.py": "threefold_hook.py",
 }
 
 # Paths the deployed stack serves as pages rather than as JSON. The dashboard sits
@@ -69,7 +76,6 @@ SERVED_SCRIPTS = {
 WEB_ASSETS = {
     "/": "index.html",
     "/index.html": "index.html",
-    "/testbook.html": "testbook.html",
     "/swagger.html": "swagger.html",
     "/settings.html": "settings.html",
     "/sessions.html": "sessions.html",
@@ -133,10 +139,63 @@ def build_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _request_id(event: Dict[str, Any], context: Any) -> str:
+    """The id an operator can find this request by in the function's log."""
+    context_id = getattr(context, "aws_request_id", None)
+    gateway_id = (event.get("requestContext") or {}).get("requestId")
+    return str(gateway_id or context_id or uuid.uuid4().hex)
+
+
+def _internal_error(path: str, request_id: str) -> Dict[str, Any]:
+    """The only thing a caller learns about a failure nobody anticipated.
+
+    The exception text used to be the detail, which handed a stranger table
+    names, library internals and whatever a stack trace happened to mention.
+    It goes to the log under the request id instead, and the caller gets the id.
+    """
+    problem = rfc7807_error(
+        500,
+        "Internal Server Error",
+        "The service could not complete this request. The cause is in the function's "
+        "log under this request id.",
+        path,
+        error_type="urn:threefold:error:internal-error",
+    )
+    problem["request_id"] = request_id
+    return problem
+
+
 def lambda_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
-    """Primary AWS Lambda event router."""
+    """Primary AWS Lambda event router.
+
+    HEAD is answered as GET with the body removed, so a link checker or an
+    uptime probe gets the status and headers a browser would. It used to fall
+    through to 404, which a probe reads as the page being gone.
+    """
+    request_id = _request_id(event, context)
+    method = str(
+        event.get("httpMethod")
+        or ((event.get("requestContext") or {}).get("http") or {}).get("method")
+        or "GET"
+    ).upper()
+    is_head = method == "HEAD"
+    try:
+        response = _route(event, "GET" if is_head else method, request_id)
+    except Exception:
+        # A backstop for anything raised before a route's own handler runs,
+        # such as headers that are not a mapping.
+        logger.exception("Unhandled error, request %s", request_id)
+        path = str(event.get("path") or event.get("rawPath") or "/")
+        response = build_response(500, _internal_error(path, request_id))
+    if is_head:
+        response = dict(response)
+        response["body"] = ""
+    return response
+
+
+def _route(event: Dict[str, Any], http_method: str, request_id: str) -> Dict[str, Any]:
+    """Routes one request. HEAD arrives here already turned into GET."""
     start_time = time.time()
-    http_method = event.get("httpMethod") or event.get("requestContext", {}).get("http", {}).get("method", "GET")
     raw_path = event.get("path") or event.get("rawPath", "/")
     headers = event.get("headers") or {}
     client_ip = (
@@ -147,7 +206,9 @@ def lambda_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]
 
     # Normalization: API Gateway prefixes rawPath with the stage name when the API
     # is deployed to a named stage (for example /prod/status), so strip it before routing.
-    path = raw_path.split("?")[0].rstrip("/")
+    # Repeated slashes are collapsed first: the stack's ApiEndpoint output ends
+    # in "/", so anything that appends "/status" to it asks for /prod//status.
+    path = re.sub(r"/{2,}", "/", raw_path.split("?")[0]).rstrip("/")
     stage = event.get("requestContext", {}).get("stage", "")
     if stage and stage != "$default" and (path == f"/{stage}" or path.startswith(f"/{stage}/")):
         path = path[len(stage) + 1:]
@@ -165,6 +226,9 @@ def lambda_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]
             raw_body = base64.b64decode(raw_body).decode("utf-8")
         except Exception:
             return build_response(400, rfc7807_error(400, "Bad Request", "Invalid Base64 payload", path))
+        # The routes read the body off the event, so the decoded text has to be
+        # put back there; it used to be measured decoded and parsed encoded.
+        event = dict(event, body=raw_body, isBase64Encoded=False)
 
     payload_size = len(raw_body.encode("utf-8")) if isinstance(raw_body, str) else 0
 
@@ -255,7 +319,11 @@ def lambda_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]
                 limit = int((event.get("queryStringParameters") or {}).get("limit", 50))
             except (TypeError, ValueError):
                 limit = 50
-            sessions = _evaluator.list_sessions(limit=max(1, min(limit, 200)))
+            # Labelled and hashed on the way out as well as in, because rows
+            # written before the labels existed are still in the table.
+            sessions = [
+                public_row(row) for row in _evaluator.list_sessions(limit=max(1, min(limit, 200)))
+            ]
             return build_response(
                 200,
                 {
@@ -275,7 +343,10 @@ def lambda_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]
             except (TypeError, ValueError):
                 days = 7
             days = max(1, min(days, 30))
-            decisions = _evaluator.list_decisions(days=days, limit=2000)
+            # Every row is reduced before it is counted, not only the per-developer
+            # table: the recent refusals and observations are whole ledger rows,
+            # and a raw name reached the page through them.
+            decisions = [public_row(row) for row in _evaluator.list_decisions(days=days, limit=2000)]
             payload = summarise(decisions, days)
             _evaluator.refresh_rules_if_stale()
             payload = with_layering_coverage(
@@ -319,13 +390,9 @@ def lambda_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]
         # Route 2: Single Tool Call Evaluation (Core Governance Gate)
         if path == "/evaluate-tool-call" and http_method == "POST":
             body = _parse_body(event)
+            request = ToolCallRequestDTO.from_payload(body)
 
-            # Strict input validation
-            input_tokens = int(body.get("projected_input_tokens", 2000))
-            output_tokens = int(body.get("projected_output_tokens", 500))
-            budget_usd = float(body.get("budget_usd", 10.00))
-
-            if input_tokens < 0 or output_tokens < 0:
+            if request.projected_input_tokens < 0 or request.projected_output_tokens < 0:
                 return build_response(
                     400,
                     rfc7807_error(
@@ -337,7 +404,7 @@ def lambda_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]
                     ),
                 )
 
-            if budget_usd <= 0.0:
+            if request.budget_usd <= 0.0:
                 return build_response(
                     400,
                     rfc7807_error(
@@ -349,22 +416,12 @@ def lambda_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]
                     ),
                 )
 
-            request = ToolCallRequestDTO(
-                session_id=body.get("session_id", "session-default"),
-                developer_id=body.get("developer_id", "dev-user"),
-                project_name=body.get("project_name", "Acme-Core"),
-                tool_name=body.get("tool_name", "unknown_tool"),
-                action_type=body.get("action_type", "FILE_READ"),
-                arguments=body.get("arguments", {}),
-                projected_input_tokens=input_tokens,
-                projected_output_tokens=output_tokens,
-                budget_usd=budget_usd,
-            )
             result = _evaluator.evaluate_tool_call(request)
-            explanation, explanation_source = _reviewer.review_action(request, result)
+            explanation, explanation_source = _reviewer.explain(request, result)
             result.bedrock_explanation = explanation
             result.explanation_source = explanation_source
             result.persistence = getattr(_evaluator.session_repo, "persistence_mode", "memory")
+            result.warnings = list(request.warnings)
 
             latency_ms = (time.time() - start_time) * 1000.0
             emit_threefold_emf_metrics(
@@ -375,6 +432,8 @@ def lambda_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]
                     "CurrentSessionCostUSD": result.current_session_cost_usd,
                     "LatencyMs": latency_ms,
                 },
+                # Already labelled, so a caller cannot mint a metric per request
+                # by sending a new project name each time.
                 dimensions={"Project": request.project_name, "Environment": "Production"},
             )
             return build_response(200, result.to_dict())
@@ -382,8 +441,6 @@ def lambda_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]
         # Route 2b: Universal Multi-Agent Adapter (OpenAI / Anthropic format)
         if path in ("/adapter/universal-tool-call", "/universal-eval") and http_method == "POST":
             body = _parse_body(event)
-            session_id = body.get("session_id", "session-universal")
-            project_name = body.get("project_name", "Universal-Agent")
 
             # Extract payload: handle nested tool_call or root payload
             tc = body.get("tool_call", body)
@@ -417,27 +474,31 @@ def lambda_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]
             elif any(k in lower_tool for k in ("exec", "command", "bash", "shell", "run")):
                 action_type = "COMMAND_EXEC"
 
-            req = ToolCallRequestDTO(
-                session_id=session_id,
-                developer_id=body.get("developer_id", "universal-user"),
-                project_name=project_name,
+            req = ToolCallRequestDTO.from_payload(
+                body,
+                default_session_id="session-universal",
+                default_input_tokens=2500,
+                default_output_tokens=800,
+                default_budget_usd=15.00,
                 tool_name=tool_name,
                 action_type=action_type,
                 arguments=tool_args,
-                projected_input_tokens=int(body.get("projected_input_tokens", 2500)),
-                projected_output_tokens=int(body.get("projected_output_tokens", 800)),
-                budget_usd=float(body.get("budget_usd", 15.00)),
             )
             result = _evaluator.evaluate_tool_call(req)
-            result.bedrock_explanation, result.explanation_source = _reviewer.review_action(req, result)
+            result.bedrock_explanation, result.explanation_source = _reviewer.explain(req, result)
             result.persistence = getattr(_evaluator.session_repo, "persistence_mode", "memory")
+            result.warnings = list(req.warnings)
 
             emit_threefold_emf_metrics(
                 {
                     "UniversalToolEvaluated": 1.0,
                     "VerdictApproved": 1.0 if result.status == "APPROVED" else 0.0,
                 },
-                dimensions={"Format": "Universal", "Tool": tool_name},
+                # The tool name is the caller's to choose, so it is logged as a
+                # property rather than used as a dimension: as a dimension, every
+                # new name a caller invented was a new metric on the bill.
+                dimensions={"Format": "Universal"},
+                extra_properties={"Tool": str(tool_name)[:120]},
             )
             return build_response(200, {
                 "adapter_status": "SUCCESS",
@@ -460,7 +521,7 @@ def lambda_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]
             _evaluator.evaluate_tool_call(req)
             _evaluator.evaluate_tool_call(req)
             third_result = _evaluator.evaluate_tool_call(req)
-            third_result.bedrock_explanation, third_result.explanation_source = _reviewer.review_action(req, third_result)
+            third_result.bedrock_explanation, third_result.explanation_source = _reviewer.explain(req, third_result)
             third_result.persistence = getattr(_evaluator.session_repo, "persistence_mode", "memory")
 
             emit_threefold_emf_metrics(
@@ -481,7 +542,7 @@ def lambda_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]
                 arguments={"command": "export AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE"},
             )
             result = _evaluator.evaluate_tool_call(req)
-            result.bedrock_explanation, result.explanation_source = _reviewer.review_action(req, result)
+            result.bedrock_explanation, result.explanation_source = _reviewer.explain(req, result)
             result.persistence = getattr(_evaluator.session_repo, "persistence_mode", "memory")
 
             emit_threefold_emf_metrics(
@@ -494,8 +555,14 @@ def lambda_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]
         if path == "/issue-certificate" and http_method == "POST":
             body = _parse_body(event)
             session_id = body.get("session_id", "session-default")
-            session = _evaluator.get_or_create_session(session_id)
             evaluations = body.get("evaluations", [])
+            # Checked before the session is touched. A list of anything else
+            # used to reach `e.get` and come back as a server error.
+            if not isinstance(evaluations, list) or not all(isinstance(e, dict) for e in evaluations):
+                raise InvalidRequestError(
+                    "evaluations must be a list of verdict objects.", "evaluations"
+                )
+            session = _evaluator.get_or_create_session(session_id)
 
             parsed_evals = []
             for e in evaluations:
@@ -574,7 +641,9 @@ def lambda_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]
                 )
             return build_response(200, {
                 "session_id": session.session_id,
-                "project_name": session.project_name,
+                # The listing's rule applies to the detail it links to, or an old
+                # row's raw project name would be one click away.
+                "project_name": project_label(session.project_name),
                 "cumulative_cost_usd": session.total_cost_usd,
                 "budget_usd": session.budget_usd,
                 "budget_remaining_usd": round(max(0.0, session.budget_usd - session.total_cost_usd), 4),
@@ -633,7 +702,9 @@ def lambda_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]
         # in the body so nothing has to be saved to be tried. Open, because it
         # changes nothing: no verdict is issued and no ledger row is written.
         if path == "/rules/explain" and http_method == "POST":
-            body = _parse_body(event)
+            # Parsed leniently: this route answers a non-object body with its own
+            # problem, which tells the caller what to send.
+            body = _parse_body(event, expect_object=False)
 
             def _cannot_explain(detail):
                 return build_response(
@@ -702,7 +773,9 @@ def lambda_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]
             )
 
         if path in ("/rules", "/rules/layering") and http_method == "POST":
-            body = _parse_body(event)
+            # The one POST that takes a bare array as well as an object: a rule
+            # set can be sent as the list itself.
+            body = _parse_body(event, expect_object=False)
             submitted = body.get("rules", body) if isinstance(body, dict) else body
             try:
                 saved = _evaluator.update_rules(submitted)
@@ -733,12 +806,15 @@ def lambda_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]
 
         if path in ("/policy/config", "/policy") and http_method == "POST":
             body = _parse_body(event)
-            config = PolicyConfigDTO(
-                max_single_call_usd=float(body.get("max_single_call_usd", 1.00)),
-                max_session_budget_usd=float(body.get("max_session_budget_usd", 10.00)),
-                loop_history_window=int(body.get("loop_history_window", 6)),
-                monomorphic_repetition_threshold=int(body.get("monomorphic_repetition_threshold", 3)),
-            )
+            try:
+                config = PolicyConfigDTO(
+                    max_single_call_usd=float(body.get("max_single_call_usd", 1.00)),
+                    max_session_budget_usd=float(body.get("max_session_budget_usd", 10.00)),
+                    loop_history_window=int(body.get("loop_history_window", 6)),
+                    monomorphic_repetition_threshold=int(body.get("monomorphic_repetition_threshold", 3)),
+                )
+            except (TypeError, ValueError):
+                raise InvalidRequestError("Every policy value must be a number.") from None
             _evaluator.update_policy(config)
             res_dict = {"status": "POLICY_UPDATED", "config": config.to_dict()}
             if idempotency_key:
@@ -756,6 +832,18 @@ def lambda_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]
             ),
         )
 
+    except InvalidRequestError as invalid:
+        return build_response(
+            400,
+            rfc7807_error(
+                400,
+                "Bad Request",
+                invalid.detail,
+                path,
+                error_type="urn:threefold:error:bad-request",
+                invalid_params=[{"name": invalid.name, "reason": invalid.detail}] if invalid.name else None,
+            ),
+        )
     except ValueError as val_err:
         return build_response(
             400,
@@ -767,27 +855,31 @@ def lambda_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]
                 error_type="urn:threefold:error:bad-request",
             ),
         )
-    except Exception as exc:
-        logger.exception("Internal error processing request: %s", exc)
-        return build_response(
-            500,
-            rfc7807_error(
-                500,
-                "Internal Server Error",
-                str(exc),
-                path,
-                error_type="urn:threefold:error:internal-error",
-            ),
-        )
+    except Exception:
+        logger.exception("Internal error processing request %s on %s", request_id, path)
+        return build_response(500, _internal_error(path, request_id))
 
 
-def _parse_body(event: Dict[str, Any]) -> Dict[str, Any]:
+def _parse_body(event: Dict[str, Any], expect_object: bool = True) -> Any:
+    """Reads the JSON body, and by default insists that it is an object.
+
+    Every POST that reads fields expects an object. An array, a string or null
+    used to reach `body.get` and come back as a 500 carrying the exception
+    text; it is the caller's mistake, so it is now a 400 that says what to send.
+    """
     raw = event.get("body")
-    if not raw:
+    if raw is None or raw == "":
         return {}
-    if isinstance(raw, dict):
-        return raw
-    try:
-        return json.loads(raw)
-    except Exception as exc:
-        raise ValueError(f"Invalid JSON payload: {exc}")
+    if isinstance(raw, (dict, list)):
+        parsed = raw
+    else:
+        try:
+            parsed = json.loads(raw)
+        except Exception as exc:
+            raise InvalidRequestError(f"Invalid JSON payload: {exc}", "body") from None
+    if expect_object and not isinstance(parsed, dict):
+        raise InvalidRequestError(
+            f"The body must be a JSON object, not {type(parsed).__name__ if parsed is not None else 'null'}.",
+            "body",
+        )
+    return parsed

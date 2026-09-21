@@ -271,6 +271,106 @@ def test_reading_a_session_that_does_not_exist_creates_nothing(monkeypatch) -> N
     assert _evaluator.session_repo.get_session("never-recorded-probe") is None
 
 
+# A stack that carries real use is deployed with PublicReads=false. The pages
+# stay open, because they are the product; what they read does not, because it
+# is that deployment's own work. The two lists are kept apart here on purpose:
+# the regression this guards against is closing one and forgetting the other.
+PRIVATE_READS = [
+    ("GET", "/rules", None),
+    ("GET", "/api/insights", None),
+    ("GET", "/api/sessions", None),
+    ("GET", "/policy/config", None),
+    ("GET", "/sessions/private-probe", None),
+    ("POST", "/rules/explain", {"path": "src/domain/models.py", "content": "import boto3"}),
+]
+PAGES_THAT_STAY_OPEN = ["/", "/index.html", "/console.html", "/rules.html", "/sessions.html", "/settings.html"]
+
+
+@pytest.mark.parametrize("method, path, body", PRIVATE_READS)
+def test_a_private_stack_with_no_key_configured_refuses_the_reads(monkeypatch, method, path, body) -> None:
+    monkeypatch.setenv("PUBLIC_READS", "false")
+    status, problem = _call(method, path, body)
+    assert status == 403
+    assert problem["type"] == "urn:threefold:error:reads-private"
+
+
+@pytest.mark.parametrize("path", PAGES_THAT_STAY_OPEN)
+def test_a_private_stack_still_serves_its_pages(monkeypatch, path) -> None:
+    """A console nobody can open is not a console, and the pages hold no data of their own."""
+    monkeypatch.setenv("PUBLIC_READS", "false")
+    response = lambda_handler(
+        {
+            "rawPath": f"/prod{path}" if path != "/" else "/prod",
+            "headers": {},
+            "requestContext": {"http": {"method": "GET"}, "stage": "prod"},
+        }
+    )
+    assert response["statusCode"] == 200
+    assert response["headers"]["Content-Type"].startswith("text/html")
+
+
+@pytest.mark.parametrize("method, path, body", PRIVATE_READS)
+def test_a_private_read_climbs_the_same_ladder_a_write_does(monkeypatch, method, path, body) -> None:
+    monkeypatch.setenv("PUBLIC_READS", "false")
+    monkeypatch.setenv("THREEFOLD_API_KEYS", "operator-key-1")
+
+    assert _call(method, path, body)[0] == 401, "A missing key is 401"
+    wrong = {"Content-Type": "application/json", "X-API-Key": "not-the-key"}
+    assert _call(method, path, body, wrong)[0] == 403, "A wrong key is 403"
+    right = {"Content-Type": "application/json", "X-API-Key": "operator-key-1"}
+    assert _call(method, path, body, right)[0] not in (401, 403), "The operator's own key reads it"
+
+
+def test_the_placeholder_key_does_not_open_a_private_read(monkeypatch) -> None:
+    """The same rule the policy write has: a key printed in the source is not a key."""
+    from threefold.infrastructure.security_middleware import DEFAULT_DEMO_API_KEY
+
+    monkeypatch.setenv("PUBLIC_READS", "false")
+    monkeypatch.setenv("THREEFOLD_API_KEYS", "operator-key-1")
+    presented = {"Content-Type": "application/json", "X-API-Key": DEFAULT_DEMO_API_KEY}
+    assert _call("GET", "/api/sessions", None, presented)[0] == 403
+
+
+def test_head_is_decided_exactly_as_get_is_on_a_private_read(monkeypatch) -> None:
+    monkeypatch.setenv("PUBLIC_READS", "false")
+    response = lambda_handler(
+        {
+            "rawPath": "/prod/api/sessions",
+            "headers": {},
+            "requestContext": {"http": {"method": "HEAD"}, "stage": "prod"},
+        }
+    )
+    assert response["statusCode"] == 403
+
+
+@pytest.mark.parametrize("method, path, body", PRIVATE_READS)
+def test_the_public_demo_is_unchanged(monkeypatch, method, path, body) -> None:
+    """PublicReads defaults to true, and the ship gate depends on it."""
+    monkeypatch.setenv("PUBLIC_READS", "true")
+    assert _call(method, path, body)[0] not in (401, 403)
+
+
+def test_a_private_stack_still_takes_the_calls_its_own_hooks_send(monkeypatch) -> None:
+    """Closing the reads must not close the gate: the hooks post to it all day."""
+    monkeypatch.setenv("PUBLIC_READS", "false")
+    status, verdict = _call(
+        "POST",
+        "/evaluate-tool-call",
+        {
+            "session_id": "private-reads-hook-001",
+            "project_name": "Acme-Private",
+            "agent": "claude-code",
+            "origin": "hook",
+            "explain": False,
+            "tool_name": "view_file",
+            "action_type": "FILE_READ",
+            "arguments": {"path": "README.md"},
+        },
+    )
+    assert status == 200
+    assert verdict["status"] == "APPROVED"
+
+
 def test_the_readiness_probe_is_not_opened_with_the_reads(monkeypatch) -> None:
     """No page reads it, and it reports the table name, region and raw client errors."""
     monkeypatch.setenv("STAGE", "prod")

@@ -24,6 +24,28 @@ Parameters:
       both the inference-profile ARN in this account and the underlying
       foundation-model ARN, which is account-less by design.
 
+  AllowedProjectPattern:
+    Type: String
+    Default: '^Acme-[A-Za-z0-9-]{1,40}$'
+    Description: >-
+      Project names this stack stores, counts and shows as they are sent. Any
+      other name is recorded as "unlabelled", on the ledger, the session row
+      and the CloudWatch Project dimension, and the response carries a warning.
+      This keeps a caller's real repository names off the public pages and
+      stops a caller creating a new metric with every request. The default is
+      the synthetic Acme namespace the demo uses.
+
+  PublicReads:
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+    Description: >-
+      Whether the data behind the pages (sessions, the decision ledger, the
+      rules and the policy) can be read without a key. 'true' is the public
+      demo. 'false' is for a stack that carries real use: those reads then need
+      a key from PolicyWriteApiKeys, exactly as a policy write does. The pages
+      and the hook stay public either way.
+
 Globals:
   Function:
     Timeout: 15
@@ -43,6 +65,10 @@ Globals:
         # AWS_REGION is supplied by the Lambda runtime and is reserved, so it is
         # read from the environment in code rather than declared here.
         BEDROCK_MODEL_ID: !Ref BedrockModelId
+        # Both default to what the stack already did before they existed, so
+        # an update that does not override them changes no behaviour.
+        ALLOWED_PROJECT_PATTERN: !Ref AllowedProjectPattern
+        PUBLIC_READS: !Ref PublicReads
 
 Resources:
   ThreefoldHttpApi:
@@ -178,8 +204,11 @@ Resources:
 
 Outputs:
   ApiEndpoint:
-    Description: HTTP API Gateway endpoint URL for Threefold
-    Value: !Sub 'https://${ThreefoldHttpApi}.execute-api.${AWS::Region}.amazonaws.com/prod'
+    # The trailing slash is part of the URL. API Gateway answers the bare /prod
+    # with its own {"message":"Not Found"} before the function is reached, so a
+    # link copied from this output without it opened nothing.
+    Description: HTTP API Gateway endpoint URL for Threefold, trailing slash included
+    Value: !Sub 'https://${ThreefoldHttpApi}.execute-api.${AWS::Region}.amazonaws.com/prod/'
   LambdaFunctionArn:
     Description: Threefold Lambda Function ARN
     Value: !GetAtt ThreefoldFunction.Arn

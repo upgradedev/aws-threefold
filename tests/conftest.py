@@ -23,6 +23,20 @@ def _force_offline_clients():
 
 
 @pytest.fixture(autouse=True)
+def _stack_parameters_start_at_their_defaults(monkeypatch):
+    """Each test sees the stack as deployed with no parameter overridden.
+
+    PUBLIC_READS and ALLOWED_PROJECT_PATTERN are read per request, so a value in
+    the developer's shell, or one a test forgot to restore, would close the
+    reads or relabel projects for every test after it. Tests that need them set
+    them with monkeypatch, which undoes itself.
+    """
+    monkeypatch.delenv("PUBLIC_READS", raising=False)
+    monkeypatch.delenv("ALLOWED_PROJECT_PATTERN", raising=False)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _reset_the_shared_rate_limiter():
     """Stops the suite from rate limiting itself.
 

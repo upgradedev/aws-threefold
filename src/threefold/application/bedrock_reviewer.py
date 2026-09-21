@@ -14,6 +14,11 @@ logger = logging.getLogger(__name__)
 
 SOURCE_BEDROCK = "bedrock"
 SOURCE_FALLBACK = "deterministic_fallback"
+# The deterministic sentence by design rather than by failure: the call was
+# approved, or the caller asked for no explanation. Kept apart from the
+# fallback so a reader, and the readiness record, can tell "not asked" from
+# "asked and the model did not answer".
+SOURCE_DETERMINISTIC = "deterministic"
 
 
 class BedrockArchitecturalReviewer:
@@ -21,6 +26,23 @@ class BedrockArchitecturalReviewer:
 
     def __init__(self, bedrock_client: Optional[Any] = None) -> None:
         self.bedrock_client = bedrock_client
+
+    def explain(
+        self,
+        request: ToolCallRequestDTO,
+        evaluation: EvaluationResultDTO,
+    ) -> Tuple[str, str]:
+        """What every route calls: the model only for a refusal someone will read.
+
+        Bedrock is kept off the enforcement path. An approval needs no
+        persuading, and a hook that sends explain=false is sitting in front of
+        a tool call waiting for a yes or a no; making it wait on a model as well
+        put seconds of someone else's latency, and a bill, on every edit. Both
+        get the deterministic sentence, labelled as such.
+        """
+        if evaluation.status == "APPROVED" or not getattr(request, "explain", True):
+            return self._fallback_explanation(request, evaluation), SOURCE_DETERMINISTIC
+        return self.review_action(request, evaluation)
 
     def review_action(
         self,
@@ -46,6 +68,15 @@ class BedrockArchitecturalReviewer:
         tool = request.tool_name
         cost = evaluation.current_session_cost_usd
 
+        # Only a dry run approves a call whose invariants failed. Telling that
+        # caller it "cleared every gate" would be the one sentence here that is
+        # false.
+        if status == "APPROVED" and not all((evaluation.rule_evaluations or {}).values()):
+            watched = ", ".join(evaluation.observed_rules or []) or "a gate"
+            return (
+                f"Tool '{tool}' was let through only because this was a dry run: "
+                f"{watched} would have refused it. Nothing was halted."
+            )
         if status == "BLOCKED_SECRET_DETECTED":
             return (
                 f"Tool '{tool}' was stopped because its arguments carried something shaped "

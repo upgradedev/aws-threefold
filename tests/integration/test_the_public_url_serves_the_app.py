@@ -55,10 +55,47 @@ def test_the_status_route_still_answers_json() -> None:
     assert json.loads(response["body"])["service"] == "Threefold"
 
 
-def test_the_testbook_is_reachable() -> None:
-    response = _get("/testbook.html")
-    assert response["statusCode"] == 200
-    assert response["headers"]["Content-Type"].startswith("text/html")
+def test_the_retired_testbook_is_neither_served_nor_public() -> None:
+    """The page was removed; a route left behind would answer for a file that is gone."""
+    from threefold.interfaces.api_handlers import WEB_ASSETS
+    from threefold.infrastructure.security_middleware import PUBLIC_PATHS
+
+    assert "/testbook.html" not in WEB_ASSETS
+    assert "/testbook.html" not in PUBLIC_PATHS
+    assert _get("/testbook.html")["statusCode"] == 404
+
+
+def _head(path: str, stage: str = "prod") -> dict:
+    return lambda_handler(
+        {
+            "rawPath": f"/{stage}{path}" if path != "/" else f"/{stage}",
+            "headers": {},
+            "requestContext": {"http": {"method": "HEAD"}, "stage": stage},
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    "path", ["/", "/rules.html", "/status", "/openapi.json", "/api/sessions", "/api/insights", "/rules"]
+)
+def test_head_answers_as_get_does_with_no_body(path: str) -> None:
+    """A link checker or uptime probe sends HEAD, and a 404 there reads as the page being gone."""
+    got = _get(path)
+    head = _head(path)
+    assert head["statusCode"] == got["statusCode"] == 200
+    assert head["headers"] == got["headers"]
+    assert head["body"] == ""
+
+
+def test_head_on_an_unknown_route_is_still_a_404() -> None:
+    assert _head("/no-such-page.html")["statusCode"] == 404
+
+
+def test_head_on_an_open_read_is_not_refused_when_keys_are_enforced(monkeypatch) -> None:
+    """Decided as its own verb, HEAD fell through to the key check that GET is exempt from."""
+    monkeypatch.setenv("STAGE", "prod")
+    assert _head("/api/sessions")["statusCode"] == 200
+    assert _head("/rules.html")["statusCode"] == 200
 
 
 @pytest.mark.parametrize(

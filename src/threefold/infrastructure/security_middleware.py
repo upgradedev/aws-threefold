@@ -121,6 +121,122 @@ PROTECTED_WRITES = {
 }
 
 
+# The pages and the hook are handed out anonymously on purpose: a reader who
+# cannot open the install page or take the script cannot adopt the product, and
+# a key requirement would put the artifacts that matter behind the one thing a
+# visitor does not have. Only "/" used to be listed, so with keys enforced the
+# dashboard opened and every link out of it answered 401. The hook is served
+# under its own name and under the name it had before, so an install command a
+# reader copied last week still works.
+PUBLIC_PATHS = frozenset(
+    {
+        "/",
+        "/index.html",
+        "/connect.html",
+        "/console.html",
+        "/rules.html",
+        "/sessions.html",
+        "/settings.html",
+        "/swagger.html",
+        "/status",
+        "/health",
+        "/docs",
+        "/openapi.json",
+        "/openapi.yaml",
+        "/hooks/threefold_hook.py",
+        "/hooks/claude_code_hook.py",
+        "/claude_code_hook.py",
+    }
+)
+
+# The reads the pages make. Opening a page and refusing the data it is built on
+# is the same regression as refusing the page, one step later: the console and
+# the rules screen rendered and then every fetch answered 401 the moment STAGE
+# or ENFORCE_API_KEY was set. Only reads are listed, by method, and each of them
+# changes nothing: GET /sessions/{id} answers 404 for an id it has not seen
+# rather than creating it. /readyz is not here: no page reads it, and it reports
+# the table name, region, model id and raw client errors.
+PAGE_READS = frozenset(
+    {
+        "/api/insights",
+        "/api/sessions",
+        "/rules",
+        "/rules/layering",
+        "/policy/config",
+        "/policy",
+    }
+)
+
+PUBLIC_READS_ENV = "PUBLIC_READS"
+
+
+def reads_are_public() -> bool:
+    """Whether the data behind the pages is open to anyone, the default.
+
+    The demo stack answers these reads anonymously because that is the ship
+    gate. A stack that carries real use is deployed with PublicReads=false and
+    they need the operator key; the pages themselves still open, and say so
+    when a read is refused. Only an explicit false closes them, and the template
+    admits nothing but "true" and "false".
+    """
+    return os.environ.get(PUBLIC_READS_ENV, "true").strip().lower() not in ("false", "0", "no")
+
+
+def is_page_read(method: str, path: str) -> bool:
+    """True for a read a page makes, which is open unless PublicReads is false."""
+    verb = method.upper()
+    if verb in ("GET", "HEAD") and (
+        path in PAGE_READS or (path.startswith("/sessions/") and path.count("/") == 2)
+    ):
+        return True
+    # Trying a rule changes nothing and records nothing, so it is a read that
+    # happens to need a body.
+    return verb == "POST" and path == "/rules/explain"
+
+
+def _require_operator_key(
+    headers: Dict[str, str],
+    path: str,
+    closed_title: str,
+    closed_detail: str,
+    closed_type: str,
+    missing_detail: str,
+) -> Tuple[bool, Optional[Dict[str, Any]]]:
+    """The ladder a durable write, or a private read, climbs.
+
+    No key configured is 403 and says the door is shut here, a missing key is
+    401, a wrong one is 403. The demo placeholder never opens it: that key is
+    printed in the source, so anyone could present it.
+    """
+    presented = _presented_key(headers)
+    accepted = _configured_keys(allow_placeholder=False)
+    if not accepted:
+        return False, rfc7807_error(
+            status_code=403,
+            title=closed_title,
+            detail=closed_detail,
+            instance=path,
+            error_type=closed_type,
+        )
+    if not presented:
+        return False, rfc7807_error(
+            status_code=401,
+            title="Unauthorized",
+            detail=missing_detail,
+            instance=path,
+            error_type="urn:threefold:error:missing-credentials",
+        )
+    if presented not in accepted:
+        return False, rfc7807_error(
+            status_code=403,
+            title="Forbidden",
+            detail="Provided API Key is invalid or expired.",
+            instance=path,
+            error_type="urn:threefold:error:invalid-credentials",
+        )
+    return True, None
+
+
 def validate_request_security(
     headers: Dict[str, str],
     client_ip: str,
@@ -132,6 +248,9 @@ def validate_request_security(
     limiter = rate_limiter or _global_rate_limiter
     stage = os.environ.get("STAGE", "dev").lower()
     enforce_auth = os.environ.get("ENFORCE_API_KEY", "false").lower() in ("true", "1", "yes")
+    # HEAD is GET without the body, so it is decided exactly as GET is. Decided
+    # as itself, a HEAD on an open read fell through to the key check.
+    verb = "GET" if method.upper() == "HEAD" else method.upper()
 
     # 1. Payload size check
     if payload_size_bytes > MAX_PAYLOAD_SIZE_BYTES:
@@ -154,99 +273,54 @@ def validate_request_security(
         )
 
     # 3. Durable policy writes are closed whether or not the rest is
-    if (method.upper(), path) in PROTECTED_WRITES:
-        presented = _presented_key(headers)
-        accepted = _configured_keys(allow_placeholder=False)
-        if not accepted:
-            return False, rfc7807_error(
-                status_code=403,
-                title="Policy Is Read Only Here",
-                detail=(
-                    "This deployment has no policy-write key configured, so the policy can be "
-                    "read but not changed. Set THREEFOLD_API_KEYS on the function to enable "
-                    "writes."
-                ),
-                instance=path,
-                error_type="urn:threefold:error:policy-write-disabled",
-            )
-        if not presented:
-            return False, rfc7807_error(
-                status_code=401,
-                title="Unauthorized",
-                detail=(
-                    "Changing the policy requires a key, even where reading it does not, because "
-                    "the write is durable and applies to every session after it. Provide it via "
-                    "'X-API-Key' or 'Authorization: Bearer <key>'."
-                ),
-                instance=path,
-                error_type="urn:threefold:error:missing-credentials",
-            )
-        if presented not in accepted:
-            return False, rfc7807_error(
-                status_code=403,
-                title="Forbidden",
-                detail="Provided API Key is invalid or expired.",
-                instance=path,
-                error_type="urn:threefold:error:invalid-credentials",
-            )
+    if (verb, path) in PROTECTED_WRITES:
+        return _require_operator_key(
+            headers,
+            path,
+            closed_title="Policy Is Read Only Here",
+            closed_detail=(
+                "This deployment has no policy-write key configured, so the policy can be "
+                "read but not changed. Set THREEFOLD_API_KEYS on the function to enable "
+                "writes."
+            ),
+            closed_type="urn:threefold:error:policy-write-disabled",
+            missing_detail=(
+                "Changing the policy requires a key, even where reading it does not, because "
+                "the write is durable and applies to every session after it. Provide it via "
+                "'X-API-Key' or 'Authorization: Bearer <key>'."
+            ),
+        )
+
+    # 4. The pages and the hook, open on every stack.
+    if path in PUBLIC_PATHS:
         return True, None
 
-    # 4. Public paths exemption
-    # The pages and the hook are handed out anonymously on purpose: a reader who
-    # cannot open the install page or take the script cannot adopt the product,
-    # and a key requirement would put the artifacts that matter behind the one
-    # thing a visitor does not have. Only "/" used to be listed, so with keys
-    # enforced the dashboard opened and every link out of it answered 401.
-    public_paths = {
-        "/",
-        "/index.html",
-        "/connect.html",
-        "/console.html",
-        "/rules.html",
-        "/sessions.html",
-        "/settings.html",
-        "/swagger.html",
-        "/testbook.html",
-        "/status",
-        "/health",
-        "/docs",
-        "/openapi.json",
-        "/openapi.yaml",
-        "/hooks/claude_code_hook.py",
-        "/claude_code_hook.py",
-    }
-    if path in public_paths:
-        return True, None
-
-    # 4b. The reads those pages make. Opening a page and refusing the data it is
-    # built on is the same regression as refusing the page, one step later: the
-    # console and the rules screen rendered and then every fetch answered 401
-    # the moment STAGE or ENFORCE_API_KEY was set. Only reads are listed, by
-    # method, and each of them changes nothing: GET /sessions/{id} answers 404
-    # for an id it has not seen rather than creating it. Writes to the same
-    # paths were decided in step 3. When keys are enforced, the kill switch
-    # under /sessions/{id}/terminate needs one like every other unlisted call;
-    # a deployment that enforces no key, as the demo stack does, answers it
+    # 4b. The reads those pages make: open by default, and on a stack deployed
+    # with PublicReads=false closed exactly as a policy write is, because what
+    # they return is that stack's real use. Writes to the same paths were
+    # decided in step 3. When keys are enforced, the kill switch under
+    # /sessions/{id}/terminate needs one like every other unlisted call; a
+    # deployment that enforces no key, as the demo stack does, answers it
     # anonymously, and STATE.md says so.
-    # /readyz is not here: no page reads it, and it reports the table name,
-    # region, model id and raw client errors.
-    public_reads = {
-        "/api/insights",
-        "/api/sessions",
-        "/rules",
-        "/rules/layering",
-        "/policy/config",
-        "/policy",
-    }
-    verb = method.upper()
-    if verb == "GET" and (
-        path in public_reads or (path.startswith("/sessions/") and path.count("/") == 2)
-    ):
-        return True, None
-    # Trying a rule changes nothing and records nothing, so it is a read that
-    # happens to need a body.
-    if verb == "POST" and path == "/rules/explain":
-        return True, None
+    if is_page_read(verb, path):
+        if reads_are_public():
+            return True, None
+        return _require_operator_key(
+            headers,
+            path,
+            closed_title="Reads Are Private Here",
+            closed_detail=(
+                "This deployment keeps its sessions, ledger and rules private and has no "
+                "operator key configured, so nothing here can be read. Set THREEFOLD_API_KEYS "
+                "on the function to read it."
+            ),
+            closed_type="urn:threefold:error:reads-private",
+            missing_detail=(
+                "This deployment keeps its sessions, ledger and rules private, so reading them "
+                "requires the operator key. Provide it via 'X-API-Key' or "
+                "'Authorization: Bearer <key>'."
+            ),
+        )
 
     # 5. Authentication enforcement
     if enforce_auth or stage == "prod":

@@ -12,6 +12,7 @@ import logging
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 # Ensure src directory is on sys.path for direct script execution
@@ -36,6 +37,12 @@ class ThreefoldHTTPRequestHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         self._handle_request("POST")
+
+    def do_HEAD(self) -> None:
+        # The handler answers HEAD as GET with an empty body. Without this the
+        # standard library answered 501 before the handler was reached, so the
+        # local server disagreed with the deployed one.
+        self._handle_request("HEAD")
 
     def _handle_request(self, method: str) -> None:
         parsed_url = urlparse(self.path)
@@ -83,6 +90,8 @@ class ThreefoldHTTPRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
         resp_body = response.get("body", "")
+        if method == "HEAD":
+            return
         if isinstance(resp_body, str):
             self.wfile.write(resp_body.encode("utf-8"))
         elif isinstance(resp_body, (bytes, bytearray)):

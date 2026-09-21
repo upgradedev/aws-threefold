@@ -4,7 +4,72 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 import json
+import math
 from typing import Any, Dict, List, Optional
+
+from threefold.application.labels import label_project
+
+# Who sent a call and through what. Closed sets, because both are stored on
+# every ledger row and a free-text field there is one more thing a caller can
+# fill with anything. A value outside the set is kept as "unknown" and the
+# response says so; a caller that sends nothing, as every caller did before
+# these fields existed, is "unknown" without a warning.
+KNOWN_AGENTS = ("claude-code", "codex", "antigravity", "pre-commit", "ci", "page")
+KNOWN_ORIGINS = ("hook", "page", "ci")
+UNKNOWN = "unknown"
+
+
+class InvalidRequestError(ValueError):
+    """A request the caller can correct, with a detail that is safe to show them."""
+
+    def __init__(self, detail: str, name: Optional[str] = None) -> None:
+        super().__init__(detail)
+        self.detail = detail
+        self.name = name
+
+
+def _flag(body: Dict[str, Any], key: str, default: bool) -> bool:
+    """Reads a yes/no field, accepting the spellings a shell script sends."""
+    value = body.get(key, default)
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and value in (0, 1):
+        return bool(value)
+    if isinstance(value, str) and value.strip().lower() in ("true", "1", "yes"):
+        return True
+    if isinstance(value, str) and value.strip().lower() in ("false", "0", "no"):
+        return False
+    raise InvalidRequestError(f"{key} must be true or false.", key)
+
+
+def _number(body: Dict[str, Any], key: str, default: float, cast: type) -> Any:
+    """Reads a numeric field, refusing what would pass a comparison by accident.
+
+    JSON as Python parses it admits NaN and Infinity, and a budget of NaN is
+    never exceeded because every comparison with it is false.
+    """
+    value = body.get(key, default)
+    if isinstance(value, bool):
+        raise InvalidRequestError(f"{key} must be a number.", key)
+    try:
+        number = cast(value)
+    except (TypeError, ValueError, OverflowError):
+        raise InvalidRequestError(f"{key} must be a number.", key) from None
+    if isinstance(number, float) and not math.isfinite(number):
+        raise InvalidRequestError(f"{key} must be a finite number.", key)
+    return number
+
+
+def _closed_set(body: Dict[str, Any], key: str, known: tuple, warnings: List[str]) -> str:
+    value = body.get(key)
+    if value is None or value == "":
+        return UNKNOWN
+    if isinstance(value, str) and value in known:
+        return value
+    warnings.append(f"{key} is not one of {', '.join(known)}, so it was recorded as '{UNKNOWN}'.")
+    return UNKNOWN
 
 
 @dataclass
@@ -19,6 +84,65 @@ class ToolCallRequestDTO:
     projected_input_tokens: int = 2000
     projected_output_tokens: int = 500
     budget_usd: float = 10.00
+    # Request v2. Every field has the value an old caller implied by not
+    # sending it, so a v1 body still means what it meant.
+    agent: str = UNKNOWN
+    origin: str = UNKNOWN
+    # A page wants the sentence; a hook sits in front of every tool call and
+    # must not wait on a model to be told no, so hooks send false.
+    explain: bool = True
+    # Recorded as observed, never refused, and never trips the session.
+    dry_run: bool = False
+    # What was changed about the request on the way in, returned to the caller.
+    warnings: List[str] = field(default_factory=list)
+
+    @classmethod
+    def from_payload(
+        cls,
+        body: Dict[str, Any],
+        *,
+        default_session_id: str = "session-default",
+        default_input_tokens: int = 2000,
+        default_output_tokens: int = 500,
+        default_budget_usd: float = 10.00,
+        tool_name: Optional[str] = None,
+        action_type: Optional[str] = None,
+        arguments: Optional[Dict[str, Any]] = None,
+    ) -> "ToolCallRequestDTO":
+        """Builds a request from a JSON body, v1 or v2.
+
+        The routes that read their tool from an envelope of their own, like the
+        universal adapter, pass it in; everything else is read from the body.
+        The project is labelled here, once, so the session row, the ledger row
+        and the metric dimension cannot disagree about it.
+        """
+        warnings: List[str] = []
+        project, project_warning = label_project(body.get("project_name"))
+        if project_warning:
+            warnings.append(project_warning)
+        # `developer` is the v2 name. A v1 caller sent `developer_id`; one that
+        # sent neither is anonymous, which is what the contract calls it.
+        developer = body.get("developer")
+        if developer is None or developer == "":
+            developer = body.get("developer_id")
+        if developer is None or developer == "":
+            developer = "anonymous"
+        return cls(
+            session_id=body.get("session_id", default_session_id),
+            developer_id=str(developer)[:120],
+            project_name=project,
+            tool_name=tool_name if tool_name is not None else body.get("tool_name", "unknown_tool"),
+            action_type=action_type if action_type is not None else body.get("action_type", "FILE_READ"),
+            arguments=arguments if arguments is not None else body.get("arguments", {}),
+            projected_input_tokens=_number(body, "projected_input_tokens", default_input_tokens, int),
+            projected_output_tokens=_number(body, "projected_output_tokens", default_output_tokens, int),
+            budget_usd=_number(body, "budget_usd", default_budget_usd, float),
+            agent=_closed_set(body, "agent", KNOWN_AGENTS, warnings),
+            origin=_closed_set(body, "origin", KNOWN_ORIGINS, warnings),
+            explain=_flag(body, "explain", True),
+            dry_run=_flag(body, "dry_run", False),
+            warnings=warnings,
+        )
 
 
 @dataclass
@@ -47,6 +171,12 @@ class EvaluationResultDTO:
     timestamp: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
+    # True when the caller asked for a dry run: whatever the gates found was
+    # recorded under observations and nothing was refused.
+    dry_run: bool = False
+    # What the service changed about the request, such as a project name it
+    # recorded as "unlabelled". Always a list, so a client never tests for it.
+    warnings: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
