@@ -15,8 +15,6 @@ Exit Code:
 from __future__ import annotations
 
 import argparse
-import ast
-import os
 import sys
 from pathlib import Path
 
@@ -26,7 +24,7 @@ sys.path.insert(0, str(repo_root / "src"))
 
 try:
     from threefold.domain.boundary_guard import ArchitecturalBoundaryGuard, SecretScanner
-    from threefold.domain.import_rules import find_forbidden_imports
+    from threefold.domain.layering_rules import DEFAULT_RULES, ENFORCE, violations as layering_violations
 except ImportError:
     # Standalone fallback if package structure differs
     import re
@@ -46,6 +44,14 @@ except ImportError:
             clean = path.replace("\\", "/")
             return ".env" in clean or ".git/" in clean
 
+    # Without the package there are no layering rules to judge by, and a gate
+    # that invented its own would be the second implementation this script
+    # was rewritten to stop carrying.
+    DEFAULT_RULES, ENFORCE = [], "enforce"
+
+    def layering_violations(path, content, rules):
+        return [], "The layering rules are not importable here"
+
 
 # Keys that AWS publishes in its own documentation. They authenticate nothing, and
 # a scanner that cannot tell them from a live key cries wolf on every tutorial.
@@ -54,20 +60,22 @@ PUBLISHED_EXAMPLE_KEYS = {
     "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
 }
 
-FORBIDDEN_DOMAIN_IMPORTS = ("boto3", "requests", "fastapi", "flask", "sqlalchemy")
-
 
 def find_domain_import_violations(content: str, file_path: Path) -> list[str]:
-    """Delegates to the same rule the live gate enforces.
+    """Judges a file by the layering rules the live gate enforces.
 
     Keeping a second implementation here is how the perimeter came to be weaker
     than this script: the script parsed imports while the API matched
     substrings, so `from boto3 import client` was caught before a commit and
-    approved at runtime.
+    approved at runtime. The next second implementation was import_rules, a
+    Python-only list the live gate had already replaced with declared rules in
+    four languages, so this script now asks the rules themselves.
     """
+    found, _ = layering_violations(str(file_path).replace("\\", "/"), content, DEFAULT_RULES)
     return [
-        f"CLEAN ARCHITECTURE VIOLATION in {file_path} -> domain {violation}"
-        for violation in find_forbidden_imports(content)
+        f"CLEAN ARCHITECTURE VIOLATION in {file_path} -> {item['reason']}"
+        for item in found
+        if item["mode"] == ENFORCE
     ]
 
 
@@ -97,10 +105,9 @@ def scan_file(file_path: Path) -> list[str]:
     if not is_clean:
         violations.append(f"SECRET LEAK DETECTED in {file_path}: {secret_msg}")
 
-    # Check Clean Architecture: the domain layer must never import infrastructure.
-    clean_path = str(file_path).replace("\\", "/")
-    if "/domain/" in clean_path:
-        violations.extend(find_domain_import_violations(content, file_path))
+    # Check Clean Architecture. The rules decide which paths they cover, so the
+    # file is not pre-filtered on a `/domain/` segment the rules may not use.
+    violations.extend(find_domain_import_violations(content, file_path))
 
     return violations
 
