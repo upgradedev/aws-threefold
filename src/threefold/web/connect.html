@@ -119,10 +119,104 @@
         </div>
         <div class="p-3 rounded-xl bg-gray-950 border border-gray-800">
           <p class="text-xs font-semibold text-purple-300">3 · A refusal is handed back as a deny</p>
-          <p class="text-[11px] text-gray-400 mt-1">Whether each agent then stops the write is being verified, agent by agent. Until it is, read a deny as a verdict the agent was shown, not as proof the write did not happen.</p>
+          <p class="text-[11px] text-gray-400 mt-1">Measured on 2026-09-21: Claude Code and the Antigravity desktop app stopped the refused write. Codex was not measured, so for Codex read a deny as a verdict it was shown, not as proof the write did not happen. The table further down has the detail.</p>
         </div>
       </div>
     </div>
+
+    <!-- GOVERN YOUR OWN REPOSITORIES. The installer writes, per repository, what the
+         three steps below do by hand. What it writes is the per-repository
+         configuration contract in STATE.md, and the enforcement claims are only
+         the ones docs/evidence/ENFORCEMENT_2026-09-21.md measured. -->
+    <section id="govern-your-repositories" class="rounded-2xl bg-gray-900 border border-gray-800 p-5 space-y-4">
+      <div class="flex items-center justify-between gap-3 flex-wrap border-b border-gray-800 pb-3">
+        <div>
+          <h2 class="text-sm font-semibold text-white">Govern your own repositories</h2>
+          <p class="text-[11px] text-gray-500">One command per repository, for all three agents and the commit, starting in observe mode.</p>
+        </div>
+        <span class="text-xs px-2.5 py-1 rounded-full font-semibold bg-amber-950 text-amber-300 border border-amber-800">observe, then enforce</span>
+      </div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div class="space-y-4">
+          <div>
+            <p class="text-xs font-semibold text-gray-200">The installer · <span class="font-mono text-purple-300">scripts/threefold_install.py</span></p>
+            <p class="text-xs text-gray-400 mt-1">
+              It is a file in the Threefold repository, standard library only, run once for each repository you want governed.
+              <span class="font-mono">--api-key-file</span> is needed only where the stack enforces a key, and it names a file
+              holding the key, so the key itself never appears in a command line or in the repository.
+            </p>
+            <div class="relative">
+              <pre class="code mt-2 p-3 rounded-xl bg-gray-950 border border-gray-800 text-[11px] font-mono text-gray-300" id="install-snippet"></pre>
+              <button onclick="copyText('install-snippet', this)" class="absolute top-3 right-2 text-[11px] px-2 py-0.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700">Copy</button>
+            </div>
+          </div>
+
+          <div>
+            <p class="text-xs font-semibold text-gray-200">What it writes</p>
+            <ul class="text-[11px] text-gray-400 space-y-1.5 list-disc pl-4 mt-1">
+              <li><span class="font-mono text-gray-200">.threefold.json</span> at the repository root, holding <span class="font-mono">project</span>, <span class="font-mono">endpoint</span>, <span class="font-mono">mode</span> and, when given, <span class="font-mono">api_key_file</span>: the path to the key, never the key.</li>
+              <li>The three agents' hook settings: <span class="font-mono text-gray-200">.claude/settings.local.json</span> for Claude Code, <span class="font-mono text-gray-200">.codex/hooks.json</span> for Codex and <span class="font-mono text-gray-200">.agents/hooks.json</span> for Antigravity, the same blocks as Step 2 below.</li>
+              <li>The pre-commit hook, so an edit that got past an agent is still judged when it is committed, and recorded with agent <span class="font-mono">pre-commit</span>.</li>
+              <li>Every one of them listed in <span class="font-mono text-gray-200">.git/info/exclude</span>, which is local to your clone. None of it is ever committed, and the governed repository shows no change.</li>
+            </ul>
+            <pre class="code mt-2 p-3 rounded-xl bg-gray-950 border border-gray-800 text-[11px] font-mono text-gray-300" id="threefold-json-snippet"></pre>
+            <p class="text-[11px] text-gray-500 mt-1">
+              The hook reads each setting from the environment first, then from <span class="font-mono">.threefold.json</span>,
+              then from <span class="font-mono">~/.threefold/config.json</span>, so a variable set where the agent starts wins
+              over the file.
+            </p>
+          </div>
+        </div>
+
+        <div class="space-y-4">
+          <div class="p-3 rounded-xl bg-gray-950 border border-gray-800 space-y-1">
+            <p class="text-xs font-semibold text-amber-300">From observe to enforce</p>
+            <p class="text-[11px] text-gray-400">
+              In <span class="font-mono">observe</span> every call is sent as <span class="font-mono">dry_run</span>: it is
+              judged and recorded, never refused, and never halts a session, so the enforcement console shows what would have
+              been stopped while nobody is. When that record reads right, switch the repository by running the installer again
+              with <span class="font-mono text-gray-200">--mode enforce</span>, or by setting
+              <span class="font-mono text-gray-200">"mode": "enforce"</span> in <span class="font-mono">.threefold.json</span>.
+              The next call is judged for real.
+            </p>
+            <pre class="code mt-2 p-2 rounded-lg bg-gray-900 border border-gray-800 text-[11px] font-mono text-gray-300" id="enforce-snippet"></pre>
+          </div>
+
+          <div class="p-3 rounded-xl bg-gray-950 border border-gray-800 space-y-1">
+            <p class="text-xs font-semibold text-gray-200">Uninstall</p>
+            <p class="text-[11px] text-gray-400">
+              Run the installer with <span class="font-mono text-gray-200">--uninstall</span> for the same repository. By hand it
+              is the same list in reverse: delete <span class="font-mono">.threefold.json</span>, take the Threefold block out of
+              each of the three hook settings files, remove the pre-commit hook, and delete the lines it added to
+              <span class="font-mono">.git/info/exclude</span>.
+            </p>
+            <pre class="code mt-2 p-2 rounded-lg bg-gray-900 border border-gray-800 text-[11px] font-mono text-gray-300" id="uninstall-snippet"></pre>
+          </div>
+
+          <div class="p-3 rounded-xl bg-sky-950/20 border border-sky-900/40 space-y-1">
+            <p class="text-xs font-semibold text-sky-300">Codex reads project hooks only in a trusted project</p>
+            <p class="text-[11px] text-gray-400">
+              Codex loads a project's hooks only when that project is trusted in Codex. Until you trust the repository there,
+              <span class="font-mono">.codex/hooks.json</span> is not read and Codex's edits meet Threefold at commit time only,
+              through the pre-commit hook.
+            </p>
+          </div>
+
+          <div class="p-3 rounded-xl bg-gray-950 border border-gray-800 space-y-1">
+            <p class="text-xs font-semibold text-gray-200">Which agents stop the write, as measured</p>
+            <p class="text-[11px] text-gray-400">
+              On 2026-09-21 a local hook answered deny and the file system was checked afterwards. Claude Code 2.1.220 refused a
+              <span class="font-mono">Write</span> and a <span class="font-mono">Bash</span> redirection, and the Antigravity
+              desktop app refused <span class="font-mono">write_to_file</span>; in each case the refused file was not created.
+              Codex CLI 0.155.0 was not measured, because the account had reached its usage limit, so no claim is made for it
+              and its edits count as governed at commit time only. One machine, Windows, those versions: method and results are
+              in <span class="font-mono">docs/evidence/ENFORCEMENT_2026-09-21.md</span> in the repository.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
 
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
@@ -132,6 +226,10 @@
           <h2 class="text-sm font-semibold text-white">Install: one file, three agents</h2>
           <span class="text-xs px-2.5 py-1 rounded-full font-semibold bg-purple-950 text-purple-400 border border-purple-800">three steps</span>
         </div>
+        <p class="text-[11px] text-gray-500">
+          By hand, one agent at a time. For a repository you mean to keep governed, the installer above writes all of this
+          for the three agents at once and keeps it out of the repository's history.
+        </p>
 
         <div>
           <p class="text-xs font-semibold text-gray-200">Step 1 · Take the script</p>
@@ -316,7 +414,7 @@
     <section class="rounded-2xl bg-gray-900 border border-gray-800 p-5 space-y-3">
       <div class="border-b border-gray-800 pb-3">
         <h2 class="text-sm font-semibold text-white">What each agent does with a deny, as far as it has been shown</h2>
-        <p class="text-[11px] text-gray-500">The hook's side is fixed. The agent's side is what is still being checked.</p>
+        <p class="text-[11px] text-gray-500">The hook's side is fixed. The agent's side was measured on 2026-09-21, on one Windows machine, for the versions named, by checking whether the refused file existed afterwards.</p>
       </div>
       <div class="overflow-x-auto">
         <table class="w-full text-xs">
@@ -329,23 +427,35 @@
             </tr>
           </thead>
           <tbody class="text-gray-300">
-            <tr class="border-b border-gray-800/60">
+            <!-- data-enforcement is what the evidence file measured for the agent, and a
+                 test holds each row to it: "stopped" only where the refused file was
+                 not created, "not-measured" where the agent was never run. -->
+            <tr class="border-b border-gray-800/60" data-agent="claude-code" data-enforcement="stopped">
               <td class="py-2 pr-3 font-semibold">Claude Code</td>
               <td class="py-2 pr-3 font-mono text-[11px] text-gray-400">Write, Edit, MultiEdit, NotebookEdit, Bash</td>
               <td class="py-2 pr-3 font-mono text-[11px] text-gray-400">hookSpecificOutput.permissionDecision "deny", with a reason</td>
-              <td class="py-2"><span class="px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-950 text-amber-300 border border-amber-800">being verified</span></td>
+              <td class="py-2">
+                <span class="px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-950 text-emerald-300 border border-emerald-800">stops the write · measured</span>
+                <p class="text-[11px] text-gray-500 mt-1">2.1.220: a <span class="font-mono">Write</span> and a <span class="font-mono">Bash</span> redirection were refused and neither file was created. The other tools were not measured.</p>
+              </td>
             </tr>
-            <tr class="border-b border-gray-800/60">
+            <tr class="border-b border-gray-800/60" data-agent="codex" data-enforcement="not-measured">
               <td class="py-2 pr-3 font-semibold">Codex</td>
               <td class="py-2 pr-3 font-mono text-[11px] text-gray-400">apply_patch, Edit, Write, Bash</td>
               <td class="py-2 pr-3 font-mono text-[11px] text-gray-400">hookSpecificOutput.permissionDecision "deny", with a reason</td>
-              <td class="py-2"><span class="px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-950 text-amber-300 border border-amber-800">being verified</span></td>
+              <td class="py-2">
+                <span class="px-2 py-0.5 rounded text-[11px] font-semibold bg-gray-800 text-gray-300 border border-gray-700">not measured</span>
+                <p class="text-[11px] text-gray-500 mt-1">0.155.0 could not be run: the account had reached its usage limit. No claim is made, and its edits count as governed at commit time only.</p>
+              </td>
             </tr>
-            <tr>
+            <tr data-agent="antigravity" data-enforcement="stopped">
               <td class="py-2 pr-3 font-semibold">Antigravity</td>
               <td class="py-2 pr-3 font-mono text-[11px] text-gray-400">write_to_file, replace_file_content, multi_replace_file_content, run_command</td>
               <td class="py-2 pr-3 font-mono text-[11px] text-gray-400">{"decision": "deny", "reason": …}</td>
-              <td class="py-2"><span class="px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-950 text-amber-300 border border-amber-800">being verified</span></td>
+              <td class="py-2">
+                <span class="px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-950 text-emerald-300 border border-emerald-800">stops the write · measured</span>
+                <p class="text-[11px] text-gray-500 mt-1">Desktop app, 2026-09: <span class="font-mono">write_to_file</span> was refused and the file was not created. The other tools were not measured.</p>
+              </td>
             </tr>
           </tbody>
         </table>
@@ -691,6 +801,32 @@
       Object.keys(AGENTS).forEach(name => {
         document.getElementById('settings-' + name).textContent = agentSettings(name);
       });
+
+      // The installer's flags are the per-repository contract: an Acme-style alias,
+      // observe first, this endpoint, and a key file rather than a key.
+      document.getElementById('install-snippet').textContent =
+        '# Watch first: every call is judged and recorded, and none is refused\n' +
+        '# --api-key-file only where the stack enforces a key; it names a file, never the key\n' +
+        'python scripts/threefold_install.py \\\n' +
+        '  --repo /path/to/acme-billing \\\n' +
+        '  --project Acme-Billing \\\n' +
+        '  --mode observe \\\n' +
+        '  --endpoint ' + endpoint + ' \\\n' +
+        '  --api-key-file /path/to/key-file';
+
+      document.getElementById('threefold-json-snippet').textContent = JSON.stringify({
+        project: 'Acme-Billing',
+        endpoint: endpoint,
+        mode: 'observe',
+        api_key_file: '/path/to/key-file'
+      }, null, 2);
+
+      document.getElementById('enforce-snippet').textContent =
+        'python scripts/threefold_install.py --repo /path/to/acme-billing --project Acme-Billing \\\n' +
+        '  --mode enforce --endpoint ' + endpoint + ' --api-key-file /path/to/key-file';
+
+      document.getElementById('uninstall-snippet').textContent =
+        'python scripts/threefold_install.py --repo /path/to/acme-billing --uninstall';
 
       document.getElementById('env-snippet').textContent =
         '# Required: the alias this project is sent under, never its real name\n' +

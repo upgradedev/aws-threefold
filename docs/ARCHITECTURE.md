@@ -141,8 +141,12 @@ sequenceDiagram
         Proxy->>Loop: Evaluate History for Recursive Thrashing
         alt Monomorphic or Ping-Pong Loop Detected
             Loop-->>Proxy: FAIL: Loop Thrashing Detected
-            Proxy->>Proxy: Trip Circuit Breaker & Freeze Session
-            Proxy-->>Dev: REJECTED: Circuit Breaker Tripped
+            alt origin hook (a governed developer's own session)
+                Proxy-->>Dev: REJECTED: the repeating call only, session not halted
+            else sim- or page session (the demo)
+                Proxy->>Proxy: Trip Circuit Breaker & Freeze Session
+                Proxy-->>Dev: REJECTED: Circuit Breaker Tripped
+            end
         else Loop Free
             Loop-->>Proxy: PASS
             Proxy->>Breaker: Evaluate Token Spend vs Budget Cap

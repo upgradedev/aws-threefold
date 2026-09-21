@@ -135,7 +135,7 @@
     "/evaluate-tool-call": {
       "post": {
         "summary": "Evaluate Agent Tool Call",
-        "description": "Evaluates one tool invocation against the credential scanner, the layering rules, the loop detector and the budget. A hook sends this before the tool call runs, and the pages send it too; agent, origin and explain say which of the two a row came from, so a visitor pressing a button on the dashboard is never counted as an agent being governed.",
+        "description": "Evaluates one tool invocation against the credential scanner, the layering rules, the loop detector and the budget. A hook sends this before the tool call runs, and the pages send it too; agent, origin and explain say which of the two a row came from, so a visitor pressing a button on the dashboard is never counted as an agent being governed. The loop gate treats the two differently. For origin hook, a detected loop refuses the repeating call with BLOCKED_LOOP_DETECTED and records it, but never halts the session: session_tripped stays false and the next different call is judged as usual, so a governed developer is not locked out of their own session. A session whose id starts sim-, and a call from a page, keep the terminal halt: the third identical call is refused, the session is frozen and every later call is refused with BLOCKED_CIRCUIT_BREAKER until an operator resumes it. Repeats of read-only or polling calls (git status, log, diff or show, ls, cat, pwd, gh run view, list or watch, sleep, and reads) are recorded as observations and are never refused as a loop.",
         "requestBody": {
           "required": true,
           "content": {
@@ -205,7 +205,7 @@
                   },
                   "dry_run": {
                     "type": "boolean",
-                    "description": "Default false. When true the call is evaluated and recorded as observed: it is never refused and never trips the session, and the rule that would have refused it is returned under observations."
+                    "description": "Default false. When true the call is evaluated and recorded as observed: it is never refused and never trips the session, and the rule that would have refused it is returned under observations. A repository installed in observe mode sends every call with dry_run true."
                   },
                   "projected_input_tokens": {
                     "type": "integer"
@@ -244,7 +244,8 @@
                       "description": "Each invariant and whether this call satisfied it."
                     },
                     "session_tripped": {
-                      "type": "boolean"
+                      "type": "boolean",
+                      "description": "Whether the session is now halted, so that every later call is refused until an operator resumes it. A loop refused for origin hook leaves it false; a loop in a sim- or page session sets it."
                     },
                     "current_session_cost_usd": {
                       "type": "number"
@@ -449,10 +450,45 @@
         }
       }
     },
+    "/sessions/{session_id}/resume": {
+      "post": {
+        "summary": "Resume a halted session",
+        "description": "Lifts the halt on a recorded session, so its next call is evaluated again instead of refused with BLOCKED_CIRCUIT_BREAKER. Requires the operator key even where reads are anonymous, because it undoes a halt the gate or an operator made. Never creates a session.",
+        "security": [
+          {
+            "OperatorApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The session is no longer halted"
+          },
+          "401": {
+            "description": "No key was presented"
+          },
+          "403": {
+            "description": "The key was rejected, or this deployment has configured no operator key at all"
+          },
+          "404": {
+            "description": "No session with this id has been recorded (urn:threefold:error:session-not-found), so there is nothing to resume and nothing is created"
+          }
+        }
+      }
+    },
     "/simulate-loop": {
       "post": {
         "summary": "Simulate Thrashing Loop",
-        "description": "Simulates 3 consecutive identical file edits to demonstrate circuit-breaker tripping.",
+        "description": "Simulates 3 consecutive identical file edits in a sim- session to demonstrate circuit-breaker tripping. The demo keeps the terminal halt: call 3 is refused and the session is frozen. A hook's loop refuses the repeating call without halting the session; see /evaluate-tool-call.",
         "responses": {
           "200": {
             "description": "Loop interception verdict with Bedrock explanation"
@@ -544,7 +580,19 @@
     "/rules": {
       "get": {
         "summary": "The layering rules in force",
-        "description": "Open, because a reader has to be able to see the architecture they are held to.",
+        "description": "Open, because a reader has to be able to see the architecture they are held to. With project, answers that project's own rules when it has saved some. When it has not, is_default is true and the rules shown are the shared default its calls are judged against until it saves its own. Without project, answers the shared set, as before.",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "query",
+            "required": false,
+            "description": "The project whose rules to read, an Acme-style alias such as Acme-Billing.",
+            "schema": {
+              "type": "string",
+              "example": "Acme-Billing"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "rules, count, is_default, languages_read, extensions_read, refresh_seconds, unsupported",
@@ -563,7 +611,8 @@
                       "type": "integer"
                     },
                     "is_default": {
-                      "type": "boolean"
+                      "type": "boolean",
+                      "description": "Asked with project: true when that project has saved no rules of its own and the rules shown are the shared default, false when they are its own. Asked without: true when the shared set is still the one Threefold ships with."
                     },
                     "languages_read": {
                       "type": "array",
@@ -592,8 +641,8 @@
         }
       },
       "post": {
-        "summary": "Replace the layering rules",
-        "description": "Replaces the whole set and stores it. The save is all or nothing: if any rule cannot be used, nothing is saved and the 400 names each rule and why. The server that takes the save applies the rules from its next call; every other server reads them again within refresh_seconds. Requires the operator key even where reads are anonymous, because the rules are the gate rather than a setting on it.",
+        "summary": "Replace the layering rules of one project, or the shared set",
+        "description": "Replaces a whole set and stores it. With project, the set is that project's own, stored under CONFIG#rules#<project>, and the gate applies it to calls whose project_name is that project; every other project keeps the shared set. Without project, the shared set is replaced, as before. The save is all or nothing: if any rule cannot be used, nothing is saved and the 400 names each rule and why. The server that takes the save applies the rules from its next call; every other server reads them again within refresh_seconds. Requires the operator key even where reads are anonymous, because the rules are the gate rather than a setting on it.",
         "security": [
           {
             "OperatorApiKey": []
@@ -609,6 +658,11 @@
                   "rules"
                 ],
                 "properties": {
+                  "project": {
+                    "type": "string",
+                    "example": "Acme-Billing",
+                    "description": "The project these rules are for, an Acme-style alias such as Acme-Billing. Leave it out to replace the shared set every project without rules of its own uses."
+                  },
                   "rules": {
                     "type": "array",
                     "items": {
@@ -682,7 +736,7 @@
     "/rules/explain": {
       "post": {
         "summary": "Try the rules on a file without saving or recording anything",
-        "description": "Reads the imports in the content and judges them against the layering rules in force, or against a draft sent in the body. Only the layering rules are tried: a write this answers ALLOW for can still be refused for a credential, a protected path, a loop or its cost. No verdict is issued, no ledger row is written and a draft is never put in force, which is why it is open.",
+        "description": "Reads the imports in the content and judges them against the layering rules in force, or against a draft sent in the body. With project, the rules in force are the ones the gate would apply to that project: its own when it has saved some, the shared set otherwise. Only the layering rules are tried: a write this answers ALLOW for can still be refused for a credential, a protected path, a loop or its cost. No verdict is issued, no ledger row is written and a draft is never put in force, which is why it is open.",
         "requestBody": {
           "required": true,
           "content": {
@@ -701,6 +755,11 @@
                   "content": {
                     "type": "string",
                     "example": "import javax.persistence.Entity;"
+                  },
+                  "project": {
+                    "type": "string",
+                    "example": "Acme-Billing",
+                    "description": "Try the rules that project's calls are judged against. A draft sent in rules is tried instead, whatever project says."
                   },
                   "rules": {
                     "type": "array",

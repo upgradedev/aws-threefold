@@ -51,9 +51,12 @@ That is the hook talking to the live service, not a mock. It is one file,
 and the deployment serves it at
 <https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/hooks/threefold_hook.py>.
 On an approval it prints nothing, so the agent's own permission flow runs
-unchanged. Whether a deny actually stops the write is being verified for each
-agent, and the install page says so per agent rather than claiming enforcement
-that has not been shown.
+unchanged. Whether a deny actually stops the write was measured per agent, on
+the file system, on 2026-09-21: in Claude Code 2.1.220 and in the Antigravity
+desktop app the refused file was not created. Codex was not measured, so no
+claim is made for it and its edits count as governed at commit time only. Method
+and results are in
+[`docs/evidence/ENFORCEMENT_2026-09-21.md`](docs/evidence/ENFORCEMENT_2026-09-21.md).
 
 ## Three more gates, honestly described
 
@@ -63,7 +66,9 @@ above rather than in four different places.
 
 1. **Cycles.** Any repeating pattern of tool calls, not a fixed list of shapes.
    The agent looping A, A, B forever is caught, which is where the name comes
-   from: the third time round the cycle, it stops.
+   from: the third time round the cycle, it stops. From a hook, the repeating
+   call is refused and the session carries on, so a developer is never locked
+   out of their own session; the demo still halts its session outright.
 2. **Credentials.** Ten patterns across AWS, GitHub, OpenAI, Anthropic, Slack,
    Google and JWTs, scanned at every depth of the arguments. Dedicated scanners
    carry hundreds of rules; use one of those in CI as well.
@@ -79,8 +84,29 @@ above rather than in four different places.
 
 ## Install it in front of your own agent
 
-One file for three agents. The deployment serves it, so there is nothing to
-clone, no package to install and no account to make.
+To govern a whole repository, run the installer,
+[`scripts/threefold_install.py`](scripts/threefold_install.py), once for it:
+
+```bash
+python scripts/threefold_install.py --repo /path/to/acme-billing --project Acme-Billing \
+  --mode observe --endpoint https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod
+```
+
+It writes `.threefold.json`, the hook settings for Claude Code, Codex and
+Antigravity, and a pre-commit hook, and lists them in `.git/info/exclude`, so
+none of it is ever committed. `--api-key-file` names a file holding the key, for
+a stack that enforces one; the key itself is never written into the repository.
+Codex reads a project's hooks only once that project is trusted in Codex.
+
+Roll it out in `observe` first: every call is judged and recorded but never
+refused, so the enforcement console shows what would have been stopped while
+nobody is. When that record reads right, run the installer again with
+`--mode enforce`, or set `"mode": "enforce"` in `.threefold.json`; `--uninstall`
+takes it all out again.
+
+By hand, one agent at a time, it is one file for three agents. The deployment
+serves it, so there is nothing to clone, no package to install and no account to
+make.
 
 ```bash
 curl -O https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/hooks/threefold_hook.py

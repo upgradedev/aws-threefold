@@ -66,6 +66,29 @@
       <p id="unsupported" class="text-[11px] text-gray-500 max-w-4xl"></p>
     </section>
 
+    <!-- WHICH PROJECT. Each project may keep its own rules; a project with none is
+         judged against the shared set. Everything below, the list, the try panel
+         and the save, acts on the project chosen here. -->
+    <section class="p-5 rounded-2xl bg-gray-900 border border-gray-800 space-y-3">
+      <div class="flex flex-wrap items-end gap-3">
+        <label class="block">
+          <span class="text-[11px] uppercase tracking-wider text-gray-400">Project</span>
+          <input id="project-input" type="text" placeholder="Acme-Billing" autocomplete="off" spellcheck="false" maxlength="60"
+                 class="mt-1 w-64 bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-purple-500" />
+        </label>
+        <button onclick="chooseProject()" class="px-3 py-2 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold">Show its rules</button>
+        <button onclick="showSharedSet()" class="px-3 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-200 text-xs border border-gray-700">Show the shared set</button>
+        <span id="scope-badge" class="px-2 py-1 rounded text-[11px] font-semibold border bg-gray-950 text-gray-400 border-gray-800">Reading…</span>
+      </div>
+      <p id="project-problem" class="text-[11px] text-red-400"></p>
+      <p class="text-[11px] text-gray-500 max-w-4xl">
+        A project that has saved rules of its own is judged against them; every other project is judged against the shared
+        set. Names are checked here against the stack's default pattern, <span class="font-mono text-gray-300">Acme-</span>
+        and then 1 to 40 letters, digits or dashes, because a name outside it is recorded as
+        <span class="font-mono">unlabelled</span> and would never match the calls you mean to govern.
+      </p>
+    </section>
+
     <div class="grid grid-cols-1 lg:grid-cols-5 gap-6">
 
       <!-- THE RULES IN FORCE -->
@@ -116,7 +139,8 @@ public class Order { }</textarea>
         <div>
           <h2 class="text-sm font-semibold text-white">Edit the rules <span class="ml-1"><a data-anchor="#/default/post_rules" href="swagger.html" class="text-[10px] font-mono text-purple-400 hover:text-purple-300 underline">POST /rules ↗</a></span></h2>
           <p class="text-[11px] text-gray-500">
-            The whole set is saved at once and replaces what is in force. Written as data so it can be reviewed the way code is.
+            The whole set is saved at once and replaces the set it is saved to: <span id="save-target" class="text-gray-300">the shared set</span>.
+            Written as data so it can be reviewed the way code is.
           </p>
         </div>
         <div class="flex flex-wrap gap-2">
@@ -200,6 +224,19 @@ public class Order { }</textarea>
     let inForce = [];
     let refreshSeconds = 30;
 
+    // The stack's default AllowedProjectPattern. The service stays the judge; this
+    // only keeps a name it would store as "unlabelled" from being read or saved
+    // under, since rules saved for that name would govern no call you meant.
+    const PROJECT_PATTERN = /^Acme-[A-Za-z0-9-]{1,40}$/;
+    // The project the list, the try panel and the save act on. Empty is the shared
+    // set. It changes only when a name is accepted, so a half-typed name in the
+    // field is never what a save lands on.
+    let currentProject = '';
+    // Each read takes a ticket, and only the latest may draw. Switching project
+    // twice quickly would otherwise let the slower first answer overwrite the
+    // second, showing one project's rules under another's name.
+    let loadTicket = 0;
+
     function escapeHtml(str) {
       // Everything is made a string first and then escaped. Returning a non-string
       // as String(value) unescaped let a tool_name sent as an array reach the page
@@ -259,21 +296,103 @@ public class Order { }</textarea>
       }).join('');
     }
 
-    async function load() {
+    function rulesUrl() {
+      return DEFAULT_API_BASE + '/rules' + (currentProject ? '?project=' + encodeURIComponent(currentProject) : '');
+    }
+
+    function setScope(tone, words) {
+      const badge = document.getElementById('scope-badge');
+      badge.className = 'px-2 py-1 rounded text-[11px] font-semibold border ' + tone;
+      badge.innerText = words;
+    }
+
+    // Says whose rules are on screen, from is_default alone: asked for a project,
+    // true means it has saved none and the list is the shared default its calls
+    // are judged against, false means the list is its own. A service that sends
+    // no is_default gets the count and nothing claimed beyond it.
+    function describeOrigin(data) {
+      const count = Array.isArray(data.rules) ? data.rules.length : (data.count || 0);
+      const counted = count + ' rule' + (count === 1 ? '' : 's');
+      const origin = document.getElementById('rules-origin');
+      if (!currentProject) {
+        setScope('bg-gray-950 text-gray-300 border-gray-700', 'SHARED SET');
+        origin.innerText = data.is_default
+          ? 'The shared set, as Threefold ships it. Every project without rules of its own is judged against it.'
+          : counted + ' saved as the shared set, which every project without rules of its own is judged against.';
+        return;
+      }
+      if (data.is_default === true) {
+        setScope('bg-amber-950 text-amber-300 border-amber-800', currentProject + ' · SHARED DEFAULT');
+        origin.innerText = currentProject + ' has no rules of its own, so these are the shared default its calls are judged against. ' +
+          'Save below to give it its own.';
+      } else if (data.is_default === false) {
+        setScope('bg-purple-950 text-purple-300 border-purple-800', currentProject + ' · ITS OWN RULES');
+        origin.innerText = counted + ' saved for ' + currentProject + ' alone. Other projects are not affected by them.';
+      } else {
+        setScope('bg-gray-950 text-gray-300 border-gray-700', currentProject);
+        origin.innerText = counted + ' read for ' + currentProject + '.';
+      }
+    }
+
+    function describeTarget() {
+      document.getElementById('save-target').innerText = currentProject ? currentProject + '’s own rules' : 'the shared set';
+      document.getElementById('save-button').innerText = currentProject ? 'Save for ' + currentProject : 'Save as the shared set';
+    }
+
+    // The project also travels in the address, so a link to this page can open on
+    // one project's rules. Replacing history can fail in a sandboxed frame, and
+    // the page works the same without it.
+    function rememberProject() {
       try {
-        const res = await fetch(DEFAULT_API_BASE + '/rules', { headers: authHeaders() });
+        const url = new URL(location.href);
+        if (currentProject) url.searchParams.set('project', currentProject); else url.searchParams.delete('project');
+        history.replaceState(null, '', url.toString());
+      } catch (err) { /* the address is a convenience */ }
+    }
+
+    function chooseProject() {
+      const typed = document.getElementById('project-input').value.trim();
+      const problem = document.getElementById('project-problem');
+      if (!typed) { showSharedSet(); return; }
+      if (!PROJECT_PATTERN.test(typed)) {
+        problem.innerText = '"' + typed.slice(0, 60) + '" is not a project name this page will send. Use Acme- and then 1 to 40 letters, digits or dashes, for example Acme-Billing.';
+        return;
+      }
+      problem.innerText = '';
+      currentProject = typed;
+      rememberProject();
+      describeTarget();
+      load();
+    }
+
+    function showSharedSet() {
+      document.getElementById('project-input').value = '';
+      document.getElementById('project-problem').innerText = '';
+      currentProject = '';
+      rememberProject();
+      describeTarget();
+      load();
+    }
+
+    async function load() {
+      const ticket = ++loadTicket;
+      setScope('bg-gray-950 text-gray-400 border-gray-800', 'Reading…');
+      try {
+        const res = await fetch(rulesUrl(), { headers: authHeaders() });
         const data = await res.json();
+        if (ticket !== loadTicket) return;
         if (!res.ok) throw new Error('HTTP ' + res.status);
         inForce = data.rules || [];
         renderRules(inForce);
         document.getElementById('languages').innerText = (data.extensions_read || data.languages_read || []).join(', ');
         refreshSeconds = data.refresh_seconds || refreshSeconds;
         document.getElementById('unsupported').innerText = data.unsupported || '';
-        document.getElementById('rules-origin').innerText = data.is_default
-          ? 'These are the rules Threefold ships with. Replace them with your own below.'
-          : data.count + ' rule' + (data.count === 1 ? '' : 's') + ' saved for this deployment.';
+        describeOrigin(data);
         resetEditor();
       } catch (err) {
+        if (ticket !== loadTicket) return;
+        setScope('bg-red-950 text-red-300 border-red-800', 'NOT READ');
+        document.getElementById('rules-origin').innerText = '';
         const refused = /HTTP 40[13]/.test(String(err));
         document.getElementById('rules-list').innerHTML =
           '<p class="text-xs text-red-400">The rules could not be read, so none are shown. ' + escapeHtml(String(err)) + '</p>' +
@@ -332,6 +451,9 @@ public class Order { }</textarea>
         path: document.getElementById('try-path').value,
         content: document.getElementById('try-content').value
       };
+      // The rules in force differ by project, so the service is told which one
+      // this file belongs to. A draft, when sent, is tried instead.
+      if (currentProject) body.project = currentProject;
       if (useDraft) {
         const draft = validate();
         if (!draft) { out.innerHTML = '<p class="text-red-400">The draft is not a list of rules yet; see beside the editor.</p>'; return; }
@@ -364,7 +486,8 @@ public class Order { }</textarea>
           '<div class="p-3 rounded-xl bg-gray-950 border border-gray-800 space-y-2">' +
             '<span class="inline-block px-2 py-0.5 rounded text-[11px] font-semibold border ' + tone + '">' + escapeHtml(d.verdict) + '</span> ' +
             '<span class="text-gray-300">' + escapeHtml(words) + '</span>' +
-            '<p class="text-[11px] text-gray-500">Against ' + (d.rules_considered === 'draft' ? 'your draft' : 'the rules in force') +
+            '<p class="text-[11px] text-gray-500">Against ' + (d.rules_considered === 'draft' ? 'your draft'
+              : currentProject ? 'the rules in force for ' + escapeHtml(currentProject) : 'the shared rules in force') +
               ' · read as ' + escapeHtml(d.language || 'a file type Threefold does not read') + '</p>' +
             '<p class="text-[11px] text-gray-400">Imports found: ' + (d.imports.length ? chips(d.imports, 'bg-gray-900 text-gray-300 border-gray-700') : '<span class="text-gray-600">none</span>') + '</p>' +
             '<p class="text-[11px] text-gray-400">Rules covering this path: ' + (d.applicable_rules.length ? chips(d.applicable_rules, 'bg-gray-900 text-purple-300 border-gray-700') : '<span class="text-gray-600">none</span>') + '</p>' +
@@ -387,7 +510,11 @@ public class Order { }</textarea>
       button.disabled = true;
       out.innerHTML = '<p class="text-gray-500">Saving…</p>';
       try {
-        const res = await fetch(DEFAULT_API_BASE + '/rules', { method: 'POST', headers, body: JSON.stringify({ rules }) });
+        // Saved to the project on screen, never to a name half typed in the field.
+        // Without a project the shared set is replaced, as it always was.
+        const target = currentProject;
+        const payload = target ? { project: target, rules: rules } : { rules: rules };
+        const res = await fetch(DEFAULT_API_BASE + '/rules', { method: 'POST', headers, body: JSON.stringify(payload) });
         const d = await res.json();
         if (!res.ok) {
           let words = d.detail || ('Refused with HTTP ' + res.status);
@@ -405,7 +532,8 @@ public class Order { }</textarea>
         // Lambda runs several containers, each holding the rules it read. The one
         // that took the save uses them at once; the others read them again within
         // the refresh interval the service reports.
-        out.innerHTML = '<p class="text-emerald-400">Saved ' + d.count + ' rule' + (d.count === 1 ? '' : 's') + '. ' +
+        out.innerHTML = '<p class="text-emerald-400">Saved ' + escapeHtml(d.count) + ' rule' + (d.count === 1 ? '' : 's') +
+          (target ? ' for ' + escapeHtml(target) + ' alone' : ' as the shared set') + '. ' +
           (d.count === 1 ? 'It applies' : 'They apply') + ' from the next call on the server that took the save, and on every other server within ' +
           (d.refresh_seconds || refreshSeconds) + ' seconds.</p>';
         await load();
@@ -417,7 +545,18 @@ public class Order { }</textarea>
     }
 
     document.addEventListener('input', event => { if (event.target && event.target.id === 'editor') validate(); });
+    document.getElementById('project-input').addEventListener('keydown', event => { if (event.key === 'Enter') chooseProject(); });
     renderNav();
+    // A link may name the project. It is held to the same pattern as a typed name.
+    (function openOnLinkedProject() {
+      let linked = '';
+      try { linked = (new URLSearchParams(location.search).get('project') || '').trim(); } catch (err) { linked = ''; }
+      if (linked && PROJECT_PATTERN.test(linked)) {
+        currentProject = linked;
+        document.getElementById('project-input').value = linked;
+      }
+    })();
+    describeTarget();
     load();
   </script>
 </body>
