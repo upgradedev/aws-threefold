@@ -121,6 +121,22 @@ PROTECTED_WRITES = {
 }
 
 
+def is_session_resume(method: str, path: str) -> bool:
+    """True for POST /sessions/{id}/resume, which a set of fixed paths cannot list.
+
+    Resuming clears a halt that a gate or an operator decided, and everything
+    the session does afterwards runs on it, so it climbs the same ladder a
+    policy write does. The kill switch beside it stays where STATE.md puts it:
+    freezing a session can only stop work, and clearing one can restart it.
+    """
+    return method.upper() == "POST" and path.startswith("/sessions/") and path.endswith("/resume")
+
+
+def is_protected_write(method: str, path: str) -> bool:
+    """A write that needs the operator key on every stack, whatever else is open."""
+    return (method.upper(), path) in PROTECTED_WRITES or is_session_resume(method, path)
+
+
 # The pages and the hook are handed out anonymously on purpose: a reader who
 # cannot open the install page or take the script cannot adopt the product, and
 # a key requirement would put the artifacts that matter behind the one thing a
@@ -273,7 +289,23 @@ def validate_request_security(
         )
 
     # 3. Durable policy writes are closed whether or not the rest is
-    if (verb, path) in PROTECTED_WRITES:
+    if is_session_resume(verb, path):
+        return _require_operator_key(
+            headers,
+            path,
+            closed_title="Sessions Cannot Be Resumed Here",
+            closed_detail=(
+                "This deployment has no operator key configured, so a halted session stays "
+                "halted. Set THREEFOLD_API_KEYS on the function to enable resuming."
+            ),
+            closed_type="urn:threefold:error:policy-write-disabled",
+            missing_detail=(
+                "Resuming a halted session requires the operator key, because it clears a halt "
+                "that a gate or an operator decided. Provide it via 'X-API-Key' or "
+                "'Authorization: Bearer <key>'."
+            ),
+        )
+    if is_protected_write(verb, path):
         return _require_operator_key(
             headers,
             path,

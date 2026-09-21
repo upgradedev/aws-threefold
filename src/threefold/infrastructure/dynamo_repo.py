@@ -27,6 +27,19 @@ MAX_SCAN_PAGES = 50
 # could pull MAX_SCAN_PAGES megabytes out of the table.
 MIN_SCAN_PAGE_SIZE = 100
 
+# One project's layering rules live under this prefix plus the project name,
+# beside the shared set at CONFIG#rules rather than inside it, so saving one
+# team's architecture can never overwrite everyone else's.
+PROJECT_RULES_PREFIX = "CONFIG#rules#"
+
+# Who last resumed a halted session, why, when, and which halt they cleared.
+# Kept on the session row beside trip_reason and terminated_by, because that is
+# where the halt itself is recorded. They travel as plain attributes on the
+# session object: AgentSession belongs to the domain track and has no fields for
+# them yet, and a row written without them would drop the record on the very
+# next approved call, which rewrites the whole item.
+RESUME_FIELDS = ("resumed_by", "resume_reason", "resumed_at", "resumed_from")
+
 
 class SessionConflictError(RuntimeError):
     """Raised when a write is refused because the stored session is already tripped.
@@ -145,6 +158,9 @@ class DynamoDBSessionRepository:
             termination_reason=item.get("termination_reason") or None,
             created_at=item.get("created_at", ""),
         )
+        for name in RESUME_FIELDS:
+            if item.get(name):
+                setattr(session, name, item[name])
         return session
 
     def list_sessions(self, limit: int = 50) -> List[Dict[str, Any]]:
@@ -359,25 +375,49 @@ class DynamoDBSessionRepository:
         ever saved", and a warm container that re-reads the rules would take it
         as an instruction to go back to the shipped set.
         """
+        return self._get_rules("CONFIG#rules")
+
+    def save_rules(self, rules: List[Dict[str, Any]]) -> bool:
+        """Persists the rules. An architecture that resets on a cold start is not one."""
+        return self._put_rules("CONFIG#rules", rules)
+
+    def load_project_rules(self, project: str) -> Optional[List[Dict[str, Any]]]:
+        """Reads the rules saved for one project, or None when it has none of its own.
+
+        A method of its own rather than a parameter on load_rules: subclasses
+        elsewhere override load_rules with no arguments, and a project passed to
+        one of those would fail as a read and be taken for an outage. A failed
+        read raises for the same reason load_rules does.
+        """
+        return self._get_rules(f"{PROJECT_RULES_PREFIX}{project}")
+
+    def save_project_rules(self, project: str, rules: List[Dict[str, Any]]) -> bool:
+        """Persists one project's rules beside the shared set, never over it."""
+        return self._put_rules(f"{PROJECT_RULES_PREFIX}{project}", rules)
+
+    def _get_rules(self, partition: str) -> Optional[List[Dict[str, Any]]]:
         if self._table is not None:
             try:
-                res = self._table.get_item(Key={"PK": "CONFIG#rules", "SK": "METADATA"})
+                res = self._table.get_item(Key={"PK": partition, "SK": "METADATA"})
             except Exception as exc:
-                logger.warning("Failed to read layering rules from DynamoDB: %s", exc)
+                logger.warning("Failed to read layering rules %s from DynamoDB: %s", partition, exc)
                 raise
             item = res.get("Item")
             if item and item.get("rules_json"):
                 return json.loads(item["rules_json"])
             return None
-        stored = self._memory_store.get("CONFIG#rules#METADATA")
+        stored = self._memory_store.get(f"{partition}#METADATA")
         if stored and stored.get("rules_json"):
             return json.loads(stored["rules_json"])
         return None
 
-    def save_rules(self, rules: List[Dict[str, Any]]) -> bool:
-        """Persists the rules. An architecture that resets on a cold start is not one."""
+    def _put_rules(self, partition: str, rules: List[Dict[str, Any]]) -> bool:
+        # The memory key is the partition and the sort key together, so a project
+        # an operator's own pattern allows to be called "METADATA" still lands
+        # on a key of its own rather than on the shared set's.
+        memory_key = f"{partition}#METADATA"
         item = {
-            "PK": "CONFIG#rules",
+            "PK": partition,
             "SK": "METADATA",
             "rules_json": json.dumps(rules, sort_keys=True),
             "rule_count": len(rules),
@@ -385,12 +425,12 @@ class DynamoDBSessionRepository:
         if self._table is not None:
             try:
                 self._table.put_item(Item=item)
-                self._memory_store["CONFIG#rules#METADATA"] = item
+                self._memory_store[memory_key] = item
                 self._last_persistence_mode = "dynamodb"
                 return True
             except Exception as exc:
-                logger.warning("DynamoDB save_rules failed, writing to memory: %s", exc)
-        self._memory_store["CONFIG#rules#METADATA"] = item
+                logger.warning("DynamoDB save of layering rules %s failed, writing to memory: %s", partition, exc)
+        self._memory_store[memory_key] = item
         self._last_persistence_mode = "memory"
         return True
 
@@ -429,6 +469,10 @@ class DynamoDBSessionRepository:
             "created_at": session.created_at,
             "ttl": int(time.time()) + SESSION_TTL_SECONDS,
         }
+        for name in RESUME_FIELDS:
+            recorded = getattr(session, name, None)
+            if recorded:
+                item[name] = str(recorded)
         memory_key = f"SESSION#{session.session_id}#METADATA"
 
         if self._table is not None:

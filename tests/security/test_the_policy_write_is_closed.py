@@ -51,6 +51,21 @@ def _restore_the_rules_the_handler_holds():
     _evaluator.layering_rules = before
 
 
+@pytest.fixture(autouse=True)
+def _restore_the_policy_the_handler_holds():
+    """The operator-key test saves a repetition threshold of four.
+
+    Nothing put it back, which went unnoticed until a test here needed the
+    third identical call to halt a session: under the leaked threshold it took
+    a fourth, and that test failed only when it ran after this file's writes.
+    """
+    from threefold.interfaces.api_handlers import _evaluator
+
+    before = _evaluator.policy_config
+    yield
+    _evaluator.update_policy(before)
+
+
 def _call(method: str, path: str, body: dict | None = None, headers: dict | None = None):
     event = {
         "rawPath": f"/prod{path}",
@@ -232,8 +247,10 @@ PUBLIC_READS = [
 ]
 STILL_CLOSED = [
     ("POST", "/rules", {"rules": []}),
+    ("POST", "/rules", {"project": "Acme-Perimeter", "rules": []}),
     ("POST", "/policy/config", {}),
     ("POST", "/sessions/perimeter-probe/terminate", {"operator_name": "probe", "reason": "probe"}),
+    ("POST", "/sessions/perimeter-probe/resume", {"operator_name": "probe", "reason": "probe"}),
     ("POST", "/evaluate-tool-call", {"session_id": "perimeter-probe", "tool_name": "Read"}),
 ]
 
@@ -369,6 +386,76 @@ def test_a_private_stack_still_takes_the_calls_its_own_hooks_send(monkeypatch) -
     )
     assert status == 200
     assert verdict["status"] == "APPROVED"
+
+
+RESUME = ("POST", "/sessions/perimeter-resume/resume", {"operator_name": "Acme On-call", "reason": "probe"})
+
+
+def _halted(session_id: str) -> None:
+    """A session a page halted, so a resume that got through would change something."""
+    from threefold.application.dtos import ToolCallRequestDTO
+    from threefold.interfaces.api_handlers import _evaluator
+
+    repeat = ToolCallRequestDTO(
+        session_id=session_id,
+        developer_id="anonymous",
+        project_name="Acme-Perimeter",
+        tool_name="run_tests",
+        action_type="COMMAND_EXEC",
+        arguments={"cmd": "pytest -q"},
+        origin="page",
+    )
+    for _ in range(3):
+        _evaluator.evaluate_tool_call(repeat)
+    assert _evaluator.session_repo.get_session(session_id).is_tripped
+
+
+def test_a_resume_is_refused_outright_where_no_key_is_configured() -> None:
+    """The demo stack deploys with no key, so there a halt stays a halt."""
+    from threefold.interfaces.api_handlers import _evaluator
+
+    _halted("perimeter-resume")
+    status, body = _call(*RESUME)
+    assert status == 403
+    assert body["type"] == "urn:threefold:error:policy-write-disabled"
+    assert "stays halted" in body["detail"]
+    assert _evaluator.session_repo.get_session("perimeter-resume").is_tripped is True
+
+
+def test_a_resume_climbs_the_same_ladder_a_policy_write_does(monkeypatch) -> None:
+    from threefold.infrastructure.security_middleware import DEFAULT_DEMO_API_KEY
+    from threefold.interfaces.api_handlers import _evaluator
+
+    _halted("perimeter-resume")
+    monkeypatch.setenv("THREEFOLD_API_KEYS", "operator-key-1")
+    method, path, body = RESUME
+    assert _call(method, path, body)[0] == 401, "A missing key is 401"
+    assert _call(method, path, body, {"X-API-Key": "not-the-key"})[0] == 403, "A wrong key is 403"
+    assert _call(method, path, body, {"X-API-Key": DEFAULT_DEMO_API_KEY})[0] == 403, (
+        "A key printed in the source is not a key"
+    )
+    assert _evaluator.session_repo.get_session("perimeter-resume").is_tripped is True
+    assert _call(method, path, body, {"X-API-Key": "operator-key-1"})[0] == 200
+
+
+def test_the_kill_switch_was_not_closed_with_the_resume() -> None:
+    """Freezing a session can only stop work, and the demo stack answers it anonymously on purpose."""
+    status, body = _call(
+        "POST", "/sessions/perimeter-freeze/terminate", {"operator_name": "probe", "reason": "probe"}
+    )
+    assert status == 200
+    assert body["status"] == "SESSION_FROZEN"
+
+
+def test_the_resume_predicate_names_only_the_resume() -> None:
+    from threefold.infrastructure.security_middleware import is_protected_write
+
+    assert is_protected_write("POST", "/sessions/acme-1/resume")
+    assert is_protected_write("post", "/sessions/acme-1/resume")
+    assert not is_protected_write("GET", "/sessions/acme-1/resume")
+    assert not is_protected_write("POST", "/sessions/acme-1/terminate")
+    assert not is_protected_write("POST", "/sessions/acme-1")
+    assert is_protected_write("POST", "/rules")
 
 
 def test_the_readiness_probe_is_not_opened_with_the_reads(monkeypatch) -> None:

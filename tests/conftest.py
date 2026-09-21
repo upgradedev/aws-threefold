@@ -7,6 +7,8 @@ seventeen seconds, and pass or fail depending on the machine they run on.
 from __future__ import annotations
 
 import os
+import sys
+
 import pytest
 
 # Set on import as well as in the fixture below. The handler module builds its
@@ -54,3 +56,30 @@ def _reset_the_shared_rate_limiter():
 
     _global_rate_limiter.reset()
     yield
+
+
+@pytest.fixture(autouse=True)
+def _project_rules_do_not_outlive_their_test():
+    """Rules saved for one project in one test are gone before the next.
+
+    The handler's evaluator is module level, and it now holds rules per
+    project as well as the shared set. The files that save rules restore the
+    shared set themselves and know nothing of projects, so a project set saved
+    in one file would judge a call in another, and the failure would land
+    somewhere unrelated and order dependent. Nothing is imported here: a test
+    that never loaded the handler has nothing to clear.
+    """
+    yield
+    handlers = sys.modules.get("threefold.interfaces.api_handlers")
+    if handlers is None:
+        return
+    from threefold.infrastructure.dynamo_repo import PROJECT_RULES_PREFIX
+
+    evaluator = handlers._evaluator
+    held = getattr(evaluator, "_project_rules", None)
+    if held is not None:
+        held.clear()
+    store = getattr(evaluator.session_repo, "_memory_store", None) or {}
+    shared = f"{PROJECT_RULES_PREFIX}METADATA"
+    for key in [k for k in store if k.startswith(PROJECT_RULES_PREFIX) and k != shared]:
+        del store[key]

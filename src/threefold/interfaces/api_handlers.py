@@ -18,9 +18,14 @@ from urllib.parse import unquote
 from threefold.application.audit_issuer import AuditIssuer
 from threefold.application.bedrock_reviewer import BedrockArchitecturalReviewer
 from threefold.application.dtos import InvalidRequestError, PolicyConfigDTO, ToolCallRequestDTO
-from threefold.application.evaluator import RULES_REFRESH_SECONDS, GovernanceEvaluator, UnusableRulesError
+from threefold.application.evaluator import (
+    RULES_REFRESH_SECONDS,
+    GovernanceEvaluator,
+    SessionNotHaltedError,
+    UnusableRulesError,
+)
 from threefold.application.insights import summarise, with_layering_coverage
-from threefold.application.labels import project_label, public_row
+from threefold.application.labels import is_labelled, project_label, public_row
 from threefold.domain.imports import LANGUAGE_BY_SUFFIX, declared_imports
 from threefold.domain.boundary_guard import MAX_PATHLIKE_LENGTH, looks_like_path
 from threefold.domain.layering_rules import (
@@ -694,18 +699,93 @@ def _route(event: Dict[str, Any], http_method: str, request_id: str) -> Dict[str
             )
             return build_response(200, res_dict)
 
+        # Route 6b2: resume a halted session. The operator key is checked by the
+        # middleware before this runs. Before this route existed a halt was
+        # permanent, so a developer whose own hook session tripped had no way
+        # back to it but a new session id.
+        if path.startswith("/sessions/") and path.endswith("/resume") and http_method == "POST":
+            target_session_id = unquote(path[len("/sessions/"):-len("/resume")].strip())
+            body = _parse_body(event)
+            # Both are required, because the record of who cleared a halt and
+            # why is the reason this route is closed rather than open.
+            operator_name = _required_text(body, "operator_name", 120)
+            reason = _required_text(body, "reason", 240)
+            try:
+                resumed = _evaluator.resume_session(target_session_id, operator_name, reason)
+            except SessionNotHaltedError as running:
+                return build_response(
+                    409,
+                    rfc7807_error(
+                        409,
+                        "Session Is Not Halted",
+                        str(running),
+                        path,
+                        error_type="urn:threefold:error:session-not-halted",
+                    ),
+                )
+            if resumed is None:
+                return build_response(
+                    404,
+                    rfc7807_error(
+                        404,
+                        "No Such Session",
+                        f"No session named {target_session_id!r} has been recorded.",
+                        path,
+                        error_type="urn:threefold:error:session-not-found",
+                    ),
+                )
+            res_dict = {
+                "status": "SESSION_RESUMED",
+                "session_id": target_session_id,
+                "operator": operator_name,
+                "reason": reason,
+                "resumed_at": resumed.resumed_at,
+                "previous_trip_reason": resumed.resumed_from,
+                "is_tripped": resumed.is_tripped,
+                "total_cost_usd": resumed.total_cost_usd,
+                "budget_usd": resumed.budget_usd,
+                "note": (
+                    "The halt is cleared and the history and spend are kept, so the gates still "
+                    "apply: a session past its budget, or repeating the call that halted it, "
+                    "halts again."
+                ),
+            }
+            if idempotency_key:
+                global_idempotency_cache.set(idempotency_key, 200, res_dict)
+            emit_threefold_emf_metrics(
+                {"SessionResumed": 1.0},
+                namespace="Threefold/Emergency",
+            )
+            return build_response(200, res_dict)
+
         # Route 6c: the layering rules. Reading them is open, because a reader
         # has to be able to see the architecture they are being held to; writing
         # them is not, because they are the gate rather than a setting on it.
         if path in ("/rules", "/rules/layering") and http_method == "GET":
-            _evaluator.refresh_rules_if_stale()
-            rules = _evaluator.layering_rules
+            project = (event.get("queryStringParameters") or {}).get("project") or None
+            if project is not None and not isinstance(project, str):
+                raise InvalidRequestError("project must be given once.", "project")
+            rules, source = _evaluator.rules_in_force(project)
+            warnings = []
+            if project is not None and not is_labelled(project):
+                warnings.append(
+                    "project does not match this deployment's AllowedProjectPattern, so no rules "
+                    "can be saved for it and its calls are judged by the shared rules."
+                )
             return build_response(
                 200,
                 {
                     "rules": rules,
                     "count": len(rules),
-                    "is_default": rules == DEFAULT_RULES,
+                    # True when nothing was saved for what was asked about:
+                    # without a project, that the shipped set is in force, as
+                    # the rules page has always read it; with one, that the
+                    # project has no rules of its own. `source` says which set
+                    # came back instead, so a reader never has to infer it.
+                    "is_default": (source != "project") if project else rules == DEFAULT_RULES,
+                    "source": source,
+                    "project": project,
+                    "warnings": warnings,
                     "languages_read": sorted(set(LANGUAGE_BY_SUFFIX.values())),
                     "extensions_read": sorted(LANGUAGE_BY_SUFFIX),
                     "refresh_seconds": RULES_REFRESH_SECONDS,
@@ -740,6 +820,9 @@ def _route(event: Dict[str, Any], http_method: str, request_id: str) -> Dict[str
                 return _cannot_explain("Send the path of the file and its content.")
             if not isinstance(content, str):
                 return _cannot_explain("content must be a string.")
+            project = body.get("project") or None
+            if project is not None and not isinstance(project, str):
+                return _cannot_explain("project must be a string.")
             # The same test the gate applies before it judges a path at all. A
             # path the gate would never evaluate used to be judged here, so the
             # page said REFUSE for a write the gate then approved.
@@ -764,9 +847,11 @@ def _route(event: Dict[str, Any], http_method: str, request_id: str) -> Dict[str
                     )
                     problem["problems"] = problems
                     return build_response(400, problem)
+                source = "draft"
             else:
-                _evaluator.refresh_rules_if_stale()
-                rules = _evaluator.layering_rules
+                # The set the gate would judge this project's write by: its own
+                # when it has one, the shared set when it does not.
+                rules, source = _evaluator.rules_in_force(project)
             language, modules = declared_imports(target, content)
             found, note = layering_violations(target, content, rules)
             enforced = [item for item in found if item["mode"] == "enforce"]
@@ -778,6 +863,8 @@ def _route(event: Dict[str, Any], http_method: str, request_id: str) -> Dict[str
                     "language": language or None,
                     "imports": modules,
                     "rules_considered": "draft" if draft is not None else "in force",
+                    "rules_source": source,
+                    "project": project,
                     "applicable_rules": [rule["id"] for rule in rules_for_path(target, rules)],
                     "verdict": "REFUSE" if enforced else ("OBSERVE" if watched else "ALLOW"),
                     "violations": found,
@@ -794,8 +881,12 @@ def _route(event: Dict[str, Any], http_method: str, request_id: str) -> Dict[str
             # set can be sent as the list itself.
             body = _parse_body(event, expect_object=False)
             submitted = body.get("rules", body) if isinstance(body, dict) else body
+            # Without a project the shared set is replaced, as it always was.
+            # With one, only that project's set is, and a name the stack would
+            # store as "unlabelled" is refused by the evaluator as a 400.
+            project = body.get("project") if isinstance(body, dict) else None
             try:
-                saved = _evaluator.update_rules(submitted)
+                saved = _evaluator.update_rules(submitted, project=project)
             except UnusableRulesError as invalid:
                 problem = rfc7807_error(
                     400,
@@ -810,6 +901,8 @@ def _route(event: Dict[str, Any], http_method: str, request_id: str) -> Dict[str
                 "status": "RULES_UPDATED",
                 "count": len(saved),
                 "rules": saved,
+                "project": project,
+                "scope": "project" if project is not None else "shared",
                 "refresh_seconds": RULES_REFRESH_SECONDS,
             }
             if idempotency_key:
@@ -875,6 +968,21 @@ def _route(event: Dict[str, Any], http_method: str, request_id: str) -> Dict[str
     except Exception:
         logger.exception("Internal error processing request %s on %s", request_id, path)
         return build_response(500, _internal_error(path, request_id))
+
+
+def _required_text(body: Dict[str, Any], name: str, limit: int) -> str:
+    """A field that must be a non-empty string of at most `limit` characters.
+
+    Refused rather than cut to length: the value is kept as a record, and a
+    record shortened on the way in says something its author did not.
+    """
+    value = body.get(name)
+    if not isinstance(value, str) or not value.strip():
+        raise InvalidRequestError(f"{name} is required and must be text.", name)
+    value = value.strip()
+    if len(value) > limit:
+        raise InvalidRequestError(f"{name} must be at most {limit} characters.", name)
+    return value
 
 
 def _parse_body(event: Dict[str, Any], expect_object: bool = True) -> Any:

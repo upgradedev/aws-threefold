@@ -5,7 +5,11 @@ import copy
 import datetime
 import logging
 import time
-from typing import Any, Dict, Optional
+from collections import OrderedDict
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Tuple
+from threefold.domain import boundary_guard as boundary_guard_module
+from threefold.domain import loop_detector as loop_detector_module
 from threefold.domain.models import (
     AgentSession,
     GovernanceVerdict,
@@ -25,11 +29,13 @@ from threefold.domain.boundary_guard import (
 )
 from threefold.application.dtos import (
     EvaluationResultDTO,
+    InvalidRequestError,
     PolicyConfigDTO,
     ReadinessResponseDTO,
     SubsystemHealthDTO,
     ToolCallRequestDTO,
 )
+from threefold.application.labels import is_labelled
 from threefold.domain.events import (
     ArchitecturalBoundaryViolatedEvent,
     DomainEventPublisher,
@@ -59,6 +65,19 @@ FROZEN_SESSION_REASON = "Session execution frozen"
 # spend problem is the mislabel this whole distinction exists to avoid.
 HALTED_SESSION_REASONS = (FROZEN_SESSION_REASON, "Session already tripped")
 
+# How many projects' rules one container holds at once. The project name is
+# the caller's to send, and every labelled name that arrives gets an entry
+# whether or not it has rules of its own, so without a bound a caller cycling
+# through names that fit the pattern would grow this without end.
+MAX_PROJECTS_HELD = 128
+
+# Session ids the dashboard's scenarios mint. Their loop halt is the demo: call
+# three refused and the session frozen, so they keep it whatever origin says.
+SIMULATED_SESSION_PREFIX = "sim-"
+
+# The note a repeated read or poll leaves on its approval instead of a trip.
+READ_OR_POLL_REPEAT = "Repeat of a read or poll, recorded rather than refused"
+
 
 class UnusableRulesError(ValueError):
     """A save that would have dropped or changed a rule, with the reasons."""
@@ -66,6 +85,64 @@ class UnusableRulesError(ValueError):
     def __init__(self, message: str, problems: list) -> None:
         super().__init__(message)
         self.problems = problems
+
+
+class SessionNotHaltedError(RuntimeError):
+    """A resume asked of a session that is running, so there is nothing to clear.
+
+    Not a ValueError: the handler answers those with 400, and this is a
+    conflict with the session's state rather than a malformed request.
+    """
+
+
+@dataclass
+class _HeldRules:
+    """One project's rules as a container last read them.
+
+    `rules` is None when the project has none of its own, which is remembered
+    as carefully as a set that exists: otherwise every call from a project that
+    uses the shared set would cost a read.
+    """
+
+    rules: Optional[List[Dict[str, Any]]]
+    read_at: float
+
+
+def is_read_or_poll(invocation: ToolInvocation) -> bool:
+    """Whether the domain classes this call as a read or a poll.
+
+    The classifier belongs to the domain track and may not be there yet, so it
+    is looked up by name each time rather than imported: the loop gate's own
+    module first, then the boundary guard's, which is where the other readings
+    of a command live. Missing, or raising, counts as "not a read", so the loop
+    gate keeps biting rather than waving a call through on a classifier fault.
+    """
+    for module in (loop_detector_module, boundary_guard_module):
+        classifier = getattr(module, "is_read_or_poll", None)
+        if not callable(classifier):
+            continue
+        try:
+            return bool(classifier(invocation))
+        except Exception as exc:
+            logger.warning("is_read_or_poll failed; judging the call as a write: %s", exc)
+            return False
+    return False
+
+
+def loop_halts_session(request: Any) -> bool:
+    """Whether a loop detected on this call freezes the whole session.
+
+    A hook sits in front of a developer's own agent, and halting the session
+    there locked the developer out of their own work until an operator cleared
+    it, for a repeat the refusal alone had already stopped. So a hook's loop is
+    refused call by call and the session stays open. The dashboard's scenarios
+    (sim-*) and the pages keep the terminal halt, because the frozen session is
+    what they exist to show; any other origin keeps it too, because that is
+    what every caller had before origins existed.
+    """
+    if str(getattr(request, "session_id", "") or "").startswith(SIMULATED_SESSION_PREFIX):
+        return True
+    return getattr(request, "origin", "") != "hook"
 
 
 class GovernanceEvaluator:
@@ -102,6 +179,11 @@ class GovernanceEvaluator:
         # never been given any enforces the shipped set.
         self.layering_rules = self._adopt_saved_rules()
         self._rules_read_at = time.monotonic()
+        # A project's own rules, when it has any, replace the shared set for
+        # that project's calls. Read on first use and again after the same
+        # interval the shared set is, one project at a time, least recently
+        # used first out.
+        self._project_rules: "OrderedDict[str, _HeldRules]" = OrderedDict()
 
     def _adopt_saved_policy(self) -> None:
         """Applies the stored policy, so a cold container does not start on defaults."""
@@ -168,13 +250,78 @@ class GovernanceEvaluator:
         if cleaned:
             self.layering_rules = cleaned
 
-    def update_rules(self, raw_rules) -> list:
+    def rules_in_force(self, project: Optional[str] = None) -> Tuple[List[Dict[str, Any]], str]:
+        """The layering rules a call from `project` is judged by, and where they came from.
+
+        The source is "project" when the project has rules of its own,
+        otherwise "shared" when an operator has saved a shared set and
+        "shipped" when nobody has. A name outside AllowedProjectPattern is
+        never looked up: no rules can be saved for it, and such a call is
+        stored as "unlabelled" anyway.
+        """
+        self.refresh_rules_if_stale()
+        own = self._project_rules_for(project) if project else None
+        if own is not None:
+            return own, "project"
+        shared = self.layering_rules
+        return shared, ("shipped" if shared == DEFAULT_RULES else "shared")
+
+    def _project_rules_for(self, project: str) -> Optional[List[Dict[str, Any]]]:
+        """One project's own rules, or None, read at most once per interval.
+
+        A read that fails keeps what this container already holds for the
+        project, for the reason refresh_rules_if_stale gives. One that fails
+        before anything is held falls back to the shared set until the next
+        interval, which is the same staleness a warm container already accepts.
+        """
+        if not is_labelled(project):
+            return None
+        loader = getattr(self.session_repo, "load_project_rules", None)
+        if loader is None:
+            return None
+        now = time.monotonic()
+        held = self._project_rules.get(project)
+        if held is not None and now - held.read_at < RULES_REFRESH_SECONDS:
+            self._project_rules.move_to_end(project)
+            return held.rules
+        kept = held.rules if held is not None else None
+        try:
+            saved = loader(project)
+        except Exception as exc:
+            logger.warning("Could not read the layering rules for a project; keeping the ones held: %s", exc)
+            rules = kept
+        else:
+            # Nothing saved is an instruction to use the shared set, as it is
+            # for the shared set to use the shipped one. A stored set that no
+            # longer normalises to anything is not: that keeps what was held.
+            rules = (normalise_rules(saved) or kept) if saved else None
+        self._hold(project, rules, now)
+        return rules
+
+    def _hold(self, project: str, rules: Optional[List[Dict[str, Any]]], read_at: float) -> None:
+        self._project_rules[project] = _HeldRules(rules=rules, read_at=read_at)
+        self._project_rules.move_to_end(project)
+        while len(self._project_rules) > MAX_PROJECTS_HELD:
+            self._project_rules.popitem(last=False)
+
+    def update_rules(self, raw_rules, project: Optional[str] = None) -> list:
         """Replaces the layering rules and stores them, or changes nothing.
 
         The save is refused whole when any rule in it cannot be used. Keeping the
         usable ones answered 200 with a rule missing, and the only sign was a
         count one lower than the architect sent.
+
+        With a project, the set is that project's alone and the shared set is
+        untouched. The name has to fit AllowedProjectPattern, because a call
+        whose name does not is stored as "unlabelled" and could never be judged
+        by rules saved under the name it was sent with.
         """
+        if project is not None and not is_labelled(project):
+            raise InvalidRequestError(
+                "project must match this deployment's AllowedProjectPattern. Leave it out "
+                "to replace the shared rules.",
+                "project",
+            )
         cleaned, problems = validate_rules(raw_rules)
         if problems:
             raise UnusableRulesError(
@@ -186,6 +333,15 @@ class GovernanceEvaluator:
                 "when_path_matches and at least one pattern under forbid_imports.",
                 [],
             )
+        if project is not None:
+            self._hold(project, cleaned, time.monotonic())
+            saver = getattr(self.session_repo, "save_project_rules", None)
+            if saver is not None:
+                try:
+                    saver(project, cleaned)
+                except Exception as exc:  # pragma: no cover - storage is best effort
+                    logger.warning("Could not persist a project's layering rules: %s", exc)
+            return cleaned
         self.layering_rules = cleaned
         self._rules_read_at = time.monotonic()
         saver = getattr(self.session_repo, "save_rules", None)
@@ -232,6 +388,44 @@ class GovernanceEvaluator:
         session.terminate_manually(operator=operator_name, reason=reason)
         # An operator may halt a session that has already tripped itself, so this
         # write deliberately overrides the terminal-state guard.
+        self.session_repo.save_session(session, force=True)
+        return session
+
+    def resume_session(self, session_id: str, operator_name: str, reason: str) -> Optional[AgentSession]:
+        """Clears a halted session and records who cleared it, why, and what halt.
+
+        None for a session this service has no record of. Unlike the kill
+        switch, a resume never creates the session it names: there is nothing
+        to resume, and a write here would let a key holder mint rows by typo.
+
+        The history and the spend are kept. A resume clears the halt, not the
+        record of what led to it, so the gates still apply afterwards: a
+        session past its budget halts again on its next call that costs
+        anything, and a page or scenario session that repeats the call that
+        halted it halts again.
+        """
+        session = self.session_repo.get_session(session_id)
+        if session is None:
+            return None
+        if not session.is_tripped:
+            raise SessionNotHaltedError(
+                f"Session {session_id!r} is not halted, so there is nothing to resume."
+            )
+        cleared = session.trip_reason or ""
+        # Assigned here because AgentSession, which belongs to the domain track,
+        # has a method to halt a session and none to resume one.
+        session.is_tripped = False
+        session.trip_reason = None
+        session.is_terminated = False
+        session.terminated_by = None
+        session.termination_reason = None
+        session.resumed_by = operator_name
+        session.resume_reason = reason
+        session.resumed_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        session.resumed_from = cleared
+        # The stored row is tripped, and the terminal-state guard exists to
+        # refuse exactly the write that clears it. This is the one caller
+        # entitled to, which is why the route needs the operator key.
         self.session_repo.save_session(session, force=True)
         return session
 
@@ -320,8 +514,10 @@ class GovernanceEvaluator:
         reached the session write. Nothing could answer which rule refused what,
         for whom, last week, which is the only question a platform owner has.
         """
-        self.refresh_rules_if_stale()
-        result = self._decide(request, dry_run=bool(getattr(request, "dry_run", False)))
+        # Resolved once, so every gate in this call reads the same set even if
+        # a refresh lands halfway through.
+        rules, _ = self.rules_in_force(getattr(request, "project_name", None))
+        result = self._decide(request, rules, dry_run=bool(getattr(request, "dry_run", False)))
         self._record_decision(request, result)
         return result
 
@@ -404,7 +600,9 @@ class GovernanceEvaluator:
                 return rule
         return "NONE"
 
-    def _decide(self, request: ToolCallRequestDTO, dry_run: bool = False) -> EvaluationResultDTO:
+    def _decide(
+        self, request: ToolCallRequestDTO, rules: List[Dict[str, Any]], dry_run: bool = False
+    ) -> EvaluationResultDTO:
         """Evaluates tool invocation against all deterministic safety gates."""
         session = self.get_or_create_session(
             session_id=request.session_id,
@@ -413,14 +611,14 @@ class GovernanceEvaluator:
             budget_usd=request.budget_usd,
         )
         if not dry_run:
-            return self._run_gates(request, session, may_halt=True)
+            return self._run_gates(request, session, rules, may_halt=True)
         # The loop and cost gates trip the session object they are handed, so a
         # dry run hands them a copy and never writes a halt: a call that is only
         # being watched must not stop the real session it belongs to. A call the
         # gates approve is recorded as any approved call is, so the loop gate
         # still sees the history it needs on the next dry run.
         halted_before = session.is_tripped
-        found = self._run_gates(request, copy.deepcopy(session), may_halt=False)
+        found = self._run_gates(request, copy.deepcopy(session), rules, may_halt=False)
         return self._as_observed(found, halted_before)
 
     def _as_observed(self, found: EvaluationResultDTO, halted_before: bool) -> EvaluationResultDTO:
@@ -460,9 +658,17 @@ class GovernanceEvaluator:
         return observed
 
     def _run_gates(
-        self, request: ToolCallRequestDTO, session: AgentSession, may_halt: bool
+        self,
+        request: ToolCallRequestDTO,
+        session: AgentSession,
+        rules: List[Dict[str, Any]],
+        may_halt: bool,
     ) -> EvaluationResultDTO:
-        """The gates themselves. `may_halt` is false only for a dry run."""
+        """The gates themselves. `may_halt` is false only for a dry run.
+
+        `rules` are the layering rules for the calling project, resolved once
+        by the caller.
+        """
         rule_evaluations: Dict[str, bool] = {
             "SECRET_LEAKAGE_FREE": True,
             "ARCHITECTURAL_BOUNDARY_SAFE": True,
@@ -495,7 +701,7 @@ class GovernanceEvaluator:
 
         # Gate 1: Check for Secrets & Credentials
         is_boundary_safe, boundary_reason = ArchitecturalBoundaryGuard.evaluate_tool_boundary(
-            invocation, rules=self.layering_rules
+            invocation, rules=rules
         )
         if not is_boundary_safe:
             if "Sensitive credential detected" in boundary_reason:
@@ -535,7 +741,14 @@ class GovernanceEvaluator:
 
         # Gate 2: Check for Loop & Thrashing
         is_loop_free, loop_reason = self.loop_detector.evaluate_loop_risk(session.history, invocation)
-        if not is_loop_free:
+        repeat_note = ""
+        if not is_loop_free and is_read_or_poll(invocation):
+            # An agent waiting on CI or checking `git status` between edits
+            # repeats itself by design, and halting it for that stopped real
+            # work for a pattern that changes nothing. The call runs, joins the
+            # history like any approved call, and the repeat is noted on it.
+            repeat_note = f"{READ_OR_POLL_REPEAT}: {loop_reason}"
+        elif not is_loop_free:
             rule_evaluations["LOOP_THRASHING_FREE"] = False
             DomainEventPublisher.publish(
                 LoopDetectedEvent.create(
@@ -544,14 +757,24 @@ class GovernanceEvaluator:
                     payload={"tool": request.tool_name, "reason": loop_reason},
                 )
             )
-            session.trip_circuit_breaker(loop_reason)
-            if may_halt:
-                self._persist_halt(session)
+            reason = loop_reason
+            if loop_halts_session(request):
+                session.trip_circuit_breaker(loop_reason)
+                if may_halt:
+                    self._persist_halt(session)
+            else:
+                # Nothing is written: the refused call stays out of the history
+                # as every refusal does, so the same call is refused again while
+                # a different one is judged on its own.
+                reason = (
+                    f"{loop_reason}. This repeat was refused and the session was not halted, "
+                    "so the next different call is judged normally."
+                )
             verdict = GovernanceVerdict.create(
                 session_id=session.session_id,
                 status=VerdictStatus.BLOCKED_LOOP_DETECTED,
                 risk_level=RiskLevel.HIGH,
-                reason=loop_reason,
+                reason=reason,
                 rule_evaluations=rule_evaluations,
             )
             return self._to_dto(session, verdict)
@@ -609,7 +832,7 @@ class GovernanceEvaluator:
             rule_evaluations=rule_evaluations,
         )
         approved = self._to_dto(session, verdict)
-        watched = observe_layering(invocation, rules=self.layering_rules)
+        watched = observe_layering(invocation, rules=rules)
         if watched:
             approved.observations = [item["reason"] for item in watched]
             # One rule watching two files of a multi-file edit is one rule that
@@ -617,6 +840,12 @@ class GovernanceEvaluator:
             # inflated the number an architect decides a rollout from.
             approved.observed_rules = list(dict.fromkeys(item["rule_id"] for item in watched))
             approved.observed_target = watched[0].get("path", "")
+        if repeat_note:
+            # Appended after any rule's observation, so the ledger's first
+            # observed reason still belongs to its first observed rule. It names
+            # no rule: the console counts observed rules as "would refuse", and
+            # no gate would refuse this call.
+            approved.observations = list(approved.observations or []) + [repeat_note]
         return approved
 
     def _persist_halt(self, session: AgentSession) -> None:
