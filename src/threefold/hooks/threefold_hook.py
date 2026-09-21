@@ -69,6 +69,12 @@ from the directory of the file that names it. The install script writes
                           config.json are read from it, held_back.log and
                           unknown_shapes.jsonl are written to it
 
+Paths are sent relative to the directory holding `.threefold.json` when there
+is one, else to the agent's cwd, and a command carries `cwd`, where it runs
+relative to that root, whenever that is not the root itself: a Codex workdir,
+an Antigravity Cwd, or Claude Code standing in a subdirectory. Without it the
+service would read `> user.py` run in src/domain as a write at the root.
+
 A key set in the environment or in THREEFOLD_HOME is sent only to the endpoint
 named there (or the default), never to a different one a repository's
 `.threefold.json` names: a cloned repository must not be able to point the
@@ -429,7 +435,7 @@ def shape_of(payload: Any, max_keys: int = 200, max_depth: int = 6) -> List[str]
 class NormalisedCall:
     """One tool call in the shape request v2 carries, whichever agent made it."""
 
-    __slots__ = ("action_type", "files", "command", "command_base", "touched")
+    __slots__ = ("action_type", "files", "command", "command_base", "command_cwd", "touched")
 
     def __init__(
         self,
@@ -443,6 +449,9 @@ class NormalisedCall:
         self.files = files or []
         self.command = command
         self.command_base = command_base
+        # Where the command runs, relative to the governed root, once
+        # _relative_to_root has worked it out. Empty means the root itself.
+        self.command_cwd = ""
         # Paths the call affects without writing content to them, such as the
         # source of a move. They are checked for hold-back like any target.
         self.touched = touched or []
@@ -455,7 +464,9 @@ class NormalisedCall:
 
     def arguments(self) -> Dict[str, Any]:
         if self.command is not None:
-            return {"command": self.command}
+            # The service reads `echo ... > user.py` run in src/domain as a
+            # write to src/domain/user.py only if it is told where it runs.
+            return {"command": self.command, "cwd": self.command_cwd} if self.command_cwd else {"command": self.command}
         if len(self.files) == 1:
             return dict(self.files[0])
         return {"edits": [dict(entry) for entry in self.files]}
@@ -750,6 +761,28 @@ def config_root(payload: Dict[str, Any]) -> Optional[str]:
     return None
 
 
+def governed_root(payload: Dict[str, Any]) -> str:
+    """The directory calls are judged relative to: the one holding .threefold.json, else the agent's cwd.
+
+    An installed repository names its own root by the file the installer put
+    there. Measuring from the agent's cwd instead lost the path above it: with
+    Claude Code standing in src/domain, a Write to src/domain/user.py was sent
+    as `user.py`, which no rule on `**/domain/**` covers. Without a
+    .threefold.json the day-one root, the cwd, is kept.
+    """
+    start = project_root(payload)
+    root = config_root(payload)
+    if root and os.path.isfile(os.path.join(root, CONFIG_FILE_NAME)):
+        return root
+    return start
+
+
+def command_directory(call: "NormalisedCall", payload: Dict[str, Any]) -> str:
+    """Where a command runs: the agent's workdir for it, resolved from the cwd, or the cwd itself."""
+    cwd = project_root(payload)
+    return os.path.abspath(os.path.join(cwd, _as_path(call.command_base))) if call.command_base else cwd
+
+
 def read_config(path: str) -> Dict[str, Any]:
     """A configuration file as a dictionary, or empty if it is missing, too large or not an object."""
     try:
@@ -1020,13 +1053,13 @@ def held_back_category(call: NormalisedCall, payload: Dict[str, Any], raw_text: 
     Only a category is ever reported, never the path, content or term that
     caused it, so the log of what was held back cannot become the leak.
     """
-    root = project_root(payload)
-    canonical_root = _canonical(root)
+    cwd = project_root(payload)
+    canonical_root = _canonical(governed_root(payload))
     protected = protected_directories(home)
     canonical_protected = [_canonical(directory) for directory in protected]
 
     for target in call.targets():
-        resolved = _resolve(target, root)
+        resolved = _resolve(target, cwd)
         if any(_is_within(resolved, directory) for directory in canonical_protected):
             return "agent-config"
         if not _is_within(resolved, canonical_root):
@@ -1039,9 +1072,14 @@ def held_back_category(call: NormalisedCall, payload: Dict[str, Any], raw_text: 
             return "data-file"
 
     if call.command is not None:
-        base = os.path.join(root, _as_path(call.command_base)) if call.command_base else root
+        base = command_directory(call, payload)
         if command_reaches(call.command, base, protected):
             return "agent-config"
+        # A command run outside the project writes outside it, relative paths
+        # and all, and judging it as though it ran at the root would refuse
+        # work on some other checkout for a rule of this one.
+        if not _is_within(_canonical(base), canonical_root):
+            return "outside-root"
 
     if mentions_never_send(raw_text, payload, read_never_send(home)):
         return "never-send"
@@ -1055,12 +1093,12 @@ def governance_target(call: NormalisedCall, payload: Dict[str, Any], home: str) 
     the home folder are the developer's, and the day-one contract keeps those
     calls on the machine unjudged rather than refused.
     """
-    root = project_root(payload)
-    canonical_root = _canonical(root)
+    cwd = project_root(payload)
+    canonical_root = _canonical(governed_root(payload))
     canonical_protected = [_canonical(directory) for directory in protected_directories(home)]
     removed = set(call.touched) | {entry["file_path"] for entry in call.files if "deleted" in entry.get("note", "")}
     for target in call.targets():
-        resolved = _resolve(target, root)
+        resolved = _resolve(target, cwd)
         if not _is_within(resolved, canonical_root) or any(_is_within(resolved, d) for d in canonical_protected):
             continue
         relative = os.path.relpath(resolved, canonical_root).replace(os.sep, "/")
@@ -1078,8 +1116,12 @@ def find_credential(call: NormalisedCall) -> Optional[str]:
     return None
 
 
-def _shorten(text: str, root: str) -> str:
-    """Replaces the project's own absolute path with `.` and the home directory with `~`.
+def _shorten(text: str, root: str, shorthand: str = ".") -> str:
+    """Replaces the project's own absolute path with `shorthand` and the home directory with `~`.
+
+    The shorthand is the root as seen from where the command runs: `.` when it
+    runs at the root, `../..` when it runs two folders down, so a path written
+    out in full still names the same file once the service resolves it.
 
     A command has to be sent as it will run, so it cannot be turned into
     relative paths the way a target can. What can go is the part of it that is
@@ -1089,28 +1131,31 @@ def _shorten(text: str, root: str) -> str:
     its protected-path rule refuses exactly as it did before.
     """
     replacements = []
-    for base, shorthand in ((root, "."), (os.path.expanduser("~"), "~")):
+    for base, short in ((root, shorthand), (os.path.expanduser("~"), "~")):
         for candidate in (base, os.path.abspath(base), os.path.realpath(base)):
             if candidate and candidate not in (os.sep, "/"):
-                replacements.append((candidate.replace("\\", "/"), shorthand))
-                replacements.append((candidate.replace("/", "\\"), shorthand))
+                replacements.append((candidate.replace("\\", "/"), short))
+                replacements.append((candidate.replace("/", "\\"), short))
     flags = re.IGNORECASE if os.name == "nt" else 0
     for absolute, shorthand in sorted(set(replacements), key=lambda pair: len(pair[0]), reverse=True):
         text = re.sub(re.escape(absolute), shorthand, text, flags=flags)
     return text
 
 
-def _relative_to_root(call: NormalisedCall, root: str) -> None:
+def _relative_to_root(call: NormalisedCall, root: str, cwd: Optional[str] = None, command_dir: Optional[str] = None) -> None:
     """Takes the machine out of the call: targets relative to the project, paths shortened.
 
     By the time this runs every target is inside the root, so nothing is lost,
     and what is gained is that the service never sees the absolute path, which
-    on most machines begins with the developer's login name.
+    on most machines begins with the developer's login name. A relative target
+    is read from `cwd`, where the agent stands, and the result is measured from
+    `root`; a command carries where it runs, measured from `root` the same way.
     """
     real_root = os.path.realpath(root)
+    cwd = cwd or root
 
     def relative(path: str) -> str:
-        absolute = os.path.realpath(os.path.join(root, os.path.expanduser(_as_path(path))))
+        absolute = os.path.realpath(os.path.join(cwd, os.path.expanduser(_as_path(path))))
         return os.path.relpath(absolute, real_root).replace(os.sep, "/")
 
     for entry in call.files:
@@ -1119,7 +1164,10 @@ def _relative_to_root(call: NormalisedCall, root: str) -> None:
         if note.startswith("moved from "):
             entry["note"] = "moved from " + relative(note[len("moved from "):])
     if call.command is not None:
-        call.command = _shorten(call.command, root)
+        runs_in = os.path.realpath(command_dir or cwd)
+        where = os.path.relpath(runs_in, real_root).replace(os.sep, "/")
+        call.command_cwd = "" if where == "." else where
+        call.command = _shorten(call.command, root, os.path.relpath(real_root, runs_in).replace(os.sep, "/"))
 
 
 def record_held_back(home: str, category: str) -> None:
@@ -1350,7 +1398,12 @@ def handle(raw_text: Optional[str], forced_agent: Optional[str] = None) -> Tuple
         record_held_back(home, category)
         return None, notes
 
-    _relative_to_root(call, project_root(payload))
+    _relative_to_root(
+        call,
+        governed_root(payload),
+        project_root(payload),
+        command_directory(call, payload) if call.command is not None else None,
+    )
     body = build_request(call, payload, agent, project, dry_run=settings.mode == "observe")
     try:
         code, document, phrase = post_evaluation(body, settings.endpoint, settings.api_key)

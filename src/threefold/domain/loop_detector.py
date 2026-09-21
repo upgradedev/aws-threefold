@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from typing import List, Sequence, Tuple
-from threefold.domain.boundary_guard import CONTENT_KEYS, READ_TOOLS, analysed, shell_command
+from threefold.domain.boundary_guard import CONTENT_KEYS, READ_TOOLS, analysed, command_cwd, shell_command
 from threefold.domain.models import ToolActionType, ToolInvocation
 from threefold.domain.shell_writes import program_name
 
@@ -79,7 +79,7 @@ def is_read_or_poll(invocation: ToolInvocation) -> bool:
             return False
         arguments = invocation.arguments if isinstance(invocation.arguments, dict) else {}
         return not any(isinstance(key, str) and key.lower() in CONTENT_KEYS for key in arguments)
-    analysis = analysed(command)
+    analysis = analysed(command, command_cwd(invocation))
     if analysis.truncated or analysis.writes or analysis.tampering or not analysis.commands:
         return False
     return all(_polls(argv) for argv in analysis.commands)

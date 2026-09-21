@@ -333,5 +333,17 @@ def test_a_command_padded_past_the_cap_says_it_was_not_read_to_the_end() -> None
     assert analyse(padded).truncated is True
 
 
+def test_the_analysis_shared_between_gates_cannot_be_changed_by_one_of_them() -> None:
+    """The boundary check, the observe pass and the loop gate share one cached
+    analysis per command. A caller that appended to it would change what every
+    later request in the same container is told about the same command."""
+    from threefold.domain.boundary_guard import analysed
+
+    shared = analysed(f"echo 'import boto3' > {DOMAIN}")
+    with pytest.raises(AttributeError):
+        shared.writes.append(None)  # type: ignore[attr-defined]
+    assert analysed(f"echo 'import boto3' > {DOMAIN}") is shared
+
+
 def test_a_long_command_that_cannot_write_is_not_marked_unread() -> None:
     assert analyse("echo " + "a" * 40_000).truncated is False

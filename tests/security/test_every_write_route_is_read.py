@@ -182,6 +182,16 @@ def test_ordinary_work_is_approved(command: str) -> None:
     assert allowed, reason
 
 
+@pytest.mark.parametrize("command", BENIGN)
+def test_ordinary_work_is_approved_wherever_in_the_project_it_runs(command: str) -> None:
+    """The hook now says where a command runs. That place must never be read as
+    a file the command writes, or every command run below the root would be
+    judged against the rules as though it wrote its own directory."""
+    invocation = ToolInvocation("Bash", ToolActionType.COMMAND_EXEC, {"command": command, "cwd": "services/billing"})
+    allowed, reason = _judge(invocation)
+    assert allowed, reason
+
+
 @pytest.mark.parametrize("command", LAYERING_PROBES + GOVERNANCE_PROBES)
 def test_every_write_route_is_refused_while_the_rule_enforces(command: str) -> None:
     allowed, reason = _judge(_command(command))

@@ -7,6 +7,7 @@ be stepped around by renaming a field.
 """
 from __future__ import annotations
 
+import posixpath
 import re
 from functools import lru_cache
 from typing import Any, Dict, Iterator, List, Optional, Tuple
@@ -34,6 +35,10 @@ COMMAND_KEYS = ("command", "cmd", "script", "shell")
 SHELL_TOOLS = frozenset(
     ("bash", "shell", "local_shell", "exec_command", "unified_exec", "container.exec", "run_command", "powershell")
 )
+# Where a command runs, relative to the project root, as the hook sends it.
+# It is a place, not a file anything is written to, so it is never paired with
+# content as a write target.
+WORKING_DIRECTORY_KEYS = ("cwd", "workdir")
 
 
 def iter_string_leaves(value: Any) -> Iterator[str]:
@@ -189,7 +194,7 @@ class ArchitecturalBoundaryGuard:
         #     sent as a Write.
         command = shell_command(invocation)
         if command is not None:
-            refusal = shell_refusal(analysed(command), active_rules)
+            refusal = shell_refusal(analysed(command, command_cwd(invocation)), active_rules)
             if refusal:
                 return False, refusal
 
@@ -208,8 +213,10 @@ class ArchitecturalBoundaryGuard:
             if not allowed:
                 return False, f"Clean Architecture violation: {reason}"
 
-        # 4. Destructive or exfiltrating shell commands.
-        if invocation.action_type == ToolActionType.COMMAND_EXEC or not path_like:
+        # 4. Destructive or exfiltrating shell commands. A call that carries a
+        #    command is read as one whatever it declares, and its working
+        #    directory is a path-like leaf that must not switch this off.
+        if invocation.action_type == ToolActionType.COMMAND_EXEC or command is not None or not path_like:
             for leaf in iter_string_leaves(arguments):
                 for pattern in cls.DESTRUCTIVE_COMMANDS:
                     if pattern.search(leaf):
@@ -343,11 +350,19 @@ def write_pairs(arguments: Any) -> List[Tuple[str, str]]:
     pairs = iter_write_targets(arguments)
     if pairs:
         return pairs
-    path_like = [leaf for leaf in iter_string_leaves(arguments) if looks_like_path(leaf)]
+    places = _working_directories(arguments)
+    path_like = [leaf for leaf in iter_string_leaves(arguments) if looks_like_path(leaf) and leaf not in places]
     if len(path_like) == 1:
         # One path and loose content: everything written in the call is meant for it.
         return [(path_like[0], leaf) for leaf in _written_leaves(arguments) if leaf not in path_like]
     return []
+
+
+def _working_directories(arguments: Any) -> List[str]:
+    """The working directory a command call names, which is where it runs rather than what it writes."""
+    if not isinstance(arguments, dict):
+        return []
+    return [value for key, value in arguments.items() if isinstance(key, str) and key.lower() in WORKING_DIRECTORY_KEYS and isinstance(value, str)]
 
 
 def observe_layering(invocation: ToolInvocation, rules: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, str]]:
@@ -364,7 +379,7 @@ def observe_layering(invocation: ToolInvocation, rules: Optional[List[Dict[str, 
             found.append(dict(item, path=target))
     command = shell_command(invocation)
     if command is not None:
-        found.extend(shell_observations(analysed(command), active_rules))
+        found.extend(shell_observations(analysed(command, command_cwd(invocation)), active_rules))
     return found
 
 
@@ -410,23 +425,52 @@ def shell_command(invocation: ToolInvocation) -> Any:
     return None
 
 
-def analysed(command: Any) -> ShellAnalysis:
+def command_cwd(invocation: ToolInvocation) -> str:
+    """Where the command runs, relative to the project root, or "" for the root itself.
+
+    The hook sends it for a Codex workdir or an Antigravity Cwd below the root.
+    Without it `echo ... > user.py` run in src/domain was judged as a write to
+    user.py at the root, which no rule on `**/domain/**` covers. A value that
+    is absolute or climbs out of the root is not a place inside the project and
+    is ignored rather than trusted.
+    """
+    arguments = invocation.arguments if isinstance(invocation.arguments, dict) else {}
+    for value in _working_directories(arguments):
+        candidate = value.strip().replace("\\", "/")
+        if not candidate or candidate.startswith(("/", "~")) or re.match(r"^[A-Za-z]:", candidate):
+            continue
+        normal = posixpath.normpath(candidate)
+        if normal == "." or normal == ".." or normal.startswith("../"):
+            continue
+        return normal
+    return ""
+
+
+def analysed(command: Any, cwd: str = "") -> ShellAnalysis:
     """The writes one command makes, read once per command rather than once per gate.
 
     The boundary check, the observe pass and the loop gate each ask about the
     same command in the same request. The result is shared, so no caller may
-    change it. Long commands are not kept, so the cache cannot hold megabytes.
+    change it: `writes` and `commands` are handed out as tuples for that
+    reason. Long commands are not kept, so the cache cannot hold megabytes.
     """
     key = tuple(command) if isinstance(command, list) else command
     size = sum(len(word) for word in key) if isinstance(key, tuple) else len(key or "")
     if size > MAX_CACHED_COMMAND:
-        return analyse_shell(command)
-    return _analysed(key)
+        return _frozen(analyse_shell(command, cwd))
+    return _analysed(key, cwd)
+
+
+def _frozen(analysis: ShellAnalysis) -> ShellAnalysis:
+    analysis.writes = tuple(analysis.writes)  # type: ignore[assignment]
+    analysis.tampering = tuple(analysis.tampering)  # type: ignore[assignment]
+    analysis.commands = tuple(analysis.commands)  # type: ignore[assignment]
+    return analysis
 
 
 @lru_cache(maxsize=128)
-def _analysed(key: Any) -> ShellAnalysis:
-    return analyse_shell(list(key) if isinstance(key, tuple) else key)
+def _analysed(key: Any, cwd: str) -> ShellAnalysis:
+    return _frozen(analyse_shell(list(key) if isinstance(key, tuple) else key, cwd))
 
 
 def _named_paths(value: Any) -> Iterator[str]:
