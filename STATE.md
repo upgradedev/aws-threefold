@@ -4,7 +4,20 @@
 **Hackathon:** AWS Zero to Shipped, submissions close 2026-10-02 23:59 PDT
 **Category:** `#workplace-efficiency` · **Lane:** `#community` (hedge to `#commercial-potential` / `#startup` decided 2026-09-28)
 **Entries permitted:** one. The Rules tab, ELIGIBILITY section, reads "Limit one entry per person." Threefold is that entry.
-**Active agent claim:** none
+**Active agent claim:** Claude Code (this session), 2026-09-21 to 2026-09-29 — the implementation plan below. Tracks and the files each owns:
+- A, engine and hooks: `src/threefold/domain/**`, `src/threefold/hooks/**`, `scripts/threefold_*.py`, `scripts/pre-commit-gate.py`, `tests/unit/**`, `tests/security/**`, `tests/hook/**`
+- B, service and AWS: `src/threefold/interfaces/**`, `src/threefold/application/**`, `src/threefold/infrastructure/**`, `deploy/**`, `tests/integration/**`; the only track that deploys
+- D, pages and story: `src/threefold/web/*.html`, `README.md`, `docs/*.md`
+- Owner: `STATE.md`, `LOG.md`, `TRAPS.md`, `CLAUDE.md`
+
+## Contracts, 2026-09-21
+
+Fixed before the tracks split, so no track waits on another for a field name.
+
+- **Hook request v2** (`POST /evaluate-tool-call`): `session_id`; `project_name`, required; a name that does not match the stack's `AllowedProjectPattern` (default `^Acme-[A-Za-z0-9-]{1,40}$`) is stored, counted and used as a metric dimension as `unlabelled`, and the response says so in `warnings`; `developer`, either `anonymous` or a 12-hex hash computed locally, never a user name, and any developer value is shown in public only as a short hash; `tool_name`, `action_type`, `arguments`; `agent`, one of `claude-code`, `codex`, `antigravity`, `pre-commit`, `ci`, `page`; `origin`, one of `hook`, `page`, `ci`; `explain`, false from hooks and true from the pages; `dry_run`, recorded as observed, never refused and never trips a session.
+- **What leaves the machine.** A hook sends only tool calls whose target resolves inside the project root. It never sends paths under an agent's own configuration or memory (`~/.claude`, `~/.codex`, `~/.gemini`), data files (by extension and by directory), or any call containing a term from the owner's local never-send list. The list, the project aliases and the list of governed repositories live in `~/.threefold/` on the owner's machine and are never committed here.
+- **Verdict output per agent.** Claude Code and Codex: `hookSpecificOutput.permissionDecision = "deny"` with a reason, and nothing at all on approval, so the agent's own permission flow still runs. Antigravity: `{"decision": "deny", "reason": ...}`, and nothing on approval. Every agent: a failure to reach the service prints nothing and exits 0, unless `THREEFOLD_FAIL_CLOSED=1`.
+- **Two stacks.** `threefold-prod` stays the public demo. `threefold-dogfood` is created from the same template with `PublicReads=false`, so its ledger and sessions need the operator key to read, and it carries the owner's real use under aliases. Only anonymised totals from it are ever shown in public.
 
 ## Ship gate
 
