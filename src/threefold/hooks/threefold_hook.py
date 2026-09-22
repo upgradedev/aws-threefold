@@ -54,6 +54,21 @@ file whose content is the key, never the key itself; a relative path is read
 from the directory of the file that names it. The install script writes
 `.threefold.json` and lists it in `.git/info/exclude`.
 
+`.threefold.json` may also hold `include`, a list of globs relative to its own
+directory (forward slashes, `**` crosses directories):
+
+    {"project": "Acme-Workspace", "include": ["repos/acme-alpha/**", "repos/acme-beta/**"]}
+
+With it, a call is sent only when every path it targets, and for a command
+the directory it runs in and every path its text names, falls inside one of
+them; anything else stays on the machine as `not-included`. This is how a
+workspace root holding several repositories governs only the ones the owner
+chose, and why a checkout inside such a workspace with no `.threefold.json` of
+its own is configured from the workspace root rather than stopping the walk
+at its own `.git`. Without it, or with an empty list, nothing changes. A credential is
+still refused wherever it is written, and in enforce mode a write to the
+hooks' own files is still refused, before the list is consulted.
+
     THREEFOLD_PROJECT     required, here or in a file. Unset, nothing is sent.
     THREEFOLD_ENDPOINT    the service, default the public /prod/ stack
     THREEFOLD_MODE        `enforce` (the default) or `observe`, which sends
@@ -98,6 +113,7 @@ by whatever Python the developer already has.
 from __future__ import annotations
 
 import datetime
+import functools
 import hashlib
 import http.client
 import json
@@ -172,7 +188,12 @@ DATA_DIRECTORIES = frozenset(
 # the developer, not about the project being governed.
 AGENT_CONFIG_DIRECTORIES = (".claude", ".codex", ".gemini")
 
-HELD_BACK_CATEGORIES = ("outside-root", "agent-config", "data-file", "never-send", "no-project")
+HELD_BACK_CATEGORIES = ("outside-root", "agent-config", "not-included", "data-file", "never-send", "no-project")
+
+# A path as a program other than a file: writing to it or reading from it
+# touches no one's work, so a command naming it is not naming a path outside
+# the include list. `2>/dev/null` would otherwise keep every quiet command at home.
+_DEVICE_TOKENS = frozenset(("/dev/null", "/dev/stdin", "/dev/stdout", "/dev/stderr", "/dev/tty", "nul"))
 
 CONFIG_FILE_NAME = ".threefold.json"
 HOME_CONFIG_NAME = "config.json"
@@ -220,6 +241,123 @@ SECRET_PATTERNS: List[Tuple[str, "re.Pattern[str]"]] = [
     ("GENERIC_API_KEY", re.compile(r"(?i)(api[_-]?key|secret[_-]?token)\s*[:=]\s*['\"][A-Za-z0-9_\-]{20,}['\"]")),
     ("PRIVATE_KEY_HEADER", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
 ]
+
+
+# --- include globs ------------------------------------------------------------
+#
+# Copied from threefold.domain.path_match, because this file is downloaded
+# alone. A test compares the two over the same paths and globs, so an include
+# list is read exactly the way a rule's paths are: `**` crosses directories,
+# including none, `*` and `?` stay inside one segment, and matching walks
+# segments rather than building a regular expression, so no glob in a
+# repository's file can make the hook slow. The one difference is case: the
+# service folds it always, while the hook folds it only on Windows, whose paths
+# are case-insensitive. On a case-sensitive disk `repos/Acme` and `repos/acme`
+# are two directories, and an include list must not quietly send the one the
+# owner did not name.
+
+MAX_GLOB_LENGTH = 300
+FOLD_GLOB_CASE = os.name == "nt"
+
+
+def _glob_normalise(path: str) -> str:
+    """Windows separators and a leading ./ become one shape."""
+    if not path:
+        return ""
+    cleaned = path.replace("\\", "/").strip()
+    while cleaned.startswith("./"):
+        cleaned = cleaned[2:]
+    return cleaned.lstrip("/")
+
+
+@functools.lru_cache(maxsize=512)
+def _glob_segments(pattern: str) -> Tuple[str, ...]:
+    """A glob as segments, with runs of `**` collapsed and a `**` inside a segment read as `*`."""
+    out: List[str] = []
+    for segment in _glob_normalise(pattern).split("/"):
+        if segment == "**":
+            if out and out[-1] == "**":
+                continue
+            out.append("**")
+        elif segment:
+            while "**" in segment:
+                segment = segment.replace("**", "*")
+            out.append(segment)
+    return tuple(out)
+
+
+def _glob_segment_matches(text: str, pattern: str) -> bool:
+    """`*` and `?` inside one segment, by the two-pointer walk that never recurses."""
+    t = p = 0
+    star = -1
+    resume = 0
+    while t < len(text):
+        if p < len(pattern) and (pattern[p] == "?" or pattern[p] == text[t]):
+            t += 1
+            p += 1
+        elif p < len(pattern) and pattern[p] == "*":
+            star = p
+            resume = t
+            p += 1
+        elif star != -1:
+            p = star + 1
+            resume += 1
+            t = resume
+        else:
+            return False
+    while p < len(pattern) and pattern[p] == "*":
+        p += 1
+    return p == len(pattern)
+
+
+def _glob_matches_segments(path_segments: Tuple[str, ...], pattern_segments: Tuple[str, ...]) -> bool:
+    """Whether the path's segments are covered, decided once per pair of positions."""
+    width = len(path_segments)
+    reachable = [False] * (width + 1)
+    reachable[0] = True
+    for segment in pattern_segments:
+        following = [False] * (width + 1)
+        if segment == "**":
+            seen = False
+            for j in range(width + 1):
+                seen = seen or reachable[j]
+                following[j] = seen
+        else:
+            for j in range(width):
+                if reachable[j] and _glob_segment_matches(path_segments[j], segment):
+                    following[j + 1] = True
+        reachable = following
+        if not any(reachable):
+            return False
+    return reachable[width]
+
+
+def glob_matches(path: str, pattern: str, fold_case: Optional[bool] = None) -> bool:
+    """Whether one relative path is covered by one glob."""
+    if not path or not pattern or len(pattern) > MAX_GLOB_LENGTH:
+        return False
+    if FOLD_GLOB_CASE if fold_case is None else fold_case:
+        path, pattern = path.lower(), pattern.lower()
+    path_segments = tuple(segment for segment in _glob_normalise(path).split("/") if segment)
+    if not path_segments:
+        return False
+    return _glob_matches_segments(path_segments, _glob_segments(pattern))
+
+
+def include_glob(value: Any) -> Optional[str]:
+    """An include glob as the hook reads it, or None for one that can only mean a mistake.
+
+    Empty, absolute (`/x`, `C:/x`, `~/x`) or climbing out with `..`: the list
+    is relative to the directory of the file that holds it, so none of these
+    can name anything inside it. The installer refuses the same three, so a
+    list it wrote never loses an entry here.
+    """
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    if stripped.startswith(("/", "\\", "~")) or re.match(r"^[A-Za-z]:", stripped) or ".." in stripped:
+        return None
+    return _glob_normalise(stripped) or None
 
 
 # --- small helpers -----------------------------------------------------------
@@ -763,11 +901,44 @@ def config_root(payload: Dict[str, Any]) -> Optional[str]:
     config file, so a repository nested in a governed one is not governed by
     its parent's settings by accident. This is only where configuration is
     found: what may leave the machine is still decided against project_root.
+
+    The one exception is a workspace: a checkout with no configuration of its
+    own, below a directory whose .threefold.json carries an include list and
+    with no other checkout in between, belongs to that directory. The list is the owner saying, not by
+    accident, which of the checkouts below it are sent, so an included one is
+    governed from the workspace root and a left-out one is held back as
+    not-included, even when THREEFOLD_PROJECT would otherwise send it under a
+    project of its own.
     """
     current = project_root(payload)
     for _ in range(MAX_WALK_UP):
-        if os.path.isfile(os.path.join(current, CONFIG_FILE_NAME)) or os.path.exists(os.path.join(current, ".git")):
+        if os.path.isfile(os.path.join(current, CONFIG_FILE_NAME)):
             return current
+        if os.path.exists(os.path.join(current, ".git")):
+            return _workspace_above(current) or current
+        parent = os.path.dirname(current)
+        if parent == current:
+            return None
+        current = parent
+    return None
+
+
+def _workspace_above(checkout: str) -> Optional[str]:
+    """The directory above a checkout whose .threefold.json has an include list, if there is one.
+
+    The walk stops at the next `.git` without a configuration file, as the
+    first walk does: a checkout nested in another checkout is that checkout's
+    business, and the tests rely on a `.git` marker keeping every walk inside
+    their own directory.
+    """
+    current = os.path.dirname(checkout)
+    for _ in range(MAX_WALK_UP):
+        path = os.path.join(current, CONFIG_FILE_NAME)
+        if os.path.isfile(path):
+            include = read_config(path).get("include")
+            return current if include is not None and include != [] else None
+        if os.path.exists(os.path.join(current, ".git")):
+            return None
         parent = os.path.dirname(current)
         if parent == current:
             return None
@@ -816,7 +987,7 @@ def read_config(path: str) -> Dict[str, Any]:
 class Settings:
     """What one call is sent under, and where each part came from. Never holds a key in its repr."""
 
-    __slots__ = ("project", "endpoint", "endpoint_source", "mode", "api_key", "notes")
+    __slots__ = ("project", "endpoint", "endpoint_source", "mode", "api_key", "include", "notes")
 
     def __init__(self) -> None:
         self.project = ""
@@ -824,6 +995,9 @@ class Settings:
         self.endpoint_source = "default"
         self.mode = "enforce"
         self.api_key: Optional[str] = None
+        # None: every call inside the root may be sent, as before include
+        # existed. A list, even an empty one: only calls inside its globs.
+        self.include: Optional[List[str]] = None
         self.notes: List[str] = []
 
     def __repr__(self) -> str:
@@ -948,7 +1122,33 @@ def resolve_settings(payload: Dict[str, Any]) -> Settings:
     if key_file:
         key = _read_key_file(key_file, key_label, settings.notes)
     settings.api_key = key
+    settings.include = _read_include(repo, settings.notes)
     return settings
+
+
+def _read_include(repo: Dict[str, Any], notes: List[str]) -> Optional[List[str]]:
+    """The include globs of the repository's .threefold.json, or None when it has none.
+
+    Read from that file alone, because its globs are relative to its own
+    directory and mean nothing anywhere else. Absent, null or an empty list
+    leaves the hook as it was. Anything else restricts what is sent, and a
+    part that cannot be read restricts it more rather than less: a list
+    written as a single string, or a glob that is absolute or climbs out with
+    `..`, matches nothing, so a typo in the list of what to send keeps calls
+    at home instead of sending the repositories the owner left out.
+    """
+    value = repo.get("include")
+    if value is None or value == []:
+        return None
+    if not isinstance(value, list):
+        notes.append(f"include in {CONFIG_FILE_NAME} must be a list of globs, so nothing was sent until it is.")
+        return []
+    globs = [glob for glob in (include_glob(item) for item in value) if glob]
+    if len(globs) != len(value):
+        notes.append(
+            f"an include glob in {CONFIG_FILE_NAME} is empty, absolute or contains '..', and matches nothing."
+        )
+    return globs
 
 
 def _paired(home_config: Dict[str, Any], endpoint_url: str, key_file: str, home: str) -> bool:
@@ -1048,6 +1248,20 @@ def command_reaches(command: str, base: str, protected: Sequence[str]) -> bool:
     for form in forms:
         if re.search(re.escape(form) + r"(?=$|[\\/\s'\"`;|&<>),])", text):
             return True
+    for _, candidate in _command_paths(command, canonical_base):
+        if any(_is_within(candidate, directory) for directory in canonical):
+            return True
+    return False
+
+
+def _command_paths(command: str, canonical_base: str) -> Iterator[Tuple[str, str]]:
+    """Each word of a command that reads as a path, with where it lands from where the command runs.
+
+    A word is a path when it holds a separator, starts with `.`, or starts
+    with a home prefix (`~`, `$HOME`, `%USERPROFILE%`), which is expanded.
+    Bare words such as `pytest` or `status` are left out: read as paths they
+    would all land in the directory the command runs in, which says nothing.
+    """
     for token in _COMMAND_TOKEN_SPLIT.split(command):
         if not token:
             continue
@@ -1056,10 +1270,40 @@ def command_reaches(command: str, base: str, protected: Sequence[str]) -> bool:
             if not ("/" in token or "\\" in token or token.startswith(".")):
                 continue
             expanded = token
-        candidate = _canonical(os.path.join(canonical_base, _as_path(expanded)))
-        if any(_is_within(candidate, directory) for directory in canonical):
-            return True
-    return False
+        yield token, _canonical(os.path.join(canonical_base, _as_path(expanded)))
+
+
+def _included(canonical_path: str, canonical_root: str, include: Sequence[str]) -> bool:
+    """Whether a canonical path lies inside one of the include globs, read relative to the root.
+
+    The root itself is inside none of them: a glob names something within the
+    directory that holds the list, and a workspace root that holds the
+    repositories left out is not one of the repositories let in.
+    """
+    if not _is_within(canonical_path, canonical_root):
+        return False
+    relative = os.path.relpath(canonical_path, canonical_root).replace(os.sep, "/")
+    if relative in ("", "."):
+        return False
+    return any(glob_matches(relative, glob) for glob in include)
+
+
+def _command_included(command: str, base: str, canonical_root: str, include: Sequence[str]) -> bool:
+    """Whether a command runs inside the include globs and names no path outside them.
+
+    Where it runs is not enough. `cat repos/acme-gamma/a.py > b.py` run from
+    an included repository carries a file of a left-out one in its text, and
+    the text is what would be sent.
+    """
+    canonical_base = _canonical(base)
+    if not _included(canonical_base, canonical_root, include):
+        return False
+    for token, candidate in _command_paths(command, canonical_base):
+        if token.lower() in _DEVICE_TOKENS:
+            continue
+        if not _included(candidate, canonical_root, include):
+            return False
+    return True
 
 
 def read_never_send(home: str) -> List[str]:
@@ -1119,11 +1363,23 @@ def mentions_never_send(raw_text: str, payload: Any, terms: Sequence[str]) -> bo
     return any(term_occurs(haystack, term) for term in terms for haystack in haystacks)
 
 
-def held_back_category(call: NormalisedCall, payload: Dict[str, Any], raw_text: str, home: str) -> Optional[str]:
+def held_back_category(
+    call: NormalisedCall,
+    payload: Dict[str, Any],
+    raw_text: str,
+    home: str,
+    include: Optional[Sequence[str]] = None,
+) -> Optional[str]:
     """Why this call must not leave the machine, or None if it may.
 
     Only a category is ever reported, never the path, content or term that
     caused it, so the log of what was held back cannot become the leak.
+
+    `include` is the list from Settings. When it is not None every target, and
+    for a command the directory it runs in and each path its text names, must
+    fall inside one of its globs, read relative to the governed root. That
+    root is the directory of the .threefold.json the list came from, so a glob
+    reads like the paths the ledger shows.
     """
     cwd = project_root(payload)
     canonical_root = _canonical(governed_root(payload))
@@ -1136,6 +1392,8 @@ def held_back_category(call: NormalisedCall, payload: Dict[str, Any], raw_text: 
             return "agent-config"
         if not _is_within(resolved, canonical_root):
             return "outside-root"
+        if include is not None and not _included(resolved, canonical_root, include):
+            return "not-included"
         # Everything under .git is held back, the hook scripts and .git/config
         # included. Those two decide whether the hooks run, but .git/config also
         # holds remote URLs, which can carry a token or a repository name, and
@@ -1153,6 +1411,8 @@ def held_back_category(call: NormalisedCall, payload: Dict[str, Any], raw_text: 
         # work on some other checkout for a rule of this one.
         if not _is_within(_canonical(base), canonical_root):
             return "outside-root"
+        if include is not None and not _command_included(call.command, base, canonical_root, include):
+            return "not-included"
 
     if mentions_never_send(raw_text, payload, read_never_send(home)):
         return "never-send"
@@ -1480,7 +1740,7 @@ def handle(raw_text: Optional[str], forced_agent: Optional[str] = None) -> Tuple
                 "whether the agent's hooks run. Nothing was sent. A person changes that file, not the agent.",
             ), notes
 
-    category = held_back_category(call, payload, raw_text or "", home)
+    category = held_back_category(call, payload, raw_text or "", home, settings.include)
     if category:
         record_held_back(home, category)
         return None, notes

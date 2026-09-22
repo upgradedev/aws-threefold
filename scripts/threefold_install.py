@@ -3,7 +3,8 @@
 
     threefold_install.py --repo PATH --project Acme-Payments
         [--agents claude-code,codex,antigravity] [--mode observe|enforce]
-        [--endpoint URL] [--api-key-file PATH] [--uninstall] [--dry-run]
+        [--endpoint URL] [--api-key-file PATH] [--include GLOB ...]
+        [--uninstall] [--dry-run]
 
 What it does, in order:
 
@@ -41,6 +42,21 @@ the copy the record keeps, as long as it still holds exactly what the install
 wrote; one changed by hand since keeps the change and loses only the install's
 entry. The shared copies in THREEFOLD_HOME stay, because other repositories
 may be using them. `--dry-run` prints every step and writes nothing at all.
+
+`--include GLOB`, repeatable, writes an `include` list into `.threefold.json`:
+globs relative to that directory, and the hook then sends only calls inside
+them. A glob that is empty, absolute or contains `..` is refused, because it
+could name nothing inside the directory.
+
+A directory git does not recognise as a repository, such as a workspace root
+that holds several repositories, is installed in workspace mode instead of
+being refused. Only `.threefold.json` and the three agents' settings files are
+written there, merged as above; there is no pre-commit hook, so nothing checks
+a commit, and nothing is written under any `.git`, including a `.git` folder
+git itself does not accept. The install record is kept in
+`THREEFOLD_HOME/installs/<16 hex of the directory's path>.json`, so `--uninstall`
+still removes exactly what was added. With `--include` this is how a
+workspace governs only the repositories the owner chose.
 
 Codex reads a project's hooks only when that project is trusted in Codex. This
 script does not edit `~/.codex/config.toml` to trust it: that is a decision
@@ -82,6 +98,7 @@ CONFIG_FILE = ".threefold.json"
 HOME_CONFIG = "config.json"
 EXCLUDE_KEY = "git:info/exclude"
 MANIFEST_NAME = "threefold-install.json"
+INSTALLS_DIR = "installs"
 PRE_COMMIT_MARKER = "# threefold pre-commit: installed by threefold_install.py"
 CHAINED_NAME = "pre-commit.before-threefold"
 EXCLUDE_MARKER = "# threefold: files written by threefold_install.py"
@@ -129,6 +146,82 @@ def git_path(root: Path, name: str) -> Path:
     _, value = git(root, "rev-parse", "--git-path", name)
     path = Path(value)
     return path if path.is_absolute() else (root / path)
+
+
+def locate(repo: Path) -> Tuple[Path, bool]:
+    """The directory to install in, and whether it is a workspace rather than a repository.
+
+    A repository is whatever git says the top of the checkout is. Anything git
+    does not recognise is a workspace, installed where it was named. That
+    includes a directory holding a `.git` folder git does not accept, such as
+    an empty one: git passes over such a folder and keeps looking upwards, so
+    inside some other checkout it would answer with that checkout's top, and
+    the install would land in a repository nobody named. A `.git` of any kind
+    between the named directory and the top git reports is therefore read as
+    git not recognising the named directory.
+    """
+    try:
+        code, top = git(repo, "rev-parse", "--show-toplevel", check=False)
+    except OSError:
+        code, top = 1, ""  # no git at all: nothing here is a repository git recognises
+    if code == 0 and top:
+        root = Path(top).resolve()
+        if not _passed_over_git(repo.resolve(), root):
+            return root, False
+    if not repo.is_dir():
+        raise InstallError(f"{repo} is not a directory")
+    return repo.resolve(), True
+
+
+def _passed_over_git(start: Path, top: Path) -> bool:
+    """Whether a `.git` sits at or above `start` but below the top git reported, so git skipped it."""
+    current = start
+    while current != top and top in current.parents:
+        if (current / ".git").exists():
+            return True
+        current = current.parent
+    return False
+
+
+def workspace_record(home: Path, root: Path) -> Path:
+    """Where a workspace's install record lives: in THREEFOLD_HOME, never in the workspace.
+
+    Keyed by the directory's absolute path, case-folded where the file system
+    folds it, so `--uninstall` finds the record however the path was typed.
+    """
+    digest = hashlib.sha256(os.path.normcase(str(root)).encode("utf-8")).hexdigest()[:16]
+    return home / INSTALLS_DIR / f"{digest}.json"
+
+
+def record_path(root: Path, home: Path, workspace: bool) -> Path:
+    return workspace_record(home, root) if workspace else git_path(root, MANIFEST_NAME)
+
+
+def include_globs(values: Optional[Sequence[str]]) -> List[str]:
+    """The --include globs as they are written to .threefold.json, or an InstallError.
+
+    Each is relative to the directory being installed, so one that is empty,
+    absolute or climbs out with `..` could only mean a mistake, and a mistake
+    in the list of what may be sent is refused rather than written. The hook
+    ignores the same three, so a list written here is read in full there.
+    """
+    globs: List[str] = []
+    for value in values or ():
+        text = (value or "").strip()
+        if text.startswith(("/", "\\", "~")) or re.match(r"^[A-Za-z]:", text) or os.path.isabs(text):
+            raise InstallError(
+                f"--include {text} is absolute; give a glob relative to the directory, such as repos/acme-billing/**"
+            )
+        if ".." in text:
+            raise InstallError(f"--include {text} contains '..'; a glob relative to the directory cannot leave it")
+        text = text.replace("\\", "/")
+        while text.startswith("./"):
+            text = text[2:]
+        if not text:
+            raise InstallError("--include was given an empty glob, which would match nothing")
+        if text not in globs:
+            globs.append(text)
+    return globs
 
 
 def read_json_object(path: Path) -> Dict[str, Any]:
@@ -270,7 +363,17 @@ def _created_dirs(root: Path, relative: str) -> List[str]:
     return list(reversed(missing))
 
 
-def install(args: argparse.Namespace, root: Path, home: Path, out: Any) -> int:
+def workspace_note(root: Path) -> str:
+    return (
+        f"workspace mode: git does not recognise {forward(root)} as a repository, so only {CONFIG_FILE} and the agents' "
+        "hook settings are written there and nothing under .git. No pre-commit hook is installed, so no commit-time "
+        "check runs for work committed from inside it; a repository within it gets one from its own install"
+    )
+
+
+def install(
+    args: argparse.Namespace, root: Path, home: Path, out: Any, workspace: bool = False, includes: Sequence[str] = ()
+) -> int:
     agents = [name.strip() for name in args.agents.split(",") if name.strip()]
     unknown = [name for name in agents if name not in AGENTS]
     if unknown or not agents:
@@ -278,10 +381,18 @@ def install(args: argparse.Namespace, root: Path, home: Path, out: Any) -> int:
     if args.endpoint and not args.endpoint.lower().startswith(("https://", "http://")):
         raise InstallError("--endpoint must be an http(s) URL")
 
-    manifest_path = git_path(root, MANIFEST_NAME)
+    manifest_path = record_path(root, home, workspace)
     manifest = _merged_manifest(load_manifest(manifest_path))
     plan = Plan(args.dry_run, out)
     written: List[str] = []
+    if workspace:
+        manifest["workspace"] = forward(root)
+        plan.add(workspace_note(root))
+
+    def tracked(relative: str) -> bool:
+        # Outside a repository git recognises there is nothing to be tracked
+        # by, and nothing to ask: git is not run against a workspace at all.
+        return False if workspace else is_tracked(root, relative)
 
     shared_copies(plan, home)
 
@@ -297,9 +408,15 @@ def install(args: argparse.Namespace, root: Path, home: Path, out: Any) -> int:
         if not key_file.is_file():
             plan.add(f"note: {forward(key_file)} does not exist yet; the hook sends no key until it does")
         config["api_key_file"] = forward(key_file)
+    # Only when asked for: a file without the key is read exactly as before
+    # include existed, and an empty list would say the same thing less plainly.
+    scope = ""
+    if includes:
+        config["include"] = list(includes)
+        scope = f", sending only calls inside {', '.join(includes)}"
     config_path = root / CONFIG_FILE
     config_text = dump_json(config)
-    if is_tracked(root, CONFIG_FILE):
+    if tracked(CONFIG_FILE):
         # Writing it would put this machine's key path in a committed file,
         # and an uninstall could never tell the team's version from ours.
         plan.add(
@@ -307,13 +424,13 @@ def install(args: argparse.Namespace, root: Path, home: Path, out: Any) -> int:
             f"the mode here. Change it in a commit, or set THREEFOLD_PROJECT, if it should say {args.project}"
         )
     elif config_path.is_file() and config_path.read_text(encoding="utf-8-sig") == config_text:
-        plan.add(f"{CONFIG_FILE} is current")
+        plan.add(f"{CONFIG_FILE} is current{scope}")
         written.append(CONFIG_FILE)
     else:
         if not config_path.exists() and CONFIG_FILE not in manifest["created_files"]:
             manifest["created_files"].append(CONFIG_FILE)
         plan.add(
-            f"write {CONFIG_FILE} for {args.project} in {args.mode} mode",
+            f"write {CONFIG_FILE} for {args.project} in {args.mode} mode{scope}",
             _planned_write(manifest, CONFIG_FILE, config_path, config_text.encode("utf-8")),
         )
         written.append(CONFIG_FILE)
@@ -325,7 +442,7 @@ def install(args: argparse.Namespace, root: Path, home: Path, out: Any) -> int:
     for agent in agents:
         relative, matcher = AGENT_SETTINGS[agent]
         path = root / relative
-        if is_tracked(root, relative):
+        if tracked(relative):
             # Codex and Antigravity project hooks are usually committed. The
             # entry names this machine's Python and home folder, so adding it
             # would put them in the next commit, and .git/info/exclude cannot
@@ -370,8 +487,11 @@ def install(args: argparse.Namespace, root: Path, home: Path, out: Any) -> int:
             _planned_write(manifest, relative, path, dump_json(document).encode("utf-8")),
         )
 
-    pre_commit_step(plan, root, home, manifest)
-    exclude_step(plan, root, written, manifest)
+    if not workspace:
+        # A workspace has no .git git would read: a hook written there would
+        # never run, and a folder git does not accept is not ours to write in.
+        pre_commit_step(plan, root, home, manifest)
+        exclude_step(plan, root, written, manifest)
 
     plan.add(f"record what was installed in {forward(manifest_path)}", _write_text(manifest_path, dump_json(manifest)))
     plan.run()
@@ -517,12 +637,14 @@ def _without_our_entries(document: Dict[str, Any], commands: Sequence[str]) -> T
     return document, removed
 
 
-def uninstall(args: argparse.Namespace, root: Path, home: Path, out: Any) -> int:
-    manifest_path = git_path(root, MANIFEST_NAME)
+def uninstall(args: argparse.Namespace, root: Path, home: Path, out: Any, workspace: bool = False) -> int:
+    manifest_path = record_path(root, home, workspace)
     manifest = load_manifest(manifest_path)
     exact = bool(manifest)
     manifest = _merged_manifest(manifest)
     plan = Plan(args.dry_run, out)
+    if workspace:
+        plan.add(f"workspace mode: {forward(root)} is not a repository git recognises, so nothing under .git is touched")
     if not exact:
         plan.add("no install record was found, so only entries, hooks and lines marked as Threefold's are removed")
 
@@ -568,6 +690,40 @@ def uninstall(args: argparse.Namespace, root: Path, home: Path, out: Any) -> int
     elif not exact and config_path.is_file():
         plan.add(f"note: {CONFIG_FILE} was left in place, because without the install record nothing says the install wrote it")
 
+    if not workspace:
+        # A workspace install wrote nothing under .git, so there is nothing
+        # there to take out, and nothing git does not recognise is read.
+        git_side_uninstall(plan, root, manifest, exact)
+
+    for directory in reversed(manifest["created_dirs"]):
+        path = root / directory
+
+        def remove_if_empty(path: Path = path) -> None:
+            if path.is_dir() and not any(path.iterdir()):
+                path.rmdir()
+
+        plan.add(f"remove {directory}/ if the install left it empty", remove_if_empty)
+
+    if manifest_path.is_file():
+        plan.add("delete the install record", manifest_path.unlink)
+        if workspace:
+
+            def remove_installs_if_empty(directory: Path = manifest_path.parent) -> None:
+                if directory.is_dir() and not any(directory.iterdir()):
+                    directory.rmdir()
+
+            plan.add(f"remove {forward(manifest_path.parent)}/ if no other workspace record is left in it", remove_installs_if_empty)
+    plan.add(
+        f"note: the shared copies in {forward(home)}, and any endpoint paired with a key file in its "
+        f"{HOME_CONFIG}, were kept, because other repositories may use them; delete them by hand once none does"
+    )
+    plan.run()
+    return 0
+
+
+def git_side_uninstall(plan: Plan, root: Path, manifest: Dict[str, Any], exact: bool) -> None:
+    """The pre-commit hook and the .git/info/exclude lines, which only a repository install adds."""
+    created = set(manifest["created_files"])
     hook_path = git_path(root, "hooks") / "pre-commit"
     chained = hook_path.with_name(CHAINED_NAME)
     if hook_path.is_file() and PRE_COMMIT_MARKER in hook_path.read_text(encoding="utf-8", errors="replace"):
@@ -593,24 +749,6 @@ def uninstall(args: argparse.Namespace, root: Path, home: Path, out: Any) -> int
         kept = [line for line in lines if line not in ours]
         if len(kept) != len(lines):
             plan.add("take the install's lines out of .git/info/exclude", _write_text(exclude, "\n".join(kept) + ("\n" if kept else "")))
-
-    for directory in reversed(manifest["created_dirs"]):
-        path = root / directory
-
-        def remove_if_empty(path: Path = path) -> None:
-            if path.is_dir() and not any(path.iterdir()):
-                path.rmdir()
-
-        plan.add(f"remove {directory}/ if the install left it empty", remove_if_empty)
-
-    if manifest_path.is_file():
-        plan.add("delete the install record", manifest_path.unlink)
-    plan.add(
-        f"note: the shared copies in {forward(home)}, and any endpoint paired with a key file in its "
-        f"{HOME_CONFIG}, were kept, because other repositories may use them; delete them by hand once none does"
-    )
-    plan.run()
-    return 0
 
 
 def _unchanged_since_install(manifest: Dict[str, Any], key: str, path: Path) -> bool:
@@ -643,23 +781,25 @@ def main(argv: Optional[Sequence[str]] = None, out: Any = None) -> int:
     parser.add_argument("--mode", choices=("observe", "enforce"), default="observe")
     parser.add_argument("--endpoint", help="the service, default the public stack")
     parser.add_argument("--api-key-file", help="a file holding the key; its path is written, never its content")
+    parser.add_argument(
+        "--include", action="append", metavar="GLOB",
+        help="repeatable; a glob relative to the directory, and only calls inside the globs given are sent",
+    )
     parser.add_argument("--uninstall", action="store_true", help="remove what an install added")
     parser.add_argument("--dry-run", action="store_true", help="print every step and write nothing")
     args = parser.parse_args(argv)
 
     try:
-        code, top = git(Path(args.repo), "rev-parse", "--show-toplevel", check=False)
-        if code != 0 or not top:
-            raise InstallError(f"{args.repo} is not inside a git repository")
-        root = Path(top).resolve()
+        root, workspace = locate(Path(args.repo))
         home = threefold_home()
         if args.uninstall:
-            return uninstall(args, root, home, out)
+            return uninstall(args, root, home, out, workspace)
         if not args.project or not PROJECT_PATTERN.match(args.project):
             # The alias is what the public ledger shows. A real name typed here
             # would be published by the first tool call.
             raise InstallError("--project must match ^Acme-[A-Za-z0-9-]{1,40}$, an alias rather than a real name")
-        return install(args, root, home, out)
+        includes = include_globs(args.include)
+        return install(args, root, home, out, workspace, includes)
     except InstallError as error:
         print(f"threefold: {error}. Nothing was changed.", file=out)
         return 2

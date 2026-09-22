@@ -16,6 +16,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -409,10 +410,189 @@ def test_a_project_that_is_not_an_acme_alias_is_refused_and_nothing_is_written(m
     assert snapshot(machine.repo, machine.home) == before
 
 
-def test_a_directory_that_is_not_a_repository_is_refused(machine) -> None:
-    elsewhere = machine.tmp / "not-a-repo"
-    elsewhere.mkdir()
+def test_a_path_that_is_not_a_directory_is_refused(machine) -> None:
+    missing = machine.tmp / "acme-missing"
     out = io.StringIO()
-    code = installer.main(["--repo", str(elsewhere), "--project", "Acme-Ledger"], out)
+    code = installer.main(["--repo", str(missing), "--project", "Acme-Ledger"], out)
     assert code == 2
-    assert "not inside a git repository" in out.getvalue()
+    assert "is not a directory" in out.getvalue() and "Nothing was changed" in out.getvalue()
+    assert not missing.exists()
+
+
+# --- a workspace git does not recognise ------------------------------------------------------
+#
+# A workspace root holds several repositories and is not one itself. It used
+# to be refused, which left no way to govern the repositories inside it from
+# one place. It is now installed with the four configuration files only.
+
+WORKSPACE_FILES = [".threefold.json", ".claude/settings.local.json", ".codex/hooks.json", ".agents/hooks.json"]
+
+
+@pytest.fixture
+def workspace(machine, monkeypatch) -> Path:
+    """A directory holding repositories, with git stopped from looking above the test's own directory."""
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(machine.tmp))
+    root = machine.tmp / "acme-workspace"
+    for name in ("acme-alpha", "acme-beta", "acme-gamma"):
+        (root / "repos" / name).mkdir(parents=True)
+        (root / "repos" / name / "README.md").write_text(f"# {name}\n", encoding="utf-8")
+    (root / "NOTES.md").write_text("# Acme workspace\n", encoding="utf-8")
+    return root
+
+
+def run_in(machine, directory: Path, *extra: str, project: Optional[str] = "Acme-Workspace") -> SimpleNamespace:
+    argv = ["--repo", str(directory)] + (["--project", project] if project else []) + list(extra)
+    out = io.StringIO()
+    code = installer.main(argv, out)
+    return SimpleNamespace(code=code, out=out.getvalue())
+
+
+def record_of(machine, directory: Path) -> Path:
+    return installer.workspace_record(machine.threefold_home, directory.resolve())
+
+
+def test_a_directory_git_does_not_recognise_is_installed_in_workspace_mode(machine, workspace) -> None:
+    before = snapshot(workspace)
+    result = run_in(machine, workspace)
+    assert result.code == 0, result.out
+    assert "workspace mode" in result.out and "no commit-time check" in result.out
+
+    added = sorted(set(snapshot(workspace)) - set(before))
+    assert added == sorted(["acme-workspace/" + relative for relative in WORKSPACE_FILES]
+                           + ["acme-workspace/.claude", "acme-workspace/.codex", "acme-workspace/.agents"])
+    assert not (workspace / ".git").exists()
+    assert json.loads((workspace / ".threefold.json").read_text(encoding="utf-8")) == {"project": "Acme-Workspace", "mode": "observe"}
+    for relative, matcher in MATCHERS.items():
+        entries = json.loads((workspace / relative).read_text(encoding="utf-8"))["hooks"]["PreToolUse"]
+        assert [entry["matcher"] for entry in entries] == [matcher]
+
+    record = record_of(machine, workspace)
+    assert record.parent == machine.threefold_home / "installs"
+    assert re.fullmatch(r"[0-9a-f]{16}\.json", record.name)
+    assert json.loads(record.read_text(encoding="utf-8"))["workspace"] == workspace.resolve().as_posix()
+
+
+def test_a_second_workspace_install_changes_nothing(machine, workspace) -> None:
+    run_in(machine, workspace)
+    before = snapshot(workspace, machine.threefold_home)
+    result = run_in(machine, workspace)
+    assert result.code == 0, result.out
+    assert snapshot(workspace, machine.threefold_home) == before
+    assert "already runs the hook" in result.out
+
+
+def test_a_workspace_install_merges_into_existing_claude_settings_and_uninstall_puts_them_back_byte_for_byte(machine, workspace) -> None:
+    original = b'{\r\n    "permissions": {"allow": ["Bash(npm test)"]},\r\n    "hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "acme-lint"}]}]}\r\n}'
+    path = workspace / ".claude" / "settings.local.json"
+    path.parent.mkdir()
+    path.write_bytes(original)
+    run_in(machine, workspace)
+    merged = json.loads(path.read_text(encoding="utf-8"))
+    assert merged["permissions"] == {"allow": ["Bash(npm test)"]}
+    assert commands_in(merged)[0] == "acme-lint"
+    assert commands_in(merged)[1].endswith("--agent claude-code")
+
+    assert run_in(machine, workspace, "--uninstall", project=None).code == 0
+    assert path.read_bytes() == original
+
+
+def test_a_workspace_uninstall_returns_the_directory_to_exactly_what_it_was(machine, workspace) -> None:
+    before = snapshot(workspace)
+    run_in(machine, workspace, "--include", "repos/acme-alpha/**")
+    result = run_in(machine, workspace, "--uninstall", project=None)
+    assert result.code == 0, result.out
+    assert "workspace mode" in result.out
+    assert snapshot(workspace) == before
+    assert not record_of(machine, workspace).exists()
+    assert not (machine.threefold_home / "installs").exists(), "the record's folder goes once it is empty"
+    assert (machine.threefold_home / "bin" / "threefold_hook.py").is_file(), "the shared copies stay"
+
+
+def test_a_directory_with_an_empty_folder_named_git_is_a_workspace_and_nothing_is_written_inside_it(machine, workspace) -> None:
+    (workspace / ".git").mkdir()
+    result = run_in(machine, workspace, "--mode", "enforce")
+    assert result.code == 0, result.out
+    assert "workspace mode" in result.out
+    assert list((workspace / ".git").iterdir()) == []
+    assert (workspace / ".threefold.json").is_file() and record_of(machine, workspace).is_file()
+
+    run_in(machine, workspace, "--uninstall", project=None)
+    assert list((workspace / ".git").iterdir()) == []
+    assert not (workspace / ".threefold.json").exists()
+
+
+def test_a_folder_git_does_not_accept_inside_a_repository_does_not_send_the_install_to_the_repository_above(machine) -> None:
+    """Git passes over a .git it cannot read and answers with the checkout above.
+    Installing there would have put a pre-commit hook and an install record in a
+    repository nobody named."""
+    inner = machine.repo / "acme-vendored"
+    (inner / ".git").mkdir(parents=True)
+    outer_before = snapshot(machine.repo / ".git")
+    result = run_in(machine, inner)
+    assert result.code == 0, result.out
+    assert "workspace mode" in result.out
+    assert (inner / ".threefold.json").is_file()
+    assert list((inner / ".git").iterdir()) == []
+    assert snapshot(machine.repo / ".git") == outer_before
+    assert not (machine.repo / ".threefold.json").exists()
+
+
+def test_a_workspace_dry_run_writes_nothing_and_prints_the_include_list(machine, workspace) -> None:
+    before = snapshot(workspace, machine.home)
+    result = run_in(machine, workspace, "--dry-run", "--include", "repos/acme-alpha/**", "--include", "repos/acme-beta/**")
+    assert result.code == 0, result.out
+    assert snapshot(workspace, machine.home) == before
+    assert "workspace mode" in result.out
+    assert "would write .threefold.json" in result.out
+    assert "repos/acme-alpha/**, repos/acme-beta/**" in result.out
+    assert "pre-commit hook" not in result.out.replace("No pre-commit hook is installed", "")
+
+
+def test_the_hook_installed_in_a_workspace_sends_only_what_the_include_list_names(machine, workspace, monkeypatch) -> None:
+    """End to end on the files the installer wrote, with each repository a real
+    checkout and a project in the environment: the hook standing inside either
+    repository still reads the list from the workspace root."""
+    for name in ("acme-alpha", "acme-gamma"):
+        assert _git(workspace / "repos" / name, "init", "-q").returncode == 0
+    result = run_in(machine, workspace, "--include", "repos/acme-alpha/**")
+    assert "workspace mode" in result.out, "a checkout inside the directory does not make the directory one"
+    monkeypatch.setenv("THREEFOLD_PROJECT", "Acme-Env")
+    spec = importlib.util.spec_from_file_location("threefold_hook_for_workspace", installer.HOOK_SOURCE)
+    hook = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(hook)
+    log = machine.threefold_home / "held_back.log"
+
+    def write(name: str) -> None:
+        repository = workspace / "repos" / name
+        payload = {"session_id": "acme-ws", "cwd": str(repository), "tool_name": "Write",
+                   "tool_input": {"file_path": str(repository / "app.py"), "content": "x = 1\n"}}
+        hook.handle(json.dumps(payload), "claude-code")
+
+    write("acme-gamma")
+    assert log.read_text(encoding="utf-8").splitlines()[-1].endswith(" not-included")
+    write("acme-alpha")
+    assert len(log.read_text(encoding="utf-8").splitlines()) == 1, "the included write went to the service instead"
+
+
+# --- the include list ------------------------------------------------------------------------
+
+def test_include_globs_are_written_to_the_config_in_the_order_given(machine) -> None:
+    result = run(machine, "--include", "services/billing/**", "--include", ".\\services\\ledger\\**", "--include", "services/billing/**")
+    assert result.code == 0, result.out
+    config = json.loads((machine.repo / ".threefold.json").read_text(encoding="utf-8"))
+    assert config["include"] == ["services/billing/**", "services/ledger/**"]
+    assert "sending only calls inside services/billing/**, services/ledger/**" in result.out
+
+
+@pytest.mark.parametrize(
+    "glob",
+    ["", "   ", "./", "/srv/acme/**", "\\acme\\**", "C:/acme/**", "c:\\acme\\**", "~/acme/**",
+     "../acme-other/**", "repos/../../acme/**", "repos/acme-alpha/.."],
+)
+def test_an_include_glob_that_is_empty_absolute_or_climbs_out_is_refused_and_nothing_is_written(machine, workspace, glob) -> None:
+    for directory in (machine.repo, workspace):
+        before = snapshot(directory, machine.home)
+        result = run_in(machine, directory, "--include", "repos/acme-alpha/**", "--include", glob)
+        assert result.code == 2, result.out
+        assert "--include" in result.out and "Nothing was changed" in result.out
+        assert snapshot(directory, machine.home) == before
