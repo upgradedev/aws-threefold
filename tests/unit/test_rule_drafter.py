@@ -177,6 +177,36 @@ def test_a_pattern_the_save_would_refuse_is_never_drafted() -> None:
     assert "inside a segment" in refused.value.problems[0]
 
 
+# --- answers nested past the interpreter's stack ---------------------------
+
+# Past the recursion limit whatever the stack already holds: the json module
+# gives up with RecursionError, which is not a ValueError.
+TOO_DEEP = 3000
+
+
+def test_an_array_nested_past_the_stack_spends_the_repair_rather_than_escaping() -> None:
+    result, client = draft("[" * TOO_DEEP + "]" * TOO_DEEP, answer(GOOD))
+    assert result["attempts"] == 2
+    assert result["rule"]["id"] == GOOD["id"]
+    assert "not a JSON object" in client.prompt(call=1, message=2)
+
+
+def test_an_object_nested_past_the_stack_inside_prose_spends_the_repair() -> None:
+    """The fallback parse of the braces found in prose is guarded as well."""
+    nested = "Here: " + '{"a":' * TOO_DEEP + "1" + "}" * TOO_DEEP
+    result, client = draft(nested, answer(GOOD))
+    assert result["attempts"] == 2
+    assert "nested too deeply" in client.prompt(call=1, message=2)
+
+
+def test_an_answer_that_parses_but_nests_deeper_than_a_rule_is_refused_and_not_echoed() -> None:
+    deep = "[" * 60 + json.dumps(GOOD) + "]" * 60
+    with pytest.raises(UndraftableRuleError) as refused:
+        draft(deep, deep)
+    assert "levels deep" in refused.value.problems[0]
+    assert refused.value.rejected is None, "Something that deep is not serialised into the problem"
+
+
 # --- observe, whatever the model says --------------------------------------
 
 

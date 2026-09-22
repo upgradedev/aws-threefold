@@ -64,6 +64,13 @@ DRAFT_MAX_TOKENS = 400
 # is not going to on the third attempt either.
 MAX_ATTEMPTS = 2
 
+# How deeply a usable answer can nest. A rule is an object holding lists of
+# strings, two levels, and wrapped as {"rules": [rule]} it is four. Anything
+# deeper is not a rule, and a model answer nested a thousand levels deep would
+# otherwise exhaust the interpreter's recursion limit while being parsed or
+# echoed back, and turn a refused draft into a 500.
+MAX_ANSWER_DEPTH = 8
+
 # Only these keys exist in a rule. Anything else a model adds, such as a
 # `languages` or a `message`, is dropped and the caller is told which.
 RULE_KEYS = ("id", "description", "mode", "when_path_matches", "forbid_imports", "allow_imports")
@@ -444,16 +451,27 @@ def _read_answer(answer: str, stop_reason: str) -> Tuple[Any, Optional[str], Lis
     fenced = re.search(r"```(?:json)?\s*(.*?)```", text, re.DOTALL)
     if fenced:
         text = fenced.group(1).strip()
+    # RecursionError is caught beside ValueError because it is not one: the
+    # json module raises it for nesting deeper than the interpreter's stack
+    # allows, and a model's answer is untrusted text that can nest that deep.
     try:
         parsed = json.loads(text)
-    except ValueError:
+    except (ValueError, RecursionError):
         start, end = text.find("{"), text.rfind("}")
         if start == -1 or end <= start:
             return None, None, ["The answer was not a JSON object"]
         try:
             parsed = json.loads(text[start:end + 1])
+        except RecursionError:
+            return None, None, ["The answer nested too deeply to be read as JSON"]
         except ValueError as exc:
             return None, None, [f"The answer was not valid JSON: {exc}"]
+    if _depth(parsed) > MAX_ANSWER_DEPTH:
+        # Not kept as the candidate: something this deep is not echoed back in
+        # the problem, where serialising it could exhaust the stack again.
+        return None, None, [
+            f"The answer nested more than {MAX_ANSWER_DEPTH} levels deep, and a rule is two"
+        ]
     if isinstance(parsed, dict) and isinstance(parsed.get("rules"), list):
         parsed = parsed["rules"]
     if isinstance(parsed, list):
@@ -466,6 +484,30 @@ def _read_answer(answer: str, stop_reason: str) -> Tuple[Any, Optional[str], Lis
     if isinstance(declined, str) and declined.strip() and not parsed.get("forbid_imports"):
         return parsed, redact_secrets(declined.strip())[:300], []
     return parsed, None, []
+
+
+def _depth(value: Any) -> int:
+    """How deeply a parsed answer nests, counted with a stack rather than recursion.
+
+    Recursion is what this guards against, so it cannot be how it is measured.
+    The walk stops as soon as the limit is passed, so a wide answer costs no more
+    than its size and a deep one no more than the limit.
+    """
+    deepest = 0
+    pending = [(value, 1)]
+    while pending:
+        item, level = pending.pop()
+        if isinstance(item, dict):
+            children = list(item.values())
+        elif isinstance(item, list):
+            children = item
+        else:
+            continue
+        deepest = max(deepest, level)
+        if deepest > MAX_ANSWER_DEPTH:
+            return deepest
+        pending.extend((child, level + 1) for child in children)
+    return deepest
 
 
 def _validated(
