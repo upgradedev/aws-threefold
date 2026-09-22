@@ -146,16 +146,33 @@ Resources:
       PolicyDocument:
         Version: '2012-10-17'
         Statement:
-          # GetObject only, for this distribution only. Without s3:ListBucket a
-          # missing page answers 403 rather than 404, which is deliberate: the
-          # alternative, a distribution-wide custom error page, would also replace
-          # the API's own RFC 7807 problem documents, which are 403s and 404s too.
+          # Two grants, both for this distribution only, each naming the one
+          # resource its action applies to: GetObject on the pages, ListBucket on
+          # the bucket itself. S3 answers a request for a key that does not exist
+          # with AccessDenied (403) to a reader that may not list the bucket, and
+          # with NoSuchKey (404) to one that may, so the second grant is what lets
+          # a mistyped page answer 404. A distribution-wide custom error response
+          # would have been the other way to get there, and it is not used: it
+          # would also replace the API's own RFC 7807 problem documents, which are
+          # 403s and 404s too. The grant cannot be turned into a listing through
+          # the edge: the page behaviors forward no query string, so no list
+          # parameter reaches the bucket, and a request for the root is answered
+          # with DefaultRootObject rather than with the bucket.
           - Sid: CloudFrontReadsThroughOriginAccessControl
             Effect: Allow
             Principal:
               Service: cloudfront.amazonaws.com
             Action: s3:GetObject
             Resource: !Sub '${WebBucket.Arn}/*'
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${Distribution}'
+          - Sid: CloudFrontListsSoAMissingPageIsNotFound
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:ListBucket
+            Resource: !GetAtt WebBucket.Arn
             Condition:
               StringEquals:
                 AWS:SourceArn: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${Distribution}'

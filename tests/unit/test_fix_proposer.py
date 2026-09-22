@@ -22,8 +22,10 @@ import pytest
 
 from threefold.application.dtos import ToolCallRequestDTO
 from threefold.application.evaluator import GovernanceEvaluator
+from threefold.application import fix_proposer
 from threefold.application.fix_proposer import MAX_CONTENT_CHARS, MAX_SUMMARY_CHARS, MAX_WRITE_BYTES, propose_fix
 from threefold.domain import imports as import_readers
+from threefold.domain import layering_rules as layering_internals
 from threefold.domain.boundary_guard import (
     CONTENT_KEYS,
     PATH_KEYS,
@@ -507,6 +509,312 @@ def test_a_file_too_large_to_rewrite_gets_advice_naming_what_to_move() -> None:
     assert fix["validated"] is False and fix["writes"] == []
     advice = " ".join(fix["steps"])
     assert "boto3" in advice and "requests" in advice and "src/infrastructure" in advice
+
+
+# --- a cap on what a fix rewrites ---------------------------------------------------------
+#
+# The evaluator asks for a fix with max_content_chars=1,500, so that a refused
+# write too large to rewrite within the gate's budget still hears what to move
+# and where. What that costs against a whole verdict is measured in
+# tests/unit/test_the_fix_reaches_the_agent.py, the way every fix ceiling is;
+# here, what the advice says, what counts toward the cap, and that the rules
+# are asked about each distinct import once, which is where the cost was.
+
+CAP = 1_500
+
+
+def _domain_file(size: int, head: str = "import boto3\nimport requests\n") -> str:
+    """A Python file of at most `size` characters beginning with `head`, built rather than spelled out."""
+    parts = [head]
+    length = len(head)
+    index = 0
+    while True:
+        part = f"\n\ndef acme_rule_{index}(order):\n    return order.total * {index}\n"
+        if length + len(part) > size:
+            break
+        parts.append(part)
+        length += len(part)
+        index += 1
+    return "".join(parts)
+
+
+def _directory(path: str) -> str:
+    return path.replace("\\", "/").rsplit("/", 1)[0]
+
+
+def test_below_the_cap_the_fix_is_still_the_checked_rewrite() -> None:
+    content = _domain_file(CAP - 100)
+    fix = _fix(*_refused("Write", {"file_path": "src/domain/acme_order.py", "content": content}), max_content_chars=CAP)
+    _assert_really_passes(fix)
+    assert fix["summary"].startswith("Checked fix: move boto3 and 1 more out of the domain"), fix["summary"]
+
+
+def test_past_the_cap_the_fix_is_advice_naming_the_imports_their_rule_and_the_permitted_layer() -> None:
+    content = _domain_file(CAP * 2)
+    assert len(content) > CAP
+    fix = _fix(*_refused("Write", {"file_path": "src/domain/acme_order.py", "content": content}), max_content_chars=CAP)
+
+    assert fix["kind"] == "layering"
+    assert fix["validated"] is False
+    assert fix["writes"] == [] and fix["checks"] == [], "Nothing was rewritten, so there is nothing to hand out or to have checked"
+    first, layer, size = fix["steps"]
+    assert first == "In src/domain/acme_order.py, remove the imports of boto3, requests: rule 'python-domain-stays-pure' forbids them there."
+    assert "an adapter under src/infrastructure/ that implements it: no layering rule in force forbids them there" in layer
+    assert "permit" not in layer, "Only the moved imports were matched, so nothing is claimed about the adapter passing"
+    assert size == (
+        f"What this call writes comes to {len(content):,} characters, over the 1,500 Threefold rewrites and checks within "
+        "a verdict, so this is advice in words and no code is proposed. The write that follows it is judged by the same "
+        "gates as any other."
+    )
+    assert fix["summary"] == (
+        "No checked fix: too large to rewrite within the verdict (over 1,500 characters); "
+        "move boto3 and 1 more behind a port, adapter under src/infrastructure."
+    )
+
+
+def test_the_advice_names_the_layer_the_rewrite_would_have_used() -> None:
+    """The same candidates in the same order, asked the same layering question, without writing the adapter."""
+    cases = [
+        ("src/domain/acme_order.py", "import boto3\n\n\nclass AcmeOrder:\n    total = 0\n", DEFAULT_RULES),
+        (
+            "src/main/java/com/acme/orders/domain/AcmeOrder.java",
+            "package com.acme.orders.domain;\n\nimport javax.persistence.Entity;\n\npublic class AcmeOrder {\n}\n",
+            DEFAULT_RULES,
+        ),
+        ("web/src/domain/acmeOrder.ts", "import axios from 'axios';\nexport const load = () => axios.get('/acme');\n", DEFAULT_RULES),
+        (
+            "src/acme/core/pricing.py",
+            "import requests\n",
+            [{"id": "acme-core-no-http", "when_path_matches": ["**/core/**/*.py"], "forbid_imports": ["requests", "**.gateways.**"]}],
+        ),
+        (
+            "src/domain/acme_order.py",
+            "import boto3\n",
+            [
+                {"id": "acme-domain-pure", "when_path_matches": ["**/domain/**/*.py"], "forbid_imports": ["boto3"]},
+                {"id": "acme-infrastructure-no-boto3", "when_path_matches": ["**/infrastructure/**/*.py"], "forbid_imports": ["boto3"]},
+            ],
+        ),
+    ]
+    for path, content, rules in cases:
+        request, result = _refused("Write", {"file_path": path, "content": content}, rules)
+        rewrite = _fix(request, result, rules)
+        _assert_really_passes(rewrite, rules)
+        (adapter,) = [write["path"] for write in rewrite["writes"] if write.get("new_file") and "adapter" in write["path"].lower()]
+        advice = _fix(request, result, rules, max_content_chars=1)
+        assert advice["validated"] is False and advice["writes"] == []
+        assert f"an adapter under {_directory(adapter)}/ that implements it" in advice["steps"][1], (path, advice["steps"])
+    # The last case skips a layer its own rules refuse, as the rewrite does.
+    assert _directory(adapter) == "src/adapters"
+
+
+def test_past_the_cap_with_no_permitted_layer_the_advice_says_so() -> None:
+    everywhere = [{"id": "acme-no-boto3-anywhere", "when_path_matches": ["**/*.py"], "forbid_imports": ["boto3"]}]
+    request, result = _refused("Write", {"file_path": "src/domain/order.py", "content": "import boto3\n"}, everywhere)
+    fix = _fix(request, result, everywhere, max_content_chars=1)
+    assert fix["validated"] is False and fix["writes"] == []
+    assert "no layer these rules permit can hold boto3" in fix["summary"]
+    assert "refuse it at src/infrastructure/, src/adapters/ as well" in fix["steps"][1]
+    assert any("architect" in step for step in fix["steps"])
+
+
+def test_the_cap_counts_the_writes_of_a_call_together() -> None:
+    """A MultiEdit of edits each under the cap is as much rewriting as one file over it."""
+    edits = [
+        {"old_string": f"A_{index} = 0", "new_string": _domain_file(CAP - 500, head=f"import boto3\nA_{index} = {index}\n")}
+        for index in range(3)
+    ]
+    assert all(len(edit["new_string"]) < CAP for edit in edits) and sum(len(edit["new_string"]) for edit in edits) > CAP
+    request, result = _refused("MultiEdit", {"file_path": "src/domain/acme_order.py", "edits": edits})
+
+    advice = _fix(request, result, max_content_chars=CAP)
+    assert advice["validated"] is False and advice["writes"] == []
+    total = sum(len(edit["new_string"]) for edit in edits)
+    assert advice["steps"][-1].startswith(f"What this call writes comes to {total:,} characters, over the 1,500")
+
+    rewrite = _fix(request, result, max_content_chars=CAP * 3)
+    _assert_really_passes(rewrite)
+
+
+def test_a_small_forbidden_edit_beside_a_large_clean_one_is_past_the_cap_too() -> None:
+    """The clean edit is read in full to find that it is clean, so it counts toward the cap as the forbidden one does.
+
+    Counting only the forbidden edit let a call of 1,440 characters to rewrite and 6,400 of clean imports through to
+    the full rewrite, which cost more than a whole verdict.
+    """
+    forbidden = _domain_file(CAP - 100)
+    clean = "".join(f"import acme_part_{index}\n" for index in range(200))
+    total = len(forbidden) + len(clean)
+    assert len(forbidden) <= CAP < total
+    for label, arguments in (
+        (
+            "one file, two edits",
+            {
+                "file_path": "src/domain/acme_order.py",
+                "edits": [{"old_string": "A = 0", "new_string": forbidden}, {"old_string": "B = 0", "new_string": clean}],
+            },
+        ),
+        (
+            "two files",
+            {
+                "edits": [
+                    {"file_path": "src/domain/acme_order.py", "content": forbidden},
+                    {"file_path": "src/domain/acme_parts.py", "content": clean},
+                ]
+            },
+        ),
+    ):
+        request, result = _refused("MultiEdit", arguments)
+        advice = _fix(request, result, max_content_chars=CAP)
+        assert advice["validated"] is False and advice["writes"] == [], label
+        assert advice["steps"][0].startswith("In src/domain/acme_order.py, remove the imports of boto3, requests"), label
+        assert advice["steps"][-1].startswith(f"What this call writes comes to {total:,} characters, over the 1,500"), label
+        _assert_really_passes(_fix(request, result, max_content_chars=total))
+
+
+def test_a_call_past_the_cap_says_why_once_however_many_files_it_writes() -> None:
+    """Each file gets its own two steps; the call's size against the cap is said once, at the end, not once a file."""
+    files = {f"src/domain/acme_part_{index}.py": _domain_file(CAP - 100, head="import boto3\n") for index in range(5)}
+    request, result = _refused("MultiEdit", {"edits": [{"file_path": path, "content": content} for path, content in files.items()]})
+    fix = _fix(request, result, max_content_chars=CAP)
+    assert fix["validated"] is False and fix["writes"] == []
+    closing = [step for step in fix["steps"] if "no code is proposed" in step]
+    assert closing == [fix["steps"][-1]], fix["steps"]
+    assert f"comes to {sum(len(content) for content in files.values()):,} characters" in closing[0]
+    for path in files:
+        assert f"In {path}, remove the import of boto3: rule 'python-domain-stays-pure' forbids it there." in fix["steps"]
+    assert len(fix["steps"]) == 2 * len(files) + 1, "Nothing is repeated, so a sixth file would not push a step out"
+
+
+def test_a_heredoc_past_the_cap_is_advice_as_well() -> None:
+    body = _domain_file(CAP * 2, head="import boto3\n")
+    request, result = _refused("Bash", {"command": f"cat > src/domain/acme_order.py <<'EOF'\n{body}EOF\n"}, action="COMMAND_EXEC")
+    fix = _fix(request, result, max_content_chars=CAP)
+    assert fix["kind"] == "layering" and fix["validated"] is False and fix["writes"] == []
+    advice = " ".join(fix["steps"])
+    assert "remove the import of boto3" in advice and "src/infrastructure/" in advice
+    assert "instead of the shell command" in advice
+
+
+def test_advice_past_the_cap_asks_the_rules_about_each_distinct_import_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The cost was never the parse, which was already remembered: it was matching every import against the rules.
+
+    The diagnosis, the site filter, the path's own filter and the advice each asked about every import again, against
+    every pattern of every rule: 1,892 matches and 30 ms for 500 short imports at 7,900 characters, three times a whole
+    verdict. Now each distinct import is asked about once per proposal, however often it is imported, the gate's own
+    matcher is asked only about an import some pattern could catch, and the file is parsed once.
+    """
+    parts = [f"acme_part_{index}" for index in range(300)]
+    content = "import boto3\n" + "".join(f"import {part}\n" for part in parts) + "".join(f"import {part}\n" for part in parts[:100])
+    request, result = _refused("Write", {"file_path": "src/domain/acme_order.py", "content": content})
+
+    asked: List[str] = []
+    matched: List[str] = []
+    parses: List[int] = []
+    real_rule, real_matcher, real_parse = fix_proposer._flagging_rule, layering_internals._forbidden_by, ast.parse
+
+    def counting_rule(module: str, applicable: Any) -> str:
+        asked.append(module)
+        return real_rule(module, applicable)
+
+    def counting_matcher(module: str, patterns: Any) -> Any:
+        matched.append(module)
+        return real_matcher(module, patterns)
+
+    def counting_parse(source: Any, *args: Any, **kwargs: Any) -> Any:
+        parses.append(len(source))
+        return real_parse(source, *args, **kwargs)
+
+    monkeypatch.setattr(fix_proposer, "_flagging_rule", counting_rule)
+    monkeypatch.setattr(layering_internals, "_forbidden_by", counting_matcher)
+    monkeypatch.setattr(ast, "parse", counting_parse)
+    fix = propose_fix(request, result, DEFAULT_RULES, max_content_chars=CAP)
+    monkeypatch.undo()
+
+    assert fix is not None and fix["validated"] is False and fix["writes"] == []
+    assert sorted(asked) == sorted(["boto3"] + parts), "Each distinct import is asked about once, and none twice"
+    assert set(matched) == {"boto3"}, "The gate's matcher is not asked about an import no pattern can catch"
+    assert parses == [len(content)], "One parse of the file, and no other"
+
+
+# --- the screen in front of the gate's own matcher ----------------------------------------
+
+SCREEN_PATTERNS = [
+    "System.Data", "system", "**.Infrastructure.**", "@aws-sdk/*", "next/*", "**/infrastructure/*", "jav?.sql",
+    "*", "**", "acme**core", "Acme.*.Gateway", "./local", " spaced.pkg ", ".leading", "trailing.", "x/**/y",
+    "BOTO3", "a//b", "../adapters/*", "*.sql", "", "react", "java.util", "Acme.Billing?",
+]
+SCREEN_MODULES = [
+    "boto3", "Boto3", "BOTO3", "boto3.session", "Boto3.Session", "boto3x", "botocore.client", "java.sql.Connection",
+    "java.sqlx", "JAVA.SQL", "jav.sql", "javx.sql", "javax.persistence.Entity", "java.util.List", "System.Data.SqlClient",
+    "System.DataAnnotations", "system.data", "System", "Acme.Orders.Infrastructure.Db", "acme.infrastructure",
+    "acme/Infrastructure/x", "infrastructure", "@aws-sdk/client-s3", "@aws-sdk", "next", "next/router", "./parts/p1",
+    "../infrastructure/db", "../adapters/http", "react", "reactive-forms", "react-dom", "acme.core", "acmecore",
+    "acme.x.core", "Acme.Billing.Gateway", "Acme.Billings", "local", "./local", "spaced.pkg", " spaced.pkg ", "a..b",
+    "a//b", "a//b/c", "a/b", "x.y", "x.q.y", "x.q.r.y", "", " ", "/abs/path", "\\win\\path", "java.sql", "trailing",
+    "trailing.x", "leading", ".leading", "sql", "acme_part_7", "m12",
+]
+
+
+def test_the_screen_never_changes_what_the_gates_matcher_answers() -> None:
+    """_forbidden_by answers with the first pattern that catches a module; asked about the screened list, it must say the same.
+
+    Every shipped pattern list, forbid and allow, and a list of awkward ones (case, `?`, `**` inside a segment,
+    leading dots and slashes, spaces, empty strings), against modules chosen to sit on each boundary, and against
+    every shipped pattern spelled as a module, with a segment after it, and in capitals.
+    """
+    lists = [rule[field] for rule in DEFAULT_RULES for field in ("forbid_imports", "allow_imports")] + [SCREEN_PATTERNS]
+    shipped = [pattern for rule in DEFAULT_RULES for pattern in rule["forbid_imports"] + rule["allow_imports"]]
+    modules = SCREEN_MODULES + shipped + [f"{pattern}.Acme" for pattern in shipped] + [pattern.upper() for pattern in shipped]
+    compared = 0
+    for patterns in lists:
+        for module in modules:
+            whole = layering_internals._forbidden_by(module, patterns)
+            screened = fix_proposer._catchable(module, patterns)
+            assert layering_internals._forbidden_by(module, screened) == whole, (module, patterns, screened)
+            assert whole is None or whole in screened, (module, whole, screened)
+            compared += 1
+    assert compared > 1_000
+    python_forbid = DEFAULT_RULES[0]["forbid_imports"]
+    assert fix_proposer._catchable("acme_part_7", python_forbid) == [], "The screen screens: a clean module is asked nothing"
+    assert fix_proposer._catchable("acme.adapters.http", python_forbid) == ["**.adapters.**"]
+
+
+def test_the_screened_flags_are_the_unscreened_ones() -> None:
+    """_flagged_modules through the screen and the memo, against the plain loop over the gate's own matcher."""
+
+    def unscreened(path: str, content: str, rules: List[Dict[str, Any]]) -> Dict[str, str]:
+        found: Dict[str, str] = {}
+        for module in declared_imports(path, content)[1]:
+            if module in found:
+                continue
+            for rule in rules_for_path(path, rules):
+                offending = layering_internals._forbidden_by(module, rule["forbid_imports"])
+                if not offending:
+                    continue
+                permitted = layering_internals._forbidden_by(module, rule.get("allow_imports"))
+                if permitted and layering_internals._specificity(permitted) > layering_internals._specificity(offending):
+                    continue
+                found[module] = rule["id"]
+                break
+        return found
+
+    python = ("boto3", "Boto3", "acme.adapters.x", "acme_part", "requests.auth", "os")
+    java = ("java.util.List", "java.sql.Connection", "javax.sql.DataSource", "com.acme.infrastructure.Db")
+    dotnet = ("System", "System.Data.SqlClient", "System.DataAnnotations", "System.Net.Http")
+    web = ("axios", "@aws-sdk/client-s3", "./parts", "../adapters/http", "reactive-forms", "react")
+    cases = [
+        ("src/domain/acme_order.py", "".join(f"import {module}\n" for module in python)),
+        ("src/main/java/com/acme/domain/Order.java", "package com.acme.domain;\n" + "".join(f"import {module};\n" for module in java)),
+        ("src/Acme/Domain/Order.cs", "".join(f"using {module};\n" for module in dotnet)),
+        ("web/src/domain/order.ts", "".join(f"import x{index} from '{module}';\n" for index, module in enumerate(web))),
+    ]
+    for path, content in cases:
+        expected = unscreened(path, content, DEFAULT_RULES)
+        assert expected, f"{path}: the case must flag something, or it proves nothing"
+        assert fix_proposer._flagged_modules(path, content, DEFAULT_RULES) == expected, path
+        assert fix_proposer._flagged_modules(path, content, DEFAULT_RULES) == expected, f"{path}: from the memo"
+    fix_proposer._FLAGGED.clear()
 
 
 def test_the_cost_of_a_fix_does_not_grow_with_the_number_of_imports(monkeypatch: pytest.MonkeyPatch) -> None:

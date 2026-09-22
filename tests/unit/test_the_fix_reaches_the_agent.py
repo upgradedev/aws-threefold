@@ -22,10 +22,13 @@ from threefold.application.dtos import ToolCallRequestDTO
 from threefold.application.evaluator import (
     FIX_ADVICE_MAX_CHARS,
     FIX_CREDENTIAL_MAX_CHARS,
+    FIX_LAYERING_ADVICE_MAX_CHARS,
     FIX_REWRITE_MAX_CHARS,
     GovernanceEvaluator,
     carries_more_than,
     fix_max_chars,
+    fix_options,
+    runs_a_command,
 )
 from threefold.domain.boundary_guard import ArchitecturalBoundaryGuard, iter_string_leaves
 from threefold.domain.layering_rules import violations
@@ -326,10 +329,60 @@ def _exactly(arguments: Dict[str, Any], key: str, size: int) -> Dict[str, Any]:
 def test_each_kind_of_verdict_reads_its_own_ceiling() -> None:
     for key in ("LOOP", "BUDGET", "HALTED_SESSION", "PROTECTED_PATH"):
         assert fix_max_chars(key) == FIX_ADVICE_MAX_CHARS, key
+        assert fix_max_chars(key, True) == FIX_ADVICE_MAX_CHARS, key
+        assert fix_options(key) == {}, key
     assert fix_max_chars("CREDENTIAL") == FIX_CREDENTIAL_MAX_CHARS
-    for key in ("UNREADABLE_WRITE", "python-domain-stays-pure", "java-domain-stays-pure"):
+    assert fix_options("CREDENTIAL") == {}
+    for key in ("python-domain-stays-pure", "java-domain-stays-pure", "acme-core-no-http"):
+        assert fix_max_chars(key) == FIX_LAYERING_ADVICE_MAX_CHARS, key
+        assert fix_max_chars(key, True) == FIX_REWRITE_MAX_CHARS, f"{key}: a command keeps the rewrite ceiling"
+        assert fix_options(key) == {"max_content_chars": FIX_REWRITE_MAX_CHARS}, key
+    for key in ("UNREADABLE_WRITE", "NONE", ""):
         assert fix_max_chars(key) == FIX_REWRITE_MAX_CHARS, key
-    assert FIX_REWRITE_MAX_CHARS < FIX_CREDENTIAL_MAX_CHARS < FIX_ADVICE_MAX_CHARS
+        assert fix_options(key) == {"max_content_chars": FIX_REWRITE_MAX_CHARS}, key
+    assert FIX_REWRITE_MAX_CHARS < FIX_CREDENTIAL_MAX_CHARS < FIX_LAYERING_ADVICE_MAX_CHARS < FIX_ADVICE_MAX_CHARS
+    assert FIX_LAYERING_ADVICE_MAX_CHARS < REFERENCE_CHARS, "The reference is the refused write too large for any fix"
+
+
+def test_the_published_contract_states_every_ceiling_the_evaluator_applies() -> None:
+    """The served document says when suggested_fix is null; each number must sit beside the kind it belongs to.
+
+    Checking only that each number appears somewhere let the document say 1,500 for "any call that runs a command"
+    while a credential in a command gets 3,000 and a destructive command 24,000. Each phrase here is built from
+    fix_max_chars for the kind it names, so a number moved to the wrong kind, or a ceiling changed in one place
+    only, fails.
+    """
+    from pathlib import Path
+
+    served = Path(evaluator_module.__file__).resolve().parents[1] / "web" / "openapi.json"
+    spec = json.loads(served.read_text(encoding="utf-8"))
+    result = spec["paths"]["/evaluate-tool-call"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
+    description = " ".join(result["properties"]["suggested_fix"]["description"].split())
+    layering = "python-domain-stays-pure"
+
+    advice = {fix_max_chars(key, command) for key in ("LOOP", "BUDGET", "HALTED_SESSION", "PROTECTED_PATH") for command in (False, True)}
+    credential = {fix_max_chars("CREDENTIAL", command) for command in (False, True)}
+    unreadable = {fix_max_chars("UNREADABLE_WRITE", command) for command in (False, True)}
+    assert len(advice) == len(credential) == len(unreadable) == 1, "The contract says these do not depend on the command"
+    assert unreadable == {fix_max_chars(layering, True)}, "The contract states these two as one number"
+    phrases = [
+        f"{advice.pop():,} characters for advice (loop, budget, halted_session, protected_path, destructive_command)",
+        f"{credential.pop():,} for a credential, whether or not the call runs a command",
+        f"{fix_max_chars(layering):,} for a layering refusal of a call that runs no command",
+        f"{fix_max_chars(layering, True):,} for a layering refusal of a call that runs one, and for an unreadable_write",
+        f"every write in the call, taken together, comes to {fix_options(layering)['max_content_chars']:,} characters or less",
+    ]
+    for phrase in phrases:
+        assert phrase in description, f"The contract does not say: {phrase}"
+    assert "validated false and no writes" in description, "The contract says what a layering fix past the rewrite cap is"
+
+
+def test_a_call_runs_a_command_as_the_guard_reads_one() -> None:
+    assert runs_a_command(_request("cmd-1", {"command": "ls"}, tool_name="Bash", action_type="COMMAND_EXEC"))
+    assert runs_a_command(_request("cmd-2", {"command": "ls"})), "A call that carries `command` runs it, whatever it says it is"
+    assert runs_a_command(_request("cmd-3", {"cmd": ["ls", "-la"]}, tool_name="exec_command", action_type="UNKNOWN"))
+    assert not runs_a_command(_request("cmd-4", _domain_write()))
+    assert not runs_a_command(_request("cmd-5", {"file_path": DOMAIN_PATH, "script": "import boto3\n"}))
 
 
 def test_a_loop_past_the_rewrite_ceiling_is_still_told_what_repeated(evaluator) -> None:
@@ -385,15 +438,105 @@ def test_a_credential_past_the_rewrite_ceiling_is_still_rewritten_and_checked(ev
     assert ACME_KEY not in json.dumps(fix), "A fix never repeats the credential"
 
 
-def test_one_character_past_the_rewrite_ceiling_is_sent_no_fix(evaluator, proposals) -> None:
-    content = _python_domain_file(FIX_REWRITE_MAX_CHARS - 120)
-    padding = FIX_REWRITE_MAX_CHARS + 1 - _carried(_domain_write(content))
-    assert padding > 0
-    arguments = _domain_write(content + "#" * padding)
-    assert _carried(arguments) == FIX_REWRITE_MAX_CHARS + 1
-    result = evaluator.evaluate_tool_call(_request("fix-past-limit", arguments))
+def test_at_the_rewrite_ceiling_a_layering_refusal_is_rewritten_and_checked(evaluator, proposals) -> None:
+    arguments = _exactly(_domain_write(), "content", FIX_REWRITE_MAX_CHARS)
+    result = evaluator.evaluate_tool_call(_request("fix-at-rewrite-limit", arguments))
+    assert result.status == "BLOCKED_BOUNDARY_VIOLATION"
+    fix = result.suggested_fix
+    assert fix["kind"] == "layering" and fix["validated"] is True and fix["writes"]
+    rules, _ = evaluator.rules_in_force(PROJECT)
+    for write in fix["writes"]:
+        assert _passes_the_gate(write, rules), f"The validated fix is itself refused at {write['path']}"
+    assert proposals[-1]["options"] == {"max_content_chars": FIX_REWRITE_MAX_CHARS}
+
+
+def test_the_rewrite_ceiling_is_on_what_is_rewritten_not_on_the_path_beside_it(evaluator, proposals) -> None:
+    arguments = _exactly(_domain_write(), "content", FIX_REWRITE_MAX_CHARS + 1)
+    assert len(arguments["content"]) < FIX_REWRITE_MAX_CHARS < _carried(arguments)
+    result = evaluator.evaluate_tool_call(_request("fix-past-by-its-path", arguments))
+    assert result.suggested_fix["validated"] is True and result.suggested_fix["writes"]
+
+
+def test_a_write_one_character_past_the_rewrite_ceiling_is_told_in_words_what_to_move_and_where(evaluator, proposals) -> None:
+    """It used to get nothing at all: too large to rewrite within the budget, and so no fix."""
+    content = _padded(_python_domain_file(FIX_REWRITE_MAX_CHARS - 120, head="import boto3\nimport requests\n"), FIX_REWRITE_MAX_CHARS + 1)
+    arguments = _domain_write(content)
+    assert len(content) == FIX_REWRITE_MAX_CHARS + 1
+    result = evaluator.evaluate_tool_call(_request("fix-past-rewrite-limit", arguments))
+    assert result.status == "BLOCKED_BOUNDARY_VIOLATION", "The refusal stands, whatever the fix says"
+    fix = result.suggested_fix
+    assert fix is not None and fix["kind"] == "layering"
+    assert fix["validated"] is False and fix["writes"] == [] and fix["checks"] == []
+    assert fix["steps"][0] == (
+        f"In {DOMAIN_PATH}, remove the imports of boto3, requests: rule 'python-domain-stays-pure' forbids them there."
+    )
+    assert "adapter under src/acme_orders/infrastructure/ that implements it" in fix["steps"][1]
+    assert "boto3 and 1 more" in fix["summary"] and "src/acme_orders/infrastructure" in fix["summary"]
+    (call,) = proposals
+    assert call["options"] == {"max_content_chars": FIX_REWRITE_MAX_CHARS}
+
+
+def test_the_advice_reaches_the_agent_in_its_deny_reason(evaluator) -> None:
+    from threefold.hooks.threefold_hook import refusal_reason
+
+    arguments = _exactly(_domain_write(), "content", FIX_LAYERING_ADVICE_MAX_CHARS)
+    judged = json.loads(json.dumps(evaluator.evaluate_tool_call(_request("fix-advice-to-hook", arguments)).to_dict()))
+    fix = judged["suggested_fix"]
+    assert fix["validated"] is False
+    reason = refusal_reason(judged)
+    assert reason.split("\n")[-1] == f"Suggested fix: {fix['summary']}", "Advice is labelled as advice, never as checked"
+    assert "move boto3 behind a port, adapter under src/acme_orders/infrastructure" in reason
+
+
+def test_one_character_past_the_layering_advice_ceiling_is_sent_no_fix(evaluator, proposals) -> None:
+    arguments = _exactly(_domain_write(), "content", FIX_LAYERING_ADVICE_MAX_CHARS + 1)
+    result = evaluator.evaluate_tool_call(_request("fix-past-advice-limit", arguments))
+    assert result.status == "BLOCKED_BOUNDARY_VIOLATION" and result.suggested_fix is None
+    assert proposals == [], "Past its ceiling the proposer is not even asked"
+
+
+def test_a_multi_edit_past_the_rewrite_ceiling_is_answered_in_words_not_rewritten_edit_by_edit(evaluator) -> None:
+    edits = [
+        {"old_string": f"A_{index} = 0", "new_string": _python_domain_file(FIX_REWRITE_MAX_CHARS - 600, head=f"import boto3\nA_{index} = 1\n")}
+        for index in range(3)
+    ]
+    arguments = {"file_path": DOMAIN_PATH, "edits": edits}
+    assert all(len(edit["new_string"]) < FIX_REWRITE_MAX_CHARS for edit in edits)
+    assert FIX_REWRITE_MAX_CHARS < _carried(arguments) <= FIX_LAYERING_ADVICE_MAX_CHARS
+    result = evaluator.evaluate_tool_call(_request("fix-multi-edit", arguments, tool_name="MultiEdit"))
+    assert result.status == "BLOCKED_BOUNDARY_VIOLATION"
+    assert result.suggested_fix["validated"] is False and result.suggested_fix["writes"] == []
+
+
+def test_a_small_forbidden_edit_beside_a_large_clean_one_is_answered_in_words(evaluator) -> None:
+    """The call writes more than the rewrite ceiling, though the forbidden edit alone is under it.
+
+    It used to be rewritten, because only the forbidden edit was counted, and reading the clean edit to find it clean
+    cost more than a whole verdict. Now every write in the call counts toward the ceiling.
+    """
+    arguments = _mixed_multi_edit(FIX_REWRITE_MAX_CHARS * 3)
+    forbidden, clean = (edit["new_string"] for edit in arguments["edits"])
+    assert len(forbidden) <= FIX_REWRITE_MAX_CHARS < len(forbidden) + len(clean) and _carried(arguments) <= ADVICE
+    result = evaluator.evaluate_tool_call(_request("fix-mixed-multi-edit", arguments, **MULTI_EDIT))
+    assert result.status == "BLOCKED_BOUNDARY_VIOLATION"
+    fix = result.suggested_fix
+    assert fix["kind"] == "layering" and fix["validated"] is False and fix["writes"] == []
+    assert fix["steps"][-1].startswith(f"What this call writes comes to {len(forbidden) + len(clean):,} characters")
+
+
+def test_a_command_past_the_rewrite_ceiling_is_sent_no_fix(evaluator, proposals) -> None:
+    """Its writes are read again for each question the proposer asks, so it keeps the rewrite ceiling."""
+    bash = dict(tool_name="Bash", action_type="COMMAND_EXEC")
+    body = _python_domain_file(FIX_REWRITE_MAX_CHARS * 2)
+    arguments = {"command": f"cat > {DOMAIN_PATH} <<'EOF'\n{body}EOF\n"}
+    assert FIX_REWRITE_MAX_CHARS < _carried(arguments) <= FIX_LAYERING_ADVICE_MAX_CHARS
+    result = evaluator.evaluate_tool_call(_request("fix-heredoc-past", arguments, **bash))
     assert result.status == "BLOCKED_BOUNDARY_VIOLATION" and result.suggested_fix is None
     assert proposals == []
+
+    small = {"command": f"cat > {DOMAIN_PATH} <<'EOF'\n{DOMAIN_WRITE}EOF\n"}
+    result = evaluator.evaluate_tool_call(_request("fix-heredoc-small", small, **bash))
+    assert result.suggested_fix["kind"] == "layering" and result.suggested_fix["validated"] is True
 
 
 @pytest.mark.parametrize(
@@ -407,6 +550,7 @@ def test_one_character_past_the_rewrite_ceiling_is_sent_no_fix(evaluator, propos
             {},
             "BLOCKED_SECRET_DETECTED",
         ),
+        ("layering", FIX_LAYERING_ADVICE_MAX_CHARS, _domain_write(), "content", {}, "BLOCKED_BOUNDARY_VIOLATION"),
         ("protected_path", FIX_ADVICE_MAX_CHARS, {"file_path": ".claude/settings.json", "content": "{}\n"}, "content", {}, "BLOCKED_BOUNDARY_VIOLATION"),
         (
             "destructive_command",
@@ -501,38 +645,86 @@ def _against_the_budget(evaluator: GovernanceEvaluator, monkeypatch, request_for
     return min(fixes), min(budgets), result
 
 
-# The dearest case under each ceiling, as measured: Python, the slowest language
-# to rewrite, for the two rewrites, and a protected path, the dearest advice,
-# for the third. Each carries between its ceiling less 120 characters and its
-# ceiling.
+def _dense(head: str, line: str, size: int, tail: str = "") -> str:
+    """`head`, then `line` with {i} numbered from 0 as often as fits, then `tail`: at most `size` characters."""
+    parts = [head]
+    length = len(head) + len(tail)
+    index = 0
+    while length + len(line.format(i=index)) <= size:
+        parts.append(line.format(i=index))
+        length += len(parts[-1])
+        index += 1
+    return "".join(parts) + tail
+
+
+def _mixed_multi_edit(size: int) -> Dict[str, Any]:
+    """One small forbidden edit, and one clean edit of imports making the call up to about `size` characters."""
+    forbidden = _dense("import boto3\n", "import boto3.m{i}\n", 1_440)
+    carried_so_far = _carried({"file_path": DOMAIN_PATH, "edits": [{"old_string": "A_0 = 0", "new_string": forbidden}, {"old_string": "B_0 = 0", "new_string": ""}]})
+    clean = _dense("", "import acme_part_{i}\n", size - carried_so_far)
+    return {"file_path": DOMAIN_PATH, "edits": [{"old_string": "A_0 = 0", "new_string": forbidden}, {"old_string": "B_0 = 0", "new_string": clean}]}
+
+
+ADVICE = FIX_LAYERING_ADVICE_MAX_CHARS
+MULTI_EDIT = {"tool_name": "MultiEdit"}
+
+# The dearest cases under each ceiling, as measured. The rewrites: Python, the
+# slowest language to rewrite. Advice for a protected path, the dearest advice.
+# And a layering refusal answered in words, whose cost is a parse of the file
+# and a match of every distinct import against the rules, so its dearest cases
+# are the densest files: short distinct imports with the forbidden one first
+# and last, imports each forbidden only by the rule's last pattern, TypeScript
+# of the same density, and a small forbidden edit beside a large clean one. A
+# file of function bodies, the cheapest case, is kept as the baseline the
+# others are compared with. Each carries between its ceiling less 120
+# characters and its ceiling.
 DEAREST = [
-    ("layering", FIX_REWRITE_MAX_CHARS, _domain_write(_python_domain_file(FIX_REWRITE_MAX_CHARS - 60)), True),
+    ("layering", "rewritten", FIX_REWRITE_MAX_CHARS, _domain_write(_python_domain_file(FIX_REWRITE_MAX_CHARS - 60)), True, {}),
+    ("layering", "in-words-function-bodies", ADVICE, _domain_write(_python_domain_file(ADVICE - 60)), False, {}),
+    ("layering", "in-words-distinct-imports-forbidden-first", ADVICE, _domain_write(_dense("import boto3\n", "import m{i}\n", ADVICE - 60)), False, {}),
+    ("layering", "in-words-distinct-imports-forbidden-last", ADVICE, _domain_write(_dense("", "import m{i}\n", ADVICE - 60, tail="import boto3\n")), False, {}),
+    ("layering", "in-words-each-forbidden-by-the-last-pattern", ADVICE, _domain_write(_dense("", "import acme.adapters.m{i}\n", ADVICE - 60)), False, {}),
+    (
+        "layering",
+        "in-words-typescript-distinct-imports",
+        ADVICE,
+        _domain_write(_dense("import axios from 'axios';\n", "import 'm{i}';\n", ADVICE - 80), path="web/src/domain/acmeOrder.ts"),
+        False,
+        {},
+    ),
+    ("layering", "in-words-small-forbidden-edit-beside-large-clean-one", ADVICE, _mixed_multi_edit(ADVICE - 60), False, MULTI_EDIT),
     (
         "credential",
+        "rewritten",
         FIX_CREDENTIAL_MAX_CHARS,
         {"file_path": "src/acme/acme_client.py", "content": _python_domain_file(FIX_CREDENTIAL_MAX_CHARS - 60, head=CREDENTIAL_MODULE_HEAD)},
         True,
+        {},
     ),
-    ("protected_path", FIX_ADVICE_MAX_CHARS, {"file_path": ".claude/settings.json", "content": _python_domain_file(FIX_ADVICE_MAX_CHARS - 60)}, False),
+    ("protected_path", "in-words", FIX_ADVICE_MAX_CHARS, {"file_path": ".claude/settings.json", "content": _python_domain_file(FIX_ADVICE_MAX_CHARS - 60)}, False, {}),
 ]
 
 
-@pytest.mark.parametrize("kind, ceiling, arguments, validated", DEAREST, ids=[case[0] for case in DEAREST])
-def test_the_dearest_fix_of_each_kind_stays_inside_the_gate_budget(kind, ceiling, arguments, validated, evaluator, monkeypatch) -> None:
+@pytest.mark.parametrize(
+    "kind, shape, ceiling, arguments, validated, overrides", DEAREST, ids=[f"{case[0]}-{case[1]}" for case in DEAREST]
+)
+def test_the_dearest_fix_of_each_kind_stays_inside_the_gate_budget(
+    kind, shape, ceiling, arguments, validated, overrides, evaluator, monkeypatch
+) -> None:
     assert ceiling - 120 < _carried(arguments) <= ceiling
     spent, budget, result = _against_the_budget(
-        evaluator, monkeypatch, lambda index: _request(f"fix-dearest-{kind}-{index}", dict(arguments))
+        evaluator, monkeypatch, lambda index: _request(f"fix-dearest-{kind}-{shape}-{index}", dict(arguments), **overrides)
     )
     fix = result.suggested_fix
     assert fix is not None and fix["kind"] == kind and fix["validated"] is validated
     assert spent < budget, (
-        f"The {kind} fix at its ceiling took {spent * 1000:.1f} ms, more than the {budget * 1000:.1f} ms a whole "
+        f"The {kind} fix ({shape}) at its ceiling took {spent * 1000:.1f} ms, more than the {budget * 1000:.1f} ms a whole "
         f"verdict took here on the {REFERENCE_CHARS:,} character reference, which is Trap 3's 10 ms on the development machine"
     )
 
 
 def test_a_large_refused_write_pays_only_for_counting_its_characters(evaluator, monkeypatch) -> None:
-    """A refused domain Write the size of the reference itself: far past the rewrite ceiling, so no fix.
+    """A refused domain Write the size of the reference itself: past every layering ceiling, so no fix.
 
     What the refusal pays for that decision is reading its rule key and
     counting its characters as far as the ceiling, a few microseconds on the

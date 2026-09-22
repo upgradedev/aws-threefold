@@ -165,16 +165,62 @@ def _statements(resource: str) -> List[dict]:
     return RESOURCES[resource]["Properties"]["PolicyDocument"]["Statement"]
 
 
-def test_only_this_distribution_can_read_the_pages_and_only_read_them() -> None:
+def _web_bucket_allows() -> Dict[str, dict]:
+    """The pages bucket's grants, by the one action each carries."""
     allows = [s for s in _statements("WebBucketPolicy") if s["Effect"] == "Allow"]
-    assert len(allows) == 1, "one reader, and it is the distribution"
-    allow = allows[0]
-    assert allow["Principal"] == {"Service": "cloudfront.amazonaws.com"}
-    assert _as_list(allow["Action"]) == ["s3:GetObject"]
-    assert allow["Resource"] == {"Fn::Sub": "${WebBucket.Arn}/*"}
-    source_arn = allow["Condition"]["StringEquals"]["AWS:SourceArn"]["Fn::Sub"]
-    assert source_arn.endswith(":distribution/${Distribution}"), "the condition must name this distribution"
-    assert ":cloudfront::${AWS::AccountId}:" in source_arn
+    by_action: Dict[str, dict] = {}
+    for allow in allows:
+        actions = _as_list(allow["Action"])
+        assert len(actions) == 1, f"one action per grant, so each names the one resource it applies to: {actions}"
+        assert actions[0] not in by_action, f"{actions[0]} is granted twice"
+        by_action[actions[0]] = allow
+    return by_action
+
+
+def test_only_this_distribution_can_read_the_pages_and_only_read_them() -> None:
+    allows = _web_bucket_allows()
+    assert set(allows) == {"s3:GetObject", "s3:ListBucket"}, (
+        "one reader, and it may read a page and learn whether one exists; any other grant fails here"
+    )
+    for action, allow in allows.items():
+        assert allow["Principal"] == {"Service": "cloudfront.amazonaws.com"}, action
+        assert set(allow["Condition"]) == {"StringEquals"}, action
+        assert set(allow["Condition"]["StringEquals"]) == {"AWS:SourceArn"}, action
+        source_arn = allow["Condition"]["StringEquals"]["AWS:SourceArn"]["Fn::Sub"]
+        assert source_arn.endswith(":distribution/${Distribution}"), f"the {action} condition must name this distribution"
+        assert source_arn.startswith("arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:"), action
+    assert allows["s3:GetObject"]["Condition"] == allows["s3:ListBucket"]["Condition"], "the same distribution, word for word"
+    assert allows["s3:GetObject"]["Resource"] == {"Fn::Sub": "${WebBucket.Arn}/*"}, "GetObject applies to the pages"
+    assert allows["s3:ListBucket"]["Resource"] == {"Fn::GetAtt": ["WebBucket", "Arn"]}, "ListBucket applies to the bucket"
+
+
+def test_a_page_that_does_not_exist_is_not_found_rather_than_forbidden() -> None:
+    """S3 tells a reader that may list the bucket NoSuchKey (404), and one that may not AccessDenied (403).
+
+    The listing permission is how a mistyped page answers 404 without a custom
+    error response, which would also replace the API's problem documents.
+    """
+    allows = _web_bucket_allows()
+    assert "s3:ListBucket" in allows, "without it a missing page answers 403 AccessDenied"
+    assert "CustomErrorResponses" not in DISTRIBUTION
+
+
+def test_the_listing_grant_cannot_be_used_to_list_the_pages_through_the_edge() -> None:
+    """ListBucket answers a GET on the bucket root with list parameters, and the edge can send neither.
+
+    A request for the root is answered with the default root object, and no page
+    behavior forwards a query string, so prefix, list-type and continuation
+    parameters never reach the bucket.
+    """
+    assert DISTRIBUTION["DefaultRootObject"] == "index.html"
+    web_behaviors = [DISTRIBUTION["DefaultCacheBehavior"]] + [b for b in BEHAVIORS if b["TargetOriginId"] == "web"]
+    for behavior in web_behaviors:
+        policy = behavior["CachePolicyId"]
+        assert isinstance(policy, dict) and set(policy) == {"Ref"}, "a page behavior uses one of this template's policies"
+        key = RESOURCES[policy["Ref"]]["Properties"]["CachePolicyConfig"]["ParametersInCacheKeyAndForwardedToOrigin"]
+        assert key["QueryStringsConfig"] == {"QueryStringBehavior": "none"}, behavior.get("PathPattern", "default")
+        assert "OriginRequestPolicyId" not in behavior, "an origin request policy could forward the query string anyway"
+        assert set(behavior["AllowedMethods"]) == {"GET", "HEAD"}
 
 
 def test_every_request_to_either_bucket_must_use_tls() -> None:

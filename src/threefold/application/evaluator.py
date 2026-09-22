@@ -27,6 +27,7 @@ from threefold.domain.boundary_guard import (
     iter_string_leaves,
     observe_layering,
     redact_secrets,
+    shell_command,
 )
 from threefold.application.fix_proposer import propose_fix
 from threefold.application.dtos import (
@@ -46,6 +47,7 @@ from threefold.application.rule_keys import (
     FROZEN_SESSION_REASON,
     HALTED_SESSION as HALTED_SESSION_KEY,
     HALTED_SESSION_REASONS,
+    FIXED_KEYS,
     LOOP as LOOP_KEY,
     PROTECTED_PATH as PROTECTED_PATH_KEY,
     rule_key as rule_key_of,
@@ -110,6 +112,36 @@ READ_OR_POLL_REPEAT = "Repeat of a read or poll, recorded rather than refused"
 # Write took 5.2 to 6.0 ms at 1,440 characters, 7.2 ms at 2,000, 12.7 ms at
 # 4,000 and 56 ms at 20,000; Java and TypeScript cost about half as much.
 FIX_REWRITE_MAX_CHARS = 1_500
+# A layering refusal past the rewrite ceiling: the proposer is asked with
+# max_content_chars=FIX_REWRITE_MAX_CHARS, so it rewrites nothing and answers
+# in words from the one read of the imports its diagnosis makes: which imports
+# to move (the first four by name, then how many more), the rules that forbid
+# them, and the first candidate layer where no rule forbids them. Validated
+# false and no writes. That read is a parse of the whole file, as the gate's
+# own is, and a match of every distinct import against the rules, so what it
+# costs grows with the number of imports as well as with the characters, and
+# the ceiling is set by the densest files rather than by a typical one. The
+# first version of this path put it at 8,000 and asked the rules about every
+# import four times over: a Python domain Write of 500 short imports at 7,947
+# characters then cost 4.0 times the verdict [PRIMARY], 2026-09-22. The
+# proposer now asks once per distinct import and skips the patterns that
+# cannot catch it (fix_proposer._flagged_modules and _catchable). Measured as
+# the tests measure it (the DEAREST cases in test_the_fix_reaches_the_agent),
+# the fix step against a whole verdict on the 20,000 character reference beside
+# it, interleaved, best of 31, two runs [PRIMARY], 2026-09-22, each case within
+# 120 characters of 6,000: Python function bodies 0.37 and 0.40; distinct short
+# imports with the forbidden one first 0.50 and 0.56, and last 0.52 and 0.59;
+# imports each forbidden only by the rule's last pattern 0.50 and 0.55;
+# TypeScript of the same density 0.38 and 0.40; a MultiEdit of a small
+# forbidden edit beside a large clean one 0.41 and 0.56. The same runs put the
+# rewrite at its ceiling at 0.44 and 0.52, a credential at 0.59 and a protected
+# path at 0.60, so this ceiling keeps the margin the others keep. At about
+# 7,930 characters the dense Python cases took 0.64 to 0.74, which is why it is
+# not 8,000. The reference verdict took 12 to 22 ms in those runs, above the
+# 10 ms the others were first measured at, so the machine was busier; the
+# ratio is the figure that carries over. A command keeps the rewrite ceiling
+# (see fix_max_chars).
+FIX_LAYERING_ADVICE_MAX_CHARS = 6_000
 # A credential: the proposer replaces the literal with an environment lookup
 # and runs the scan and the gates again. A Python module holding one took
 # 6.1 ms at 3,000 characters, 8.5 ms at 4,000 and 12.2 ms at 6,000.
@@ -129,17 +161,55 @@ FIX_ADVICE_MAX_CHARS = 24_000
 _ADVICE_KEYS = frozenset((LOOP_KEY, BUDGET_KEY, HALTED_SESSION_KEY, PROTECTED_PATH_KEY))
 
 
-def fix_max_chars(rule_key: str) -> int:
+def fix_max_chars(rule_key: str, command: bool = False) -> int:
     """The most a call may carry and still be sent a fix, for a verdict under this rule key.
 
-    Anything that is not advice or a credential is a layering rule's own id or
-    an unreadable write, both of which the proposer rewrites.
+    The key decides first: advice (LOOP, BUDGET, HALTED_SESSION and
+    PROTECTED_PATH, under which a destructive command is filed) gets
+    FIX_ADVICE_MAX_CHARS and a credential FIX_CREDENTIAL_MAX_CHARS, whether or
+    not the call runs a command. A layering rule's own id (any key the contract
+    does not fix) on a Write, an Edit or any call that runs no command is
+    rewritten up to FIX_REWRITE_MAX_CHARS and answered in words above it, up to
+    FIX_LAYERING_ADVICE_MAX_CHARS. A layering refusal of a command keeps the
+    rewrite ceiling, and so do an unreadable write and a verdict whose key says
+    nothing: the proposer judges a command's writes again with the gate's own
+    shell reader, which parses each write anew for each question it asks, and
+    a refused heredoc of 5,900 characters cost 1.06 times the whole reference
+    verdict, measured as the tests measure it [PRIMARY], 2026-09-22.
     """
     if rule_key in _ADVICE_KEYS:
         return FIX_ADVICE_MAX_CHARS
     if rule_key == CREDENTIAL_KEY:
         return FIX_CREDENTIAL_MAX_CHARS
+    if rule_key and rule_key not in FIXED_KEYS and not command:
+        return FIX_LAYERING_ADVICE_MAX_CHARS
     return FIX_REWRITE_MAX_CHARS
+
+
+def runs_a_command(request: Any) -> bool:
+    """Whether the call runs a shell command, as the boundary guard reads a call."""
+    arguments = getattr(request, "arguments", None)
+    if not isinstance(arguments, dict):
+        return False
+    try:
+        action = ToolActionType(getattr(request, "action_type", None))
+    except ValueError:
+        action = ToolActionType.UNKNOWN
+    invocation = ToolInvocation(tool_name=str(getattr(request, "tool_name", "") or ""), action_type=action, arguments=arguments)
+    return shell_command(invocation) is not None
+
+
+def fix_options(rule_key: str) -> Dict[str, Any]:
+    """What the proposer is told besides the call, for a verdict under this rule key.
+
+    Every fix that rewrites the call is capped at FIX_REWRITE_MAX_CHARS of
+    rewriting, whatever else the call carries, so a call past that is answered
+    in words rather than rewritten. Advice and a credential are passed nothing:
+    their own ceilings already bound what they read.
+    """
+    if rule_key in _ADVICE_KEYS or rule_key == CREDENTIAL_KEY:
+        return {}
+    return {"max_content_chars": FIX_REWRITE_MAX_CHARS}
 
 
 def carries_more_than(arguments: Any, limit: int) -> bool:
@@ -737,7 +807,10 @@ class GovernanceEvaluator:
         gets none.
 
         Which ceiling applies depends on what the fix has to do, read off the
-        verdict's rule key before the proposer is asked: see fix_max_chars.
+        verdict's rule key and whether the call runs a command, before the
+        proposer is asked: see fix_max_chars. A fix that rewrites the call is
+        told to rewrite no more than FIX_REWRITE_MAX_CHARS (fix_options), so a
+        layering refusal between that and its own ceiling is answered in words.
 
         No `phrase` is passed. A model call has no place inside a verdict's
         latency, and the summary the proposer writes is already one clean line.
@@ -752,9 +825,10 @@ class GovernanceEvaluator:
             return None
         try:
             key = rule_key if rule_key is not None else GovernanceEvaluator._rule_key(result, rules)
-            if carries_more_than(getattr(request, "arguments", None), fix_max_chars(key)):
+            limit = fix_max_chars(key, runs_a_command(request))
+            if carries_more_than(getattr(request, "arguments", None), limit):
                 return None
-            return propose_fix(request, result, rules)
+            return propose_fix(request, result, rules, **fix_options(key))
         except Exception as exc:
             # The proposer never raises, and measuring a call that the gates
             # already read should not either; if either ever does, the caller
