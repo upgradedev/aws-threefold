@@ -220,13 +220,17 @@ def parse_events(path: Path, classify: Callable[[str], str] = lambda text: "OTHE
     return summary
 
 
-def read_hook_log(path: Path) -> Dict[str, int]:
-    """What the per-run hook wrapper recorded for each call: how often the hook ran, let a call through unjudged, or crashed.
+def read_hook_log(path: Path) -> Dict[str, Any]:
+    """What the per-run hook wrapper recorded for each call: how often the hook ran, refused a call (and by which
+    gate), let a call through unjudged, or crashed.
 
     Codex prints no hook events in its JSON, so this log, written by the
-    wrapper Codex runs as its hook, is the evidence that the hook started.
+    wrapper Codex runs as its hook, is the evidence that the hook started. It
+    is also the evidence of a refusal: whether Codex's JSON quotes the hook's
+    reason is not known, and a credential refused on the machine never
+    reaches the server's ledger either.
     """
-    counts = {"calls": 0, "unjudged": 0, "crashed": 0}
+    counts: Dict[str, Any] = {"calls": 0, "unjudged": 0, "crashed": 0, "refused": 0, "refused_by_kind": Counter()}
     try:
         lines = Path(path).read_text(encoding="utf-8").splitlines()
     except OSError:
@@ -241,14 +245,35 @@ def read_hook_log(path: Path) -> Dict[str, int]:
         counts["calls"] += 1
         counts["unjudged"] += 1 if record.get("unjudged") else 0
         counts["crashed"] += 1 if record.get("crashed") or record.get("exit") not in (0, None) else 0
+        if record.get("refused"):
+            counts["refused"] += 1
+            counts["refused_by_kind"][str(record.get("kind") or "OTHER")] += 1
     return counts
 
 
-def merge_hook_log(summary: Dict[str, Any], counts: Mapping[str, int]) -> Dict[str, Any]:
+def merge_hook_log(summary: Dict[str, Any], counts: Mapping[str, Any]) -> Dict[str, Any]:
+    """The hook log's facts in the transcript summary: its calls as hook events, and the refusals the JSON did not show.
+
+    Refusals are topped up, never added: when Codex's JSON does quote the
+    hook, the transcript already holds the same refusals, so only as many as
+    the log counts beyond them are added, named by the gates the log has more
+    of. The total is then the larger of the two counts, never their sum.
+    """
     if counts.get("calls"):
         summary["hook_events"] = Counter({"hook_response": int(counts["calls"])})
     summary["hook_unjudged"] = int(counts.get("unjudged") or 0)
     summary["hook_errors"] = int(counts.get("crashed") or 0)
+    refusals = summary.setdefault("refusals", [])
+    missing = int(counts.get("refused") or 0) - len(refusals)
+    if missing > 0:
+        seen = Counter(str(item.get("kind")) for item in refusals)
+        for kind, count in sorted((counts.get("refused_by_kind") or {}).items()):
+            for _ in range(max(0, int(count) - seen.get(kind, 0))):
+                if missing <= 0:
+                    break
+                refusals.append({"tool": "?", "kind": kind})
+                missing -= 1
+        refusals.extend({"tool": "?", "kind": "OTHER"} for _ in range(missing))
     return summary
 
 

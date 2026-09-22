@@ -255,6 +255,75 @@ def test_the_hook_log_stands_in_for_the_hook_events_codex_does_not_print(tmp_pat
     assert (summary["hook_unjudged"], summary["hook_errors"]) == (1, 1)
 
 
+@pytest.mark.parametrize("printed, kind", [
+    ({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                             "permissionDecisionReason": "Threefold refused: the content contains a credential"}}, "CREDENTIAL"),
+    ({"hookSpecificOutput": {"permissionDecision": "deny",
+                             "permissionDecisionReason": "Threefold refused: layering rule domain-no-io"}}, "LAYERING"),
+    ({"decision": "deny", "reason": "Threefold refused for a reason no gate names"}, "OTHER"),
+    (None, None),
+])
+def test_the_hook_log_names_the_gate_of_each_refusal_and_keeps_no_words(tmp_path, printed, kind):
+    """For Codex a printed deny is the refusal; an approval prints nothing. The log keeps the gate, never the reason."""
+    probe = tmp_path / "probe_hook.py"
+    probe.write_text("import json\n" + (f"print(json.dumps({printed!r}))\n" if printed else ""), encoding="utf-8")
+    wrapper = harness.write_hook_wrapper(tmp_path / "run", probe, agent="codex")
+    subprocess.run([sys.executable, str(wrapper)], input=b"{}", capture_output=True, timeout=60, check=True)
+    (line,) = (tmp_path / "run" / harness.HOOK_LOG_NAME).read_text(encoding="utf-8").splitlines()
+    record = json.loads(line)
+    assert (record["refused"], record["kind"]) == (kind is not None, kind)
+    assert "Threefold refused" not in line and "domain-no-io" not in line
+    counts = codex_agent.read_hook_log(tmp_path / "run" / harness.HOOK_LOG_NAME)
+    assert counts["refused"] == (1 if kind else 0) and dict(counts["refused_by_kind"]) == ({kind: 1} if kind else {})
+
+
+def _refused_items(tmp_path, reasons):
+    """A completed Codex run whose JSON quotes the hook's refusal for each reason given."""
+    messages = [{"type": "thread.started", "thread_id": "t"}]
+    for number, reason in enumerate(reasons):
+        messages.append({"type": "item.completed", "item": {"id": f"e{number}", "type": "error", "message": reason}})
+    messages += [{"type": "item.completed", "item": {"id": "c1", "type": "command_execution", "status": "completed"}},
+                 {"type": "turn.completed", "usage": {"input_tokens": 10, "output_tokens": 5}}]
+    return codex_agent.parse_events(_events(tmp_path, messages), classify=harness.refusal_kind)
+
+
+@pytest.mark.parametrize("quoted, logged, expected", [
+    ([], {"CREDENTIAL": 1}, {"CREDENTIAL": 1}),
+    (["Threefold refused: layering rule domain-no-io"], {"LAYERING": 1}, {"LAYERING": 1}),
+    (["Threefold refused: layering rule domain-no-io"], {"LAYERING": 1, "CREDENTIAL": 1}, {"LAYERING": 1, "CREDENTIAL": 1}),
+    (["Threefold refused: layering rule domain-no-io"], {}, {"LAYERING": 1}),
+])
+def test_refusals_only_the_hook_log_saw_are_added_and_never_counted_twice(tmp_path, quoted, logged, expected):
+    summary = _refused_items(tmp_path, quoted)
+    counts = {"calls": 2, "unjudged": 0, "crashed": 0, "refused": sum(logged.values()), "refused_by_kind": logged}
+    merged = codex_agent.merge_hook_log(summary, counts)
+    metrics = harness.agent_metrics(merged, harness.Sanitiser(tmp_path))
+    assert metrics["hook_refusals_by_kind"] == expected and metrics["hook_refusals"] == sum(expected.values())
+
+
+def test_a_credential_refused_on_the_machine_counts_for_codex_although_the_ledger_never_saw_it(tmp_path):
+    """The case the log exists for: Codex's JSON does not quote the hook, and the server never heard of the call."""
+    summary = codex_agent.merge_hook_log(_refused_items(tmp_path, []), {
+        "calls": 1, "unjudged": 0, "crashed": 0, "refused": 1, "refused_by_kind": {"CREDENTIAL": 1}})
+    row = dict(harness.agent_metrics(summary, harness.Sanitiser(tmp_path)), condition="threefold",
+               ledger={"reachable": True, "decisions": 0, "refused": 0}, violation_landed=False, acceptance_passed=True)
+    assert row["agent_ran"] and row["hook_refusals"] == 1
+    outcome = harness.refusal_outcome("threefold", row)
+    assert outcome == {"refused_at_least_once": True, "self_corrected": True, "gave_up_after_refusal": False}
+    assert harness.hook_check("threefold", row, row["ledger"], "codex")["governance_observed"] is True
+
+
+def test_a_codex_login_check_that_hangs_says_error_with_a_next_step(tmp_path):
+    def hanging(command, **kwargs):
+        raise subprocess.TimeoutExpired(command, kwargs.get("timeout"))
+
+    result = credentials.check_codex_auth("codex", tmp_path / "codex-home", base_env={}, work_base=tmp_path / "w",
+                                          runner=hanging)
+    assert result.status == "error" and "did not answer" in result.message
+    assert "codex login status" in result.next_step and "--check-auth" in result.next_step
+    assert not list((tmp_path / "w").glob("threefold-auth-*"))
+
+
 def _codex_row(**extra):
     row = {"agent": "codex", "condition": "threefold", "agent_ran": True, "measured": True, "harness_error": None,
            "acceptance_passed": True, "server_healthy_after": True, "ledger": {"reachable": True, "decisions": 3, "refused": 1},
