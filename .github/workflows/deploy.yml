@@ -54,10 +54,20 @@ jobs:
             --output-template-file packaged.yml \
             --region "$AWS_REGION"
 
+      # The packaged template is sent through the packaging bucket rather than
+      # inline. CloudFormation accepts at most 51,200 bytes inline and far more
+      # from S3, and the source template is already within a few kilobytes of
+      # the inline limit, so the next addition would otherwise fail the deploy
+      # with nothing wrong in the template. The prefix is the one the deploy
+      # role may write under. Parameters this command does not name,
+      # EdgeOriginSecret among them, keep the stack's current values, so a
+      # secret the owner set once is never sent from here.
       - name: Deploy
         run: |
           aws cloudformation deploy \
             --template-file packaged.yml \
+            --s3-bucket "$PACKAGING_BUCKET" \
+            --s3-prefix threefold \
             --stack-name "$STACK_NAME" \
             --capabilities CAPABILITY_IAM CAPABILITY_AUTO_EXPAND \
             --region "$AWS_REGION" \

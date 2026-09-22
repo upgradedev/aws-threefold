@@ -69,7 +69,32 @@
         "apigateway:POST",
         "apigateway:PUT",
         "apigateway:PATCH",
-        "apigateway:DELETE"
+        "apigateway:DELETE",
+        "cloudwatch:ListDashboards"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "TheApiAccessLogIsAVendedLogDelivery",
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogDelivery",
+        "logs:GetLogDelivery",
+        "logs:UpdateLogDelivery",
+        "logs:DeleteLogDelivery",
+        "logs:ListLogDeliveries",
+        "logs:PutResourcePolicy",
+        "logs:DescribeResourcePolicies"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "SubscriptionCallsNameNoTopic",
+      "Effect": "Allow",
+      "Action": [
+        "sns:GetSubscriptionAttributes",
+        "sns:SetSubscriptionAttributes",
+        "sns:Unsubscribe"
       ],
       "Resource": "*"
     },
@@ -83,7 +108,13 @@
         "dynamodb:UpdateTable",
         "dynamodb:UpdateTimeToLive",
         "dynamodb:DescribeTimeToLive",
+        "dynamodb:UpdateContinuousBackups",
+        "dynamodb:DescribeContinuousBackups",
+        "dynamodb:DescribeContributorInsights",
+        "dynamodb:DescribeKinesisStreamingDestination",
+        "dynamodb:GetResourcePolicy",
         "dynamodb:TagResource",
+        "dynamodb:UntagResource",
         "dynamodb:ListTagsOfResource"
       ],
       "Resource": "arn:aws:dynamodb:eu-west-1:308857099262:table/threefold-prod-*"
@@ -114,12 +145,84 @@
       "Action": [
         "logs:CreateLogGroup",
         "logs:DeleteLogGroup",
-        "logs:DescribeLogGroups",
         "logs:PutRetentionPolicy",
+        "logs:DeleteRetentionPolicy",
         "logs:TagResource",
-        "logs:ListTagsForResource"
+        "logs:UntagResource",
+        "logs:ListTagsForResource",
+        "logs:TagLogGroup",
+        "logs:UntagLogGroup",
+        "logs:ListTagsLogGroup",
+        "logs:PutMetricFilter",
+        "logs:DeleteMetricFilter",
+        "logs:DescribeMetricFilters"
       ],
-      "Resource": "arn:aws:logs:eu-west-1:308857099262:log-group:/aws/lambda/threefold-prod-*"
+      "Resource": [
+        "arn:aws:logs:eu-west-1:308857099262:log-group:/aws/lambda/threefold-prod-*",
+        "arn:aws:logs:eu-west-1:308857099262:log-group:/aws/vendedlogs/apigateway/threefold-prod/*"
+      ]
+    },
+    {
+      "Sid": "DescribeLogGroupsListsTheRegion",
+      "Effect": "Allow",
+      "Action": "logs:DescribeLogGroups",
+      "Resource": "arn:aws:logs:eu-west-1:308857099262:log-group:*"
+    },
+    {
+      "Sid": "AlarmsThisStackOwns",
+      "Effect": "Allow",
+      "Action": [
+        "cloudwatch:PutMetricAlarm",
+        "cloudwatch:DescribeAlarms",
+        "cloudwatch:DeleteAlarms",
+        "cloudwatch:TagResource",
+        "cloudwatch:UntagResource",
+        "cloudwatch:ListTagsForResource"
+      ],
+      "Resource": "arn:aws:cloudwatch:eu-west-1:308857099262:alarm:threefold-prod-*"
+    },
+    {
+      "Sid": "TheDashboardThisStackOwns",
+      "Effect": "Allow",
+      "Action": [
+        "cloudwatch:PutDashboard",
+        "cloudwatch:GetDashboard",
+        "cloudwatch:DeleteDashboards",
+        "cloudwatch:TagResource",
+        "cloudwatch:UntagResource",
+        "cloudwatch:ListTagsForResource"
+      ],
+      "Resource": "arn:aws:cloudwatch::308857099262:dashboard/threefold-prod-*"
+    },
+    {
+      "Sid": "TheAlarmTopicThisStackOwns",
+      "Effect": "Allow",
+      "Action": [
+        "sns:CreateTopic",
+        "sns:DeleteTopic",
+        "sns:GetTopicAttributes",
+        "sns:SetTopicAttributes",
+        "sns:Subscribe",
+        "sns:ListSubscriptionsByTopic",
+        "sns:TagResource",
+        "sns:UntagResource",
+        "sns:ListTagsForResource",
+        "sns:GetDataProtectionPolicy",
+        "sns:PutDataProtectionPolicy"
+      ],
+      "Resource": "arn:aws:sns:eu-west-1:308857099262:threefold-prod-*"
+    },
+    {
+      "Sid": "TheBudgetThisStackMayCreate",
+      "Effect": "Allow",
+      "Action": [
+        "budgets:ModifyBudget",
+        "budgets:ViewBudget",
+        "budgets:TagResource",
+        "budgets:UntagResource",
+        "budgets:ListTagsForResource"
+      ],
+      "Resource": "arn:aws:budgets::308857099262:budget/threefold-prod-*"
     },
     {
       "Sid": "OnlyTheExecutionRoleThisStackCreates",
@@ -132,14 +235,29 @@
         "iam:PutRolePolicy",
         "iam:DeleteRolePolicy",
         "iam:GetRolePolicy",
-        "iam:AttachRolePolicy",
-        "iam:DetachRolePolicy",
         "iam:ListRolePolicies",
         "iam:ListAttachedRolePolicies",
         "iam:TagRole",
         "iam:UntagRole"
       ],
       "Resource": "arn:aws:iam::308857099262:role/threefold-prod-*"
+    },
+    {
+      "Sid": "OnlyTheManagedPoliciesTheTransformAttaches",
+      "Effect": "Allow",
+      "Action": [
+        "iam:AttachRolePolicy",
+        "iam:DetachRolePolicy"
+      ],
+      "Resource": "arn:aws:iam::308857099262:role/threefold-prod-*",
+      "Condition": {
+        "ArnEquals": {
+          "iam:PolicyARN": [
+            "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+            "arn:aws:iam::aws:policy/AWSXrayWriteOnlyAccess"
+          ]
+        }
+      }
     }
   ]
 }
