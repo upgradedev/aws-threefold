@@ -1,96 +1,106 @@
-# Threefold: 3-Minute Demo Video Script & Production Guide
+# Threefold: demo video script
 
-**Hackathon Track:** `#workplace-efficiency` (Developer Productivity & AI Governance)  
-**Lane:** `#community`  
-**Target Duration:** 2 minutes 45 seconds (< 180 seconds hard cap)  
-**Host / Presenter:** Engineering Lead / Builder  
-**URL:** `https://github.com/upgradedev/threefold-aws`  
+**Category:** `#workplace-efficiency` · **Lane:** `#community`
+**Target length:** 2:45, under a 3:00 hard cap
+**Everything shown is live:** <https://d1og72wpk4aqig.cloudfront.net/> and its pages. Nothing in the script needs a mock, and every sentence of narration is something the screen shows or the code does.
 
 ---
 
-## Video Timeline & Scene Breakdown
+## Scene 1: the problem (0:00 to 0:20)
 
-### Scene 1: The Problem — Autonomous Coding Agent Thrashing & Runaway Costs (0:00 - 0:25)
-- **Visual:**
-  - Full screen title slide: *"Threefold: Serverless Real-Time Governance, Cost Circuit Breakers & Invariant Enforcement for AI Coding Agents"*.
-  - Cut to terminal showing an autonomous coding agent trapped in an infinite loop: repeated tool calls, token usage climbing rapidly, and cloud bills spiking.
-- **Narration (Spoken):**
-  > "Autonomous coding agents are revolutionizing software development. But when left ungoverned, agents can enter destructive thrashing loops—endlessly editing the same file, burning through thousands of dollars in LLM tokens in minutes, or accidentally leaking sensitive AWS credentials into public repositories.
-  > Today's teams are forced to choose between completely manual code review or risking runaway agent execution.
-  > We built **Threefold** to give engineering teams real-time, deterministic governance over any AI coding agent."
+- **Visual:** title card, "Threefold: refuse the edit, not the pull request".
+  Then a coding agent in a terminal writing `import boto3` into a file under
+  `src/domain/`.
+- **Narration:**
+  > "Coding agents write code faster than anyone reviews it. The architecture
+  > checks most teams have run in CI, after the agent has moved on. The only
+  > moment a bad edit can still be refused is when the agent asks to make it.
+  > Threefold answers at that moment."
+
+## Scene 2: who decides (0:20 to 0:45)
+
+- **Visual:** the architecture diagram from `docs/ARCHITECTURE.md`: the hook on
+  the developer's machine, CloudFront with WAF, API Gateway, one Lambda,
+  DynamoDB, and Bedrock off to the side.
+- **Narration:**
+  > "One hook file sits in front of Claude Code, Codex and Antigravity. It
+  > refuses a credential on the machine and sends the rest to a service on AWS.
+  > Deterministic gates decide: the architect's layering rules, credentials,
+  > writes that would switch the hooks off, repeating calls, a spend ceiling.
+  > Amazon Bedrock never decides. It explains a refusal to a person, and every
+  > response says which one you are reading."
+
+## Scene 3: the two-stage rollout, live (0:45 to 1:45)
+
+- **Visual:** open `https://d1og72wpk4aqig.cloudfront.net/dashboard.html#/try`
+  and walk the five steps.
+  1. **Make a sandbox.** A project `Acme-Sandbox-<8 hex>` appears, seeded with
+     twelve synthetic hook calls from all three agents.
+  2. **See what would be refused.** The would-refuse calls, grouped by rule.
+     Nothing was refused: the project is in Observe.
+  3. **Label each call.** Mark the real violations correct and the one false
+     alarm as a false alarm. Rules turn Ready or Noisy.
+  4. **Promote.** Enforce the rules that earned it; the noisy one keeps
+     observing.
+  5. **Send it again.** The same kind of call is refused for real, with the fix
+     Threefold suggests, whether that fix passed the same gates, and a sentence
+     from Amazon Bedrock explaining the refusal.
+- **Narration:**
+  > "Every project starts in Observe. Calls are judged and recorded, and the
+  > dashboard shows what each rule would have refused. You mark each one correct
+  > or a false alarm. A rule whose every flag was correct is Ready. Promote the
+  > project with the rules that earned it, and the next violation is refused
+  > before it lands, with a fix that has itself been run through the same gates.
+  > Demote is one click."
+
+## Scene 4: one command, and a real agent refused (1:45 to 2:15)
+
+- **Visual:** the dashboard's `#/connect` page, copy the command, run it in a
+  repository:
+
+  ```powershell
+  irm https://d1og72wpk4aqig.cloudfront.net/install.py -OutFile threefold.py; py threefold.py connect --project Acme-Billing
+  ```
+
+  The installer lists what it wrote, sends one dry-run call, reports it
+  recorded, and opens the project page. Cut to Claude Code asked to write
+  `import boto3` into a domain file in a project promoted to Enforce: the deny
+  appears with the rule's name and the fix's one-line summary, and the file is
+  not created.
+- **Narration:**
+  > "Connecting a repository is one command. It installs the hook for the
+  > agents it finds, keeps every file it writes out of git, and opens the
+  > project. When a rule is in force, the agent is refused before the write,
+  > and told what to do instead. We checked on the file system that the refused
+  > file is not created, for Claude Code and for Antigravity. Codex has not been
+  > measured yet, so we make no claim for it."
+
+## Scene 5: running it, and what is not claimed yet (2:15 to 2:45)
+
+- **Visual:** the dashboard's overview; the CloudWatch dashboard
+  `threefold-prod-operations` with its alarms; then the dashboard's `#/proof`
+  page, which shows the benchmark as a pilot with nothing measured yet.
+- **Narration:**
+  > "It runs on AWS behind CloudFront and AWS WAF, on one Lambda function and one
+  > DynamoDB table, with ten CloudWatch alarms and point-in-time recovery. A
+  > live probe checks the project's claims against the deployed stack. What is not
+  > measured, we do not claim: the benchmark comparing agents with and without
+  > Threefold has only run as a pilot, and its headline will come from the full
+  > run. Try the rollout yourself at the link below. It takes a minute."
+- **End card:** `https://d1og72wpk4aqig.cloudfront.net/dashboard.html#/try`
 
 ---
 
-### Scene 2: The Architectural Axiom — "Deterministic Code Trips the Breaker, Bedrock Explains Why" (0:25 - 0:55)
-- **Visual:**
-  - Architecture diagram showing:
-    `Agent Tool Invocation -> Universal Adapter (OpenAI / Anthropic) -> Deterministic Safety Invariants (Tokens, Loops, Boundaries, Secrets) -> Amazon Bedrock Reviewer -> Governance Certificate, returned to the caller, with the session in DynamoDB`.
-  - Highlight that the deterministic gate decides, and Bedrock only explains the decision afterwards.
-- **Narration (Spoken):**
-  > "Threefold is built on a clear architectural principle: *Deterministic code trips the circuit breaker; Amazon Bedrock explains why.*
-  > All agent tool calls pass through an ultra-fast, air-gapped governance layer in Python that enforces four critical invariants:
-  > One: Token Budget Ceilings.
-  > Two: N-Gram Thrashing & Loop Detection.
-  > Three: Clean Architecture Layer Boundaries.
-  > And Four: Pre-Invocation Secret Leakage Prevention.
-  > If an invariant is breached, execution halts instantly. Then, Amazon Bedrock analyzes the incident and delivers actionable, architectural explanations to the developer."
+## Recording checklist
 
----
-
-### Scene 3: Live Application Walkthrough & Threat Interceptions (0:55 - 1:40)
-- **Visual:**
-  - Screen capture of the live web interface (<https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/> / `src/threefold/web/index.html`).
-  - Show the green **"BACKEND ONLINE (v1.0.0)"** status badge.
-  - Click **"Scenario 1: Thrashing Loop Intercept"**:
-    - Terminal shows repeated calls to `edit_file("src/service.py")`.
-    - At call #3, the circuit breaker trips. Status changes to red: `BLOCKED_LOOP_DETECTED`.
-    - Bedrock explanation card displays: *"Agent thrashing detected... execution halted to prevent unbounded token consumption."*
-  - Click **"Scenario 2: Secret Leak Intercept"**:
-    - Agent attempts to execute `export AWS_ACCESS_KEY_ID=AKIA...`.
-    - Gate instantly blocks it: `BLOCKED_SECRET_DETECTED`.
-- **Narration (Spoken):**
-  > "Here is Threefold running live on our server, intercepting real tool calls.
-  > In Scenario 1, an agent gets stuck in a recursive loop modifying the same file. On the third repeated call, our N-gram loop detector trips the circuit breaker, stopping the session before budget is wasted. Amazon Bedrock immediately explains the root cause.
-  > In Scenario 2, an agent attempts to execute a shell command containing an AWS Access Key. Threefold catches the credential in pre-invocation and neutralizes the leak before it ever leaves the developer's workstation."
-
----
-
-### Scene 4: Universal Multi-Agent Adapter & Governance Certificate (1:40 - 2:15)
-- **Visual:**
-  - Click **"Scenario 5: Universal Adapter (OpenAI / Anthropic)"**:
-    - Show real OpenAI `function_call` payload being ingested and normalized into domain entities.
-    - Show Anthropic `tool_use` payload being approved.
-  - Click **"Scenario 4: Compliant Run & Cert"**:
-    - 4 safe, well-architected tool calls execute.
-    - Budget remaining updates smoothly ($14.92 / $15.00).
-    - Status turns green: `APPROVED`.
-    - Click **"📥 Export Governance Certificate"**.
-    - Open the downloaded JSON certificate showing the SHA-256 fingerprint, the session it covers and how many verdicts it counts. It carries no list of invariants; the verdicts themselves are on the page behind it.
-- **Narration (Spoken):**
-  > "Threefold is model-agnostic. With our Universal Multi-Agent Adapter, you can protect Claude Code, Cursor, Copilot, or OpenAI Swarm agents using their native payload schemas.
-  > When an agent operates safely within boundaries, Threefold tracks the cost it was told about and issues a SHA-256 fingerprinted **Governance Certificate**.
-  > Nothing verifies this certificate yet. The fingerprint is unkeyed, so it detects corruption rather than an adversary, and making a CI check refuse a pull request whose session has no valid certificate is the next piece of work."
-
----
-
-### Scene 5: Production Engineering, CloudWatch EMF, & Conclusion (2:15 - 2:45)
-- **Visual:**
-  - Switch to terminal. Run `THREEFOLD_OFFLINE=1 python -m pytest tests -q` showing all **65 tests passing**.
-  - Show Swagger UI at `src/threefold/web/swagger.html` with OpenAPI 3.1 endpoints.
-  - Show CloudWatch Embedded Metric Format (EMF) logs streaming in the terminal (`Threefold/Governance`).
-  - Return to slide with GitHub repository link: `https://github.com/upgradedev/threefold-aws`.
-- **Narration (Spoken):**
-  > "Threefold is engineered for enterprise production: zero-trust token-bucket rate limiting, full jitter resilience, OpenAPI 3.1 specs, and real-time CloudWatch Embedded Metric Format telemetry.
-  > Our automated test pyramid includes 65 hermetic unit, integration, and security tests—running clean-room with zero external dependencies.
-  > Give your developers the superpower of autonomous AI agents—with the safety, cost control, and architectural integrity of Threefold.
-  > Thank you, and explore our repository on GitHub!"
-
----
-
-## Screen Recording Checklist
-
-- [ ] Browser window 1: <https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/> (Threefold Interactive Console)
-- [ ] Browser window 2: `https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/swagger.html` (Swagger UI)
-- [ ] Terminal window: split pane showing pytest suite (`146 passed`), pre-commit hook execution, and live CloudWatch EMF logs
-- [ ] Audio: crisp microphone recording matching the scene timings
-- [ ] Final video duration: 2 minutes 35 seconds to 2 minutes 45 seconds (strictly < 3:00)
+- [ ] Browser: `https://d1og72wpk4aqig.cloudfront.net/dashboard.html#/try`, in a
+      fresh private window so the walkthrough starts at step 1.
+- [ ] Browser: `https://d1og72wpk4aqig.cloudfront.net/dashboard.html#/connect`
+      and `#/proof`.
+- [ ] Terminal: a synthetic `Acme-*` repository, connected with the command
+      above and promoted to Enforce on a stack you operate (the public stack has
+      no operator key, so only sandbox projects can be promoted there). No real
+      project or company name on screen.
+- [ ] CloudWatch console: `threefold-prod-operations` in eu-west-1.
+- [ ] Do not show a test count or any benchmark number: none is measured yet.
+- [ ] Final length between 2:35 and 2:45.
