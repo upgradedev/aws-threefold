@@ -224,7 +224,7 @@ def read_window(
     days: int,
     project: Optional[str] = None,
     today: Optional[datetime.date] = None,
-    budget: int = SELF_CORRECTION_ROWS,
+    budget: Optional[int] = None,
 ) -> Tuple[List[Dict[str, Any]], int, bool]:
     """The window's rows as pages show them, newest first, as far as `budget` rows reach.
 
@@ -239,6 +239,7 @@ def read_window(
     reading them.
     """
     today = today or datetime.datetime.now(datetime.timezone.utc).date()
+    budget = SELF_CORRECTION_ROWS if budget is None else budget
     day, after = str(today), None
     oldest = str(today - datetime.timedelta(days=max(1, days) - 1))
     kept: List[Dict[str, Any]] = []
@@ -270,7 +271,7 @@ def self_correction(
     days: int,
     project: Optional[str] = None,
     today: Optional[datetime.date] = None,
-    budget: int = SELF_CORRECTION_ROWS,
+    budget: Optional[int] = None,
 ) -> Dict[str, Any]:
     """{refusals_considered, self_corrected, rate, median_calls_to_correct, rows_read, complete}.
 
