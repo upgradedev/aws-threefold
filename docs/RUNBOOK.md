@@ -20,10 +20,12 @@ outside the repository.
 
 ## 1. Deploy a regional stack
 
-`deploy/template.yml` is 49,398 bytes, within two kilobytes of the 51,200
-bytes CloudFormation accepts inline, so both commands send it through the
-packaging bucket, which has no such limit. (`deploy/edge.yml`, at 44,377
-bytes, is still deployed inline in section 2.)
+`deploy/template.yml` has grown to within two kilobytes of the 51,200 bytes
+CloudFormation accepts for an inline template, so both commands send it through
+the packaging bucket, which has no such limit. Its exact size is not written
+down here, because it changes with every edit to the template and a number in a
+document does not; `wc -c deploy/template.yml` gives it.  (`deploy/edge.yml` is
+still comfortably under that limit and is deployed inline in section 2.)
 
 ```bash
 aws cloudformation package \

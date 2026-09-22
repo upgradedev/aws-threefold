@@ -43,8 +43,13 @@ its edits are treated as governed at commit time only.
   a shell heredoc is a separate, server-side gap, tracked in STATE.md and closed
   by the shell-write reader.
 - It is one machine, one platform (Windows), and the versions above. Another
-  version may behave differently, which is why the check is a script that can be
-  rerun rather than a sentence in a document.
+  version may behave differently, so the Method above is written to be repeated
+  rather than taken on trust: a throwaway repository, `src/domain/order.py`, a
+  deny-only hook that makes no network call, the request to create
+  `src/domain/model.py` with `import boto3`, and then the file system. No
+  script in this repository runs it, so repeating it on a new version is manual
+  work; a committed `scripts/measure_enforcement.py` would make this table
+  reproducible instead of only repeatable, and is not written.
 
 ## Argument shapes observed
 
