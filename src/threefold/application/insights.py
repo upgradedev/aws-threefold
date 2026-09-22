@@ -9,8 +9,9 @@ is a console that lies by omission.
 from __future__ import annotations
 
 import datetime
+import statistics
 from collections import Counter, defaultdict
-from typing import Any, Dict, List
+from typing import Any, Dict, Iterable, List, Mapping
 
 # What the gates actually watch today. Shown on the console beside the counts,
 # so a zero is read as "nothing was refused here" rather than "nothing happens
@@ -226,6 +227,86 @@ def summarise(decisions: List[Dict[str, Any]], window_days: int) -> Dict[str, An
             for row in refusals[:25]
         ],
         "coverage": GATE_COVERAGE,
+    }
+
+
+# ---------------------------------------------------------------- self-correction
+
+# How many of its own next calls an agent is given to find an acceptable way to
+# do what was refused. Past that, a later approval on the same target is more
+# likely to be unrelated work than an answer to the refusal.
+SELF_CORRECTION_WINDOW = 10
+
+# Only a governed agent can correct itself. A page call is a visitor pressing a
+# button, and the demo's own sessions are refused on purpose and never retried,
+# so counting them would measure the demo rather than the agents.
+SELF_CORRECTION_ORIGINS = ("hook", "ci")
+
+
+def _same_target(value: Any) -> str:
+    """A target as two calls to the same file or program are compared.
+
+    A path an agent sends with backslashes, or with a leading "./", names the
+    same file as one sent without; anything else is compared exactly.
+    """
+    text = str(value or "").strip().replace("\\", "/")
+    while text.startswith("./"):
+        text = text[2:]
+    return text
+
+
+def self_correction(rows: Iterable[Mapping[str, Any]], window: int = SELF_CORRECTION_WINDOW) -> Dict[str, Any]:
+    """How often an agent that was refused went on to do the same thing acceptably.
+
+    A refusal of a governed call (origin hook or ci) self-corrected when one of
+    the next `window` calls of the same session, in time order, aimed at the
+    same target and was not refused: approved, or only observed by a rule that
+    is still watching. The distance is how many calls that took, 1 being the
+    very next one.
+
+    Every refusal counts on its own, so a target refused twice before the call
+    that went through is two refusals, each corrected. A refusal whose target
+    the ledger did not record (a command with no program, arguments with no
+    path) is not considered at all: it cannot be matched with anything, and
+    scoring it as uncorrected would lower the rate for a reason that has
+    nothing to do with the agent. In the observe stage nothing is refused, so
+    such a window considers no refusal.
+
+    `rate` and `median_calls_to_correct` are None when there is nothing to
+    divide or rank: none of none is not a rate, and a median of no distances
+    would read as corrected at once.
+    """
+    sessions: Dict[str, List[Mapping[str, Any]]] = defaultdict(list)
+    seen = set()
+    for row in rows:
+        if str(row.get("origin") or "") not in SELF_CORRECTION_ORIGINS or not row.get("session_id"):
+            continue
+        identity = (row.get("timestamp"), row.get("verdict_id"))
+        if identity in seen:
+            continue
+        seen.add(identity)
+        sessions[str(row["session_id"])].append(row)
+
+    considered = 0
+    distances: List[int] = []
+    for calls in sessions.values():
+        calls.sort(key=lambda call: (str(call.get("timestamp") or ""), str(call.get("verdict_id") or "")))
+        for index, call in enumerate(calls):
+            target = _same_target(call.get("target"))
+            if not _is_refusal(str(call.get("status") or "")) or not target:
+                continue
+            considered += 1
+            for distance, later in enumerate(calls[index + 1:index + 1 + window], start=1):
+                if _same_target(later.get("target")) == target and not _is_refusal(str(later.get("status") or "")):
+                    distances.append(distance)
+                    break
+
+    corrected = len(distances)
+    return {
+        "refusals_considered": considered,
+        "self_corrected": corrected,
+        "rate": round(corrected / considered, 4) if considered else None,
+        "median_calls_to_correct": statistics.median(distances) if distances else None,
     }
 
 

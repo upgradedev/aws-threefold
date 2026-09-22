@@ -20,6 +20,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
+from threefold.application import insights
 from threefold.application.dtos import InvalidRequestError
 from threefold.application.insights import CATEGORY_LABELS
 from threefold.application.labels import public_row
@@ -33,6 +34,10 @@ MAX_DAYS = 30
 # cursor carries the rest.
 PAGE_SIZE = 200
 MAX_PAGES_PER_REQUEST = 25
+# How many ledger rows the self-correction figure may read. It is shown on the
+# overview, which a browser refreshes every thirty seconds, so the budget is
+# modest and the answer says when it ran out rather than reading on.
+SELF_CORRECTION_ROWS = 2000
 
 KINDS = ("all", "refused", "observed", "approved")
 REVIEW_FILTERS = ("any", "unreviewed", "correct", "false_alarm")
@@ -209,6 +214,88 @@ def _finish(items: List[Dict[str, Any]], day: str, after: Optional[str], oldest:
     if day <= oldest:
         return {"items": items, "next_cursor": None}
     return {"items": items, "next_cursor": encode_cursor(_previous_day(day), after, oldest)}
+
+
+# ---------------------------------------------------------------- self-correction
+
+
+def read_window(
+    reader: Reader,
+    days: int,
+    project: Optional[str] = None,
+    today: Optional[datetime.date] = None,
+    budget: int = SELF_CORRECTION_ROWS,
+) -> Tuple[List[Dict[str, Any]], int, bool]:
+    """The window's rows as pages show them, newest first, as far as `budget` rows reach.
+
+    Returns (rows of `project`, or of every project; rows read; whether the
+    whole window was read). Newest first matters: a refusal's corrections come
+    after it, so every refusal that was read has all of its later calls read
+    too, and a read cut short leaves out whole refusals rather than half of
+    what followed one. The budget counts rows, not requests, so a quiet
+    thirty-day window whose days are mostly empty is still read to the end.
+    A read that stops at the budget says it is incomplete even when the days
+    it did not reach turn out to be empty: it cannot know that without
+    reading them.
+    """
+    today = today or datetime.datetime.now(datetime.timezone.utc).date()
+    day, after = str(today), None
+    oldest = str(today - datetime.timedelta(days=max(1, days) - 1))
+    kept: List[Dict[str, Any]] = []
+    read = 0
+    # One request per day, plus one per full page the budget allows: a store
+    # that kept answering empty pages with a resume key could otherwise hold
+    # this loop for ever without spending any of the row budget.
+    requests_left = max(1, days) + budget // PAGE_SIZE + 1
+    while True:
+        if read >= budget or requests_left <= 0:
+            return kept, read, False
+        requests_left -= 1
+        page, next_after = reader(day, after, min(PAGE_SIZE, budget - read))
+        read += len(page)
+        for row in page:
+            shown = shown_row(row)
+            if project is None or shown.get("project_name") == project:
+                kept.append(shown)
+        if next_after is not None:
+            after = next_after
+            continue
+        if day <= oldest:
+            return kept, read, True
+        day, after = _previous_day(day), None
+
+
+def self_correction(
+    reader: Reader,
+    days: int,
+    project: Optional[str] = None,
+    today: Optional[datetime.date] = None,
+    budget: int = SELF_CORRECTION_ROWS,
+) -> Dict[str, Any]:
+    """{refusals_considered, self_corrected, rate, median_calls_to_correct, rows_read, complete}.
+
+    Read from the ledger rather than the rollups, because whether a refusal
+    was followed by an acceptable call is a question about the order of calls
+    in a session, which a daily counter cannot answer. `complete` is false when
+    the budget ran out before the window did: the figure then covers the
+    newest `rows_read` rows only, and is exact for the refusals among them.
+    """
+    rows, read, complete = read_window(reader, days, project, today, budget)
+    figure = insights.self_correction(rows)
+    figure.update(rows_read=read, complete=complete)
+    return figure
+
+
+def self_correction_unread() -> Dict[str, Any]:
+    """The figure when the ledger could not be read: nothing considered, and not complete."""
+    return {
+        "refusals_considered": 0,
+        "self_corrected": 0,
+        "rate": None,
+        "median_calls_to_correct": None,
+        "rows_read": 0,
+        "complete": False,
+    }
 
 
 # ---------------------------------------------------------------- reviews
