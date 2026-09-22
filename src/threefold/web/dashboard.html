@@ -1432,13 +1432,19 @@
               // in the ledger" here would deny rows a bar on the overview counts.
               ? html`<div class="tf-card p-6 space-y-2" data-state="not-reached">
                   <h2 class="text-sm font-semibold text-white">Not reached yet</h2>
-                  <p class="text-xs text-gray-400">${describeFilters(f)}: none among the <span data-metric="scanned">${num(state.scanned)}</span> newest ${state.scanned === 1 ? 'row' : 'rows'} read so far, and the ledger holds older ones. Load more below to keep reading back.</p>
-                  <div class="flex flex-wrap gap-2"><a class="tf-btn tf-btn-sm" href="${callsHref(Object.assign({}, cleanFilters(f), { day: '' }))}">Drop the day filter</a><a class="tf-btn tf-btn-sm" href="#/calls">Clear every filter</a></div>
+                  <p class="text-xs text-gray-400">${describeFilters(f)}: ${state.scanned
+                    // Rows counted here are rows this screen read and filtered
+                    // itself, which is the day filter. When the route did the
+                    // filtering it returns the matches only, so there is no
+                    // count to give and none is claimed.
+                    ? html`none among the <span data-metric="scanned">${num(state.scanned)}</span> newest ${state.scanned === 1 ? 'row' : 'rows'} read so far, and the ledger holds older ones.`
+                    : 'none in the rows read so far, and the ledger holds older ones.'} Load more below to keep reading back.</p>
+                  ${widenLinks(f)}
                 </div>`
               : html`<div class="tf-card p-6 space-y-2" data-state="empty">
                   <h2 class="text-sm font-semibold text-white">No call matches</h2>
-                  <p class="text-xs text-gray-400">${describeFilters(f)}: none in the ledger. ${f.days < 30 ? 'Widen the window, or ' : ''}remove a filter above.</p>
-                  <div class="flex flex-wrap gap-2">${f.days < 30 ? html`<a class="tf-btn tf-btn-sm" href="${callsHref(Object.assign({}, cleanFilters(f), { days: 30, day: '' }))}">Show 30 days</a>` : ''}<a class="tf-btn tf-btn-sm" href="#/calls">Clear every filter</a></div>
+                  <p class="text-xs text-gray-400">${describeFilters(f)}: none in the ledger. ${f.days < 30 || f.day ? 'Widen the window, or ' : ''}remove a filter above.</p>
+                  ${widenLinks(f)}
                 </div>`}
           ${state.cursor ? html`<div class="mt-4"><button type="button" class="tf-btn" data-action="more" ${state.loadingMore ? raw('disabled') : ''}>${state.loadingMore ? 'Loading…' : 'Load more'}</button></div>` : ''}`);
       }
@@ -1480,6 +1486,15 @@
         kind: f.kind === 'all' ? '' : f.kind, review: f.review === 'any' ? '' : f.review,
         project: f.project, rule: f.rule, agent: f.agent, session: f.session, days: f.days, day: f.day
       };
+    }
+
+    // The ways out of a calls screen that shows nothing, offered by both cards
+    // so neither can drift from the other: each link is here only when it
+    // changes the filters, so no button leads back to the page it is on.
+    function widenLinks(f) {
+      return html`<div class="flex flex-wrap gap-2">${f.day
+        ? html`<a class="tf-btn tf-btn-sm" href="${callsHref(Object.assign({}, cleanFilters(f), { day: '' }))}">Drop the day filter</a>` : ''}${f.days < 30
+        ? html`<a class="tf-btn tf-btn-sm" href="${callsHref(Object.assign({}, cleanFilters(f), { days: 30, day: '' }))}">Show 30 days</a>` : ''}<a class="tf-btn tf-btn-sm" href="#/calls">Clear every filter</a></div>`;
     }
 
     function filterBar(f) {

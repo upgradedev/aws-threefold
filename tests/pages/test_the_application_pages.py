@@ -907,6 +907,39 @@ def test_a_day_the_read_has_not_got_back_to_says_so_rather_than_none_in_the_ledg
     assert "none among the 10 newest rows read so far" in out["text"]
     assert 'data-action="more"' in out["view"], "The reader can keep reading back towards that day"
     assert out["after"] == 10, "Load more reads on from the cursor the budget stopped at"
+    assert "Drop the day filter" in out["view"], "The day is the filter to drop here"
+    assert "Show 30 days" in out["view"], "Widening the window is a way out of this card too"
+
+
+def test_a_filter_the_route_read_past_offers_only_the_ways_out_that_change_it(tmp_path: Path) -> None:
+    """Empty with a cursor happens without a day filter too, and reads differently.
+
+    GET /api/decisions filters its own rows and reads a bounded number of ledger
+    pages, so an ordinary filter that matches nothing on a busy ledger comes back
+    empty with a cursor. The screen must not count rows it never saw, must not
+    offer to drop a day filter that is not set, and must keep the way to widen
+    the window that the other empty card has.
+    """
+    out = dash(
+        r"""
+  // The route found no match inside its own page budget and says where to go on.
+  answer = contract({ '/api/decisions': () => ({ status: 200, body: { items: [], next_cursor: 'more' } }) });
+  await visit('#/calls?project=Acme-Nope&days=7');
+  out.view = view();
+  out.text = text(view());
+  out.here = location.hash;
+  out.links = hrefs(view(), '#/calls').filter((v, i, a) => a.indexOf(v) === i);
+""",
+        tmp_path,
+    )
+    assert 'data-state="not-reached"' in out["view"] and 'data-state="empty"' not in out["view"]
+    assert "none in the ledger" not in out["text"], "Rows the route never reached are not proved absent"
+    assert "0 newest rows" not in out["text"], "The screen counted no rows here, so it claims no count"
+    assert "none in the rows read so far" in out["text"]
+    assert "Drop the day filter" not in out["view"], "There is no day filter to drop"
+    assert "Show 30 days" in out["view"], "The window can still be widened from this card"
+    assert out["here"] == "#/calls?project=Acme-Nope&days=7"
+    assert out["here"] not in out["links"], f"A way out leads back to this page: {out['links']}"
 
 
 def test_the_call_screen_shows_the_row_the_rule_and_the_session_with_their_links(tmp_path: Path) -> None:
