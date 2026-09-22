@@ -86,12 +86,16 @@ refused (below), it is refused before the list is consulted.
     THREEFOLD_DRY_RUN     1 is the older spelling of THREEFOLD_MODE=observe
     THREEFOLD_API_KEY     sent as X-API-Key when set
     THREEFOLD_API_KEY_FILE a file holding the key, read at call time
-    THREEFOLD_DEVELOPER   hashed locally to 12 hex characters; never sent as typed
+    THREEFOLD_DEVELOPER   hashed locally to 12 hex characters, with a random
+                          salt kept in THREEFOLD_HOME so the public value
+                          cannot be recomputed from a guessed name; never sent
+                          as typed
     THREEFOLD_TIMEOUT     seconds, default 4
     THREEFOLD_FAIL_CLOSED 1 refuses a call the service could not judge
     THREEFOLD_HOME        local state, default ~/.threefold: never_send.txt and
                           config.json are read from it, held_back.log,
-                          unknown_shapes.jsonl and stage/ are written to it
+                          unknown_shapes.jsonl, developer_salt and stage/ are
+                          written to it
 
 Every request says which of the three modes sent it, as `hook_mode`, so the
 ledger can tell a machine capped at observe from one the stage decides for.
@@ -481,17 +485,71 @@ def timeout_seconds() -> float:
     return value if value > 0 else DEFAULT_TIMEOUT_SECONDS
 
 
+DEVELOPER_SALT_NAME = "developer_salt"
+MAX_SALT_BYTES = 128
+MIN_SALT_BYTES = 16
+
+
+def developer_salt(home: str) -> str:
+    """A random value kept in THREEFOLD_HOME and mixed into the developer hash.
+
+    Without it the hash was sha256 of a name with no secret anywhere, and the
+    ledger is open wherever the stack allows public reads. connect.html tells
+    people to use "any stable name for you", so in practice they use a login:
+    anyone could hash a dictionary of logins, hash each result the way the
+    service does, and read off which person worked on which project and when.
+    The contract says a developer appears in public only as a short hash so
+    that the ledger does not name a person, and an unsalted hash of a guessable
+    name names them.
+
+    Written once with O_EXCL and never overwritten, so two hooks starting at
+    the same moment cannot give one developer two identities.
+    """
+    path = os.path.join(home, DEVELOPER_SALT_NAME)
+
+    def existing() -> str:
+        try:
+            with open(path, "rb") as handle:
+                salt = handle.read(MAX_SALT_BYTES + 1).strip()
+        except OSError:
+            return ""
+        return salt.decode("ascii", "replace") if MIN_SALT_BYTES <= len(salt) <= MAX_SALT_BYTES else ""
+
+    found = existing()
+    if found:
+        return found
+    salt = hashlib.sha256(os.urandom(32)).hexdigest()
+    try:
+        os.makedirs(home, exist_ok=True)
+        handle = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        try:
+            os.write(handle, salt.encode("ascii"))
+        finally:
+            os.close(handle)
+        return salt
+    except OSError:
+        # Another hook wrote it first, or nothing here can be written.
+        return existing()
+
+
 def developer_id() -> str:
-    """Who is working, as the service may know it: a hash, never a name.
+    """Who is working, as the service may know it: a keyed hash, never a name.
 
     The previous hook sent $USER, so the public ledger learned the login of
     everyone who installed it. Hashing locally means the name never leaves the
-    machine, and the same developer still groups together across sessions.
+    machine, and the same developer still groups together across sessions on
+    this machine. The salt is what makes the public value impossible to
+    recompute from a guessed name; on a machine where none can be kept there
+    is no secret to hash with, so nothing is attributed at all rather than
+    attributed reversibly.
     """
     developer = _env("THREEFOLD_DEVELOPER")
     if not developer:
         return "anonymous"
-    return hashlib.sha256(developer.encode("utf-8")).hexdigest()[:12]
+    salt = developer_salt(threefold_home())
+    if not salt:
+        return "anonymous"
+    return hashlib.sha256(f"{salt}\x00{developer}".encode("utf-8")).hexdigest()[:12]
 
 
 # --- which agent, and what it asked for ----------------------------------------
