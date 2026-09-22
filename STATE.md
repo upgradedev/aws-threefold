@@ -15,6 +15,12 @@
 - E4, live probes: `scripts/probe_live.py` (new), `tests/unit/test_probe_live.py` (new)
 - E5, rule drafting with Bedrock: `src/threefold/application/rule_drafter.py` (new), `src/threefold/interfaces/draft_routes.py` (new), `tests/unit/test_rule_drafter.py` (new)
 - E6, validated fix per refusal: `src/threefold/application/fix_proposer.py` (new), `tests/unit/test_fix_proposer.py` (new); wired into verdicts by the owner after B1 merges
+- Wave three (2026-09-22, after A, B1, B2, D and E1–E6 merged), each in its own worktree:
+  - W1, the fix reaches the agent: `application/dtos.py`, `application/evaluator.py`, `application/labels.py`, `hooks/threefold_hook.py`, the call detail and the refusal panels in `web/dashboard.html`, `web/index.html`, `web/connect.html`, tests for these
+  - W2, drafting on the rules page: `infrastructure/security_middleware.py` (the draft route only), `interfaces/draft_routes.py`, `web/rules.html`, tests for these
+  - W3, the edge knows who is calling: `deploy/edge.yml`, `deploy/template.yml` (the edge secret parameter only), `deploy/iam/**`, `.github/workflows/**`, `interfaces/access_routes.py`, `interfaces/server.py`, `infrastructure/security_middleware.py` (the client address only), tests for these
+  - W4, self-correction and the proof page: `application/insights.py`, `application/ledger.py`, `interfaces/app_routes.py`, `scripts/build_proof.py` (new), `web/assets/proof.json` (generated), the overview and a new `#/proof` route in `web/dashboard.html`, tests for these
+  - W5, the benchmark runs for real: `benchmark/**`, `tests/unit/test_benchmark_*.py`
 - Shared, one dispatch line each: `src/threefold/interfaces/api_handlers.py`, `src/threefold/web/openapi.json`, `docs/openapi.yaml`
 - Owner: `STATE.md`, `LOG.md`, `TRAPS.md`, `CLAUDE.md`; merges and deploys
 
