@@ -17,8 +17,11 @@ Three things are pinned:
   anonymous; and
 * the recording routes stay open there deliberately, because a machine this
   stack governs reports to it without a key. Closing them would stop the work
-  the stack exists to record rather than a reader of it. A later track that
-  decides otherwise changes that test on purpose rather than by accident.
+  the stack exists to record rather than a reader of it. What that leaves open
+  is named in the test itself, because it is more than a read: a caller who
+  knows a session id can send a call into it and trip its circuit breaker. A
+  later track that decides otherwise changes that test on purpose rather than
+  by accident.
 """
 from __future__ import annotations
 
@@ -140,6 +143,13 @@ def test_the_recording_routes_stay_open_on_a_private_stack(monkeypatch) -> None:
     use that report arrives with no key. Closing this would stop the work the
     stack exists to record rather than a reader of it, so it stays open until
     the machines that report to it carry a key.
+
+    The price of that is not only a read: the spend gate believes the token
+    counts a caller declares, so a caller who knows a session id can send one
+    call into it and trip its circuit breaker, and the owner's next call in
+    that session is refused. It is the end state the kill switch is closed here
+    to prevent, reached the other way, and it is written down rather than left
+    to be found.
     """
     monkeypatch.setenv("PUBLIC_READS", "false")
     monkeypatch.setenv("THREEFOLD_API_KEYS", OPERATOR_KEY)

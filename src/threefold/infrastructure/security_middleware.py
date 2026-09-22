@@ -868,9 +868,15 @@ def validate_request_security(
     # The recording routes are deliberately not here. `/evaluate-tool-call` and
     # the universal adapter are how a machine this stack governs reports to it,
     # and that report arrives without a key today, so closing them would stop
-    # the work this stack exists to record rather than a reader of it. What is
-    # left open by that is narrow and real: a caller who already knows a session
-    # id can send a call into it and read that session's own cost back.
+    # the work this stack exists to record rather than a reader of it. What that
+    # leaves open is stated plainly rather than implied: a caller who already
+    # knows a session id can send a call into it, read that session's cost and
+    # halt state back, and — because the spend gate believes the token counts a
+    # caller declares, which STATE.md records as its own open gap — trip it, so
+    # the owner's next call in that session is refused by the circuit breaker.
+    # That is the end state step 3d closes the kill switch to prevent, reached
+    # the other way. Closing it needs the machines that report here to carry a
+    # key first; until they do, closing it would silence them instead.
     if is_session_answering_post(verb, path) and not reads_are_public():
         return _require_operator_key(
             headers,
