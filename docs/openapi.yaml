@@ -761,6 +761,278 @@ paths:
           description: >-
             The body is not a JSON object, has no path, has a path the gate would never judge (urn:threefold:error:nothing-to-explain),
             or carries a draft with a rule that cannot be used (urn:threefold:error:unusable-rule, with problems)
+  /rules/draft:
+    post:
+      summary: Draft one layering rule from a sentence with Amazon Bedrock, try it, and save nothing
+      description: >-
+        Asks the model for one rule in the format POST /rules accepts, checks it with the validation a save uses,
+        as one more member of the rules in force for project (so an id already in force is caught), sets its mode
+        to observe whatever the model proposed, and tries it on the examples sent and on two files built from the
+        rule itself, with the verdicts POST /rules/explain gives. A drafted rule watches, so a file it would refuse
+        reads OBSERVE. Nothing is saved, no verdict is issued and no ledger row is written: putting the draft in
+        force is a separate POST /rules, which needs the operator. When the model cannot be reached the answer is
+        503 with no draft; Threefold never stands in for the model with a rule of its own. Each draft is at most
+        two model calls, and only the description and the paths, expectations and imports of the examples reach
+        the model, never an example's file content. Open where PublicReads is true, as POST /rules/explain is; on
+        a stack deployed with PublicReads=false it needs the operator key or a sign-in session.
+      security:
+      - {}
+      - OperatorApiKey: []
+      - SignInSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - description
+              properties:
+                description:
+                  type: string
+                  minLength: 1
+                  maxLength: 600
+                  example: Billing domain classes may not reach persistence; java.util is fine.
+                  description: >-
+                    The boundary in words. Refused with 400 when empty or longer than 600 characters, rather than
+                    cut to length and drafted from half a sentence.
+                project:
+                  type: string
+                  maxLength: 120
+                  example: Acme-Billing
+                  description: >-
+                    The project the rule is for. The draft is checked against that project's rules in force, its
+                    own or the shared set. A name outside AllowedProjectPattern is drafted with a warning, as POST
+                    /rules/explain answers it. Leave it out to draft for the shared set.
+                examples:
+                  type: array
+                  maxItems: 5
+                  description: Files the rule should refuse or allow, tried against the draft.
+                  items:
+                    type: object
+                    required:
+                    - path
+                    - expect
+                    properties:
+                      path:
+                        type: string
+                        maxLength: 400
+                        example: src/main/java/com/acme/billing/domain/Order.java
+                        description: >-
+                          At most 400 characters, on one line, with no spaces: the same test the gate applies before
+                          it judges a path.
+                      content:
+                        type: string
+                        maxLength: 4000
+                        example: import javax.persistence.Entity;
+                        description: What an agent might write there. Its imports are what a rule reads.
+                      expect:
+                        type: string
+                        enum:
+                        - refuse
+                        - allow
+      responses:
+        '200':
+          description: >-
+            rule (mode always observe), validation, tried, source (bedrock), model, attempts, project, saved (always
+            false), notes, unsupported, warnings
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rule:
+                    $ref: '#/components/schemas/LayeringRule'
+                  validation:
+                    type: object
+                    properties:
+                      ok:
+                        type: boolean
+                        const: true
+                      errors:
+                        type: array
+                        items:
+                          type: string
+                  tried:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        path:
+                          type: string
+                        content_preview:
+                          type: string
+                          description: At most 160 characters of the content, credentials redacted.
+                        expected:
+                          type: string
+                          enum:
+                          - refuse
+                          - allow
+                        verdict:
+                          type: string
+                          enum:
+                          - REFUSE
+                          - OBSERVE
+                          - ALLOW
+                        matched:
+                          type: boolean
+                          description: 'Whether the verdict is what was expected: REFUSE or OBSERVE for refuse,
+                            ALLOW for allow.'
+                        origin:
+                          type: string
+                          enum:
+                          - caller
+                          - generated
+                          description: An example sent in the request, or one built from the rule itself.
+                        note:
+                          type: string
+                  source:
+                    type: string
+                    const: bedrock
+                  model:
+                    type:
+                    - string
+                    - 'null'
+                  attempts:
+                    type: integer
+                    minimum: 1
+                    maximum: 2
+                    description: 'Model calls made: one, or two when the first answer was repaired.'
+                  project:
+                    type:
+                    - string
+                    - 'null'
+                  saved:
+                    type: boolean
+                    const: false
+                  notes:
+                    type: array
+                    items:
+                      type: string
+                  unsupported:
+                    type: string
+                  warnings:
+                    type: array
+                    items:
+                      type: string
+        '400':
+          description: >-
+            The body is not a JSON object, the description is missing or longer than 600 characters, more than 5
+            examples were sent, an example's path is not one the gate would judge, its content is longer than 4000
+            characters or its expect is neither refuse nor allow, project is not a string, or the rules in force
+            already number 50. No model call is made. invalid_params names the field.
+        '401':
+          description: PublicReads is false and no key or sign-in session was presented
+        '403':
+          description: >-
+            PublicReads is false and the key or sign-in session was rejected, or this deployment has configured
+            no operator key at all (urn:threefold:error:reads-private)
+        '422':
+          description: >-
+            The model read the description as a boundary a layering rule cannot express, so nothing was drafted
+            (urn:threefold:error:not-a-layering-rule)
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  type:
+                    type: string
+                  title:
+                    type: string
+                  status:
+                    type: integer
+                  detail:
+                    type: string
+                  instance:
+                    type: string
+                  source:
+                    type: string
+                    const: bedrock
+                  attempts:
+                    type: integer
+                  saved:
+                    type: boolean
+                    const: false
+                  unsupported:
+                    type: string
+        '502':
+          description: >-
+            The model answered, but no answer was a usable rule, even after one repair; nothing was drafted (urn:threefold:error:undraftable-rule).
+            problems says why, in the words POST /rules would use.
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  type:
+                    type: string
+                  title:
+                    type: string
+                  status:
+                    type: integer
+                  detail:
+                    type: string
+                  instance:
+                    type: string
+                  problems:
+                    type: array
+                    items:
+                      type: string
+                  rejected_draft:
+                    description: The last answer, when it was small enough to echo, or null.
+                  validation:
+                    type: object
+                    properties:
+                      ok:
+                        type: boolean
+                        const: false
+                      errors:
+                        type: array
+                        items:
+                          type: string
+                  source:
+                    type: string
+                    const: bedrock
+                  model:
+                    type:
+                    - string
+                    - 'null'
+                  attempts:
+                    type: integer
+                  saved:
+                    type: boolean
+                    const: false
+        '503':
+          description: >-
+            Amazon Bedrock could not be asked or did not answer, or this container has made its drafting calls;
+            no rule was drafted and nothing was saved (urn:threefold:error:model-unavailable). There is no fallback
+            draft.
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  type:
+                    type: string
+                  title:
+                    type: string
+                  status:
+                    type: integer
+                  detail:
+                    type: string
+                  instance:
+                    type: string
+                  source:
+                    type: string
+                    const: unavailable
+                  model:
+                    type:
+                    - string
+                    - 'null'
+                  saved:
+                    type: boolean
+                    const: false
   /api/auth/links:
     post:
       summary: Mint a single-use sign-in link
