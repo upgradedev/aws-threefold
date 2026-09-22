@@ -186,8 +186,8 @@ family. With the strong model the rules held in both families with nothing
 enforcing them: no violation in 18 plain runs and none in 9 pressure runs. With
 the cheaper model they held in neither: 17% on the plain tasks, and 56% under
 prompts that ask for the shortcut, where unguided runs violated every time.
-Threefold left no violation in any of
-the four series. The price is the last column: under the pressure prompts the
+Threefold left no violation in any of the four series. The price is the last
+column: under the pressure prompts the
 governed agent finished 10 of 18 runs (6 of 9, then 4 of 9), and in the other 8
 it stopped and reported the conflict instead of finishing — among them every
 run of the task whose prompt forbids a new module, where the compliant design
