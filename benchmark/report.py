@@ -57,8 +57,10 @@ def is_scripted(row: Mapping[str, Any]) -> bool:
 
 
 def is_valid(row: Mapping[str, Any]) -> bool:
-    """A run that measured something: the agent reached the model and the harness did its part."""
-    return bool(row.get("agent_ran")) and not row.get("harness_error") and row.get("acceptance_passed") is not None
+    """A run that measured something: the agent reached the model, the harness did its part, and a
+    Threefold run really had Threefold in front of it."""
+    return (bool(row.get("agent_ran")) and not row.get("harness_error") and row.get("acceptance_passed") is not None
+            and not row.get("hook_missing"))
 
 
 def invalid_reason(row: Mapping[str, Any]) -> str:
@@ -66,6 +68,9 @@ def invalid_reason(row: Mapping[str, Any]) -> str:
         return f"harness: {row['harness_error']}"
     if not row.get("agent_ran"):
         return f"agent did not run: {row.get('agent_error') or 'no output'}"
+    if row.get("hook_missing"):
+        return (f"the Threefold hook never fired although the agent made {row.get('governed_calls')} governed call(s); "
+                "Claude Code did not load it, so this run did not measure Threefold")
     return "not judged"
 
 

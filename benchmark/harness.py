@@ -622,6 +622,29 @@ def agent_metrics(summary: Mapping[str, Any], sanitise: Sanitiser) -> Dict[str, 
     }
 
 
+GOVERNED_TOOLS = frozenset({"Write", "Edit", "MultiEdit", "NotebookEdit", "Bash"})
+
+
+def hook_check(condition: str, metrics: Mapping[str, Any], ledger: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
+    """Whether the Threefold hook demonstrably ran in a run that should have had it.
+
+    The scripted self-test calls the hook itself, so it cannot show that Claude
+    Code loads the hook from .claude/settings.local.json under the flags the
+    runner passes. This can: a Threefold run whose agent made governed calls
+    but left no decision in the ledger, no refusal in the transcript and no
+    hook event is not a measurement of Threefold, and the report rejects it.
+    A credential refusal never reaches the server, which is why the
+    transcript counts as evidence too.
+    """
+    if not uses_threefold(condition):
+        return {"hook_fired": None, "hook_missing": False, "governed_calls": None}
+    tool_uses = metrics.get("tool_uses") or {}
+    governed = sum(count for name, count in tool_uses.items() if name in GOVERNED_TOOLS)
+    decisions = int((ledger or {}).get("decisions") or 0)
+    fired = decisions > 0 or int(metrics.get("hook_refusals") or 0) > 0 or sum((metrics.get("hook_events") or {}).values()) > 0
+    return {"hook_fired": fired, "hook_missing": governed > 0 and not fired, "governed_calls": governed}
+
+
 # --- judging the work ------------------------------------------------------------------
 
 def changed_files(repo: Path) -> List[str]:
@@ -766,6 +789,7 @@ def run_one(task: Task, condition: str, rep: int, plan: RunPlan, base_env: Optio
             row["ledger"] = server.ledger()
         else:
             row["ledger"] = None
+        row.update(hook_check(condition, row, row["ledger"]))
     except Exception as error:  # noqa: BLE001 - one broken run must not stop the matrix
         row["harness_error"] = sanitise(f"{type(error).__name__}: {error}", 400)
     finally:

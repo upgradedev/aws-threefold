@@ -228,6 +228,19 @@ def test_an_expired_login_is_recorded_as_an_agent_that_did_not_run(tmp_path):
     assert metrics["agent_error"].startswith("Failed to authenticate")
 
 
+@pytest.mark.parametrize("condition, metrics, ledger, fired, missing", [
+    ("threefold", {"tool_uses": {"Write": 3, "Read": 2}}, {"decisions": 3}, True, False),
+    ("threefold", {"tool_uses": {"Write": 1}, "hook_refusals": 1}, {"decisions": 0}, True, False),
+    ("threefold", {"tool_uses": {"Edit": 2, "Bash": 1}}, {"decisions": 0}, False, True),
+    ("threefold", {"tool_uses": {"Read": 4}}, {"decisions": 0}, False, False),
+    ("none", {"tool_uses": {"Write": 3}}, None, None, False),
+])
+def test_a_threefold_run_without_the_hook_is_caught(condition, metrics, ledger, fired, missing):
+    """The scripted self-test calls the hook itself; only this shows Claude Code really loaded it."""
+    check = harness.hook_check(condition, metrics, ledger)
+    assert (check["hook_fired"], check["hook_missing"]) == (fired, missing)
+
+
 @pytest.mark.parametrize("reason, kind", [
     ("it contains a credential (AWS_ACCESS_KEY)", "CREDENTIAL"),
     ("... use Write or Edit so the rule can read it", "UNREADABLE_WRITE"),
