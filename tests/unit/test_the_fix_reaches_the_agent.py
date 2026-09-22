@@ -256,12 +256,14 @@ def test_a_row_without_a_fix_is_exactly_what_it_was(evaluator, recorded) -> None
 # ---------------------------------------------------------------- what it may cost
 
 
-def _time_the_fix(evaluator: GovernanceEvaluator, monkeypatch, request_for, runs: int = 7):
+def _time_the_fix(evaluator: GovernanceEvaluator, monkeypatch, request_for, runs: int = 25):
     """The time evaluate_tool_call spends on the fix, best of `runs`, and the last verdict.
 
-    Best of several, as timeit takes it: the other tracks' suites share this
-    machine, and the fastest run is the one that measures the code rather than
-    the neighbours.
+    Best of many, as timeit takes it, with a pause between runs: a wall clock
+    also counts whatever else the machine is doing, and with seven runs a busy
+    moment across the whole suite once pushed every one of them past the
+    budget. The fastest of runs spread over half a second is the one that
+    measures the code rather than the neighbours.
     """
     spent: List[float] = []
     real = GovernanceEvaluator._suggest_fix
@@ -277,6 +279,7 @@ def _time_the_fix(evaluator: GovernanceEvaluator, monkeypatch, request_for, runs
     result = None
     for index in range(runs):
         result = evaluator.evaluate_tool_call(request_for(index))
+        time.sleep(0.01)
     return min(spent), result
 
 
