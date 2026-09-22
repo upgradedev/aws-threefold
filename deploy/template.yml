@@ -24,6 +24,95 @@ Parameters:
       both the inference-profile ARN in this account and the underlying
       foundation-model ARN, which is account-less by design.
 
+  # Operations. Every one of these defaults to a value both stacks run with,
+  # so an update that overrides none of them deploys unattended, and neither
+  # stack has to be told anything new to pick them up.
+  # A String with a pattern rather than a Number: a Number also accepts 0.0,
+  # which the condition that turns 0 into "no reservation" compares as text
+  # and would pass on to Lambda as a reservation of nothing.
+  ReservedConcurrency:
+    Type: String
+    Default: '25'
+    AllowedPattern: '^(0|[1-9][0-9]{0,3})$'
+    ConstraintDescription: a whole number of copies, or 0 for no reservation
+    Description: >-
+      The most copies of the function that may run at once, reserved out of the
+      account's pool. If a call without a model takes a tenth of a second, 25
+      copies serve about 250 requests a second, more than the API's throttle
+      lets through on any one route, so the cap is reached only by calls that
+      run long, which are the ones that cost: it bounds how many Bedrock calls
+      and table writes a runaway client can have in flight. Lambda refuses a
+      reservation that leaves fewer than 100 unreserved, and a new account's
+      quota can be as low as 10, so before the first deploy check that
+      `aws lambda get-account-settings` shows
+      AccountLimit.ConcurrentExecutions of at least 100 plus every reservation
+      in the account: 150 for the two stacks at 25. Below that, deploy with 0,
+      which removes the reservation instead of being passed to Lambda, which
+      reads 0 as "never run".
+
+  ApiThrottleRateLimit:
+    Type: Number
+    Default: 100
+    MinValue: 1
+    Description: >-
+      Steady requests per second each route of the stage accepts before API
+      Gateway answers 429 itself, without invoking the function. The public
+      stack is read by judges, an automated scorer and anyone following a
+      link, and one dashboard load is a dozen parallel reads, so this is set
+      well above anything a person or a handful of agents produce, and still a
+      hundredth of the account's regional quota, so a runaway client is stopped
+      before it is billed at the account's full rate.
+
+  ApiThrottleBurstLimit:
+    Type: Number
+    Default: 200
+    MinValue: 1
+    Description: >-
+      Requests API Gateway accepts at once above the steady rate before it
+      starts answering 429. Twice the rate, so a burst of page loads is served
+      and only a sustained flood is refused.
+
+  SlowCallAlarmMs:
+    Type: Number
+    Default: 5000
+    MinValue: 100
+    Description: >-
+      Milliseconds above which a call counts as slow for two alarms: the
+      function's p95 Duration, and the average LatencyMs the service reports
+      for the calls it evaluates. A hook's call makes no model call and only a
+      page's call waits on Bedrock, so either passing five seconds for most of
+      fifteen minutes means a dependency is struggling. The function
+      times out at 15 seconds, so this warns well before calls start failing.
+
+  AlarmEmail:
+    Type: String
+    Default: ''
+    NoEcho: true
+    AllowedPattern: '^$|^[^@\s]+@[^@\s]+\.[^@\s]+$'
+    ConstraintDescription: an email address, or empty for none
+    Description: >-
+      Where the alarm topic sends email. Empty, the default, creates the topic
+      and every alarm with no subscription, so the alarms still show their
+      state in the console. AWS sends a confirmation message first and
+      delivers nothing until it is accepted. NoEcho because an address is
+      personal data, and describe-stacks would otherwise print it to anyone who
+      can read the stack, including a CI log.
+
+  # A String with a pattern for the reason given at ReservedConcurrency.
+  MonthlyBudgetUsd:
+    Type: String
+    Default: '0'
+    AllowedPattern: '^(0|[1-9][0-9]{0,5})$'
+    ConstraintDescription: a whole number of US dollars, or 0 for no budget
+    Description: >-
+      A monthly cost budget in US dollars that notifies the alarm topic when
+      actual spend passes 80% of it and when forecast spend passes all of it.
+      0, the default, creates no budget. A budget measures the account, not a
+      stack: Bedrock spend through the inference profile carries no stack tag
+      and is the cost most likely to run away, so a budget filtered to this
+      stack would miss it. Set it on one of the two stacks only, or the account
+      gets two budgets counting the same spend.
+
   AllowedProjectPattern:
     Type: String
     Default: '^Acme-[A-Za-z0-9-]{1,40}$'
@@ -87,6 +176,27 @@ Resources:
     Type: AWS::Serverless::HttpApi
     Properties:
       StageName: prod
+      # The stage's default route throttle, answered by API Gateway with 429
+      # before the function runs, so a flood costs neither an invocation nor a
+      # table write. For an HTTP API only the two throttling fields and
+      # DetailedMetricsEnabled apply here. Per-route metrics stay off: the
+      # stage's own Count, 4xx, 5xx and Latency are published without them,
+      # and each route's metrics would be billed as custom metrics.
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: !Ref ApiThrottleBurstLimit
+        ThrottlingRateLimit: !Ref ApiThrottleRateLimit
+      # One line per request, in a log group of its own. The destination is
+      # the plain log-group ARN built from the group's name, not GetAtt's form
+      # with a trailing ":*". HTTP APIs deliver access logs without the
+      # account-wide CloudWatch role a REST API needs, so nothing outside this
+      # stack is changed to turn them on. The line is JSON only as far as its
+      # values allow: the format has no way to escape a value, and two of
+      # them, the path and the User-Agent, are the client's to choose, so a
+      # request that puts a double quote or a backslash in either can write a
+      # line that does not parse. It is still kept, and still readable as text.
+      AccessLogSettings:
+        DestinationArn: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${ThreefoldApiAccessLogGroup}'
+        Format: '{"requestId":"$context.requestId","ip":"$context.identity.sourceIp","requestTime":"$context.requestTime","httpMethod":"$context.httpMethod","routeKey":"$context.routeKey","path":"$context.path","status":"$context.status","protocol":"$context.protocol","responseLength":"$context.responseLength","latency":"$context.responseLatency","integrationLatency":"$context.integrationLatency","integrationStatus":"$context.integrationStatus","integrationError":"$context.integrationErrorMessage","error":"$context.error.message","userAgent":"$context.identity.userAgent"}'
       CorsConfiguration:
         # DELETE is how the dashboard signs out of a session.
         AllowMethods: ['GET', 'POST', 'DELETE', 'OPTIONS']
@@ -173,6 +283,16 @@ Resources:
             ApiId: !Ref ThreefoldHttpApi
             Path: /{proxy+}
             Method: ANY
+      # Every sampled invocation is recorded in X-Ray. The transform attaches
+      # the AWSXrayWriteOnlyAccess managed policy to the role it generates
+      # whenever Tracing is set, so the permission needs no statement in the
+      # Policies above. An HTTP API cannot trace, so a trace starts at the
+      # function; and the X-Ray SDK is not bundled, so it shows the invocation
+      # and its cold start rather than each DynamoDB or Bedrock call inside it.
+      Tracing: Active
+      # 0 is turned into no reservation at all rather than passed through,
+      # because Lambda reads a reservation of 0 as "never run".
+      ReservedConcurrentExecutions: !If [CapConcurrency, !Ref ReservedConcurrency, !Ref 'AWS::NoValue']
 
   ThreefoldTable:
     Type: AWS::DynamoDB::Table
@@ -193,6 +313,15 @@ Resources:
           KeyType: RANGE
       SSESpecification:
         SSEEnabled: true
+      # SSEEnabled above encrypts with the AWS managed key aws/dynamodb rather
+      # than the AWS owned key used when it is left out, so every use of the key
+      # is recorded in CloudTrail. Point-in-time recovery keeps continuous
+      # backups for the last 35 days, restorable to any second: the ledger and
+      # the sessions are the product's record of what it allowed and refused,
+      # and without it a bad script or a deleted item is permanent. A restore
+      # creates a new table and never rewrites this one.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
 
   EvidenceBucket:
     Type: AWS::S3::Bucket
@@ -219,7 +348,711 @@ Resources:
       LogGroupName: !Sub '/aws/lambda/${ThreefoldFunction}'
       RetentionInDays: 30
 
+  # ---------------------------------------------------------------------------
+  # Operations: what watches and bounds the stack rather than serves it. Every
+  # name below carries the stack's name, so threefold-prod and
+  # threefold-dogfood deploy side by side from this one template without
+  # colliding.
+  # ---------------------------------------------------------------------------
+
+  ThreefoldApiAccessLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      # Under /aws/vendedlogs/, the prefix CloudWatch Logs grants to log
+      # deliveries with one wildcard, so a new stack does not add a statement
+      # to the account's log resource policy, which has a size limit.
+      LogGroupName: !Sub '/aws/vendedlogs/apigateway/${AWS::StackName}/access'
+      # Shorter than the function's 30 days: every line holds a client's
+      # address, which is personal data, and two weeks is enough to look into
+      # an incident while it is still fresh.
+      RetentionInDays: 14
+
+  ThreefoldAlarmTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub '${AWS::StackName}-alarms'
+      DisplayName: Threefold
+      # Not encrypted with the AWS managed key aws/sns, because CloudWatch
+      # cannot publish to a topic under that key, and a customer managed key
+      # would cost a dollar a month to protect alarm names and states.
+
+  ThreefoldAlarmTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+        - !Ref ThreefoldAlarmTopic
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          # Only this account's alarms and budgets may publish. The condition
+          # stops another account's alarm from naming this topic as its action.
+          - Sid: AlarmsOfThisAccount
+            Effect: Allow
+            Principal:
+              Service: cloudwatch.amazonaws.com
+            Action: sns:Publish
+            Resource: !Ref ThreefoldAlarmTopic
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+          - Sid: BudgetsOfThisAccount
+            Effect: Allow
+            Principal:
+              Service: budgets.amazonaws.com
+            Action: sns:Publish
+            Resource: !Ref ThreefoldAlarmTopic
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+
+  ThreefoldAlarmEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasAlarmEmail
+    Properties:
+      TopicArn: !Ref ThreefoldAlarmTopic
+      Protocol: email
+      Endpoint: !Ref AlarmEmail
+
+  # The service's own metrics, read back per stack. The function writes one
+  # Embedded Metric Format record per evaluated call to namespace
+  # Threefold/Governance with the dimensions Project and Environment, and
+  # Environment is always "Production". Both stacks run in this account and
+  # region and write that same namespace, so an alarm on those metrics could
+  # not tell the public demo from the private stack, and the per-project
+  # dimension leaves no single series to alarm on. These filters read the same
+  # records from this stack's own log group into a namespace named after the
+  # stack. Two routes evaluate a call: /evaluate-tool-call's record counts it
+  # as ToolCallsEvaluated and the universal adapter's as UniversalToolEvaluated,
+  # so each filter starts from either, and ToolCallsEvaluated here counts both.
+  # That start keeps out the demo's /simulate-loop record, which carries
+  # CircuitBreakerTripped on every click by design. Only the first route's
+  # record carries a trip, the latency and the spend, so those three count
+  # that route alone until the adapter's record carries them too.
+  ThreefoldCallsEvaluatedFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref ThreefoldLogGroup
+      FilterPattern: '{ $.ToolCallsEvaluated > 0 || $.UniversalToolEvaluated > 0 }'
+      MetricTransformations:
+        - MetricNamespace: !Sub 'Threefold/${AWS::StackName}'
+          MetricName: ToolCallsEvaluated
+          MetricValue: '1'
+          Unit: Count
+
+  ThreefoldVerdictApprovedFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref ThreefoldLogGroup
+      FilterPattern: '{ ($.ToolCallsEvaluated > 0 || $.UniversalToolEvaluated > 0) && $.VerdictApproved > 0 }'
+      MetricTransformations:
+        - MetricNamespace: !Sub 'Threefold/${AWS::StackName}'
+          MetricName: VerdictApproved
+          MetricValue: '1'
+          Unit: Count
+
+  ThreefoldCircuitBreakerTrippedFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref ThreefoldLogGroup
+      FilterPattern: '{ ($.ToolCallsEvaluated > 0 || $.UniversalToolEvaluated > 0) && $.CircuitBreakerTripped > 0 }'
+      MetricTransformations:
+        - MetricNamespace: !Sub 'Threefold/${AWS::StackName}'
+          MetricName: CircuitBreakerTripped
+          MetricValue: '1'
+          Unit: Count
+
+  # The value filters also require their field, so a record without one is
+  # left out by the pattern rather than by however CloudWatch treats a value
+  # it cannot find.
+  ThreefoldLatencyMsFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref ThreefoldLogGroup
+      FilterPattern: '{ ($.ToolCallsEvaluated > 0 || $.UniversalToolEvaluated > 0) && $.LatencyMs >= 0 }'
+      MetricTransformations:
+        - MetricNamespace: !Sub 'Threefold/${AWS::StackName}'
+          MetricName: LatencyMs
+          MetricValue: $.LatencyMs
+          Unit: Milliseconds
+
+  ThreefoldSessionCostFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref ThreefoldLogGroup
+      FilterPattern: '{ ($.ToolCallsEvaluated > 0 || $.UniversalToolEvaluated > 0) && $.CurrentSessionCostUSD >= 0 }'
+      MetricTransformations:
+        - MetricNamespace: !Sub 'Threefold/${AWS::StackName}'
+          MetricName: CurrentSessionCostUSD
+          MetricValue: $.CurrentSessionCostUSD
+          Unit: None
+
+  # Alarms. Missing data is treated as not breaching on every one of them, and
+  # deliberately: each measures failures, throttles, slowness or volume of
+  # traffic, and a quiet stack has none of those. Treating silence as a breach
+  # would page every night the owner's agents are idle and every hour nobody
+  # opens the demo. Each alarm notifies the topic when it fires and when it
+  # clears, so an email never leaves the reader wondering whether it is over.
+
+  ThreefoldFunctionErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-function-errors'
+      AlarmDescription: >-
+        The function failed outright. The handler answers every exception it
+        catches with an RFC 7807 problem, so an Error here is a timeout, a
+        crash while the module loads or memory running out. Read the
+        function's log group for the request id.
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref ThreefoldFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref ThreefoldAlarmTopic
+      OKActions:
+        - !Ref ThreefoldAlarmTopic
+
+  ThreefoldFunctionThrottlesAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-function-throttles'
+      AlarmDescription: >-
+        Calls were refused because the function's concurrency reservation was
+        full. A caller is flooding the stack or calls have become slow. Check
+        the call volume and latency before raising ReservedConcurrency.
+      Namespace: AWS/Lambda
+      MetricName: Throttles
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref ThreefoldFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref ThreefoldAlarmTopic
+      OKActions:
+        - !Ref ThreefoldAlarmTopic
+
+  ThreefoldFunctionDurationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-function-duration-p95'
+      AlarmDescription: >-
+        One call in twenty took longer than SlowCallAlarmMs in two of the last
+        three five-minute periods. The usual cause is Bedrock or DynamoDB
+        answering slowly; the function times out at 15 seconds.
+      Namespace: AWS/Lambda
+      MetricName: Duration
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref ThreefoldFunction
+      ExtendedStatistic: p95
+      Unit: Milliseconds
+      Period: 300
+      EvaluationPeriods: 3
+      DatapointsToAlarm: 2
+      Threshold: !Ref SlowCallAlarmMs
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref ThreefoldAlarmTopic
+      OKActions:
+        - !Ref ThreefoldAlarmTopic
+
+  ThreefoldApi5xxRateAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-api-5xx-rate'
+      AlarmDescription: >-
+        At least 5% of requests in five minutes were answered with a 5xx,
+        among at least ten requests. The floor keeps one failed request on an
+        otherwise quiet demo from paging; a crash with no traffic around it is
+        caught by the function errors alarm instead.
+      Metrics:
+        - Id: failed
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: AWS/ApiGateway
+              MetricName: '5xx'
+              Dimensions:
+                - Name: ApiId
+                  Value: !Ref ThreefoldHttpApi
+                - Name: Stage
+                  Value: prod
+            Period: 300
+            Stat: Sum
+        - Id: requests
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: AWS/ApiGateway
+              MetricName: Count
+              Dimensions:
+                - Name: ApiId
+                  Value: !Ref ThreefoldHttpApi
+                - Name: Stage
+                  Value: prod
+            Period: 300
+            Stat: Sum
+        - Id: rate
+          Label: 5xx responses, percent of requests
+          Expression: 'IF(requests >= 10, 100 * FILL(failed, 0) / requests, 0)'
+          ReturnData: true
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref ThreefoldAlarmTopic
+      OKActions:
+        - !Ref ThreefoldAlarmTopic
+
+  ThreefoldApi4xxRateAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-api-4xx-rate'
+      AlarmDescription: >-
+        A quarter or more of requests were refused with a 4xx for fifteen
+        minutes running, among at least twenty requests in each five. This API
+        answers 400, 401, 403, 404 and 409 as RFC 7807 problems by design and
+        the public stack is probed by crawlers, so short spikes are normal. A
+        sustained share means a client is misconfigured, such as a hook with a
+        wrong key on a private stack, which fails open and says nothing, or
+        the throttle is answering 429.
+      Metrics:
+        - Id: refused
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: AWS/ApiGateway
+              MetricName: '4xx'
+              Dimensions:
+                - Name: ApiId
+                  Value: !Ref ThreefoldHttpApi
+                - Name: Stage
+                  Value: prod
+            Period: 300
+            Stat: Sum
+        - Id: requests
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: AWS/ApiGateway
+              MetricName: Count
+              Dimensions:
+                - Name: ApiId
+                  Value: !Ref ThreefoldHttpApi
+                - Name: Stage
+                  Value: prod
+            Period: 300
+            Stat: Sum
+        - Id: rate
+          Label: 4xx responses, percent of requests
+          Expression: 'IF(requests >= 20, 100 * FILL(refused, 0) / requests, 0)'
+          ReturnData: true
+      EvaluationPeriods: 3
+      DatapointsToAlarm: 3
+      Threshold: 25
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref ThreefoldAlarmTopic
+      OKActions:
+        - !Ref ThreefoldAlarmTopic
+
+  # DynamoDB publishes ThrottledRequests and SystemErrors per operation, with
+  # the dimensions TableName and Operation, so an alarm on TableName alone would
+  # read a series that does not exist. A Metrics Insights query sums every
+  # operation on this table, including any a later release starts to use.
+  ThreefoldTableThrottlesAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-table-throttled-requests'
+      AlarmDescription: >-
+        DynamoDB throttled requests to the table. It bills on demand, so this
+        means a hot partition or the table's on-demand maximum; a throttled
+        write can lose a ledger row or a session halt.
+      Metrics:
+        - Id: throttled
+          Expression: !Sub >-
+            SELECT SUM(ThrottledRequests)
+            FROM SCHEMA("AWS/DynamoDB", Operation, TableName)
+            WHERE TableName = '${ThreefoldTable}'
+          Period: 300
+          ReturnData: true
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref ThreefoldAlarmTopic
+      OKActions:
+        - !Ref ThreefoldAlarmTopic
+
+  ThreefoldTableSystemErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-table-system-errors'
+      AlarmDescription: >-
+        DynamoDB answered requests to the table with a server error. The
+        service falls back to what the container holds in memory, so verdicts
+        keep coming while they stop being durable.
+      Metrics:
+        - Id: failed
+          Expression: !Sub >-
+            SELECT SUM(SystemErrors)
+            FROM SCHEMA("AWS/DynamoDB", Operation, TableName)
+            WHERE TableName = '${ThreefoldTable}'
+          Period: 300
+          ReturnData: true
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref ThreefoldAlarmTopic
+      OKActions:
+        - !Ref ThreefoldAlarmTopic
+
+  ThreefoldHaltedSessionCallsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-halted-session-calls'
+      AlarmDescription: >-
+        Ten or more calls in five minutes were answered on a halted session.
+        The service reports CircuitBreakerTripped on the call that halts a
+        session and on every call after it, so this is an agent that keeps
+        calling after it was stopped, or many sessions halting at once. Only
+        /evaluate-tool-call reports it; the universal adapter does not, so its
+        halted sessions are not counted here.
+      Namespace: !Sub 'Threefold/${AWS::StackName}'
+      MetricName: CircuitBreakerTripped
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 10
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref ThreefoldAlarmTopic
+      OKActions:
+        - !Ref ThreefoldAlarmTopic
+
+  ThreefoldEvaluationLatencyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-evaluation-latency'
+      AlarmDescription: >-
+        The average LatencyMs the service reports for the calls it evaluates
+        passed SlowCallAlarmMs in two of the last three five-minute periods.
+        The handler measures it on /evaluate-tool-call alone, from routing the
+        request to the verdict, so it points at that route's gates, table
+        reads and Bedrock call, where the function's Duration covers every
+        route. Neither counts a cold start, which Lambda reports separately as
+        Init Duration. The universal adapter reports no latency.
+      Namespace: !Sub 'Threefold/${AWS::StackName}'
+      MetricName: LatencyMs
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 3
+      DatapointsToAlarm: 2
+      Threshold: !Ref SlowCallAlarmMs
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref ThreefoldAlarmTopic
+      OKActions:
+        - !Ref ThreefoldAlarmTopic
+
+  ThreefoldCallVolumeAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-call-volume'
+      AlarmDescription: >-
+        More than 1,500 calls were evaluated in each of three five-minute
+        periods, five a second for fifteen minutes, on /evaluate-tool-call and
+        the universal adapter together. That is beyond what a person or a
+        handful of agents make and below the API's throttle, so it warns of a
+        runaway caller while every call is still being billed and before the
+        throttle starts hiding it behind 429s.
+      Namespace: !Sub 'Threefold/${AWS::StackName}'
+      MetricName: ToolCallsEvaluated
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 3
+      DatapointsToAlarm: 3
+      Threshold: 1500
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref ThreefoldAlarmTopic
+      OKActions:
+        - !Ref ThreefoldAlarmTopic
+
+  ThreefoldOperationsDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub '${AWS::StackName}-operations'
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "text", "x": 0, "y": 0, "width": 24, "height": 2,
+              "properties": {
+                "markdown": "## ${AWS::StackName}\nThe API, the function and the table of this stack, and the governance numbers read from this stack's own log. A call judged in observe or as a dry run counts as approved even when a rule flags it; the application's own dashboard shows what rules would have refused. The last row is account-wide: Bedrock and the service's shared metric namespaces cannot tell the two stacks apart."
+              }
+            },
+            {
+              "type": "alarm", "x": 0, "y": 2, "width": 24, "height": 4,
+              "properties": {
+                "title": "Alarms",
+                "alarms": [
+                  "${ThreefoldFunctionErrorsAlarm.Arn}",
+                  "${ThreefoldFunctionThrottlesAlarm.Arn}",
+                  "${ThreefoldFunctionDurationAlarm.Arn}",
+                  "${ThreefoldApi5xxRateAlarm.Arn}",
+                  "${ThreefoldApi4xxRateAlarm.Arn}",
+                  "${ThreefoldTableThrottlesAlarm.Arn}",
+                  "${ThreefoldTableSystemErrorsAlarm.Arn}",
+                  "${ThreefoldHaltedSessionCallsAlarm.Arn}",
+                  "${ThreefoldEvaluationLatencyAlarm.Arn}",
+                  "${ThreefoldCallVolumeAlarm.Arn}"
+                ]
+              }
+            },
+            {
+              "type": "metric", "x": 0, "y": 6, "width": 6, "height": 6,
+              "properties": {
+                "title": "Tool calls evaluated, approved and refused",
+                "region": "${AWS::Region}", "view": "timeSeries", "stacked": false, "period": 300, "stat": "Sum",
+                "metrics": [
+                  ["Threefold/${AWS::StackName}", "ToolCallsEvaluated", {"id": "calls", "label": "Evaluated"}],
+                  ["Threefold/${AWS::StackName}", "VerdictApproved", {"id": "approved", "label": "Approved, including calls a rule flagged that observe or a dry run let through"}],
+                  [{"expression": "calls - FILL(approved, 0)", "id": "refused", "label": "Refused"}]
+                ]
+              }
+            },
+            {
+              "type": "metric", "x": 6, "y": 6, "width": 6, "height": 6,
+              "properties": {
+                "title": "Calls on a halted session",
+                "region": "${AWS::Region}", "view": "timeSeries", "stacked": false, "period": 300, "stat": "Sum",
+                "metrics": [
+                  ["Threefold/${AWS::StackName}", "CircuitBreakerTripped", {"label": "Circuit breaker tripped, the halting call included"}]
+                ],
+                "annotations": {"horizontal": [{"label": "Alarm", "value": 10}]}
+              }
+            },
+            {
+              "type": "metric", "x": 12, "y": 6, "width": 6, "height": 6,
+              "properties": {
+                "title": "Evaluation latency, ms",
+                "region": "${AWS::Region}", "view": "timeSeries", "stacked": false, "period": 300,
+                "metrics": [
+                  ["Threefold/${AWS::StackName}", "LatencyMs", {"stat": "Average", "label": "Average"}],
+                  ["Threefold/${AWS::StackName}", "LatencyMs", {"stat": "Maximum", "label": "Maximum"}]
+                ],
+                "annotations": {"horizontal": [{"label": "Slow-call alarm", "value": ${SlowCallAlarmMs}}]}
+              }
+            },
+            {
+              "type": "metric", "x": 18, "y": 6, "width": 6, "height": 6,
+              "properties": {
+                "title": "Session spend, USD",
+                "region": "${AWS::Region}", "view": "timeSeries", "stacked": false, "period": 300,
+                "metrics": [
+                  ["Threefold/${AWS::StackName}", "CurrentSessionCostUSD", {"stat": "Maximum", "label": "Highest session spend, as callers declare it"}]
+                ]
+              }
+            },
+            {
+              "type": "metric", "x": 0, "y": 12, "width": 8, "height": 6,
+              "properties": {
+                "title": "API requests",
+                "region": "${AWS::Region}", "view": "timeSeries", "stacked": false, "period": 300, "stat": "Sum",
+                "metrics": [
+                  ["AWS/ApiGateway", "Count", "ApiId", "${ThreefoldHttpApi}", "Stage", "prod", {"label": "Requests"}]
+                ]
+              }
+            },
+            {
+              "type": "metric", "x": 8, "y": 12, "width": 8, "height": 6,
+              "properties": {
+                "title": "API errors",
+                "region": "${AWS::Region}", "view": "timeSeries", "stacked": false, "period": 300, "stat": "Sum",
+                "metrics": [
+                  ["AWS/ApiGateway", "4xx", "ApiId", "${ThreefoldHttpApi}", "Stage", "prod", {"label": "4xx"}],
+                  ["AWS/ApiGateway", "5xx", "ApiId", "${ThreefoldHttpApi}", "Stage", "prod", {"label": "5xx"}]
+                ]
+              }
+            },
+            {
+              "type": "metric", "x": 16, "y": 12, "width": 8, "height": 6,
+              "properties": {
+                "title": "API latency, ms",
+                "region": "${AWS::Region}", "view": "timeSeries", "stacked": false, "period": 300,
+                "metrics": [
+                  ["AWS/ApiGateway", "Latency", "ApiId", "${ThreefoldHttpApi}", "Stage", "prod", {"stat": "p50", "label": "Latency p50"}],
+                  ["AWS/ApiGateway", "Latency", "ApiId", "${ThreefoldHttpApi}", "Stage", "prod", {"stat": "p95", "label": "Latency p95"}],
+                  ["AWS/ApiGateway", "IntegrationLatency", "ApiId", "${ThreefoldHttpApi}", "Stage", "prod", {"stat": "p95", "label": "Integration latency p95"}]
+                ]
+              }
+            },
+            {
+              "type": "metric", "x": 0, "y": 18, "width": 8, "height": 6,
+              "properties": {
+                "title": "Function invocations, errors, throttles",
+                "region": "${AWS::Region}", "view": "timeSeries", "stacked": false, "period": 300, "stat": "Sum",
+                "metrics": [
+                  ["AWS/Lambda", "Invocations", "FunctionName", "${ThreefoldFunction}", {"label": "Invocations"}],
+                  ["AWS/Lambda", "Errors", "FunctionName", "${ThreefoldFunction}", {"label": "Errors"}],
+                  ["AWS/Lambda", "Throttles", "FunctionName", "${ThreefoldFunction}", {"label": "Throttles"}]
+                ]
+              }
+            },
+            {
+              "type": "metric", "x": 8, "y": 18, "width": 8, "height": 6,
+              "properties": {
+                "title": "Function duration, ms",
+                "region": "${AWS::Region}", "view": "timeSeries", "stacked": false, "period": 300,
+                "metrics": [
+                  ["AWS/Lambda", "Duration", "FunctionName", "${ThreefoldFunction}", {"stat": "p50", "label": "p50"}],
+                  ["AWS/Lambda", "Duration", "FunctionName", "${ThreefoldFunction}", {"stat": "p95", "label": "p95"}],
+                  ["AWS/Lambda", "Duration", "FunctionName", "${ThreefoldFunction}", {"stat": "Maximum", "label": "Maximum"}]
+                ],
+                "annotations": {"horizontal": [{"label": "Slow-call alarm", "value": ${SlowCallAlarmMs}}]}
+              }
+            },
+            {
+              "type": "metric", "x": 16, "y": 18, "width": 8, "height": 6,
+              "properties": {
+                "title": "Function concurrency",
+                "region": "${AWS::Region}", "view": "timeSeries", "stacked": false, "period": 60,
+                "metrics": [
+                  ["AWS/Lambda", "ConcurrentExecutions", "FunctionName", "${ThreefoldFunction}", {"stat": "Maximum", "label": "Running at once"}]
+                ],
+                "annotations": {"horizontal": [{"label": "Reservation, 0 means none", "value": ${ReservedConcurrency}}]}
+              }
+            },
+            {
+              "type": "metric", "x": 0, "y": 24, "width": 8, "height": 6,
+              "properties": {
+                "title": "Table capacity consumed",
+                "region": "${AWS::Region}", "view": "timeSeries", "stacked": false, "period": 300, "stat": "Sum",
+                "metrics": [
+                  ["AWS/DynamoDB", "ConsumedReadCapacityUnits", "TableName", "${ThreefoldTable}", {"label": "Read units"}],
+                  ["AWS/DynamoDB", "ConsumedWriteCapacityUnits", "TableName", "${ThreefoldTable}", {"label": "Write units"}]
+                ]
+              }
+            },
+            {
+              "type": "metric", "x": 8, "y": 24, "width": 8, "height": 6,
+              "properties": {
+                "title": "Table throttles and server errors",
+                "region": "${AWS::Region}", "view": "timeSeries", "stacked": false, "period": 300,
+                "metrics": [
+                  [{"expression": "SELECT SUM(ThrottledRequests) FROM SCHEMA(\"AWS/DynamoDB\", Operation, TableName) WHERE TableName = '${ThreefoldTable}'", "id": "throttled", "label": "Throttled requests", "period": 300}],
+                  [{"expression": "SELECT SUM(SystemErrors) FROM SCHEMA(\"AWS/DynamoDB\", Operation, TableName) WHERE TableName = '${ThreefoldTable}'", "id": "failed", "label": "Server errors", "period": 300}]
+                ]
+              }
+            },
+            {
+              "type": "metric", "x": 16, "y": 24, "width": 8, "height": 6,
+              "properties": {
+                "title": "Table latency by operation, ms",
+                "region": "${AWS::Region}", "view": "timeSeries", "stacked": false, "period": 300,
+                "metrics": [
+                  [{"expression": "SELECT AVG(SuccessfulRequestLatency) FROM SCHEMA(\"AWS/DynamoDB\", Operation, TableName) WHERE TableName = '${ThreefoldTable}' GROUP BY Operation", "id": "latency", "period": 300}]
+                ]
+              }
+            },
+            {
+              "type": "metric", "x": 0, "y": 30, "width": 12, "height": 6,
+              "properties": {
+                "title": "Bedrock tokens by model, whole account",
+                "region": "${AWS::Region}", "view": "timeSeries", "stacked": false, "period": 3600,
+                "metrics": [
+                  [{"expression": "SELECT SUM(InputTokenCount) FROM SCHEMA(\"AWS/Bedrock\", ModelId) GROUP BY ModelId", "id": "input", "period": 3600}],
+                  [{"expression": "SELECT SUM(OutputTokenCount) FROM SCHEMA(\"AWS/Bedrock\", ModelId) GROUP BY ModelId", "id": "output", "period": 3600}]
+                ]
+              }
+            },
+            {
+              "type": "metric", "x": 12, "y": 30, "width": 12, "height": 6,
+              "properties": {
+                "title": "Demo and operator events, both stacks",
+                "region": "${AWS::Region}", "view": "timeSeries", "stacked": false, "period": 3600, "stat": "Sum",
+                "metrics": [
+                  ["Threefold/SafetyTrips", "LoopDetected", "Project", "Acme-Core", "Environment", "Production", {"label": "Demo loop halted"}],
+                  ["Threefold/Security", "SecretLeakBlocked", "Project", "Acme-Core", "Environment", "Production", {"label": "Demo secret refused"}],
+                  ["Threefold/Audits", "CertificatesIssued", "Project", "Acme-Core", "Environment", "Production", {"label": "Certificates issued"}],
+                  ["Threefold/Audits", "CertificatesRefused", "Project", "Acme-Core", "Environment", "Production", {"label": "Certificates refused"}],
+                  ["Threefold/Audits", "LayeringRulesUpdated", "Project", "Acme-Core", "Environment", "Production", {"label": "Rules saved"}],
+                  ["Threefold/Emergency", "SessionManuallyTerminated", "Project", "Acme-Core", "Environment", "Production", {"label": "Sessions terminated"}],
+                  ["Threefold/Emergency", "SessionResumed", "Project", "Acme-Core", "Environment", "Production", {"label": "Sessions resumed"}],
+                  ["Threefold/Operations", "HealthCheck", "Project", "Acme-Core", "Environment", "Production", {"label": "Status probes"}]
+                ]
+              }
+            }
+          ]
+        }
+
+  # Optional, off by default: see MonthlyBudgetUsd. Its notifications go to
+  # the alarm topic, whose policy lets this account's budgets publish.
+  ThreefoldMonthlyBudget:
+    Type: AWS::Budgets::Budget
+    Condition: HasBudget
+    DependsOn: ThreefoldAlarmTopicPolicy
+    Properties:
+      Budget:
+        BudgetName: !Sub '${AWS::StackName}-account-monthly-cost'
+        BudgetType: COST
+        TimeUnit: MONTHLY
+        BudgetLimit:
+          Amount: !Ref MonthlyBudgetUsd
+          Unit: USD
+      NotificationsWithSubscribers:
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 80
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: SNS
+              Address: !Ref ThreefoldAlarmTopic
+        - Notification:
+            NotificationType: FORECASTED
+            ComparisonOperator: GREATER_THAN
+            Threshold: 100
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: SNS
+              Address: !Ref ThreefoldAlarmTopic
+
+# Each turns an operations parameter's value for "none" into no property or
+# no resource at all, rather than a resource configured with nothing.
+Conditions:
+  CapConcurrency: !Not [!Equals [!Ref ReservedConcurrency, '0']]
+  HasAlarmEmail: !Not [!Equals [!Ref AlarmEmail, '']]
+  HasBudget: !Not [!Equals [!Ref MonthlyBudgetUsd, '0']]
+
 Outputs:
+  OperationsDashboardUrl:
+    Description: The CloudWatch dashboard for this stack
+    Value: !Sub 'https://${AWS::Region}.console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#dashboards/dashboard/${ThreefoldOperationsDashboard}'
+  AlarmTopicArn:
+    Description: The SNS topic every alarm of this stack notifies
+    Value: !Ref ThreefoldAlarmTopic
   ApiEndpoint:
     # The trailing slash is part of the URL. API Gateway answers the bare /prod
     # with its own {"message":"Not Found"} before the function is reached, so a

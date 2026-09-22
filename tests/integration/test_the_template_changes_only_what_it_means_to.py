@@ -7,6 +7,13 @@ are checked against the constants the code reads, because a variable declared
 under one name and read under another is a setting that silently does nothing.
 The API's logical id and its stage name are pinned: renaming either replaces
 the API, and with it the public URL every artifact points at.
+
+The operations additions (tracing, the concurrency cap, the stage throttle,
+access logs, point-in-time recovery, alarms, the dashboard) are asserted in
+test_the_template_watches_the_stack_it_builds.py. This file pins what they
+must leave alone: the logical ids of everything the live stacks already hold,
+and the table properties whose change would replace the table and the ledger
+in it.
 """
 from __future__ import annotations
 
@@ -92,3 +99,47 @@ def test_the_api_and_its_stage_are_not_renamed() -> None:
     assert re.search(r"^  ThreefoldHttpApi:\n    Type: AWS::Serverless::HttpApi$", TEMPLATE, re.M)
     assert re.search(r"^      StageName: prod$", TEMPLATE, re.M)
     assert "${ThreefoldHttpApi}" in TEMPLATE, "The output must name the API it belongs to"
+
+
+# Everything the two live stacks already hold. A renamed logical id is a new
+# resource to CloudFormation: the old one is deleted once the new one exists,
+# so renaming the table would delete the ledger and renaming the API would
+# change the public URL.
+LIVE_RESOURCES = {
+    "ThreefoldHttpApi": "AWS::Serverless::HttpApi",
+    "ThreefoldFunction": "AWS::Serverless::Function",
+    "ThreefoldTable": "AWS::DynamoDB::Table",
+    "EvidenceBucket": "AWS::S3::Bucket",
+    "ThreefoldLogGroup": "AWS::Logs::LogGroup",
+}
+
+
+def _resource(logical_id: str) -> str:
+    block = re.search(rf"^  {logical_id}:\n(.*?)(?=^  \w|^\S|\Z)", TEMPLATE, re.S | re.M)
+    assert block, f"The template has no {logical_id}"
+    return block.group(1)
+
+
+@pytest.mark.parametrize("logical_id, resource_type", sorted(LIVE_RESOURCES.items()))
+def test_the_resources_the_live_stacks_hold_keep_their_logical_ids(logical_id: str, resource_type: str) -> None:
+    assert re.search(rf"^  {logical_id}:\n    Type: {re.escape(resource_type)}$", TEMPLATE, re.M), (
+        f"{logical_id} is renamed or retyped, which replaces it on both live stacks"
+    )
+
+
+def test_the_table_keeps_the_key_schema_and_generated_name_that_hold_the_ledger() -> None:
+    """Point-in-time recovery is added in place; these would replace the table."""
+    table = _resource("ThreefoldTable")
+    assert re.search(r"^        - AttributeName: PK\n          KeyType: HASH$", table, re.M)
+    assert re.search(r"^        - AttributeName: SK\n          KeyType: RANGE$", table, re.M)
+    assert not re.search(r"^      TableName:", table, re.M), (
+        "Naming the table replaces it, and a fixed name would collide between the two stacks"
+    )
+
+
+@pytest.mark.parametrize(
+    "logical_id, name_property", [("ThreefoldFunction", "FunctionName"), ("EvidenceBucket", "BucketName")]
+)
+def test_the_function_and_the_bucket_keep_generated_names(logical_id: str, name_property: str) -> None:
+    """Both stacks deploy from this template, so a fixed name fails the second one."""
+    assert not re.search(rf"^      {name_property}:", _resource(logical_id), re.M)
