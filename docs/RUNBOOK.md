@@ -74,6 +74,11 @@ aws cloudformation deploy \
     "AlarmEmail=$(cat /path/outside/the/repo/alarm-email.txt)"
 ```
 
+The value never reaches the terminal or the shell's history, which keeps the
+`$(cat ...)` rather than what it expands to. It is still an argument of the
+`aws` process while that runs, visible to anyone who can list this machine's
+processes, so run it on a machine only you use.
+
 PowerShell:
 
 ```powershell
@@ -110,10 +115,12 @@ returns 200. Keep the trailing slash: the bare `/prod` is API Gateway's own 404.
 
 A web ACL for CloudFront can only live in us-east-1, so the edge is its own
 stack, pointed at the regional API by host name. Deploy the regional stack
-with the edge secret first, then the edge with the same value: until both
-agree, the function treats requests from the edge as untrusted (it counts the
-edge server as the caller and writes the API's own address into
-`/install.py`), and nothing else breaks.
+with the edge secret first, then the edge with the same value. Until both
+agree, the function treats requests from the edge as untrusted: its
+per-address limit counts the edge server as the caller, so every viewer behind
+one edge server shares one bucket, and `/install.py`, `/dist/manifest.json` and
+sign-in links name the API's own address instead of the edge's. The API URL
+itself works throughout.
 
 ```bash
 aws cloudformation deploy \
