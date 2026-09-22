@@ -12,6 +12,7 @@ rows of /api/insights are.
 from __future__ import annotations
 
 import datetime
+import json
 import logging
 import re
 from typing import Any, Callable, Dict, Optional, Tuple
@@ -23,6 +24,7 @@ from threefold.application.dtos import InvalidRequestError
 from threefold.application.labels import UNLABELLED, is_labelled, public_row
 from threefold.application.rule_keys import kind_of, stored_rule_key
 from threefold.application.sandbox import create_sandbox
+from threefold.infrastructure.idempotency import global_idempotency_cache
 from threefold.infrastructure.security_middleware import rfc7807_error
 
 logger = logging.getLogger("threefold.api.app")
@@ -92,9 +94,31 @@ def handle(path: str, method: str, event: Dict[str, Any]) -> Optional[Dict[str, 
         return None
     handler, project = route
     try:
-        return handler(event, path, project)
+        response = handler(event, path, project)
     except (InvalidRequestError, stages.ConfigError) as invalid:
         return _problem(400, "Bad Request", invalid.detail, path, "bad-request", invalid.name)
+    if method == "POST" and response.get("statusCode") == 200:
+        _remember(event, method, path, response)
+    return response
+
+
+def _remember(event: Dict[str, Any], method: str, path: str, response: Dict[str, Any]) -> None:
+    """Stores a write's answer under its Idempotency-Key, as the router's own writes do.
+
+    The router answers a repeated key from the cache before any route runs, so
+    a retried promotion is not a second history entry and a retried sandbox is
+    the same sandbox. The key is scoped by method and path exactly as the
+    router scopes it when it looks one up.
+    """
+    headers = event.get("headers") or {}
+    key = next(
+        (headers[name] for name in ("Idempotency-Key", "idempotency-key", "X-Idempotency-Key", "x-idempotency-key")
+         if headers.get(name)),
+        None,
+    )
+    if not key:
+        return
+    global_idempotency_cache.set(f"{method} {path} {key}", response["statusCode"], json.loads(response["body"]))
 
 
 def _match(path: str, method: str) -> Optional[Tuple[Handler, Optional[str]]]:

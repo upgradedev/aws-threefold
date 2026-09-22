@@ -97,6 +97,15 @@ def test_a_promotion_enforces_what_was_picked_and_a_demotion_undoes_it(observe_d
     assert {row["mode_now"] for row in page["readiness"]["rules"]} == {"observe"}
 
 
+def test_a_retried_promotion_with_its_idempotency_key_is_one_history_entry() -> None:
+    project = fresh_project()
+    retry = {"Idempotency-Key": f"{project}-promote-1"}
+    first = post(f"/api/projects/{project}/promote", {"enforce": ["LOOP"]}, headers=retry)
+    again = post(f"/api/projects/{project}/promote", {"enforce": ["LOOP"]}, headers=retry)
+    assert again == first
+    assert len(get(f"/api/projects/{project}")["config"]["history"]) == 1
+
+
 def test_readiness_says_which_rules_enforce_after_a_promotion() -> None:
     project = fresh_project()
     post(f"/api/projects/{project}/promote", {"enforce": ["python-domain-stays-pure"]})
