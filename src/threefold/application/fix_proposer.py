@@ -1689,11 +1689,8 @@ def _assemble(kind: str, outcome: _Outcome, notes: List[str], shell: bool, extra
         steps.append("Threefold ran the same gates, with the same rules, on every proposed write, and each passed.")
         summary = _layering_summary(kind, outcome)
         return _Fix(kind, summary, steps, outcome.writes, True, outcome.checks)
-    why = outcome.why or (notes[0] if notes else "the proposal did not pass the gates")
-    if kind == KIND_UNREADABLE and notes:
-        summary = f"No checked fix: {notes[0][:1].lower()}{notes[0][1:]}"
-    else:
-        summary = f"No checked fix: {why.rstrip('.')}."
+    why = (notes[0] if notes and (kind == KIND_UNREADABLE or not outcome.why) else outcome.why) or "the proposal did not pass the gates"
+    summary = f"No checked fix: {why[:1].lower()}{why[1:].rstrip('.')}."
     # A textual fix carries no code: a write that has not passed is not handed out.
     return _Fix(kind, summary, steps, [], False, outcome.checks)
 
@@ -1812,7 +1809,7 @@ def _environment_name(text: str, start: int, label: str) -> str:
     line_start = text.rfind("\n", 0, start) + 1
     # Back to before the literal the value sits in, so `"Bearer ` in front of a
     # token does not hide the name the literal is assigned to.
-    before = re.sub(r"""[`'"][^`'"]*$""", "", text[line_start:start])
+    before = re.sub(r"""[`'"]+[^`'"]*$""", "", text[line_start:start])
     found = re.search(r"([A-Za-z_][A-Za-z0-9_\-]*)['\"]?\s*(?::=|=>|[:=])\s*(?:[A-Za-z_][\w.]*\(\s*)?$", before)
     if not found:
         return default
@@ -2151,7 +2148,9 @@ def _protected_fix(diagnosis: _Diagnosis) -> _Fix:
                 f"If the hooks themselves need to change, ask the operator: {installer} (connect or disconnect).",
             ],
         )
-    if diagnosis.why == "hooks":
+    # `.git/hooks/pre-commit` trips the `.git` pattern before the hooks check is
+    # reached; the advice that helps is still the one about hooks.
+    if diagnosis.why == "hooks" or (diagnosis.path and is_governance_path(diagnosis.path)):
         return _Fix(
             KIND_PROTECTED_PATH,
             f"No code fix: {path} decides whether the agent's hooks run. Ask the operator; {installer}.",
@@ -2228,6 +2227,22 @@ def _loop_fix(request: Any, result: Any) -> _Fix:
 
 
 def _budget_fix(request: Any, result: Any) -> _Fix:
+    """The cost gate: one call over the per-call cap, or a session over its budget. Both halt it."""
+    session = str(_field(result, "session_id") or _field(request, "session_id") or "")[:64]
+    resume = (
+        f"The cost gate halted the session; an operator resumes it with POST /sessions/{session or '<session>'}/resume "
+        "once the spend is understood."
+    )
+    if _effective_reason(result).startswith("Single invocation cost"):
+        return _Fix(
+            KIND_BUDGET,
+            "No code fix: this one call declares more cost than the per-call cap. Split the work into smaller calls, or ask the operator.",
+            [
+                "The call's declared token usage costs more than the per-call safety cap allows.",
+                "Split the work into smaller calls, or ask the operator to raise max_single_call_usd in the policy.",
+                resume,
+            ],
+        )
     spent = _field(result, "current_session_cost_usd")
     budget = _field(request, "budget_usd")
     try:
@@ -2238,8 +2253,9 @@ def _budget_fix(request: Any, result: Any) -> _Fix:
         KIND_BUDGET,
         f"No code fix: this session has spent its budget{detail}. Ask the operator to raise it, or start a new session.",
         [
-            f"The session's spend reached its budget{detail}, so the cost gate halted it.",
+            f"The session's spend reached its budget{detail}.",
             "Ask the operator to raise budget_usd for this work, or start a new session for the next task.",
+            resume,
         ],
     )
 
