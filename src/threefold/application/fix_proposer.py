@@ -24,26 +24,92 @@ The shape:
 - summary: one line of at most 200 characters, safe to append to a hook's deny
   reason: no secret, no newline, no control character.
 - steps: what to do, in order, in words.
-- writes: [{path, content}], with `old_string` for an Edit retry and `partial`
-  for shell-added text. Left out when the files come to more than 8 KB, and the
-  steps say so; they were still checked in full.
+- writes: [{path, content}], with `old_string` for an Edit retry, `partial`
+  for shell-added text, and `new_file` for a port or an adapter Threefold
+  proposes as a new file (it cannot see whether one is already there, and the
+  steps say to add to it rather than overwrite it if so). Left out when the
+  files come to more than 8 KB, and the steps say so; they were still checked
+  in full.
 - validated: true only when every proposed write was run through the gates and
-  passed. Never true for advice in words, for a loop, or for content Threefold
-  could not see.
+  passed: every layering rule in any mode, the credential scan, and the whole
+  boundary guard, with the rules the call was judged by. Every Python file this
+  module writes whole (a port, an adapter, a domain file that parsed before) is
+  also parsed, because a file that does not parse is not a fix whatever the
+  gates say. Never true for advice in words, for a loop, or for content
+  Threefold could not see. It does not claim the rewritten code behaves as the
+  original did: the gates judge imports and credentials, not meaning.
 - checks: [{gate, path, passed}] for every check that was run.
 
-Which fix a refusal gets is decided by the verdict's family (its
-rule_evaluations, or a rule_key when the response carries one) and then by
-asking the questions the boundary guard asks, in the guard's order, of the call
-itself. Reason strings are prose and change; the gates are the contract.
+Which fix a refusal gets is decided by the verdict's family (a rule_key when the
+response carries one, else its rule_evaluations and status) and then by asking
+the questions the boundary guard asks, in the guard's order, of the call itself.
+Reason text is read in four places only, all of them for detail rather than for
+the decision, and each says less when the text does not match rather than
+guessing: a loop's repeat count and cycle, a halted session's cause, which of
+the circuit breaker's two cost sentences refused the call, and (until the
+rule_key reaches every verdict) the evaluator's own halted-session prefix, the
+same one the evaluator itself relies on.
 
-A detected secret is never repeated. Fixes replace it with an environment lookup,
-and every string that leaves this module is passed through the redaction the
-ledger uses.
+A detected secret is never repeated. Fixes replace it with an environment lookup;
+every string that leaves this module is passed through the redaction the ledger
+uses; and the text of every secret found in the call, including the body of a
+private key the scanner knows only by its header, is withheld from the answer
+wherever it would otherwise appear.
+
+What it costs. Content over MAX_CONTENT_CHARS gets advice in words from one read
+of its imports; below it, a layering fix reads the file a fixed number of times
+(about six parses, however many imports it moves), then judges the small port
+and adapter. Measured on this development machine [PRIMARY], 2026-09-22: the
+shipped fixtures of a few hundred bytes take 3 to 6 ms; a 60 KB Python domain
+file with 60 forbidden imports takes about 7 times what the gate alone takes on
+it. A refused call pays this once, on top of the gate; an approved call never
+does.
+
+Wiring (for the owner, after B1 merges; this track changes none of these files):
+
+1. Response field `suggested_fix`: add `suggested_fix: Optional[Dict[str, Any]]
+   = None` to EvaluationResultDTO (src/threefold/application/dtos.py). to_dict
+   is asdict, so it reaches the /evaluate-tool-call response unchanged; add it
+   as a nullable object to the EvaluationResult schema in the shared
+   src/threefold/web/openapi.json and docs/openapi.yaml, one line each.
+2. Where: GovernanceEvaluator.evaluate_tool_call in
+   src/threefold/application/evaluator.py, after `result = self._decide(request,
+   rules, ...)` and before `self._record_decision(request, result)`, passing the
+   same `rules` list resolved at the top of that method, so the fix is checked
+   against exactly the rules that judged the call:
+       if result.status != "APPROVED" or (request.explain and result.observations):
+           result.suggested_fix = propose_fix(request, result, rules)
+   Compute it only when someone will read it: a refusal, which the hook prints,
+   or a page call (`explain: true`) that shows an observation. In Observe, the
+   default stage, the hook prints nothing on approval, so a fix computed for a
+   hook's would-refuse costs time on every such call and reaches no agent. Pass
+   no `phrase` on this path: a model call has no place inside a verdict's
+   latency.
+3. Never store it. `writes` carry the agent's own source code. `_record_decision`
+   must not copy `suggested_fix` into the ledger row, and `public_row`
+   (src/threefold/application/labels.py) must never expose it, above all on a
+   stack with PublicReads=true, where every ledger row is readable by anyone. If
+   the dashboard wants a column, store only `kind` and `validated`, after asking
+   the owner for the field, as the contract requires.
+4. Hook: in `refusal_reason()` in src/threefold/hooks/threefold_hook.py, after
+   the explanation line, append the summary as its own line:
+       fix = verdict.get("suggested_fix")
+       if isinstance(fix, dict) and isinstance(fix.get("summary"), str):
+           label = "Suggested fix, checked by Threefold" if fix.get("validated") is True else "Suggested fix"
+           detail += f"\n{label}: {_clean(fix['summary'])[:200]}"
+   where `_clean` strips control characters, because the hook trusts nothing
+   the network sends. Only the summary goes into the deny reason, never the
+   writes; `deny()` then carries it as permissionDecisionReason (Claude Code,
+   Codex) or reason (Antigravity). A stack without the field changes nothing.
+5. Budget: the hook gives up after DEFAULT_TIMEOUT_SECONDS = 4.0 and fails open,
+   and the Lambda has Timeout 15 at 256 MB. The cost above is what keeps a large
+   refused write inside that; raising MAX_CONTENT_CHARS spends it.
 """
 from __future__ import annotations
 
 import ast
+import functools
+import json
 import keyword
 import logging
 import posixpath
@@ -51,9 +117,10 @@ import re
 import shlex
 from dataclasses import dataclass, field
 from types import SimpleNamespace
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Collection, Dict, List, Optional, Sequence, Set, Tuple
 
 from threefold.domain import imports as import_readers
+from threefold.domain import layering_rules as layering_internals
 from threefold.domain.boundary_guard import (
     COMMAND_KEYS,
     CONTENT_KEYS,
@@ -80,7 +147,6 @@ from threefold.domain.imports import declared_imports, language_for
 from threefold.domain.layering_rules import (
     DEFAULT_RULES,
     ENFORCE,
-    evaluate as evaluate_layering,
     normalise_rules,
     rules_for_path,
     violations,
@@ -105,12 +171,15 @@ MAX_WRITE_BYTES = 8 * 1024
 MAX_SUMMARY_CHARS = 200
 MAX_STEP_CHARS = 600
 MAX_STEPS = 14
-# Content larger than this is not rewritten. The gate reads it, but a fix that
-# re-parses and re-emits half a megabyte on every refusal is a cost nobody asked
-# for, and the 8 KB cap would leave it out of the answer anyway.
-MAX_CONTENT_CHARS = 512_000
+# Content larger than this is not rewritten, only described. A rewrite costs
+# five to seven times the gate's own read of the file, and at 64 KB that was
+# 350 to 470 ms on the development machine [PRIMARY], before a 256 MB Lambda's
+# fraction of a core multiplies it, against a hook that gives up after 4 s and
+# then lets the call through. Three times the 8 KB a verdict carries is past
+# anything the answer can include; a larger file gets the same advice in words
+# from the one read of its imports the fix makes anyway.
+MAX_CONTENT_CHARS = 24_000
 MAX_METHODS = 8
-MAX_REMOVAL_ROUNDS = 64
 MAX_COMMAND_IN_STEP = 400
 
 KIND_LAYERING = "layering"
@@ -125,6 +194,10 @@ KIND_DESTRUCTIVE = "destructive_command"
 GATE_LAYERING = "layering"
 GATE_CREDENTIAL = "credential"
 GATE_BOUNDARY = "boundary"
+# Not a Threefold gate: a check that a Python file this module wrote whole
+# parses. The gates read imports and credentials, so a docstring broken by a
+# path with `"""` or `\N` in it passed all three and was still no fix.
+GATE_SYNTAX = "syntax"
 # Not a pass of the content, which Threefold could not see: a record that a
 # Write to this path is judged by reading it, so the route proposed will not be
 # refused as unreadable. It never makes a fix validated on its own.
@@ -156,6 +229,11 @@ class _Fix:
     writes: List[Dict[str, Any]] = field(default_factory=list)
     validated: bool = False
     checks: List[Dict[str, Any]] = field(default_factory=list)
+    # The text of every secret the call carried, found independently of the
+    # scanner's view of the answer. _finish keeps each out of everything it
+    # returns: the scanner knows a private key only by its header, so a body
+    # left behind by a rewrite passed its check and reached the answer.
+    withheld: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -179,6 +257,8 @@ class _Site:
     shape: str = "write"  # write | edit | partial
     old_string: Optional[str] = None
     literal_heredoc: bool = False
+    # A whole Python file that parsed as the call sent it, so its proposal must too.
+    must_parse: bool = False
 
 
 @dataclass
@@ -238,10 +318,16 @@ def propose_fix(
         fix = _propose(request, result, active)
         if fix is None:
             return None
+        fix.withheld = list(dict.fromkeys(fix.withheld + _withheld(_field(request, "arguments"))))
         return _finish(fix, max_write_bytes, phrase)
     except Exception as exc:  # pragma: no cover - the refusal stands without a fix
         logger.warning("Could not propose a fix; the refusal stands on its own: %s", exc)
         return None
+    finally:
+        # The memo holds the agent's source for the length of one proposal and
+        # no longer: a warm container must not keep one caller's files around.
+        _imports.cache_clear()
+        _parse_python.cache_clear()
 
 
 def _field(value: Any, name: str, default: Any = None) -> Any:
@@ -360,8 +446,12 @@ def _diagnose(invocation: ToolInvocation, rules: List[Dict[str, Any]]) -> Option
         if shell_refusal(analysis, rules):
             return _shell_diagnosis(analysis, rules)
 
+    # The layering gate's question (layering_rules.evaluate: does an enforcing
+    # rule flag one of the file's imports), asked through the memoised import
+    # read so the fix that follows does not parse the same file again.
+    enforcing = [rule for rule in rules if rule.get("mode", ENFORCE) == ENFORCE]
     for target, content in write_pairs(arguments):
-        if rules_for_path(target, rules) and not evaluate_layering(target, content, rules)[0]:
+        if _flagged_modules(target, content, enforcing):
             return _Diagnosis(KIND_LAYERING, path=target)
 
     if invocation.action_type == ToolActionType.COMMAND_EXEC or command is not None or not path_like:
@@ -515,15 +605,40 @@ def _entry(site: _Site, content: str, path: Optional[str] = None) -> Dict[str, A
     return entry
 
 
-def _check_entry(entry: Dict[str, Any], rules: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], str]:
+def _parses(path: str, content: str) -> bool:
+    """Whether Python content parses, for a file this module wrote whole."""
+    try:
+        compile(content, path or "<fix>", "exec", flags=ast.PyCF_ONLY_AST, dont_inherit=True)
+    except (SyntaxError, ValueError, RecursionError, MemoryError):
+        return False
+    return True
+
+
+def _check_entry(
+    entry: Dict[str, Any], rules: List[Dict[str, Any]], must_parse: bool = False
+) -> Tuple[List[Dict[str, Any]], str]:
     """Runs one proposed write through the gates. Returns the checks and why one failed.
 
     Three questions: does any layering rule, enforcing or watching, flag it; does
     the credential scanner find anything in it; and does the whole boundary
     guard, the check the evaluator runs first, let the call through. The first
     is stricter than the gate on purpose: a fix a watching rule would flag is a
-    fix the dashboard would list as a would-refuse the day after.
+    fix the dashboard would list as a would-refuse the day after. With
+    `must_parse`, a Python file is also parsed: the gates would pass a file that
+    no interpreter could load.
     """
+    checks, why = _gate_entry(entry, rules)
+    path = entry["path"]
+    if must_parse and language_for(path) == "python":
+        parsed = _parses(path, entry["content"])
+        checks.append({"gate": GATE_SYNTAX, "path": path, "passed": parsed})
+        if not parsed and not why:
+            why = f"the proposed {path} would not parse as Python"
+    return checks, why
+
+
+def _gate_entry(entry: Dict[str, Any], rules: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], str]:
+    """The three gate questions of _check_entry."""
     path = entry["path"]
     content = entry["content"]
     found, _ = violations(path, content, rules)
@@ -580,7 +695,14 @@ def _mask(content: str, language: str) -> str:
     return import_readers._LINE_COMMENT.sub(blank, "".join(kept))
 
 
+@functools.lru_cache(maxsize=4)
 def _parse_python(content: str) -> Optional[ast.Module]:
+    """The tree, or None when the content does not parse or is past the reader's parse limit.
+
+    Remembered for the length of one proposal, as _imports is: the removal and
+    the question whether the file parsed before ask about the same content.
+    Callers only read the tree.
+    """
     if len(content) > import_readers.PYTHON_PARSE_LIMIT:
         return None
     try:
@@ -617,10 +739,10 @@ def _char_offset(line: str, byte_col: int) -> int:
     return len(line.encode("utf-8")[:byte_col].decode("utf-8", errors="ignore"))
 
 
-def _python_removal(content: str, module: str) -> Tuple[str, List[_Removed]]:
+def _python_removal(content: str, modules: Collection[str]) -> Tuple[str, List[_Removed]]:
     tree = _parse_python(content)
     if tree is None:
-        return _python_line_removal(content, module)
+        return _python_line_removal(content, modules)
     lines = content.splitlines(keepends=True)
     starts = [0]
     for line in lines:
@@ -630,32 +752,29 @@ def _python_removal(content: str, module: str) -> Tuple[str, List[_Removed]]:
         line = lines[lineno - 1] if 0 < lineno <= len(lines) else ""
         return starts[min(lineno - 1, len(lines))] + _char_offset(line, col)
 
+    # One walk: the tree is the cost here, and a second walk for the parents
+    # doubled it. Only an import's parent block is ever needed.
     parents: Dict[int, list] = {}
+    edits: List[List[Any]] = []
+    removed: List[_Removed] = []
     for node in ast.walk(tree):
         for name in ("body", "orelse", "finalbody"):
             block = getattr(node, name, None)
             if isinstance(block, list):
                 for child in block:
-                    parents[id(child)] = block
-
-    edits: List[List[Any]] = []
-    removed: List[_Removed] = []
-    for node in ast.walk(tree):
+                    if isinstance(child, (ast.Import, ast.ImportFrom)):
+                        parents[id(child)] = block
         if isinstance(node, ast.Import):
-            hits = [alias for alias in node.names if alias.name == module]
+            hits = [alias for alias in node.names if alias.name in modules]
             if not hits:
                 continue
-            keep = [alias for alias in node.names if alias.name != module]
+            keep = [alias for alias in node.names if alias.name not in modules]
             replacement = ("import " + ", ".join(_alias_text(alias) for alias in keep)) if keep else None
-            removed.append(
-                _Removed(
-                    module,
-                    "import " + ", ".join(_alias_text(alias) for alias in hits),
-                    [alias.asname or alias.name for alias in hits],
-                )
-            )
-        elif isinstance(node, ast.ImportFrom) and node.module == module:
+            for alias in hits:
+                removed.append(_Removed(alias.name, "import " + _alias_text(alias), [alias.asname or alias.name]))
+        elif isinstance(node, ast.ImportFrom) and node.module in modules:
             replacement = None
+            module = node.module
             names = [_alias_text(alias) for alias in node.names]
             removed.append(
                 _Removed(
@@ -684,7 +803,7 @@ def _python_removal(content: str, module: str) -> Tuple[str, List[_Removed]]:
     return _apply_edits(content, edits), removed
 
 
-def _python_line_removal(content: str, module: str) -> Tuple[str, List[_Removed]]:
+def _python_line_removal(content: str, modules: Collection[str]) -> Tuple[str, List[_Removed]]:
     """The line reader's statements, for content that does not parse (it arrives mid-edit)."""
     masked = _mask(content, "python")
     edits: List[List[Any]] = []
@@ -694,7 +813,8 @@ def _python_line_removal(content: str, module: str) -> Tuple[str, List[_Removed]
         line_end = masked.find("\n", match.start())
         line_end = len(masked) if line_end == -1 else line_end
         if match.group("from") is not None:
-            if match.group("from").lstrip(".") != module:
+            module = match.group("from").lstrip(".")
+            if module not in modules:
                 continue
             semicolon = masked.find(";", match.end(), line_end)
             end = semicolon if semicolon != -1 else line_end
@@ -707,25 +827,27 @@ def _python_line_removal(content: str, module: str) -> Tuple[str, List[_Removed]
             edits.append([keyword_start, end, None])
             continue
         parts = [part.strip() for part in match.group("import").split(",") if part.strip()]
-        hits = [part for part in parts if part.split(" ")[0].strip("()").lstrip(".") == module]
+        hits = [part for part in parts if part.split(" ")[0].strip("()").lstrip(".") in modules]
         if not hits:
             continue
         keep = [part for part in parts if part not in hits]
         replacement = ("import " + ", ".join(keep)) if keep else None
-        bindings = [part.split(" as ")[-1].strip() if " as " in part else part.split(" ")[0] for part in hits]
-        removed.append(_Removed(module, "import " + ", ".join(hits), bindings))
+        for part in hits:
+            binding = part.split(" as ")[-1].strip() if " as " in part else part.split(" ")[0]
+            removed.append(_Removed(part.split(" ")[0].strip("()").lstrip("."), "import " + part, [binding]))
         edits.append([keyword_start, match.end(), replacement])
     return _apply_edits(content, edits), removed
 
 
-def _pattern_removal(content: str, module: str, language: str) -> Tuple[str, List[_Removed]]:
+def _pattern_removal(content: str, modules: Collection[str], language: str) -> Tuple[str, List[_Removed]]:
     """Java and C# statements, found by the reader's own patterns."""
     pattern = import_readers._JAVA if language == "java" else import_readers._CSHARP
     masked = _mask(content, language)
     edits: List[List[Any]] = []
     removed: List[_Removed] = []
     for match in pattern.finditer(masked):
-        if match.group("module") != module:
+        module = match.group("module")
+        if module not in modules:
             continue
         start = match.start() + len(match.group(0)) - len(match.group(0).lstrip(" \t"))
         text = content[start:match.end()].strip()
@@ -808,14 +930,17 @@ def _ts_call_statement(masked: str, match: "re.Match[str]") -> Tuple[int, int, L
     raise _CannotRemove("the call is part of a longer expression")
 
 
-def _ts_removal(content: str, module: str) -> Tuple[str, List[_Removed]]:
+def _ts_removal(content: str, modules: Collection[str]) -> Tuple[str, List[_Removed], Set[str]]:
+    """Every statement importing one of `modules`, and the modules one of them could not be taken from."""
     masked = _mask(content, "typescript")
     edits: List[List[Any]] = []
     removed: List[_Removed] = []
+    stuck: Set[str] = set()
     taken = set()
     for pattern in (import_readers._TS_FROM, import_readers._TS_BARE):
         for match in pattern.finditer(masked):
-            if match.group("module") != module:
+            module = match.group("module")
+            if module not in modules:
                 continue
             keyword_match = _TS_KEYWORD.search(masked, match.start(), match.end())
             if keyword_match is None or keyword_match.start() in taken:
@@ -831,40 +956,74 @@ def _ts_removal(content: str, module: str) -> Tuple[str, List[_Removed]]:
             removed.append(_Removed(module, text.strip(), bindings, literal=module))
             edits.append([start, end, None])
     for match in import_readers._TS_CALL.finditer(masked):
-        if match.group("module") != module:
+        module = match.group("module")
+        if module not in modules:
             continue
-        start, end, bindings = _ts_call_statement(masked, match)
+        try:
+            start, end, bindings = _ts_call_statement(masked, match)
+        except _CannotRemove:
+            stuck.add(module)
+            continue
         if start in taken:
             continue
         taken.add(start)
         removed.append(_Removed(module, content[start:end].strip(), bindings, literal=module))
         edits.append([start, end, None])
-    return _apply_edits(content, edits), removed
+    return _apply_edits(content, edits), removed, stuck
 
 
-def _remove_module(path: str, content: str, module: str) -> Tuple[str, List[_Removed]]:
-    """Takes every statement importing `module` out of the content, or changes nothing.
+@functools.lru_cache(maxsize=16)
+def _imports(path: str, content: str) -> Tuple[str, ...]:
+    """declared_imports, remembered for the length of one proposal.
 
-    The reader is asked again afterwards. If it still sees the module, what was
-    taken out was not what the gate reads, and nothing is reported as removed.
+    The same content is asked about by the site filter, the removal and its
+    check; each ask used to be a full parse. propose_fix clears it on the way out.
     """
+    return tuple(declared_imports(path, content)[1])
+
+
+def _flagged_modules(path: str, content: str, rules: List[Dict[str, Any]]) -> Dict[str, str]:
+    """Every import any rule flags, enforcing or watching, with the first rule that flags it.
+
+    violations() stops at one import per rule, which is enough to refuse a call
+    and not enough to fix one: a file with sixty forbidden imports took sixty
+    rounds of parse-remove-parse, tens of seconds on a large file. This is the
+    same loop without the stop, using the gate's own matchers and its own rule
+    for an allowance that is more specific than the prohibition. The proposal is
+    still judged afterwards by violations() itself, so a drift between the two
+    shows up as a fix that is not validated, never as one that is wrongly.
+    """
+    applicable = rules_for_path(path, rules)
+    if not applicable or not language_for(path):
+        return {}
+    flagged: Dict[str, str] = {}
+    for module in _imports(path, content):
+        if module in flagged:
+            continue
+        for rule in applicable:
+            offending = layering_internals._forbidden_by(module, rule["forbid_imports"])
+            if not offending:
+                continue
+            permitted = layering_internals._forbidden_by(module, rule.get("allow_imports"))
+            if permitted and layering_internals._specificity(permitted) > layering_internals._specificity(offending):
+                continue
+            flagged[module] = rule["id"]
+            break
+    return flagged
+
+
+def _remove_modules(path: str, content: str, modules: Collection[str]) -> Tuple[str, List[_Removed], Set[str]]:
+    """Takes every statement importing one of `modules` out, in one pass. (content, removed, stuck)"""
     language = language_for(path)
-    try:
-        if language == "python":
-            new, removed = _python_removal(content, module)
-        elif language in ("java", "csharp"):
-            new, removed = _pattern_removal(content, module, language)
-        elif language == "typescript":
-            new, removed = _ts_removal(content, module)
-        else:
-            return content, []
-    except _CannotRemove:
-        return content, []
-    if not removed:
-        return content, []
-    if module in declared_imports(path, new)[1]:
-        return content, []
-    return new, removed
+    if language == "python":
+        new, removed = _python_removal(content, modules)
+        return new, removed, set()
+    if language in ("java", "csharp"):
+        new, removed = _pattern_removal(content, modules, language)
+        return new, removed, set()
+    if language == "typescript":
+        return _ts_removal(content, modules)
+    return content, [], set(modules)
 
 
 def _remove_offending(
@@ -872,35 +1031,25 @@ def _remove_offending(
 ) -> Tuple[str, List[_Removed], List[str], str]:
     """Removes every import any rule flags, enforcing or watching. (content, removed, rule ids, why not)
 
-    violations() reports one import per rule, which is enough to refuse a call
-    and not enough to fix one: a file with three forbidden imports would come
-    back with two still in it. So the question is asked again after each
-    removal until nothing is flagged or nothing more can be taken out.
+    One pass takes every flagged import out: removal never adds an import, so
+    nothing new can appear for a second pass to find. A flagged module with no
+    statement taken out stops the fix with the reason. One the reader still
+    sees afterwards (the removal and the reader disagreeing) is caught when the
+    proposal is judged by the gate itself, and the fix is then not validated.
     """
-    current = content
-    removed: List[_Removed] = []
-    rule_ids: List[str] = []
-    for _ in range(MAX_REMOVAL_ROUNDS):
-        found, _ = violations(path, current, rules)
-        if not found:
-            return current, removed, rule_ids, ""
-        progressed = False
-        for item in found:
-            new, taken = _remove_module(path, current, item["module"])
-            if not taken:
-                continue
-            for statement in taken:
-                statement.rule_id = item["rule_id"]
-            removed.extend(taken)
-            rule_ids.append(item["rule_id"])
-            current = new
-            progressed = True
-        if not progressed:
-            return current, removed, rule_ids, (
-                f"the statement in '{path}' that imports '{found[0]['module']}' could not be taken out "
-                "without breaking the code around it"
-            )
-    return current, removed, rule_ids, f"'{path}' imports more forbidden modules than one fix can move"
+    flagged = _flagged_modules(path, content, rules)
+    if not flagged:
+        return content, [], [], ""
+    new, taken, stuck = _remove_modules(path, content, flagged)
+    missed = [module for module in flagged if module in stuck or not any(item.module == module for item in taken)]
+    if missed:
+        return content, [], [], (
+            f"the statement in '{path}' that imports '{missed[0]}' could not be taken out "
+            "without breaking the code around it"
+        )
+    for statement in taken:
+        statement.rule_id = flagged.get(statement.module, "")
+    return new, taken, list(dict.fromkeys(flagged.values())), ""
 
 
 # --- names and paths for the port and the adapter -------------------------------------
@@ -968,16 +1117,29 @@ def _members(content: str, bindings: Sequence[str], language: str) -> List[Tuple
     masked = _mask(content, language)
     found: List[Tuple[str, Optional[str]]] = []
     seen = set()
+    members: Dict[str, List[str]] = {binding: [] for binding in bindings}
+    called: Set[str] = set()
+    if bindings:
+        # One scan for every binding: a file that moved sixty imports scanned
+        # itself a hundred and twenty times here. Longest first, so `ab` is
+        # tried before `a`. Not after `@`: `@Table(name = "x")` is an
+        # annotation, not something the domain asks the outside world to do.
+        alternation = "|".join(re.escape(binding) for binding in sorted(members, key=len, reverse=True))
+        pattern = re.compile(
+            r"(?<![\w$.@])(?P<binding>" + alternation + r")\s*(?:\.\s*(?P<member>[A-Za-z_$][\w$]*)|(?P<call>\())"
+        )
+        for match in pattern.finditer(masked):
+            if match.group("member"):
+                members[match.group("binding")].append(match.group("member"))
+            elif masked[max(0, match.start() - 4):match.start()] != "new ":
+                called.add(match.group("binding"))
     for binding in bindings:
-        escaped = re.escape(binding)
-        # Not after `@`: `@Table(name = "x")` is an annotation, not something
-        # the domain asks the outside world to do.
-        for match in re.finditer(r"(?<![\w$.@])" + escaped + r"\s*\.\s*([A-Za-z_$][\w$]*)", masked):
-            name = _method_name(match.group(1), language)
+        for member in members[binding]:
+            name = _method_name(member, language)
             if name and name not in seen:
                 seen.add(name)
-                found.append((name, f"{binding}.{match.group(1)}"))
-        if re.search(r"(?<![\w$.@])(?<!new )" + escaped + r"\s*\(", masked):
+                found.append((name, f"{binding}.{member}"))
+        if binding in called:
             name = _method_name(binding, language)
             if name and name not in seen:
                 seen.add(name)
@@ -988,8 +1150,11 @@ def _members(content: str, bindings: Sequence[str], language: str) -> List[Tuple
 
 
 def _uses(content: str, bindings: Sequence[str], language: str) -> int:
+    if not bindings:
+        return 0
     masked = _mask(content, language)
-    return sum(len(re.findall(r"(?<![\w$.])" + re.escape(binding) + r"(?![\w$])", masked)) for binding in bindings)
+    alternation = "|".join(re.escape(binding) for binding in sorted(set(bindings), key=len, reverse=True))
+    return len(re.findall(r"(?<![\w$.])(?:" + alternation + r")(?![\w$])", masked))
 
 
 def _cased(layer: str, like: str) -> str:
@@ -1110,7 +1275,8 @@ def _render_statement(statement: _Removed, language: str, domain_path: str, adap
         for quote in ("'", '"'):
             old = f"{quote}{statement.literal}{quote}"
             if old in statement.text:
-                return statement.text.replace(old, f"{quote}{rebased}{quote}", 1)
+                new = f"{quote}{rebased}{quote}" if _PLAIN_MODULE.fullmatch(rebased) else _module_literal(rebased)
+                return statement.text.replace(old, new, 1)
     return statement.text
 
 
@@ -1125,6 +1291,7 @@ def _libraries(removed: Sequence[_Removed]) -> str:
 
 
 def _python_port(port: str, methods: Sequence[Tuple[str, Optional[str]]], libraries: str, stem: str) -> str:
+    libraries, stem = _comment_text(libraries), _comment_text(stem)
     lines = [
         f"class {port}(Protocol):",
         f'    """What {stem} needs from {libraries}, declared here so the domain never depends on it.',
@@ -1167,6 +1334,7 @@ def _insert_python_port(content: str, block: str) -> str:
 
 
 def _script_port(port: str, methods: Sequence[Tuple[str, Optional[str]]], libraries: str, stem: str, flavour: str) -> str:
+    libraries, stem = _comment_text(libraries), _comment_text(stem)
     comment = (
         f"/** What {stem} needs from {libraries}, declared here so the domain never depends on it. "
         "An adapter outside the domain implements it. */"
@@ -1205,7 +1373,36 @@ def _quoted(text: str) -> str:
     return '"' + re.sub(r'[\\"]', lambda match: "\\" + match.group(0), re.sub(r"[^\x20-\x7e]", "?", text)) + '"'
 
 
+# What may stand as written inside a docstring or a comment in every language
+# this module writes: letters, digits and the punctuation a path or a package
+# name uses. Everything else becomes `_`. A path is the caller's to choose, and
+# `a"""+__import__("os").getcwd()+"""b.py` closed a docstring and ran as code;
+# `src\acme\domain\user.py` made `\u` an escape and the file stopped parsing;
+# `*/` would close a Java or TypeScript comment the same way, and `<` or `&`
+# would break a C# XML doc comment.
+_COMMENT_UNSAFE = re.compile(r"[^\w./@+~,()\[\]$=: -]")
+_PLAIN_MODULE = re.compile(r"[\w./@+~-]+")
+
+
+def _comment_text(text: str) -> str:
+    """Text that cannot end, escape or corrupt the comment or docstring it is put in."""
+    return _COMMENT_UNSAFE.sub("_", (text or "").replace("\\", "/"))
+
+
+def _module_literal(module: str) -> str:
+    """A TypeScript or JavaScript module specifier that names exactly this path.
+
+    Single-quoted, as the rest of the file is, when the path is plain; a JSON
+    string otherwise, which every JavaScript engine reads as the same string, so
+    a quote in a directory name can neither break the import nor end it early.
+    """
+    if _PLAIN_MODULE.fullmatch(module or ""):
+        return f"'{module}'"
+    return json.dumps(module)
+
+
 def _java_port(package: str, port: str, methods: Sequence[Tuple[str, Optional[str]]], libraries: str, stem: str) -> str:
+    libraries, stem = _comment_text(libraries), _comment_text(stem)
     lines = [f"package {package};", ""] if package else []
     lines.append(
         f"/** What {stem} needs from {libraries}, declared in the domain so {stem} never depends on it. "
@@ -1226,6 +1423,7 @@ def _csharp_block(namespace: str, block_style: bool, body: List[str]) -> List[st
 
 
 def _csharp_port(namespace: str, block_style: bool, port: str, methods: Sequence[Tuple[str, Optional[str]]], libraries: str, stem: str) -> str:
+    libraries, stem = _comment_text(libraries), _comment_text(stem)
     body = [
         f"/// <summary>What {stem} needs from {libraries}, declared in the domain so {stem} never references it. "
         "An adapter outside the domain implements it.</summary>",
@@ -1252,9 +1450,13 @@ def _adapter_text(
 ) -> str:
     """The adapter: the imports the domain gave up, and the port implemented with them."""
     domain_package, adapter_package = package
+    # Raw names go only where they are code the domain file already held (the
+    # moved statements) or through _quoted; prose goes through _comment_text.
+    call_hint = libraries
+    libraries = _comment_text(libraries)
     if language == "python":
         lines = [
-            f'"""Implements {port} from {port_path} with {libraries}, outside the domain."""',
+            f'"""Implements {port} from {_comment_text(port_path)} with {libraries}, outside the domain."""',
             "from typing import Any",
             "",
             *statements,
@@ -1269,25 +1471,25 @@ def _adapter_text(
             if target:
                 lines.append(f"        return {target}(*args, **kwargs)")
             else:
-                lines.append(f"        raise NotImplementedError({_quoted('Call ' + libraries + ' here')})")
+                lines.append(f"        raise NotImplementedError({_quoted('Call ' + call_hint + ' here')})")
         return "\n".join(lines) + "\n"
     if language == "typescript":
-        module = _relative_module(_split(adapter_path)[0], _script_module_path(port_path, flavour))
+        module = _module_literal(_relative_module(_split(adapter_path)[0], _script_module_path(port_path, flavour)))
         if flavour == "typescript":
-            lines = [*statements, f"import type {{ {port} }} from '{module}';", ""]
+            lines = [*statements, f"import type {{ {port} }} from {module};", ""]
             lines.append(f"/** Implements {port} with {libraries}, outside the domain. */")
             lines.append(f"export class {adapter} implements {port} {{")
             for name, target in methods:
                 lines.append(f"  {name}(...args: unknown[]): unknown {{")
-                lines.append(f"    {_script_call(target, libraries, typed=True)}")
+                lines.append(f"    {_script_call(target, call_hint, typed=True)}")
                 lines.append("  }")
         else:
-            lines = [*statements, f"import {{ {port} }} from '{module}';", ""]
+            lines = [*statements, f"import {{ {port} }} from {module};", ""]
             lines.append(f"/** Implements {port} with {libraries}, outside the domain. */")
             lines.append(f"export class {adapter} extends {port} {{")
             for name, target in methods:
                 lines.append(f"  {name}(...args) {{")
-                lines.append(f"    {_script_call(target, libraries, typed=False)}")
+                lines.append(f"    {_script_call(target, call_hint, typed=False)}")
                 lines.append("  }")
         lines.append("}")
         return "\n".join(lines) + "\n"
@@ -1371,6 +1573,21 @@ def _adapter_file_name(language: str, flavour: str, stem: str, base: str, extens
     return f"{stem}.adapter" + (".ts" if flavour == "typescript" else (extension if extension in (".js", ".mjs", ".cjs") else ".js"))
 
 
+def _adds_nothing(site: _Site, content: str) -> bool:
+    """Whether retrying this edit or addition without the import would change nothing.
+
+    An Edit whose new_string only added the import came back as an Edit with
+    new_string equal to old_string, which Claude Code's Edit tool rejects as a
+    no-op, and a `>>` of only the import came back as an empty addition. Neither
+    is a fix: the file should be left as it is.
+    """
+    if site.shape == "edit" and site.old_string is not None:
+        return content == site.old_string or content.strip() == site.old_string.strip()
+    if site.shape == "partial":
+        return not content.strip()
+    return False
+
+
 def _plan_layers(
     path: str,
     group: List[_Site],
@@ -1387,12 +1604,17 @@ def _plan_layers(
     port = f"I{base}Port" if language == "csharp" else f"{base}Port"
     adapter = f"{base}Adapter"
     libraries = _libraries(removed)
+    modules = list(dict.fromkeys(statement.module.rstrip(".") for statement in removed))
     bindings = list(dict.fromkeys(binding for statement in removed for binding in statement.bindings))
     methods = _members("\n".join(cleaned), bindings, language)
     whole = len(group) == 1 and group[0].shape == "write"
     separate_port = language in ("java", "csharp") or not whole
     masked_original = _mask(group[0].content or "", language)
     block_style = bool(re.search(r"(?m)^[ \t]*namespace[ \t]+[\w.]+\s*\{", masked_original))
+    # A whole Python file that parsed as sent must still parse as proposed. One
+    # that arrived mid-edit, or a fragment, is judged only by the gates, as the
+    # gate judges it.
+    parsed_before = language == "python" and whole and _parse_python(group[0].content or "") is not None
 
     domain_package = ""
     if language == "java":
@@ -1404,6 +1626,8 @@ def _plan_layers(
 
     outcome = _Outcome()
     domain_entries: List[Dict[str, Any]] = []
+    new_files: List[Dict[str, Any]] = []
+    unchanged: List[_Site] = []
     if whole and not separate_port:
         if language == "python":
             content = _insert_python_port(cleaned[0], _python_port(port, methods, libraries, stem))
@@ -1413,11 +1637,15 @@ def _plan_layers(
         port_path = path
     else:
         for site, content in zip(group, cleaned):
+            if _adds_nothing(site, content):
+                unchanged.append(site)
+                continue
             domain_entries.append(_entry(site, content))
         port_path = _join(directory, _port_file_name(language, flavour, stem, base, extension))
         if language == "python":
             port_text = (
-                f'"""The port {stem} depends on, declared in the domain so it never depends on {libraries}."""\n'
+                f'"""The port {_comment_text(stem)} depends on, declared in the domain so it never depends on '
+                f'{_comment_text(libraries)}."""\n'
                 "from typing import Any, Protocol\n\n\n" + _python_port(port, methods, libraries, stem)
             )
         elif language == "java":
@@ -1426,14 +1654,14 @@ def _plan_layers(
             port_text = _csharp_port(domain_package, block_style, port, methods, libraries, stem)
         else:
             port_text = _script_port(port, methods, libraries, stem, flavour)
-        domain_entries.append({"path": port_path, "content": port_text})
+        new_files.append({"path": port_path, "content": port_text, "new_file": True})
 
-    for entry in domain_entries:
-        checks, why = _check_entry(entry, rules)
+    for entry, must_parse in [(entry, parsed_before) for entry in domain_entries] + [(entry, True) for entry in new_files]:
+        checks, why = _check_entry(entry, rules, must_parse=must_parse)
         outcome.checks.extend(checks)
         if why:
             outcome.ok = False
-            outcome.why = outcome.why or f"the domain side still fails a gate: {why}"
+            outcome.why = outcome.why or f"the domain side still fails a check: {why}"
     if not outcome.ok:
         outcome.steps.append(
             f"In {path}, remove the import of {libraries} and move it behind a port; "
@@ -1443,6 +1671,7 @@ def _plan_layers(
 
     attempts: List[Dict[str, Any]] = []
     tried: List[str] = []
+    refused_by_rules = 0
     for adapter_directory, layer, replaced in _adapter_directories(path, rules, rule_ids):
         adapter_path = _join(adapter_directory, _adapter_file_name(language, flavour, stem, base, extension))
         tried.append(adapter_path)
@@ -1457,20 +1686,35 @@ def _plan_layers(
             language, flavour, adapter, port, port_path, adapter_path, statements, methods, libraries,
             (domain_package, adapter_package), block_style,
         )
-        entry = {"path": adapter_path, "content": text}
-        checks, why = _check_entry(entry, rules)
+        entry = {"path": adapter_path, "content": text, "new_file": True}
+        checks, why = _check_entry(entry, rules, must_parse=True)
         attempts.extend(checks)
         if why:
+            refused_by_rules += any(not check["passed"] and check["gate"] != GATE_SYNTAX for check in checks)
             continue
-        outcome.writes = domain_entries + [entry]
+        outcome.writes = domain_entries + new_files + [entry]
         outcome.checks.extend(checks)
-        outcome.plans.append({"path": path, "libraries": libraries, "port": port, "port_path": port_path, "adapter": adapter_path})
-        _layer_steps(outcome, path, group, removed, bindings, cleaned, language, port, port_path, adapter, adapter_path, methods, flavour)
+        outcome.plans.append(
+            {"path": path, "libraries": libraries, "modules": modules, "port": port, "port_path": port_path, "adapter": adapter_path}
+        )
+        _layer_steps(
+            outcome, path, group, removed, bindings, cleaned, language, port, port_path, adapter, adapter_path,
+            methods, flavour, bool(domain_entries), unchanged, [write["path"] for write in new_files] + [adapter_path],
+        )
         return outcome
 
     outcome.ok = False
     outcome.checks.extend(attempts)
     places = ", ".join(tried) or "no directory at all"
+    if tried and refused_by_rules < len(tried):
+        # At least one layer would take the import; what failed was the file
+        # Threefold wrote there, which a person can write where a template cannot.
+        outcome.why = f"the adapter Threefold would write for {libraries} ({places}) does not parse"
+        outcome.steps.append(
+            f"In {path}, move {libraries} behind a port and write the adapter by hand at one of {places}: "
+            "the one generated there does not parse, usually because a directory name is not a valid module name."
+        )
+        return outcome
     outcome.why = f"no layer these rules permit can hold {libraries}: every candidate ({places}) is refused too"
     outcome.steps.append(
         f"In {path}, {libraries} cannot simply move to another layer: the rules refuse it at {places} as well. "
@@ -1493,6 +1737,9 @@ def _layer_steps(
     adapter_path: str,
     methods: Sequence[Tuple[str, Optional[str]]],
     flavour: str,
+    domain_changes: bool,
+    unchanged: List[_Site],
+    new_paths: List[str],
 ) -> None:
     statements = list(dict.fromkeys(re.sub(r"\s+", " ", statement.text).strip() for statement in removed))
     rules_named = ", ".join(dict.fromkeys(f"'{statement.rule_id}'" for statement in removed if statement.rule_id))
@@ -1500,13 +1747,28 @@ def _layer_steps(
     kind = {"python": "a Protocol", "java": "an interface", "csharp": "an interface"}.get(
         language, "an interface" if flavour == "typescript" else "a class to extend"
     )
-    retry = {"edit": "Retry the Edit with the new text below", "partial": "Add the text below with Edit"}.get(
-        group[0].shape, "Write the domain file below"
-    )
-    outcome.steps.append(f"{retry}: it drops {shown} from {path}, which rule {rules_named or 'in force'} forbids there.")
+    forbids = f"which rule {rules_named or 'in force'} forbids there"
+    if domain_changes:
+        retry = {"edit": "Retry the Edit with the new text below", "partial": "Add the text below with Edit"}.get(
+            group[0].shape, "Write the domain file below"
+        )
+        outcome.steps.append(f"{retry}: it drops {shown} from {path}, {forbids}.")
+        if unchanged:
+            outcome.steps.append(
+                f"Leave out the call's other change(s) to {path}: without the import they change nothing."
+            )
+    else:
+        what = "the edit" if group[0].shape == "edit" else "that addition"
+        outcome.steps.append(f"Nothing needs retrying in {path}: without {shown}, {forbids}, {what} adds nothing.")
     where = "in the same file" if port_path == path else f"in {port_path}, beside it in the domain"
     outcome.steps.append(f"Declare {port}, {kind}, {where}, for what the domain needs: {', '.join(name for name, _ in methods)}.")
     outcome.steps.append(f"Create {adapter_path}: {adapter} holds the import and implements {port}; the rules do not refuse it there.")
+    single = len(new_paths) == 1
+    outcome.steps.append(
+        f"{' and '.join(new_paths)} {'is' if single else 'are'} proposed as new, and Threefold cannot see whether "
+        f"{'it already exists' if single else 'they already exist'}: if {'it does' if single else 'one does'}, "
+        "add the class to it with Edit rather than overwrite it."
+    )
     remaining = _uses("\n".join(cleaned), bindings, language)
     if remaining:
         outcome.steps.append(
@@ -1528,7 +1790,7 @@ def _write_fix(invocation: ToolInvocation, rules: List[Dict[str, Any]], diagnosi
     sites = [
         site
         for site in _tool_sites(invocation.arguments)
-        if site.content is not None and violations(site.path, site.content, rules)[0]
+        if site.content is not None and _flagged_modules(site.path, site.content, rules)
     ]
     if not sites:
         return _Fix(
@@ -1557,15 +1819,35 @@ def _fix_sites(sites: List[_Site], rules: List[Dict[str, Any]]) -> _Outcome:
     return outcome
 
 
+def _too_large(path: str, group: List[_Site], rules: List[Dict[str, Any]]) -> _Outcome:
+    """Advice in words for a file too large to rewrite, from the one read of its imports already made."""
+    flagged: Dict[str, str] = {}
+    for site in group:
+        flagged.update(_flagged_modules(path, site.content or "", rules))
+    modules = list(flagged)
+    shown = ", ".join(modules[:4]) + (f" and {len(modules) - 4} more" if len(modules) > 4 else "")
+    candidates = _adapter_directories(path, rules, list(dict.fromkeys(flagged.values())))
+    where = f", for instance in {candidates[0][0]}/ (not checked)" if candidates and candidates[0][0] else ""
+    return _Outcome(
+        ok=False,
+        why=f"'{path}' is over {MAX_CONTENT_CHARS} characters, too large to rewrite and check here",
+        steps=[
+            f"In {path}, remove the import of {shown or 'the module the rule names'} and move it behind a port declared "
+            f"in the domain, with an adapter outside it that holds the import{where}. The file is over "
+            f"{MAX_CONTENT_CHARS} characters, too large for Threefold to rewrite and check within a verdict."
+        ],
+    )
+
+
 def _fix_path(path: str, group: List[_Site], rules: List[Dict[str, Any]]) -> _Outcome:
-    flagged = [site for site in group if site.content is not None and violations(path, site.content, rules)[0]]
+    flagged = [site for site in group if site.content is not None and _flagged_modules(path, site.content, rules)]
     if not flagged:
         # Nothing to move: the content as sent, or as recovered from the
         # command, is itself the proposal, checked like any other.
         part = _Outcome()
         for site in group:
             entry = _entry(site, site.content or "")
-            checks, why = _check_entry(entry, rules)
+            checks, why = _check_entry(entry, rules, must_parse=site.must_parse)
             part.writes.append(entry)
             part.checks.extend(checks)
             if why:
@@ -1573,9 +1855,7 @@ def _fix_path(path: str, group: List[_Site], rules: List[Dict[str, Any]]) -> _Ou
                 part.why = part.why or why
         return part
     if any(len(site.content or "") > MAX_CONTENT_CHARS for site in group):
-        return _Outcome(ok=False, why=f"'{path}' is too large to rewrite here", steps=[
-            f"{path} is too large for a mechanical rewrite: remove the import the rule names and move it behind a port."
-        ])
+        return _too_large(path, group, rules)
     cleaned: List[str] = []
     removed: List[_Removed] = []
     rule_ids: List[str] = []
@@ -1585,7 +1865,7 @@ def _fix_path(path: str, group: List[_Site], rules: List[Dict[str, Any]]) -> _Ou
             return _Outcome(ok=False, why=why, steps=[f"In {path}, {why}; take the import out by hand and move it behind a port."])
         cleaned.append(new)
         removed.extend(taken)
-        rule_ids.extend(ids)
+        rule_ids.extend(rule_id for rule_id in ids if rule_id not in rule_ids)
     return _plan_layers(path, group, cleaned, removed, rule_ids, rules)
 
 
@@ -1700,8 +1980,10 @@ def _layering_summary(kind: str, outcome: _Outcome) -> str:
         paths = ", ".join(dict.fromkeys(_short(write["path"]) for write in outcome.writes))
         return f"Checked fix: send the writes below with Write instead of the shell ({paths}); they pass the same rules."
     plan = outcome.plans[0]
-    libraries = plan["libraries"].split(", ")
-    named = libraries[0] if len(libraries) == 1 else f"{libraries[0]} and {len(libraries) - 1} more"
+    # Counted from the modules themselves: the display string is already cut to
+    # "a, b, c and N more", and counting its commas said "2 more" for sixty.
+    modules = plan["modules"] or [plan["libraries"]]
+    named = modules[0] if len(modules) == 1 else f"{modules[0]} and {len(modules) - 1} more"
     more = f" ({len(outcome.plans) - 1} more file(s) likewise)" if len(outcome.plans) > 1 else ""
     return (
         f"Checked fix: move {named} out of the domain behind {plan['port']}; "
@@ -1719,7 +2001,26 @@ def _short(path: str, limit: int = 60) -> str:
 _PREFIXED_LABELS = ("AWS_SECRET_KEY", "GENERIC_API_KEY")
 _VALUE_AFTER_KEY = re.compile(r"[:=]\s*['\"]?([A-Za-z0-9/+=_\-]{20,})")
 _TOKEN_CHARACTER = re.compile(r"[A-Za-z0-9/+=_\-]")
+PEM_LABEL = "PRIVATE_KEY_HEADER"
+_PEM_HEADER = dict(SecretScanner.PATTERNS)[PEM_LABEL]
 _PEM_END = re.compile(r"-----END [A-Z ]*PRIVATE KEY-----")
+# What separates the lines of a key: a newline, or the two characters `\n` when
+# the key sits in a one-line string literal.
+_PEM_BREAK = r"(?:[ \t]|\r?\n|\\r|\\n)"
+# The body of a key, line after line: base64 that runs to the end of its line,
+# or the header fields an encrypted key carries. Each line must end where a
+# line or a string ends, so the first word of the next line of code (`other:`
+# in YAML) is never taken for base64.
+_PEM_BODY = re.compile(
+    rf"(?:{_PEM_BREAK}+(?:[A-Za-z0-9+/]{{4,}}={{0,2}}|Proc-Type:[^\n\\]*|DEK-Info:[^\n\\]*)"
+    r"(?=[ \t]*(?:\r?\n|\\[nr]|$|[\"'`])))*"
+)
+_PEM_TAIL = re.compile(rf"{_PEM_BREAK}*-----END [A-Z ]*PRIVATE KEY-----")
+# A line that holds nothing but base64, as a key's body does however it is
+# quoted: bare, indented in YAML, or one string per line joined with `+`.
+_KEY_LINE = re.compile(r"(?m)^[\s\"'`+(,]*([A-Za-z0-9+/]{16,}={0,2})(?:\\[nr])*[\s\"'`+),;]*$")
+_KEY_REGION_WITH_END = 16_384
+_KEY_REGION_WITHOUT_END = 4_096
 _DEFAULT_ENVIRONMENT_NAMES = {
     "AWS_ACCESS_KEY": "AWS_ACCESS_KEY_ID",
     "AWS_SECRET_KEY": "AWS_SECRET_ACCESS_KEY",
@@ -1740,6 +2041,32 @@ _GENERIC_NAMES = frozenset(
         "CREDENTIAL", "CREDENTIALS", "SECRET_KEY", "ACCESS_KEY", "DATA", "HEADER", "HEADERS", "PAT",
     )
 )
+# Names a process already uses for something else. Proposing one would read the
+# system's PATH or HOME as the credential, and a step saying "set PATH in the
+# environment" would break the shell of whoever followed it.
+_RESERVED_NAMES = frozenset(
+    (
+        "PATH", "HOME", "USER", "USERNAME", "LOGNAME", "USERPROFILE", "USERDOMAIN", "PWD", "OLDPWD", "CWD",
+        "SHELL", "TEMP", "TMP", "TMPDIR", "TERM", "LANG", "LANGUAGE", "OS", "COMSPEC", "WINDIR", "SYSTEMROOT",
+        "SYSTEMDRIVE", "APPDATA", "LOCALAPPDATA", "PROGRAMFILES", "PROGRAMDATA", "PATHEXT", "HOSTNAME", "HOST",
+        "PORT", "URL", "URI", "IFS", "PS1", "PS2", "PS4", "PROMPT_COMMAND", "EDITOR", "VISUAL", "PAGER",
+        "DISPLAY", "MAIL", "TZ", "CI", "LD_LIBRARY_PATH", "LD_PRELOAD", "DYLD_LIBRARY_PATH", "PYTHONPATH",
+        "PYTHONHOME", "NODE_PATH", "NODE_OPTIONS", "NODE_ENV", "JAVA_HOME", "GOPATH", "GOROOT", "SSH_AUTH_SOCK",
+        "SSH_AGENT_PID", "GPG_AGENT_INFO", "AWS_PROFILE", "AWS_REGION", "AWS_DEFAULT_REGION", "AWS_CONFIG_FILE",
+        "AWS_SHARED_CREDENTIALS_FILE", "GOOGLE_APPLICATION_CREDENTIALS", "KUBECONFIG", "DOCKER_HOST",
+        "DOCKER_CONFIG", "GIT_DIR", "GIT_WORK_TREE",
+    )
+)
+_RESERVED_PREFIXES = ("XDG_", "LC_", "NPM_CONFIG_", "RUNNER_")
+# A name that ends in one of these names a place, not a secret: `REPO_URL`
+# holding a URL with a token in it wants the token read from the environment,
+# not a variable called REPO_URL that would have to hold the token alone.
+_LOCATION_SUFFIXES = frozenset(
+    (
+        "URL", "URI", "HOST", "HOSTNAME", "PORT", "PATH", "DIR", "DIRECTORY", "FILE", "FILENAME", "HOME",
+        "ENDPOINT", "ADDRESS", "ADDR", "DOMAIN", "REGION", "EMAIL", "USER", "USERNAME",
+    )
+)
 _FLAVOURS = {
     ".py": "python", ".pyi": "python",
     ".ts": "typescript", ".tsx": "typescript",
@@ -1747,7 +2074,7 @@ _FLAVOURS = {
     ".java": "java", ".kt": "kotlin", ".kts": "kotlin",
     ".cs": "csharp", ".go": "go", ".rb": "ruby", ".php": "php",
     ".sh": "shell", ".bash": "shell", ".zsh": "shell",
-    ".ps1": "powershell",
+    ".ps1": "powershell", ".psm1": "powershell",
 }
 _LOOKUPS = {
     "python": 'os.environ["{name}"]',
@@ -1761,6 +2088,12 @@ _LOOKUPS = {
     "php": "getenv('{name}')",
     "powershell": "$env:{name}",
 }
+_POSIX_SHELLS = frozenset(("sh", "bash", "zsh", "dash", "ksh", "ash", "mksh"))
+_POWERSHELLS = frozenset(("pwsh", "powershell"))
+
+
+class _CannotSubstitute(Exception):
+    """A secret that sits where no lookup could take its place and still be read."""
 
 
 def _flavour(path: str) -> str:
@@ -1773,6 +2106,34 @@ def _has_secret(text: Optional[str]) -> bool:
     return bool(text) and not SecretScanner.scan_payload(text)[0]
 
 
+def _pem_extent(text: str, end: int) -> int:
+    """Where a private key that starts with a header ending at `end` ends.
+
+    Through its body and its END line when they follow. The scanner matches
+    only the header, and a span that stopped there replaced the header and left
+    the whole key body in the proposed file, where no scanner saw it again.
+    """
+    body = _PEM_BODY.match(text, end)
+    stop = body.end() if body else end
+    tail = _PEM_TAIL.match(text, stop)
+    return tail.end() if tail else stop
+
+
+def _key_material(text: str) -> List[str]:
+    """The lines of base64 after each private key header: what a key's body looks like.
+
+    Found independently of the rewrite, so a body the rewrite missed (split
+    across edits, cut off, or joined from one string per line) is still known,
+    and is kept out of the answer.
+    """
+    runs: List[str] = []
+    for header in _PEM_HEADER.finditer(text or ""):
+        closing = _PEM_END.search(text, header.end(), header.end() + _KEY_REGION_WITH_END)
+        stop = closing.start() if closing else header.end() + _KEY_REGION_WITHOUT_END
+        runs.extend(match.group(1) for match in _KEY_LINE.finditer(text, header.end(), stop))
+    return list(dict.fromkeys(runs))
+
+
 def _secret_spans(text: str) -> List[Tuple[int, int, str]]:
     """Where each credential sits: the value itself, not the key name in front of it."""
     spans: List[Tuple[int, int, str]] = []
@@ -1783,13 +2144,11 @@ def _secret_spans(text: str) -> List[Tuple[int, int, str]]:
                 inner = _VALUE_AFTER_KEY.search(text, start, end)
                 if inner:
                     start, end = inner.span(1)
-            elif label == "PRIVATE_KEY_HEADER":
-                closing = _PEM_END.search(text, end)
-                if closing:
-                    end = closing.end()
+            elif label == PEM_LABEL:
+                end = _pem_extent(text, end)
             # The pattern can stop short of the token, which would leave its
             # tail in the file beside the lookup. The whole token goes.
-            while end < len(text) and label != "PRIVATE_KEY_HEADER" and _TOKEN_CHARACTER.match(text[end]):
+            while end < len(text) and label != PEM_LABEL and _TOKEN_CHARACTER.match(text[end]):
                 end += 1
             spans.append((start, end, label))
     spans.sort(key=lambda span: (span[0], -(span[1] - span[0])))
@@ -1801,6 +2160,17 @@ def _secret_spans(text: str) -> List[Tuple[int, int, str]]:
             continue
         kept.append(span)
     return kept
+
+
+def _withheld(arguments: Any) -> List[str]:
+    """The text of every secret anywhere in a call's arguments, to be kept out of its fix."""
+    found: List[str] = []
+    for leaf in iter_string_leaves(arguments if isinstance(arguments, (dict, list, tuple)) else {}):
+        if not isinstance(leaf, str):
+            continue
+        found.extend(leaf[start:end] for start, end, _ in _secret_spans(leaf) if end - start >= 8)
+        found.extend(_key_material(leaf))
+    return list(dict.fromkeys(found))
 
 
 def _environment_name(text: str, start: int, label: str) -> str:
@@ -1818,11 +2188,18 @@ def _environment_name(text: str, start: int, label: str) -> str:
         return default
     if name in _GENERIC_NAMES and label not in ("GENERIC_API_KEY", "JWT"):
         return default
+    if name in _RESERVED_NAMES or name.startswith(_RESERVED_PREFIXES) or name.rsplit("_", 1)[-1] in _LOCATION_SUFFIXES:
+        return default
     return name
 
 
-def _enclosing_literal(text: str, start: int, end: int, flavour: str) -> Optional[Tuple[int, int, str, str]]:
-    """The string literal a secret sits in: (opening index, closing index, quote, string prefix)."""
+def _enclosing_literal(text: str, start: int, end: int, flavour: str) -> Tuple[str, Optional[Tuple[int, int, str, str]]]:
+    """What a secret sits in: ("literal", (open, close, quote, prefix)), or "unterminated", "comment" or "bare".
+
+    "unterminated" is a string opened before the secret whose end this text
+    does not hold (the rest is in another edit, or was cut off): a lookup put
+    there would be read as literal text, so nothing can be substituted.
+    """
     line_start = text.rfind("\n", 0, start) + 1
     segment = text[line_start:start]
     opened: Optional[str] = None
@@ -1847,15 +2224,15 @@ def _enclosing_literal(text: str, start: int, end: int, flavour: str) -> Optiona
             position += len(quote)
             continue
         if flavour == "python" and character == "#":
-            return None
+            return "comment", None
         if flavour not in ("python", "shell", "config") and segment.startswith("//", position):
-            return None
+            return "comment", None
         position += 1
     if opened:
         close = _closing_quote(text, end, opened, flavour)
         if close is None:
-            return None
-        return open_at, close, opened, _string_prefix(text, open_at, flavour)
+            return "unterminated", None
+        return "literal", (open_at, close, opened, _string_prefix(text, open_at, flavour))
     for quote in ('"""', "'''", "`"):
         if quote != "`" and not triple_ok:
             continue
@@ -1866,8 +2243,10 @@ def _enclosing_literal(text: str, start: int, end: int, flavour: str) -> Optiona
             continue
         closing = text.find(quote, end)
         if closing != -1 and not text[end:closing].strip():
-            return opening, closing, quote, _string_prefix(text, opening, flavour)
-    return None
+            return "literal", (opening, closing, quote, _string_prefix(text, opening, flavour))
+        if closing == -1:
+            return "unterminated", None
+    return "bare", None
 
 
 def _closing_quote(text: str, position: int, quote: str, flavour: str) -> Optional[int]:
@@ -1891,25 +2270,261 @@ def _string_prefix(text: str, open_at: int, flavour: str) -> str:
     return found.group(1) if found else ""
 
 
-def _substitute(text: str, start: int, end: int, name: str, flavour: str) -> str:
-    """The text with one secret replaced by the language's own way of reading `name`."""
+_HEREDOC = re.compile(r"(?<![<\w])<<(-?)[ \t]*(\\?)(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\3")
+
+
+def _heredoc_bodies(text: str) -> List[Tuple[int, int, bool]]:
+    """(start, end, quoted) of each heredoc body in a shell command, in order.
+
+    Several openers on one line have bodies one after another, as the shell
+    reads them. A quoted delimiter (<<'EOF', <<"EOF", <<\\EOF) makes the body
+    literal, so no variable in it is ever expanded.
+    """
+    bodies: List[Tuple[int, int, bool]] = []
+    cursor = 0
+    for match in _HEREDOC.finditer(text):
+        if match.start() < cursor:
+            continue
+        line_end = text.find("\n", match.end())
+        if line_end == -1:
+            break
+        body_start = line_end + 1
+        for opener in _HEREDOC.finditer(text, match.start(), line_end):
+            tabs = r"\t*" if opener.group(1) == "-" else ""
+            closing = re.compile(r"(?m)^" + tabs + re.escape(opener.group(4)) + r"[ \t]*\r?$").search(text, body_start)
+            body_end = closing.start() if closing else len(text)
+            bodies.append((body_start, body_end, bool(opener.group(2) or opener.group(3))))
+            body_start = min(len(text), closing.end() + 1) if closing else len(text)
+        cursor = body_start
+    return bodies
+
+
+def _shell_context(text: str, start: int, bodies: Sequence[Tuple[int, int, bool]]) -> Tuple[str, int]:
+    """Where `start` sits in a shell command: bare, single, ansi ($'...'), double or comment; and where that opened.
+
+    Read from the start of the command, not of the line, because a quoted
+    string may span lines; with a backslash escaping the next character outside
+    single quotes, so `'it'\\''s` is read as the shell reads it; and past each
+    heredoc body, whose quotes are text. Reading quotes on one line, as the
+    other languages are read, put `"${NAME}"` inside single quotes after a `\\'`.
+    """
+    body_ends = {body_start: body_end for body_start, body_end, _ in bodies}
+    state, opened, position = "bare", -1, 0
+    while position < start:
+        if state == "bare" and position in body_ends:
+            position = max(position + 1, body_ends[position])
+            continue
+        character = text[position]
+        if state == "bare":
+            if character == "\\":
+                position += 2
+                continue
+            if text.startswith("$'", position):
+                state, opened = "ansi", position
+                position += 2
+                continue
+            if character == "'":
+                state, opened = "single", position
+            elif character == '"':
+                state, opened = "double", position
+            elif character == "#" and (position == 0 or text[position - 1] in " \t\r\n;&|("):
+                line_end = text.find("\n", position)
+                if line_end == -1 or line_end >= start:
+                    return "comment", position
+                position = line_end
+                continue
+        elif state == "single":
+            if character == "'":
+                state = "bare"
+        else:
+            if character == "\\":
+                position += 2
+                continue
+            if character == ("'" if state == "ansi" else '"'):
+                state = "bare"
+        position += 1
+    return state, opened
+
+
+def _shell_close(text: str, position: int, quote: str, escapes: bool) -> Optional[int]:
+    """The index of the quote that ends a shell string, or None when this text does not hold it."""
+    while position < len(text):
+        if escapes and text[position] == "\\":
+            position += 2
+            continue
+        if text[position] == quote:
+            return position
+        position += 1
+    return None
+
+
+def _substitute_shell(text: str, start: int, end: int, name: str) -> str:
     placeholder = "${" + name + "}"
-    if flavour == "shell":
-        literal = _enclosing_literal(text, start, end, "shell")
-        if literal is None:
-            return text[:start] + '"' + placeholder + '"' + text[end:]
-        if literal[2] == "'":
-            return text[:start] + "'\"" + placeholder + "\"'" + text[end:]
+    bodies = _heredoc_bodies(text)
+    for body_start, body_end, quoted in bodies:
+        if body_start <= start < body_end:
+            if quoted:
+                raise _CannotSubstitute(
+                    "the credential sits in a quoted heredoc (<<'EOF'), whose text the shell never expands"
+                )
+            # An unquoted heredoc expands ${NAME} as it is; quotes around it
+            # would be literal characters in the text.
+            return text[:start] + placeholder + text[end:]
+    state, opened = _shell_context(text, start, bodies)
+    unterminated = "the credential sits in a quoted string that continues past the text this call carries"
+    if state == "comment":
         return text[:start] + placeholder + text[end:]
+    if state == "bare":
+        return text[:start] + '"' + placeholder + '"' + text[end:]
+    if state == "double":
+        if _shell_close(text, end, '"', escapes=True) is None:
+            raise _CannotSubstitute(unterminated)
+        return text[:start] + placeholder + text[end:]
+    if state == "single":
+        close = _shell_close(text, end, "'", escapes=False)
+        if close is None:
+            raise _CannotSubstitute(unterminated)
+        # Close the single quotes, expand in double quotes, open them again;
+        # where the secret began or ended the string, without an empty '' there.
+        head = text[:opened] if opened == start - 1 else text[:start] + "'"
+        tail = text[close + 1:] if close == end else "'" + text[end:]
+        return head + '"' + placeholder + '"' + tail
+    # $'...': close it, expand, and open a new $'...' so the escapes after the
+    # secret keep their meaning.
+    if _shell_close(text, end, "'", escapes=True) is None:
+        raise _CannotSubstitute(unterminated)
+    return text[:start] + "'\"" + placeholder + "\"$'" + text[end:]
+
+
+def _powershell_context(text: str, start: int) -> Tuple[str, int]:
+    """Where `start` sits in PowerShell: bare, single, double, here-single, here-double or comment; and where that opened."""
+    state, opened, position = "bare", -1, 0
+    while position < start:
+        character = text[position]
+        pair = text[position:position + 2]
+        if state == "bare":
+            if pair in ("@'", '@"') and text[position + 2:position + 3] in ("\n", "\r"):
+                state, opened = ("here-single" if pair == "@'" else "here-double"), position
+                position += 2
+                continue
+            if character == "#" and (position == 0 or text[position - 1] in " \t\r\n;"):
+                line_end = text.find("\n", position)
+                if line_end == -1 or line_end >= start:
+                    return "comment", position
+                position = line_end
+                continue
+            if character == "'":
+                state, opened = "single", position
+            elif character == '"':
+                state, opened = "double", position
+            position += 1
+        elif state == "single":
+            if pair == "''":
+                position += 2
+                continue
+            if character == "'":
+                state = "bare"
+            position += 1
+        elif state == "double":
+            if character == "`" or pair == '""':
+                position += 2
+                continue
+            if character == '"':
+                state = "bare"
+            position += 1
+        else:
+            closer = "\n'@" if state == "here-single" else '\n"@'
+            if text.startswith(closer, position):
+                state = "bare"
+                position += len(closer)
+                continue
+            position += 1
+    return state, opened
+
+
+def _powershell_close(text: str, position: int, quote: str) -> Optional[int]:
+    """The index of the quote that closes a PowerShell string, skipping its escapes."""
+    while position < len(text):
+        if quote == '"' and text[position] == "`":
+            position += 2
+            continue
+        if text.startswith(quote * 2, position):
+            position += 2
+            continue
+        if text[position] == quote:
+            return position
+        position += 1
+    return None
+
+
+def _as_expandable(single_quoted: str) -> str:
+    """The inside of a PowerShell '...' string, said again inside "..." so that it means the same."""
+    text = single_quoted.replace("''", "'")
+    return text.replace("`", "``").replace("$", "`$").replace('"', '`"')
+
+
+def _substitute_powershell(text: str, start: int, end: int, name: str) -> str:
+    """A secret replaced by $env:NAME where PowerShell expands it.
+
+    PowerShell expands nothing inside '...', and `${NAME}` is one of its own
+    variables, not the environment's: the bash spelling offered before was two
+    ways wrong. A single-quoted string holding the secret becomes a
+    double-quoted one with its other text escaped so that it still reads the
+    same; a single-quoted here-string cannot expand at all.
+    """
+    lookup = "$env:" + name
+    state, opened = _powershell_context(text, start)
+    if state == "here-single":
+        raise _CannotSubstitute("the credential sits in a single-quoted here-string (@'...'@), which PowerShell never expands")
+    if state == "comment":
+        return text[:start] + lookup + text[end:]
+    if state in ("double", "here-double"):
+        if state == "double":
+            close = _powershell_close(text, end, '"')
+            if close is not None and opened + 1 == start and close == end:
+                return text[:opened] + lookup + text[close + 1:]
+        return text[:start] + "$(" + lookup + ")" + text[end:]
+    if state == "single":
+        close = _powershell_close(text, end, "'")
+        if close is None:
+            raise _CannotSubstitute("the credential sits in a quoted string that continues past the text this call carries")
+        before, after = text[opened + 1:start], text[end:close]
+        if not before and not after:
+            return text[:opened] + lookup + text[close + 1:]
+        return text[:opened] + '"' + _as_expandable(before) + "$(" + lookup + ")" + _as_expandable(after) + '"' + text[close + 1:]
+    whole_word = (start == 0 or text[start - 1] in " \t\r\n=,;(") and (end == len(text) or text[end] in " \t\r\n,;)")
+    return text[:start] + (lookup if whole_word else "$(" + lookup + ")") + text[end:]
+
+
+def _substitute(text: str, start: int, end: int, name: str, flavour: str) -> str:
+    """The text with one secret replaced by the language's own way of reading `name`.
+
+    Raises _CannotSubstitute where no lookup could stand in the secret's place
+    and be read as one: a validated fix must still read the variable where the
+    secret was, not carry `${NAME}` as literal text.
+    """
+    if flavour == "shell":
+        return _substitute_shell(text, start, end, name)
+    if flavour == "powershell":
+        return _substitute_powershell(text, start, end, name)
+    placeholder = "${" + name + "}"
     lookup_format = _LOOKUPS.get(flavour)
     if lookup_format is None:
         # A configuration file has no lookup of its own; ${NAME} is what the
         # tools that read such files substitute, and it carries no secret.
         return text[:start] + placeholder + text[end:]
     lookup = lookup_format.format(name=name)
-    literal = _enclosing_literal(text, start, end, flavour)
-    if literal is None:
+    kind, literal = _enclosing_literal(text, start, end, flavour)
+    if kind == "unterminated":
+        raise _CannotSubstitute("the credential sits in a string that continues past the text this call carries")
+    if kind == "comment":
         return text[:start] + placeholder + text[end:]
+    if literal is None:
+        # No string this line opens holds it. It may be unquoted code, or the
+        # middle of a string or comment that began lines earlier; which one
+        # cannot be told from here, and a lookup in the wrong one is either
+        # literal text or code that does not parse.
+        raise _CannotSubstitute("the credential does not sit in a string that can be found on its line")
     open_at, close_at, quote, prefix = literal
     inner_start = open_at + len(quote)
     before, after = text[inner_start:start], text[end:close_at]
@@ -1929,19 +2544,49 @@ def _substitute(text: str, start: int, end: int, name: str, flavour: str) -> str
     return text[:literal_start] + joiner.join(parts) + text[literal_end:]
 
 
-def _replace_secrets(text: str, flavour: str) -> Tuple[str, List[str], bool]:
-    """Every credential in the text replaced by a lookup. (text, names, clean afterwards)"""
+def _replace_secrets(text: str, flavour: str) -> Tuple[str, List[str], bool, str]:
+    """Every credential in the text replaced by a lookup. (text, names, clean afterwards, why not)"""
     current = text
     names: List[str] = []
     for _ in range(16):
         spans = _secret_spans(current)
         if not spans:
-            return current, names, True
+            break
         for start, end, label in reversed(spans):
             name = _environment_name(current, start, label)
-            current = _substitute(current, start, end, name, flavour)
+            try:
+                current = _substitute(current, start, end, name, flavour)
+            except _CannotSubstitute as why:
+                return text, names, False, str(why)
             names.append(name)
-    return current, names, not _secret_spans(current)
+    if _secret_spans(current):
+        return text, names, False, "not every credential could be replaced by a lookup"
+    # The scanner knows a key only by its header. What the rewrite left of a
+    # body is found by comparing against the original, not by scanning again.
+    if any(run in current for run in _key_material(text)):
+        return text, names, False, "part of a private key's body would be left behind"
+    return current, names, True, ""
+
+
+def _python_lookups(content: str) -> Optional[int]:
+    """How many `os.environ[...]` reads the code holds, or None when it does not parse.
+
+    The lookup is placed by reading quotes on one line, and a quote inside a
+    string that began lines earlier fools that. Counting the reads the parser
+    sees tells a lookup that became code from one that became text.
+    """
+    tree = _parse_python(content)
+    if tree is None:
+        return None
+    return sum(
+        1
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Subscript)
+        and isinstance(node.value, ast.Attribute)
+        and node.value.attr == "environ"
+        and isinstance(node.value.value, ast.Name)
+        and node.value.value.id == "os"
+    )
 
 
 def _ensure_import_os(content: str) -> Tuple[str, bool]:
@@ -1994,13 +2639,10 @@ def _credential_fix(invocation: ToolInvocation, rules: List[Dict[str, Any]], dia
         if not sites:
             return _command_credential_fix(invocation, rules, command, label)
         covered = [command] if isinstance(command, str) else list(command)
-        text = command if isinstance(command, str) else " ".join(command)
-        if len(_secret_spans(text)) > sum(len(_secret_spans(site.content or "")) for site in sites):
-            # The Writes replace the command, and the command also carried the
-            # credential somewhere else: running "the rest" would leak it.
-            stray_in_command = True
-        else:
-            stray_in_command = False
+        text = command if isinstance(command, str) else " ".join(str(word) for word in command)
+        # The Writes replace the command; if the command also carried the
+        # credential somewhere else, running "the rest" would leak it.
+        stray_in_command = len(_secret_spans(text)) > sum(len(_secret_spans(site.content or "")) for site in sites)
     else:
         stray_in_command = False
         sites = [site for site in _tool_sites(arguments) if _has_secret(site.content) or _has_secret(site.old_string)]
@@ -2018,9 +2660,17 @@ def _credential_fix(invocation: ToolInvocation, rules: List[Dict[str, Any]], dia
             )
             continue
         flavour = _flavour(site.path)
-        new_content, found_names, clean = _replace_secrets(site.content or "", flavour)
+        new_content, found_names, clean, why = _replace_secrets(site.content or "", flavour)
+        if clean and flavour == "python":
+            before, after = _python_lookups(site.content or ""), _python_lookups(new_content)
+            if before is not None and after is not None and after - before < len(found_names):
+                clean, why = False, "the credential sits inside a longer string, where a lookup would be text rather than code"
         if not clean:
-            notes.append(f"Not every credential in {site.path} could be replaced by a lookup; remove it by hand.")
+            variable = (found_names or [_DEFAULT_ENVIRONMENT_NAMES.get(label, "API_KEY")])[0]
+            notes.append(
+                f"In {site.path}, {why}, so no lookup can replace it here: remove the whole value by hand and read it "
+                f"from {variable} in the environment."
+            )
             continue
         names.extend(found_names)
         if flavour == "python" and "os.environ[" in new_content:
@@ -2030,7 +2680,9 @@ def _credential_fix(invocation: ToolInvocation, rules: List[Dict[str, Any]], dia
                     steps.append(f"`import os` is added to {site.path} for the lookup.")
             else:
                 steps.append(f"Make sure `import os` is at the top of {site.path} for the lookup.")
-        fixed.append(_Site(site.path, new_content, site.shape, site.old_string))
+        # A whole Python file that parsed as sent must parse as proposed.
+        must_parse = flavour == "python" and site.shape == "write" and _parses(site.path, site.content or "")
+        fixed.append(_Site(site.path, new_content, site.shape, site.old_string, must_parse=must_parse))
     stray = [
         leaf
         for leaf in iter_string_leaves(arguments)
@@ -2067,34 +2719,94 @@ def _credential_fix(invocation: ToolInvocation, rules: List[Dict[str, Any]], dia
     return _Fix(KIND_CREDENTIAL, f"No checked fix for the {label}: {why}", all_steps, [], False, outcome.checks)
 
 
+def _script_word(words: Sequence[str]) -> Tuple[Optional[int], str]:
+    """Which word of an argv a shell runs as its script (`bash -lc '<script>'`), and in which flavour."""
+    if not words:
+        return None, ""
+    program = posixpath.basename(str(words[0]).replace("\\", "/")).lower()
+    if program.endswith(".exe"):
+        program = program[:-4]
+    if program in _POSIX_SHELLS:
+        index = 1
+        while index < len(words) - 1:
+            word = str(words[index])
+            if re.fullmatch(r"-[A-Za-z]*c[A-Za-z]*", word):
+                return index + 1, "shell"
+            if word in ("-o", "+o"):
+                index += 2
+                continue
+            if not word.startswith(("-", "+")) or word == "--":
+                break
+            index += 1
+        return None, ""
+    if program in _POWERSHELLS:
+        for index in range(1, len(words) - 1):
+            if str(words[index]).lower() in ("-command", "-c"):
+                return index + 1, "powershell"
+    return None, ""
+
+
 def _command_credential_fix(invocation: ToolInvocation, rules: List[Dict[str, Any]], command: Any, label: str) -> _Fix:
-    """A command carrying a credential: the same command reading it from the environment."""
+    """A command carrying a credential: the same command reading it from the environment.
+
+    Validated only where the rewritten command still expands the variable at
+    the place the secret was. A list of words is run without a shell, so
+    nothing in it expands, unless it is itself a shell running a script; a
+    quoted heredoc and a single-quoted PowerShell here-string expand nothing;
+    PowerShell reads the environment as $env:NAME, not ${NAME}.
+    """
     arguments = dict(invocation.arguments)
     key = _command_key(arguments, command)
+    powershell_tool = str(invocation.tool_name or "").lower() == "powershell"
+    flavour = "powershell" if powershell_tool else "shell"
     names: List[str] = []
+    why = ""
+    script: Optional[int] = None
     if isinstance(command, str):
         rewritten: Any
-        rewritten, names, clean = _replace_secrets(command, "shell")
+        rewritten, names, clean, why = _replace_secrets(command, flavour)
     else:
-        words = []
+        words = list(command)
+        script, script_flavour = _script_word([str(word) for word in words])
         clean = True
-        for word in command:
-            new_word, found, word_clean = _replace_secrets(word, "config")
-            words.append(new_word)
+        for position, word in enumerate(words):
+            if not isinstance(word, str) or not _secret_spans(word):
+                continue
+            if position != script:
+                clean = False
+                why = (
+                    "the command is a list of words run without a shell, so no variable written into it would ever "
+                    "be expanded"
+                )
+                break
+            flavour = script_flavour
+            new_word, found, word_clean, word_why = _replace_secrets(word, script_flavour)
             names.extend(found)
-            clean = clean and word_clean
+            if not word_clean:
+                clean, why = False, word_why
+                break
+            words[position] = new_word
         rewritten = words
     names = list(dict.fromkeys(names)) or [_DEFAULT_ENVIRONMENT_NAMES.get(label, "API_KEY")]
     variable = names[0]
+    reference = f"$env:{variable}" if flavour == "powershell" else f"${variable}"
     closing = [
         f"Export {', '.join(names)} in your own shell, outside the agent, so the value never passes through the agent.",
         "If the credential was ever committed or shared, rotate it.",
     ]
     if key is None or not clean:
+        advice = [f"Take the {label} out of the command: {why or 'no environment reference could take its place there'}."]
+        if not isinstance(command, str):
+            advice.append(
+                f"Run it through a shell instead (sh -c with \"${variable}\" in the script), or have the program read "
+                f"{variable} from the environment itself."
+            )
+        else:
+            advice.append(f"Rewrite the command so that the value is read from the environment as {reference} where the shell expands it.")
         return _Fix(
             KIND_CREDENTIAL,
-            f"No checked fix: take the {label} out of the command and read it from the environment as ${variable}.",
-            [f"Replace the {label} in the command with ${variable}."] + closing,
+            f"No checked fix: take the {label} out of the command and read it from the environment as {reference}.",
+            advice + closing,
         )
     arguments[key] = rewritten
     stray = [leaf for leaf in iter_string_leaves(arguments) if _has_secret(leaf)]
@@ -2105,16 +2817,27 @@ def _command_credential_fix(invocation: ToolInvocation, rules: List[Dict[str, An
         {"gate": GATE_CREDENTIAL, "path": "(command)", "passed": not stray},
         {"gate": GATE_BOUNDARY, "path": "(command)", "passed": allowed},
     ]
-    text = rewritten if isinstance(rewritten, str) else shlex.join(rewritten)
-    steps = [f"Refer to the {label} as ${variable} in the command instead of writing it out."]
-    if len(text) <= MAX_COMMAND_IN_STEP:
-        steps.append(f"Run instead: {text}")
+    if isinstance(rewritten, str):
+        text, shown_as = rewritten, "Run instead"
+    elif script is not None and script < len(rewritten):
+        # The script alone reads far better than the shell quoting of a whole
+        # argv around it, and it is the one word that changed.
+        text, shown_as = str(rewritten[script]), f"Pass this as the script {posixpath.basename(str(rewritten[0]))} runs"
+    else:
+        text, shown_as = shlex.join(str(word) for word in rewritten), "Run instead"
+    steps = [f"Refer to the {label} as {reference} in the command instead of writing it out."]
+    if "\n" in text or "\r" in text:
+        # A step is one line; a heredoc flattened onto one line is a different
+        # command, so a command that spans lines is described, not repeated.
+        steps.append(f"The command spans several lines, so it is not repeated here: replace the literal with {reference} where it sits.")
+    elif len(text) <= MAX_COMMAND_IN_STEP:
+        steps.append(f"{shown_as}: {text}")
     steps.extend(closing)
     if not stray and allowed:
         steps.append("Threefold ran the credential scan and the same gates on the rewritten command, and it passed.")
         return _Fix(
             KIND_CREDENTIAL,
-            f"Checked fix: use ${variable} from the environment in the command instead of the literal {label} credential.",
+            f"Checked fix: use {reference} from the environment in the command instead of the literal {label} credential.",
             steps,
             [],
             True,
@@ -2122,7 +2845,7 @@ def _command_credential_fix(invocation: ToolInvocation, rules: List[Dict[str, An
         )
     return _Fix(
         KIND_CREDENTIAL,
-        f"No checked fix: the command still fails a gate once the {label} is replaced by ${variable}.",
+        f"No checked fix: the command still fails a gate once the {label} is replaced by {reference}.",
         steps,
         [],
         False,
@@ -2201,15 +2924,18 @@ def _loop_fix(request: Any, result: Any) -> _Fix:
         SimpleNamespace(action_type=str(getattr(_field(request, "action_type"), "value", _field(request, "action_type")) or ""), arguments=arguments if isinstance(arguments, dict) else {})
     )
     tool = str(_field(request, "tool_name") or "the tool")[:60]
+    # The count and the cycle are in the loop detector's sentence and nowhere
+    # else in a verdict. Read from it when it says them; when it does not, the
+    # fix says "repeatedly" rather than a number it made up.
     count_match = re.search(r"(\d+) consecutive times", reason) or re.search(r"for the (\d+)\w* time", reason)
-    count = int(count_match.group(1)) if count_match else 3
+    times = f"{int(count_match.group(1))} times" if count_match else "repeatedly"
     cycle = re.search(r"cycle \(([^)]{1,200})\)", reason)
     if cycle:
         what = f"the cycle {cycle.group(1)}"
-        how = f"{what} was repeated {count} times"
+        how = f"{what} was repeated {times}"
     else:
         what = f"{tool} on {_short(target, 50)}" if target else tool
-        how = f"{what} was called {count} times with identical arguments"
+        how = f"{what} was called {times} with identical arguments"
     halted = bool(_field(result, "session_tripped"))
     session = str(_field(result, "session_id") or _field(request, "session_id") or "")[:64]
     steps = [
@@ -2233,7 +2959,21 @@ def _budget_fix(request: Any, result: Any) -> _Fix:
         f"The cost gate halted the session; an operator resumes it with POST /sessions/{session or '<session>'}/resume "
         "once the spend is understood."
     )
-    if _effective_reason(result).startswith("Single invocation cost"):
+    # The circuit breaker's two sentences are the only thing in a verdict that
+    # tells the per-call cap from the session budget; neither is a field. A
+    # sentence that is neither gets advice that covers both, not a guess.
+    reason = _effective_reason(result)
+    if not reason.startswith(("Single invocation cost", "Projected session cost")):
+        return _Fix(
+            KIND_BUDGET,
+            "No code fix: the cost gate refused this call. Split the work into smaller calls, or ask the operator about the budget.",
+            [
+                "The cost gate refused the call: either its declared cost is over the per-call cap, or the session's budget is spent.",
+                "Split the work into smaller calls, or ask the operator to raise max_single_call_usd or budget_usd.",
+                resume,
+            ],
+        )
+    if reason.startswith("Single invocation cost"):
         return _Fix(
             KIND_BUDGET,
             "No code fix: this one call declares more cost than the per-call cap. Split the work into smaller calls, or ask the operator.",
@@ -2288,13 +3028,29 @@ def _one_line(text: Any, limit: int) -> str:
     return cleaned
 
 
+def _scrub(text: Any, withheld: Sequence[str]) -> str:
+    """The text with every withheld secret taken out, before it is flattened to one line."""
+    text = str(text or "")
+    for secret in withheld:
+        if secret in text:
+            text = text.replace(secret, "[REDACTED]")
+    return text
+
+
 def _finish(fix: _Fix, max_write_bytes: int, phrase: Optional[Callable[[Dict[str, Any]], Optional[str]]]) -> Dict[str, Any]:
-    steps = [_one_line(step, MAX_STEP_CHARS) for step in fix.steps if step][:MAX_STEPS]
+    withheld = sorted((text for text in fix.withheld if len(text) >= 8), key=len, reverse=True)
+    steps = [_one_line(_scrub(step, withheld), MAX_STEP_CHARS) for step in fix.steps if step][:MAX_STEPS]
     writes = [dict(write) for write in fix.writes]
     validated = bool(fix.validated) and bool(fix.checks) and all(check.get("passed") for check in fix.checks if check.get("gate") != GATE_ROUTE)
     # Belt and braces: a write that still carries a credential is never handed
-    # out, whatever the code above believed about it.
-    if any(_has_secret(write.get("content")) or _has_secret(write.get("old_string")) for write in writes):
+    # out, whatever the code above believed about it. Two tests, because the
+    # scanner alone missed a key's body: it matches only the header.
+    if any(
+        _has_secret(write.get("content"))
+        or _has_secret(write.get("old_string"))
+        or any(secret in str(write.get(part) or "") for part in ("content", "old_string") for secret in withheld)
+        for write in writes
+    ):
         writes = []
         validated = False
         steps.append("The proposed files were withheld because a credential was still found in them.")
@@ -2304,7 +3060,7 @@ def _finish(fix: _Fix, max_write_bytes: int, phrase: Optional[Callable[[Dict[str
         + len(str(write.get("old_string") or "").encode("utf-8"))
         for write in writes
     )
-    summary = fix.summary
+    summary = _scrub(fix.summary, withheld)
     include_writes = size <= max_write_bytes
     if not include_writes:
         steps.append(
@@ -2318,7 +3074,7 @@ def _finish(fix: _Fix, max_write_bytes: int, phrase: Optional[Callable[[Dict[str
         out["writes"] = writes
     out["validated"] = validated
     out["checks"] = [
-        {"gate": str(check.get("gate")), "path": _one_line(check.get("path"), 300), "passed": bool(check.get("passed"))}
+        {"gate": str(check.get("gate")), "path": _one_line(_scrub(check.get("path"), withheld), 300), "passed": bool(check.get("passed"))}
         for check in fix.checks
     ]
     if phrase is not None:
@@ -2328,5 +3084,5 @@ def _finish(fix: _Fix, max_write_bytes: int, phrase: Optional[Callable[[Dict[str
             logger.warning("The phrasing hook failed; keeping the deterministic summary: %s", exc)
             worded = None
         if isinstance(worded, str) and worded.strip():
-            out["summary"] = _one_line(worded, MAX_SUMMARY_CHARS)
+            out["summary"] = _one_line(_scrub(worded, withheld), MAX_SUMMARY_CHARS)
     return out

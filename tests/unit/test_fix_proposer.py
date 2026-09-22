@@ -175,7 +175,7 @@ import {
   S3Client,
   PutObjectCommand,
 } from '@aws-sdk/client-s3';
-import { OracleGateway } from '../infrastructure/oracle';
+import { AcmeGateway } from '../infrastructure/acme-gateway';
 
 export async function price(id: string): Promise<Money> {
   const response = await axios.get(`/prices/${id}`);
@@ -198,10 +198,10 @@ SHIPPED_CASES = {
         ["System.Data.SqlClient"],
     ),
     "web-domain-stays-pure": (
-        "web/src/domain/price.ts", TS_DOMAIN, ["axios", "@aws-sdk/client-s3", "../infrastructure/oracle"],
+        "web/src/domain/price.ts", TS_DOMAIN, ["axios", "@aws-sdk/client-s3", "../infrastructure/acme-gateway"],
         "web/src/infrastructure/price.adapter.ts",
         # The relative import is said again from the adapter's own directory.
-        ["axios", "@aws-sdk/client-s3", "./oracle"],
+        ["axios", "@aws-sdk/client-s3", "./acme-gateway"],
     ),
 }
 
@@ -276,7 +276,7 @@ def test_the_typescript_fix_rebases_a_relative_import_into_the_adapter() -> None
     assert "export interface PricePort {" in domain and "get(...args: unknown[]): unknown;" in domain
     assert "import { Money } from './money';" in domain
     assert "import type { PricePort } from '../domain/price';" in adapter
-    assert "import { OracleGateway } from './oracle';" in adapter, "A relative import must still resolve from the adapter"
+    assert "import { AcmeGateway } from './acme-gateway';" in adapter, "A relative import must still resolve from the adapter"
     assert "PutObjectCommand" in adapter and "import axios from 'axios';" in adapter
 
 
@@ -448,13 +448,40 @@ def test_a_layer_taken_from_the_rules_own_patterns_is_tried_first() -> None:
 
 
 def test_an_edit_is_retried_as_an_edit() -> None:
-    arguments = {"file_path": "src/domain/acme_user.py", "old_string": "import json\n", "new_string": "import json\nimport boto3\n"}
+    arguments = {
+        "file_path": "src/domain/acme_user.py",
+        "old_string": "import json\n",
+        "new_string": "import json\nimport boto3\n\nLIMIT = 3\n",
+    }
     fix = _fix(*_refused("Edit", arguments))
     _assert_really_passes(fix)
     retry = _write_at(fix, "src/domain/acme_user.py")
-    assert retry["old_string"] == "import json\n" and retry["content"] == "import json\n"
+    assert retry["old_string"] == "import json\n" and retry["content"] == "import json\n\nLIMIT = 3\n"
+    assert retry["content"] != retry["old_string"], "An Edit retry must change something, or the Edit tool rejects it"
     assert "class AcmeUserPort(Protocol):" in _write_at(fix, "src/domain/acme_user_port.py")["content"]
     assert _write_at(fix, "src/infrastructure/acme_user_adapter.py")
+
+
+def test_an_edit_that_only_added_the_import_needs_no_edit_at_all() -> None:
+    """Retried without the import, it would be an Edit whose new_string equals its old_string: a no-op the tool rejects."""
+    arguments = {"file_path": "src/domain/acme_user.py", "old_string": "import json\n", "new_string": "import json\nimport boto3\n"}
+    fix = _fix(*_refused("Edit", arguments))
+    _assert_really_passes(fix)
+    assert [write["path"] for write in fix["writes"]] == [
+        "src/domain/acme_user_port.py",
+        "src/infrastructure/acme_user_adapter.py",
+    ], "No write to the domain file: leaving it as it is is the fix"
+    assert any("Nothing needs retrying in src/domain/acme_user.py" in step for step in fix["steps"])
+
+
+def test_a_port_and_an_adapter_are_proposed_as_new_files_with_a_warning() -> None:
+    """Threefold cannot see the disk, so it says so rather than let a Write overwrite an adapter that exists."""
+    arguments = {"file_path": "src/domain/acme_user.py", "old_string": "a = 1", "new_string": "import requests\na = 2"}
+    fix = _fix(*_refused("Edit", arguments))
+    created = {write["path"] for write in fix["writes"] if write.get("new_file")}
+    assert created == {"src/domain/acme_user_port.py", "src/infrastructure/acme_user_adapter.py"}
+    assert not _write_at(fix, "src/domain/acme_user.py").get("new_file")
+    assert any("cannot see whether they already exist" in step and "rather than overwrite" in step for step in fix["steps"])
 
 
 def test_a_multi_edit_is_retried_edit_by_edit() -> None:
@@ -477,9 +504,9 @@ def test_a_multi_edit_is_retried_edit_by_edit() -> None:
         ("echo 'import boto3' > src/domain/x.py", False),
         ("cd src/domain && echo 'import boto3' > x.py", False),
         ("python -c \"open('src/domain/x.py','w').write('import boto3')\"", False),
-        ("echo 'import boto3' >> src/domain/x.py", True),
-        ("echo 'import boto3' | tee -a src/domain/x.py", True),
-        ("cat >> src/domain/x.py <<'EOF'\nimport boto3\nEOF", True),
+        ("printf 'import boto3\\nLIMIT = 3\\n' >> src/domain/x.py", True),
+        ("printf 'import boto3\\nLIMIT = 3\\n' | tee -a src/domain/x.py", True),
+        ("cat >> src/domain/x.py <<'EOF'\nimport boto3\nLIMIT = 3\nEOF", True),
     ],
 )
 def test_a_shell_write_becomes_the_write_it_meant(command: str, partial: bool) -> None:
@@ -488,7 +515,25 @@ def test_a_shell_write_becomes_the_write_it_meant(command: str, partial: bool) -
     _assert_really_passes(fix)
     domain = [write for write in fix["writes"] if write["path"].startswith("src/domain/") and "_port" not in write["path"]]
     assert domain and all(bool(write.get("partial")) is partial for write in domain), domain
+    assert all(write["content"].strip() for write in domain), "A proposed write must add something"
     assert any("instead of the shell command" in step for step in fix["steps"])
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "echo 'import boto3' >> src/domain/x.py",
+        "echo 'import boto3' | tee -a src/domain/x.py",
+        "cat >> src/domain/x.py <<'EOF'\nimport boto3\nEOF",
+    ],
+)
+def test_an_append_of_only_the_import_needs_no_addition(command: str) -> None:
+    """Without the import there is nothing left to add: an empty partial write is not a fix."""
+    fix = _fix(*_refused("Bash", {"command": command}, action="COMMAND_EXEC"))
+    _assert_really_passes(fix)
+    assert "src/domain/x.py" not in [write["path"] for write in fix["writes"]]
+    assert {write["path"] for write in fix["writes"]} == {"src/domain/x_port.py", "src/infrastructure/x_adapter.py"}
+    assert any("Nothing needs retrying in src/domain/x.py" in step for step in fix["steps"])
 
 
 # --- writes the rules could not read --------------------------------------------------
@@ -556,7 +601,20 @@ CREDENTIAL_CASES = [
     ("cmd/acme/main.go", 'package main\n\nvar key = "' + ACCESS_KEY + '"\n', 'os.Getenv("AWS_ACCESS_KEY_ID")'),
     ("deploy/acme.yml", "token: " + GITHUB_TOKEN + "\n", "token: ${GITHUB_TOKEN}"),
     ("scripts/acme.sh", 'export ACME_KEY="' + ACCESS_KEY + '"\n', 'export ACME_KEY="${ACME_KEY}"'),
+    ("src/main/kotlin/com/acme/Config.kt", 'object Config { val token = "' + GITHUB_TOKEN + '" }\n', 'val token = System.getenv("GITHUB_TOKEN")'),
+    ("lib/acme/config.rb", "ACME_TOKEN = '" + GITHUB_TOKEN + "'\n", 'ACME_TOKEN = ENV["ACME_TOKEN"]'),
+    ("src/Acme/config.php", "<?php\n$auth = 'Bearer " + GITHUB_TOKEN + "';\n", "$auth = 'Bearer ' . getenv('GITHUB_TOKEN');"),
+    ("web/src/client.js", "const headers = { Authorization: 'token " + GITHUB_TOKEN + "' };\n", "Authorization: 'token ' + process.env.GITHUB_TOKEN }"),
+    # PowerShell expands nothing in '...' and reads the environment as $env:NAME.
+    ("scripts/acme.ps1", "$Token = '" + GITHUB_TOKEN + "'\n", "$Token = $env:GITHUB_TOKEN"),
+    ("scripts/call.ps1", "$h = 'it''s " + GITHUB_TOKEN + " $x'\n", '$h = "it\'s $($env:GITHUB_TOKEN) `$x"'),
 ]
+
+
+def test_the_credential_cases_cover_every_language_with_a_lookup() -> None:
+    from threefold.application.fix_proposer import _LOOKUPS, _flavour
+
+    assert {_flavour(path) for path, _, _ in CREDENTIAL_CASES} >= set(_LOOKUPS)
 
 
 @pytest.mark.parametrize("path, content, lookup", CREDENTIAL_CASES)
@@ -586,13 +644,186 @@ def test_a_private_key_block_is_replaced_whole() -> None:
     assert "PRIVATE KEY" not in proposed and "MIIB" not in proposed
 
 
+PEM_HEADER = "-----BEGIN " + "RSA PRIVATE KEY-----"
+PEM_FOOTER = "-----END " + "RSA PRIVATE KEY-----"
+PEM_BODY = SECRETS[2]
+
+
+@pytest.mark.parametrize(
+    "path, content, lookup",
+    [
+        (
+            "deploy/acme.yml",
+            "signing:\n  key: |\n    " + PEM_HEADER + "\n    " + PEM_BODY + "\n    " + PEM_FOOTER + "\n  other: kept\n",
+            "  key: |\n    ${PRIVATE_KEY_PEM}\n  other: kept\n",
+        ),
+        # No END line, as when the content was cut off: the body still goes,
+        # and the next key of the file is not taken for base64.
+        ("deploy/acme.yml", "key: |\n  " + PEM_HEADER + "\n  " + PEM_BODY + "\nother: kept\n", "key: |\n  ${PRIVATE_KEY_PEM}\nother: kept\n"),
+        # One line, with the newlines written as \n escapes.
+        (
+            "src/acme/keys.py",
+            'SIGNING_KEY = "' + PEM_HEADER + "\\n" + PEM_BODY + "\\n" + PEM_FOOTER + '"\n',
+            'SIGNING_KEY = os.environ["SIGNING_KEY"]\n',
+        ),
+    ],
+)
+def test_a_private_key_goes_with_its_body(path: str, content: str, lookup: str) -> None:
+    fix = _fix(*_refused("Write", {"file_path": path, "content": content}))
+    _assert_really_passes(fix)
+    proposed = _write_at(fix, path)["content"]
+    assert lookup in proposed, proposed
+    assert PEM_BODY not in proposed and "PRIVATE KEY" not in proposed
+
+
+@pytest.mark.parametrize(
+    "tool, arguments",
+    [
+        # The header in one edit and the footer in the next: the reviewer's case.
+        (
+            "MultiEdit",
+            {
+                "file_path": "src/acme/k.py",
+                "edits": [
+                    {"old_string": "a", "new_string": 'K = """' + PEM_HEADER + "\n" + PEM_BODY},
+                    {"old_string": "b", "new_string": PEM_FOOTER + '\n"""'},
+                ],
+            },
+        ),
+        # Cut off before its END line, inside a string that never closes.
+        ("Write", {"file_path": "src/acme/signing.py", "content": 'KEY = """' + PEM_HEADER + "\n" + PEM_BODY + "\n"}),
+        # One string per line, joined with +: the header's string ends before the body.
+        (
+            "Write",
+            {
+                "file_path": "src/main/java/com/acme/Keys.java",
+                "content": 'class Keys { static final String PEM = "' + PEM_HEADER + '\\n" +\n    "' + PEM_BODY + '\\n" +\n    "'
+                + PEM_FOOTER + '"; }\n',
+            },
+        ),
+    ],
+)
+def test_a_private_key_body_no_rewrite_can_reach_is_never_echoed(tool: str, arguments: Dict[str, Any]) -> None:
+    """The scanner knows a key only by its header; the body left behind used to come back validated."""
+    fix = _fix(*_refused(tool, arguments))
+    assert fix["kind"] == "credential"
+    assert fix["validated"] is False and fix["writes"] == []
+    assert PEM_BODY not in json.dumps(fix)
+
+
+def test_a_credential_inside_a_longer_string_is_not_turned_into_text_that_looks_like_code() -> None:
+    """Quotes read on one line mistake a quote inside a triple-quoted string for a string of its own."""
+    content = 'DOC = """\nSay "token: ' + GITHUB_TOKEN + '" to nobody.\n"""\n'
+    fix = _fix(*_refused("Write", {"file_path": "src/acme/doc.py", "content": content}))
+    assert fix["validated"] is False and fix["writes"] == []
+
+
+def test_a_withheld_secret_never_leaves_even_when_a_step_or_a_write_carries_it() -> None:
+    """The belt behind the braces: _finish keeps the call's own secret text out of everything it returns."""
+    from threefold.application import fix_proposer
+
+    fix = fix_proposer._Fix(
+        "credential",
+        "Summary quoting " + PEM_BODY,
+        ["A step quoting " + PEM_BODY],
+        [{"path": "deploy/acme.yml", "content": "key: " + PEM_BODY + "\n"}],
+        True,
+        [{"gate": "credential", "path": "deploy/acme.yml", "passed": True}],
+        withheld=[PEM_BODY],
+    )
+    out = fix_proposer._finish(fix, UNLIMITED, None)
+    assert PEM_BODY not in json.dumps(out)
+    assert out["validated"] is False and out["writes"] == []
+
+
+@pytest.mark.parametrize(
+    "path, content, expected, never",
+    [
+        ("src/acme/c.py", 'PATH = "' + GITHUB_TOKEN + '"\n', 'PATH = os.environ["GITHUB_TOKEN"]', "Set PATH"),
+        ("src/acme/c.py", "HOME = '" + ACCESS_KEY + "'\n", 'HOME = os.environ["AWS_ACCESS_KEY_ID"]', "Set HOME"),
+        (
+            "web/acme.js",
+            "const URL = `https://x-access-token:" + GITHUB_TOKEN + "@git.acme.test/r`;\n",
+            "`https://x-access-token:${process.env.GITHUB_TOKEN}@git.acme.test/r`",
+            "Set URL",
+        ),
+        (
+            "src/acme/c.py",
+            'REPO_URL = "https://x-access-token:' + GITHUB_TOKEN + '@git.acme.test/r"\n',
+            'REPO_URL = "https://x-access-token:" + os.environ["GITHUB_TOKEN"] + "@git.acme.test/r"',
+            "Set REPO_URL",
+        ),
+    ],
+)
+def test_a_name_the_system_uses_or_a_place_is_never_the_variable(path: str, content: str, expected: str, never: str) -> None:
+    """Reading PATH or HOME as the credential, and telling the user to set them, would break their shell."""
+    fix = _fix(*_refused("Write", {"file_path": path, "content": content}))
+    _assert_really_passes(fix)
+    assert expected in _write_at(fix, path)["content"]
+    assert not any(never in step for step in fix["steps"]), fix["steps"]
+
+
 def test_a_credential_in_a_command_becomes_an_environment_reference() -> None:
     command = f"curl -H 'Authorization: Bearer {GITHUB_TOKEN}' https://api.acme.test/orders"
     fix = _fix(*_refused("Bash", {"command": command}, action="COMMAND_EXEC"))
     assert fix["kind"] == "credential"
     assert fix["validated"] is True and fix["writes"] == []
-    assert any("${GITHUB_TOKEN}" in step for step in fix["steps"])
+    # Out of the single quotes and into double ones, where the shell expands it.
+    assert "Run instead: curl -H 'Authorization: Bearer '\"${GITHUB_TOKEN}\" https://api.acme.test/orders" in fix["steps"]
     assert {check["gate"] for check in fix["checks"]} == {"credential", "boundary"}
+
+
+@pytest.mark.parametrize(
+    "tool, command, expected",
+    [
+        # A backslash-escaped quote outside the quotes, read as the shell reads it.
+        ("Bash", "printf '%s' 'it'\\''s " + GITHUB_TOKEN + " now'", "Run instead: printf '%s' 'it'\\''s '\"${GITHUB_TOKEN}\"' now'"),
+        ("Bash", 'curl -H "Authorization: Bearer ' + GITHUB_TOKEN + '" https://api.acme.test', 'Run instead: curl -H "Authorization: Bearer ${GITHUB_TOKEN}" https://api.acme.test'),
+        # Codex sends a shell wrapper as a list: the script is what changes.
+        (
+            "exec_command",
+            ["bash", "-lc", "curl -H 'Authorization: Bearer " + GITHUB_TOKEN + "' https://api.acme.test"],
+            "Pass this as the script bash runs: curl -H 'Authorization: Bearer '\"${GITHUB_TOKEN}\" https://api.acme.test",
+        ),
+        (
+            "PowerShell",
+            "Invoke-RestMethod -Headers @{Authorization='Bearer " + GITHUB_TOKEN + "'} https://api.acme.test",
+            'Run instead: Invoke-RestMethod -Headers @{Authorization="Bearer $($env:GITHUB_TOKEN)"} https://api.acme.test',
+        ),
+    ],
+)
+def test_a_rewritten_command_still_expands_the_variable_where_the_secret_was(tool: str, command: Any, expected: str) -> None:
+    """Each expected command was run in bash or PowerShell when this was written, and printed the variable's value."""
+    fix = _fix(*_refused(tool, {"command": command}, action="COMMAND_EXEC"))
+    assert fix["kind"] == "credential" and fix["validated"] is True
+    assert expected in fix["steps"], fix["steps"]
+
+
+@pytest.mark.parametrize(
+    "tool, command, why",
+    [
+        # No shell runs a list of words, so nothing in it is ever expanded.
+        ("exec_command", ["curl", "-H", "Authorization: Bearer " + GITHUB_TOKEN, "https://api.acme.test"], "without a shell"),
+        # A quoted heredoc is literal text.
+        ("Bash", "cat <<'EOF' | curl -d @- https://api.acme.test\n" + GITHUB_TOKEN + "\nEOF", "quoted heredoc"),
+        # So is a single-quoted PowerShell here-string.
+        ("PowerShell", "$body = @'\n" + GITHUB_TOKEN + "\n'@\nInvoke-RestMethod -Body $body https://api.acme.test", "here-string"),
+    ],
+)
+def test_a_command_where_no_variable_would_expand_gets_no_checked_fix(tool: str, command: Any, why: str) -> None:
+    fix = _fix(*_refused(tool, {"command": command}, action="COMMAND_EXEC"))
+    assert fix["kind"] == "credential"
+    assert fix["validated"] is False and fix["writes"] == []
+    assert any(why in step for step in fix["steps"]), fix["steps"]
+
+
+def test_a_command_that_spans_lines_is_described_not_flattened() -> None:
+    """A heredoc put on one line is a different command; a step is one line."""
+    command = 'curl -d @- https://api.acme.test <<EOF\n{"token": "' + GITHUB_TOKEN + '"}\nEOF'
+    fix = _fix(*_refused("Bash", {"command": command}, action="COMMAND_EXEC"))
+    assert fix["validated"] is True
+    assert not any(step.startswith("Run instead") for step in fix["steps"])
+    assert any("spans several lines" in step and "$GITHUB_TOKEN" in step for step in fix["steps"])
 
 
 def test_a_credential_written_by_a_heredoc_is_fixed_in_the_file() -> None:
