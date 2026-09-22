@@ -186,7 +186,11 @@ def test_a_dry_run_names_the_layering_rule_that_would_have_refused() -> None:
     assert verdict.status == "APPROVED" and verdict.dry_run is True
     row = _row(evaluator, "keys-dry-layer")
     assert row["rule_key"] == "python-domain-stays-pure"
-    assert row["observed_rules"] == ["ARCHITECTURAL_BOUNDARY_SAFE"], "The old field keeps what it held"
+    # The field named the invariant here and the rule's own id in the test
+    # above, for the same act of watching, because a dry run reached it by a
+    # different route. Both now name the rule, and a call that would have
+    # broken two rules lists both rather than one invariant twice.
+    assert row["observed_rules"] == ["python-domain-stays-pure"]
 
 
 def test_a_dry_run_of_a_gate_names_the_gate() -> None:

@@ -17,7 +17,17 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, Iterable, Mapping, Optional
 
-from threefold.domain.boundary_guard import UNREADABLE_WRITE as UNREADABLE_WRITE_ADVICE
+from threefold.domain.boundary_guard import (
+    COMMAND_PATH_FOUND,
+    CREDENTIAL_FOUND,
+    DESTRUCTIVE_FOUND,
+    GOVERNANCE_FOUND,
+    LAYERING_FOUND,
+    PROTECTED_PATH_FOUND,
+    TAMPERING_FOUND,
+    UNREADABLE_FOUND,
+    UNREADABLE_WRITE as UNREADABLE_WRITE_ADVICE,
+)
 
 LOOP = "LOOP"
 PROTECTED_PATH = "PROTECTED_PATH"
@@ -79,6 +89,38 @@ _CATEGORY_FOR_KEY = {
 }
 
 
+# Which key each of the guard's gates is staged under. A destructive command
+# and a command that reaches a credential store are filed with the protected
+# path: the contract's keys are closed and name no gate of their own for them,
+# they are refused by the same guard on the same invariant, and an operator
+# stages them together.
+_KEY_BY_FINDING = {
+    CREDENTIAL_FOUND: CREDENTIAL,
+    PROTECTED_PATH_FOUND: PROTECTED_PATH,
+    GOVERNANCE_FOUND: PROTECTED_PATH,
+    TAMPERING_FOUND: PROTECTED_PATH,
+    DESTRUCTIVE_FOUND: PROTECTED_PATH,
+    COMMAND_PATH_FOUND: PROTECTED_PATH,
+    UNREADABLE_FOUND: UNREADABLE_WRITE,
+}
+
+
+def finding_key(finding: Any) -> str:
+    """The key of one thing the guard found, taken from the gate that found it.
+
+    The sentences below quote the caller's own command — a destructive command
+    and a command-protected path both embed its first 120 characters, and a
+    layering refusal embeds the target path — so reading the key back out of
+    them let a trailing comment file a refusal under whichever rule it named.
+    A project that observes that rule then approved the call. The gate is a
+    fact the guard states; `refusal_key` below stays for a stored row, which is
+    all that is left of a verdict nobody carried the finding from.
+    """
+    if finding.kind == LAYERING_FOUND:
+        return finding.rule_id or layering_rule_named(finding.reason) or PROTECTED_PATH
+    return _KEY_BY_FINDING.get(finding.kind, PROTECTED_PATH)
+
+
 def is_unreadable_write(reason: str) -> bool:
     return any(marker in (reason or "") for marker in _UNREADABLE_MARKERS)
 
@@ -96,6 +138,24 @@ def layering_rule_named(reason: str, known_ids: Iterable[str] = ()) -> Optional[
             return rule_id
     found = _LAYERING_RULE.search(text)
     return found.group(1) if found else None
+
+
+# The two sentences that quote the caller's own command line, and so are the
+# two a caller could write the rest of this module's vocabulary into. Both come
+# from the same gate and are filed under the same key, so they are recognised by
+# their own frame before anything inside the quotes is read. A layering refusal
+# opens with "Clean Architecture violation" or "Layering rule", a governance one
+# with "Target path", and command tampering with "Command turns", so none of
+# them can be taken for one of these.
+_QUOTES_THE_COMMAND = (
+    "' reaches a protected path or credential store",
+    "' contains a destructive operation",
+)
+
+
+def quotes_the_command(reason: str) -> bool:
+    text = reason or ""
+    return text.startswith("Command '") and any(marker in text for marker in _QUOTES_THE_COMMAND)
 
 
 def refusal_key(status: str, reason: str, known_ids: Iterable[str] = ()) -> str:
@@ -116,6 +176,8 @@ def refusal_key(status: str, reason: str, known_ids: Iterable[str] = ()) -> str:
     if "CIRCUIT_BREAKER" in upper:
         return HALTED_SESSION if (reason or "").startswith(HALTED_SESSION_REASONS) else BUDGET
     if "BOUNDARY" in upper:
+        if quotes_the_command(reason):
+            return PROTECTED_PATH
         if is_unreadable_write(reason):
             return UNREADABLE_WRITE
         return layering_rule_named(reason, known_ids) or PROTECTED_PATH
