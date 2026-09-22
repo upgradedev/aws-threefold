@@ -56,16 +56,24 @@ uses; and the text of every secret found in the call, including the body of a
 private key the scanner knows only by its header, is withheld from the answer
 wherever it would otherwise appear.
 
-What it costs. Content over MAX_CONTENT_CHARS (24 KB) gets advice in words from
-one read of its imports; below it, a layering fix reads the file a fixed number
-of times (about six parses, however many imports it moves; a test holds this),
-then judges the small port and adapter. Measured on the development machine
-[PRIMARY], 2026-09-22, medians: the shipped fixtures of 170 to 330 bytes take 2
-to 5 ms; files just under the cap take about 100 ms for Python or TypeScript and
-45 ms for Java, five to seven times what the gate alone takes on the same file,
-however many of their imports move. Not measured on the Lambda, whose 256 MB
-share of a core will make both slower. A refused call pays this once, on top of
-the gate; an approved call never does.
+What it costs. A layering fix rewrites at most `max_content_chars` of a call's
+writes, taken together: MAX_CONTENT_CHARS (24 KB) unless the caller says
+otherwise, and the evaluator passes 1,500. Past it the fix is advice in words
+from the one read of the imports the diagnosis already made: every import to
+move, the rule that forbids each, and the first layer the rules permit them in,
+found by matching those imports against the rules at each candidate adapter
+path, with no second parse and nothing written. Below it, a layering fix reads
+the file a fixed number of times (about six parses, however many imports it
+moves; a test holds this), then judges the small port and adapter. Measured on
+the development machine [PRIMARY], 2026-09-22, medians: the shipped fixtures of
+170 to 330 bytes take 2 to 5 ms; files just under 24 KB take about 100 ms for
+Python or TypeScript and 45 ms for Java, five to seven times what the gate alone
+takes on the same file, however many of their imports move. The advice alone,
+for a refused Python domain Write, took 3.3 ms at 4,000 characters and 5.8 to
+6.6 ms at 8,000, best of 15 and of 25, 0.27 and 0.44 to 0.50 of a whole verdict
+measured beside it on a 20,000 character refused Write [PRIMARY], 2026-09-22.
+Not measured on the Lambda, whose 256 MB share of a core will make both slower.
+A refused call pays this once, on top of the gate; an approved call never does.
 
 Wiring (for the owner, after B1 merges; this track changes none of these files):
 
@@ -179,7 +187,8 @@ MAX_STEPS = 16
 # The closing steps (rotate the credential, the gates were run) come last and
 # matter most, so a list too long for MAX_STEPS loses its middle, not its end.
 KEPT_TAIL_STEPS = 3
-# Content larger than this is not rewritten, only described. A rewrite costs
+# The default for propose_fix's max_content_chars: writes that come to more
+# than this, taken together, are not rewritten, only described. A rewrite costs
 # five to seven times the gate's own read of the file, and at 64 KB that was
 # 350 to 470 ms on the development machine [PRIMARY], before a 256 MB Lambda's
 # fraction of a core multiplies it, against a hook that gives up after 4 s and
@@ -306,6 +315,7 @@ def propose_fix(
     *,
     phrase: Optional[Callable[[Dict[str, Any]], Optional[str]]] = None,
     max_write_bytes: int = MAX_WRITE_BYTES,
+    max_content_chars: int = MAX_CONTENT_CHARS,
 ) -> Optional[Dict[str, Any]]:
     """The fix for a refused call, or None when there is nothing to fix.
 
@@ -319,11 +329,19 @@ def propose_fix(
     finished fix and its answer replaces only the summary, cleaned the same way;
     if it fails, the deterministic summary stands.
 
+    `max_content_chars` is the most text a layering fix rewrites: the content
+    of every write the fix would have to change, taken together. Past it the fix
+    is advice in words from the one read of the imports the diagnosis already
+    made: validated false, no writes, and steps that name every import to move,
+    the rule that forbids each, and the first layer the rules permit it in. The
+    evaluator passes a small value here so that a large refused write still gets
+    that much within the gate's budget, where a rewrite would not fit.
+
     Never raises: a fault here must not turn a refusal into a 500.
     """
     try:
         active = normalise_rules(rules) if rules else list(DEFAULT_RULES if rules is None else [])
-        fix = _propose(request, result, active)
+        fix = _propose(request, result, active, max(0, int(max_content_chars)))
         if fix is None:
             return None
         fix.withheld = list(dict.fromkeys(fix.withheld + _withheld(_field(request, "arguments"))))
@@ -394,7 +412,9 @@ def _family(result: Any) -> Optional[str]:
     return None
 
 
-def _propose(request: Any, result: Any, rules: List[Dict[str, Any]]) -> Optional[_Fix]:
+def _propose(
+    request: Any, result: Any, rules: List[Dict[str, Any]], max_content_chars: int = MAX_CONTENT_CHARS
+) -> Optional[_Fix]:
     family = _family(result)
     if family is None:
         return None
@@ -412,12 +432,12 @@ def _propose(request: Any, result: Any, rules: List[Dict[str, Any]]) -> Optional
         # does not know. Guessing would be the noise this module exists to avoid.
         return None
     if diagnosis.kind == KIND_CREDENTIAL:
-        return _credential_fix(invocation, rules, diagnosis)
+        return _credential_fix(invocation, rules, diagnosis, max_content_chars)
     if diagnosis.kind == KIND_PROTECTED_PATH:
         return _protected_fix(diagnosis)
     if diagnosis.kind == KIND_DESTRUCTIVE:
         return _destructive_fix(diagnosis)
-    return _write_fix(invocation, rules, diagnosis)
+    return _write_fix(invocation, rules, diagnosis, max_content_chars)
 
 
 # --- asking the guard's questions again ---------------------------------------------
@@ -1008,16 +1028,36 @@ def _flagged_modules(path: str, content: str, rules: List[Dict[str, Any]]) -> Di
     for module in _imports(path, content):
         if module in flagged:
             continue
-        for rule in applicable:
-            offending = layering_internals._forbidden_by(module, rule["forbid_imports"])
-            if not offending:
-                continue
-            permitted = layering_internals._forbidden_by(module, rule.get("allow_imports"))
-            if permitted and layering_internals._specificity(permitted) > layering_internals._specificity(offending):
-                continue
-            flagged[module] = rule["id"]
-            break
+        rule_id = _flagging_rule(module, applicable)
+        if rule_id:
+            flagged[module] = rule_id
     return flagged
+
+
+def _flagging_rule(module: str, applicable: List[Dict[str, Any]]) -> str:
+    """The id of the first of these rules that forbids importing `module`, or an empty string."""
+    for rule in applicable:
+        offending = layering_internals._forbidden_by(module, rule["forbid_imports"])
+        if not offending:
+            continue
+        permitted = layering_internals._forbidden_by(module, rule.get("allow_imports"))
+        if permitted and layering_internals._specificity(permitted) > layering_internals._specificity(offending):
+            continue
+        return rule["id"]
+    return ""
+
+
+def _refused_at(path: str, modules: Sequence[str], rules: List[Dict[str, Any]]) -> List[str]:
+    """Which of `modules` the rules would flag in a file at `path`, read from the rules alone.
+
+    The question _flagged_modules asks, for imports already known rather than
+    read from content, so it costs a match of each module against the rules
+    covering the path and no parse at all.
+    """
+    applicable = rules_for_path(path, rules)
+    if not applicable or not language_for(path):
+        return []
+    return [module for module in modules if _flagging_rule(module, applicable)]
 
 
 def _remove_modules(path: str, content: str, modules: Collection[str]) -> Tuple[str, List[_Removed], Set[str]]:
@@ -1791,10 +1831,15 @@ def _layer_steps(
 # --- the writes fix: layering, and writes the rules could not read ---------------------
 
 
-def _write_fix(invocation: ToolInvocation, rules: List[Dict[str, Any]], diagnosis: _Diagnosis) -> _Fix:
+def _write_fix(
+    invocation: ToolInvocation,
+    rules: List[Dict[str, Any]],
+    diagnosis: _Diagnosis,
+    max_content_chars: int = MAX_CONTENT_CHARS,
+) -> _Fix:
     command = shell_command(invocation)
     if command is not None:
-        return _shell_write_fix(invocation, rules, diagnosis, command)
+        return _shell_write_fix(invocation, rules, diagnosis, command, max_content_chars)
     sites = [
         site
         for site in _tool_sites(invocation.arguments)
@@ -1806,17 +1851,23 @@ def _write_fix(invocation: ToolInvocation, rules: List[Dict[str, Any]], diagnosi
             f"No checked fix: the rules flag {diagnosis.path or 'this call'}, but no write in it could be rewritten.",
             [f"Remove the import the rule names from {diagnosis.path or 'the file'} and move it behind a port outside the domain."],
         )
-    outcome = _fix_sites(sites, rules)
+    outcome = _fix_sites(sites, rules, max_content_chars)
     return _assemble(diagnosis.kind, outcome, [], shell=False)
 
 
-def _fix_sites(sites: List[_Site], rules: List[Dict[str, Any]]) -> _Outcome:
+def _fix_sites(sites: List[_Site], rules: List[Dict[str, Any]], max_content_chars: int = MAX_CONTENT_CHARS) -> _Outcome:
     outcome = _Outcome()
     groups: Dict[str, List[_Site]] = {}
     for site in sites:
         groups.setdefault(site.path, []).append(site)
+    # What a rewrite costs grows with all the text it rewrites, so the cap is
+    # on the call's writes taken together: a MultiEdit of twenty edits, each
+    # under the cap, would otherwise be twenty rewrites. And a fix is validated
+    # only when every write in it is, so rewriting the small files of a call
+    # whose large one gets advice would be work nobody receives.
+    too_large = sum(len(site.content or "") for site in sites) > max_content_chars
     for path, group in groups.items():
-        part = _fix_path(path, group, rules)
+        part = _fix_path(path, group, rules, max_content_chars if too_large else None)
         outcome.writes.extend(part.writes)
         outcome.checks.extend(part.checks)
         outcome.steps.extend(part.steps)
@@ -1827,27 +1878,78 @@ def _fix_sites(sites: List[_Site], rules: List[Dict[str, Any]]) -> _Outcome:
     return outcome
 
 
-def _too_large(path: str, group: List[_Site], rules: List[Dict[str, Any]]) -> _Outcome:
-    """Advice in words for a file too large to rewrite, from the one read of its imports already made."""
+def _permitted_layer(
+    path: str, modules: Sequence[str], rules: List[Dict[str, Any]], rule_ids: Sequence[str]
+) -> Tuple[str, List[str]]:
+    """The first directory an adapter holding `modules` could live in that the rules permit. (directory, tried)
+
+    The candidates are _plan_layers' own, derived from the rules' patterns, in
+    the same order, and each is asked the layering question for the adapter
+    file _plan_layers would write there. Nothing is written or parsed: the
+    modules are already known, so this is a match of each against the rules
+    covering that path. The directory is empty when every candidate is refused.
+    """
+    language = language_for(path)
+    flavour = _script_flavour(path) if language == "typescript" else language
+    _, _, stem, extension = _split(path)
+    name = _adapter_file_name(language, flavour, stem, _pascal(stem), extension)
+    tried: List[str] = []
+    for directory, _, _ in _adapter_directories(path, rules, rule_ids):
+        tried.append(directory)
+        if not _refused_at(_join(directory, name), modules, rules):
+            return directory, tried
+    return "", tried
+
+
+def _too_large(path: str, group: List[_Site], rules: List[Dict[str, Any]], cap: int = MAX_CONTENT_CHARS) -> _Outcome:
+    """Advice in words for writes too large to rewrite, from the one read of their imports already made.
+
+    It names every import to move and the rule that forbids each, and the
+    first layer the rules permit them in, or says that no candidate layer does.
+    It carries no code and no checks, because nothing was rewritten to check.
+    """
     flagged: Dict[str, str] = {}
     for site in group:
         flagged.update(_flagged_modules(path, site.content or "", rules))
     modules = list(flagged)
+    rule_ids = list(dict.fromkeys(flagged.values()))
     shown = ", ".join(modules[:4]) + (f" and {len(modules) - 4} more" if len(modules) > 4 else "")
-    candidates = _adapter_directories(path, rules, list(dict.fromkeys(flagged.values())))
-    where = f", for instance in {candidates[0][0]}/ (not checked)" if candidates and candidates[0][0] else ""
-    return _Outcome(
-        ok=False,
-        why=f"'{path}' is over {MAX_CONTENT_CHARS} characters, too large to rewrite and check here",
-        steps=[
-            f"In {path}, remove the import of {shown or 'the module the rule names'} and move it behind a port declared "
-            f"in the domain, with an adapter outside it that holds the import{where}. The file is over "
-            f"{MAX_CONTENT_CHARS} characters, too large for Threefold to rewrite and check within a verdict."
-        ],
+    shown = shown or "the module the rule names"
+    named = (modules[0] if len(modules) == 1 else f"{modules[0]} and {len(modules) - 1} more") if modules else "the import"
+    rules_named = ", ".join(f"'{rule_id}'" for rule_id in rule_ids[:3]) + (" and others" if len(rule_ids) > 3 else "")
+    which = f"rule {rules_named}" if len(rule_ids) == 1 else (f"rules {rules_named}" if rule_ids else "a rule in force")
+    size = sum(len(site.content or "") for site in group)
+    over = (
+        f"What this call writes to {path} comes to over {cap:,} characters"
+        if size > cap
+        else f"What this call writes comes to over {cap:,} characters"
     )
+    them, imports = ("them", "imports") if len(modules) > 1 else ("it", "import")
+    directory, tried = _permitted_layer(path, modules, rules, rule_ids)
+    steps = [f"In {path}, remove the {imports} of {shown}: {which} forbids {them} there."]
+    if directory:
+        steps.append(
+            f"Declare a port in the domain for what {path} needs from {shown}, and move the {imports} into an adapter "
+            f"under {directory}/ that implements it: the layering rules permit {them} there. Pass the adapter in from "
+            "outside the domain."
+        )
+        why = f"too large to rewrite within the verdict (over {cap:,} characters); move {named} behind a port, adapter under {_short(directory)}"
+    else:
+        places = ", ".join(f"{place}/" for place in tried) or "no directory at all"
+        steps.append(
+            f"{shown} cannot simply move to another layer: the rules refuse {them} at {places} as well. Ask the "
+            f"architect which layer may depend on {them}, or change the rule, then move the {imports} there behind a port."
+        )
+        why = f"too large to rewrite within the verdict (over {cap:,} characters), and no layer these rules permit can hold {named}"
+    steps.append(
+        f"{over}, too large for Threefold to rewrite and check within a verdict, so this is advice in words and no code "
+        "is proposed. The write that follows it is judged by the same gates as any other."
+    )
+    return _Outcome(ok=False, why=why, steps=steps)
 
 
-def _fix_path(path: str, group: List[_Site], rules: List[Dict[str, Any]]) -> _Outcome:
+def _fix_path(path: str, group: List[_Site], rules: List[Dict[str, Any]], too_large_over: Optional[int] = None) -> _Outcome:
+    """The fix for one path's writes; advice in words when `too_large_over` names the cap the call is past."""
     flagged = [site for site in group if site.content is not None and _flagged_modules(path, site.content, rules)]
     if not flagged:
         # Nothing to move: the content as sent, or as recovered from the
@@ -1862,8 +1964,8 @@ def _fix_path(path: str, group: List[_Site], rules: List[Dict[str, Any]]) -> _Ou
                 part.ok = False
                 part.why = part.why or why
         return part
-    if any(len(site.content or "") > MAX_CONTENT_CHARS for site in group):
-        return _too_large(path, group, rules)
+    if too_large_over is not None:
+        return _too_large(path, group, rules, too_large_over)
     cleaned: List[str] = []
     removed: List[_Removed] = []
     rule_ids: List[str] = []
@@ -1912,7 +2014,13 @@ def _route_check(write: ShellWrite) -> Optional[Dict[str, Any]]:
     return {"gate": GATE_ROUTE, "path": target, "passed": readable}
 
 
-def _shell_write_fix(invocation: ToolInvocation, rules: List[Dict[str, Any]], diagnosis: _Diagnosis, command: Any) -> _Fix:
+def _shell_write_fix(
+    invocation: ToolInvocation,
+    rules: List[Dict[str, Any]],
+    diagnosis: _Diagnosis,
+    command: Any,
+    max_content_chars: int = MAX_CONTENT_CHARS,
+) -> _Fix:
     cwd = command_cwd(invocation)
     analysis = diagnosis.analysis or analysed(command, cwd)
     if analysis.truncated:
@@ -1953,7 +2061,7 @@ def _shell_write_fix(invocation: ToolInvocation, rules: List[Dict[str, Any]], di
             "No checked fix: make the command's file writes with Write or Edit so the rules can read them.",
             ["Make the command's file writes with Write or Edit, naming each file, so the rules read them before they land."],
         )
-    outcome = _fix_sites(sites, rules) if sites else _Outcome(ok=False)
+    outcome = _fix_sites(sites, rules, max_content_chars) if sites else _Outcome(ok=False)
     outcome.checks.extend(route_checks)
     extra: List[str] = []
     if any(site.literal_heredoc for site in sites):
@@ -2635,7 +2743,12 @@ def _command_key(arguments: Dict[str, Any], command: Any) -> Optional[str]:
     return None
 
 
-def _credential_fix(invocation: ToolInvocation, rules: List[Dict[str, Any]], diagnosis: _Diagnosis) -> _Fix:
+def _credential_fix(
+    invocation: ToolInvocation,
+    rules: List[Dict[str, Any]],
+    diagnosis: _Diagnosis,
+    max_content_chars: int = MAX_CONTENT_CHARS,
+) -> _Fix:
     arguments = invocation.arguments if isinstance(invocation.arguments, dict) else {}
     label = diagnosis.label or "credential"
     command = shell_command(invocation)
@@ -2715,7 +2828,7 @@ def _credential_fix(invocation: ToolInvocation, rules: List[Dict[str, Any]], dia
 
     names = list(dict.fromkeys(names))
     variable = names[0] if names else _DEFAULT_ENVIRONMENT_NAMES.get(label, "API_KEY")
-    outcome = _fix_sites(fixed, rules) if fixed else _Outcome(ok=False)
+    outcome = _fix_sites(fixed, rules, max_content_chars) if fixed else _Outcome(ok=False)
     lead = []
     for site in fixed:
         lead.append(

@@ -509,6 +509,152 @@ def test_a_file_too_large_to_rewrite_gets_advice_naming_what_to_move() -> None:
     assert "boto3" in advice and "requests" in advice and "src/infrastructure" in advice
 
 
+# --- a cap on what a fix rewrites ---------------------------------------------------------
+#
+# The evaluator asks for a fix with max_content_chars=1,500, so that a refused
+# write too large to rewrite within the gate's budget still hears what to move
+# and where. What that costs against a whole verdict is measured in
+# tests/unit/test_the_fix_reaches_the_agent.py, the way every fix ceiling is;
+# here, what the advice says, and that it reads the file no more than once.
+
+CAP = 1_500
+
+
+def _domain_file(size: int, head: str = "import boto3\nimport requests\n") -> str:
+    """A Python file of at most `size` characters beginning with `head`, built rather than spelled out."""
+    parts = [head]
+    length = len(head)
+    index = 0
+    while True:
+        part = f"\n\ndef acme_rule_{index}(order):\n    return order.total * {index}\n"
+        if length + len(part) > size:
+            break
+        parts.append(part)
+        length += len(part)
+        index += 1
+    return "".join(parts)
+
+
+def _directory(path: str) -> str:
+    return path.replace("\\", "/").rsplit("/", 1)[0]
+
+
+def test_below_the_cap_the_fix_is_still_the_checked_rewrite() -> None:
+    content = _domain_file(CAP - 100)
+    fix = _fix(*_refused("Write", {"file_path": "src/domain/acme_order.py", "content": content}), max_content_chars=CAP)
+    _assert_really_passes(fix)
+    assert fix["summary"].startswith("Checked fix: move boto3 and 1 more out of the domain"), fix["summary"]
+
+
+def test_past_the_cap_the_fix_is_advice_naming_every_import_its_rule_and_the_permitted_layer() -> None:
+    content = _domain_file(CAP * 2)
+    assert len(content) > CAP
+    fix = _fix(*_refused("Write", {"file_path": "src/domain/acme_order.py", "content": content}), max_content_chars=CAP)
+
+    assert fix["kind"] == "layering"
+    assert fix["validated"] is False
+    assert fix["writes"] == [] and fix["checks"] == [], "Nothing was rewritten, so there is nothing to hand out or to have checked"
+    first, layer, size = fix["steps"]
+    assert first == "In src/domain/acme_order.py, remove the imports of boto3, requests: rule 'python-domain-stays-pure' forbids them there."
+    assert "an adapter under src/infrastructure/ that implements it: the layering rules permit them there" in layer
+    assert "comes to over 1,500 characters" in size and "no code is proposed" in size
+    assert fix["summary"] == (
+        "No checked fix: too large to rewrite within the verdict (over 1,500 characters); "
+        "move boto3 and 1 more behind a port, adapter under src/infrastructure."
+    )
+
+
+def test_the_advice_names_the_layer_the_rewrite_would_have_used() -> None:
+    """The same candidates in the same order, asked the same layering question, without writing the adapter."""
+    cases = [
+        ("src/domain/acme_order.py", "import boto3\n\n\nclass AcmeOrder:\n    total = 0\n", DEFAULT_RULES),
+        (
+            "src/main/java/com/acme/orders/domain/AcmeOrder.java",
+            "package com.acme.orders.domain;\n\nimport javax.persistence.Entity;\n\npublic class AcmeOrder {\n}\n",
+            DEFAULT_RULES,
+        ),
+        ("web/src/domain/acmeOrder.ts", "import axios from 'axios';\nexport const load = () => axios.get('/acme');\n", DEFAULT_RULES),
+        (
+            "src/acme/core/pricing.py",
+            "import requests\n",
+            [{"id": "acme-core-no-http", "when_path_matches": ["**/core/**/*.py"], "forbid_imports": ["requests", "**.gateways.**"]}],
+        ),
+        (
+            "src/domain/acme_order.py",
+            "import boto3\n",
+            [
+                {"id": "acme-domain-pure", "when_path_matches": ["**/domain/**/*.py"], "forbid_imports": ["boto3"]},
+                {"id": "acme-infrastructure-no-boto3", "when_path_matches": ["**/infrastructure/**/*.py"], "forbid_imports": ["boto3"]},
+            ],
+        ),
+    ]
+    for path, content, rules in cases:
+        request, result = _refused("Write", {"file_path": path, "content": content}, rules)
+        rewrite = _fix(request, result, rules)
+        _assert_really_passes(rewrite, rules)
+        (adapter,) = [write["path"] for write in rewrite["writes"] if write.get("new_file") and "adapter" in write["path"].lower()]
+        advice = _fix(request, result, rules, max_content_chars=1)
+        assert advice["validated"] is False and advice["writes"] == []
+        assert f"an adapter under {_directory(adapter)}/ that implements it" in advice["steps"][1], (path, advice["steps"])
+    # The last case skips a layer its own rules refuse, as the rewrite does.
+    assert _directory(adapter) == "src/adapters"
+
+
+def test_past_the_cap_with_no_permitted_layer_the_advice_says_so() -> None:
+    everywhere = [{"id": "acme-no-boto3-anywhere", "when_path_matches": ["**/*.py"], "forbid_imports": ["boto3"]}]
+    request, result = _refused("Write", {"file_path": "src/domain/order.py", "content": "import boto3\n"}, everywhere)
+    fix = _fix(request, result, everywhere, max_content_chars=1)
+    assert fix["validated"] is False and fix["writes"] == []
+    assert "no layer these rules permit can hold boto3" in fix["summary"]
+    assert "refuse it at src/infrastructure/, src/adapters/ as well" in fix["steps"][1]
+    assert any("architect" in step for step in fix["steps"])
+
+
+def test_the_cap_counts_the_writes_of_a_call_together() -> None:
+    """A MultiEdit of edits each under the cap is as much rewriting as one file over it."""
+    edits = [
+        {"old_string": f"A_{index} = 0", "new_string": _domain_file(CAP - 500, head=f"import boto3\nA_{index} = {index}\n")}
+        for index in range(3)
+    ]
+    assert all(len(edit["new_string"]) < CAP for edit in edits) and sum(len(edit["new_string"]) for edit in edits) > CAP
+    request, result = _refused("MultiEdit", {"file_path": "src/domain/acme_order.py", "edits": edits})
+
+    advice = _fix(request, result, max_content_chars=CAP)
+    assert advice["validated"] is False and advice["writes"] == []
+    assert "What this call writes to src/domain/acme_order.py comes to over 1,500 characters" in advice["steps"][-1]
+
+    rewrite = _fix(request, result, max_content_chars=CAP * 3)
+    _assert_really_passes(rewrite)
+
+
+def test_a_heredoc_past_the_cap_is_advice_as_well() -> None:
+    body = _domain_file(CAP * 2, head="import boto3\n")
+    request, result = _refused("Bash", {"command": f"cat > src/domain/acme_order.py <<'EOF'\n{body}EOF\n"}, action="COMMAND_EXEC")
+    fix = _fix(request, result, max_content_chars=CAP)
+    assert fix["kind"] == "layering" and fix["validated"] is False and fix["writes"] == []
+    advice = " ".join(fix["steps"])
+    assert "remove the import of boto3" in advice and "src/infrastructure/" in advice
+    assert "instead of the shell command" in advice
+
+
+def test_advice_past_the_cap_reads_the_file_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The diagnosis reads the imports; every later question is the memo's or the rules' alone."""
+    content = _domain_file(CAP * 4)
+    request, result = _refused("Write", {"file_path": "src/domain/acme_order.py", "content": content})
+    parses: List[int] = []
+    real_parse = ast.parse
+
+    def counting_parse(source: Any, *args: Any, **kwargs: Any) -> Any:
+        parses.append(len(source))
+        return real_parse(source, *args, **kwargs)
+
+    monkeypatch.setattr(ast, "parse", counting_parse)
+    fix = propose_fix(request, result, DEFAULT_RULES, max_content_chars=CAP)
+    monkeypatch.setattr(ast, "parse", real_parse)
+    assert fix is not None and fix["validated"] is False
+    assert sum(1 for size in parses if size >= len(content) // 2) == 1, parses
+
+
 def test_the_cost_of_a_fix_does_not_grow_with_the_number_of_imports(monkeypatch: pytest.MonkeyPatch) -> None:
     """Sixty forbidden imports took sixty rounds of parse, remove, parse; now any number takes the same reads."""
     parses: List[int] = []
