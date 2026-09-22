@@ -767,14 +767,14 @@ paths:
       description: >-
         Asks the model for one rule in the format POST /rules accepts, checks it with the validation a save uses,
         as one more member of the rules in force for project (so an id already in force is caught), sets its mode
-        to observe whatever the model proposed, and tries it on the examples sent and on two files built from the
-        rule itself, with the verdicts POST /rules/explain gives. A drafted rule watches, so a file it would refuse
-        reads OBSERVE. Nothing is saved, no verdict is issued and no ledger row is written: putting the draft in
-        force is a separate POST /rules, which needs the operator. When the model cannot be reached the answer is
-        503 with no draft; Threefold never stands in for the model with a rule of its own. Each draft is at most
+        to observe whatever the model proposed, and tries it on the examples sent and on up to two files built from
+        the rule itself, with the verdicts POST /rules/explain gives. A drafted rule watches, so a file it would
+        refuse reads OBSERVE. Nothing is saved, no verdict is issued and no ledger row is written: putting the draft
+        in force is a separate POST /rules, which needs the operator. When the model cannot be reached the answer
+        is 503 with no draft; Threefold never stands in for the model with a rule of its own. Each draft is at most
         two model calls, and only the description and the paths, expectations and imports of the examples reach
-        the model, never an example's file content. Open where PublicReads is true, as POST /rules/explain is; on
-        a stack deployed with PublicReads=false it needs the operator key or a sign-in session.
+        the model, never the rest of an example's file. Open where PublicReads is true, as POST /rules/explain is;
+        on a stack deployed with PublicReads=false it needs the operator key or a sign-in session.
       security:
       - {}
       - OperatorApiKey: []
