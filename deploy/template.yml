@@ -24,6 +24,25 @@ Parameters:
       both the inference-profile ARN in this account and the underlying
       foundation-model ARN, which is account-less by design.
 
+  # Operations. Every one of these defaults to a value both stacks run with,
+  # so an update that overrides none of them deploys unattended, and neither
+  # stack has to be told anything new to pick them up.
+  ReservedConcurrency:
+    Type: Number
+    Default: 25
+    MinValue: 0
+    Description: >-
+      The most copies of the function that may run at once, reserved out of the
+      account's pool. If a call without a model takes a tenth of a second, 25
+      copies serve about 250 requests a second, more than the API's throttle
+      lets through on any one route, so the cap is reached only by calls that
+      run long, which are the ones that cost: it bounds how many Bedrock calls
+      and table writes a runaway client can have in flight. Two stacks at 25
+      reserve 50 of the default account quota of 1,000, which leaves every
+      other function in the account the rest. 0 removes the reservation instead
+      of being passed to Lambda, which reads 0 as "never run"; use it on an
+      account whose quota is too small to reserve from.
+
   ApiThrottleRateLimit:
     Type: Number
     Default: 100
@@ -196,6 +215,16 @@ Resources:
             ApiId: !Ref ThreefoldHttpApi
             Path: /{proxy+}
             Method: ANY
+      # Every sampled invocation is recorded in X-Ray. The transform attaches
+      # the AWSXrayWriteOnlyAccess managed policy to the role it generates
+      # whenever Tracing is set, so the permission needs no statement in the
+      # Policies above. An HTTP API cannot trace, so a trace starts at the
+      # function; and the X-Ray SDK is not bundled, so it shows the invocation
+      # and its cold start rather than each DynamoDB or Bedrock call inside it.
+      Tracing: Active
+      # 0 is turned into no reservation at all rather than passed through,
+      # because Lambda reads a reservation of 0 as "never run".
+      ReservedConcurrentExecutions: !If [CapConcurrency, !Ref ReservedConcurrency, !Ref 'AWS::NoValue']
 
   ThreefoldTable:
     Type: AWS::DynamoDB::Table
@@ -269,6 +298,11 @@ Resources:
       # address, which is personal data, and two weeks is enough to look into
       # an incident that an alarm has already raised.
       RetentionInDays: 14
+
+# Each turns an operations parameter's value for "none" into no property or
+# no resource at all, rather than a resource configured with nothing.
+Conditions:
+  CapConcurrency: !Not [!Equals [!Ref ReservedConcurrency, '0']]
 
 Outputs:
   ApiEndpoint:

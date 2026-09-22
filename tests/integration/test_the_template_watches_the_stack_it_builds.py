@@ -167,3 +167,41 @@ def test_the_access_log_group_is_the_stacks_own_and_expires() -> None:
     retention = re.search(r"^      RetentionInDays: (\d+)$", group, re.M)
     assert retention, "Without retention, client addresses are kept forever"
     assert int(retention.group(1)) <= 30, "Every line holds a client address, which is personal data"
+
+
+# ------------------------------------------------------------------ the function
+
+
+def test_the_function_is_traced_and_the_transform_grants_it_the_permission() -> None:
+    function = RESOURCES["ThreefoldFunction"]
+    assert re.search(r"^      Tracing: Active$", function, re.M)
+    # The transform attaches AWSXrayWriteOnlyAccess only to a role it generates
+    # itself. A Role property here would take that away without a word.
+    assert not re.search(r"^      Role:", function, re.M), (
+        "With an explicit Role, Tracing: Active is left without permission to write traces"
+    )
+
+
+def test_concurrency_is_capped_by_a_parameter_that_cannot_switch_the_function_off() -> None:
+    block = PARAMETERS["ReservedConcurrency"]
+    assert re.search(r"^    Type: Number$", block, re.M)
+    assert re.search(r"^    MinValue: 0$", block, re.M)
+    default = int(_default("ReservedConcurrency"))
+    assert 10 <= default <= 100, (
+        f"{default}: below ten a busy demo is throttled, above a hundred two stacks eat into "
+        "the account's pool and the cap stops bounding a runaway client's cost"
+    )
+    assert re.search(
+        r"^      ReservedConcurrentExecutions: !If \[CapConcurrency, !Ref ReservedConcurrency, !Ref 'AWS::NoValue'\]$",
+        RESOURCES["ThreefoldFunction"],
+        re.M,
+    ), "0 must become no reservation: passed through, Lambda reads it as never run"
+    assert re.search(r"^  CapConcurrency: !Not \[!Equals \[!Ref ReservedConcurrency, '0'\]\]$", _conditions(), re.M)
+
+
+def test_the_function_log_group_keeps_its_name_and_explicit_retention() -> None:
+    group = RESOURCES["ThreefoldLogGroup"]
+    assert re.search(r"^      LogGroupName: !Sub '/aws/lambda/\$\{ThreefoldFunction\}'$", group, re.M), (
+        "A different name is a second group; the function would keep writing to its own, unretained"
+    )
+    assert re.search(r"^      RetentionInDays: 30$", group, re.M)
