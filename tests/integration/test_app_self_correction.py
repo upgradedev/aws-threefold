@@ -83,6 +83,7 @@ def test_the_project_page_reports_it_in_the_readiness_summary(corrected) -> None
 
 
 def test_the_overview_without_a_project_counts_every_projects_sessions(corrected) -> None:
+    # Another project's session: a tie with it cannot reorder any of these.
     other = fresh_project("Acme-Other")
     hook_call(other, f"{other}-cc", DOMAIN_WRITE)
     assert get("/api/overview", days=1)["self_correction"]["refusals_considered"] == 3
@@ -92,6 +93,7 @@ def test_a_project_in_observe_refuses_nothing_so_nothing_is_considered(monkeypat
     monkeypatch.delenv("DEFAULT_HOOK_STAGE", raising=False)
     name = fresh_project("Acme-Watch")
     hook_call(name, f"{name}-cc", DOMAIN_WRITE)
+    _next_instant()
     hook_call(name, f"{name}-cc", CLEAN_WRITE)
     figure = get(f"/api/projects/{name}")["readiness"]["summary"]["self_correction"]
     assert figure["refusals_considered"] == 0 and figure["rate"] is None and figure["complete"] is True
@@ -101,6 +103,7 @@ def test_a_project_in_observe_refuses_nothing_so_nothing_is_considered(monkeypat
 def test_a_page_refusal_is_not_an_agent_to_correct() -> None:
     name = fresh_project("Acme-Page")
     hook_call(name, f"sim-{name}", DOMAIN_WRITE, origin="page", agent="page")
+    _next_instant()
     hook_call(name, f"sim-{name}", CLEAN_WRITE, origin="page", agent="page")
     assert get("/api/overview", project=name)["self_correction"]["refusals_considered"] == 0
 
