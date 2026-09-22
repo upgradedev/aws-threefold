@@ -139,7 +139,7 @@ slash is API Gateway's own 404, before the function is reached **[PRIMARY, 2026-
 3. What remains is one `POST /evaluate-tool-call` to the endpoint the
    repository's `.threefold.json` names. An install made from the edge names the
    edge, because the function writes the viewer's host into `/install.py` when
-   the request carries the edge secret (section 7.6).
+   the request carries the edge secret (section 8.6).
 4. The function runs the gates (section 4.2), applies the project's stage,
    records one ledger row and one rollup increment, and answers.
 5. On a refusal the hook prints a deny in the agent's own format, with the
@@ -277,14 +277,18 @@ outside the standard library.
 `GovernanceEvaluator._run_gates` in `application/evaluator.py`:
 
 1. **A halted session** refuses every call (`BLOCKED_CIRCUIT_BREAKER`).
-2. **The boundary guard** reads the call once: a credential in any argument, at
-   any depth (`BLOCKED_SECRET_DETECTED`); then the layering rules in force for
-   the calling project, protected paths (`.env`, keys, the hooks' own settings,
-   `.git/hooks`, `git commit --no-verify` and the other ways to switch hooks
-   off), writes made through the shell whose content cannot be read, and
-   destructive commands (`BLOCKED_BOUNDARY_VIOLATION`). A shell command is
-   read for the writes it makes (`domain/shell_writes.py`), so a heredoc into a
-   domain file is judged like a `Write`.
+2. **The boundary guard** (`domain/boundary_guard.py`,
+   `evaluate_tool_boundary`) reads the call once, in this order: a credential
+   in any argument, at any depth (`BLOCKED_SECRET_DETECTED`); then protected
+   paths (`.env`, anything under `.git`, `.ssh`, `.aws`, `secrets`, key files);
+   the files that decide whether the hooks run (the agents' hook settings,
+   `.threefold.json`); what a shell command writes (`domain/shell_writes.py`),
+   where readable content is judged by the layering rules like a `Write`, an
+   unreadable write to a covered path is refused, and `git commit --no-verify`
+   and the other ways to point git at other hooks are refused; then the
+   layering rules in force for the calling project over the content the call
+   carries; and last, destructive commands. Every refusal after the credential
+   is `BLOCKED_BOUNDARY_VIOLATION`.
 3. **The loop detector** looks for any repeating cycle of byte-identical call
    signatures, up to period six. A repeated read or poll (`git status`, `ls`,
    `gh run view`, a file read) is noted and never refused. For a hook the
@@ -293,8 +297,10 @@ outside the standard library.
 4. **The cost breaker** refuses a call whose projected cost exceeds the
    single-call cap, which comes from the policy (`max_single_call_usd`, $1.00 on
    the public stack **[PRIMARY, 2026-09-22]**, `GET /policy/config`), or that would
-   take the session past the `budget_usd` the call declares ($10.00 when the
-   caller sends none, `application/dtos.py`). Tokens are the caller's own
+   take the session past 105% of the `budget_usd` the call declares ($10.00 when
+   the caller sends none, `application/dtos.py`; the 5% is
+   `CostCircuitBreaker`'s `hard_limit_buffer` in `domain/circuit_breaker.py`,
+   which nothing in `src/` overrides). Tokens are the caller's own
    declaration, and every call is priced at the default Sonnet-class rate
    because no model id reaches `TokenCostCalculator` **[STATE-FILE]**. A hook
    declares no tokens, so a hook call costs nothing here.
