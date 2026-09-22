@@ -218,7 +218,14 @@ Each file takes the same shape:
    false alarm.
 4. **Promote.** Promote moves the project to Enforce with the rules you pick;
    the others keep observing, recording what they would refuse. **Demote** is one
-   click back to Observe and applies from the next call.
+   click back to Observe.
+
+A promotion or a demotion applies at once on the Lambda container that handled
+it, and within 30 seconds on every other warm container, each of which reads
+the project's stage again once its copy is 30 seconds old
+(`RULES_REFRESH_SECONDS` in `application/evaluator.py`). Until then a call that
+lands on another container can still be judged under the old stage, so for up
+to half a minute after a demotion a call can still be refused.
 
 The stage applies to calls from hooks and CI. The demo's page and simulation
 calls always enforce, so the public demo behaves the same whatever a project's

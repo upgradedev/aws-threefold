@@ -302,6 +302,10 @@ never refused, never halting. Enforce runs the gates and turns a refusal whose
 rule key the project still observes into an observation. Page calls and every
 call in a `sim-` session always enforce, whatever their origin, so the demo
 behaves the same under any setting (`application/projects.py`, `stage_applies`).
+Each container holds a project's stage for `RULES_REFRESH_SECONDS` (30 s) before
+reading it again, so a promotion or a demotion applies at once on the container
+that handled it and within 30 seconds on every other warm container; a call
+landing elsewhere in that window is judged under the old stage.
 The request's `hook_mode` is recorded on the ledger row and plays no part in
 choosing the stage, so a machine in `enforce` mode is refused only where the
 project enforces. The last step of the `#/try` walkthrough sends its call in a

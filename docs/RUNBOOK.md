@@ -314,7 +314,7 @@ other stack, or create users or policies.
 | A failed stack update | CloudFormation rolls it back by itself. |
 | A bad code deploy | Check out the previous commit (in a separate worktree) and run section 1 again; parameters keep their values. |
 | A bad page publish | Run `publish_web.py` from the previous commit, or restore the previous object version in the pages bucket (versioned; replaced versions kept 30 days) and invalidate `/*`. |
-| A project promoted too early | **Demote** on its dashboard page, or `POST /api/projects/<name>/demote` with the operator. It applies from the next call. |
+| A project promoted too early | **Demote** on its dashboard page, or `POST /api/projects/<name>/demote` with the operator. It applies at once on the container that handled it and within 30 seconds on every other warm container (`RULES_REFRESH_SECONDS`), so a call in that half minute can still be refused under Enforce. |
 | A repository | `threefold.py disconnect`. |
 | The edge | Delete `threefold-prod-edge` (section 10). The origin URL keeps working exactly as before, but hooks installed from the edge name the edge as their endpoint: without it they cannot reach the service and fail open until reconnected against the origin. |
 | Table data | Point-in-time recovery restores to a **new** table (`aws dynamodb restore-table-to-point-in-time`). The function keeps using the old one; nothing in the template or the scripts switches it, so copying items back is manual. |
