@@ -14,6 +14,8 @@ ledger row that leaves here has been through `public_row`, as the rows of
 from __future__ import annotations
 
 import datetime
+import functools
+import inspect
 import json
 import logging
 import os
@@ -171,10 +173,25 @@ def _self_correction(days: int, project: Optional[str]) -> Dict[str, Any]:
     if reader is None:
         return ledger.self_correction_unread()
     try:
-        return ledger.self_correction(reader, days, project)
-    except Exception as exc:  # pragma: no cover - a figure never fails the page it is on
+        return ledger.self_correction(_reader_that_fails_loudly(reader), days, project)
+    except Exception as exc:  # a figure never fails the page it is on
         logger.warning("Could not read the ledger for self-correction: %s", exc)
         return ledger.self_correction_unread()
+
+
+def _reader_that_fails_loudly(reader: Callable[..., Any]) -> Callable[..., Any]:
+    """The ledger reader, asked to raise on a failed query where the store can.
+
+    The store answers a failed query with the rows its container holds, so a
+    listing still shows something. For this figure that would read a ledger it
+    could not reach as a complete window with no refusal in it; raised, the
+    failure gives the unread figure, which says it is not complete.
+    """
+    try:
+        accepts = "raise_errors" in inspect.signature(reader).parameters
+    except (TypeError, ValueError):
+        accepts = False
+    return functools.partial(reader, raise_errors=True) if accepts else reader
 
 
 def _get_decisions(event: Dict[str, Any], path: str, _: Optional[str]) -> Dict[str, Any]:

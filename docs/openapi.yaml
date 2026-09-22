@@ -2209,4 +2209,5 @@ components:
           type: boolean
           description: >-
             False when the bounded read stopped before it covered the whole window, or when the ledger could not
-            be read at all.
+            be read: a store that cannot page the ledger, or a query that failed. A failed read is never reported
+            as an empty window.

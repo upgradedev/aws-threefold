@@ -122,6 +122,26 @@ def test_a_store_that_cannot_page_the_ledger_gives_the_unread_figure(monkeypatch
     assert get("/api/overview")["self_correction"] == ledger.self_correction_unread()
 
 
+def test_a_ledger_whose_queries_fail_is_not_read_as_a_complete_empty_window(monkeypatch) -> None:
+    # The store answers a failed query with an empty day so its listings keep
+    # working; read that way, a throttled table would show "no refusal in this
+    # window", complete. The figure asks it to raise, and so says it is unread.
+    class _Throttled:
+        def __getattr__(self, name):
+            def fail(*args, **kwargs):
+                raise RuntimeError("ProvisionedThroughputExceededException")
+            return fail
+
+    repo = DynamoDBSessionRepository()
+    repo._table = _Throttled()
+    monkeypatch.setattr(api_handlers, "_evaluator", GovernanceEvaluator(session_repo=repo))
+    assert get("/api/overview")["self_correction"] == ledger.self_correction_unread()
+    summary = get("/api/projects/Acme-Throttled")["readiness"]["summary"]
+    assert summary["self_correction"]["complete"] is False
+    # The listing beside it still reads the failure as it always has.
+    assert get("/api/decisions")["items"] == []
+
+
 def test_commands_are_left_out_because_the_ledger_keeps_only_their_program() -> None:
     name = fresh_project("Acme-Shell")
     session = f"{name}-cc"
