@@ -7,9 +7,13 @@ the code that answers them (every comparison of `path` in
 src/threefold/interfaces/, the served-script table, the paths in the published
 OpenAPI document) and from the 2026-09-22 contract for the routes other tracks
 are building now, and resolves each one the way CloudFront does: first matching
-pattern wins, `*` is any run of characters, `?` one character, case counts.
-Every JSON route must land on the API origin; every page, /app and every asset
-on the bucket, and no API pattern may match a page even out of order.
+pattern wins, `*` is any run of characters, `?` one character, case counts,
+after the path is normalized as CloudFront normalizes it (repeated slashes
+collapsed, dot segments resolved). Every JSON route must land on the API
+origin, with or without a trailing slash; the same routes under the stage
+prefix (/prod/...) must land on the API origin that keeps the prefix; every
+page, /app and every asset on the bucket, and no API pattern may match a page
+even out of order.
 """
 from __future__ import annotations
 
@@ -26,8 +30,10 @@ import pytest
 REPO = Path(__file__).resolve().parents[2]
 INTERFACES = REPO / "src" / "threefold" / "interfaces"
 WEB_ROOT = REPO / "src" / "threefold" / "web"
-# CloudFront's default quota was 25 cache behaviors when this edge was designed;
-# the default behavior is counted too, the conservative reading.
+# The edge's specification holds it to 25 cache behaviors, CloudFront's long-standing
+# default, with the default behavior counted too, the conservative reading.
+# CloudFront's quota page read on 2026-09-22 lists 75, so this is a budget the
+# edge keeps rather than a limit it would hit.
 BEHAVIOR_QUOTA = 25
 
 
@@ -41,9 +47,20 @@ def _reader():
     return sys.modules[name]
 
 
-DISTRIBUTION = _reader().load_edge_template()["Resources"]["Distribution"]["Properties"]["DistributionConfig"]
-BEHAVIORS: List[Tuple[str, str]] = [(b["PathPattern"], b["TargetOriginId"]) for b in DISTRIBUTION["CacheBehaviors"]]
+READER = _reader()
+TEMPLATE = READER.load_edge_template()
+DISTRIBUTION = TEMPLATE["Resources"]["Distribution"]["Properties"]["DistributionConfig"]
+# A pattern built from a parameter is matched as it reads with the defaults: the
+# stage behavior's `${ApiStagePath}/*` is /prod/*.
+BEHAVIORS: List[Tuple[str, str]] = [
+    (READER.with_defaults(b["PathPattern"], TEMPLATE), b["TargetOriginId"]) for b in DISTRIBUTION["CacheBehaviors"]
+]
 DEFAULT_ORIGIN = DISTRIBUTION["DefaultCacheBehavior"]["TargetOriginId"]
+# "api" adds the stage in front of the path; "api-stage" is the same API for paths
+# that already carry it.
+API_ORIGINS = {origin["Id"] for origin in DISTRIBUTION["Origins"] if "CustomOriginConfig" in origin}
+STAGE = TEMPLATE["Parameters"]["ApiStagePath"]["Default"]
+EDGE_HOST = "https://d1acme.cloudfront.net"
 
 # The routes the 2026-09-22 contract adds, which tracks A, B1 and B2 are building
 # in parallel and which are not in this tree yet. One concrete path per route.
@@ -125,11 +142,40 @@ def pattern_matches(pattern: str, path: str) -> bool:
     return re.fullmatch(expression, path, flags=re.DOTALL) is not None
 
 
+def normalize(path: str) -> str:
+    """The path CloudFront matches behaviors against.
+
+    The CloudFront developer guide ("Path normalization", under cache behavior
+    settings): CloudFront normalizes URI paths consistent with RFC 3986, and
+    multiple slashes and dot segments are normalized away, before it matches a
+    behavior; the raw path is what it then sends to the origin. So //status
+    matches /status, and /a/b/../c matches /a/c. A trailing slash is kept.
+    """
+    segments = re.sub(r"/{2,}", "/", path).split("/")[1:]
+    kept: List[str] = []
+    for index, segment in enumerate(segments):
+        last = index == len(segments) - 1
+        if segment in (".", ".."):
+            if segment == ".." and kept:
+                kept.pop()
+            if last:
+                kept.append("")
+            continue
+        kept.append(segment)
+    return "/" + "/".join(kept)
+
+
 def origin_for(path: str) -> str:
+    matched = normalize(path)
     for pattern, origin in BEHAVIORS:
-        if pattern_matches(pattern, path):
+        if pattern_matches(pattern, matched):
             return origin
     return DEFAULT_ORIGIN
+
+
+def path_of(url: str) -> str:
+    """The path part of an absolute URL, exactly as a client sends it."""
+    return "/" + url.split("/", 3)[3] if url.count("/") >= 3 else "/"
 
 
 def _constant_strings(node: ast.AST) -> List[str]:
@@ -210,6 +256,11 @@ API_PATHS = sorted(
     {p for p in CODE_ROUTES | routes_in_openapi() if not is_page(p)} | set(CONTRACT_API_PATHS)
 )
 PAGE_PATHS = sorted(page_paths() | {p for p in CODE_ROUTES if is_page(p)})
+# The function strips a trailing slash from every route; a route that ends in a
+# file name is left out, since nothing asks for /install.py/.
+EXTENSIONLESS_API_PATHS = [p for p in API_PATHS if "." not in p.rstrip("/").rsplit("/", 1)[-1]]
+# The function answers every route, and its pages, under the stage prefix too.
+STAGED_PATHS = sorted({STAGE + p for p in API_PATHS} | {STAGE + p for p in PAGE_PATHS})
 
 
 # --- the matcher and the collectors are right before anything relies on them ----------
@@ -228,10 +279,30 @@ PAGE_PATHS = sorted(page_paths() | {p for p in CODE_ROUTES if is_page(p)})
         ("/status", "/Status", False),
         ("/a?c", "/abc", True),
         ("api/*", "/api/x", True),
+        ("/evaluate-tool-call*", "/evaluate-tool-call/", True),
+        ("/*.json", "/docs/openapi.json", True),
+        ("/*.json", "/sessions.html", False),
+        ("/prod/*", "/prod/evaluate-tool-call", True),
     ],
 )
 def test_the_matcher_follows_cloudfront_s_pattern_rules(pattern: str, path: str, expected: bool) -> None:
     assert pattern_matches(pattern, path) is expected
+
+
+@pytest.mark.parametrize(
+    "raw, matched",
+    [
+        ("//status", "/status"),
+        ("/prod//evaluate-tool-call", "/prod/evaluate-tool-call"),
+        ("/a/b/../c", "/a/c"),
+        ("/a/./b/", "/a/b/"),
+        ("/a/b/..", "/a/"),
+        ("/status/", "/status/"),
+        ("/", "/"),
+    ],
+)
+def test_paths_are_normalized_as_cloudfront_normalizes_them(raw: str, matched: str) -> None:
+    assert normalize(raw) == matched
 
 
 def test_the_collector_reads_every_form_a_route_is_written_in() -> None:
@@ -289,19 +360,72 @@ def test_every_page_and_asset_is_served_from_the_bucket(path: str) -> None:
 @pytest.mark.parametrize("path", PAGE_PATHS)
 def test_no_api_pattern_matches_a_page_even_out_of_order(path: str) -> None:
     """Behaviors get reordered; a page must not depend on sitting above an API pattern."""
-    overlapping = [p for p, origin in BEHAVIORS if origin == "api" and pattern_matches(p, path)]
+    overlapping = [p for p, origin in BEHAVIORS if origin in API_ORIGINS and pattern_matches(p, path)]
     assert not overlapping, f"{path} is matched by API patterns {overlapping}"
 
 
 def test_every_api_pattern_is_needed_by_some_route() -> None:
     """A pattern no route uses is a path to the function nobody meant to open."""
     for pattern, origin in BEHAVIORS:
-        if origin == "api":
-            assert any(pattern_matches(pattern, path) for path in API_PATHS), f"{pattern} serves no known route"
+        if origin in API_ORIGINS:
+            assert any(pattern_matches(pattern, path) for path in API_PATHS + STAGED_PATHS), (
+                f"{pattern} serves no known route"
+            )
 
 
-def test_the_hook_s_own_request_reaches_the_api() -> None:
-    """The hook posts to <endpoint>evaluate-tool-call; pointed at the edge, that is this path."""
-    endpoint = "https://d1acme.cloudfront.net/"
-    path = "/" + (endpoint + "evaluate-tool-call").split("/", 3)[3]
-    assert origin_for(path) == "api"
+# --- the shapes a path arrives in -----------------------------------------------------------
+
+
+@pytest.mark.parametrize("path", EXTENSIONLESS_API_PATHS)
+def test_every_route_reaches_the_api_with_a_trailing_slash(path: str) -> None:
+    """The function strips it, so the edge must not send /status/ to the bucket."""
+    assert origin_for(path.rstrip("/") + "/") == "api"
+
+
+@pytest.mark.parametrize("path", API_PATHS)
+def test_every_route_reaches_the_api_with_a_doubled_leading_slash(path: str) -> None:
+    """A base URL ending in "/" plus a route starting with one, the case the function collapses."""
+    assert origin_for("/" + path) == "api"
+    assert origin_for(path_of(EDGE_HOST + "/" + path)) == "api"
+
+
+@pytest.mark.parametrize("path", STAGED_PATHS)
+def test_a_path_that_keeps_the_stage_reaches_the_api_unprefixed(path: str) -> None:
+    """/prod/evaluate-tool-call goes to the origin with no origin path, never to /prod/prod/..."""
+    assert origin_for(path) == "api-stage", f"{path} would not reach the function as the API's own URL does"
+    assert origin_for(path.replace(STAGE + "/", STAGE + "//", 1)) == "api-stage"
+
+
+def test_the_stage_behavior_comes_before_every_pattern_that_could_take_a_staged_path() -> None:
+    patterns = [pattern for pattern, _ in BEHAVIORS]
+    stage_index = patterns.index(STAGE + "/*")
+    for pattern in patterns[:stage_index]:
+        assert not pattern_matches(pattern, STAGE + "/openapi.json"), pattern
+
+
+@pytest.mark.parametrize(
+    "endpoint, origin",
+    [
+        (EDGE_HOST + "/", "api"),
+        (EDGE_HOST, "api"),
+        (EDGE_HOST + "//", "api"),
+        (EDGE_HOST + STAGE + "/", "api-stage"),
+        (EDGE_HOST + STAGE, "api-stage"),
+    ],
+)
+def test_every_endpoint_form_a_hook_can_be_given_reaches_the_function(endpoint: str, origin: str) -> None:
+    """The hook appends "/" when missing, then "evaluate-tool-call" (threefold_hook.endpoint()).
+
+    The SiteUrl output, with or without its slash, and the API's documented
+    https://<host>/prod/ with only the host swapped all have to reach the
+    function: a POST the edge does not route answers CloudFront's 403, which the
+    hook reads as a refusal of every tool call.
+    """
+    base = endpoint if endpoint.endswith("/") else endpoint + "/"
+    assert origin_for(path_of(base + "evaluate-tool-call")) == origin
+
+
+@pytest.mark.parametrize("path", ["/dev/evaluate-tool-call", "/v1/evaluate-tool-call", "/prod"])
+def test_a_path_the_edge_does_not_route_falls_to_the_bucket(path: str) -> None:
+    """What the template's comment warns about: another stage, or a bare /prod, is not the function's."""
+    assert origin_for(path) == DEFAULT_ORIGIN == "web"

@@ -407,6 +407,28 @@ def load_edge_template() -> dict:
     return load_cfn_yaml(EDGE_TEMPLATE.read_text(encoding="utf-8"))
 
 
+def with_defaults(value: Any, template: dict) -> Any:
+    """A string, or a !Sub of parameters, as it reads when every parameter keeps its default.
+
+    A path pattern built from a parameter (the stage behavior's `${ApiStagePath}/*`)
+    has to be matched as the string CloudFront will see. Anything this cannot turn
+    into a string, such as a !Sub naming a resource, is refused rather than guessed.
+    """
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict) and list(value) == ["Fn::Sub"] and isinstance(value["Fn::Sub"], str):
+        parameters = template.get("Parameters", {})
+
+        def default(match: "re.Match[str]") -> str:
+            name = match.group(1)
+            if name not in parameters or "Default" not in parameters[name]:
+                raise CfnYamlError(f"${{{name}}} is not a parameter with a default")
+            return str(parameters[name]["Default"])
+
+        return re.sub(r"\$\{([^}!]+)\}", default, value["Fn::Sub"])
+    raise CfnYamlError(f"{value!r} is not a string or a !Sub of parameters")
+
+
 # --- the reader's own behaviour ----------------------------------------------------
 
 
@@ -500,6 +522,15 @@ def test_a_list_may_sit_in_its_key_s_own_column() -> None:
 def test_anything_outside_the_subset_is_refused_rather_than_guessed(text: str) -> None:
     with pytest.raises(CfnYamlError):
         load_cfn_yaml(text)
+
+
+def test_a_parameter_sub_reads_as_its_defaults_and_anything_else_is_refused() -> None:
+    template = load_cfn_yaml("Parameters:\n  Stage:\n    Default: /prod\n  Domain:\n    Type: String\n")
+    assert with_defaults("/api/*", template) == "/api/*"
+    assert with_defaults({"Fn::Sub": "${Stage}/*"}, template) == "/prod/*"
+    for value in ({"Fn::Sub": "${Domain}/*"}, {"Fn::Sub": "${Bucket.Arn}"}, {"Ref": "Stage"}):
+        with pytest.raises(CfnYamlError):
+            with_defaults(value, template)
 
 
 def test_the_edge_template_is_inside_the_subset() -> None:

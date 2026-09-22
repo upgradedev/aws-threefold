@@ -30,12 +30,16 @@ def _reader():
     return sys.modules[name]
 
 
-TEMPLATE = _reader().load_edge_template()
+READER = _reader()
+TEMPLATE = READER.load_edge_template()
 RESOURCES: Dict[str, Any] = TEMPLATE["Resources"]
 PARAMETERS: Dict[str, Any] = TEMPLATE["Parameters"]
 DISTRIBUTION = RESOURCES["Distribution"]["Properties"]["DistributionConfig"]
 BEHAVIORS: List[dict] = DISTRIBUTION["CacheBehaviors"]
 ORIGINS = {origin["Id"]: origin for origin in DISTRIBUTION["Origins"]}
+# Every behavior that does not serve the bucket serves the API, through one of its
+# two origins: "api" prefixes the stage, "api-stage" passes a staged path through.
+API_BEHAVIORS: List[dict] = [b for b in BEHAVIORS if b["TargetOriginId"] != "web"]
 HEADERS = RESOURCES["SecurityHeadersPolicy"]["Properties"]["ResponseHeadersPolicyConfig"]["SecurityHeadersConfig"]
 WEB_ACL = RESOURCES["WebAcl"]["Properties"]
 ACL_RULES = {rule["Name"]: rule for rule in WEB_ACL["Rules"]}
@@ -246,6 +250,19 @@ def test_the_api_origin_is_the_existing_api_over_tls_only() -> None:
     assert config["OriginSSLProtocols"] == ["TLSv1.2"]
 
 
+def test_the_staged_origin_is_the_same_api_with_nothing_prefixed() -> None:
+    """/prod/status at the edge must reach the API as /prod/status, not /prod/prod/status."""
+    staged = ORIGINS["api-stage"]
+    assert staged["DomainName"] == {"Ref": "ApiDomainName"}
+    assert "OriginPath" not in staged
+    assert staged["CustomOriginConfig"] == ORIGINS["api"]["CustomOriginConfig"], "the two differ only in the path"
+    assert set(ORIGINS) == {"web", "api", "api-stage"}
+    uses = [b for b in BEHAVIORS if b["TargetOriginId"] == "api-stage"]
+    assert [b["PathPattern"] for b in uses] == [{"Fn::Sub": "${ApiStagePath}/*"}], (
+        "one behavior, following the stage parameter"
+    )
+
+
 @pytest.mark.parametrize(
     "value, accepted",
     [
@@ -296,10 +313,9 @@ def test_nothing_from_the_viewer_reaches_the_bucket_or_splits_its_cache() -> Non
 
 
 def test_api_behaviors_are_uncached_forward_all_but_host_and_accept_every_method() -> None:
-    api_behaviors = [b for b in BEHAVIORS if b["TargetOriginId"] == "api"]
-    assert api_behaviors
-    for behavior in api_behaviors:
-        pattern = behavior["PathPattern"]
+    assert {b["TargetOriginId"] for b in API_BEHAVIORS} == {"api", "api-stage"}
+    for behavior in API_BEHAVIORS:
+        pattern = repr(behavior["PathPattern"])
         assert behavior["CachePolicyId"] == CACHING_DISABLED, pattern
         assert behavior["OriginRequestPolicyId"] == ALL_VIEWER_EXCEPT_HOST_HEADER, pattern
         assert set(behavior["AllowedMethods"]) == ALL_METHODS, pattern
@@ -433,8 +449,8 @@ def test_only_body_rules_and_the_named_extension_rule_are_relaxed() -> None:
 def test_the_install_path_is_not_refused_for_its_file_extension() -> None:
     """/install.py, the hook and the bundle are served on purpose; see the comment in edge.yml."""
     assert "RestrictedExtensions_URIPATH" in _counted("AWSManagedRulesCommonRuleSet")
-    served = [b["PathPattern"] for b in BEHAVIORS if b["TargetOriginId"] == "api"]
-    assert {"/install.py", "/claude_code_hook.py", "/hooks/*", "/dist/*"} <= set(served)
+    served = {READER.with_defaults(b["PathPattern"], TEMPLATE) for b in API_BEHAVIORS}
+    assert {"/install.py", "/claude_code_hook.py", "/hooks/*", "/dist/*"} <= served
 
 
 def test_the_web_acl_stays_inside_the_capacity_billed_at_the_base_price() -> None:

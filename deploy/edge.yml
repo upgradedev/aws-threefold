@@ -32,6 +32,9 @@ Parameters:
       The API Gateway stage, as the origin path CloudFront prefixes to every API
       request. The function strips the stage before routing, so /api/overview at
       the edge reaches the same route as /prod/api/overview on the API's own URL.
+      A request that already carries the stage (/prod/...) is passed through to
+      the API unprefixed, so a URL copied from the API with only its host changed
+      still works.
 
   RateLimitPerFiveMinutes:
     Type: Number
@@ -449,13 +452,52 @@ Resources:
 
   # --- the distribution -----------------------------------------------------------------
 
-  # One origin for the pages, one for the API. The default behavior serves the
-  # bucket, so a path nobody listed can never reach the function; every path the
+  # One origin for the pages and the API twice. The default behavior serves the
+  # bucket, so a path nobody listed never reaches the function; every path the
   # function answers is listed below, each under CachingDisabled with every
   # viewer header except Host (API Gateway answers only to its own Host, and the
   # function reads Authorization, X-API-Key and the query string). No custom
   # error responses: they apply to every origin, and would replace the API's
   # problem documents with a page.
+  #
+  # Path shapes. CloudFront normalizes a path before it matches a behavior,
+  # collapsing repeated slashes and resolving dot segments, and then sends the
+  # raw path on, which the function collapses the same way. So //status (a
+  # base URL ending in "/" plus "/status") matches /status here and reaches the
+  # function as /prod//status. A trailing slash is not normalized, so the
+  # routes without a file extension are written as prefixes (/status*,
+  # /evaluate-tool-call*): the function strips the slash, and the edge has to
+  # route what the function accepts. And a URL that keeps the API's documented
+  # /prod/ and swaps only the host, the likeliest way anyone points a hook at
+  # this edge, is sent whole to the second API origin, which has no origin
+  # path, so /prod/evaluate-tool-call reaches the function as it does on the
+  # API's own URL, pages under /prod/ included.
+  #
+  # What still falls through: a POST to any other path lands on the bucket's
+  # GET-only default, and CloudFront answers it 403. The hook reads a 403 as the
+  # service refusing the call and tells the developer to check their API key,
+  # so a hook pointed at a path this edge does not route refuses every tool
+  # call, with or without THREEFOLD_FAIL_CLOSED. Point hooks at the SiteUrl
+  # output or at <SiteUrl>prod/, the two forms routed here.
+  #
+  # Two consequences of the function sitting behind the edge, both for the API
+  # stack to handle, not this one:
+  # - Host. The function sees the API's own host name, not the edge's, because
+  #   the Host header is replaced. Anything it builds from Host, such as the
+  #   endpoint baked into /install.py, names the API's own URL, so a hook
+  #   installed from the edge talks to the API directly, past this web ACL.
+  # - Source address. The function rate-limits per client address, read from
+  #   requestContext.http.sourceIp, 2 a second with a burst of 60 in each
+  #   container. Behind the edge that address is a CloudFront server shared by
+  #   every viewer it serves, and this web ACL lets one viewer send about 3 a
+  #   second, so one busy client can empty the bucket for everyone behind the
+  #   same edge server, whose hook calls then get 429 and go unjudged. The
+  #   viewer's own address does reach the function, in CloudFront-Viewer-Address
+  #   (AllViewerExceptHostHeader forwards the viewer location headers, that one
+  #   among them), but the API's URL is public, so any caller can send that
+  #   header too. The middleware can key on it only for a request that proves it
+  #   came through the edge, for example by a secret origin header the edge adds
+  #   and the function checks, which is a parameter both stacks would share.
   Distribution:
     Type: AWS::CloudFront::Distribution
     Properties:
@@ -481,9 +523,22 @@ Resources:
             OriginAccessControlId: !GetAtt WebOriginAccessControl.Id
             S3OriginConfig:
               OriginAccessIdentity: ''
+          # The API at its root: CloudFront prefixes the stage, so /status at the
+          # edge is /prod/status at the API.
           - Id: api
             DomainName: !Ref ApiDomainName
             OriginPath: !Ref ApiStagePath
+            CustomOriginConfig:
+              OriginProtocolPolicy: https-only
+              HTTPSPort: 443
+              OriginSSLProtocols:
+                - TLSv1.2
+              OriginReadTimeout: 30
+              OriginKeepaliveTimeout: 5
+          # The same API with no origin path, for requests that already carry
+          # the stage: /prod/status at the edge is /prod/status at the API.
+          - Id: api-stage
+            DomainName: !Ref ApiDomainName
             CustomOriginConfig:
               OriginProtocolPolicy: https-only
               HTTPSPort: 443
@@ -504,6 +559,7 @@ Resources:
         # as a GET in most clients and the call would silently not be judged.
         # 4135ea2d-... is the managed CachingDisabled cache policy and
         # b689b0a8-... the managed AllViewerExceptHostHeader origin request policy.
+        # 21 behaviors and the default: the tests hold the list to 25 in all.
         CacheBehaviors:
           - PathPattern: /assets/*
             TargetOriginId: web
@@ -512,6 +568,16 @@ Resources:
             CachedMethods: [GET, HEAD]
             Compress: true
             CachePolicyId: !Ref AssetCachePolicy
+            ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
+          # First among the API behaviors, so that /*.json below never takes a
+          # staged path such as /prod/openapi.json and prefixes the stage twice.
+          - PathPattern: !Sub '${ApiStagePath}/*'
+            TargetOriginId: api-stage
+            ViewerProtocolPolicy: https-only
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+            CachedMethods: [GET, HEAD]
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
             ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
           # The application's JSON: overview, decisions, projects, reviews,
           # sandbox, sign-in, sessions and insights.
@@ -523,7 +589,7 @@ Resources:
             CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
             OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
             ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
-          - PathPattern: /evaluate-tool-call
+          - PathPattern: /evaluate-tool-call*
             TargetOriginId: api
             ViewerProtocolPolicy: https-only
             AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
@@ -540,7 +606,7 @@ Resources:
             CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
             OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
             ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
-          - PathPattern: /issue-certificate
+          - PathPattern: /issue-certificate*
             TargetOriginId: api
             ViewerProtocolPolicy: https-only
             AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
@@ -548,7 +614,7 @@ Resources:
             CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
             OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
             ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
-          - PathPattern: /universal-eval
+          - PathPattern: /universal-eval*
             TargetOriginId: api
             ViewerProtocolPolicy: https-only
             AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
@@ -574,7 +640,13 @@ Resources:
             CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
             OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
             ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
-          - PathPattern: /sessions.json
+          # Every JSON document is the function's: /sessions.json, /insights.json,
+          # /openapi.json and /docs/openapi.json. The function serves the OpenAPI
+          # document deployed with its code, so swagger.html reads that one rather
+          # than a copy published beside it, and the bucket holds no JSON (the
+          # contract's assets are .js, .css and .svg; /assets/* above comes first
+          # regardless). One pattern for four routes keeps room under the quota.
+          - PathPattern: /*.json
             TargetOriginId: api
             ViewerProtocolPolicy: https-only
             AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
@@ -582,16 +654,8 @@ Resources:
             CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
             OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
             ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
-          - PathPattern: /insights.json
-            TargetOriginId: api
-            ViewerProtocolPolicy: https-only
-            AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
-            CachedMethods: [GET, HEAD]
-            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
-            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
-            ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
-          # /rules exactly, and /rules/<anything>: a /rules* pattern would also
-          # take /rules.html, a page, away from the bucket.
+          # /rules exactly, and /rules/<anything> (/rules/ included): a /rules*
+          # pattern would also take /rules.html, a page, away from the bucket.
           - PathPattern: /rules
             TargetOriginId: api
             ViewerProtocolPolicy: https-only
@@ -624,7 +688,7 @@ Resources:
             CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
             OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
             ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
-          - PathPattern: /status
+          - PathPattern: /status*
             TargetOriginId: api
             ViewerProtocolPolicy: https-only
             AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
@@ -632,7 +696,7 @@ Resources:
             CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
             OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
             ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
-          - PathPattern: /health
+          - PathPattern: /health*
             TargetOriginId: api
             ViewerProtocolPolicy: https-only
             AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
@@ -640,26 +704,8 @@ Resources:
             CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
             OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
             ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
-          # /ready and /readyz in one behavior, to stay well inside the quota.
+          # /ready and /readyz in one behavior.
           - PathPattern: /ready*
-            TargetOriginId: api
-            ViewerProtocolPolicy: https-only
-            AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
-            CachedMethods: [GET, HEAD]
-            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
-            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
-            ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
-          # The function serves the OpenAPI document, so swagger.html reads the
-          # one deployed with the code rather than a copy published beside it.
-          - PathPattern: /openapi.json
-            TargetOriginId: api
-            ViewerProtocolPolicy: https-only
-            AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
-            CachedMethods: [GET, HEAD]
-            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
-            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
-            ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
-          - PathPattern: /docs/openapi.json
             TargetOriginId: api
             ViewerProtocolPolicy: https-only
             AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
