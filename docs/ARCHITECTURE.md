@@ -96,7 +96,11 @@ The API's own URL, `https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/
 stays public and serves the same pages from the function. It answers without
 any of the edge's security headers: a `GET /prod/dashboard.html` returned only
 `content-type`, `content-length`, `cache-control: no-cache` and API Gateway's
-request id **[PRIMARY, 2026-09-22]**. The bare `/prod` without the trailing
+request id **[PRIMARY, 2026-09-22]**. The pages at `/prod/` and
+`/prod/dashboard.html` carry none of the edge's headers; the function's own
+files carry one of them, `x-content-type-options: nosniff`, on `/install.py`,
+`/hooks/threefold_hook.py` and `/assets/threefold.js`, and nothing else of the
+edge's set **[PRIMARY, 2026-09-22]**. The bare `/prod` without the trailing
 slash is API Gateway's own 404, before the function is reached **[PRIMARY, 2026-09-22]**.
 
 ---
@@ -530,8 +534,8 @@ copy deployed with its code; the edge serves whatever `publish_web.py` last
 uploaded, so a deploy that changes a page is not visible at the edge until the
 pages are published again. On 2026-09-22 the two `dashboard.html` copies were
 the same size, 159,267 bytes **[PRIMARY, 2026-09-22]**. The API URL has no web
-ACL and none of the edge's headers (section 1), and anyone can reach every
-route there, past the edge.
+ACL and serves its pages with none of the edge's headers (section 1), and
+anyone can reach every route there, past the edge.
 
 ### 8.6 What the edge secret protects, and what it does not
 

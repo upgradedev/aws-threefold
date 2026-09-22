@@ -29,7 +29,7 @@ every response names which of the two you are reading.
 | | URL | What it is |
 |---|---|---|
 | **Site** | **<https://d1og72wpk4aqig.cloudfront.net/>** | CloudFront in front of everything: the pages from a private S3 bucket, every API path to the function, AWS WAF, security headers |
-| Origin | <https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/> | the API Gateway URL the edge forwards to. It serves the same pages from the function and stays public; it has no WAF and none of the edge's headers. The trailing slash is part of it: the bare `/prod` is API Gateway's own 404 |
+| Origin | <https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/> | the API Gateway URL the edge forwards to. It serves the same pages from the function and stays public; it has no WAF, its pages carry none of the edge's headers, and its files (`/install.py`, `/hooks/*`, `/assets/*`) carry only `x-content-type-options: nosniff` of them. The trailing slash is part of it: the bare `/prod` is API Gateway's own 404 |
 
 Both answered anonymously, with no key, on 2026-09-22: `GET /` returned 200
 `text/html` from each, and the site's response carried HSTS, a content security

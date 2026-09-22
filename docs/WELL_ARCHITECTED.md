@@ -50,9 +50,12 @@ itself is in [`ARCHITECTURE.md`](ARCHITECTURE.md).
 | Data | Table encryption with the AWS managed key, so each use is in CloudTrail. Project names outside `AllowedProjectPattern` are stored as `unlabelled`, developers are shown only as short hashes, and ledger rows keep a command's program name, never its arguments, with refusal reasons passed through the credential redactor. `AlarmEmail` is `NoEcho`. |
 
 **Gaps.**
-- The origin URL is public and answers every route without the web ACL and
-  without the edge's headers [PRIMARY, 2026-09-22: `GET /prod/dashboard.html` on
-  the origin returned none of them].
+- The origin URL is public and answers every route without the web ACL, and
+  serves its pages without the edge's headers [PRIMARY, 2026-09-22:
+  `GET /prod/` and `GET /prod/dashboard.html` on the origin returned none of
+  them; `/install.py`, `/hooks/threefold_hook.py` and `/assets/threefold.js`
+  carry `x-content-type-options: nosniff` and no other header of the edge's
+  set].
 - The edge secret is not authentication, and it is readable by anyone in the
   account allowed `cloudfront:GetDistributionConfig` or
   `lambda:GetFunctionConfiguration`. See `ARCHITECTURE.md` section 8.6.
