@@ -111,8 +111,11 @@ browser ─────────────────────►├─
 
 - **One Lambda function** answers every route, so the page's "try it" and a
   hook's verdict run the same code. The price: page reads and verdicts share one
-  reserved concurrency of 25, kept apart by the API's stage throttle and the
-  edge's per-address limit.
+  reserved concurrency of 25 [PRIMARY, 2026-09-22: `get-function-concurrency`],
+  and nothing keeps them apart. API Gateway's throttle (100 requests a second,
+  burst 200) applies to each route separately, and the edge limits each
+  address; both bound a flood, and neither stops dashboard loads from crowding
+  out verdicts.
 - **One DynamoDB table** holds sessions, the decision ledger by day, daily
   rollups written with `ADD` so charts stay exact however busy the ledger is,
   rules, project stages and sign-in records (stored only as hashes). All of it

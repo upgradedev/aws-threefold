@@ -65,7 +65,7 @@ viewer or hook ──► CloudFront (WAF, security headers)            us-east-1
                                                           │
                                                           ▼
                    API Gateway HTTP API, stage prod               eu-west-1
-                     (throttle 100 rps, burst 200, access logs)
+                     (throttle 100 rps, burst 200, per route; access logs)
                                                           │
                                                           ▼
                    One Lambda (python3.11, arm64, 256 MB, 15 s,
@@ -85,7 +85,7 @@ What was checked on the live public stacks **[PRIMARY, 2026-09-22]**:
 | Distribution | `aws cloudfront get-distribution` | `Deployed`, 3 origins, 21 cache behaviors, the web ACL attached |
 | Web ACL | `aws wafv2 get-web-acl` | rules `AmazonIpReputationList`, `RateLimitPerIp`, `CommonRuleSet`, `KnownBadInputsRuleSet` |
 | Edge stack | `aws cloudformation describe-stacks --stack-name threefold-prod-edge --region us-east-1` | `RateLimitPerFiveMinutes=1000`, `PriceClass_100`, `AccessLogs=true` |
-| API stage | `aws apigatewayv2 get-stage --api-id raa131f9dj --stage-name prod` | `ThrottlingRateLimit 100`, `ThrottlingBurstLimit 200`, access logs to `/aws/vendedlogs/apigateway/threefold-prod/access` |
+| API stage | `aws apigatewayv2 get-stage --api-id raa131f9dj --stage-name prod`, `get-routes` | `DefaultRouteSettings` `ThrottlingRateLimit 100`, `ThrottlingBurstLimit 200`, which API Gateway applies to each of the 7 routes separately; access logs to `/aws/vendedlogs/apigateway/threefold-prod/access` |
 | Function | `aws lambda get-function-configuration`, `get-function-concurrency` | `python3.11`, `arm64`, 256 MB, 15 s, tracing `Active`, reserved concurrency 25 |
 | Table | `aws dynamodb describe-continuous-backups`, `describe-time-to-live` | point-in-time recovery `ENABLED`, TTL on `ttl` `ENABLED` |
 | Alarms | `aws cloudwatch describe-alarms --alarm-name-prefix threefold-prod-` | 10 alarms, all `OK` |
@@ -115,7 +115,8 @@ slash is API Gateway's own 404, before the function is reached **[PRIMARY, 2026-
    Those paths match API behaviors: caching disabled, every viewer header except
    `Host` forwarded, the viewer-host function run on the viewer request, and the
    origin sends `X-Threefold-Edge` with the edge secret.
-3. API Gateway applies the stage throttle and invokes the function, which
+3. API Gateway applies the throttle of the route the path matches (`ANY /{proxy+}`
+   for these reads) and invokes the function, which
    strips the stage, checks the request in `security_middleware.py` and routes it
    in `api_handlers.py` / `app_routes.py`.
 4. Charts are inline SVG drawn by `assets/threefold.js`. There is no chart
@@ -455,9 +456,13 @@ one place where the gates' code lives, so the page's "try it" and the hook's
 verdict cannot drift apart.
 
 What it costs. Page reads and hook verdicts share one reserved concurrency of
-25, so a flood of dashboard loads competes with governed tool calls; the API
-throttle (100 requests a second, burst 200) and the edge's per-address limit are
-what keep that flood out. One role carries the union of what every route needs:
+25, so a flood of dashboard loads competes with governed tool calls, and
+nothing separates the two. The API throttle is 100 requests a second with a
+burst of 200 for each of the API's seven routes on its own
+(`DefaultRouteSettings`), so page reads (`ANY /{proxy+}`) and hook verdicts
+(`POST /evaluate-tool-call`) each get that allowance; together with the edge's
+per-address limit it bounds a flood, and does not keep one kind of request
+from crowding out the other. One role carries the union of what every route needs:
 Bedrock, the table (including `Scan` and `DeleteItem`) and the unused evidence
 bucket. And every in-memory limit (the per-address bucket, the Bedrock call
 caps) is per container, not per account: N busy containers allow N times the cap.

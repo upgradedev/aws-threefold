@@ -79,8 +79,8 @@ so the rollout had to show what a rule would stop before it stops anything.
   managed rule groups), security headers on every response, and a secret origin
   header so the function trusts the viewer's address and host only from the
   edge. Its own stack in us-east-1.
-- **API and compute:** Amazon API Gateway HTTP API (stage throttle, access
-  logs) and one AWS Lambda function, Python 3.11 on arm64, X-Ray tracing,
+- **API and compute:** Amazon API Gateway HTTP API (a throttle on each route,
+  access logs) and one AWS Lambda function, Python 3.11 on arm64, X-Ray tracing,
   reserved concurrency.
 - **State:** one Amazon DynamoDB table (sessions, the decision ledger, daily
   rollups, rules, project stages, sign-in records), with TTLs and point-in-time

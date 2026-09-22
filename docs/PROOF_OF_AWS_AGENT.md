@@ -48,7 +48,7 @@ Every command below is read-only, and each answer is what AWS returned on
 | `aws cloudformation describe-stacks --stack-name threefold-prod --region eu-west-1` | `UPDATE_COMPLETE`, last updated 2026-09-22T13:53:15Z; `PublicReads=true`, `DefaultHookStage=observe`, `BedrockModelId=eu.anthropic.claude-haiku-4-5-20251001-v1:0`, `ReservedConcurrency=25`; secrets shown as `****` |
 | `aws cloudformation describe-stacks --stack-name threefold-prod-edge --region us-east-1` | `CREATE_COMPLETE`; `ApiDomainName=raa131f9dj.execute-api.eu-west-1.amazonaws.com`, `RateLimitPerFiveMinutes=1000`, `PriceClass_100`; `SiteUrl` `https://d1og72wpk4aqig.cloudfront.net/` |
 | `aws lambda get-function-configuration` and `get-function-concurrency` on the function | `python3.11`, `arm64`, 256 MB, 15 s, tracing `Active`, reserved concurrency 25 |
-| `aws apigatewayv2 get-stage --api-id raa131f9dj --stage-name prod` | throttling 100 requests a second, burst 200; access logs to `/aws/vendedlogs/apigateway/threefold-prod/access` |
+| `aws apigatewayv2 get-stage --api-id raa131f9dj --stage-name prod` | throttling 100 requests a second, burst 200, applied to each route separately; access logs to `/aws/vendedlogs/apigateway/threefold-prod/access` |
 | `aws dynamodb describe-continuous-backups` and `describe-time-to-live` on the table | point-in-time recovery `ENABLED`; TTL on `ttl` `ENABLED` |
 | `aws cloudwatch describe-alarms --alarm-name-prefix threefold-prod-` | 10 alarms, all `OK` |
 | `aws wafv2 get-web-acl` on the edge's web ACL | `AmazonIpReputationList`, `RateLimitPerIp`, `CommonRuleSet`, `KnownBadInputsRuleSet` |
