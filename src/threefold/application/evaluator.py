@@ -27,6 +27,7 @@ from threefold.domain.boundary_guard import (
     iter_string_leaves,
     observe_layering,
     redact_secrets,
+    shell_command,
 )
 from threefold.application.fix_proposer import propose_fix
 from threefold.application.dtos import (
@@ -46,6 +47,7 @@ from threefold.application.rule_keys import (
     FROZEN_SESSION_REASON,
     HALTED_SESSION as HALTED_SESSION_KEY,
     HALTED_SESSION_REASONS,
+    FIXED_KEYS,
     LOOP as LOOP_KEY,
     PROTECTED_PATH as PROTECTED_PATH_KEY,
     rule_key as rule_key_of,
@@ -110,6 +112,23 @@ READ_OR_POLL_REPEAT = "Repeat of a read or poll, recorded rather than refused"
 # Write took 5.2 to 6.0 ms at 1,440 characters, 7.2 ms at 2,000, 12.7 ms at
 # 4,000 and 56 ms at 20,000; Java and TypeScript cost about half as much.
 FIX_REWRITE_MAX_CHARS = 1_500
+# A layering refusal past the rewrite ceiling: the proposer is asked with
+# max_content_chars=FIX_REWRITE_MAX_CHARS, so it rewrites nothing and answers
+# in words from the one read of the imports its diagnosis makes: which imports
+# to move, the rule that forbids each, and the first layer the rules permit
+# them in. Validated false and no writes. That read is a parse of the whole
+# file, as the gate's own is, so it has a ceiling too. Measured as the tests
+# measure it, the fix step against a whole verdict on the 20,000 character
+# reference beside it, interleaved, best of 15 and of 25 [PRIMARY], 2026-09-22:
+# a refused Python domain Write took 3.3 ms at 4,000 characters (0.27 of the
+# verdict), 4.6 ms at 6,000 (0.38) and 5.8 to 6.6 ms at 8,000 (0.44 to 0.50);
+# Java 0.26 and TypeScript 0.30 to 0.35 at 8,000. The reference verdict took
+# 10.4 to 16.5 ms in those runs, above the 10 ms the others were measured at,
+# so the machine was busier; the ratio is the figure that carries over. The
+# same file written by a heredoc cost 0.78 of the verdict at 4,000, 1.02 at
+# 6,000 and 1.38 at 8,000, which is why a command keeps the rewrite ceiling
+# (see fix_max_chars).
+FIX_LAYERING_ADVICE_MAX_CHARS = 8_000
 # A credential: the proposer replaces the literal with an environment lookup
 # and runs the scan and the gates again. A Python module holding one took
 # 6.1 ms at 3,000 characters, 8.5 ms at 4,000 and 12.2 ms at 6,000.
@@ -129,17 +148,51 @@ FIX_ADVICE_MAX_CHARS = 24_000
 _ADVICE_KEYS = frozenset((LOOP_KEY, BUDGET_KEY, HALTED_SESSION_KEY, PROTECTED_PATH_KEY))
 
 
-def fix_max_chars(rule_key: str) -> int:
+def fix_max_chars(rule_key: str, command: bool = False) -> int:
     """The most a call may carry and still be sent a fix, for a verdict under this rule key.
 
-    Anything that is not advice or a credential is a layering rule's own id or
-    an unreadable write, both of which the proposer rewrites.
+    A layering rule's own id (any key the contract does not fix) on a Write, an
+    Edit or any call that runs no command is rewritten up to
+    FIX_REWRITE_MAX_CHARS and answered in words above it, up to its own ceiling.
+    A command keeps the rewrite ceiling whatever refused it, and so does a
+    verdict whose key says nothing: the proposer reads a command's writes again
+    for each question it asks of them, and each read parses the content anew, so
+    a refused heredoc of 6,000 characters cost as much as the whole reference
+    verdict (see FIX_LAYERING_ADVICE_MAX_CHARS).
     """
     if rule_key in _ADVICE_KEYS:
         return FIX_ADVICE_MAX_CHARS
     if rule_key == CREDENTIAL_KEY:
         return FIX_CREDENTIAL_MAX_CHARS
+    if rule_key and rule_key not in FIXED_KEYS and not command:
+        return FIX_LAYERING_ADVICE_MAX_CHARS
     return FIX_REWRITE_MAX_CHARS
+
+
+def runs_a_command(request: Any) -> bool:
+    """Whether the call runs a shell command, as the boundary guard reads a call."""
+    arguments = getattr(request, "arguments", None)
+    if not isinstance(arguments, dict):
+        return False
+    try:
+        action = ToolActionType(getattr(request, "action_type", None))
+    except ValueError:
+        action = ToolActionType.UNKNOWN
+    invocation = ToolInvocation(tool_name=str(getattr(request, "tool_name", "") or ""), action_type=action, arguments=arguments)
+    return shell_command(invocation) is not None
+
+
+def fix_options(rule_key: str) -> Dict[str, Any]:
+    """What the proposer is told besides the call, for a verdict under this rule key.
+
+    Every fix that rewrites the call is capped at FIX_REWRITE_MAX_CHARS of
+    rewriting, whatever else the call carries, so a call past that is answered
+    in words rather than rewritten. Advice and a credential are passed nothing:
+    their own ceilings already bound what they read.
+    """
+    if rule_key in _ADVICE_KEYS or rule_key == CREDENTIAL_KEY:
+        return {}
+    return {"max_content_chars": FIX_REWRITE_MAX_CHARS}
 
 
 def carries_more_than(arguments: Any, limit: int) -> bool:
@@ -737,7 +790,10 @@ class GovernanceEvaluator:
         gets none.
 
         Which ceiling applies depends on what the fix has to do, read off the
-        verdict's rule key before the proposer is asked: see fix_max_chars.
+        verdict's rule key and whether the call runs a command, before the
+        proposer is asked: see fix_max_chars. A fix that rewrites the call is
+        told to rewrite no more than FIX_REWRITE_MAX_CHARS (fix_options), so a
+        layering refusal between that and its own ceiling is answered in words.
 
         No `phrase` is passed. A model call has no place inside a verdict's
         latency, and the summary the proposer writes is already one clean line.
@@ -752,9 +808,10 @@ class GovernanceEvaluator:
             return None
         try:
             key = rule_key if rule_key is not None else GovernanceEvaluator._rule_key(result, rules)
-            if carries_more_than(getattr(request, "arguments", None), fix_max_chars(key)):
+            limit = fix_max_chars(key, runs_a_command(request))
+            if carries_more_than(getattr(request, "arguments", None), limit):
                 return None
-            return propose_fix(request, result, rules)
+            return propose_fix(request, result, rules, **fix_options(key))
         except Exception as exc:
             # The proposer never raises, and measuring a call that the gates
             # already read should not either; if either ever does, the caller
