@@ -6,8 +6,10 @@ somewhere in the text: the bucket is private, encrypted and versioned and
 answers only this distribution; the pages origin uses origin access control;
 the API origin is the existing API over TLS; every behavior carries the
 security headers; the web ACL has its four rules with metrics on, and its body
-rules count instead of blocking a tool call's source code. Nothing here calls
-AWS.
+rules count instead of blocking a tool call's source code; both API origins
+send the edge secret, and every API behavior tells the function the viewer's
+host, under header names the code reads. Nothing here calls AWS; the viewer
+host function's code is run by node when node is installed.
 """
 from __future__ import annotations
 
@@ -257,6 +259,8 @@ def test_the_staged_origin_is_the_same_api_with_nothing_prefixed() -> None:
     assert staged["DomainName"] == {"Ref": "ApiDomainName"}
     assert "OriginPath" not in staged
     assert staged["CustomOriginConfig"] == ORIGINS["api"]["CustomOriginConfig"], "the two differ only in the path"
+    assert staged["OriginCustomHeaders"] == ORIGINS["api"]["OriginCustomHeaders"], "the two differ only in the path"
+    assert set(staged) == set(ORIGINS["api"]) - {"OriginPath"}
     assert set(ORIGINS) == {"web", "api", "api-stage"}
     uses = [b for b in BEHAVIORS if b["TargetOriginId"] == "api-stage"]
     assert [b["PathPattern"] for b in uses] == [{"Fn::Sub": "${ApiStagePath}/*"}], (
@@ -495,3 +499,187 @@ def test_the_outputs_publish_web_and_the_owner_read(name: str, value: dict) -> N
 
 def test_the_site_url_output_carries_the_trailing_slash() -> None:
     assert TEMPLATE["Outputs"]["SiteUrl"]["Value"] == {"Fn::Sub": "https://${Distribution.DomainName}/"}
+
+
+# --- the edge tells the function who is calling ------------------------------------------------
+#
+# The function believes the viewer's address and host name only on a request
+# that carries the edge's secret (security_middleware.edge_request_is_trusted),
+# so these check the three halves the edge owns: the secret goes to both API
+# origins, the viewer's address and host reach the origin, and the names agree
+# with the ones the code reads.
+
+# From the CloudFront developer guide, "Add custom headers to origin requests":
+# the headers CloudFront refuses to add as origin custom headers.
+CUSTOM_ORIGIN_HEADER_DENYLIST = {
+    "cache-control", "connection", "content-length", "cookie", "host", "if-match", "if-modified-since",
+    "if-none-match", "if-range", "if-unmodified-since", "max-forwards", "pragma", "proxy-authenticate",
+    "proxy-authorization", "proxy-connection", "range", "request-range", "te", "trailer", "transfer-encoding",
+    "upgrade", "via", "x-real-ip",
+}
+CUSTOM_ORIGIN_HEADER_DENIED_PREFIXES = ("x-amz-", "x-edge-")
+# From "Restrictions on all edge functions": headers a function may not add, and
+# the ones it may read but not change in a viewer request.
+FUNCTION_DISALLOWED_HEADERS = {
+    "connection", "expect", "keep-alive", "proxy-authenticate", "proxy-authorization", "proxy-connection",
+    "trailer", "upgrade", "x-accel-buffering", "x-accel-charset", "x-accel-limit-rate", "x-accel-redirect",
+    "x-amzn-auth", "x-amzn-cf-billing", "x-amzn-cf-id", "x-amzn-cf-xff", "x-amzn-errortype",
+    "x-amzn-fle-profile", "x-amzn-header-count", "x-amzn-header-order", "x-amzn-lambda-integration-tag",
+    "x-amzn-requestid", "x-cache", "x-forwarded-proto", "x-real-ip", "cloudfront-viewer-cert-pem",
+    "client-cert", "client-cert-chain",
+}
+FUNCTION_DISALLOWED_PREFIXES = ("x-amz-cf-", "x-edge-")
+FUNCTION_READ_ONLY_IN_VIEWER_REQUEST = {"cdn-loop", "content-length", "host", "transfer-encoding", "via"}
+FUNCTION = RESOURCES["ViewerHostFunction"]
+FUNCTION_ARN = {"Fn::GetAtt": ["ViewerHostFunction", "FunctionMetadata.FunctionARN"]}
+
+
+def _middleware():
+    from threefold.infrastructure import security_middleware
+
+    return security_middleware
+
+
+def test_the_edge_secret_is_a_long_hidden_parameter_with_no_default() -> None:
+    secret = PARAMETERS["EdgeOriginSecret"]
+    assert secret["Type"] == "String"
+    assert secret["NoEcho"] is True, "describe-stacks would print it"
+    assert "Default" not in secret, "an edge must never deploy without a secret"
+    assert secret["MinLength"] >= _middleware().MIN_EDGE_SECRET_LENGTH == 32
+    assert secret["MaxLength"] <= 1783, "CloudFront's limit on an origin custom header value"
+
+
+@pytest.mark.parametrize(
+    "value, accepted",
+    [
+        ("acmeSyntheticEdgeSecret_0123456789-abcdefghijklmnopqrstuvwxyzAB", True),
+        ("a" * 32, True),
+        ("a" * 31, False),
+        ("acme synthetic edge secret with spaces 0123456789", False),
+        ("acme-synthetic-edge-secret-0123456789-abcdef\n", False),
+        ("acme-synthetic-edge-secret-0123456789-abcdef;", False),
+    ],
+)
+def test_the_edge_secret_is_url_safe_and_long_enough(value: str, accepted: bool) -> None:
+    """The alphabet secrets.token_urlsafe writes, and the length the function insists on."""
+    secret = PARAMETERS["EdgeOriginSecret"]
+    fits = bool(re.fullmatch(secret["AllowedPattern"], value)) and secret["MinLength"] <= len(value) <= secret["MaxLength"]
+    assert fits is accepted
+
+
+def test_both_api_origins_send_the_secret_and_the_bucket_does_not() -> None:
+    """A request through /prod/* goes to api-stage; without the header there it would be counted as the edge."""
+    name = _middleware().EDGE_SECRET_HEADER
+    for origin_id in ("api", "api-stage"):
+        headers = ORIGINS[origin_id]["OriginCustomHeaders"]
+        assert headers == [{"HeaderName": name, "HeaderValue": {"Ref": "EdgeOriginSecret"}}], origin_id
+    assert "OriginCustomHeaders" not in ORIGINS["web"], "S3 reads no header of ours"
+
+
+def test_the_secret_header_is_one_cloudfront_will_add() -> None:
+    name = _middleware().EDGE_SECRET_HEADER.lower()
+    assert name not in CUSTOM_ORIGIN_HEADER_DENYLIST
+    assert not name.startswith(CUSTOM_ORIGIN_HEADER_DENIED_PREFIXES)
+    assert re.fullmatch(r"[A-Za-z0-9-]+", name), "a plain header token"
+
+
+def test_the_viewer_host_function_is_published_and_runs_the_current_runtime() -> None:
+    assert FUNCTION["Type"] == "AWS::CloudFront::Function"
+    properties = FUNCTION["Properties"]
+    assert properties["AutoPublish"] is True, "only a LIVE function can be associated"
+    assert properties["FunctionConfig"]["Runtime"] == "cloudfront-js-2.0"
+    assert properties["FunctionConfig"]["Comment"]
+    assert properties["Name"] == {"Fn::Sub": "${AWS::StackName}-viewer-host"}, "a second edge must not collide"
+    assert isinstance(properties["FunctionCode"], str), "plain code, never a !Sub that could eat ${...}"
+
+
+def test_the_function_copies_host_into_the_header_the_code_reads() -> None:
+    code = FUNCTION["Properties"]["FunctionCode"]
+    header = _middleware().VIEWER_HOST_HEADER.lower()
+    assert f"request.headers['{header}'] = {{ value: host.value }}" in code
+    assert "request.headers.host" in code
+    assert f"delete request.headers['{header}']" in code, "a viewer's own value is removed when there is no Host"
+    assert "${" not in code
+
+
+def test_the_function_adds_a_header_edge_functions_may_add() -> None:
+    header = _middleware().VIEWER_HOST_HEADER.lower()
+    assert header not in FUNCTION_DISALLOWED_HEADERS
+    assert not header.startswith(FUNCTION_DISALLOWED_PREFIXES)
+    assert header not in FUNCTION_READ_ONLY_IN_VIEWER_REQUEST
+    assert not header.startswith("cloudfront-"), "CloudFront's own header names are its to set"
+
+
+def test_every_api_behavior_runs_the_function_on_the_viewer_request() -> None:
+    for behavior in API_BEHAVIORS:
+        assert behavior["FunctionAssociations"] == [{"EventType": "viewer-request", "FunctionARN": FUNCTION_ARN}], (
+            repr(behavior["PathPattern"])
+        )
+
+
+def test_the_bucket_behaviors_do_not_run_the_function() -> None:
+    """S3 reads no header of ours, and every run is billed."""
+    for behavior in [DISTRIBUTION["DefaultCacheBehavior"], *[b for b in BEHAVIORS if b["TargetOriginId"] == "web"]]:
+        assert "FunctionAssociations" not in behavior
+
+
+def test_the_viewer_address_and_host_reach_the_origin() -> None:
+    """AllViewerExceptHostHeader forwards both, by its documentation.
+
+    "Use managed origin request policies": the policy includes every viewer
+    header except Host, and "all device type and viewer location headers";
+    "Add CloudFront request headers" lists CloudFront-Viewer-Address among the
+    viewer location headers. The function's header is part of the viewer
+    request by the time the policy applies. A policy that forwarded Host
+    instead would be refused by API Gateway, so no other managed policy fits.
+    """
+    for behavior in API_BEHAVIORS:
+        assert behavior["OriginRequestPolicyId"] == ALL_VIEWER_EXCEPT_HOST_HEADER, repr(behavior["PathPattern"])
+    assert _middleware().VIEWER_ADDRESS_HEADER == "CloudFront-Viewer-Address"
+    assert not [r for r in RESOURCES.values() if r["Type"] == "AWS::CloudFront::OriginRequestPolicy"], (
+        "a custom policy would have to be shown to forward both; the managed one is documented to"
+    )
+
+
+def _run_function(event: dict) -> dict:
+    """The function's code run by node, the closest runtime this machine has to CloudFront's."""
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not on this machine; the function's text is still checked above")
+    script = (
+        FUNCTION["Properties"]["FunctionCode"]
+        + "\nconst out = handler(JSON.parse(process.argv[1]));\nprocess.stdout.write(JSON.stringify(out));\n"
+    )
+    result = subprocess.run(
+        [node, "-e", script, json.dumps(event)], capture_output=True, text=True, timeout=30, check=True
+    )
+    return json.loads(result.stdout)
+
+
+def _viewer_request(headers: dict) -> dict:
+    request = {"method": "GET", "uri": "/install.py", "querystring": {}, "cookies": {}, "headers": headers}
+    return {"version": "1.0", "context": {"eventType": "viewer-request"}, "request": request}
+
+
+@pytest.mark.parametrize(
+    "headers, expected",
+    [
+        ({"host": {"value": "d1acme0edge.cloudfront.net"}}, "d1acme0edge.cloudfront.net"),
+        (
+            {"host": {"value": "d1acme0edge.cloudfront.net"}, "x-threefold-viewer-host": {"value": "acme.example"}},
+            "d1acme0edge.cloudfront.net",
+        ),
+        ({"x-threefold-viewer-host": {"value": "acme.example"}}, None),
+        ({}, None),
+    ],
+)
+def test_the_function_sets_the_viewer_host_and_nothing_a_viewer_sent(headers: dict, expected) -> None:
+    request = _run_function(_viewer_request(headers))
+    value = request["headers"].get("x-threefold-viewer-host")
+    assert (value["value"] if value else None) == expected
+    assert request["uri"] == "/install.py" and request["method"] == "GET", "the request is otherwise untouched"
+    if "host" in headers:
+        assert request["headers"]["host"] == headers["host"], "Host is read-only in a viewer request"
