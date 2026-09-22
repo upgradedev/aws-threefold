@@ -24,9 +24,10 @@ only ever report to its own local server.
 A Claude Code login token read from a token file (credentials.py) is placed in
 one environment only, the agent process's, and only for a run with a
 configuration folder of its own. It is never on a command line, in a file the
-harness writes, or in a row: the sanitiser replaces it in everything recorded,
-and after each run every file under the run's folder is searched for it and
-any copy found is overwritten (scrub_secret).
+harness writes, or in a row: the sanitiser replaces it, in every text shape a
+copy can take, in everything recorded, and after each run everything under the
+run's folder is searched for it, names included, and any copy found is
+removed without ever writing through a link (scrub_secret).
 
 What the agent itself can reach is narrower than the machine but not sealed.
 Claude Code confines its file edits to the repository, reads outside the
@@ -40,6 +41,7 @@ reason to leave its repository and the environment removes the easy ways
 """
 from __future__ import annotations
 
+import base64
 import datetime
 import hashlib
 import importlib.util
@@ -209,6 +211,66 @@ def uses_rules(condition: str) -> bool:
     return condition.startswith("prompt")
 
 
+REDACTED = "<redacted>"
+# What a name that held the secret is renamed to: `<` and `>` are not allowed in Windows file names.
+REDACTED_NAME = "REDACTED"
+# A base64 fragment shorter than this could turn up by chance, so it is not searched for.
+_MIN_FRAGMENT = 16
+
+
+def _base64_fragments(data: bytes) -> List[str]:
+    """The part of the secret's base64 that is the same wherever the secret sits in a longer encoded text.
+
+    Base64 turns every three bytes into four characters, so the characters a
+    copy produces depend on where it starts: three alignments. For each, the
+    first group (which mixes in the bytes before) and a last partial group
+    (which mixes in the bytes after) are dropped, and what remains is only
+    the secret's. Both alphabets are covered: `+/` and the URL-safe `-_`.
+    """
+    fragments: List[str] = []
+    for offset in range(3):
+        encoded = base64.b64encode(b"\0" * offset + data).decode("ascii").rstrip("=")
+        fragment = encoded[4 if offset else 0: len(encoded) - len(encoded) % 4]
+        if len(fragment) >= _MIN_FRAGMENT:
+            fragments += [fragment, fragment.replace("+", "-").replace("/", "_")]
+    return list(dict.fromkeys(fragments))
+
+
+def secret_texts(secret: str) -> List[str]:
+    """The secret and the text shapes a copy of it can take, longest first: as it is, JSON-escaped, hex, base64.
+
+    JSON-escaped means character by character (`\\u0061...`, hex digits in
+    either case), which is how a JSON writer may store it. A copy the agent
+    transformed any other way, encrypted or split in pieces, is not found by
+    any search; keeping the token out of the agent's shell is what guards
+    against that.
+    """
+    if not secret:
+        return []
+    raw = secret.encode("utf-8")
+    escaped = "".join(f"\\u{ord(character):04x}" for character in secret)
+    forms = [secret, escaped, escaped.upper().replace("\\U", "\\u"),
+             raw.hex(), raw.hex().upper(), *_base64_fragments(raw)]
+    return sorted(dict.fromkeys(forms), key=len, reverse=True)
+
+
+def secret_forms(secret: str) -> List[Tuple[bytes, bytes]]:
+    """The byte shapes a copy of the secret can take in a file, each with what replaces it there.
+
+    Every text shape of secret_texts in UTF-8, and the secret itself in
+    UTF-16, little and big endian, which is what Windows tools write.
+    """
+    forms = [(text.encode("utf-8"), REDACTED.encode("ascii")) for text in secret_texts(secret)]
+    if secret:
+        forms += [(secret.encode(codec), REDACTED.encode(codec)) for codec in ("utf-16-le", "utf-16-be")]
+    return forms
+
+
+def name_forms(secret: str) -> List[str]:
+    """The shapes of the secret a file or folder name can hold: those of secret_texts with no path separator in them."""
+    return [text for text in secret_texts(secret) if "/" not in text and "\\" not in text]
+
+
 class Sanitiser:
     """Takes this machine's paths, and any secret it is given, out of anything that is recorded, since results are committed."""
 
@@ -223,13 +285,14 @@ class Sanitiser:
             for variant in {raw, raw.replace("\\", "/"), raw.replace("\\", "\\\\")}:
                 self._pairs.append((variant, label))
         self._pairs.sort(key=lambda pair: len(pair[0]), reverse=True)
-        # Replaced first and before truncating, so no prefix of a secret survives a cut either.
-        self._secrets = [secret for secret in secrets if secret]
+        # Replaced first and before truncating, so no prefix of a secret survives a cut either, in every
+        # text shape a copy can take: a file name holding the token's hex is recorded as a changed file.
+        self._secrets = [form for secret in secrets for form in secret_texts(secret)]
 
     def __call__(self, text: Any, limit: int = 400) -> str:
         text = "" if text is None else str(text)
         for secret in self._secrets:
-            text = text.replace(secret, "<redacted>")
+            text = text.replace(secret, REDACTED)
         for raw, label in self._pairs:
             text = text.replace(raw, label)
             text = text.replace(raw.lower(), label)
@@ -1271,34 +1334,94 @@ def baseline_for(task: Task, scratch: Path) -> checks.CheckResult:
 
 # --- one run --------------------------------------------------------------------------
 
-def scrub_secret(root: Path, secret: str, repo: Optional[Path] = None) -> List[str]:
-    """Every file under root that holds the secret, which is overwritten there; the paths, relative to root.
+def _is_link(path: Path) -> bool:
+    """A symbolic link or, on Windows, a junction: never read or written through, and removed rather than renamed.
 
-    The harness itself writes the token nowhere. This is the proof that
+    Python 3.11 reports a junction as neither a link nor anything else
+    special, so its reparse tag is read. A path that cannot be examined
+    counts as a link, which is the side that never touches it.
+    """
+    try:
+        status = os.lstat(path)
+    except OSError:
+        return True
+    tags = {getattr(stat, "IO_REPARSE_TAG_MOUNT_POINT", None), getattr(stat, "IO_REPARSE_TAG_SYMLINK", None)} - {None}
+    return stat.S_ISLNK(status.st_mode) or getattr(status, "st_reparse_tag", 0) in tags
+
+
+def _redacted_name(path: Path, forms: Sequence[str]) -> Path:
+    name = path.name
+    for form in forms:
+        name = name.replace(form, REDACTED_NAME)
+    target, number = path.with_name(name), 1
+    while os.path.lexists(target):
+        number += 1
+        target = path.with_name(f"{name}.{number}")
+    return target
+
+
+def scrub_secret(root: Path, secret: str, repo: Optional[Path] = None) -> List[str]:
+    """Every file under root that holds the secret, and every name that does; each copy removed; the paths, relative to root.
+
+    The harness itself writes the token nowhere. This is the check that
     nothing else did either, such as an agent echoing its environment into a
-    file, or Claude Code keeping a copy in the run's configuration folder. Git
-    stores committed files compressed, where a byte search cannot see them,
-    so the repository's objects are read through `git cat-file`; if one holds
-    the secret, the repository's .git folder is deleted, after judging, since
-    rewriting history is not the harness's business. Nothing is followed
-    through a link or a Windows junction: a folder or file whose real path is
-    outside root is passed over, so the owner's token file itself can never be
-    reached through one an agent made.
+    file, or Claude Code keeping a copy in the run's configuration folder. It
+    looks for the shapes in secret_forms (UTF-8, UTF-16, JSON-escaped, hex,
+    base64) in every file's contents, and for the secret in every file,
+    folder and link name and link target.
+
+    A file that holds it is rewritten without it, through a new file renamed
+    into place, never by writing into the file itself. A file with more than
+    one name (a hard link) is not rewritten at all: its name here is removed
+    and the file behind it is left alone, because the other name could be the
+    owner's token file, which an agent can link to from inside the run
+    without any special right. Nothing is followed through a symbolic link
+    or a Windows junction: a folder or file whose real path is outside root
+    is passed over, and a link whose name or target holds the secret is
+    removed, never what it points to. A name that holds the secret is renamed
+    once the search is done, deepest first, so the search never loses its way.
+
+    Git stores committed files compressed, where a byte search cannot see
+    them, so the repository's objects are read through `git cat-file`; if one
+    holds the secret, the repository's .git folder is deleted, after judging,
+    since rewriting history is not the harness's business.
     """
     if not secret:
         return []
-    needle = secret.encode("utf-8")
+    forms = secret_forms(secret)
+    names = name_forms(secret)
     found: List[str] = []
     root = Path(root)
     real_root = root.resolve()
+    named: List[Path] = []
 
     def inside(path: Path) -> bool:
         try:
-            return not path.is_symlink() and path.resolve().is_relative_to(real_root)
+            return not _is_link(path) and path.resolve().is_relative_to(real_root)
         except OSError:
             return False
 
+    def holds_name(text: str) -> bool:
+        return any(form in text for form in names)
+
+    def shown(path: Path) -> str:
+        # The path as recorded: a name holding the secret's hex or base64 is not passed on in that shape either.
+        text = path.relative_to(root).as_posix()
+        for form in names:
+            text = text.replace(form, REDACTED)
+        return text
+
     for folder, directories, files in os.walk(root, followlinks=False):
+        for name in [*directories, *files]:
+            path = Path(folder) / name
+            target = ""
+            if _is_link(path):
+                try:
+                    target = os.readlink(path)
+                except (OSError, ValueError):
+                    target = ""
+            if holds_name(name) or holds_name(target):
+                named.append(path)
         directories[:] = [name for name in directories if inside(Path(folder) / name)]
         for name in files:
             path = Path(folder) / name
@@ -1308,17 +1431,15 @@ def scrub_secret(root: Path, secret: str, repo: Optional[Path] = None) -> List[s
                 data = path.read_bytes()
             except OSError:
                 continue
-            if needle in data:
-                shown = path.relative_to(root).as_posix()
-                try:
-                    _writable(path)
-                    path.write_bytes(data.replace(needle, b"<redacted>"))
-                except OSError:
-                    try:
-                        path.unlink()
-                    except OSError:
-                        shown += " (could not be overwritten or deleted)"
-                found.append(shown)
+            held = [(needle, replacement) for needle, replacement in forms if needle in data]
+            if not held:
+                continue
+            found.append(shown(path) + _remove_copy(path, data, held))
+    # Deepest first, so renaming a folder never moves a path still waiting in the list.
+    for path in sorted(set(named), key=lambda item: len(item.parts), reverse=True):
+        # A hard link whose contents held the secret is gone already, and its name with it.
+        if os.path.lexists(path):
+            found.append(shown(path) + _remove_name(path, names))
     if repo is not None and (Path(repo) / ".git").is_dir():
         try:
             objects = subprocess.run(
@@ -1327,12 +1448,65 @@ def scrub_secret(root: Path, secret: str, repo: Optional[Path] = None) -> List[s
             ).stdout
         except (OSError, subprocess.SubprocessError):
             objects = b""
-        if needle in objects:
+        if any(needle in objects for needle, _ in forms):
             git_dir = Path(repo) / ".git"
             remove_tree(git_dir)
             outcome = "could not be deleted" if git_dir.exists() else "deleted"
-            found.append(git_dir.relative_to(root).as_posix() + f" ({outcome}: a commit held it)")
+            found.append(shown(git_dir) + f" ({outcome}: a commit held it)")
     return sorted(set(found))
+
+
+def _remove_copy(path: Path, data: bytes, held: Sequence[Tuple[bytes, bytes]]) -> str:
+    """Takes the secret out of one file; returns a note for the record, empty when the file was simply rewritten.
+
+    A hard link is only ever unlinked: writing into it, or even clearing its
+    read-only bit, would change the file behind it, wherever its other name is.
+    """
+    try:
+        linked = os.lstat(path).st_nlink > 1
+    except OSError:
+        linked = True
+    if linked:
+        try:
+            path.unlink()
+        except OSError:
+            return " (a hard link: could not be removed)"
+        return " (a hard link: this name was removed and the file behind it left alone)"
+    for needle, replacement in held:
+        data = data.replace(needle, replacement)
+    partial = path.with_name(f".{path.name}.{os.getpid()}.scrub")
+    try:
+        partial.write_bytes(data)
+        _writable(path)
+        os.replace(partial, path)
+        return ""
+    except OSError:
+        try:
+            partial.unlink()
+        except OSError:
+            pass
+    try:
+        path.unlink()
+    except OSError:
+        return " (could not be overwritten or deleted)"
+    return " (could not be overwritten: deleted)"
+
+
+def _remove_name(path: Path, forms: Sequence[str]) -> str:
+    """Renames a file or folder whose name holds the secret, or removes a link whose name or target does."""
+    if _is_link(path):
+        for remove in (os.unlink, os.rmdir):
+            try:
+                remove(path)
+                return " (a link whose name or target held it: the link was removed)"
+            except OSError:
+                continue
+        return " (a link whose name or target held it: could not be removed)"
+    try:
+        os.rename(path, _redacted_name(path, forms))
+        return " (its name held it: renamed)"
+    except OSError:
+        return " (its name held it: could not be renamed)"
 
 
 def _writable(path: Path) -> None:
@@ -1524,14 +1698,17 @@ def run_one(task: Task, condition: str, rep: int, plan: RunPlan, base_env: Optio
     return redact(row, secret) if secret else row
 
 
-def redact(value: Any, secret: str) -> Any:
-    """The value with the secret replaced in every string it holds, keys included: the last net before a row is kept."""
+def redact(value: Any, secret: str, _texts: Optional[Sequence[str]] = None) -> Any:
+    """The value with the secret, in every text shape, replaced in every string it holds, keys included: the last net before a row is kept."""
     if not secret:
         return value
+    texts = secret_texts(secret) if _texts is None else _texts
     if isinstance(value, str):
-        return value.replace(secret, "<redacted>")
+        for text in texts:
+            value = value.replace(text, REDACTED)
+        return value
     if isinstance(value, dict):
-        return {redact(key, secret): redact(item, secret) for key, item in value.items()}
+        return {redact(key, secret, texts): redact(item, secret, texts) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
-        return [redact(item, secret) for item in value]
+        return [redact(item, secret, texts) for item in value]
     return value

@@ -15,15 +15,24 @@ token only whether it was set and its sha256 are logged, never its value, and
 any copy of it in the arguments is replaced before they are logged, with a
 flag saying so.
 
-Modes: ok, expired, not_logged_in, usage_limit, overloaded, and leak (Claude
-Code only), which behaves like ok but also tries every way of putting the
-token it was given where the harness must not let it stay: the transcript,
-its stderr, a file in the repository committed to git, and its configuration
-folder. `modes` (a list) gives one mode per call, in order, the last repeated.
-Not a test itself, and never used by a real run.
+Modes: ok, expired, not_logged_in, usage_limit, overloaded, and:
+
+- stderr_usage_limit: says it hit a usage limit on stderr alone and exits 1
+  without printing a result, as an agent may when the limit strikes first;
+- leak (Claude Code only): behaves like ok but also puts the token it was
+  given where the harness must not let it stay: the transcript, its stderr, a
+  file in the repository committed to git, and its configuration folder;
+- hide (Claude Code only): behaves like ok but hides the token in the shapes a
+  plain search misses: in file and folder names (as text and as hex), as
+  UTF-16, JSON-escaped in the transcript, inside base64, and, when the
+  behaviour names `link_to`, as a hard link to that file in the repository.
+
+`modes` (a list) gives one mode per call, in order, the last repeated. Not a
+test itself, and never used by a real run.
 """
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -77,11 +86,11 @@ MESSAGES = {
 }
 
 
-def install(bin_dir: Path, agent: str, mode: str = "ok", modes: Optional[List[str]] = None) -> Path:
+def install(bin_dir: Path, agent: str, mode: str = "ok", modes: Optional[List[str]] = None, **extra: Any) -> Path:
     """Writes the launcher for `agent` into bin_dir, with its behaviour, and returns the launcher's path."""
     bin_dir = Path(bin_dir)
     bin_dir.mkdir(parents=True, exist_ok=True)
-    set_behaviour(bin_dir, agent, mode, modes)
+    set_behaviour(bin_dir, agent, mode, modes, **extra)
     python, script = sys.executable, str(Path(__file__).resolve())
     if os.name == "nt":
         launcher = bin_dir / f"{agent}.cmd"
@@ -93,8 +102,10 @@ def install(bin_dir: Path, agent: str, mode: str = "ok", modes: Optional[List[st
     return launcher
 
 
-def set_behaviour(bin_dir: Path, agent: str, mode: str = "ok", modes: Optional[List[str]] = None) -> None:
-    (Path(bin_dir) / f"{agent}.behaviour.json").write_text(json.dumps({"mode": mode, "modes": modes or []}), encoding="utf-8")
+def set_behaviour(bin_dir: Path, agent: str, mode: str = "ok", modes: Optional[List[str]] = None, **extra: Any) -> None:
+    """How the stand-in behaves from its next call; `extra` holds a mode's own settings, such as hide's `link_to`."""
+    behaviour = {"mode": mode, "modes": modes or [], **extra}
+    (Path(bin_dir) / f"{agent}.behaviour.json").write_text(json.dumps(behaviour), encoding="utf-8")
     (Path(bin_dir) / f"{agent}.count").write_text("0", encoding="utf-8")
 
 
@@ -107,8 +118,12 @@ def calls(bin_dir: Path, agent: str) -> List[Dict[str, Any]]:
 
 # --- running as the executable ----------------------------------------------------------
 
+def _behaviour(bin_dir: Path, agent: str) -> Dict[str, Any]:
+    return json.loads((bin_dir / f"{agent}.behaviour.json").read_text(encoding="utf-8"))
+
+
 def _mode(bin_dir: Path, agent: str) -> str:
-    behaviour = json.loads((bin_dir / f"{agent}.behaviour.json").read_text(encoding="utf-8"))
+    behaviour = _behaviour(bin_dir, agent)
     counter = bin_dir / f"{agent}.count"
     index = int(counter.read_text(encoding="utf-8") or "0")
     counter.write_text(str(index + 1), encoding="utf-8")
@@ -182,11 +197,36 @@ def fake_claude(bin_dir: Path, argv: List[str]) -> int:
         config = os.environ.get("CLAUDE_CONFIG_DIR")
         if config:
             Path(config, ".credentials.json").write_text(json.dumps({"accessToken": token}), encoding="utf-8")
+    if mode == "hide" and token:
+        _hide(token, _behaviour(bin_dir, "claude"))
     _emit({"type": "result", "subtype": "success", "is_error": False, "terminal_reason": "completed", "num_turns": 2,
            "duration_ms": 1500, "duration_api_ms": 900, "total_cost_usd": 0.0123, "result": "ok",
            "usage": {"input_tokens": 12, "output_tokens": 34, "cache_read_input_tokens": 100, "cache_creation_input_tokens": 0},
            "permission_denials": []})
     return 0
+
+
+def _hide(token: str, behaviour: Dict[str, Any]) -> None:
+    """Puts the token, from the repository the stand-in runs in, where only a search for its other shapes finds it."""
+    link_to = behaviour.get("link_to")
+    if link_to:
+        try:
+            os.link(link_to, "copy.txt")
+        except OSError:
+            pass
+    Path(f"leak-{token}.txt").write_text("a file named after the token\n", encoding="utf-8")
+    Path(f"hex-{token.encode('utf-8').hex()}.txt").write_text("a file named after the token's hex\n", encoding="utf-8")
+    Path("notes.txt").write_bytes(token.encode("utf-16-le"))
+    Path("b64.txt").write_text(base64.b64encode(b"x" + token.encode("utf-8") + b"yz").decode("ascii") + "\n",
+                               encoding="utf-8")
+    escaped = "".join(f"\\u{ord(character):04x}" for character in token)
+    sys.stdout.write('{"type": "assistant", "message": {"content": [{"type": "text", "text": "' + escaped + '"}]}}\n')
+    sys.stdout.flush()
+    config = os.environ.get("CLAUDE_CONFIG_DIR")
+    if config:
+        folder = Path(config, f"cache-{token}")
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "entry.txt").write_text("kept in a folder named after the token\n", encoding="utf-8")
 
 
 def _codex_hook(repo: Path, payload: Dict[str, Any]) -> Optional[str]:
@@ -216,7 +256,7 @@ def fake_codex(bin_dir: Path, argv: List[str]) -> int:
         print(CODEX_EXEC_HELP)
         return 0
     if argv[:2] == ["login", "status"]:
-        behaviour = json.loads((bin_dir / "codex.behaviour.json").read_text(encoding="utf-8"))
+        behaviour = _behaviour(bin_dir, "codex")
         _log(bin_dir, "codex", argv, {"mode": behaviour.get("mode")})
         if behaviour.get("mode") == "not_logged_in":
             print("Not logged in")

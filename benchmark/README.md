@@ -37,17 +37,29 @@ or in anything it prints. The local Threefold server, the acceptance run
 (which executes code the agent wrote) and the hook are started without it;
 Claude Code 2.1.220 itself removes the variable from the environment of every
 process it starts (read from its binary, below), and the hook wrapper removes
-it again. After each run every file under the run's folder is searched for
-the token, git's objects included, and any copy is overwritten; the row lists
-where one was found in `token_found_in`, which should always be empty. A
+it again. After each run everything under the run's folder is searched for
+the token, git's objects included: in every file's contents as text (UTF-8 or
+UTF-16), JSON-escaped, hex or base64, and in every file, folder and link name
+and link target. A file holding it is rewritten without it through a new file
+renamed into place, a name holding it is renamed, and a link is removed,
+never what it points to. A file with a second name elsewhere (a hard link,
+which an agent can make to the owner's token file without any special right)
+is never written: only its name inside the run is removed, so the file behind
+it stays as it was. The row lists what was found in `token_found_in`. Empty
+means none of those shapes turned up; a copy an agent set out to disguise
+another way (encrypted, split in pieces) would not be seen by any search,
+which is why the token is kept out of the agent's shell in the first place.
+The row itself has every one of those text shapes replaced. A
 `CLAUDE_CODE_OAUTH_TOKEN` exported in the owner's shell is not used, and the
 runner says so: a token typed into a shell sits in its history.
 
 Codex keeps its login in `CODEX_HOME` (`codex login`); there is no token for
 the runner to handle, and its rows say `machine-login`.
 
-Check the login before a long matrix. It makes one trivial headless call the
-way a run would and prints `ok`, `expired`, `missing` or `limited` with the
+Check the login before a long matrix. It makes one trivial headless call with
+the login the matrix would use (so with `--isolation user-config` it leaves a
+token file unused, as the runs do) and prints `ok`, `expired`, `missing`,
+`limited` or `error` (a failure it does not recognise, or no answer) with the
 exact next step, and never the token:
 
     python benchmark/run.py --check-auth                  # Claude Code, with the token file when there is one

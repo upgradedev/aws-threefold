@@ -9,9 +9,11 @@ file is pointed at a path that does not exist, so no test can read a real one.
 """
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
+import re
 import secrets
 import shutil
 import subprocess
@@ -64,9 +66,39 @@ def token(tmp_path):
     return value, path
 
 
+_BASE64_RUN = re.compile(rb"[A-Za-z0-9+/_-]{24,}")
+
+
+def _decoded_base64(data: bytes):
+    """Every stretch of base64 in the data, decoded at each of its four starting points, so a copy is found wherever it sits."""
+    for match in _BASE64_RUN.finditer(data):
+        run_text = match.group(0).replace(b"-", b"+").replace(b"_", b"/")
+        for start in range(4):
+            part = run_text[start:]
+            part = part[: len(part) - len(part) % 4]
+            try:
+                yield base64.b64decode(part)
+            except ValueError:
+                continue
+
+
 def _files_holding(root: Path, needle: str):
-    data = needle.encode("utf-8")
-    return [path for path in Path(root).rglob("*") if path.is_file() and data in path.read_bytes()]
+    """Every path under root holding the token in a shape a leak could take, written here apart from the harness's own
+    search so it checks that search rather than repeating it: in a name (as text or hex), or in the contents as UTF-8,
+    UTF-16, JSON escapes, hex or base64."""
+    raw = needle.encode("utf-8")
+    escaped = "".join(f"\\u{ord(character):04x}" for character in needle)
+    shapes = [raw, needle.encode("utf-16-le"), needle.encode("utf-16-be"), escaped.encode(),
+              escaped.upper().replace("\\U", "\\u").encode(), raw.hex().encode(), raw.hex().upper().encode()]
+    holding = []
+    for path in Path(root).rglob("*"):
+        if needle in path.name or raw.hex() in path.name:
+            holding.append(path)
+        elif path.is_file() and not path.is_symlink():
+            data = path.read_bytes()
+            if any(shape in data for shape in shapes) or any(raw in decoded for decoded in _decoded_base64(data)):
+                holding.append(path)
+    return holding
 
 
 def _rows(results_dir: Path):
@@ -206,6 +238,102 @@ def test_a_token_the_agent_spilled_is_scrubbed_from_every_file_and_never_reaches
     assert _files_holding(tmp_path / "work", value) == []
     assert _files_holding(tmp_path / "results", value) == []
     assert value not in printed.out and value not in printed.err
+
+
+def test_a_token_hidden_in_names_encodings_and_a_hard_link_is_found_and_the_token_file_is_left_alone(
+        tmp_path, fake_bin, token, capsys):
+    """The stand-in names files and folders after the token, writes it as UTF-16, hex, base64 and JSON escapes, and
+    hard-links the owner's token file into the repository, as the reviewer's hostile agent did."""
+    value, path = token
+    probe = tmp_path / "probe-link"
+    try:
+        os.link(path, probe)
+        probe.unlink()
+        links = True
+    except OSError:
+        links = False
+    fake_agents.set_behaviour(fake_bin, "claude", "hide", link_to=str(path))
+    code = _run(tmp_path, "--conditions", "none", "--token-file", str(path))
+    printed = capsys.readouterr()
+    assert code == 0, printed.err
+    assert path.read_text(encoding="utf-8") == value + "\n", "the owner's token file was changed"
+    (row,) = _rows(tmp_path / "results")
+    found = row["token_found_in"]
+    run_dir = tmp_path / "work" / "orders-s3-archive--none--r1"
+    for expected in ("repo/notes.txt", "repo/b64.txt", "transcript.jsonl"):
+        assert expected in found
+    assert any(item.startswith("repo/leak-<redacted>.txt") and "renamed" in item for item in found)
+    assert any(item.startswith("repo/hex-<redacted>.txt") and "renamed" in item for item in found)
+    assert any(item.startswith("claude-config/cache-<redacted>") and "renamed" in item for item in found)
+    if links:
+        assert "repo/copy.txt (a hard link: this name was removed and the file behind it left alone)" in found
+        assert not (run_dir / "repo" / "copy.txt").exists() and os.stat(path).st_nlink == 1
+    assert (run_dir / "repo" / "leak-REDACTED.txt").is_file() and (run_dir / "claude-config" / "cache-REDACTED").is_dir()
+    serialised = json.dumps(row)
+    assert value not in serialised and value.encode().hex() not in serialised
+    assert _files_holding(tmp_path / "work", value) == []
+    assert _files_holding(tmp_path / "results", value) == []
+    assert value not in printed.out and value not in printed.err
+
+
+def test_scrubbing_never_writes_through_a_hard_link_to_a_file_outside_the_run(tmp_path):
+    secret = "acme-bench-fixture-" + secrets.token_hex(24)
+    owner = tmp_path / "owner" / "claude-oauth-token"
+    owner.parent.mkdir()
+    owner.write_text(secret + "\n", encoding="utf-8")
+    run_dir = tmp_path / "run"
+    (run_dir / "repo").mkdir(parents=True)
+    try:
+        os.link(owner, run_dir / "repo" / "copy.txt")
+    except OSError as error:
+        pytest.skip(f"this file system makes no hard links: {error}")
+    (run_dir / "plain.txt").write_text(f"token={secret}\n", encoding="utf-8")
+    found = harness.scrub_secret(run_dir, secret)
+    assert found == ["plain.txt", "repo/copy.txt (a hard link: this name was removed and the file behind it left alone)"]
+    assert owner.read_text(encoding="utf-8") == secret + "\n" and os.stat(owner).st_nlink == 1
+    assert not (run_dir / "repo" / "copy.txt").exists()
+    assert (run_dir / "plain.txt").read_text(encoding="utf-8") == "token=<redacted>\n"
+
+
+def _link_folder(link: Path, target: Path) -> bool:
+    """A folder link an agent could make without special rights: a symbolic link, or a junction on Windows."""
+    try:
+        os.symlink(target, link, target_is_directory=True)
+        return True
+    except (OSError, NotImplementedError):
+        pass
+    if os.name == "nt":
+        completed = subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(target)], capture_output=True)
+        return completed.returncode == 0 and link.exists()
+    return False
+
+
+def test_a_link_named_after_the_token_is_removed_and_what_it_points_to_is_left_alone(tmp_path):
+    secret = "acme-bench-fixture-" + secrets.token_hex(24)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "kept.txt").write_text(secret, encoding="utf-8")
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    link = run_dir / f"link-{secret}"
+    if not _link_folder(link, outside):
+        pytest.skip("this machine lets no folder link be made without special rights")
+    found = harness.scrub_secret(run_dir, secret)
+    assert found == ["link-<redacted> (a link whose name or target held it: the link was removed)"]
+    assert not os.path.lexists(link)
+    assert (outside / "kept.txt").read_text(encoding="utf-8") == secret
+
+
+def test_every_text_shape_of_the_token_is_redacted_from_what_is_recorded():
+    secret = "acme-bench-fixture-" + "d" * 40
+    sanitise = harness.Sanitiser(secrets=[secret])
+    hex_name = secret.encode().hex()
+    assert sanitise(f"repo/hex-{hex_name}.txt") == "repo/hex-<redacted>.txt"
+    assert harness.redact({"files_changed": [f"leak-{secret}.txt", f"hex-{hex_name}"]}, secret) == {
+        "files_changed": ["leak-<redacted>.txt", "hex-<redacted>"]}
+    for prefix in (b"", b"x", b"xy"):
+        encoded = base64.b64encode(prefix + secret.encode() + b"tail").decode()
+        assert "<redacted>" in sanitise(encoded, 1000)
 
 
 def test_a_token_exported_in_the_shell_is_not_used_and_the_owner_is_told(tmp_path, fake_bin, monkeypatch, capsys):
