@@ -276,7 +276,11 @@ provider, and that role does not exist yet [STATE-FILE], so every deploy so far
 was run by hand with section 1. Neither workflow deploys the edge or publishes
 the pages.
 
-To create the role, from the repository root:
+First check the trust policy's `sub` condition in
+`deploy/iam/github-trust.json`: it must read
+`repo:<owner>/<repository>:ref:refs/heads/main` for the one repository whose
+`main` branch is allowed to deploy, with no wildcard. Then create the role,
+from the repository root:
 
 ```bash
 aws iam create-role \
