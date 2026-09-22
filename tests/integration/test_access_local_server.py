@@ -99,17 +99,45 @@ def test_signing_out_reaches_the_handler(server, signed_in_store) -> None:
     assert json.loads(_request(server, "GET", "/api/auth/whoami", headers=bearer)[2])["authenticated"] is False
 
 
+def _listed(value: str) -> set:
+    return {item.strip() for item in value.split(",") if item.strip()}
+
+
 def test_the_preflight_allows_signing_out_with_a_bearer(server) -> None:
     status, headers, _ = _request(server, "OPTIONS", "/api/auth/sessions")
     assert status == 200
-    assert "DELETE" in headers["Access-Control-Allow-Methods"]
-    assert "Authorization" in headers["Access-Control-Allow-Headers"]
+    assert "DELETE" in _listed(headers["Access-Control-Allow-Methods"])
+    assert {"Authorization", "X-API-Key"} <= _listed(headers["Access-Control-Allow-Headers"]), (
+        "the key travels in either header, and the preflight has to allow both"
+    )
 
 
-def test_each_cors_header_is_sent_once(server) -> None:
-    _, headers, _ = _request(server, "GET", "/status")
+def test_the_local_preflight_allows_what_the_deployed_function_does(server) -> None:
+    """Two lists that drift apart make a page work locally and fail its preflight when deployed."""
+    from threefold.interfaces.api_handlers import CORS_HEADERS
+
+    _, headers, _ = _request(server, "OPTIONS", "/api/projects/Acme-Billing/reviews")
+    for name in ("Access-Control-Allow-Methods", "Access-Control-Allow-Headers"):
+        assert _listed(headers[name]) == _listed(CORS_HEADERS[name]), name
+    assert headers["Access-Control-Allow-Origin"] == CORS_HEADERS["Access-Control-Allow-Origin"]
+
+
+@pytest.mark.parametrize(
+    "method, path",
+    [
+        ("GET", "/status"),
+        ("OPTIONS", "/api/auth/sessions"),
+        ("DELETE", "/api/auth/sessions"),
+        ("GET", "/no-such-route"),
+        ("POST", "/policy/config"),
+        ("HEAD", "/status"),
+    ],
+)
+def test_each_cors_header_is_sent_once(server, method: str, path: str) -> None:
+    """Sent twice, a header reaches the browser as a list, and "*, *" is no origin at all."""
+    _, headers, _ = _request(server, method, path, {} if method == "POST" else None)
     for name in ("Access-Control-Allow-Origin", "Access-Control-Allow-Methods", "Access-Control-Allow-Headers"):
-        assert len(headers.get_all(name)) == 1, f"{name} was sent more than once"
+        assert len(headers.get_all(name) or []) == 1, f"{method} {path}: {name} was not sent exactly once"
 
 
 def test_the_bundle_arrives_as_a_zip_not_as_base64(server, package) -> None:
