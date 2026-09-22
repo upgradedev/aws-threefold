@@ -51,6 +51,7 @@ ORDINARY = [
     'find . -name "*.env" -maxdepth 2',
     "sed -n '/process.env/p' src/app.js",
     "awk '/secrets/ {print}' docs/notes.md",
+    "cat >> .gitignore <<'EOF'\n.env\n.env.local\nEOF",
 ]
 
 STILL_REFUSED = [
@@ -83,6 +84,24 @@ def test_ordinary_developer_work_is_approved(command: str) -> None:
 def test_a_real_reach_for_a_credential_store_is_refused(command: str) -> None:
     allowed, _ = _command(command)
     assert allowed is False, command
+
+
+def test_a_command_sent_word_by_word_is_read_the_same_way() -> None:
+    """Codex and Antigravity send argv, not a line, and a word is not a target path."""
+    searching = ToolInvocation(
+        tool_name="local_shell",
+        action_type=ToolActionType.COMMAND_EXEC,
+        arguments={"command": ["grep", "-rn", "process.env", "src/"]},
+    )
+    allowed, reason = ArchitecturalBoundaryGuard.evaluate_tool_boundary(searching, rules=DEFAULT_RULES)
+    assert allowed is True, reason
+
+    reading = ToolInvocation(
+        tool_name="local_shell",
+        action_type=ToolActionType.COMMAND_EXEC,
+        arguments={"command": ["cat", ".env"]},
+    )
+    assert ArchitecturalBoundaryGuard.evaluate_tool_boundary(reading, rules=DEFAULT_RULES)[0] is False
 
 
 def test_file_content_is_not_judged_as_a_target_path() -> None:

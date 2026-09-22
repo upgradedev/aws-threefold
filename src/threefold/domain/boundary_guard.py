@@ -284,12 +284,22 @@ class ArchitecturalBoundaryGuard:
             yield BoundaryFinding(CREDENTIAL_FOUND, secret_msg, label=secret_msg.rsplit(": ", 1)[-1])
             return
 
+        # What the call runs, read once: the writes it makes are judged in 2c,
+        # and the words it never opens are left out of the checks below, which
+        # would otherwise read a command's own search pattern as a file.
+        command = shell_command(invocation)
+        analysis = analysed(command, command_cwd(invocation)) if command is not None else None
+        spelled, not_a_file = not_file_words(command, analysis)
+
         # 2. Protected paths: the file the call names, found by shape as well as
         #    by argument name, since `notebook_path` was invisible to the four
         #    fixed keys this replaced. What a call *writes* is not a path it
         #    names, so an Edit whose new text is `process.env.PORT` is no longer
-        #    reported as a target path the agent cannot act on.
+        #    reported as a target path the agent cannot act on, and neither is
+        #    the `process.env` a command sent word by word is searching for.
         for candidate in target_paths(arguments):
+            if candidate in not_a_file:
+                continue
             for pattern in cls.PROTECTED_PATH_PATTERNS:
                 if pattern.search(candidate):
                     yield BoundaryFinding(
@@ -553,6 +563,10 @@ def not_file_words(command: Any, analysis: Optional[ShellAnalysis]) -> Tuple[Dic
     words: List[str] = []
     for argv in analysis.commands:
         words.extend(_words_that_are_not_files(list(argv)))
+    # What the command writes is text for a file, not a file it opens, exactly
+    # as an Edit's new text is. Without this a heredoc adding `.env` to
+    # .gitignore was refused while `echo ".env" >> .gitignore` was not.
+    words.extend(write.content for write in analysis.writes if write.content)
     words = [
         word
         for word in words
