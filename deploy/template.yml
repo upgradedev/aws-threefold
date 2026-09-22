@@ -91,6 +91,19 @@ Parameters:
       personal data, and describe-stacks would otherwise print it to anyone who
       can read the stack, including a CI log.
 
+  MonthlyBudgetUsd:
+    Type: Number
+    Default: 0
+    MinValue: 0
+    Description: >-
+      A monthly cost budget in US dollars that notifies the alarm topic when
+      actual spend passes 80% of it and when forecast spend passes all of it.
+      0, the default, creates no budget. A budget measures the account, not a
+      stack: Bedrock spend through the inference profile carries no stack tag
+      and is the cost most likely to run away, so a budget filtered to this
+      stack would miss it. Set it on one of the two stacks only, or the account
+      gets two budgets counting the same spend.
+
   AllowedProjectPattern:
     Type: String
     Default: '^Acme-[A-Za-z0-9-]{1,40}$'
@@ -951,11 +964,44 @@ Resources:
           ]
         }
 
+  # Optional, off by default: see MonthlyBudgetUsd. Its notifications go to
+  # the alarm topic, whose policy lets this account's budgets publish.
+  ThreefoldMonthlyBudget:
+    Type: AWS::Budgets::Budget
+    Condition: HasBudget
+    DependsOn: ThreefoldAlarmTopicPolicy
+    Properties:
+      Budget:
+        BudgetName: !Sub '${AWS::StackName}-account-monthly-cost'
+        BudgetType: COST
+        TimeUnit: MONTHLY
+        BudgetLimit:
+          Amount: !Ref MonthlyBudgetUsd
+          Unit: USD
+      NotificationsWithSubscribers:
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 80
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: SNS
+              Address: !Ref ThreefoldAlarmTopic
+        - Notification:
+            NotificationType: FORECASTED
+            ComparisonOperator: GREATER_THAN
+            Threshold: 100
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: SNS
+              Address: !Ref ThreefoldAlarmTopic
+
 # Each turns an operations parameter's value for "none" into no property or
 # no resource at all, rather than a resource configured with nothing.
 Conditions:
   CapConcurrency: !Not [!Equals [!Ref ReservedConcurrency, '0']]
   HasAlarmEmail: !Not [!Equals [!Ref AlarmEmail, '']]
+  HasBudget: !Not [!Equals [!Ref MonthlyBudgetUsd, '0']]
 
 Outputs:
   OperationsDashboardUrl:

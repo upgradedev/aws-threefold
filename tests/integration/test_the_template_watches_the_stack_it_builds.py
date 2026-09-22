@@ -688,3 +688,20 @@ def test_the_dashboard_alarm_widget_lists_every_alarm() -> None:
     body = _dashboard_body()
     listed = set(re.findall(r'"\$\{(\w+)\.Arn\}"', body))
     assert listed == set(_alarms()), "An alarm missing from the widget is an alarm nobody looks at"
+
+
+# ------------------------------------------------------------------ the budget
+
+
+def test_the_budget_is_off_unless_asked_for_and_reports_to_the_topic() -> None:
+    assert _default("MonthlyBudgetUsd") == "0", "A default deploy must create nothing billable it was not asked for"
+    budget = RESOURCES["ThreefoldMonthlyBudget"]
+    assert _type(budget) == "AWS::Budgets::Budget"
+    assert re.search(r"^    Condition: HasBudget$", budget, re.M)
+    assert re.search(r"^  HasBudget: !Not \[!Equals \[!Ref MonthlyBudgetUsd, '0'\]\]$", _conditions(), re.M)
+    assert re.search(r"^        BudgetName: !Sub '\$\{AWS::StackName\}-[a-z-]+'$", budget, re.M)
+    assert re.search(r"^          Amount: !Ref MonthlyBudgetUsd$", budget, re.M)
+    assert budget.count("Address: !Ref ThreefoldAlarmTopic") == 2
+    assert re.search(r"^    DependsOn: ThreefoldAlarmTopicPolicy$", budget, re.M), (
+        "Budgets checks that it may publish to the topic when the notification is created"
+    )
