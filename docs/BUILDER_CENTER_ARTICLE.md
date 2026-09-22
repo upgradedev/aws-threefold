@@ -74,8 +74,10 @@ No model writes the fix.
 
 A rule switched on everywhere at once is a rule that gets uninstalled on its
 first false alarm. So every connected project starts in **Observe**: calls are
-judged and recorded, and nothing is refused except a credential, which the hook
-refuses on the developer's own machine. The dashboard shows what each rule
+judged and recorded, and no rule refuses anything. A credential is still
+refused by the hook on the developer's own machine, and so is a request the
+service cannot take at all, such as a body over 1 MB, since the hook reads any
+4xx answer other than 429 as a refusal. The dashboard shows what each rule
 *would* have refused. An operator marks each of those correct or a false alarm,
 and each rule reads its state from the labels: **Ready** when everything it
 flagged was correct, **Quiet** when it flagged nothing, **Noisy** after a false

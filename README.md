@@ -13,8 +13,11 @@ before it runs. Deterministic gates decide: a domain file importing
 infrastructure under the architect's layering rules, a credential in the
 arguments, a write that switches the hooks off, the same call repeating, a
 spend ceiling. A team connects a repository with one command, and every project
-starts in **Observe**: calls are judged and recorded, and only a credential is
-refused, on the developer's own machine. The operations dashboard shows what
+starts in **Observe**: calls are judged and recorded, and no rule refuses
+anything. What is still refused there is a credential, by the hook on the
+developer's own machine, and a request the service cannot take at all (a body
+over 1 MB, a malformed call, a key it rejects), because the hook reads any 4xx
+answer other than 429 as a refusal. The operations dashboard shows what
 each rule *would* have refused; the operator marks each of those correct or a
 false alarm, promotes the project to **Enforce** with the rules that earned it,
 and demotes it with one click. Amazon Bedrock never decides; it phrases a
@@ -233,9 +236,10 @@ to half a minute after a demotion a call can still be refused.
 
 The stage applies to calls from hooks and CI. The demo's page and simulation
 calls always enforce, so the public demo behaves the same whatever a project's
-stage is. A machine pinned to `--mode observe` is never refused by the service,
-whatever the dashboard says, and the project page flags such a machine among
-its agents.
+stage is. A machine pinned to `--mode observe` is never refused by a rule,
+whatever the dashboard says (only a request the service cannot take, such as a
+body over 1 MB, still comes back as a refusal), and the project page flags such
+a machine among its agents.
 
 A refusal comes with a **validated fix** when one fits: a rewritten file, a
 port and an adapter, an environment lookup in place of a literal credential.
