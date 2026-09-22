@@ -8,6 +8,8 @@ synthetic, as the clean-room rule requires.
 from __future__ import annotations
 
 import json
+import re
+from pathlib import Path
 from typing import Any, Dict, List
 
 import pytest
@@ -15,6 +17,7 @@ import pytest
 from threefold.application import rule_drafter
 from threefold.application.dtos import InvalidRequestError
 from threefold.application.rule_drafter import (
+    DRAFT_CLIENT_TIMEOUTS,
     MAX_ATTEMPTS,
     RULE_KEYS,
     SYSTEM_PROMPT,
@@ -25,7 +28,8 @@ from threefold.application.rule_drafter import (
     generated_examples,
 )
 from threefold.domain.layering_rules import DEFAULT_RULES, OBSERVE, validate_rules
-from threefold.interfaces import draft_routes
+from threefold.infrastructure.bedrock_client import CLIENT_TIMEOUTS, BedrockGovernanceClient
+from threefold.interfaces import api_handlers, draft_routes
 from threefold.interfaces.api_handlers import _evaluator, lambda_handler
 
 MODEL = "eu.anthropic.claude-haiku-4-5-20251001-v1:0"
@@ -404,6 +408,80 @@ def test_a_container_past_its_drafting_cap_does_not_call_the_model() -> None:
     assert client.runtime.calls == []
 
 
+# --- the real governance client -------------------------------------------
+
+
+class FakeSession:
+    """Stands where a boto3 session does, so the real client builds its runtime from it."""
+
+    def __init__(self, runtime: FakeRuntime) -> None:
+        self.runtime = runtime
+        self.asked: List[Dict[str, Any]] = []
+
+    def client(self, service_name: str, **kwargs: Any) -> FakeRuntime:
+        self.asked.append(dict(kwargs, service_name=service_name))
+        return self.runtime
+
+
+def test_the_real_governance_client_drafts_through_its_own_runtime() -> None:
+    """Pins the one place the drafter leans on the client's insides.
+
+    The drafter asks the runtime the client built, which the client keeps as
+    `_client`. Every other test here fakes the client whole, so a rename of that
+    attribute would leave them green and every live draft answering 503.
+    """
+    runtime = FakeRuntime([answer(GOOD)])
+    client = BedrockGovernanceClient(
+        model_id=MODEL, region_name="eu-west-1", boto3_session=FakeSession(runtime),
+        max_calls_per_container=draft_routes.DRAFT_CALLS_PER_CONTAINER,
+    )
+    result = draft_rule(DESCRIPTION, None, None, client=client, existing_rules=[])
+    assert result["source"] == "bedrock" and result["model"] == MODEL
+    assert result["rule"]["id"] == GOOD["id"]
+    assert len(runtime.calls) == 1 and runtime.calls[0]["modelId"] == MODEL
+    assert client.calls_made == 1 and client.last_error is None
+
+
+def test_the_route_builds_its_client_with_its_own_cap_and_drafting_timeouts(monkeypatch) -> None:
+    import boto3
+
+    built: List[Dict[str, Any]] = []
+
+    def fake_client(service_name: str, **kwargs: Any) -> FakeRuntime:
+        built.append(dict(kwargs, service_name=service_name))
+        return FakeRuntime([])
+
+    monkeypatch.setattr(draft_routes, "_client", None)
+    monkeypatch.delenv("THREEFOLD_OFFLINE", raising=False)
+    monkeypatch.setattr(boto3, "client", fake_client)
+    client = draft_routes._drafting_client()
+    assert client is not api_handlers._bedrock_client, "Drafts must not spend the explanations' cap"
+    assert client.max_calls_per_container == draft_routes.DRAFT_CALLS_PER_CONTAINER == 60
+    assert isinstance(client._client, FakeRuntime)
+    assert [call["service_name"] for call in built] == ["bedrock-runtime"]
+    config = built[0]["config"]
+    assert config.read_timeout == DRAFT_CLIENT_TIMEOUTS["read_timeout"]
+    assert config.connect_timeout == DRAFT_CLIENT_TIMEOUTS["connect_timeout"]
+    assert config.retries["max_attempts"] == 1, "A retry would double a bill and blow the deadline"
+
+
+def test_offline_the_route_builds_no_runtime_even_with_its_own_session(monkeypatch) -> None:
+    monkeypatch.setattr(draft_routes, "_client", None)
+    monkeypatch.setenv("THREEFOLD_OFFLINE", "1")
+    assert draft_routes._drafting_client()._client is None
+
+
+def test_the_drafting_timeouts_are_longer_than_a_verdicts_and_two_calls_fit_the_function() -> None:
+    """A draft generates up to 400 tokens without streaming; an explanation, two sentences."""
+    template = (Path(__file__).resolve().parents[2] / "deploy" / "template.yml").read_text(
+        encoding="utf-8"
+    )
+    function_timeout = int(re.search(r"^\s*Timeout:\s*(\d+)", template, re.MULTILINE).group(1))
+    per_call = DRAFT_CLIENT_TIMEOUTS["connect_timeout"] + DRAFT_CLIENT_TIMEOUTS["read_timeout"]
+    assert DRAFT_CLIENT_TIMEOUTS["read_timeout"] > CLIENT_TIMEOUTS["read_timeout"]
+    assert MAX_ATTEMPTS * per_call <= function_timeout - 2, "Leave the rest of the request its time"
+
+
 def test_a_boundary_that_is_not_a_layering_rule_is_declined_not_invented() -> None:
     declined = json.dumps({"cannot_express": "File size is not an import."})
     with pytest.raises(NotALayeringRuleError) as refused:
@@ -567,6 +645,21 @@ def _post(body: Any, method: str = "POST", path: str = "/prod/rules/draft", key:
     return response["statusCode"], json.loads(response["body"]) if response["body"] else {}, response
 
 
+def _drafting_metrics(captured: str) -> List[Dict[str, Any]]:
+    """The EMF records the drafting route printed, one per draft."""
+    records = []
+    for line in captured.splitlines():
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(record, dict) or "_aws" not in record:
+            continue
+        if record["_aws"]["CloudWatchMetrics"][0]["Namespace"] == "Threefold/Drafting":
+            records.append(record)
+    return records
+
+
 @pytest.fixture
 def fake(monkeypatch):
     def install(*answers: Any) -> FakeClient:
@@ -700,6 +793,85 @@ def test_on_a_stack_with_private_reads_the_operator_drafts_against_the_rules_in_
     assert "java-domain-stays-pure" in client.prompt(), "Only the operator gets this far"
     assert "is used by an earlier rule" in client.prompt(call=1, message=2)
     assert body["rule"]["id"] == GOOD["id"]
+
+
+def test_the_route_answers_502_not_500_for_answers_nested_past_the_stack(fake, capsys) -> None:
+    deep = "[" * TOO_DEEP + "]" * TOO_DEEP
+    nested = "Here: " + '{"a":' * TOO_DEEP + "1" + "}" * TOO_DEEP
+    client = fake(deep, nested)
+    capsys.readouterr()
+    status, body, _ = _post({"description": DESCRIPTION})
+    assert status == 502, body
+    assert body["type"] == "urn:threefold:error:undraftable-rule"
+    assert body["attempts"] == 2 and client.calls_made == 2
+    (record,) = _drafting_metrics(capsys.readouterr().out)
+    assert record["Outcome"] == "undraftable" and record["RuleDraftModelCalls"] == 2.0
+
+
+def test_the_route_answers_502_for_an_answer_that_parses_but_nests_too_deep(fake) -> None:
+    deep = "[" * 600 + "]" * 600
+    fake(deep, deep)
+    status, body, _ = _post({"description": DESCRIPTION})
+    assert status == 502, body
+    assert body["rejected_draft"] is None
+
+
+# --- one metric per draft ---------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "answers, status, outcome, calls",
+    [
+        ([answer(GOOD)], 200, "drafted", 1.0),
+        ([answer(dict(GOOD, forbid_imports=[])), answer(GOOD)], 200, "drafted", 2.0),
+        ([TimeoutError("read timed out")], 503, "unavailable", 1.0),
+        ([json.dumps({"cannot_express": "A size limit is not an import."})], 422, "declined", 1.0),
+        ([answer(dict(GOOD, forbid_imports=[]))] * 2, 502, "undraftable", 2.0),
+    ],
+    ids=["drafted", "repaired", "unavailable", "declined", "undraftable"],
+)
+def test_every_draft_emits_one_metric_with_a_bounded_outcome(
+    fake, capsys, answers, status, outcome, calls
+) -> None:
+    fake(*answers)
+    capsys.readouterr()
+    got, body, _ = _post({"description": DESCRIPTION})
+    assert got == status, body
+    (record,) = _drafting_metrics(capsys.readouterr().out)
+    metrics = record["_aws"]["CloudWatchMetrics"][0]
+    assert metrics["Dimensions"] == [["Outcome"]]
+    assert {m["Name"] for m in metrics["Metrics"]} == {
+        "RuleDrafts", "RuleDraftModelCalls", "RuleDraftLatencyMs"
+    }
+    assert record["Outcome"] == outcome
+    assert record["RuleDrafts"] == 1.0 and record["RuleDraftModelCalls"] == calls
+    assert record["RuleDraftLatencyMs"] >= 0
+
+
+def test_the_route_offline_counts_no_model_call(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(draft_routes, "_client", None)
+    capsys.readouterr()
+    status, _, _ = _post({"description": DESCRIPTION})
+    assert status == 503
+    (record,) = _drafting_metrics(capsys.readouterr().out)
+    assert record["Outcome"] == "unavailable" and record["RuleDraftModelCalls"] == 0.0
+
+
+def test_a_refused_input_emits_no_draft_metric(fake, capsys) -> None:
+    fake(answer(GOOD))
+    capsys.readouterr()
+    status, _, _ = _post({"description": "x" * 601})
+    assert status == 400
+    assert _drafting_metrics(capsys.readouterr().out) == []
+
+
+def test_a_draft_never_spends_the_explanations_calls(fake) -> None:
+    before = api_handlers._bedrock_client.calls_made
+    client = fake(answer(dict(GOOD, forbid_imports=[])), answer(GOOD))
+    status, _, _ = _post({"description": DESCRIPTION})
+    assert status == 200
+    assert client.calls_made == 2
+    assert api_handlers._bedrock_client.calls_made == before
 
 
 def test_where_keys_are_enforced_an_anonymous_draft_is_refused_before_the_model(

@@ -57,11 +57,25 @@ EXPECTATIONS = ("refuse", "allow")
 # it; an answer cut off at the limit fails to parse and is asked for again.
 DRAFT_MAX_TOKENS = 400
 
-# One repair and no more. The function has fifteen seconds and the Bedrock
-# client waits at most one second to connect and two and a half to read, with
-# no retry, so two calls fit with room for the rest of the request and a third
-# would not. A model that cannot produce a valid rule twice from a clear error
-# is not going to on the third attempt either.
+# How long one drafting call may take. The verdict client's own timeouts, one
+# second to connect and two and a half to read, were sized for a two-sentence
+# explanation of at most 256 tokens. Converse does not stream, so the read
+# timeout has to cover the whole generation, and a rule of up to 400 tokens
+# from Haiku can plausibly take longer than two and a half seconds. The
+# drafting client therefore gets its own read timeout of five seconds, still
+# with no retry. No live latency has been measured here; every draft reports
+# its own in the RuleDraftLatencyMs metric, so the first live ones measure it.
+DRAFT_CLIENT_TIMEOUTS = {
+    "connect_timeout": 1,
+    "read_timeout": 5,
+    "retries": {"max_attempts": 1, "mode": "standard"},
+}
+
+# One repair and no more. The function has fifteen seconds, and one call waits
+# at most one second to connect and five to read, so two calls take at most
+# twelve seconds and leave three for the rest of the request; a third would
+# not fit. A model that cannot produce a valid rule twice from a clear error is
+# not going to on the third attempt either.
 MAX_ATTEMPTS = 2
 
 # How deeply a usable answer can nest. A rule is an object holding lists of

@@ -43,10 +43,13 @@ concurrency or throttling in the template, which this track does not own.
 from __future__ import annotations
 
 import logging
+import os
+import time
 from typing import Any, Dict, Optional
 
 from threefold.application.dtos import InvalidRequestError
 from threefold.application.rule_drafter import (
+    DRAFT_CLIENT_TIMEOUTS,
     SOURCE_BEDROCK,
     SOURCE_UNAVAILABLE,
     ModelUnavailableError,
@@ -75,6 +78,38 @@ DRAFT_CALLS_PER_CONTAINER = 60
 _client: Optional[BedrockGovernanceClient] = None
 
 
+class _DraftingSession:
+    """Hands the governance client a runtime built with the drafting timeouts.
+
+    `BedrockGovernanceClient` takes a session so a caller can choose how its
+    runtime is built, and builds it with the verdict timeouts otherwise. A draft
+    generates up to 400 tokens without streaming, so it needs a longer read
+    timeout than a two-sentence explanation; `DRAFT_CLIENT_TIMEOUTS` in the
+    drafter says how long and why. Everything else, the model id, the region,
+    the call cap and the record of the last error, stays the client's own.
+    """
+
+    def client(
+        self, service_name: str, region_name: Optional[str] = None, config: Any = None
+    ) -> Any:
+        import boto3
+        from botocore.config import Config
+
+        return boto3.client(
+            service_name, region_name=region_name, config=Config(**DRAFT_CLIENT_TIMEOUTS)
+        )
+
+
+def _offline() -> bool:
+    """The switch the governance client reads, read here because a session bypasses it.
+
+    The client consults THREEFOLD_OFFLINE only when it builds its own runtime, so
+    a session handed to it would bring a runtime back in an offline test or
+    container. Without a session it stays offline, as it does for the verdicts.
+    """
+    return os.getenv("THREEFOLD_OFFLINE", "").lower() in ("1", "true", "yes")
+
+
 def _drafting_client() -> BedrockGovernanceClient:
     """The container's drafting client, built on the first draft rather than at import.
 
@@ -84,7 +119,17 @@ def _drafting_client() -> BedrockGovernanceClient:
     """
     global _client
     if _client is None:
-        _client = BedrockGovernanceClient(max_calls_per_container=DRAFT_CALLS_PER_CONTAINER)
+        session = None if _offline() else _DraftingSession()
+        try:
+            _client = BedrockGovernanceClient(
+                max_calls_per_container=DRAFT_CALLS_PER_CONTAINER, boto3_session=session
+            )
+        except Exception as exc:
+            # Without boto3 the session cannot build a runtime. The client built
+            # without one then tries for itself, records why it could not, and
+            # every draft answers 503 with no draft, as it does offline.
+            logger.info("The drafting runtime could not be built with its own timeouts: %s", exc)
+            _client = BedrockGovernanceClient(max_calls_per_container=DRAFT_CALLS_PER_CONTAINER)
     return _client
 
 
@@ -145,6 +190,7 @@ def handle(path: str, method: str, event: Dict[str, Any]) -> Optional[Dict[str, 
         rules, _source = router._evaluator.rules_in_force(project)
         return rules
 
+    started = time.monotonic()
     try:
         drafted = draft_rule(
             body.get("description"),
@@ -155,7 +201,7 @@ def handle(path: str, method: str, event: Dict[str, Any]) -> Optional[Dict[str, 
         )
     except ModelUnavailableError as unavailable:
         logger.warning("A rule draft was refused because the model is unavailable: %s", unavailable)
-        _count("unavailable", unavailable.calls)
+        _count("unavailable", unavailable.calls, started)
         problem = rfc7807_error(
             503,
             "Model Unavailable",
@@ -168,7 +214,7 @@ def handle(path: str, method: str, event: Dict[str, Any]) -> Optional[Dict[str, 
         problem.update({"source": SOURCE_UNAVAILABLE, "model": model, "saved": False})
         return router.build_response(503, problem)
     except NotALayeringRuleError as declined:
-        _count("declined", declined.attempts)
+        _count("declined", declined.attempts, started)
         problem = rfc7807_error(
             422,
             "Not A Layering Rule",
@@ -188,7 +234,7 @@ def handle(path: str, method: str, event: Dict[str, Any]) -> Optional[Dict[str, 
         )
         return router.build_response(422, problem)
     except UndraftableRuleError as undraftable:
-        _count("undraftable", undraftable.attempts)
+        _count("undraftable", undraftable.attempts, started)
         problem = rfc7807_error(
             502,
             "No Usable Draft",
@@ -211,14 +257,23 @@ def handle(path: str, method: str, event: Dict[str, Any]) -> Optional[Dict[str, 
         return router.build_response(502, problem)
 
     drafted["warnings"] = router._project_warnings(drafted.get("project"))
-    _count("drafted", drafted.get("attempts", 0))
+    _count("drafted", drafted.get("attempts", 0), started)
     return router.build_response(200, drafted)
 
 
-def _count(outcome: str, model_calls: int) -> None:
-    """One metric per draft, by an outcome from a fixed set, so the dimension stays bounded."""
+def _count(outcome: str, model_calls: int, started: float) -> None:
+    """One metric per draft, by an outcome from a fixed set, so the dimension stays bounded.
+
+    The latency is the whole draft, model calls and all. It is how the drafting
+    read timeout gets measured in the field: a draft that answers 503 after
+    about six seconds ran into it.
+    """
     emit_threefold_emf_metrics(
-        {"RuleDrafts": 1.0, "RuleDraftModelCalls": float(model_calls)},
+        {
+            "RuleDrafts": 1.0,
+            "RuleDraftModelCalls": float(model_calls),
+            "RuleDraftLatencyMs": round((time.monotonic() - started) * 1000.0, 1),
+        },
         dimensions={"Outcome": outcome},
         namespace="Threefold/Drafting",
     )
