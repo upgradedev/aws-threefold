@@ -949,24 +949,37 @@ def _named_paths(value: Any) -> Iterator[str]:
 
 
 def governed_write_targets(invocation: ToolInvocation) -> List[str]:
-    """The paths a call other than a shell command writes, for the governance check.
+    """The paths a call writes that are not its command's own, for the governance check.
 
     A shell command's targets come from reading the command, in shell_refusal.
     A call declared as a read, or made by a read tool, that carries no content
     writes nothing, so it is not refused for naming a settings file.
+
+    A call that carries a command used to give up every target, and a Write
+    with a real `file_path` beside a `command` field therefore wrote
+    .claude/settings.json — the file that decides whether any of this runs at
+    all — with this check switched off. The command's own words are still
+    left alone, because `write_pairs` would read them as paths the call names
+    and refuse a read for naming a settings file; what the call names under a
+    path key is a path it names, whatever else it carries.
     """
-    if shell_command(invocation) is not None:
-        return []
     arguments = invocation.arguments or {}
-    pairs = write_pairs(arguments)
+    running = shell_command(invocation) is not None
+    # write_pairs falls back to shape when nothing pairs by key, and a
+    # command's own words have a path's shape, so a `Read` carrying a command
+    # would look like a write of the file it names. Where there is a command,
+    # only what pairs by key counts as content.
+    pairs = iter_write_targets(arguments) if running else write_pairs(arguments)
     reading = (
         invocation.action_type == ToolActionType.FILE_READ
         or str(invocation.tool_name or "").lower() in READ_TOOLS
     )
     if reading and not pairs:
         return []
-    targets = [target for target, _ in pairs] + list(_named_paths(arguments))
-    return list(dict.fromkeys(targets))
+    named = list(_named_paths(arguments))
+    if running:
+        return list(dict.fromkeys(named))
+    return list(dict.fromkeys([target for target, _ in pairs] + named))
 
 
 def governance_reason(target: str, route: str = "", deletes: bool = False) -> str:

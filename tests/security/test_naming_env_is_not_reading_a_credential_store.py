@@ -20,6 +20,10 @@ quote-split (`cat .env; echo ".e"nv`); and the exemption reached out of the
 command into the call's own `file_path`. The patterns themselves are not
 narrowed at all, because they judge named paths as well as command lines: a
 store named exactly `secrets`, and a bare `.key`, stay protected everywhere.
+
+The last of those has an older sibling pinned here too: a call that carried a
+command gave up every governance target, not just the command's own, so one
+extra field wrote .claude/settings.json with that check silent.
 """
 from __future__ import annotations
 
@@ -246,3 +250,45 @@ def test_reading_dotenv_under_any_argument_name_is_still_refused() -> None:
     )
     allowed, _ = ArchitecturalBoundaryGuard.evaluate_tool_boundary(invocation, rules=DEFAULT_RULES)
     assert allowed is False
+
+
+GOVERNANCE_WITH_A_COMMAND = [
+    {"file_path": ".claude/settings.json", "content": "{}", "command": ["echo", "hi"]},
+    {"file_path": ".claude/settings.json", "content": "{}", "command": "echo hi"},
+    {"file_path": ".codex/hooks.json", "content": "{}", "command": ["echo", "hi"]},
+    {"file_path": ".threefold.json", "content": "{}", "command": ["echo", "hi"]},
+]
+
+
+@pytest.mark.parametrize("arguments", GOVERNANCE_WITH_A_COMMAND)
+def test_a_command_field_does_not_excuse_the_hooks_own_settings(arguments: dict) -> None:
+    """The third site of the same mechanism, and the one that turns the rest off.
+
+    The governance check gave up every target as soon as the call carried a
+    command, because a command's targets are read from the command. A Write
+    with a real `file_path` beside a `command` field therefore wrote the file
+    that decides whether any of this runs at all, with this check silent.
+    """
+    allowed, reason = _write(arguments)
+    assert allowed is False, arguments
+    assert "architectural governance" in reason
+
+
+def test_a_command_beside_a_read_is_still_only_a_read() -> None:
+    """And the command's own words are not content for the path the call names."""
+    invocation = ToolInvocation(
+        tool_name="Read",
+        action_type=ToolActionType.FILE_READ,
+        arguments={"file_path": ".claude/settings.json", "command": ["echo", "hi"]},
+    )
+    allowed, reason = ArchitecturalBoundaryGuard.evaluate_tool_boundary(invocation, rules=DEFAULT_RULES)
+    assert allowed is True, reason
+
+
+def test_a_command_that_only_names_the_settings_file_is_still_a_read() -> None:
+    for command in ("cat .claude/settings.json", ["cat", ".claude/settings.json"]):
+        invocation = ToolInvocation(
+            tool_name="Bash", action_type=ToolActionType.COMMAND_EXEC, arguments={"command": command}
+        )
+        allowed, reason = ArchitecturalBoundaryGuard.evaluate_tool_boundary(invocation, rules=DEFAULT_RULES)
+        assert allowed is True, reason
