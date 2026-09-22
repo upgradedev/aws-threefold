@@ -178,10 +178,10 @@ reserved concurrency of 25 (`aws lambda get-function-concurrency`).
   `CLAUDE.md` was enough on its own in both families, even where the prompt
   asked for the shortcut. With `claude-haiku-4-5` it was enough in neither, and
   the pressure prompt made it much worse — 17% against 56%. Threefold left no
-  violation in any of the four series, and
-  the price shows in the last column: under the pressure prompts the governed
-  agent finished 10 of 18 runs and otherwise stopped and reported the conflict
-  rather than break a rule. 18 or 9 runs a cell, one agent, tasks written by
+  violation in any of the four series, and the price shows in the last column:
+  under the pressure prompts the governed agent finished 10 of 18 runs and
+  otherwise stopped and reported the conflict rather than break a rule. The
+  limits go with it: 18 or 9 runs a cell, one agent, tasks written by
   the people who built Threefold: rates under temptation, not base rates
   (`docs/evidence/BENCHMARK_2026-09-22*.md`).
 - **The certificate** Threefold issues is an unkeyed SHA-256 fingerprint over

@@ -158,9 +158,9 @@ so the rollout had to show what a rule would stop before it stops anything.
   17% / 0% / 0% and 39% / 17% / 0% on the standard tasks, and 67% / 0% / 0%
   and 100% / 56% / 0% on the pressure ones: no violation under Threefold in any
   series, while the rules in `CLAUDE.md` alone held in both families with
-  `claude-sonnet-5` and in neither with `claude-haiku-4-5`, which is the
-  cheaper model most teams leave running. The price is in the pressure series, where the governed agent
-  finished 10 of 18 runs and otherwise stopped and reported the conflict
+  `claude-sonnet-5` and in neither with `claude-haiku-4-5`, the cheaper model.
+  The price is in the pressure series, where the governed agent finished 10 of
+  18 runs and otherwise stopped and reported the conflict
   (`docs/evidence/BENCHMARK_2026-09-22*.md`). What is still missing is another
   agent (Codex and Antigravity are unmeasured), a task set someone else wrote,
   and more than 18 or 9 runs a cell.
