@@ -324,10 +324,13 @@ Resources:
       Scope: CLOUDFRONT
       DefaultAction:
         Allow: {}
+      # Metric names carry the stack name, so a second edge in the account (one in
+      # front of the private stack, say) reports under its own names instead of
+      # adding into this one's.
       VisibilityConfig:
         SampledRequestsEnabled: true
         CloudWatchMetricsEnabled: true
-        MetricName: threefold-edge-web-acl
+        MetricName: !Sub '${AWS::StackName}-web-acl'
       Rules:
         - Name: AmazonIpReputationList
           Priority: 0
@@ -340,7 +343,7 @@ Resources:
           VisibilityConfig:
             SampledRequestsEnabled: true
             CloudWatchMetricsEnabled: true
-            MetricName: threefold-edge-ip-reputation
+            MetricName: !Sub '${AWS::StackName}-ip-reputation'
 
         # 429, not the default 403. The hook reads a 4xx as the service refusing
         # the call and reports it to the developer as a key problem, while it reads
@@ -364,7 +367,7 @@ Resources:
           VisibilityConfig:
             SampledRequestsEnabled: true
             CloudWatchMetricsEnabled: true
-            MetricName: threefold-edge-rate-limit
+            MetricName: !Sub '${AWS::StackName}-rate-limit'
 
         # The body rules count rather than block. Every POST body this service
         # receives is an agent's tool call or a rule under test, and carrying
@@ -404,7 +407,7 @@ Resources:
           VisibilityConfig:
             SampledRequestsEnabled: true
             CloudWatchMetricsEnabled: true
-            MetricName: threefold-edge-common
+            MetricName: !Sub '${AWS::StackName}-common'
 
         - Name: KnownBadInputsRuleSet
           Priority: 3
@@ -427,7 +430,7 @@ Resources:
           VisibilityConfig:
             SampledRequestsEnabled: true
             CloudWatchMetricsEnabled: true
-            MetricName: threefold-edge-known-bad-inputs
+            MetricName: !Sub '${AWS::StackName}-known-bad-inputs'
 
   # --- the distribution -----------------------------------------------------------------
 

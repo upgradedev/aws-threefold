@@ -369,7 +369,10 @@ def test_the_web_acl_is_for_cloudfront_allows_by_default_and_is_observable() -> 
     for rule in WEB_ACL["Rules"]:
         assert _visibility_is_on(rule["VisibilityConfig"]), rule["Name"]
     metric_names = [WEB_ACL["VisibilityConfig"]["MetricName"]] + [r["VisibilityConfig"]["MetricName"] for r in WEB_ACL["Rules"]]
-    assert len(set(metric_names)) == len(metric_names), "each rule needs its own metric"
+    assert len({repr(name) for name in metric_names}) == len(metric_names), "each rule needs its own metric"
+    for name in metric_names:
+        # Two edges in one account would otherwise add their counts into one metric.
+        assert isinstance(name, dict) and name["Fn::Sub"].startswith("${AWS::StackName}-"), name
     priorities = [rule["Priority"] for rule in WEB_ACL["Rules"]]
     assert len(set(priorities)) == len(priorities)
 
