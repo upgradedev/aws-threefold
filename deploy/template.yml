@@ -159,7 +159,10 @@ Parameters:
       than the CloudFront server's, and points /install.py and sign-in links at
       the edge. Empty, the default, trusts no edge header at all, which is right
       for a stack with no edge in front of it: this API's URL is public, so any
-      caller could send those headers. NoEcho keeps it out of describe-stacks.
+      caller could send those headers. NoEcho keeps it out of describe-stacks;
+      the function's environment still holds it in plain text, as
+      THREEFOLD_EDGE_SECRET, readable by anyone in the account allowed
+      lambda:GetFunctionConfiguration, the CI deploy role included.
 
 Globals:
   Function:
