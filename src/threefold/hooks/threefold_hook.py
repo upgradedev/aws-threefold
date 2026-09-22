@@ -1647,9 +1647,8 @@ def _command_write_targets(command: str) -> Iterator[str]:
             at_command = False
             continue
         name = _unquoted(piece).lower()
-        if not at_command:
-            continue
-        if at_command and name in _KEEPS_COMMAND_POSITION:
+        if not at_command or name in _KEEPS_COMMAND_POSITION:
+            # A word that is not the command, or one that only introduces it.
             continue
         operands = []
         while index < len(pieces) and pieces[index][0] not in ";&|()\n<>":
