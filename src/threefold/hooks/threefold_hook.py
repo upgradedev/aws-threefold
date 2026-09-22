@@ -70,14 +70,19 @@ Without it, or with an empty list, nothing changes. A list that cannot be
 read sends less, never more: a `.threefold.json` that mentions include but
 cannot be parsed or read in full sends nothing until it can (a UTF-16 file,
 as Windows PowerShell writes it, is read). A credential is still refused
-wherever it is written, and in enforce mode a write to the hooks' own files
-is still refused, before the list is consulted.
+wherever it is written, and wherever a write to the hooks' own files is
+refused (below), it is refused before the list is consulted.
 
     THREEFOLD_PROJECT     required, here or in a file. Unset, nothing is sent.
     THREEFOLD_ENDPOINT    the service, default the public /prod/ stack
-    THREEFOLD_MODE        `enforce` (the default) or `observe`, which sends
-                          every call as `dry_run`: recorded, never refused,
-                          never able to trip the session
+    THREEFOLD_MODE        `enforce` (the default), `managed` or `observe`:
+                          enforce sends every call to be judged and refused;
+                          managed sends it the same way and lets the project's
+                          stage on the service decide, so a project in Observe
+                          records and a project promoted to Enforce refuses;
+                          observe sends every call as `dry_run`, recorded,
+                          never refused, never able to trip the session, which
+                          stays a hard cap on this machine whatever the stage
     THREEFOLD_DRY_RUN     1 is the older spelling of THREEFOLD_MODE=observe
     THREEFOLD_API_KEY     sent as X-API-Key when set
     THREEFOLD_API_KEY_FILE a file holding the key, read at call time
@@ -85,8 +90,14 @@ is still refused, before the list is consulted.
     THREEFOLD_TIMEOUT     seconds, default 4
     THREEFOLD_FAIL_CLOSED 1 refuses a call the service could not judge
     THREEFOLD_HOME        local state, default ~/.threefold: never_send.txt and
-                          config.json are read from it, held_back.log and
-                          unknown_shapes.jsonl are written to it
+                          config.json are read from it, held_back.log,
+                          unknown_shapes.jsonl and stage/ are written to it
+
+Every request says which of the three modes sent it, as `hook_mode`, so the
+ledger can tell a machine capped at observe from one the stage decides for.
+Every response names the project's stage, `project_stage`, and the hook keeps
+the last one it saw in THREEFOLD_HOME/stage/<16 hex of the project's sha256>.json
+as {"stage": ..., "at": ...}, so it knows the stage without asking.
 
 Paths are sent relative to the directory holding `.threefold.json` when there
 is one, else to the agent's cwd, and a command carries `cwd`, where it runs
@@ -108,8 +119,14 @@ In enforce mode a write to the files that decide whether the hooks run
 (`.claude/settings*.json`, `.codex/hooks.json`, `.codex/config.toml`,
 `.agents/hooks.json`, `.threefold.json`, `.git/hooks/`, `.git/config`) is refused before
 anything is sent, so turning governance off does not depend on the network.
-In observe mode the same write is sent as its path with the content left out,
-except under `.git`, which is a data directory and is not sent at all.
+In managed mode the same is true while the stage last seen for the project is
+`enforce`, and only then, because a project in Observe is promised that
+nothing but a credential is refused on its machines. In observe mode,
+and in managed mode at any other stage, including none seen yet, the same
+write is sent as its path with the content left out, except under `.git`,
+which is a data directory and is not sent at all. The service refuses such a
+write by where it lands whenever the project enforces, so a stale stage here
+decides only what happens while the service cannot be reached.
 
 Standard library only and a single file, because it is downloaded alone and run
 by whatever Python the developer already has.
@@ -202,7 +219,12 @@ _DEVICE_TOKENS = frozenset(("/dev/null", "/dev/stdin", "/dev/stdout", "/dev/stde
 
 CONFIG_FILE_NAME = ".threefold.json"
 HOME_CONFIG_NAME = "config.json"
-MODES = ("enforce", "observe")
+MODES = ("enforce", "managed", "observe")
+# The stages a project can be in on the service. Anything else in a response
+# or in the cache is read as no stage at all, never as either of these.
+STAGES = ("observe", "enforce")
+STAGE_DIRECTORY = "stage"
+MAX_STAGE_BYTES = 4_096
 MAX_CONFIG_BYTES = 65_536
 MAX_KEY_BYTES = 1_024
 MAX_WALK_UP = 64
@@ -1150,7 +1172,7 @@ def resolve_settings(payload: Dict[str, Any]) -> Settings:
 
     mode = _env("THREEFOLD_MODE").lower()
     if mode and mode not in MODES:
-        settings.notes.append(f"THREEFOLD_MODE must be enforce or observe; {mode[:20]!r} was ignored.")
+        settings.notes.append(f"THREEFOLD_MODE must be enforce, managed or observe; {mode[:20]!r} was ignored.")
         mode = ""
     if not mode and _flag("THREEFOLD_DRY_RUN"):
         mode = "observe"
@@ -1163,7 +1185,7 @@ def resolve_settings(payload: Dict[str, Any]) -> Settings:
         if isinstance(value, str) and value.strip().lower() in MODES:
             mode = value.strip().lower()
         else:
-            settings.notes.append(f"the mode in {label} must be enforce or observe, and was ignored.")
+            settings.notes.append(f"the mode in {label} must be enforce, managed or observe, and was ignored.")
     settings.mode = mode or "enforce"
 
     key: Optional[str] = None
@@ -1675,8 +1697,9 @@ def held_back_category(
         # Everything under .git is held back, the hook scripts and .git/config
         # included. Those two decide whether the hooks run, but .git/config also
         # holds remote URLs, which can carry a token or a repository name, and
-        # the day-one contract never sends a data directory. In enforce mode a
-        # write to either has already been refused before this is reached.
+        # the day-one contract never sends a data directory. Wherever the mode
+        # guards the hooks' own files (enforce, or managed while the project
+        # enforces), a write to either has already been refused before this.
         if call.action_type == FILE_WRITE and _is_data_file(resolved, canonical_root):
             return "data-file"
 
@@ -1782,7 +1805,9 @@ def _relative_to_root(call: NormalisedCall, root: str, cwd: Optional[str] = None
 
 
 def _strip_governance_content(call: NormalisedCall) -> None:
-    """In observe mode, a write to the hooks' own files goes as its path alone.
+    """Wherever the hook does not refuse it, a write to the hooks' own files goes as its path alone.
+
+    That is observe mode, and managed mode at any stage but enforce.
 
     The service refuses such a write by where it lands, never by what it says,
     so the content adds nothing to the record a rollout reads, and an agent's
@@ -1816,6 +1841,54 @@ def _append_line(path: str, line: str) -> None:
         pass
 
 
+# --- the project's stage, as the service last named it ---------------------------------
+
+def stage_path(home: str, project: str) -> str:
+    """Where the stage last seen for a project is kept: named by a hash, so the file name says nothing."""
+    digest = hashlib.sha256(project.encode("utf-8")).hexdigest()[:16]
+    return os.path.join(home, STAGE_DIRECTORY, digest + ".json")
+
+
+def cached_stage(home: str, project: str) -> Optional[str]:
+    """The stage the service last named for this project, or None when none was seen or it cannot be read.
+
+    None is never read as enforce: a stage that cannot be trusted is no stage,
+    and managed mode then refuses nothing on the machine that the service would
+    not refuse itself.
+    """
+    try:
+        with open(stage_path(home, project), "rb") as handle:
+            raw = handle.read(MAX_STAGE_BYTES + 1)
+        document = json.loads(raw.decode("utf-8")) if len(raw) <= MAX_STAGE_BYTES else None
+    except (OSError, ValueError, UnicodeDecodeError, RecursionError):
+        return None
+    stage = document.get("stage") if isinstance(document, dict) else None
+    return stage if stage in STAGES else None
+
+
+def remember_stage(home: str, project: str, stage: Any) -> None:
+    """Keeps the stage a response named, written whole or not at all, and never stops the agent.
+
+    Written to a temporary file and moved into place, because another agent's
+    hook may be reading it at the same moment, and half a file would read as
+    no stage for a call that should have known it.
+    """
+    if stage not in STAGES:
+        return
+    path = stage_path(home, project)
+    temporary = f"{path}.{os.getpid()}.tmp"
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(temporary, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps({"stage": stage, "at": _timestamp()}))
+        os.replace(temporary, path)
+    except OSError:
+        try:
+            os.remove(temporary)
+        except OSError:
+            pass
+
+
 # --- the service ----------------------------------------------------------------
 
 class ServiceUnavailable(Exception):
@@ -1823,13 +1896,25 @@ class ServiceUnavailable(Exception):
 
 
 def build_request(
-    call: NormalisedCall, payload: Dict[str, Any], agent: str, project: str, dry_run: Optional[bool] = None
+    call: NormalisedCall,
+    payload: Dict[str, Any],
+    agent: str,
+    project: str,
+    dry_run: Optional[bool] = None,
+    hook_mode: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Request v2 for POST /evaluate-tool-call. `dry_run` defaults to what the environment says."""
+    """Request v2 for POST /evaluate-tool-call.
+
+    `dry_run` defaults to what the environment says, and `hook_mode` to the
+    mode that implies: observe for a dry run, enforce otherwise.
+    """
     if agent == "antigravity":
         session = payload.get("conversationId") or payload.get("session_id")
     else:
         session = payload.get("session_id") or payload.get("conversationId")
+    dry = _flag("THREEFOLD_DRY_RUN") if dry_run is None else bool(dry_run)
+    if hook_mode not in MODES:
+        hook_mode = "observe" if dry else "enforce"
     return {
         # A call with no session of its own still belongs to a session, or the
         # loop detector and the cost ceiling have nothing to count against.
@@ -1842,7 +1927,10 @@ def build_request(
         "agent": agent,
         "origin": "hook",
         "explain": False,
-        "dry_run": _flag("THREEFOLD_DRY_RUN") if dry_run is None else bool(dry_run),
+        "dry_run": dry,
+        # Which mode sent it, so the ledger can tell a machine held to observe
+        # from one whose project's stage decided, whatever the verdict says.
+        "hook_mode": hook_mode,
     }
 
 
@@ -2007,9 +2095,15 @@ def handle(raw_text: Optional[str], forced_agent: Optional[str] = None) -> Tuple
             "Nothing was sent. Read the value from the environment or a secret store instead of writing it.",
         ), notes
 
-    if settings.mode == "enforce":
-        # Observe mode sends the call instead, as a dry run, so a rollout sees
-        # the attempt without stopping it.
+    # Worked out once and used twice, so the refusal here and the stripped
+    # content below can never disagree about which mode guards these files.
+    # Observe mode, and managed mode while the project is not known to
+    # enforce, send the call instead, so a rollout sees the attempt without
+    # stopping it.
+    guards_governance = settings.mode == "enforce" or (
+        settings.mode == "managed" and cached_stage(home, project) == "enforce"
+    )
+    if guards_governance:
         governing = governance_target(call, payload, home)
         if governing:
             return deny(
@@ -2029,14 +2123,17 @@ def handle(raw_text: Optional[str], forced_agent: Optional[str] = None) -> Tuple
         project_root(payload),
         command_directory(call, payload) if call.command is not None else None,
     )
-    if settings.mode == "observe":
+    if not guards_governance:
         _strip_governance_content(call)
-    body = build_request(call, payload, agent, project, dry_run=settings.mode == "observe")
+    body = build_request(call, payload, agent, project, dry_run=settings.mode == "observe", hook_mode=settings.mode)
     try:
         code, document, phrase = post_evaluation(body, settings.endpoint, settings.api_key)
     except ServiceUnavailable as failure:
         output, lines = _unjudged(agent, str(failure))
         return output, notes + lines
+
+    if isinstance(document, dict):
+        remember_stage(home, project, document.get("project_stage"))
 
     if code == 429 or code >= 500:
         output, lines = _unjudged(agent, f"HTTP {code}")

@@ -420,13 +420,14 @@ def test_every_request_carries_the_v2_fields(agent, payloads, stub, run_hook) ->
     body = _sent(stub)
     assert set(body) == {
         "session_id", "project_name", "developer", "tool_name", "action_type",
-        "arguments", "agent", "origin", "explain", "dry_run",
+        "arguments", "agent", "origin", "explain", "dry_run", "hook_mode",
     }
     assert body["project_name"] == "Acme-Payments"
     assert body["agent"] == agent
     assert body["origin"] == "hook"
     assert body["explain"] is False
     assert body["dry_run"] is False
+    assert body["hook_mode"] == "enforce", "no mode anywhere is enforce, and the request says so"
 
 
 def test_the_developer_is_anonymous_unless_one_is_configured(payloads, stub, run_hook) -> None:
@@ -446,6 +447,7 @@ def test_dry_run_is_asked_for_with_the_environment(payloads, stub, run_hook, mon
     monkeypatch.setenv("THREEFOLD_DRY_RUN", "1")
     run_hook(payloads.write("codex"), ["--agent", "codex"])
     assert _sent(stub)["dry_run"] is True
+    assert _sent(stub)["hook_mode"] == "observe"
 
 
 def test_the_login_name_and_folder_name_are_never_sent(machine, payloads, stub, run_hook, monkeypatch) -> None:
