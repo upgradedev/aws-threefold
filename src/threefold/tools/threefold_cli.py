@@ -28,7 +28,12 @@ change to the rule file as a finding of its own, so a person sees it.
 
 In observe mode it prints what would be refused and exits 0. In enforce mode it
 exits 1 when a rule that enforces is broken, naming the rule by the id the hook
-names. Rules in observe mode are reported and never fail a commit.
+names. Rules in observe mode are reported and never fail a commit. In managed
+mode, which `connect` writes, the project's stage on the stack decides, read
+from `GET {endpoint}api/projects/<project>`: in Observe it judges as observe
+mode, in Enforce as enforce mode except for the rules the operator left
+observing, which are reported. A stage it cannot read refuses nothing, as the
+hook fails open when the stack cannot be reached.
 
 Standard library only. It runs from a Threefold checkout, where it sits in
 src/threefold/tools inside the engine's own package, or from THREEFOLD_HOME/bin
@@ -45,7 +50,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, FrozenSet, List, Optional, Sequence, Tuple
 
 HERE = Path(__file__).resolve().parent
 # Installed, the engine is in ../lib beside bin/. In a checkout this file is in
@@ -61,6 +66,8 @@ from threefold.domain.layering_rules import DEFAULT_RULES, ENFORCE, validate_rul
 
 MAX_FILE_BYTES = 2_000_000
 MAX_RULES_BYTES = 1_000_000
+MAX_PROJECT_BYTES = 1_000_000
+MODES = ("observe", "managed", "enforce")
 LOCAL_RULES = Path(".threefold") / "rules.json"
 
 
@@ -135,6 +142,47 @@ def fetch_rules(endpoint: str, project: str, api_key: Optional[str], timeout: fl
     if not usable:
         return None, "the service returned no usable rules"
     return usable, ""
+
+
+def managed_mode(settings: Any, timeout: float) -> Tuple[str, FrozenSet[str], str]:
+    """What managed mode judges as: (observe or enforce, the rules left observing, a line saying why).
+
+    The project's configuration on the stack names its stage and, once it is
+    promoted, the rules the operator chose to keep observing. A commit is held
+    to exactly that, so the backstop never refuses what the hook would only
+    have recorded.
+    """
+    project = settings.project
+    if not project:
+        return "observe", frozenset(), "managed mode with no project names no stage, so nothing is refused."
+    url = settings.endpoint + "api/projects/" + urllib.parse.quote(project, safe="")
+    headers = {"Accept": "application/json"}
+    if settings.api_key:
+        headers["X-API-Key"] = settings.api_key
+    document: Any = None
+    why = "the stack named no stage"
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=timeout) as response:
+            document = json.loads(response.read(MAX_PROJECT_BYTES).decode("utf-8"))
+    except urllib.error.HTTPError as error:
+        why = f"the stack answered HTTP {error.code}"
+    except (urllib.error.URLError, OSError, ValueError) as error:
+        why = f"the stack could not be read ({type(error).__name__})"
+    document = document if isinstance(document, dict) else {}
+    config = document.get("config") if isinstance(document.get("config"), dict) else {}
+    readiness = document.get("readiness") if isinstance(document.get("readiness"), dict) else {}
+    summary = readiness.get("summary") if isinstance(readiness.get("summary"), dict) else {}
+    stage = config.get("stage") if config.get("stage") in ("observe", "enforce") else summary.get("stage")
+    if stage == "enforce":
+        listed = config.get("observe_rules")
+        if not isinstance(listed, list):
+            rules = readiness.get("rules") if isinstance(readiness.get("rules"), list) else []
+            listed = [rule.get("rule_key") for rule in rules if isinstance(rule, dict) and rule.get("mode_now") == "observe"]
+        observing = frozenset(item for item in listed if isinstance(item, str))
+        return "enforce", observing, f"managed mode: {project} is in Enforce on the stack, so a rule it enforces refuses the commit."
+    if stage == "observe":
+        return "observe", frozenset(), f"managed mode: {project} is in Observe on the stack, so nothing is refused."
+    return "observe", frozenset(), f"managed mode: the stage of {project} could not be read ({why}), so nothing is refused."
 
 
 def local_rules(root: Path, ref: Optional[str]) -> Tuple[Optional[List[Dict[str, Any]]], List[str]]:
@@ -227,11 +275,15 @@ def judge(files: Sequence[Tuple[str, str]], rules: List[Dict[str, Any]]) -> List
     return findings
 
 
-def report(findings: List[Dict[str, str]], mode: str, out: Any) -> int:
-    """Prints each finding and returns the exit code the mode calls for."""
+def report(findings: List[Dict[str, str]], mode: str, out: Any, observing: FrozenSet[str] = frozenset()) -> int:
+    """Prints each finding and returns the exit code the mode calls for.
+
+    `observing` names the rules a promoted project keeps observing: reported,
+    never refused, whatever the rule itself says.
+    """
     refused = 0
     for item in findings:
-        enforcing = item["mode"] == ENFORCE
+        enforcing = item["mode"] == ENFORCE and item["rule_id"] not in observing
         if enforcing and mode == "enforce":
             label = "REFUSED"
             refused += 1
@@ -253,7 +305,7 @@ def main(argv: Optional[Sequence[str]] = None, out: Any = None) -> int:
     for name, text in (("check", "judge the staged files"), ("ci", "judge the files changed since a base")):
         sub = commands.add_parser(name, help=text)
         sub.add_argument("--repo", default=".", help="the repository, default the current directory")
-        sub.add_argument("--mode", choices=("observe", "enforce"), help="overrides the configured mode")
+        sub.add_argument("--mode", choices=MODES, help="overrides the configured mode")
         if name == "ci":
             sub.add_argument("--base", required=True, help="the ref to compare HEAD against, such as origin/main")
     args = parser.parse_args(argv)
@@ -277,12 +329,16 @@ def main(argv: Optional[Sequence[str]] = None, out: Any = None) -> int:
     hook = load_hook()
     settings = hook.resolve_settings({"cwd": str(root)})
     mode = args.mode or settings.mode
+    observing: FrozenSet[str] = frozenset()
+    if mode == "managed":
+        mode, observing, why = managed_mode(settings, hook.timeout_seconds())
+        notes.append(why)
     rules, source, chosen = choose_rules(root, settings, hook.timeout_seconds(), ref)
     for note in list(settings.notes) + chosen + notes:
         print(f"threefold: {note}", file=out)
     what = "staged file(s)" if args.command == "check" else f"file(s) changed since {args.base}"
     print(f"threefold: judging {len(files)} {what} against {source}, {mode} mode.", file=out)
-    return report(extra + judge(files, rules), mode, out)
+    return report(extra + judge(files, rules), mode, out, observing)
 
 
 if __name__ == "__main__":
