@@ -524,7 +524,11 @@ def test_a_project_alias_holding_a_never_send_term_is_never_sent_from_the_enviro
     """
     _never_send(machine, "Globex\n")
     monkeypatch.setenv("THREEFOLD_PROJECT", "Acme-Globex-Portal")
-    _held_back(stub, run_hook, payloads.write("claude-code", "src/app.py", "x = 1\n"), held_back_lines, "never-send")
+    code, out, err = run_hook(payloads.write("claude-code", "src/app.py", "x = 1\n"))
+    assert (code, out, stub.requests) == (0, "", [])
+    assert LOG_LINE.match(held_back_lines()[0]) and held_back_lines()[0].endswith(" never-send")
+    assert "project alias" in err and "THREEFOLD_PROJECT" in err, "an alias is a setting, so say so"
+    assert "globex" not in err.lower(), "the note names the fact, never the term or the alias"
 
 
 def test_a_project_alias_holding_a_never_send_term_is_never_sent_from_a_config_file(
@@ -535,7 +539,20 @@ def test_a_project_alias_holding_a_never_send_term_is_never_sent_from_a_config_f
     (machine.project / ".threefold.json").write_text(
         json.dumps({"project": "Acme-Globex-Portal", "mode": "enforce"}), encoding="utf-8"
     )
-    _held_back(stub, run_hook, payloads.write("claude-code", "src/app.py", "x = 1\n"), held_back_lines, "never-send")
+    code, out, err = run_hook(payloads.write("claude-code", "src/app.py", "x = 1\n"))
+    assert (code, out, stub.requests) == (0, "", [])
+    assert held_back_lines()[0].endswith(" never-send")
+    assert ".threefold.json" in err and "never-send list" in err
+
+
+def test_a_never_send_term_in_what_the_agent_sent_is_held_back_without_a_word(
+    machine, payloads, stub, run_hook, held_back_lines
+) -> None:
+    """Only the alias gets a note: the agent's own text is the agent's to change,
+    and a note about it would be the hook repeating what the developer wrote."""
+    _never_send(machine, "Globex\n")
+    payload = payloads.write("claude-code", "src/app.py", "CLIENT = 'globex'\n")
+    _held_back(stub, run_hook, payload, held_back_lines, "never-send")
 
 
 def test_a_project_alias_that_names_nothing_on_the_list_is_still_sent(machine, payloads, stub, run_hook, monkeypatch) -> None:

@@ -1455,10 +1455,17 @@ _COMMAND_TOKEN_SPLIT = re.compile(r"[\s'\"`;|&<>(),=]+")
 # Claude Code runs Bash through Git Bash on Windows, so that is the spelling
 # its commands arrive in.
 _DRIVE_PATH = re.compile(r"^(?:/cygdrive|/mnt)?/([A-Za-z])(?=/|$)")
-# Read only on Windows: on a POSIX machine /c and /mnt/c name real directories,
-# and rewriting them would take a command out of the project it runs in. A
-# module-level flag rather than a call to os.name at each site, so a test can
-# drive both readings on one machine, as FOLD_GLOB_CASE already does.
+# Read only where the hook itself runs on Windows: on a POSIX machine /c and
+# /mnt/c name real directories, and rewriting them would take a command out of
+# the project it runs in. A module-level flag rather than a call to os.name at
+# each site, so a test can drive both readings on one machine, as
+# FOLD_GLOB_CASE already does.
+#
+# A hook running inside WSL is POSIX, and there /mnt/c/Users/<login> really is
+# the Windows home. That spelling is out of scope and stays as written: the
+# home the hook protects is the WSL one that HOME names, the Windows home is
+# not a directory it can resolve or shorten against, and a translation would
+# read a path outside anything it governs.
 WINDOWS_DRIVE_PATHS = os.name == "nt"
 
 
@@ -1470,6 +1477,9 @@ def _drive_path(token: str, translate: Optional[bool] = None) -> str:
     not the agents' own folders, not the include list, not the project whose
     path is taken out before sending. So the one spelling Claude Code actually
     uses on Windows slipped past all three.
+
+    Windows means this hook's own machine. Under WSL, where os.name is posix,
+    the token is left as written; see WINDOWS_DRIVE_PATHS for why.
     """
     if WINDOWS_DRIVE_PATHS if translate is None else translate:
         found = _DRIVE_PATH.match(token)
@@ -2044,7 +2054,20 @@ def held_back_category(
                 f"{never_send.problem}. Nothing is sent until it can be; save it as UTF-8 and try again."
             )
         return "never-send"
-    if mentions_never_send(raw_text, [payload, project], never_send.terms):
+    # The alias before the payload, because the two are put right differently.
+    # A term in what the agent sent is the agent's line to change; an alias
+    # that names one is a setting, and without a word about it every call from
+    # that folder stopped with an empty stderr and only a line in the log. The
+    # note names the fact and not the term, as the note about the list itself
+    # names the file and not a line of it.
+    if project and mentions_never_send("", [project], never_send.terms):
+        if notes is not None:
+            notes.append(
+                "the project alias names a term on your never-send list, so nothing is being sent. Set "
+                f"THREEFOLD_PROJECT, or `project` in {CONFIG_FILE_NAME}, to an alias that does not name it."
+            )
+        return "never-send"
+    if mentions_never_send(raw_text, [payload], never_send.terms):
         return "never-send"
     return None
 
