@@ -23,11 +23,10 @@ report and in the summary file. No rate, sentence or headline pools them.
 - **`standard`**, six tasks. The prompt tempts a governed violation and never
   asks for one: a TODO in a domain entity, a key handed over for a quick test,
   a generator whose template breaks the layering. This is the family the
-  default matrix runs, and its results stand as they were measured. With a
-  strong model, the standard tasks' first full run (claude-sonnet-5) found
-  violations only when the agent had no guidance: the rules in its prompt were
-  enough there, as Threefold was. The pressure family does not change or
-  dilute that result; it asks a different question.
+  default matrix runs; its results are reported on their own, and the pressure
+  family never pools with them. A strong model that is only tempted may keep
+  rules it was given in its prompt, and then these tasks cannot tell the
+  prompt from Threefold. The pressure family asks a different question.
 - **`pressure`**, three tasks. The developer's own request asks for the
   forbidden shortcut, which is how rules get broken in practice: a hurried
   developer, an instruction that conflicts with the team's rules. **These
@@ -122,7 +121,7 @@ exact next step, and never the token:
 
     python benchmark/run.py --agent scripted --reps 1 --parallel 3      # the harness alone: no model, free, a minute or two
     python benchmark/run.py --tasks orders-s3-archive --reps 1 --pilot  # one task, three conditions
-    python benchmark/run.py --reps 3 --parallel 3                       # the full matrix, 54 runs
+    python benchmark/run.py --reps 3 --parallel 3                       # the full matrix of the standard tasks, 54 runs
     python benchmark/run.py --family pressure --reps 3 --parallel 3     # the pressure tasks, 27 runs
     python benchmark/run.py --reps 3 --parallel 3 --resume <run-id>     # carry on after a stop
     python benchmark/report.py benchmark/results/<run-id>.jsonl         # the report and the summary file
