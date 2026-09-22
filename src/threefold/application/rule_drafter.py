@@ -32,7 +32,7 @@ from threefold.domain.layering_rules import (
     validate_rules,
     violations,
 )
-from threefold.domain.path_match import normalise
+from threefold.domain.path_match import matches, normalise
 from threefold.infrastructure.bedrock_client import prompt_safe
 
 logger = logging.getLogger(__name__)
@@ -258,10 +258,7 @@ def draft_rule(
             "changing before it is saved. Edit the rule and try it again with POST /rules/explain."
         )
     if not generated:
-        notes.append(
-            "No example could be built from the rule itself: none of its path patterns names a "
-            "path the gate would judge."
-        )
+        notes.append("No example could be built from the rule itself: " + _why_no_example(rule))
     if existing_rules is None:
         notes.append(
             "The id was not checked against the rules in force here; POST /rules checks it when "
@@ -592,7 +589,7 @@ def _validated(
     literal = _literal_glob_problems(rule)
     if literal:
         return None, literal, notes
-    everything = ("**", "**/*", "*")
+    everything = ("**", "**/*", "*", "**/*.*", "*.*")
     if any(normalise(pattern).lower() in everything for pattern in rule["when_path_matches"]):
         notes.append("when_path_matches covers every file, not one layer; narrow it before saving.")
     return rule, [], notes
@@ -703,6 +700,18 @@ def generated_examples(rule: Dict[str, Any]) -> List[Dict[str, Any]]:
     return rows
 
 
+def _why_no_example(rule: Dict[str, Any]) -> str:
+    """Why generated_examples came back empty, in words that say which half failed."""
+    path = _covered_path(rule)
+    if path is None:
+        return "none of its path patterns names a path the gate would judge."
+    language = language_for(path) or _guess_language(rule)
+    return (
+        f"it covers {path}, but the drafter has no example import for {language} files yet, "
+        "so try it with an example of your own."
+    )
+
+
 def _covered_path(rule: Dict[str, Any]) -> Optional[str]:
     """A path the rule's own globs cover, preferring one in a language Threefold reads."""
     candidates = []
@@ -733,14 +742,45 @@ def _instantiate_path(pattern: str, rule: Dict[str, Any]) -> str:
                 # A trailing ** covers anything below, so a file is put there.
                 out.append("Example" + _suffix_for(_guess_language(rule)))
             continue
-        star = "Example" if last else "acme"
-        filled = segment.replace("**", "*").replace("*", star).replace("?", "x")
-        if last and segment == "*":
-            filled = "Example" + _suffix_for(_guess_language(rule))
-        out.append(filled)
+        if last:
+            out.append(_file_name(segment, "/".join(out), pattern, rule))
+        else:
+            out.append(segment.replace("**", "*").replace("*", "acme").replace("?", "x"))
     # Not cut to length: a path cut short loses its suffix and would be judged
     # as another file type. One too long for the gate is skipped by the caller.
     return "/".join(out)
+
+
+def _file_name(segment: str, folder: str, pattern: str, rule: Dict[str, Any]) -> str:
+    """A file name the last segment covers, in a language Threefold reads when it can be.
+
+    Filling every wildcard with the same word turned `*.*` into `Example.Example`
+    and `*Repository.*` into `ExampleRepository.Example`, files Threefold does not
+    read, so a rule that fires on every real `.java` file was reported as one
+    that does not. Each suffix Threefold reads is tried instead, the language the
+    rule's imports are written in first, and the first name the glob covers is
+    used. This looks only at what the glob covers, never at the verdict, so an
+    example built this way can still fail.
+    """
+    if "*" not in segment and "?" not in segment:
+        return segment
+    stem, dot, extension = segment.rpartition(".")
+    wild_extension = bool(dot) and ("*" in extension or "?" in extension)
+    base = stem if wild_extension else segment
+    filled = base.replace("**", "*").replace("*", "Example").replace("?", "x")
+    if not wild_extension and language_for(filled):
+        # A glob that names its own suffix, as `*.java` does, is filled as written.
+        return filled
+    preferred = _suffix_for(_guess_language(rule))
+    suffixes = [preferred] + [suffix for suffix in LANGUAGE_BY_SUFFIX if suffix != preferred]
+    prefix = folder + "/" if folder else ""
+    for suffix in suffixes:
+        name = filled + suffix
+        if matches(prefix + name, pattern):
+            return name
+    # Nothing Threefold reads fits the glob, as with `*.go`: the plain filling
+    # is kept so the example shows the rule covering a file it cannot read.
+    return segment.replace("**", "*").replace("*", "Example").replace("?", "x")
 
 
 def _module_for(patterns: Sequence[str]) -> Optional[str]:

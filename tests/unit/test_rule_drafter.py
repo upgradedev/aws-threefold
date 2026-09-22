@@ -12,6 +12,7 @@ from typing import Any, Dict, List
 
 import pytest
 
+from threefold.application import rule_drafter
 from threefold.application.dtos import InvalidRequestError
 from threefold.application.rule_drafter import (
     DRAFT_MAX_TOKENS,
@@ -314,7 +315,43 @@ def test_a_rule_whose_path_no_gate_would_judge_says_no_example_could_be_built() 
     too_deep = dict(GOOD, when_path_matches=["/".join(["**"] * 90) + "/*.java"])
     result, _ = draft(answer(too_deep))
     assert [row for row in result["tried"] if row["origin"] == "generated"] == []
-    assert any("No example could be built" in note for note in result["notes"])
+    assert any(
+        "No example could be built" in note and "names a path the gate would judge" in note
+        for note in result["notes"]
+    )
+
+
+def test_a_language_with_no_example_import_says_so_rather_than_blaming_the_path(monkeypatch) -> None:
+    templates = {k: v for k, v in rule_drafter._IMPORT_TEMPLATES.items() if k != "java"}
+    monkeypatch.setattr(rule_drafter, "_IMPORT_TEMPLATES", templates)
+    result, _ = draft(answer(GOOD))
+    note = next(note for note in result["notes"] if "No example could be built" in note)
+    assert "no example import for java" in note
+    assert "gate would judge" not in note
+
+
+@pytest.mark.parametrize(
+    "glob, forbidden, suffix",
+    [
+        ("**/billing/**/*.*", ["javax.persistence"], ".java"),
+        ("src/**/*Repository.*", ["javax.persistence"], "Repository.java"),
+        ("src/**/*Repository*", ["javax.persistence"], ".java"),
+        ("**/domain/**/*.ts*", ["axios"], ".ts"),
+        ("**/domain/*.t?", ["axios"], ".ts"),
+    ],
+)
+def test_a_wildcard_extension_is_filled_with_a_suffix_threefold_reads(glob, forbidden, suffix) -> None:
+    """`*.*` used to become Example.Example, a file no rule can fire on, and read as a failure."""
+    rule = dict(GOOD, when_path_matches=[glob], forbid_imports=forbidden, allow_imports=[])
+    rows = generated_examples(dict(rule, mode=OBSERVE))
+    assert [row["expected"] for row in rows] == ["refuse", "allow"]
+    assert all(row["path"].endswith(suffix) for row in rows), rows
+    assert all(row["matched"] for row in rows), rows
+
+
+def test_a_glob_over_every_file_is_flagged_whatever_its_extension() -> None:
+    result, _ = draft(answer(dict(GOOD, when_path_matches=["**/*.*"])))
+    assert any("covers every file" in note for note in result["notes"])
 
 
 def test_trying_the_draft_matches_what_rules_explain_says_of_the_same_file() -> None:
