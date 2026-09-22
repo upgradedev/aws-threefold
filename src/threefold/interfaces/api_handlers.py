@@ -949,6 +949,14 @@ def _route(event: Dict[str, Any], http_method: str, request_id: str) -> Dict[str
                 global_idempotency_cache.set(idempotency_key, 200, res_dict)
             return build_response(200, res_dict)
 
+        # The application's routes (overview, decisions, projects and their stages,
+        # reviews, sandbox), imported here so that module can reach this one's
+        # evaluator without either needing the other loaded first.
+        from threefold.interfaces import app_routes
+        app_response = app_routes.handle(path, http_method, event)
+        if app_response is not None:
+            return app_response
+
         return build_response(
             404,
             rfc7807_error(
