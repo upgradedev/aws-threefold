@@ -1607,19 +1607,59 @@ def _command_included(command: str, base: str, canonical_root: str, include: Seq
     return True
 
 
-def read_never_send(home: str) -> List[str]:
-    """The owner's never-send terms: one per line, blank lines and # comments ignored."""
+NEVER_SEND_NAME = "never_send.txt"
+MAX_NEVER_SEND_BYTES = 262_144
+
+
+class NeverSendList:
+    """The owner's never-send terms, or why the file that holds them could not be read.
+
+    A missing file is an empty list and changes nothing. A file that exists
+    and cannot be read is not an empty list: read as UTF-8 a UTF-16 file
+    became NULs and replacement characters, every term stopped matching, and
+    the calls naming them were sent without a word. This is the one file that
+    keeps a name at home, so when it cannot be read every call stays here
+    until it can, the way an include list that cannot be read sends nothing.
+    """
+
+    __slots__ = ("terms", "problem")
+
+    def __init__(self, terms: Optional[List[str]] = None, problem: Optional[str] = None):
+        self.terms: List[str] = terms if terms is not None else []
+        self.problem = problem
+
+
+def load_never_send(home: str) -> NeverSendList:
+    """The never-send list as read, in any encoding Windows writes, or why it could not be."""
+    path = os.path.join(home, NEVER_SEND_NAME)
     try:
-        with open(os.path.join(home, "never_send.txt"), "r", encoding="utf-8-sig", errors="replace") as handle:
-            lines = handle.read().splitlines()
+        with open(path, "rb") as handle:
+            raw = handle.read(MAX_NEVER_SEND_BYTES + 1)
     except OSError:
-        return []
+        if not os.path.exists(path):
+            return NeverSendList()
+        return NeverSendList(problem="could not be opened")
+    if len(raw) > MAX_NEVER_SEND_BYTES:
+        return NeverSendList(problem=f"is larger than {MAX_NEVER_SEND_BYTES // 1024} KB")
+    try:
+        text = _decode_config(raw)
+    except UnicodeDecodeError:
+        return NeverSendList(problem="is not UTF-8, UTF-16 or UTF-32 text")
+    if "\x00" in text:
+        # UTF-16 without a byte order mark decodes as UTF-8 into NULs instead
+        # of raising, and every term in it would be a term that never matches.
+        return NeverSendList(problem="is not the text it looks like: it holds NUL characters")
     terms = []
-    for line in lines:
+    for line in text.splitlines():
         term = line.strip()
         if term and not term.startswith("#"):
             terms.append(term.casefold())
-    return terms
+    return NeverSendList(terms)
+
+
+def read_never_send(home: str) -> List[str]:
+    """The owner's never-send terms: one per line, blank lines and # comments ignored."""
+    return load_never_send(home).terms
 
 
 SHORT_TERM = 4
@@ -1670,6 +1710,7 @@ def held_back_category(
     raw_text: str,
     home: str,
     include: Optional[Sequence[str]] = None,
+    notes: Optional[List[str]] = None,
 ) -> Optional[str]:
     """Why this call must not leave the machine, or None if it may.
 
@@ -1681,6 +1722,11 @@ def held_back_category(
     fall inside one of its globs, read relative to the governed root. That
     root is the directory of the .threefold.json the list came from, so a glob
     reads like the paths the ledger shows.
+
+    `notes` is where the one thing worth saying out loud goes: that the
+    never-send list itself could not be read, which is why everything is
+    staying here. It names the file and what is wrong with it, never a line
+    of it.
     """
     cwd = project_root(payload)
     canonical_root = _canonical(governed_root(payload))
@@ -1716,7 +1762,15 @@ def held_back_category(
         if include is not None and not _command_included(call.command, base, canonical_root, include):
             return "not-included"
 
-    if mentions_never_send(raw_text, payload, read_never_send(home)):
+    never_send = load_never_send(home)
+    if never_send.problem is not None:
+        if notes is not None:
+            notes.append(
+                f"the never-send list in THREEFOLD_HOME ({NEVER_SEND_NAME}) could not be read: it "
+                f"{never_send.problem}. Nothing is sent until it can be; save it as UTF-8 and try again."
+            )
+        return "never-send"
+    if mentions_never_send(raw_text, payload, never_send.terms):
         return "never-send"
     return None
 
@@ -2171,7 +2225,7 @@ def handle(raw_text: Optional[str], forced_agent: Optional[str] = None) -> Tuple
                 "whether the agent's hooks run. Nothing was sent. A person changes that file, not the agent.",
             ), notes
 
-    category = held_back_category(call, payload, raw_text or "", home, settings.include)
+    category = held_back_category(call, payload, raw_text or "", home, settings.include, notes)
     if category:
         record_held_back(home, category)
         return None, notes

@@ -7,6 +7,7 @@ hold-back that still sent the call would pass a test that only looked at stdout.
 """
 from __future__ import annotations
 
+import codecs
 import json
 import re
 
@@ -256,6 +257,68 @@ def test_a_never_send_list_saved_with_a_byte_order_mark_still_works(machine, pay
     (machine.threefold_home / "never_send.txt").write_text("Acme-Orion\n", encoding="utf-8-sig")
     run_hook(payloads.write("claude-code", "src/app.py", "x = 'Acme-Orion'"))
     assert stub.requests == []
+
+
+def _never_send_bytes(machine, raw: bytes) -> None:
+    machine.threefold_home.mkdir(parents=True, exist_ok=True)
+    (machine.threefold_home / "never_send.txt").write_bytes(raw)
+
+
+@pytest.mark.parametrize(
+    "encoding",
+    ["utf-16", codecs.BOM_UTF16_BE + "# the owner's list\nAcme-Orion\n".encode("utf-16-be"), "utf-32"],
+    ids=["utf-16-le-bom", "utf-16-be-bom", "utf-32"],
+)
+def test_a_never_send_list_written_by_windows_powershell_is_read(
+    encoding, machine, payloads, stub, run_hook, held_back_lines
+) -> None:
+    """`Add-Content`, `Out-File` and `>` in Windows PowerShell 5.1 write UTF-16 with a BOM.
+
+    Read as UTF-8 every term became NULs and replacement characters, so every
+    term stopped matching and the calls that named them were sent, silently.
+    The one file that keeps a name at home must not fail that way.
+    """
+    raw = encoding if isinstance(encoding, bytes) else "# the owner's list\nAcme-Orion\n".encode(encoding)
+    _never_send_bytes(machine, raw)
+    payload = payloads.write("claude-code", "src/app.py", "CLIENT = 'acme-orion'\n")
+    _held_back(stub, run_hook, payload, held_back_lines, "never-send")
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        pytest.param(b"Acme-\xe9\xffOrion\n", id="not-text-at-all"),
+        pytest.param("Acme-Orion\n".encode("utf-16-le"), id="utf-16-without-a-bom"),
+    ],
+)
+def test_a_never_send_list_that_cannot_be_read_holds_every_call_back(
+    raw, machine, payloads, stub, run_hook, held_back_lines
+) -> None:
+    """A list nobody can read is not an empty list.
+
+    Guessing at it is how the term it holds reaches the service. The call
+    stays here and the developer is told, without a word of the file in the
+    note: the file is the one place a name is kept.
+    """
+    _never_send_bytes(machine, raw)
+    code, out, err = run_hook(payloads.write("claude-code", "src/app.py", "x = 1\n"))
+    assert (code, out, stub.requests) == (0, "", [])
+    assert held_back_lines()[0].endswith(" never-send")
+    assert "never_send.txt" in err and "could not be read" in err
+    assert "Orion" not in err and "Acme" not in err
+
+
+def test_a_never_send_list_that_cannot_be_read_does_not_stop_the_agent(machine, payloads, stub, run_hook) -> None:
+    """Held back, never refused: the hook still only ever takes permission away."""
+    _never_send_bytes(machine, b"Acme-\xe9\xffOrion\n")
+    _, out, _ = run_hook(payloads.write("claude-code", "src/app.py", "x = 1\n"))
+    assert out == ""
+
+
+def test_an_empty_never_send_list_is_still_an_empty_list(machine, payloads, stub, run_hook) -> None:
+    _never_send_bytes(machine, b"")
+    run_hook(payloads.write("claude-code", "src/app.py", "x = 1\n"))
+    assert len(stub.requests) == 1
 
 
 # --- configuration ----------------------------------------------------------------

@@ -102,7 +102,17 @@ def main(argv: Optional[Sequence[str]] = None, out: Any = None) -> int:
     hook = load_hook()
     _HOOK = hook
     home = hook.threefold_home()
-    terms = hook.read_never_send(home)
+    listed = hook.load_never_send(home) if hasattr(hook, "load_never_send") else None
+    terms = listed.terms if listed is not None else hook.read_never_send(home)
+    if listed is not None and listed.problem is not None:
+        # A list the hook cannot read holds every call back, so saying "there
+        # is no list" here would send the reader to write one they already have.
+        print(
+            f"threefold: the never-send list at {Path(home, 'never_send.txt').as_posix()} {listed.problem}, "
+            "so the hook holds every call back until it can be read; save it as UTF-8 and run this again.",
+            file=out,
+        )
+        return 2
     if not terms:
         print(
             f"threefold: there is no never-send list at {Path(home, 'never_send.txt').as_posix()}, "
