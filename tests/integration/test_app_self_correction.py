@@ -205,6 +205,22 @@ def test_a_snapshot_that_is_not_an_object_is_the_deployments_fault(tmp_path, mon
     assert status == 500 and body["type"] == "urn:threefold:error:proof-unreadable"
 
 
+@pytest.mark.parametrize("env, closed", [
+    ({"ENFORCE_API_KEY": "true", "THREEFOLD_API_KEYS": "acme-key-1"}, "/readyz"),
+    ({"STAGE": "prod", "THREEFOLD_API_KEYS": "acme-key-1"}, "/readyz"),
+    ({"PUBLIC_READS": "false"}, "/api/overview"),
+])
+def test_the_snapshot_is_open_to_anyone_on_every_stack(monkeypatch, env, closed) -> None:
+    # A decision, not an accident of which variables a stack sets: the page
+    # that shows it is public, and it carries only anonymised totals. The
+    # route beside it shows each stack really is closing what it closes.
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    assert request("GET", closed)[0] in (401, 403)
+    assert request("GET", "/proof.json")[0] == 200
+    assert request("HEAD", "/proof.json")[0] == 200
+
+
 def test_the_committed_snapshot_is_the_one_the_route_serves() -> None:
     assert app_routes.PROOF_PATH.replace("\\", "/").endswith("src/threefold/web/proof.json")
 

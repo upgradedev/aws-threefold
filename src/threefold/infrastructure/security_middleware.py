@@ -300,6 +300,10 @@ PUBLIC_PATHS = frozenset(
         "/docs",
         "/openapi.json",
         "/openapi.yaml",
+        # The proof page's snapshot. It is committed with the code and holds
+        # only anonymised totals, so it is the same public document on every
+        # stack, and the page that shows it is open to anyone.
+        "/proof.json",
         "/hooks/threefold_hook.py",
         "/hooks/claude_code_hook.py",
         "/claude_code_hook.py",
