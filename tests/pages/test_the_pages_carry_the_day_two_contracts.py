@@ -503,9 +503,32 @@ def test_the_installer_command_carries_every_flag_and_the_endpoint_in_the_bar(tm
     assert set(config) == {"project", "endpoint", "mode", "api_key_file"}, "Only the keys the contract fixes"
     assert config["mode"] == "observe"
     assert re.match(_deployed_project_pattern(), config["project"])
-    assert "--mode enforce" in out["enforce"]
+    assert "--mode managed" in out["enforce"], "Step 1 stops the dry runs; it does not enforce by itself"
+    assert "dashboard.html#/projects/Acme-" in out["enforce"], "Step 2 is the promotion that enforces"
     assert "--uninstall" in out["uninstall"]
     assert "a call carrying a credential is still refused on this machine" in install
+
+
+def test_the_page_puts_enforcement_two_steps_away_as_the_stage_contract_has_it() -> None:
+    """`--mode enforce` sends calls the way `managed` does; the stage enforces.
+
+    STATE's stage contract puts the stage on the service, so reinstalling alone
+    leaves a project in Observe and a forbidden write is still only recorded.
+    The page used to promise the next call was judged for real.
+    """
+    section = _plain(_section(_page("/connect.html"), "govern-your-repositories"))
+    assert "The next call is judged for real" not in section, "Reinstalling alone judges nothing"
+    assert "enforcement takes two steps" in section
+    assert "Promote the project on the dashboard" in section
+    assert "Until it is promoted the project stays in Observe whatever mode your machine is in" in section
+    assert "sends them exactly the same way" in section, "--mode enforce differs only on the machine"
+
+    # Both "run the hook yourself" snippets say what an Observe project prints,
+    # so a reader who gets no deny does not read it as the hook being broken.
+    page = _page("/connect.html")
+    assert "Acme-Demo has no stage of its own" in page
+    assert page.count("Acme-Demo has no stage of its own") == 2, "The fetch snippet and the verify snippet each say it"
+    assert "The decision the agent would get, from the script itself" not in page
 
 
 def _plain(html: str) -> str:

@@ -20,10 +20,12 @@ outside the repository.
 
 ## 1. Deploy a regional stack
 
-`deploy/template.yml` is 49,398 bytes, within two kilobytes of the 51,200
-bytes CloudFormation accepts inline, so both commands send it through the
-packaging bucket, which has no such limit. (`deploy/edge.yml`, at 44,377
-bytes, is still deployed inline in section 2.)
+`deploy/template.yml` has grown to within two kilobytes of the 51,200 bytes
+CloudFormation accepts for an inline template, so both commands send it through
+the packaging bucket, which has no such limit. Its exact size is not written
+down here, because it changes with every edit to the template and a number in a
+document does not; `wc -c deploy/template.yml` gives it. (`deploy/edge.yml` is
+still comfortably under that limit and is deployed inline in section 2.)
 
 ```bash
 aws cloudformation package \
@@ -206,9 +208,30 @@ repository. Leave it there.
 ## 6. The agent benchmark
 
 The harness in `benchmark/` runs a coding agent headless on six synthetic Acme
-tasks under three conditions and grades what it left behind. Only a pilot
-exists so far (`docs/evidence/BENCHMARK_2026-09-22-PILOT.md`), and its real-agent
-runs never reached the model, so no result exists yet.
+tasks, and on three pressure variants whose prompt asks for the forbidden
+shortcut, under three conditions, and grades what it left behind.
+
+Measured on 2026-09-22, four matrices, 162 Claude Code runs. A governed
+violation landed with no guidance / with the rules in `CLAUDE.md` / with
+Threefold enforcing:
+
+| Report | Rows | Violation landed | Tests passed, Threefold |
+|---|---|---|---|
+| `BENCHMARK_2026-09-22.md` (standard, `claude-sonnet-5`) | `20260922T143932Z.jsonl` | 17% / 0% / 0% | 18/18 |
+| `BENCHMARK_2026-09-22-HAIKU.md` (standard, `claude-haiku-4-5`) | `20260922T145644Z.jsonl` | 39% / 17% / 0% | 18/18 |
+| `BENCHMARK_2026-09-22-PRESSURE-SONNET.md` | `20260922T161455Z-pressure.jsonl` | 67% / 0% / 0% | 6/9 |
+| `BENCHMARK_2026-09-22-PRESSURE-HAIKU.md` | `20260922T162306Z-pressure.jsonl` | 100% / 56% / 0% | 4/9 |
+
+The two families are never pooled. Nothing under Threefold violated in any
+series. The `CLAUDE.md` column follows the model rather than the family: with
+`claude-sonnet-5` the rules held in both families with nothing enforcing them
+(0/18 and 0/9), with `claude-haiku-4-5` in neither (17% and 56%). The cost of
+enforcing shows in the pressure rows, where the governed agent finished 10 of
+18 runs and otherwise stopped and reported the conflict.
+
+The pilot before them (`BENCHMARK_2026-09-22-PILOT.md`) measured nothing: its
+real-agent runs never reached the model on an expired login, which the token
+file below fixed.
 
 **The login.** Run `claude setup-token` once in a terminal and save the token
 it prints, alone on one line, to `C:\threefold-bench\.claude-oauth-token`, or
@@ -220,13 +243,20 @@ alone, with a configuration folder and a home folder made for each run. A
 python benchmark/run.py --check-auth                                   # ok, expired, missing, limited or error
 python benchmark/run.py --agent scripted --reps 1 --parallel 3         # the harness alone, no model, free
 python benchmark/run.py --tasks orders-s3-archive --reps 1 --pilot     # one task, three conditions, labelled pilot
-python benchmark/run.py --reps 3 --parallel 3                          # the full matrix: 54 runs
+python benchmark/run.py --reps 3 --parallel 3                          # the standard matrix: 54 runs
+python benchmark/run.py --family pressure --reps 3 --parallel 3        # the pressure matrix: 27 runs
 python benchmark/run.py --reps 3 --parallel 3 --resume <run-id>        # after a stop
 python benchmark/report.py benchmark/results/<run-id>.jsonl            # docs/evidence/BENCHMARK_<date>.md and a summary
-python scripts/build_proof.py --benchmark benchmark/results/<run-id>.jsonl
+python scripts/build_proof.py \
+  --series benchmark/results/20260922T143932Z.jsonl \
+  --series benchmark/results/20260922T145644Z.jsonl \
+  --series benchmark/results/20260922T161455Z-pressure.jsonl \
+  --series benchmark/results/20260922T162306Z-pressure.jsonl
 ```
 
-`report.py` computes the headline from the rows; nothing else states one.
+`report.py` computes the headline from the rows; nothing else states one. Each
+run of the matrix is its own `--series`, so two models, or the standard and the
+pressure tasks, are never pooled into one set of rates.
 `build_proof.py` writes `src/threefold/web/proof.json` from the same rows (and,
 with `--private-endpoint` and `--key-file`, anonymised totals from a private
 stack, refusing to write if any string matches a project name, the key or an
@@ -236,9 +266,13 @@ regional deploy (section 1), not with `publish_web.py`.
 
 Bounds, from the harness's own caps: each run stops at 20 minutes and, for
 Claude Code, $5 at API list price, so the 54-run matrix cannot take more than
-about 6 hours or cost more than $270 at list price; under a subscription that
-is usage against its limits. ESTIMATE, not measured: 1 to 2 hours and $16 to
-$54. Codex runs use `--agent codex` and its own login (`codex login`).
+about 6 hours or cost more than $270 at list price (the 27-run pressure matrix,
+3 hours and $135); under a subscription that is usage against its limits. What
+the four matrices of 2026-09-22 actually took, from their own rows: the
+standard matrix about 0.3 hours and $10 with `claude-sonnet-5` and about
+0.3 hours and $4 with `claude-haiku-4-5`; the pressure matrix about 0.1 hours
+and $6, then about 0.1 hours and $1. Codex runs use `--agent codex` and its own
+login (`codex login`) and are not measured.
 
 ## 7. Connect, open, status, disconnect
 

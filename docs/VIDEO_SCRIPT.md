@@ -45,23 +45,23 @@
      `java-domain-stays-pure` checked; the noisy Python rule keeps observing.
   5. **Send it again.** Frame the result panel: the refusal, the fix Threefold
      suggests with whether that fix passed the same gates, and the sentence
-     from Amazon Bedrock. This call runs in a `sim-` demo session, which the
-     service enforces whatever the project's stage, so it shows what a refusal
-     carries and is not evidence that the promotion caused it. The narration
-     says so, and scene 4 shows the promotion refusing a real agent. Keep the
-     step-5 card's own sentence ("now in Enforce. This time the rule in force
-     refuses it") out of frame: it claims more than a `sim-` call shows.
+     from Amazon Bedrock. This call runs in a `try-` session, which the
+     project's stage decides exactly as it decides a real hook's call, so the
+     refusal is evidence that the promotion caused it: the same call was
+     recorded and approved one step earlier, in Observe. The step-5 card's own
+     sentence ("now in Enforce. This time the rule in force refuses it") can
+     stay in frame.
 - **Narration:**
   > "Every project starts in Observe. Calls are judged and recorded, and the
   > dashboard shows what each rule would have refused. You mark each one correct
   > or a false alarm. A rule whose every flag was correct is Ready; the one with
   > a false alarm is Noisy and keeps observing. Promote the project with the
   > rules that earned it, and from then on a hook's call that breaks one of them
-  > is refused. The walkthrough's last call shows what a refusal carries: the
-  > rule's reason, a fix that has itself been run through the same gates, and a
-  > sentence from Amazon Bedrock for the person reading. That one is a demo
-  > call, always enforced. Next, the same promotion refuses a real agent.
-  > Demote is one click."
+  > is refused. The walkthrough sends that same call again, and this time it is
+  > refused: the rule's reason, a fix that has itself been run through the same
+  > gates, and a sentence from Amazon Bedrock for the person reading. Nothing
+  > about the call changed; the stage did. Next, the same promotion refuses a
+  > real agent. Demote is one click."
 
 ## Scene 4: one command, and a real agent refused (1:45 to 2:15)
 
@@ -89,18 +89,27 @@
   > the file system that a refused file is not created, for Claude Code and for
   > Antigravity. Codex has not been measured yet, so we make no claim for it."
 
-## Scene 5: running it, and what is not claimed yet (2:15 to 2:45)
+## Scene 5: running it, and what the benchmark says (2:15 to 2:45)
 
 - **Visual:** the dashboard's overview; the CloudWatch dashboard
   `threefold-prod-operations` with its alarms; then the dashboard's `#/proof`
-  page, which shows the benchmark as a pilot with nothing measured yet.
+  page, on the table of the four measured series. Hold on the Threefold
+  column, which reads 0% in every row, and let the pressure rows' "tests
+  passed" figures (67% and 44%) stay readable in the same shot: the cost is
+  part of the claim, not a footnote.
 - **Narration:**
   > "It runs on AWS behind CloudFront and AWS WAF, on one Lambda function and one
   > DynamoDB table, with ten CloudWatch alarms and point-in-time recovery. A
-  > live probe checks the project's claims against the deployed stack. What is not
-  > measured, we do not claim: the benchmark comparing agents with and without
-  > Threefold has only run as a pilot, and its headline will come from the full
-  > run. Try the rollout yourself at the link below. It takes a minute."
+  > live probe checks the project's claims against the deployed stack. And we
+  > measured it: a hundred and sixty-two headless Claude Code runs, two models,
+  > graded by a checker that does not import Threefold. With the rules only
+  > written in CLAUDE.md, the stronger model kept them and the cheaper one did
+  > not — violations landed in seventeen per cent of ordinary runs, and in more
+  > than half of the runs where the prompt itself asked for the shortcut. With
+  > Threefold enforcing, none landed, in any series. The cost is honest too:
+  > under those prompts the agent finished ten of eighteen runs and otherwise
+  > stopped and reported the conflict. Try the rollout yourself at the link
+  > below. It takes a minute."
 - **End card:** `https://d1og72wpk4aqig.cloudfront.net/dashboard.html#/try`
 
 ---
@@ -110,14 +119,14 @@
 | Claim | Source |
 |---|---|
 | A promoted sandbox refuses a real hook's call, and a demoted one records it | [PRIMARY, 2026-09-22] `docs/evidence/PROBES_2026-09-22.md`, group "application": a hook `Write` of `import boto3` into `src/domain/` answered `APPROVED` with the would-refuse recorded before promotion, `BLOCKED_BOUNDARY_VIOLATION` with `project_stage` `enforce` after it, and `APPROVED` again after demotion. The probe's sessions are named `probe-<run id>-*`, not `sim-` |
-| The walkthrough's last call is always enforced | `dashboard.html` sends it with `session_id` from `T.newSessionId('sim-')`; `application/projects.py`, `stage_applies`, returns false for any `sim-` session |
+| The walkthrough's last call is decided by the promotion | `dashboard.html` sends it with `session_id` from `T.newSessionId('try-')`, so `application/projects.py`, `stage_applies`, applies the project's stage to it as to any hook's call. `tests/pages/test_the_walkthrough_proves_the_promotion.py` sends that call to a fresh sandbox before and after promoting it: `APPROVED` with `project_stage` `observe`, then `BLOCKED_BOUNDARY_VIOLATION` with `enforce` |
 | Visitors can promote only sandbox projects on the public stack | `infrastructure/security_middleware.py`: a project write is open without a key only where reads are public and the name is `Acme-Sandbox-<8 hex>`; the public stack has no operator key [STATE-FILE] |
 | A refused file is not created, for Claude Code and Antigravity; Codex not measured | [STATE-FILE], `docs/evidence/ENFORCEMENT_2026-09-21.md` |
 | Behind CloudFront and AWS WAF | [PRIMARY, 2026-09-22] `aws cloudfront list-distributions`: the distribution behind `d1og72wpk4aqig.cloudfront.net` is `Deployed` with the web ACL `threefold-prod-edge-web-acl` attached |
 | Ten CloudWatch alarms | [PRIMARY, 2026-09-22] `aws cloudwatch describe-alarms --alarm-name-prefix threefold-prod-`: 10 alarms, all `OK` |
 | Point-in-time recovery | [PRIMARY, 2026-09-22] `aws dynamodb describe-continuous-backups`: `ENABLED` |
 | A live probe checks the claims | [PRIMARY, 2026-09-22] `docs/evidence/PROBES_2026-09-22.md`, run against the public origin URL: 113 PASS, 0 FAIL, 3 SKIP |
-| The benchmark has only run as a pilot | `docs/evidence/BENCHMARK_2026-09-22-PILOT.md`: its real-agent runs never reached the model, so no result exists |
+| 162 headless runs, two models, no violation under Threefold, and 10 of 18 pressure runs finished | [PRIMARY, 2026-09-22] the four reports `docs/evidence/BENCHMARK_2026-09-22.md`, `-HAIKU.md`, `-PRESSURE-SONNET.md` and `-PRESSURE-HAIKU.md`, from `benchmark/results/20260922T143932Z.jsonl`, `…145644Z.jsonl`, `…161455Z-pressure.jsonl` and `…162306Z-pressure.jsonl`. Violation landed, no guidance / rules in `CLAUDE.md` / Threefold: 17% / 0% / 0%, then 39% / 17% / 0%, then 67% / 0% / 0%, then 100% / 56% / 0%; acceptance tests passed under Threefold 100% (18/18), 100% (18/18), 67% (6/9), 44% (4/9). Grading is `benchmark/checks.py`, which does not import Threefold |
 
 ---
 
@@ -139,5 +148,13 @@
       repository after connecting. No real project or company name on screen.
 - [ ] CloudWatch console: `threefold-prod-operations` in eu-west-1, signed in
       as the operator. No account id, email address or other stack in frame.
-- [ ] Do not show a test count or any benchmark number: none is measured yet.
+- [ ] Do not show a test count. Benchmark numbers are fine now that four
+      matrices are measured, but only as the reports and `#/proof` state them,
+      with the two families apart and the pressure series' completion rate in
+      the same shot as its violation rate.
+- [ ] Before filming scene 5, check that the live `#/proof` page shows the four
+      series and not the PILOT banner: the snapshot in `src/threefold/web/`
+      reaches the page only with the next regional deploy (`docs/RUNBOOK.md`
+      section 1). Narrating measured results over that banner is the one thing
+      this scene must not do.
 - [ ] Final length between 2:35 and 2:45.

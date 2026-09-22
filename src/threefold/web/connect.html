@@ -240,10 +240,24 @@
               what would have been stopped while nobody is. Two things are decided on your machine before anything is sent, so
               they hold in either mode: a call carrying a credential is still refused on your machine and never sent, and a call
               the hook holds back (outside the project, a data file, a term on your never-send list) is neither sent nor
-              recorded. When that record reads right, switch the repository by running the installer again
-              with <span class="font-mono text-gray-200">--mode enforce</span>, or by setting
-              <span class="font-mono text-gray-200">"mode": "enforce"</span> in <span class="font-mono">.threefold.json</span>.
-              The next call is judged for real.
+              recorded. When that record reads right, enforcement takes <span class="text-gray-200">two steps</span>, because
+              the stage is the project's on the service and not your machine's.
+            </p>
+            <ol class="text-[11px] text-gray-400 list-decimal pl-4 space-y-1">
+              <li>Run the installer again with <span class="font-mono text-gray-200">--mode managed</span>, or set
+                <span class="font-mono text-gray-200">"mode": "managed"</span> in <span class="font-mono">.threefold.json</span>,
+                so the calls stop going as dry runs and the project's stage decides.
+                <span class="font-mono text-gray-200">--mode enforce</span> sends them exactly the same way; what it adds is on
+                the machine, where a file-tool write to the hooks' own files is refused whatever stage was last seen.</li>
+              <li>Promote the project on
+                <a class="underline decoration-dotted" id="projects-link" href="dashboard.html#/projects">the dashboard</a>,
+                choosing the rules that enforce. That is the step that moves it from Observe to Enforce.</li>
+            </ol>
+            <p class="text-[11px] text-gray-400">
+              Until it is promoted the project stays in Observe whatever mode your machine is in, so a forbidden write is still
+              recorded and the agent is told nothing. A stack deployed with
+              <span class="font-mono text-gray-200">DefaultHookStage=enforce</span> puts projects that have no stage of their
+              own straight into Enforce; the public demo deploys with the default, <span class="font-mono">observe</span>.
             </p>
             <pre class="code mt-2 p-2 rounded-lg bg-gray-900 border border-gray-800 text-[11px] font-mono text-gray-300" id="enforce-snippet"></pre>
           </div>
@@ -876,7 +890,10 @@
 
       document.getElementById('fetch-snippet').textContent =
         'curl -O ' + endpoint + '/' + HOOK_PATH + '\n\n' +
-        '# one tool call on stdin; a refusal prints a deny, an approval prints nothing\n' +
+        '# One tool call on stdin. The project stage decides: a deny is printed only\n' +
+        '# where the project enforces. Acme-Demo has no stage of its own, so on a stack\n' +
+        '# whose default is observe this prints nothing and exits 0, and the call is\n' +
+        '# judged and recorded rather than refused. Promote a project to see the deny.\n' +
         'echo \'' + JSON.stringify(CASES.domain_write) + '\' \\\n' +
         '  | THREEFOLD_PROJECT=Acme-Demo THREEFOLD_ENDPOINT=' + endpoint + ' python threefold_hook.py --agent claude-code';
 
@@ -905,8 +922,11 @@
       }, null, 2);
 
       document.getElementById('enforce-snippet').textContent =
+        '# Step 1, on the machine: stop sending dry runs and let the stage decide\n' +
         'python scripts/threefold_install.py --repo /path/to/acme-billing --project Acme-Billing \\\n' +
-        '  --mode enforce --endpoint ' + endpoint + ' --api-key-file /path/to/key-file';
+        '  --mode managed --endpoint ' + endpoint + ' --api-key-file /path/to/key-file\n\n' +
+        '# Step 2, on the service: promote the project, which is what enforces it\n' +
+        '# ' + PAGE_BASE + 'dashboard.html#/projects/Acme-Billing';
 
       document.getElementById('uninstall-snippet').textContent =
         'python scripts/threefold_install.py --repo /path/to/acme-billing --uninstall';
@@ -929,7 +949,9 @@
         'curl -s -X POST ' + endpoint + '/evaluate-tool-call \\\n' +
         "  -H 'Content-Type: application/json' \\\n" +
         '  -d \'' + shellBody(CASES.domain_write) + '\'\n\n' +
-        '# The decision the agent would get, from the script itself\n' +
+        '# The same call through the hook. The curl above comes from a page, which always\n' +
+        '# enforces; the hook carries the project stage instead, so on an Observe project\n' +
+        '# (Acme-Demo has no stage of its own) it prints nothing and exits 0.\n' +
         'echo \'' + JSON.stringify(CASES.domain_write) + '\' \\\n' +
         '  | THREEFOLD_PROJECT=Acme-Demo THREEFOLD_ENDPOINT=' + endpoint + ' python threefold_hook.py --agent claude-code\n\n' +
         '# The loop gate needs calls that PASS. Send the ordinary edit three times\n' +
@@ -1096,6 +1118,7 @@
     linkToSpec();
     linkToHook();
     document.getElementById('wizard-link').href = PAGE_BASE + 'dashboard.html#/connect';
+    document.getElementById('projects-link').href = PAGE_BASE + 'dashboard.html#/projects';
     document.getElementById('apiBaseInput').value = DEFAULT_API_BASE;
     renderSnippets();
   </script>
