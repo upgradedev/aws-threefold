@@ -75,9 +75,6 @@ SCRIPTED_AGENT = BENCHMARK_DIR / "scripted_agent.py"
 
 CONDITIONS = ("none", "prompt", "threefold", "prompt+threefold")
 DEFAULT_CONDITIONS = ("none", "prompt", "threefold")
-# The agents a run can drive, as rows record them. `claude` is accepted on the
-# command line as the older spelling of `claude-code`.
-AGENTS = ("claude-code", "codex")
 DEFAULT_MODEL = "claude-sonnet-5"
 DEFAULT_MAX_TURNS = 50
 DEFAULT_TIMEOUT_S = 1200
