@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import codecs
 import json
+import os
 import re
 
 import pytest
@@ -131,6 +132,81 @@ def test_a_command_that_only_resembles_a_configuration_path_is_sent(payloads, st
     run_hook(payloads.command("claude-code", "ls docs/.claudette ~/.claudette"))
     assert len(stub.requests) == 1
     assert held_back_lines() == []
+
+
+# --- the same home folder, spelled the way Git Bash and Windows spell it ------------
+#
+# Claude Code runs Bash through Git Bash on Windows, which writes C:\Users\me
+# as /c/Users/me. Resolved as written that lands at the current drive's \c\,
+# which is inside nothing, so the developer's login used to reach the ledger
+# in the command text while the `~` and C:/ spellings of the same file were
+# held back.
+
+BASH_HOME_VARIABLES = [
+    'cat "$USERPROFILE/.claude/projects/p/memory/MEMORY.md"',
+    "ls ${USERPROFILE}/.codex",
+    "cat $HOMEDRIVE$HOMEPATH/.gemini/settings.json",
+]
+
+
+@pytest.mark.parametrize("command", BASH_HOME_VARIABLES)
+@pytest.mark.parametrize("agent", AGENTS)
+def test_a_command_naming_the_home_folder_by_a_windows_variable_is_held_back(
+    agent, command, payloads, stub, run_hook, held_back_lines
+) -> None:
+    _held_back(stub, run_hook, payloads.command(agent, command), held_back_lines, "agent-config", ["--agent", agent])
+
+
+def bash_spelling(path, prefix: str = "") -> str:
+    """A Windows path as Git Bash, Cygwin and WSL write it: C:\\Users\\me becomes /c/Users/me."""
+    drive, rest = os.path.splitdrive(str(path))
+    return prefix + "/" + drive[0].lower() + rest.replace("\\", "/")
+
+
+@pytest.mark.parametrize(
+    "token, windows",
+    [
+        ("/c/Users/acmedev/.claude", "C:/Users/acmedev/.claude"),
+        ("/cygdrive/d/work/acme", "D:/work/acme"),
+        ("/mnt/e/work/acme", "E:/work/acme"),
+        ("/c", "C:/"),
+        ("/usr/local/bin/python", "/usr/local/bin/python"),
+        ("/carrots/x.py", "/carrots/x.py"),
+        ("src/app.py", "src/app.py"),
+    ],
+)
+def test_a_drive_written_the_git_bash_way_is_read_as_a_drive_only_on_windows(hook, token, windows) -> None:
+    """A POSIX machine has real /c and /mnt directories, so the reading is Windows' alone."""
+    assert hook._drive_path(token, translate=True) == windows
+    assert hook._drive_path(token, translate=False) == token
+
+
+@pytest.mark.skipif(os.name != "nt", reason="/c/Users names a real directory on a POSIX machine")
+@pytest.mark.parametrize("prefix", ["", "/cygdrive", "/mnt"])
+@pytest.mark.parametrize("directory", [".claude", ".codex", ".gemini", ".threefold"])
+def test_a_command_naming_the_agents_configuration_the_git_bash_way_is_held_back(
+    prefix, directory, machine, payloads, stub, run_hook, held_back_lines
+) -> None:
+    where = bash_spelling(machine.home / directory / "projects" / "p" / "memory" / "MEMORY.md", prefix)
+    _held_back(stub, run_hook, payloads.command("claude-code", "cat " + where), held_back_lines, "agent-config")
+
+
+@pytest.mark.skipif(os.name != "nt", reason="/c/Users names a real directory on a POSIX machine")
+def test_a_command_run_from_the_configuration_folder_named_the_git_bash_way_is_held_back(
+    machine, stub, run_hook, held_back_lines
+) -> None:
+    command = f"cat {bash_spelling(machine.home / '.claude' / 'settings.json')} > notes.txt"
+    payload = {"session_id": "s", "cwd": str(machine.project), "tool_name": "Bash", "tool_input": {"command": command}}
+    _held_back(stub, run_hook, payload, held_back_lines, "agent-config")
+
+
+@pytest.mark.skipif(os.name != "nt", reason="/c/Users names a real directory on a POSIX machine")
+def test_the_git_bash_spelling_of_the_project_is_shortened_before_it_is_sent(machine, payloads, stub, run_hook) -> None:
+    """The path above the project is what carries the developer's login."""
+    command = "python " + bash_spelling(machine.project / "src" / "app.py")
+    run_hook(payloads.command("claude-code", command))
+    text = stub.requests[0]["body"]["arguments"]["command"]
+    assert text == "python ./src/app.py", text
 
 
 def test_a_command_reaching_the_aws_credentials_is_still_sent_for_the_service_to_refuse(payloads, stub, run_hook, verdict) -> None:

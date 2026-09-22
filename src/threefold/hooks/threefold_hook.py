@@ -1324,8 +1324,55 @@ def _is_data_file(target: str, root: str) -> bool:
     return any(part.lower() in DATA_DIRECTORIES for part in parts[:-1])
 
 
-_HOME_PREFIXES = ("${home}", "$home", "%userprofile%", "$env:userprofile", "%home%", "~")
+# Every spelling of the developer's home folder a shell on Windows accepts.
+# `$HOME` and `${HOME}` are Git Bash's, `%USERPROFILE%` cmd's, `$env:USERPROFILE`
+# PowerShell's; `$USERPROFILE` is what Git Bash makes of the same variable, and
+# missing it put the login on the public ledger. Longest first, so
+# `$homedrive$homepath` is not read as `$home` with a stray tail.
+_HOME_PREFIXES = (
+    "$homedrive$homepath", "${homedrive}${homepath}", "%homedrive%%homepath%",
+    "${env:userprofile}", "$env:userprofile", "${userprofile}", "$userprofile", "%userprofile%",
+    "${home}", "$home", "%home%", "~",
+)
 _COMMAND_TOKEN_SPLIT = re.compile(r"[\s'\"`;|&<>(),=]+")
+
+# Git Bash, Cygwin and WSL spell C:\Users\me as /c/Users/me, /cygdrive/c/Users/me
+# and /mnt/c/Users/me. Claude Code runs Bash through Git Bash on Windows, so
+# that is the spelling its commands arrive in.
+_DRIVE_PATH = re.compile(r"^(?:/cygdrive|/mnt)?/([A-Za-z])(?=/|$)")
+# Read only on Windows: on a POSIX machine /c and /mnt/c name real directories,
+# and rewriting them would take a command out of the project it runs in. A
+# module-level flag rather than a call to os.name at each site, so a test can
+# drive both readings on one machine, as FOLD_GLOB_CASE already does.
+WINDOWS_DRIVE_PATHS = os.name == "nt"
+
+
+def _drive_path(token: str, translate: Optional[bool] = None) -> str:
+    """`/c/Users/me`, `/cygdrive/c/...` and `/mnt/c/...` as `C:/Users/me`, on Windows.
+
+    Resolved as written against the directory a command runs in, `/c/Users/me`
+    lands at the current drive's `\\c\\Users\\me`, which lies inside nothing:
+    not the agents' own folders, not the include list, not the project whose
+    path is taken out before sending. So the one spelling Claude Code actually
+    uses on Windows slipped past all three.
+    """
+    if WINDOWS_DRIVE_PATHS if translate is None else translate:
+        found = _DRIVE_PATH.match(token)
+        if found:
+            return f"{found.group(1).upper()}:/" + token[found.end():].lstrip("/")
+    return token
+
+
+def _drive_spellings(path: str) -> Iterator[str]:
+    """An absolute Windows path written the way Git Bash, Cygwin and WSL write it."""
+    if not WINDOWS_DRIVE_PATHS:
+        return
+    found = re.match(r"^([A-Za-z]):[\\/]", path)
+    if not found:
+        return
+    tail = path[3:].replace("\\", "/")
+    for prefix in ("", "/cygdrive", "/mnt"):
+        yield f"{prefix}/{found.group(1).lower()}/{tail}"
 
 
 def _expand_home_token(token: str) -> Optional[str]:
@@ -1348,6 +1395,9 @@ def command_reaches(command: str, base: str, protected: Sequence[str]) -> bool:
     and each word of the command resolved as a path, with `~`, `$HOME` and
     `%USERPROFILE%` expanded, against where the command runs. A command run
     from inside a protected directory reaches it whatever it names.
+
+    On Windows the text is searched for the Git Bash spelling of each
+    directory as well, since that is how a shell there writes a drive.
     """
     canonical = [_canonical(directory) for directory in protected]
     canonical_base = _canonical(base)
@@ -1355,6 +1405,8 @@ def command_reaches(command: str, base: str, protected: Sequence[str]) -> bool:
         return True
     text = os.path.normcase(command)
     forms = set(canonical) | {os.path.normcase(directory) for directory in protected}
+    for directory in list(canonical) + list(protected):
+        forms.update(os.path.normcase(spelling) for spelling in _drive_spellings(directory))
     for form in forms:
         if re.search(re.escape(form) + r"(?=$|[\\/\s'\"`;|&<>),])", text):
             return True
@@ -1386,7 +1438,7 @@ def _word_as_path(token: str, canonical_base: str) -> Optional[str]:
     if expanded is None:
         if not ("/" in token or "\\" in token or token.startswith(".")):
             return None
-        expanded = token
+        expanded = _drive_path(token)
     return _canonical(os.path.join(canonical_base, _as_path(expanded)))
 
 
@@ -1575,7 +1627,7 @@ def _command_included(command: str, base: str, canonical_root: str, include: Seq
                 place = _unquoted(operands[0]) if operands else ""
                 if not place or place in ("-", "~-", "~+") or place[0] in "-+" or re.search(r"[$%`]", place):
                     return False
-                expanded = _expand_home_token(place) or place
+                expanded = _expand_home_token(place) or _drive_path(place)
                 targets = []
                 for directory in current:
                     target = _canonical(os.path.join(directory, _as_path(expanded)))
@@ -1818,6 +1870,10 @@ def _shorten(text: str, root: str, shorthand: str = ".") -> str:
     begins with the developer's login name. A `cat` of the credentials file
     spelled out in full reaches the service as `cat ~/.aws/credentials`, which
     its protected-path rule refuses exactly as it did before.
+
+    On Windows the Git Bash spelling of the same place goes too. Left in,
+    `/c/Users/<login>/...` reached the ledger verbatim, and the ledger is
+    public wherever the stack allows public reads.
     """
     replacements = []
     for base, short in ((root, shorthand), (os.path.expanduser("~"), "~")):
@@ -1825,6 +1881,8 @@ def _shorten(text: str, root: str, shorthand: str = ".") -> str:
             if candidate and candidate not in (os.sep, "/"):
                 replacements.append((candidate.replace("\\", "/"), short))
                 replacements.append((candidate.replace("/", "\\"), short))
+                for spelling in _drive_spellings(candidate):
+                    replacements.append((spelling, short))
     flags = re.IGNORECASE if os.name == "nt" else 0
     for absolute, shorthand in sorted(set(replacements), key=lambda pair: len(pair[0]), reverse=True):
         text = re.sub(re.escape(absolute), shorthand, text, flags=flags)
