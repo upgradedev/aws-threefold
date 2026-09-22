@@ -77,16 +77,16 @@ def test_the_panel_holds_the_caps_the_drafter_enforces() -> None:
     assert f"const DRAFT_MAX_DESCRIPTION = {rule_drafter.MAX_DESCRIPTION_CHARS};" in body
     assert f"const DRAFT_MAX_EXAMPLES = {rule_drafter.MAX_EXAMPLES};" in body
     assert f"const DRAFT_MAX_CONTENT = {rule_drafter.MAX_EXAMPLE_CONTENT_CHARS};" in body
+    assert f"const DRAFT_PREVIEW_CHARS = {rule_drafter.PREVIEW_CHARS};" in body
 
 
 def test_a_save_is_sent_from_one_function_and_that_function_only_from_its_button() -> None:
     """Drafting and saving are never combined: no draft path reaches POST /rules."""
     body = page_source("rules.html")
-    script = body.split('id="draft"', 1)[1]
-    assert re.findall(r"saveDraftedRule\(", body) == ["saveDraftedRule(", "saveDraftedRule("], (
-        "saveDraftedRule is defined once and called only from the Save to project button"
-    )
-    assert 'onclick="saveDraftedRule()"' in script
+    assert body.count('onclick="saveDraftedRule()"') == 1, "Save to project is the one way to save a draft"
+    elsewhere = body.replace('onclick="saveDraftedRule()"', "").replace("async function saveDraftedRule()", "")
+    assert "saveDraftedRule(" not in elsewhere, "saveDraftedRule is called from somewhere other than its button"
+    assert not re.search(r"addEventListener\([^)]*saveDraftedRule", body)
     draft_fn = body.split("async function draftRule()", 1)[1].split("\n    }\n", 1)[0]
     assert "'/rules/draft'" in draft_fn and "DEFAULT_API_BASE + '/rules'," not in draft_fn
 
@@ -340,9 +340,10 @@ def test_the_other_refusals_each_say_what_happened(tmp_path: Path) -> None:
 def test_try_again_tries_the_edited_rule_with_explain_and_saves_nothing(tmp_path: Path) -> None:
     out = rules_page(
         r"""
+  const cut = { path: 'src/billing/domain/acme/Long.java', content_preview: 'import ' + 'a.'.repeat(80) + '...', expected: 'refuse', verdict: 'OBSERVE', matched: true, origin: 'generated', note: '' };
   answer = api({
     'GET /rules': { status: 200, body: IN_FORCE },
-    'POST /rules/draft': { status: 200, body: drafted() },
+    'POST /rules/draft': { status: 200, body: drafted({ tried: drafted().tried.concat([cut]) }) },
     'POST /rules/explain': (u, init, body) => {
       const fires = /persistence|sql/.test(body.content) && /billing\/domain/.test(body.path);
       return { status: 200, body: { verdict: fires ? 'OBSERVE' : 'ALLOW', violations: fires ? [{ mode: 'observe', reason: 'imports a forbidden module' }] : [], note: 'none', rules_considered: 'draft', imports: [], applicable_rules: [] } };
@@ -388,6 +389,9 @@ def test_try_again_tries_the_edited_rule_with_explain_and_saves_nothing(tmp_path
     assert "Tried again against your edited rule: 2 of 3 behaved as expected" in out["tried"]
     assert out["tried"].count('data-result="matched"') == 2, "The two files of the architect's own now behave"
     assert "Nothing was saved" in out["validation"]
+    assert "1 file built from the rule came back only as a shortened preview" in out["validation"], (
+        "A cut preview is not the file that was tried, so it is named and not judged"
+    )
     assert "cannot be used as written" in out["unusable"] and "forbid_imports is empty" in out["unusable"]
     assert "not valid JSON" in out["notJson"]
 

@@ -1033,19 +1033,29 @@ public class Order { }</textarea>
       return { rule: parsed, why: '' };
     }
 
+    // How much of a file the drafter echoes back as content_preview. A preview
+    // is a label for a person: longer content is cut and ends in "...", and a
+    // credential is replaced by its label.
+    const DRAFT_PREVIEW_CHARS = 160;
+
     // The files Try again judges: the example rows as they stand now, so one
     // can be added to test an edit, and the files the service built from the
-    // draft, which it sent back whole.
+    // draft, but only those whose preview is provably the whole file. A cut or
+    // redacted preview is not the file that was tried, so judging it would put
+    // a verdict beside a file nobody sent; those are counted and named instead.
     function retryCases() {
       const cases = readDraftExamples()
         .filter(example => example.path.trim())
         .map(example => ({ path: example.path.trim(), content: example.content, expect: example.expect, origin: 'caller' }));
+      let partial = 0;
       (lastDraft ? lastDraft.tried : []).forEach(row => {
-        if (row && row.origin === 'generated' && typeof row.path === 'string') {
-          cases.push({ path: row.path, content: String(row.content_preview || ''), expect: row.expected === 'allow' ? 'allow' : 'refuse', origin: 'generated' });
-        }
+        if (!row || row.origin !== 'generated' || typeof row.path !== 'string') return;
+        const preview = typeof row.content_preview === 'string' ? row.content_preview : '';
+        const whole = characters(preview) <= DRAFT_PREVIEW_CHARS && !/\.\.\.$/.test(preview) && preview.indexOf(' REDACTED]') === -1;
+        if (!whole) { partial += 1; return; }
+        cases.push({ path: row.path, content: preview, expect: row.expected === 'allow' ? 'allow' : 'refuse', origin: 'generated' });
       });
-      return cases;
+      return { cases: cases, partial: partial };
     }
 
     async function retryDraft() {
@@ -1054,8 +1064,12 @@ public class Order { }</textarea>
       const out = document.getElementById('draft-validation');
       if (!edited.rule) { out.innerHTML = '<p class="text-red-400">' + escapeHtml(edited.why) + '</p>'; return; }
       renderDraftMode(edited.rule);
-      const cases = retryCases();
-      if (!cases.length) { out.innerHTML = '<p class="text-amber-300">There is nothing to try the rule on. Add an example above.</p>'; return; }
+      const { cases, partial } = retryCases();
+      const skipped = partial
+        ? '<p class="text-[11px] text-gray-400">' + partial + ' file' + (partial === 1 ? '' : 's') + ' built from the rule came back only as a shortened preview, so ' +
+          (partial === 1 ? 'it was' : 'they were') + ' not tried again. Draft again to rebuild ' + (partial === 1 ? 'it' : 'them') + ' from the rule.</p>'
+        : '';
+      if (!cases.length) { out.innerHTML = '<p class="text-amber-300">There is nothing to try the rule on. Add an example above.</p>' + skipped; return; }
       const ticket = ++draftTicket;
       const button = document.getElementById('draft-retry-button');
       button.disabled = true;
@@ -1094,7 +1108,8 @@ public class Order { }</textarea>
           });
         }
         out.innerHTML = '<p class="text-emerald-300">The service could use the edited rule and tried it as a draft, alone. Nothing was saved.</p>' +
-          (edited.rule.mode === 'observe' ? '' : '<p class="text-amber-300">Its mode is not observe, so Save to project will not send it: a new rule watches first.</p>');
+          (edited.rule.mode === 'observe' ? '' : '<p class="text-amber-300">Its mode is not observe, so Save to project will not send it: a new rule watches first.</p>') +
+          skipped;
         renderTried(rows, 'Tried again against your edited rule');
       } catch (err) {
         if (ticket !== draftTicket) return;
