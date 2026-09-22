@@ -4,8 +4,11 @@ A judge who opens the public URL meets the hero before anything else: the
 sentence, then "Try the two-stage rollout (60 s)", "Open the dashboard" and
 "Connect a repository", then the zero-setup scenarios that trip the circuit
 breaker and issue the certificate. The hero holds no number of its own: its
-one line of figures is read from /api/overview when the page loads and stays
-hidden when the stack does not answer, needs a key, or has counted nothing.
+one line of figures is read from /api/overview when the page loads, without a
+key, says that it counts a public demo stack's own traffic rather than usage,
+and stays hidden when the stack does not answer, needs a key, or has counted
+nothing. The sentence names three agents; the paragraph under it says which
+of them a refusal has been measured to stop.
 
 The markup is read as the stack serves it; the script runs under Node with the
 stub browser in _browser.py, and those tests skip where Node is absent.
@@ -58,7 +61,7 @@ def _overview(**totals) -> str:
     )
 
 
-def _load(tmp_path: Path, overview: str) -> dict:
+def _load(tmp_path: Path, overview: str, before: str = "") -> dict:
     """The page loaded against a stack whose /api/overview answers `overview` (a reply, or 'network')."""
     return run(
         "index.html",
@@ -70,6 +73,7 @@ def _load(tmp_path: Path, overview: str) -> dict:
 """,
         tmp_path,
         before=DEMO_DOM
+        + before
         + "answer = api({ '/status': { status: 200, body: { service: 'Threefold', status: 'HEALTHY' } }, '/api/overview': "
         + overview
         + " });\n",
@@ -104,6 +108,23 @@ def test_the_demo_scenarios_follow_the_hero_unchanged() -> None:
     main = body.split("<main", 1)[1].split(">", 1)[1]
     first_element = re.search(r"<(?!!--)[a-z]+[^>]*>", main).group(0)
     assert first_element.startswith('<section id="what-threefold-is"'), f"The hero is the first thing in main, not {first_element}"
+
+
+def test_the_hero_says_which_agents_a_refusal_is_measured_to_stop() -> None:
+    """The sentence says "before they are written" for three agents; STATE.md has that measured for two.
+
+    Claude Code and Antigravity refused a Write and no file was created; Codex could not be measured, so its edits
+    count as governed at commit time only. The sentence is the one the first screen was specified with, so the
+    scope sits in the paragraph right under the actions, where the same glance reaches it.
+    """
+    hero = _hero()
+    scope = re.search(r'<span id="hero-scope">(.*?)</span>', hero, re.S)
+    assert scope, "The hero says what has been measured"
+    assert _text(scope.group(1)) == (
+        "That a refusal stops the write has been measured for Claude Code and Antigravity; for Codex it has not been "
+        "measured yet, so its edits count as governed at commit time only."
+    )
+    assert hero.index('id="hero-actions"') < hero.index('id="hero-scope"')
 
 
 def test_the_hero_writes_no_number_of_its_own() -> None:
@@ -144,13 +165,23 @@ def test_the_live_line_is_read_from_the_overview_at_load(tmp_path: Path) -> None
     out = _load(tmp_path, "{ status: 200, body: " + _overview() + " }")
     assert not out["hidden"]
     assert _text(out["live"]) == (
-        "Live from this stack, last 7 days: 1,284 tool calls judged, 37 refused, 57 that would have been refused "
-        "while observing, across 12 projects. See them on the dashboard."
+        "This public demo stack, last 7 days: 1,284 tool calls judged, 37 refused, 57 that would have been refused "
+        "while observing, across 12 projects. They are this project's own probes and tests, the scenarios on this page, "
+        "the sandboxes visitors start (each walkthrough adds one) and anyone else calling its open API, so they show "
+        "that the stack is live, not how widely Threefold is used. See them on the dashboard."
     )
     assert 'href="https://example.test/prod/dashboard.html#/overview"' in out["live"]
     (asked,) = out["asked"]
     assert asked["url"] == "https://example.test/prod/api/overview?days=7" and asked["method"] == "GET"
     assert "X-API-Key" not in asked["headers"], "No key is sent unless someone typed one"
+
+
+def test_the_live_line_is_read_without_a_key_even_when_one_is_typed(tmp_path: Path) -> None:
+    """So it only ever shows a stack whose reads are open, which is what its words say it is."""
+    out = _load(tmp_path, "{ status: 200, body: " + _overview() + " }", before="el('apiKeyInput').value = 'acme-operator-key';\n")
+    (asked,) = out["asked"]
+    assert "X-API-Key" not in asked["headers"], "A typed key would read a private stack's totals under a demo label"
+    assert not out["hidden"]
 
 
 def test_one_of_each_reads_in_the_singular(tmp_path: Path) -> None:
@@ -178,6 +209,8 @@ def test_hostile_totals_never_reach_the_page(tmp_path: Path) -> None:
     assert out["hidden"] and out["live"] == "", "A figure that is not a number is not shown at all"
     out = _load(tmp_path, "{ status: 200, body: " + _overview(calls=-3) + " }")
     assert out["hidden"], "A negative count is not a count"
+    out = _load(tmp_path, "{ status: 200, body: " + _overview(calls=2.5) + " }")
+    assert out["hidden"] and out["live"] == "", "A fractional count is not shown rounded down; it is not shown"
 
 
 def test_the_flagship_loop_still_trips_after_the_hero_has_loaded(tmp_path: Path) -> None:

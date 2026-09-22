@@ -156,7 +156,9 @@
          repository. The scenarios below stay the zero-setup demo of the circuit
          breaker and the certificate. No number on this card is written into the
          page: the line under the actions is filled from /api/overview when the
-         stack answers, and stays hidden when it does not. -->
+         stack answers an anonymous read, and stays hidden when it does not. The
+         paragraph under it says which agents a refusal has been measured to stop,
+         because the sentence names three and the evidence covers two. -->
     <section id="what-threefold-is" class="p-4 sm:p-6 rounded-2xl bg-gradient-to-br from-gray-900 via-gray-900 to-purple-950/30 border border-gray-800">
       <div class="max-w-4xl space-y-4">
         <h2 id="hero-sentence" class="text-lg sm:text-xl md:text-2xl font-bold text-white leading-snug break-words">
@@ -179,7 +181,9 @@
         </div>
         <p id="hero-live" class="hidden text-xs text-gray-400 break-words" aria-live="polite"></p>
         <p class="text-xs sm:text-sm text-gray-400">
-          An agent asks to write a file or run a command, and Threefold answers yes or no before the tool call happens. Four
+          An agent asks to write a file or run a command, and Threefold answers yes or no before the tool call happens.
+          <span id="hero-scope">That a refusal stops the write has been measured for Claude Code and Antigravity; for Codex it
+          has not been measured yet, so its edits count as governed at commit time only.</span> Four
           deterministic gates decide: a credential in the arguments, a domain file importing infrastructure, the same call
           repeating, a spend ceiling. Amazon Bedrock never decides; it only explains the verdict in a sentence, and every response
           names which of the two you are reading. Or press a scenario below to watch the gates refuse, with no account.
@@ -1041,14 +1045,20 @@
     // The one line of numbers on the first card, read from the stack at load and
     // never written into the page. It says what the stack itself answered: the
     // window it counted, and how many calls it judged, refused and would have
-    // refused, across how many projects. It stays hidden when the stack does not
-    // answer, when its reads need a key (a private stack), when the answer is not
-    // the contract's shape, and when it counted no call at all, because a row of
+    // refused, across how many projects. It is read without a key, even when one
+    // has been typed, so it only ever shows a stack whose reads are open, which
+    // is the public demo stack, and it says so: those counts are the project's
+    // own probes and tests, the scenarios on this page, visitors' sandboxes and
+    // anyone else calling the open API, so they show the stack is live, not how
+    // widely Threefold is used. It stays hidden when the stack does not answer,
+    // when its reads need a key (a private stack), when the answer is not the
+    // contract's shape, and when it counted no call at all, because a row of
     // zeros would read as "nothing is governed" rather than "nothing to count".
     // Never rejects: it runs beside the demo, which must not wait for it or fail
     // with it.
     function wholeNumber(value) {
-      return typeof value === 'number' && isFinite(value) && value >= 0 ? Math.floor(value) : null;
+      // A count is a whole number or it is not shown: 2.5 is refused, not rounded.
+      return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : null;
     }
 
     function formatCount(value) {
@@ -1063,7 +1073,7 @@
       try {
         const res = await fetch(`${getApiBase()}/api/overview?days=7`, {
           method: 'GET',
-          headers: authHeaders({ 'Accept': 'application/json' })
+          headers: { 'Accept': 'application/json' }
         });
         if (!res || !res.ok) return;
         const data = await res.json();
@@ -1077,11 +1087,14 @@
         if (!days || !calls || refused === null || wouldRefuse === null || projects === null) return;
         const plural = (n, one, many) => formatCount(n) + ' ' + (n === 1 ? one : many);
         line.innerHTML =
-          '<span class="text-gray-300 font-semibold">Live from this stack, last ' + escapeHtml(plural(days, 'day', 'days')) + ':</span> ' +
+          '<span class="text-gray-300 font-semibold">This public demo stack, last ' + escapeHtml(plural(days, 'day', 'days')) + ':</span> ' +
           escapeHtml(plural(calls, 'tool call', 'tool calls')) + ' judged, ' +
           escapeHtml(formatCount(refused)) + ' refused, ' +
           escapeHtml(formatCount(wouldRefuse)) + ' that would have been refused while observing, across ' +
           escapeHtml(plural(projects, 'project', 'projects')) + '. ' +
+          'They are this project\'s own probes and tests, the scenarios on this page, the sandboxes visitors start ' +
+          '(each walkthrough adds one) and anyone else calling its open API, so they show that the stack is live, ' +
+          'not how widely Threefold is used. ' +
           '<a href="' + PAGE_BASE + 'dashboard.html#/overview" class="text-purple-300 hover:text-purple-200 underline">See them on the dashboard</a>.';
         line.classList.remove('hidden');
       } catch (err) {
