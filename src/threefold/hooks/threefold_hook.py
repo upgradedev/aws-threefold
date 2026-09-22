@@ -1993,7 +1993,7 @@ def post_evaluation(body: Dict[str, Any], base: Optional[str] = None, api_key: A
 # What a summary line may not carry into the agent's context: C0 and C1
 # control characters, the Unicode line and paragraph separators, and the
 # direction overrides that can make a line read differently from what it holds.
-_UNPRINTABLE = re.compile(r"[\x00-\x1f\x7f-\x9f  ‎‏‪-‮⁦-⁩]+")
+_UNPRINTABLE = re.compile(r"[\x00-\x1f\x7f-\x9f\u2028\u2029\u200e\u200f\u202a-\u202e\u2066-\u2069]+")
 MAX_FIX_SUMMARY_CHARS = 200
 
 
