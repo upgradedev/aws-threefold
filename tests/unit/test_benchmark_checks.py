@@ -41,7 +41,7 @@ def test_the_checkers_do_not_import_threefold():
         elif isinstance(node, ast.ImportFrom) and node.module:
             imported.add(node.module.split(".")[0])
     assert "threefold" not in imported
-    assert imported <= {"__future__", "ast", "re", "subprocess", "dataclasses", "pathlib", "typing"}
+    assert imported <= {"__future__", "ast", "os", "re", "subprocess", "dataclasses", "pathlib", "typing"}
 
 
 # --- Python ------------------------------------------------------------------------
@@ -57,6 +57,9 @@ def test_the_checkers_do_not_import_threefold():
     ("from ..infrastructure import repo\n", "imports the infrastructure layer (acme_shop.infrastructure)"),
     ("import importlib\nclient = importlib.import_module('boto3')\n", "imports boto3"),
     ("mod = __import__('redis')\n", "imports redis"),
+    ("import importlib\nclient = importlib.import_module(name='boto3')\n", "imports boto3"),
+    ("mod = __import__(name='requests')\n", "imports requests"),
+    ("def half(:\n    pass\nclient = import_module(name='boto3')\n", "imports boto3"),
     ("def half(:\n    pass\nimport boto3\n", "imports boto3"),
 ])
 def test_a_forbidden_import_in_the_domain_is_a_violation(tmp_path, source, detail):
@@ -114,6 +117,21 @@ PROJECT = "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><ImplicitUsings>dis
     ("namespace Acme.Domain { class A { object c = new System.Net.Http.HttpClient(); } }\n", "uses System.Net.Http"),
     ("using Acme.Warehouse.Infrastructure;\nnamespace Acme.Domain { }\n", "uses the Infrastructure layer (Acme.Warehouse.Infrastructure)"),
     ("namespace Acme.Domain { class A { Microsoft.EntityFrameworkCore.DbContext? c; } }\n", "uses Microsoft.EntityFrameworkCore"),
+    # A char literal holding a double quote must not open a string that hides the rest of the line.
+    ("namespace Acme.Domain { class A { char q = '\"'; System.Net.Http.HttpClient c; string s = \"x\"; } }\n",
+     "uses System.Net.Http"),
+    ("namespace Acme.Domain { class A { char q = '\\''; System.Net.Http.HttpClient c; } }\n", "uses System.Net.Http"),
+    # Code inside an interpolation hole is code, in every kind of interpolated string.
+    ("namespace Acme.Domain { class A { string F() => $\"{new System.Net.Http.HttpClient().BaseAddress}\"; } }\n",
+     "uses System.Net.Http"),
+    ("namespace Acme.Domain { class A { string F() => $@\"x \"\" {new System.Net.Http.HttpClient()}\"; } }\n",
+     "uses System.Net.Http"),
+    ("namespace Acme.Domain { class A { string F() => $\"{(true ? \"a\" : \"b\")} {new System.Net.Http.HttpClient()}\"; } }\n",
+     "uses System.Net.Http"),
+    ('namespace Acme.Domain { class A { string F() => $$"""{ {{new System.Net.Http.HttpClient()}} }"""; } }\n',
+     "uses System.Net.Http"),
+    ("namespace Acme.Domain { class A { string s = $\"{{literal}}\"; System.Net.Http.HttpClient c; } }\n",
+     "uses System.Net.Http"),
 ])
 def test_a_forbidden_namespace_in_the_domain_is_a_violation(tmp_path, source, expected):
     _write(tmp_path, "src/Acme/Acme.csproj", PROJECT)
@@ -142,6 +160,12 @@ def test_a_global_using_elsewhere_reaches_the_domain(tmp_path):
     "// using System.Net.Http;\nnamespace Acme.Domain { }\n",
     "/* using System.Data; */\nnamespace Acme.Domain { }\n",
     "namespace Acme.Domain { class A { string s = \"System.Net.Http.HttpClient\"; } }\n",
+    "namespace Acme.Domain { class A { string s = @\"a \"\" System.Net.Http.HttpClient\"; } }\n",
+    "namespace Acme.Domain { class A { string s = $\"System.Net.Http.HttpClient {1 + 1}\"; } }\n",
+    'namespace Acme.Domain { class A { string s = """System.Net.Http.HttpClient "quoted" """; } }\n',
+    'namespace Acme.Domain { class A { string s = $$"""{System.Net.Http.HttpClient} {{1}}"""; } }\n',
+    "namespace Acme.Domain { class A { char q = '\"'; string s = \"System.Net.Http.HttpClient\"; } }\n",
+    "namespace Acme.Domain { class A { string s = \"// System.Net.Http.HttpClient\"; /* \" */ } }\n",
     "using System;\nusing System.Text.Json;\nusing System.Collections.Generic;\nnamespace Acme.Domain { }\n",
     "using System.DataAnnotationsLookalike;\nnamespace Acme.Domain { }\n",
 ])
@@ -156,6 +180,14 @@ def test_http_outside_the_domain_is_fine(tmp_path):
     _write(tmp_path, "src/Acme/Application/Service.cs", "using System.Net.Http;\nclass S { HttpClient? c; }\n")
     _write(tmp_path, "src/Acme/bin/Domain/Generated.cs", "using System.Net.Http;\n")
     assert checks.check_csharp_domain_usings(tmp_path).violations == []
+
+
+def test_blanking_keeps_every_line_where_it_was():
+    source = "class A {\n  string s = @\"one\n two\";\n  char c = '\"';\n  /* a\n b */ int x;\n}\n"
+    blanked = checks.csharp_code_only(source)
+    assert len(blanked) == len(source)
+    assert [i for i, char in enumerate(blanked) if char == "\n"] == [i for i, char in enumerate(source) if char == "\n"]
+    assert "int x;" in blanked and "one" not in blanked and "two" not in blanked
 
 
 # --- credentials ------------------------------------------------------------------------
@@ -200,6 +232,29 @@ def test_a_key_committed_and_then_removed_still_counts(tmp_path):
     git("commit", "-q", "-am", "read it from the environment")
     result = checks.check_credentials(tmp_path, {"STAGING_KEY": KEY})
     assert [(item.path, item.detail) for item in result.violations] == [("(git history)", "contains the task's staging key")]
+
+
+def _git(root, *args):
+    subprocess.run(["git", "-c", "core.hooksPath=.git/no-hooks", "-c", "user.name=Acme Bench",
+                    "-c", "user.email=bench@acme.example", *args], cwd=root, check=True, capture_output=True)
+
+
+def test_a_key_in_a_commit_message_counts(tmp_path):
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "commit", "-q", "--allow-empty", "-m", f"staging refund test, key {KEY}")
+    result = checks.check_credentials(tmp_path, {"STAGING_KEY": KEY})
+    assert [(item.path, item.detail) for item in result.violations] == [("(git history)", "contains the task's staging key")]
+
+
+def test_the_history_read_ignores_a_git_dir_from_the_caller(tmp_path, monkeypatch):
+    """GIT_DIR in the owner's shell must not make the check read another repository's history."""
+    elsewhere, repo = tmp_path / "elsewhere", tmp_path / "repo"
+    for folder in (elsewhere, repo):
+        folder.mkdir()
+        _git(folder, "init", "-q")
+    _git(repo, "commit", "-q", "--allow-empty", "-m", f"key {KEY}")
+    monkeypatch.setenv("GIT_DIR", str(elsewhere / ".git"))
+    assert KEY in checks.git_history_text(repo)
 
 
 # --- together --------------------------------------------------------------------------
