@@ -503,7 +503,12 @@ def developer_salt(home: str) -> str:
     name names them.
 
     Written once with O_EXCL and never overwritten, so two hooks starting at
-    the same moment cannot give one developer two identities.
+    the same moment cannot give one developer two identities. A file that is
+    there and cannot be used is the one exception: a crash or a full disk
+    during that single write leaves it empty or truncated, O_EXCL cannot
+    replace it, and every later call from the machine would be anonymous for
+    good with nothing said. One is replaced and read back, so hooks that
+    repair it at the same moment still end on the salt that is on disk.
     """
     path = os.path.join(home, DEVELOPER_SALT_NAME)
 
@@ -527,9 +532,38 @@ def developer_salt(home: str) -> str:
         finally:
             os.close(handle)
         return salt
-    except OSError:
-        # Another hook wrote it first, or nothing here can be written.
+    except FileExistsError:
+        found = existing()
+        if found:
+            # Another hook wrote it between the two reads, and it is theirs.
+            return found
+        _replace_unusable_salt(path, salt)
         return existing()
+    except OSError:
+        # Nothing here can be written.
+        return existing()
+
+
+def _replace_unusable_salt(path: str, salt: str) -> None:
+    """Puts a usable salt where one that cannot be used is, in one rename.
+
+    Written beside the file and renamed over it, so no reader ever sees a
+    half-written salt, and a machine that cannot be written to is left as it
+    was: anonymous, as it is when the home folder cannot be written at all.
+    """
+    temporary = f"{path}.{os.getpid():x}.{os.urandom(4).hex()}"
+    try:
+        handle = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        try:
+            os.write(handle, salt.encode("ascii"))
+        finally:
+            os.close(handle)
+        os.replace(temporary, path)
+    except OSError:
+        try:
+            os.unlink(temporary)
+        except OSError:
+            pass
 
 
 def developer_id() -> str:
