@@ -10,6 +10,9 @@
        Play CDN answers with no Access-Control-Allow-Origin header, so a browser
        would refuse a script carrying one and the page would lose every style. -->
   <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <!-- The layer every page shares: the navigation, the sign-in and the API base. -->
+  <link rel="stylesheet" href="assets/threefold.css" />
+  <script src="assets/threefold.js"></script>
   <script>
       // The server rewrites __THREEFOLD_BASE_PATH__ to the API Gateway stage prefix
       // when it serves this page, so the base is exact rather than guessed from the
@@ -45,7 +48,7 @@
           <p class="text-xs text-gray-400">What each layer of your code may not depend on, enforced at the moment an agent writes the file</p>
         </div>
       </div>
-      <nav id="page-nav" class="flex items-center gap-2 text-xs"></nav>
+      <div id="page-nav" class="flex items-center gap-2 text-xs"></div>
     </div>
   </header>
 
@@ -98,7 +101,7 @@
             <h2 class="text-sm font-semibold text-white">Rules in force <span class="ml-1"><a data-anchor="#/default/get_rules" href="swagger.html" class="text-[10px] font-mono text-purple-400 hover:text-purple-300 underline">GET /rules ↗</a></span></h2>
             <p id="rules-origin" class="text-[11px] text-gray-500"></p>
           </div>
-          <a id="console-link" href="console.html" class="text-[11px] text-purple-300 hover:text-purple-200 underline">what they refused this week ↗</a>
+          <a id="console-link" href="dashboard.html#/overview" class="text-[11px] text-purple-300 hover:text-purple-200 underline">what they refused this week ↗</a>
         </div>
         <div id="rules-list" class="space-y-3"><p class="text-xs text-gray-500">Reading the rules…</p></div>
       </section>
@@ -183,8 +186,8 @@ public class Order { }</textarea>
 
   <script>
     const NAV = [
-      { href: 'console.html', label: 'Enforcement Console' },
-      { href: 'index.html', label: 'Dashboard' },
+      { href: 'dashboard.html#/overview', label: 'Dashboard' },
+      { href: 'index.html', label: 'Demo' },
       { href: 'sessions.html', label: 'Sessions' },
       { href: 'settings.html', label: 'Policy' },
       { href: 'connect.html', label: 'Connect an agent' },
@@ -262,6 +265,9 @@ public class Order { }</textarea>
       try { return (window.localStorage.getItem(OPERATOR_KEY_STORAGE) || '').trim(); } catch (err) { return ''; }
     }
     function authHeaders(extra, typedKey) {
+      // With the shared layer, a sign-in goes as a bearer token and the stored key
+      // only without one; a key typed beside Save still wins over both.
+      if (window.Threefold) return Threefold.authHeaders(extra, typedKey);
       const headers = Object.assign({ Accept: 'application/json' }, extra || {});
       const key = (typedKey || '').trim() || storedOperatorKey();
       if (key) headers['X-API-Key'] = key;
@@ -269,10 +275,13 @@ public class Order { }</textarea>
     }
 
     function renderNav() {
-      document.getElementById('page-nav').innerHTML = NAV.map(item =>
+      // The shared navigation, with the stack's kind and the sign-in state, when
+      // the shared layer loaded; this page's own links when it did not.
+      if (window.Threefold) Threefold.mountNav(document.getElementById('page-nav'), { active: 'rules' });
+      else document.getElementById('page-nav').innerHTML = NAV.map(item =>
         '<a href="' + PAGE_BASE + item.href + '" class="px-3 py-1.5 rounded-md bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700 transition">' + item.label + '</a>'
       ).join('');
-      document.getElementById('console-link').href = PAGE_BASE + 'console.html';
+      document.getElementById('console-link').href = PAGE_BASE + 'dashboard.html#/overview';
       document.querySelectorAll('a[data-anchor]').forEach(a => { a.href = PAGE_BASE + 'swagger.html' + a.getAttribute('data-anchor'); });
     }
 
@@ -408,8 +417,8 @@ public class Order { }</textarea>
         document.getElementById('rules-list').innerHTML =
           '<p class="text-xs text-red-400">The rules could not be read, so none are shown. ' + escapeHtml(String(err)) + '</p>' +
           (refused
-            ? '<p class="text-[11px] text-gray-400 mt-1">This stack keeps its reads private. <a href="' + PAGE_BASE +
-              'settings.html#operator-key" class="text-purple-300 hover:text-purple-200 underline">Store the operator key in this browser ↗</a></p>'
+            ? '<p class="text-[11px] text-gray-400 mt-1">This stack keeps its reads private. Sign in with <span class="font-mono">python threefold.py open</span>, or <a href="' + PAGE_BASE +
+              'settings.html#operator-key" class="text-purple-300 hover:text-purple-200 underline">store the operator key in this browser ↗</a></p>'
             : '');
       }
     }
@@ -556,7 +565,7 @@ public class Order { }</textarea>
             return;
           }
           if (d.type === 'urn:threefold:error:policy-write-disabled') words = 'This deployment has no operator key configured, so its rules can be read and tried but not changed.';
-          else if (res.status === 401) words = 'Saving needs the operator key. Type it beside Save, or store it on the settings page.';
+          else if (res.status === 401) words = 'Saving needs the operator. Sign in with python threefold.py open, type the key beside Save, or store it on the settings page.';
           else if (res.status === 403) words = 'That key was not accepted.';
           out.innerHTML = '<p class="text-red-400">' + escapeHtml(words) + ' Nothing changed.</p>';
           return;

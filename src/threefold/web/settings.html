@@ -10,6 +10,9 @@
        Play CDN answers with no Access-Control-Allow-Origin header, so a browser
        would refuse a script carrying one and the page would lose every style. -->
   <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <!-- The layer every page shares: the navigation, the sign-in and the API base. -->
+  <link rel="stylesheet" href="assets/threefold.css" />
+  <script src="assets/threefold.js"></script>
   <script>
       // The server rewrites __THREEFOLD_BASE_PATH__ to the API Gateway stage prefix
       // when it serves this page, so the base is exact rather than guessed from the
@@ -71,7 +74,7 @@
           <p class="text-xs text-gray-400">The stored governance policy · read from and written to the live service, with each field labelled by whether a gate reads it</p>
         </div>
       </div>
-      <nav id="page-nav" class="flex items-center gap-2 text-xs"></nav>
+      <div id="page-nav" class="flex items-center gap-2 text-xs"></div>
     </div>
 
     <!-- LIVE API CONNECTION BAR -->
@@ -134,13 +137,14 @@
         </p>
 
         <div class="p-3 rounded-xl bg-sky-950/20 border border-sky-900/40">
-          <p class="text-xs font-semibold text-sky-300">Saving needs a key. On the public demo, reading does not.</p>
+          <p class="text-xs font-semibold text-sky-300">Saving needs the operator. On the public demo, reading does not.</p>
           <p class="text-[11px] text-gray-400 mt-1">
             A saved policy is written to DynamoDB and adopted by every container that starts afterwards, so an anonymous write
             would change the thresholds this product leads with for everyone who came after it. The public demo keeps reads
             open, because a reader has to be able to see what is enforced; a stack deployed with private reads needs the key
-            for those too. Put the operator key in the <span class="font-mono">API Key</span> field above, or store it in this
-            browser below. A deployment that has configured no key refuses writes outright and says so.
+            for those too. Sign in with <span class="font-mono">python threefold.py open</span>, as below; the key, typed into the
+            <span class="font-mono">API Key</span> field above or stored in this browser, is the fallback. A deployment that has
+            configured no key refuses writes outright and says so.
           </p>
         </div>
 
@@ -151,8 +155,26 @@
              readable by every script on this origin, and these pages load two
              bundles from a CDN, so a page that only reassured the reader would be
              leaving out the thing that decides whether storing it is safe. -->
+        <!-- Signing in is the way in. The operator runs one command on the machine
+             that holds the key, and this browser receives a session that expires,
+             never the key itself. -->
+        <div id="sign-in" class="p-3 rounded-xl bg-emerald-950/20 border border-emerald-900/40 space-y-2">
+          <p class="text-xs font-semibold text-emerald-300">Sign in, rather than paste a key</p>
+          <p class="text-[11px] text-gray-400">
+            On the machine that holds the operator key, in the folder where you ran connect, run
+            <span class="font-mono text-gray-200">python threefold.py open</span>. It opens the dashboard already signed in,
+            through a link that works once and only for a short while. This browser then holds a sign-in session that
+            expires, never the key, and every page here uses it for reads and saves.
+          </p>
+          <p id="sign-in-state" class="text-[11px] text-gray-500"></p>
+        </div>
+
         <div id="operator-key" class="p-3 rounded-xl bg-gray-950 border border-gray-800 space-y-2">
-          <p class="text-xs font-semibold text-gray-200">Operator key for this browser</p>
+          <p class="text-xs font-semibold text-gray-200">Fallback: an operator key for this browser</p>
+          <p class="text-[11px] text-gray-400">
+            For a machine without <span class="font-mono">threefold.py</span>. A sign-in replaces it: signing in removes a key
+            stored here, and while this browser is signed in the session is sent instead.
+          </p>
           <p class="text-[11px] text-gray-400">
             Kept in this browser's localStorage under <span class="font-mono text-purple-300">threefold-operator-key</span> and
             sent as <span class="font-mono">X-API-Key</span> on the requests the console, rules, sessions and settings pages make
@@ -318,15 +340,18 @@
     };
 
     const NAV = [
-      { href: 'index.html', label: 'Dashboard' },
-      { href: 'console.html', label: 'Enforcement Console' },
+      { href: 'dashboard.html#/overview', label: 'Dashboard' },
       { href: 'rules.html', label: 'Architecture Rules' },
       { href: 'sessions.html', label: 'Sessions' },
       { href: 'connect.html', label: 'Connect an agent' },
+      { href: 'index.html', label: 'Demo' },
       { href: 'swagger.html', label: 'OpenAPI 3.1' }
     ];
 
     function renderNav() {
+      // The shared navigation, with the stack's kind and the sign-in state, when
+      // the shared layer loaded; this page's own links when it did not.
+      if (window.Threefold) { Threefold.mountNav(document.getElementById('page-nav'), { active: 'settings' }); return; }
       document.getElementById('page-nav').innerHTML = NAV.map(item =>
         '<a href="' + PAGE_BASE + item.href + '" class="px-3 py-1.5 rounded-md bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700 transition">' + item.label + '</a>'
       ).join('');
@@ -433,11 +458,25 @@
     }
 
     function authHeaders(extra) {
-      const headers = Object.assign({ "Accept": "application/json" }, extra || {});
       const typed = document.getElementById("apiKeyInput").value.trim();
+      // A sign-in, like the stored key, goes only to the host that served this
+      // page; the shared layer sends the sign-in when there is one, and the
+      // stored key otherwise.
+      if (!typed && window.Threefold && baseIsThisOrigin(getApiBase())) return Threefold.authHeaders(extra);
+      const headers = Object.assign({ "Accept": "application/json" }, extra || {});
       const key = typed || (baseIsThisOrigin(getApiBase()) ? storedOperatorKey() : "");
       if (key) headers["X-API-Key"] = key;
       return headers;
+    }
+
+    // Says whether this browser is signed in, and until when; never the token.
+    function renderSignInState() {
+      const el = document.getElementById('sign-in-state');
+      if (!el || !window.Threefold) return;
+      const session = Threefold.readSession();
+      el.textContent = session
+        ? 'This browser is signed in' + (session.endsAt ? ' until ' + Threefold.clockTime(session.endsAt) : '') + '. The key below is not needed.'
+        : 'This browser is not signed in.';
     }
 
     function setConnection(ok, text) {
@@ -498,7 +537,7 @@
           showRaw(data);
           if (res.status === 401 || res.status === 403) {
             document.getElementById('save-status').innerHTML =
-              '<span class="text-amber-400">This stack keeps its reads private. Store the operator key in this browser, below.</span>';
+              '<span class="text-amber-400">This stack keeps its reads private. Sign in with python threefold.py open, or store the operator key in this browser, below.</span>';
           }
           return;
         }
@@ -575,7 +614,7 @@
           if (data && data.type === 'urn:threefold:error:policy-write-disabled') {
             explanation = 'This deployment has no policy-write key configured, so the policy is read only here. The values above are unchanged.';
           } else if (res.status === 401) {
-            explanation = 'Saving needs the operator key. Put it in the API Key field above, or store it in this browser. The policy is unchanged.';
+            explanation = 'Saving needs the operator. Sign in with python threefold.py open, or put the key in the API Key field above, or store it in this browser. The policy is unchanged.';
           } else if (res.status === 403) {
             explanation = 'That key was not accepted. The policy is unchanged.';
           }
@@ -616,6 +655,7 @@
 
     renderNav();
     linkToSpec();
+    renderSignInState();
     renderOperatorKeyState();
     document.getElementById('apiBaseInput').value = DEFAULT_API_BASE;
     loadPolicy();
