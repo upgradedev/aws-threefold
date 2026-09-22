@@ -553,7 +553,7 @@ class DynamoDBSessionRepository:
         return cleaned[:limit]
 
     def read_decision_day(
-        self, day: str, after: Optional[str] = None, limit: int = 200
+        self, day: str, after: Optional[str] = None, limit: int = 200, *, raise_errors: bool = False
     ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
         """One page of one day's decisions, newest first, and where the next page starts.
 
@@ -562,6 +562,11 @@ class DynamoDBSessionRepository:
         is exhausted. Each row carries its sort key as `_sk` so a caller that
         stops part way through a page can resume exactly after the last row it
         kept rather than after the last row this page happened to hold.
+
+        A failed query is logged and read as the rows this container holds,
+        which a listing can live with. `raise_errors` lets it through instead,
+        for a caller that reports whether it read the whole window: an empty
+        day and an unreadable one must not look the same to it.
         """
         partition = f"{DECISION_PARTITION}#{day}"
         if self._table is not None:
@@ -576,6 +581,8 @@ class DynamoDBSessionRepository:
             try:
                 response = self._table.query(**kwargs)
             except Exception as exc:
+                if raise_errors:
+                    raise
                 logger.warning("Failed to read the decision ledger for %s: %s", day, exc)
             else:
                 items = response.get("Items", [])

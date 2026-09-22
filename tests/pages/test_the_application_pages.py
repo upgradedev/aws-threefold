@@ -149,13 +149,20 @@ def _contract_routes() -> set[str]:
     return routes
 
 
+# Routes added after the contract paragraph was written, each named here so
+# the check stays exact for every other route. The owner adds `#/proof` to
+# "The application (D)" paragraph in STATE.md at merge; this set can then go,
+# and the union below is the same either way.
+ROUTES_PENDING_IN_THE_CONTRACT = {"/proof"}
+
+
 # ------------------------------------------------------------------- routes
 
 
 def test_the_dashboard_declares_every_route_the_contract_lists() -> None:
     body = page_source("dashboard.html")
     declared = set(re.findall(r"\{ path: '([^']+)'", body))
-    assert declared == _contract_routes()
+    assert declared == _contract_routes() | ROUTES_PENDING_IN_THE_CONTRACT
 
 
 def test_every_route_draws_a_screen_with_a_heading(tmp_path: Path) -> None:

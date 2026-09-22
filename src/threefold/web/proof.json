@@ -1,0 +1,153 @@
+{
+  "schema": 1,
+  "generated_at": "2026-09-22T10:31:24Z",
+  "generated_by": "scripts/build_proof.py",
+  "benchmark": {
+    "source": "benchmark/report.py over benchmark/results/20260922T095056Z-pilot.jsonl",
+    "snapshot_at": "2026-09-22",
+    "pilot": true,
+    "headline": "PILOT, not a result: No headline: none of the 3 real-agent run(s) produced a measurement. agent did not run: Failed to authenticate: OAuth session expired and could not be refreshed (3 run(s)).",
+    "agent": "Claude Code",
+    "agent_versions": [
+      "2.1.220"
+    ],
+    "models": [
+      "claude-sonnet-5"
+    ],
+    "dates": [
+      "2026-09-22"
+    ],
+    "run_ids": [
+      "20260922T095056Z-pilot"
+    ],
+    "tasks": [
+      "orders-s3-archive"
+    ],
+    "rows": 3,
+    "real_rows": 3,
+    "valid_rows": 0,
+    "scripted_rows": 0,
+    "conditions": [
+      {
+        "condition": "none",
+        "label": "no guidance",
+        "n": 0,
+        "not_measured": 1,
+        "violation": {
+          "k": 0,
+          "n": 0,
+          "rate": null,
+          "ci_low": null,
+          "ci_high": null
+        },
+        "completion": {
+          "k": 0,
+          "n": 0,
+          "rate": null,
+          "ci_low": null,
+          "ci_high": null
+        },
+        "self_correction": {
+          "refused_runs": 0,
+          "self_corrected": 0,
+          "rate": null
+        },
+        "overhead": null
+      },
+      {
+        "condition": "prompt",
+        "label": "rules in CLAUDE.md",
+        "n": 0,
+        "not_measured": 1,
+        "violation": {
+          "k": 0,
+          "n": 0,
+          "rate": null,
+          "ci_low": null,
+          "ci_high": null
+        },
+        "completion": {
+          "k": 0,
+          "n": 0,
+          "rate": null,
+          "ci_low": null,
+          "ci_high": null
+        },
+        "self_correction": {
+          "refused_runs": 0,
+          "self_corrected": 0,
+          "rate": null
+        },
+        "overhead": {
+          "against": "none",
+          "turns": null,
+          "seconds": null,
+          "cost": null
+        }
+      },
+      {
+        "condition": "threefold",
+        "label": "Threefold enforcing",
+        "n": 0,
+        "not_measured": 1,
+        "violation": {
+          "k": 0,
+          "n": 0,
+          "rate": null,
+          "ci_low": null,
+          "ci_high": null
+        },
+        "completion": {
+          "k": 0,
+          "n": 0,
+          "rate": null,
+          "ci_low": null,
+          "ci_high": null
+        },
+        "self_correction": {
+          "refused_runs": 0,
+          "self_corrected": 0,
+          "rate": null
+        },
+        "overhead": {
+          "against": "none",
+          "turns": null,
+          "seconds": null,
+          "cost": null
+        }
+      }
+    ],
+    "evidence": [
+      {
+        "label": "The report benchmark/report.py wrote: method, every result and its limits",
+        "path": "docs/evidence/BENCHMARK_2026-09-22-PILOT.md"
+      },
+      {
+        "label": "The result rows it was computed from",
+        "path": "benchmark/results/20260922T095056Z-pilot.jsonl"
+      }
+    ]
+  },
+  "method": [
+    {
+      "label": "The benchmark harness, its tasks and its independent checkers",
+      "path": "benchmark/README.md"
+    },
+    {
+      "label": "How the benchmark's rows become rates and a headline",
+      "path": "benchmark/report.py"
+    },
+    {
+      "label": "How self-correction is computed from the ledger",
+      "path": "src/threefold/application/insights.py"
+    },
+    {
+      "label": "The routes the owner's totals are read from",
+      "path": "src/threefold/web/openapi.json"
+    },
+    {
+      "label": "How this snapshot was built, and what it refuses to write",
+      "path": "scripts/build_proof.py"
+    }
+  ]
+}

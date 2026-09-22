@@ -1594,7 +1594,9 @@ paths:
         Read from one rollup item per project and day, added to as every decision is recorded, so the numbers are
         exact however busy the ledger is. approved, observed and refused are disjoint: observed is a call that ran
         and that a rule would have refused, and a day's calls are the sum of the three. needs_review is the observed
-        calls nobody has labelled; false_alarms the calls labelled false alarm.
+        calls nobody has labelled; false_alarms the calls labelled false alarm. self_correction is the one figure
+        not read from the rollups: it is read from the ledger, a bounded number of rows, and says whether it covered
+        the whole window.
       parameters:
       - name: days
         in: query
@@ -1615,7 +1617,7 @@ paths:
         '200':
           description: >-
             window_days, generated_at, source (always rollups), totals, series, by_agent, by_origin, by_rule, by_project,
-            stages
+            stages, self_correction (read from the ledger, not the rollups)
           content:
             application/json:
               schema:
@@ -1720,6 +1722,8 @@ paths:
                         type: integer
                       enforce:
                         type: integer
+                  self_correction:
+                    $ref: '#/components/schemas/SelfCorrection'
   /api/decisions:
     get:
       summary: The ledger's rows, newest first, filtered and a page at a time
@@ -1989,6 +1993,8 @@ paths:
                             type: integer
                           false_alarm_rate:
                             type: number
+                          self_correction:
+                            $ref: '#/components/schemas/SelfCorrection'
                       rules:
                         type: array
                         items:
@@ -2257,6 +2263,70 @@ paths:
                     example: dashboard.html#/projects/Acme-Sandbox-0a1b2c3d
         '409':
           description: This stack's AllowedProjectPattern does not admit sandbox names.
+  /proof.json:
+    get:
+      summary: 'The proof page''s snapshot: the benchmark and the owner''s own use, anonymised'
+      description: >-
+        Written by scripts/build_proof.py and deployed with the function, so it changes only when a new snapshot
+        is committed. benchmark carries what benchmark/report.py computes from the result rows it names, per condition,
+        with the headline sentence exactly as computed and pilot true when every real-agent row was a pilot run.
+        private carries aggregate totals read from the owner's private stack with the operator key: never a project
+        name, a path, a target or a developer. Each section names its source and when its snapshot was taken, and
+        a section that was not measured is absent, never zero.
+      responses:
+        '200':
+          description: schema, generated_at, generated_by, benchmark (when measured), private (when measured), method
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - schema
+                - generated_at
+                properties:
+                  schema:
+                    type: integer
+                  generated_at:
+                    type: string
+                  generated_by:
+                    type: string
+                  benchmark:
+                    type: object
+                    description: >-
+                      source, snapshot_at, pilot, headline, models, agent_versions, dates, run_ids, tasks, rows,
+                      real_rows, valid_rows, scripted_rows, conditions (per condition: n, not_measured, violation,
+                      completion, self_correction, overhead) and evidence.
+                  private:
+                    type: object
+                    description: >-
+                      source, snapshot_at, window_days, days_observed, calls_governed, would_refuse, refused, reviewed,
+                      false_alarms, false_alarm_rate, projects, agents, stages and self_correction: numbers only.
+                      false_alarms and false_alarm_rate are null when calls were refused in the window, because
+                      the overview counts false alarms on refused calls as well and reviewed calls on would-refuse
+                      calls only.
+                  method:
+                    type: array
+                    description: The evidence files, by their path in the repository.
+                    items:
+                      type: object
+                      properties:
+                        label:
+                          type: string
+                        path:
+                          type: string
+        '404':
+          description: >-
+            No snapshot is deployed here; the proof page reads this as not measured yet (urn:threefold:error:proof-not-found)
+          content:
+            application/problem+json:
+              schema:
+                type: object
+        '500':
+          description: The deployed snapshot is not a JSON object (urn:threefold:error:proof-unreadable)
+          content:
+            application/problem+json:
+              schema:
+                type: object
 components:
   securitySchemes:
     OperatorApiKey:
@@ -2474,3 +2544,60 @@ components:
                 type: array
                 items:
                   type: string
+    SelfCorrection:
+      type: object
+      description: >-
+        How often an agent that was refused went on to do the same thing acceptably, read from the ledger rather
+        than the rollups because it is a question about the order of calls in a session. A refusal of a hook or
+        ci call self-corrected when one of the next ten calls of the same session aimed at the same file and was
+        approved or only observed. Commands are left out on both sides: the ledger keeps only the program a command
+        ran, never the rest of its line, so it cannot say which file a refused command was aimed at; a refused command
+        is not considered, and a later command is never taken as a correction, though it counts as one of the calls
+        in between. Calls recorded at the same instant are not ordered against each other: one that shares the refusal's
+        instant is never its correction, and a tie can only lengthen a distance. Page calls are never considered,
+        and nothing is refused in the observe stage, so a project there considers no refusal. The read is bounded:
+        complete is false when it stopped before the window's oldest day, and the figure then covers the newest
+        rows_read rows only.
+      required:
+      - refusals_considered
+      - self_corrected
+      - rate
+      - median_calls_to_correct
+      - rows_read
+      - complete
+      properties:
+        refusals_considered:
+          type: integer
+          description: >-
+            Refusals of hook and ci calls in the window aimed at a file the ledger recorded. A refusal with no recorded
+            target, or of a command, whose recorded target is only the program it ran, cannot be matched with anything
+            and is left out.
+        self_corrected:
+          type: integer
+          description: >-
+            Of those, the refusals followed within the next ten calls of the same session by a call to the same
+            file that was not refused and was not a command.
+        rate:
+          type:
+          - number
+          - 'null'
+          description: >-
+            self_corrected / refusals_considered, rounded to four places; null when no refusal was considered, because
+            none of none is not a rate.
+        median_calls_to_correct:
+          type:
+          - number
+          - 'null'
+          description: >-
+            The median number of calls from a refusal to the call that corrected it, 1 being the very next call;
+            null when nothing was corrected. Calls that share an instant with the correction are all counted as
+            having come before it.
+        rows_read:
+          type: integer
+          description: Ledger rows read to compute the figure, of every project, before the project filter.
+        complete:
+          type: boolean
+          description: >-
+            False when the bounded read stopped before it covered the whole window, or when the ledger could not
+            be read: a store that cannot page the ledger, or a query that failed. A failed read is never reported
+            as an empty window.

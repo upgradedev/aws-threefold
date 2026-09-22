@@ -6,14 +6,19 @@ decided here: the security middleware has already run by the time a request
 arrives, and its rules for these paths are its own.
 
 Charts and tiles are read from the daily rollups; lists of calls from the
-ledger. Every ledger row that leaves here has been through `public_row`, as the
-rows of /api/insights are.
+ledger. The one tile that cannot come from a rollup, self-correction, is read
+from the ledger with a bounded read that says when it stopped short. Every
+ledger row that leaves here has been through `public_row`, as the rows of
+/api/insights are.
 """
 from __future__ import annotations
 
 import datetime
+import functools
+import inspect
 import json
 import logging
+import os
 import re
 from typing import Any, Callable, Dict, Optional, Tuple
 from urllib.parse import unquote
@@ -37,6 +42,13 @@ DECISION_DAYS = (7, 1, ledger.MAX_DAYS)
 PROJECT_DAYS = (14, 1, 30)
 PROJECTS_LISTING_DAYS = 7
 MAX_CURSOR_LENGTH = 1000
+
+# The proof page's snapshot, written by scripts/build_proof.py. It sits beside
+# openapi.json rather than under assets/: the edge sends every *.json path to
+# the function, so a JSON file in the bucket would be reachable only while the
+# behaviors stay in their present order, and the asset route serves scripts,
+# styles and icons only. Served as the function reads it, like openapi.json.
+PROOF_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web", "proof.json")
 
 Handler = Callable[[Dict[str, Any], str, Optional[str]], Dict[str, Any]]
 
@@ -146,7 +158,40 @@ def _get_overview(event: Dict[str, Any], path: str, _: Optional[str]) -> Dict[st
     evaluator = _evaluator()
     items = evaluator.list_rollups(days=days, project=project)
     payload = rollups.overview(items, evaluator.list_project_configs(), days, project=project)
+    payload["self_correction"] = _self_correction(days, project)
     return _respond(200, payload)
+
+
+def _self_correction(days: int, project: Optional[str]) -> Dict[str, Any]:
+    """The self-correction figure for a window, or the unread one when the ledger cannot be read.
+
+    Best effort, like a rollup: the tiles beside it are exact without it, so a
+    ledger that fails to answer costs this one figure, marked incomplete, and
+    never the overview or the project page.
+    """
+    reader = _repo("read_decision_day")
+    if reader is None:
+        return ledger.self_correction_unread()
+    try:
+        return ledger.self_correction(_reader_that_fails_loudly(reader), days, project)
+    except Exception as exc:  # a figure never fails the page it is on
+        logger.warning("Could not read the ledger for self-correction: %s", exc)
+        return ledger.self_correction_unread()
+
+
+def _reader_that_fails_loudly(reader: Callable[..., Any]) -> Callable[..., Any]:
+    """The ledger reader, asked to raise on a failed query where the store can.
+
+    The store answers a failed query with the rows its container holds, so a
+    listing still shows something. For this figure that would read a ledger it
+    could not reach as a complete window with no refusal in it; raised, the
+    failure gives the unread figure, which says it is not complete.
+    """
+    try:
+        accepts = "raise_errors" in inspect.signature(reader).parameters
+    except (TypeError, ValueError):
+        accepts = False
+    return functools.partial(reader, raise_errors=True) if accepts else reader
 
 
 def _get_decisions(event: Dict[str, Any], path: str, _: Optional[str]) -> Dict[str, Any]:
@@ -233,7 +278,31 @@ def _get_project(event: Dict[str, Any], path: str, name: Optional[str]) -> Dict[
     rules, _ = evaluator.rules_in_force(name if labelled else None)
     days = ledger.bounded_int(_query(event), "days", *PROJECT_DAYS)
     items = evaluator.list_rollups(days=days, project=name)
-    return _respond(200, {"project": name, "config": config, "readiness": rollups.readiness(items, config, rules)})
+    readiness = rollups.readiness(items, config, rules)
+    readiness["summary"]["self_correction"] = _self_correction(days, name)
+    return _respond(200, {"project": name, "config": config, "readiness": readiness})
+
+
+def _get_proof(event: Dict[str, Any], path: str, _: Optional[str]) -> Dict[str, Any]:
+    """GET /proof.json: the proof page's snapshot as scripts/build_proof.py wrote it.
+
+    Absent is a 404 the page reads as "not measured yet", never an empty
+    document it could mistake for a measurement of nothing.
+    """
+    try:
+        with open(PROOF_PATH, "r", encoding="utf-8") as handle:
+            proof = json.load(handle)
+    except FileNotFoundError:
+        return _problem(404, "Not Measured Yet",
+                        "No proof snapshot is deployed here: scripts/build_proof.py writes one.",
+                        path, "proof-not-found")
+    except (OSError, ValueError) as unreadable:
+        logger.error("The proof snapshot could not be read: %s", unreadable)
+        proof = None
+    if not isinstance(proof, dict):
+        return _problem(500, "Proof Unreadable", "The proof snapshot deployed here is not a JSON object.",
+                        path, "proof-unreadable")
+    return _respond(200, proof)
 
 
 # ---------------------------------------------------------------- writes
@@ -382,6 +451,7 @@ FIXED_ROUTES: Dict[Tuple[str, str], Handler] = {
     ("GET", "/api/decision"): _get_decision,
     ("GET", "/api/projects"): _get_projects,
     ("POST", "/api/sandbox"): _post_sandbox,
+    ("GET", "/proof.json"): _get_proof,
 }
 
 PROJECT_WRITES: Dict[Optional[str], Handler] = {
