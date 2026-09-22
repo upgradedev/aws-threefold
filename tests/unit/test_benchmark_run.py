@@ -60,6 +60,17 @@ def test_the_agent_may_edit_and_test_but_not_install_or_reach_out():
     assert not {tool for tool in allowed if tool.startswith(("Bash(rm", "Bash(curl", "Bash(aws"))}
 
 
+def test_the_permission_lists_also_travel_as_settings_so_no_rule_can_be_split(tmp_path):
+    """`Bash(python -m pip:*)` holds spaces; as a JSON string it cannot be read as three words."""
+    path = harness.write_agent_settings(tmp_path)
+    command = harness.build_agent_command(_options(), None, path)
+    assert command[command.index("--settings") + 1] == str(path)
+    settings = json.loads(path.read_text(encoding="utf-8"))
+    assert "Bash(python -m pip:*)" in settings["permissions"]["deny"]
+    assert settings["permissions"]["allow"] == list(harness.ALLOWED_TOOLS)
+    assert "--settings" not in harness.build_agent_command(_options())
+
+
 def test_the_matcher_is_the_installer_s():
     for candidate in (REPO_ROOT / "src" / "threefold" / "tools" / "threefold_install.py",
                       REPO_ROOT / "scripts" / "threefold_install.py"):

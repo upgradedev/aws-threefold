@@ -140,7 +140,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     print(f"work root: {work_root}")
     print(f"results: {results.path}")
     if args.dry_run:
-        print("command: " + " ".join(harness.build_agent_command(options, tasks[0])) + "   (prompt on stdin)")
+        command = harness.build_agent_command(options, tasks[0], Path("<run-dir>") / "agent-settings.json")
+        print("command: " + " ".join(command) + "   (prompt on stdin)")
         for task, condition, rep in runs:
             print(f"  would run {task.id} / {condition} / r{rep}")
         return 0

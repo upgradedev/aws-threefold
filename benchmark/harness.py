@@ -462,7 +462,27 @@ class AgentOptions:
     python: str = sys.executable
 
 
-def build_agent_command(options: AgentOptions, task: Optional[Task] = None) -> List[str]:
+def agent_settings() -> Dict[str, Any]:
+    """The permission lists again, as settings, where each rule is one JSON string.
+
+    The command line takes the same lists as space- or comma-separated words,
+    and a rule such as `Bash(python -m pip:*)` holds spaces. Claude Code 2.1.220
+    reads them whole (its debug log, 2026-09-22, shows 31 allow and 25 deny
+    rules applied with that rule intact), but should another version split it,
+    the refusal of pip would quietly vanish while `Bash(python:*)` stayed
+    allowed. Given here as well, the rules cannot be misread; allow and deny
+    lists from every source are merged, so the two copies agree.
+    """
+    return {"permissions": {"allow": list(ALLOWED_TOOLS), "deny": list(DISALLOWED_TOOLS)}}
+
+
+def write_agent_settings(run_dir: Path) -> Path:
+    path = Path(run_dir) / "agent-settings.json"
+    path.write_text(json.dumps(agent_settings(), indent=2) + "\n", encoding="utf-8")
+    return path
+
+
+def build_agent_command(options: AgentOptions, task: Optional[Task] = None, settings_file: Optional[Path] = None) -> List[str]:
     """The headless Claude Code command for one run. The prompt goes on stdin.
 
     It goes on stdin because --allowedTools takes a variable number of values:
@@ -470,7 +490,7 @@ def build_agent_command(options: AgentOptions, task: Optional[Task] = None) -> L
     """
     if options.agent == "scripted":
         return [options.python, str(SCRIPTED_AGENT), "--task", task.id if task else ""]
-    return [
+    command = [
         options.claude, "-p",
         "--output-format", "stream-json", "--verbose", "--include-hook-events",
         "--model", options.model,
@@ -481,9 +501,10 @@ def build_agent_command(options: AgentOptions, task: Optional[Task] = None) -> L
         "--strict-mcp-config",
         "--disable-slash-commands",
         "--no-session-persistence",
-        "--disallowedTools", *DISALLOWED_TOOLS,
-        "--allowedTools", *ALLOWED_TOOLS,
     ]
+    if settings_file is not None:
+        command += ["--settings", str(settings_file)]
+    return command + ["--disallowedTools", *DISALLOWED_TOOLS, "--allowedTools", *ALLOWED_TOOLS]
 
 
 def run_agent(command: Sequence[str], prompt: str, cwd: Path, env: Mapping[str, str], timeout_s: int,
@@ -775,7 +796,7 @@ def run_one(task: Task, condition: str, rep: int, plan: RunPlan, base_env: Optio
             server.start(base_env)
             installed = install_hook(task, repo, run_dir, plan.work_root, server.endpoint, python=options.python)
             row["hook_sha256"] = installed["hook_sha256"]
-        command = build_agent_command(options, task)
+        command = build_agent_command(options, task, write_agent_settings(run_dir))
         code, timed_out, seconds = run_agent(
             command, task.prompt(), repo, env, options.timeout_s, run_dir / "transcript.jsonl", run_dir / "agent-stderr.txt"
         )
