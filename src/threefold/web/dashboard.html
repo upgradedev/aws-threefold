@@ -748,7 +748,7 @@
               <div class="space-y-1.5">
                 <h2 class="text-base font-semibold text-white">Enforce: the rules in force refuse a call before it runs</h2>
                 <p class="text-xs text-gray-300">An agent's write or command that breaks a rule in force is refused, and the agent is told why. ${observing.length
-                  ? html`<strong class="text-white">${plural(observing.length, 'rule')}</strong> still ${observing.length === 1 ? 'observes' : 'observe'}: ${observing.join(', ')}. ${observing.length === 1 ? 'It records' : 'They record'} what ${observing.length === 1 ? 'it' : 'they'} would refuse, and refuse nothing.`
+                  ? html`<strong class="text-white">${plural(observing.length, 'rule')}</strong> still ${observing.length === 1 ? 'observes' : 'observe'}: ${observing.join(', ')}. ${observing.length === 1 ? 'It records' : 'They record'} what ${observing.length === 1 ? 'it' : 'they'} would refuse, and ${observing.length === 1 ? 'refuses' : 'refuse'} nothing.`
                   : 'Every rule of this project is in force.'}</p>
                 <p class="text-[11px] text-gray-500">Back to Observe is one click and applies from the next call. A hook capped to observe on its machine is never refused, whatever this says; the agents list below flags one.</p>
               </div>
