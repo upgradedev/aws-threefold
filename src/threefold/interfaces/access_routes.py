@@ -37,7 +37,9 @@ from threefold.infrastructure.security_middleware import (
     AUTH_LINKS_PATH,
     AUTH_SESSIONS_PATH,
     AUTH_WHOAMI_PATH,
+    VIEWER_HOST_HEADER,
     configured_key_refs,
+    edge_request_is_trusted,
     operator_identity,
     presented_bearer,
     presented_key_ref,
@@ -91,6 +93,13 @@ HOST_PATTERN = re.compile(
     r"(?:[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?|\[[0-9A-Fa-f:.]{2,45}\])(?::[0-9]{1,5})?"
 )
 STAGE_PATTERN = re.compile(r"[A-Za-z0-9_-]{1,128}")
+# The name a viewer reached the edge by, as the edge's function copies it from
+# Host: a DNS name of at least two labels whose last label starts with a
+# letter, so no port, no IP address and no trailing dot. The edge serves only
+# the default HTTPS port, so a name with a port is not one it would hand out.
+VIEWER_HOST_PATTERN = re.compile(
+    r"(?=.{4,253}\Z)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?"
+)
 
 # One zip per container, keyed by the roots it was built from. Rebuilt only when
 # a root changes, which in a deployment is never, so every download from one
@@ -263,15 +272,47 @@ def _close_session(event: Dict[str, Any]) -> Dict[str, Any]:
 # ------------------------------------------------------------------ served files
 
 
+def edge_base(event: Dict[str, Any]) -> Optional[str]:
+    """https://<viewer host>/ when the request came through the edge, else None.
+
+    Behind CloudFront the function sees the API's own host, because the edge
+    replaces Host on the way to the origin, so an installer or a sign-in link
+    built from it would send a reader past the edge, its web ACL included. The
+    edge copies the viewer's Host into its own header, and that header is
+    believed only on a request carrying the edge's secret: the API's URL is
+    public, and anyone can send the header to it. No stage prefix, because the
+    edge maps its root onto the stage.
+    """
+    headers = event.get("headers") or {}
+    if not edge_request_is_trusted(headers):
+        return None
+    wanted = VIEWER_HOST_HEADER.lower()
+    host = next((v for k, v in headers.items() if str(k).lower() == wanted), None)
+    if not isinstance(host, str):
+        return None
+    host = host.strip().lower()
+    if not VIEWER_HOST_PATTERN.fullmatch(host):
+        return None
+    return f"https://{host}/"
+
+
 def public_base(event: Dict[str, Any]) -> Optional[str]:
     """This stack's own address, https://<host>/<stage>/, as the request reached it.
 
-    The host is API Gateway's own record of the domain when there is one, and
-    the Host header otherwise, which is the local server's case; the local
-    server speaks plain HTTP unless a proxy in front of it says otherwise. The
-    stage prefix follows the rule the pages' base path follows. None when the
-    host or stage is not one that can safely be written into a script.
+    Through the edge it is the edge's address instead (see edge_base), so the
+    installer, the manifest's installer_sha256 and a sign-in link fetched there
+    all point back at the edge. The manifest's installer hash therefore differs
+    between the edge and the API's own URL, as the installers they serve do;
+    the bundle and its hash are the same from both. Otherwise the host is API
+    Gateway's own record of the domain when there is one, and the Host header
+    otherwise, which is the local server's case; the local server speaks plain
+    HTTP unless a proxy in front of it says otherwise. The stage prefix follows
+    the rule the pages' base path follows. None when the host or stage is not
+    one that can safely be written into a script.
     """
+    through_edge = edge_base(event)
+    if through_edge is not None:
+        return through_edge
     context = event.get("requestContext") or {}
     headers = {str(k).lower(): v for k, v in (event.get("headers") or {}).items()}
     domain = context.get("domainName")
