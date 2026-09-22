@@ -1,10 +1,11 @@
 """A long matrix survives the service: a cut-short run is tried once more, a lasting refusal stops it, and --resume carries on.
 
 Most tests replace harness.run_one with a function that returns the row a run
-would have produced, so the matrix logic is exercised without an agent. One
-test drives the real runner against the stand-in `claude` (fake_agents.py),
-which reaches no service, to show a usage limit followed by a success becomes
-one row with two attempts.
+would have produced, so the matrix logic is exercised without an agent. The
+last tests drive the real runner against the stand-in `claude` and `codex`
+(fake_agents.py), which reach no service, to show a usage limit followed by a
+success becomes one row with two attempts, and that a usage limit the agent
+reports on its stderr alone is retried and stops the matrix just the same.
 """
 from __future__ import annotations
 
@@ -32,6 +33,9 @@ def _confined(tmp_path, monkeypatch):
     monkeypatch.setattr(run, "claude_help", lambda claude: fake_agents.CLAUDE_HELP)
     monkeypatch.setattr(run, "claude_version", lambda claude: "2.1.220 (Claude Code)")
     monkeypatch.delenv(credentials.TOKEN_ENV, raising=False)
+    # Codex's home in the test's own folder, so a Codex run never looks at the machine's.
+    (tmp_path / "codex-home").mkdir()
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex-home"))
 
 
 def _row(task="orders-s3-archive", condition="none", rep=1, attempt=1, **extra):
@@ -104,6 +108,33 @@ def test_a_usage_limit_before_the_model_answered_is_cut_short_not_not_run(tmp_pa
 def test_a_finished_run_is_never_relabelled_by_the_words_in_its_last_message():
     row = harness.apply_service_failure({"measured": True, "run_end": "completed", "agent_error": "rate limit mentioned"})
     assert (row["run_end"], row["service_failure"]) == ("completed", None)
+
+
+def test_the_agent_s_stderr_explains_a_run_that_measured_nothing(tmp_path):
+    """A usage limit said on stderr alone, with no result message, must still read as the service's doing."""
+    stderr = tmp_path / "agent-stderr.txt"
+    stderr.write_text("starting\nError: Claude AI usage limit reached|1790000000\nshutting down\n", encoding="utf-8")
+    sanitise = harness.Sanitiser(tmp_path)
+
+    silent = {"measured": False, "agent_ran": False, "run_end": "not_run", "agent_error": harness.NO_RESULT_MESSAGE,
+              "agent_exit_code": 1}
+    harness.explain_ending(silent, stderr, sanitise)
+    assert silent["agent_error"] == "Error: Claude AI usage limit reached|1790000000"
+    assert (silent["run_end"], silent["service_failure"]) == ("cut_short:usage_limit", "usage_limit")
+
+    vague = {"measured": False, "agent_ran": True, "run_end": "cut_short:error", "agent_error": "error_during_execution",
+             "agent_exit_code": 1}
+    harness.explain_ending(vague, stderr, sanitise)
+    assert vague["agent_error"] == "error_during_execution; stderr: Error: Claude AI usage limit reached|1790000000"
+    assert vague["service_failure"] == "usage_limit"
+
+    finished = {"measured": True, "run_end": "completed", "agent_error": "", "agent_exit_code": 0}
+    harness.explain_ending(finished, stderr, sanitise)
+    assert (finished["run_end"], finished["service_failure"], finished["agent_error"]) == ("completed", None, "")
+
+    quiet = {"measured": False, "agent_ran": False, "run_end": "not_run", "agent_error": "", "agent_exit_code": 2}
+    harness.explain_ending(quiet, tmp_path / "no-stderr.txt", sanitise)
+    assert (quiet["agent_error"], quiet["service_failure"]) == ("exit 2", None)
 
 
 # --- one planned run, tried at most twice ---------------------------------------------------------------
@@ -244,22 +275,36 @@ def test_the_resume_command_keeps_every_argument_but_the_run_id():
 
 # --- the real runner and a stand-in claude that hits its limit once ----------------------------------------
 
-def test_a_usage_limit_then_a_success_is_one_row_with_two_attempts(tmp_path, monkeypatch, capsys):
+def _stand_in(tmp_path, monkeypatch, agent, modes):
+    """The stand-in agent on PATH, with the machine's folders that hold a real claude or codex left out."""
     bin_dir = tmp_path / "bin"
-    fake_agents.install(bin_dir, "claude", modes=["usage_limit", "ok"])
+    fake_agents.install(bin_dir, agent, modes=modes)
     kept = [str(bin_dir)] + [entry for entry in os.environ.get("PATH", "").split(os.pathsep)
                              if entry and not shutil.which("claude", path=entry) and not shutil.which("codex", path=entry)]
     monkeypatch.setenv("PATH", os.pathsep.join(kept))
-    assert Path(shutil.which("claude")).parent == bin_dir
+    assert Path(shutil.which(agent)).parent == bin_dir
+    return bin_dir
+
+
+def _token_file(tmp_path):
     token_file = tmp_path / "token"
     token_file.write_text("acme-bench-fixture-" + secrets.token_hex(20) + "\n", encoding="utf-8")
+    return token_file
+
+
+def _results(tmp_path):
+    return [json.loads(line) for path in (tmp_path / "results").glob("*.jsonl")
+            for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+def test_a_usage_limit_then_a_success_is_one_row_with_two_attempts(tmp_path, monkeypatch, capsys):
+    bin_dir = _stand_in(tmp_path, monkeypatch, "claude", ["usage_limit", "ok"])
     code = run.main(["--tasks", "orders-s3-archive", "--conditions", "none", "--reps", "1", "--retry-pause", "0",
-                     "--token-file", str(token_file), "--work-root", str(tmp_path / "work"),
+                     "--token-file", str(_token_file(tmp_path)), "--work-root", str(tmp_path / "work"),
                      "--results-dir", str(tmp_path / "results")])
     printed = capsys.readouterr()
     assert code == 0, printed.err
-    (row,) = [json.loads(line) for path in (tmp_path / "results").glob("*.jsonl")
-              for line in path.read_text(encoding="utf-8").splitlines()]
+    (row,) = _results(tmp_path)
     assert (row["attempts"], row["attempt"], row["run_end"], row["measured"]) == (2, 2, "completed", True)
     assert row["first_attempt"]["run_end"] == "cut_short:usage_limit"
     assert "usage limit reached" in row["first_attempt"]["agent_error"]
@@ -267,3 +312,30 @@ def test_a_usage_limit_then_a_success_is_one_row_with_two_attempts(tmp_path, mon
     assert (tmp_path / "work" / "orders-s3-archive--none--r1--a2").is_dir()
     assert "(attempt 2, retried)" in printed.out
     assert len(fake_agents.calls(bin_dir, "claude")) == 2
+
+
+@pytest.mark.parametrize("agent", ["claude", "codex"])
+def test_a_usage_limit_said_on_stderr_alone_is_retried_and_then_stops_the_matrix(tmp_path, monkeypatch, capsys, agent):
+    """No result message, only the agent's stderr: still the service's doing, so paused, tried once more, then stopped."""
+    bin_dir = _stand_in(tmp_path, monkeypatch, agent, ["stderr_usage_limit"])
+    login = ["--token-file", str(_token_file(tmp_path))] if agent == "claude" else ["--agent", "codex"]
+    code = run.main(["--tasks", "orders-s3-archive", "--conditions", "none", "--reps", "1", "--retry-pause", "0", *login,
+                     "--work-root", str(tmp_path / "work"), "--results-dir", str(tmp_path / "results")])
+    err = capsys.readouterr().err
+    assert code == run.STOPPED_EXIT_CODE, err
+    (row,) = _results(tmp_path)
+    assert (row["run_end"], row["service_failure"], row["attempts"]) == ("cut_short:usage_limit", "usage_limit", 2)
+    assert "usage limit" in row["agent_error"].lower() and row["first_attempt"]["run_end"] == "cut_short:usage_limit"
+    assert "stopped early: the service still refused after a pause (usage_limit" in err and "--resume" in err
+    assert len([call for call in fake_agents.calls(bin_dir, agent) if call.get("prompt_chars") is not None]) == 2
+
+
+def test_a_usage_limit_said_on_stderr_then_a_success_is_one_measured_row(tmp_path, monkeypatch, capsys):
+    _stand_in(tmp_path, monkeypatch, "claude", ["stderr_usage_limit", "ok"])
+    code = run.main(["--tasks", "orders-s3-archive", "--conditions", "none", "--reps", "1", "--retry-pause", "0",
+                     "--token-file", str(_token_file(tmp_path)), "--work-root", str(tmp_path / "work"),
+                     "--results-dir", str(tmp_path / "results")])
+    assert code == 0, capsys.readouterr().err
+    (row,) = _results(tmp_path)
+    assert (row["run_end"], row["attempts"], row["measured"]) == ("completed", 2, True)
+    assert row["first_attempt"]["service_failure"] == "usage_limit"

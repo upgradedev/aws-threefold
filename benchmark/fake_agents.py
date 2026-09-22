@@ -182,6 +182,9 @@ def fake_claude(bin_dir: Path, argv: List[str]) -> int:
                   "result": MESSAGES["claude"][mode], "usage": {"input_tokens": 0, "output_tokens": 0}}
         _emit(result)
         return 1
+    if mode == "stderr_usage_limit":
+        sys.stderr.write(f"Error: {MESSAGES['claude']['usage_limit']}\n")
+        return 1
     if streaming:
         _emit({"type": "assistant", "message": {"content": [
             {"type": "tool_use", "id": "toolu_1", "name": "Read", "input": {"file_path": "README.md"}}]}})
@@ -272,6 +275,9 @@ def fake_codex(bin_dir: Path, argv: List[str]) -> int:
     if mode in MESSAGES["codex"]:
         _emit({"type": "error", "message": MESSAGES["codex"][mode]})
         _emit({"type": "turn.failed", "error": {"message": MESSAGES["codex"][mode]}})
+        return 1
+    if mode == "stderr_usage_limit":
+        sys.stderr.write(f"Error: {MESSAGES['codex']['usage_limit']}\n")
         return 1
     calls_made = [
         ("item_1", "command_execution", {"tool_name": "Bash", "tool_input": {"command": "python -m pytest -q"}}),

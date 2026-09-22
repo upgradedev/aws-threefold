@@ -84,7 +84,8 @@ recorded as `codex-default`, so pass one to pin it), `--parallel`,
 
 **When the service says no.** A run the service stops, a usage limit or an
 overload, is recorded as `cut_short:usage_limit` or `cut_short:overloaded`,
-even when it struck before the model answered. The runner waits
+even when it struck before the model answered, and whether the agent said so
+in its result or only on its stderr. The runner waits
 `--retry-pause` seconds and tries that run once more in a fresh folder
 (`...--r1--a2`); the planned run is still one row, the second attempt's, with
 `attempts: 2` and the first attempt's ending in `first_attempt`. If the second

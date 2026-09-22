@@ -1089,6 +1089,53 @@ def _denied_calls(result: Mapping[str, Any], sanitise: Sanitiser) -> List[str]:
     return calls[:20]
 
 
+# What agent_metrics records when the transcript ended without the agent's
+# own result: a placeholder, which the agent's stderr replaces when it says more.
+NO_RESULT_MESSAGE = "no result message in the transcript"
+
+
+def stderr_reason(path: Path, sanitise: Sanitiser) -> str:
+    """The line of the agent's stderr that says why it stopped: one naming a service failure if any does, else the last.
+
+    An agent that hits a usage limit or an overload before it could print a
+    result says so here only, and the runner must still see it as the
+    service's doing, to pause and try once more.
+    """
+    try:
+        lines = [line.strip() for line in Path(path).read_text(encoding="utf-8", errors="replace").splitlines()
+                 if line.strip()]
+    except OSError:
+        return ""
+    for line in reversed(lines):
+        if service_failure_kind(line):
+            return sanitise(line, 300)
+    return sanitise(lines[-1], 300) if lines else ""
+
+
+def explain_ending(row: Dict[str, Any], stderr_path: Path, sanitise: Sanitiser) -> Dict[str, Any]:
+    """Adds what the agent's stderr says to a run that measured nothing, then marks a service failure.
+
+    The stderr is read when the transcript gave no reason, or only the
+    placeholder, or a reason that names no service failure while the stderr
+    does. A run that measured the agent keeps its ending; a non-zero exit
+    with no error is only noted.
+    """
+    error = str(row.get("agent_error") or "")
+    code = row.get("agent_exit_code")
+    if not row.get("measured"):
+        said = stderr_reason(stderr_path, sanitise)
+        if error in ("", NO_RESULT_MESSAGE):
+            if said:
+                row["agent_error"] = said
+            elif not error and code not in (0, None):
+                row["agent_error"] = f"exit {code}"
+        elif said and not service_failure_kind(error) and service_failure_kind(said):
+            row["agent_error"] = sanitise(f"{error}; stderr: {said}", 300)
+    elif not error and code not in (0, None):
+        row["agent_error"] = stderr_reason(stderr_path, sanitise) or f"exit {code}"
+    return apply_service_failure(row)
+
+
 def agent_metrics(summary: Mapping[str, Any], sanitise: Sanitiser, timed_out: bool = False,
                   timeout_s: Optional[int] = None) -> Dict[str, Any]:
     result = summary.get("result") or {}
@@ -1107,7 +1154,7 @@ def agent_metrics(summary: Mapping[str, Any], sanitise: Sanitiser, timed_out: bo
     elif result and result.get("is_error"):
         error = sanitise(result.get("result") or result.get("subtype") or "error", 300)
     elif not result:
-        error = "no result message in the transcript"
+        error = NO_RESULT_MESSAGE
     refusals = list(summary.get("refusals") or [])
     metrics = {
         "agent_ran": ran,
@@ -1665,10 +1712,7 @@ def run_one(task: Task, condition: str, rep: int, plan: RunPlan, base_env: Optio
         )
         row.update({"agent_exit_code": code, "agent_timed_out": timed_out, "wall_seconds": round(seconds, 1)})
         row.update(agent_metrics(read_agent_transcript(options, run_dir, condition), sanitise, timed_out, options.timeout_s))
-        if not row.get("agent_error") and code not in (0, None):
-            stderr_text = (run_dir / "agent-stderr.txt").read_text(encoding="utf-8", errors="replace")
-            row["agent_error"] = sanitise(stderr_text.strip().splitlines()[-1] if stderr_text.strip() else f"exit {code}", 300)
-        apply_service_failure(row)
+        explain_ending(row, run_dir / "agent-stderr.txt", sanitise)
         if server is not None:
             row["server_healthy_after"] = server.healthy()
             row["ledger"] = server.ledger()
