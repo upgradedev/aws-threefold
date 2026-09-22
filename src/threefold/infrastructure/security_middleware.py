@@ -481,6 +481,15 @@ ASSETS_PREFIX = "/assets/"
 def is_served_asset(method: str, path: str) -> bool:
     return method.upper() in ("GET", "HEAD") and path.startswith(ASSETS_PREFIX)
 
+# Two reads the router answers under two names each. The names live here rather
+# than in the router so the list below cannot miss one: the router spells its
+# own dispatch with these tuples, so a path it serves as a read is a path this
+# module decides as a read. Listed only as "/api/sessions" and "/api/insights",
+# the other two names skipped the private-read check below and answered a
+# PublicReads=false stack's session list and ledger summary to anyone.
+SESSIONS_READ_PATHS = ("/api/sessions", "/sessions.json")
+INSIGHTS_READ_PATHS = ("/api/insights", "/insights.json")
+
 # The reads the pages make. Opening a page and refusing the data it is built on
 # is the same regression as refusing the page, one step later: the console and
 # the rules screen rendered and then every fetch answered 401 the moment STAGE
@@ -490,8 +499,8 @@ def is_served_asset(method: str, path: str) -> bool:
 # the table name, region, model id and raw client errors.
 PAGE_READS = frozenset(
     {
-        "/api/insights",
-        "/api/sessions",
+        *INSIGHTS_READ_PATHS,
+        *SESSIONS_READ_PATHS,
         "/rules",
         "/rules/layering",
         "/policy/config",
@@ -544,6 +553,34 @@ def is_page_read(method: str, path: str) -> bool:
     # Trying a rule, or drafting one, changes nothing and records nothing, so
     # each is a read that happens to need a body.
     return verb == "POST" and path in PAGE_READ_POSTS
+
+
+def _private_read_refusal(
+    headers: Dict[str, str], path: str
+) -> Tuple[bool, Optional[Dict[str, Any]]]:
+    """The one answer a stack with PublicReads=false gives a read it will not serve.
+
+    Shared by the page reads listed above and by the default below, so a route
+    that is closed because nobody listed it as open says exactly what a listed
+    private read says, and a reader cannot tell from the answer which list a
+    path was on.
+    """
+    return _require_operator_key(
+        headers,
+        path,
+        closed_title="Reads Are Private Here",
+        closed_detail=(
+            "This deployment keeps its sessions, ledger and rules private and has no "
+            "operator key configured, so nothing here can be read. Set THREEFOLD_API_KEYS "
+            "on the function to read it."
+        ),
+        closed_type="urn:threefold:error:reads-private",
+        missing_detail=(
+            "This deployment keeps its sessions, ledger and rules private, so reading them "
+            "requires the operator key. Provide it via 'X-API-Key' or "
+            "'Authorization: Bearer <key>'."
+        ),
+    )
 
 
 def _require_operator_key(
@@ -752,22 +789,20 @@ def validate_request_security(
     if is_page_read(verb, path):
         if reads_are_public():
             return True, None
-        return _require_operator_key(
-            headers,
-            path,
-            closed_title="Reads Are Private Here",
-            closed_detail=(
-                "This deployment keeps its sessions, ledger and rules private and has no "
-                "operator key configured, so nothing here can be read. Set THREEFOLD_API_KEYS "
-                "on the function to read it."
-            ),
-            closed_type="urn:threefold:error:reads-private",
-            missing_detail=(
-                "This deployment keeps its sessions, ledger and rules private, so reading them "
-                "requires the operator key. Provide it via 'X-API-Key' or "
-                "'Authorization: Bearer <key>'."
-            ),
-        )
+        return _private_read_refusal(headers, path)
+
+    # 4c. Every other read, on a stack that keeps its reads private. Steps 4 and
+    # 4b name what is open there: the pages, the hook, the installer and the
+    # bundle, and the reads those pages make. A GET that is on neither list is
+    # closed rather than open, so a read added later, or a second name for one
+    # already listed, is the operator's until somebody lists it rather than
+    # anonymous until somebody notices. That is how /sessions.json and
+    # /insights.json came to answer a private stack's session list and ledger
+    # summary to a caller with no credential at all: they were aliases of two
+    # listed reads and were not themselves listed. A public stack is untouched,
+    # here as everywhere else, because the ship gate depends on it.
+    if verb == "GET" and not reads_are_public():
+        return _private_read_refusal(headers, path)
 
     # 5. Authentication enforcement. A sign-in session is the operator here as
     # everywhere else; what follows is the key check as it always was, demo

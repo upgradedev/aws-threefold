@@ -40,6 +40,8 @@ from threefold.infrastructure.bedrock_client import BedrockGovernanceClient
 from threefold.infrastructure.idempotency import global_idempotency_cache
 from threefold.infrastructure.metrics_emf import emit_threefold_emf_metrics
 from threefold.infrastructure.security_middleware import (
+    INSIGHTS_READ_PATHS,
+    SESSIONS_READ_PATHS,
     rfc7807_error,
     validate_request_security,
 )
@@ -320,7 +322,9 @@ def _route(event: Dict[str, Any], http_method: str, request_id: str) -> Dict[str
 
         # Route 0a: the sessions the service has actually governed. The dashboard
         # reads this; a browser asking for /sessions gets the page above instead.
-        if path in ("/api/sessions", "/sessions.json") and http_method == "GET":
+        # Both names come from the middleware's own table, so the route and the
+        # rule about who may call it cannot name different paths.
+        if path in SESSIONS_READ_PATHS and http_method == "GET":
             limit = 50
             try:
                 limit = int((event.get("queryStringParameters") or {}).get("limit", 50))
@@ -343,7 +347,7 @@ def _route(event: Dict[str, Any], http_method: str, request_id: str) -> Dict[str
         # Route 0c: what the gates did, aggregated the way a platform owner asks.
         # The console renders this and computes nothing of its own, so a number on
         # the page cannot disagree with the ledger it came from.
-        if path in ("/api/insights", "/insights.json") and http_method == "GET":
+        if path in INSIGHTS_READ_PATHS and http_method == "GET":
             days = 7
             try:
                 days = int((event.get("queryStringParameters") or {}).get("days", 7))
