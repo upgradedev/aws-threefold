@@ -237,6 +237,13 @@ def read_window(
     A read that stops at the budget says it is incomplete even when the days
     it did not reach turn out to be empty: it cannot know that without
     reading them.
+
+    The budget is spent on every project's rows, before the project filter.
+    The ledger is partitioned by day with no index by project, so finding a
+    quiet project's calls costs the same reads as finding everyone's, and the
+    budget is what bounds that cost; counting only the kept rows would let a
+    quiet project on a busy stack read without limit. `rows_read` is that
+    count, and the project page says its rows were of every project.
     """
     today = today or datetime.datetime.now(datetime.timezone.utc).date()
     budget = SELF_CORRECTION_ROWS if budget is None else budget
