@@ -1382,6 +1382,22 @@ def _is_data_file(target: str, root: str) -> bool:
     return any(part.lower() in DATA_DIRECTORIES for part in parts[:-1])
 
 
+def _is_written_data(target: str, root: str) -> bool:
+    """A place a command writes to that the contract keeps on the machine.
+
+    The same reading as _is_data_file, except that `.git` is not a data
+    directory here. A command that redirects into `.git/hooks` is exactly what
+    the service's protected-path rule exists to refuse, and such a command has
+    always been sent to be refused: holding it back instead would let turning
+    the agent's hooks off run unjudged, which is the opposite of the point.
+    A Write of the same path carries the file's content and stays held back.
+    """
+    parts = [part for part in re.split(r"[\\/]+", os.path.relpath(target, root)) if part]
+    if not parts or any(part.lower() == ".git" for part in parts):
+        return False
+    return _is_data_file(target, root)
+
+
 # Every spelling of the developer's home folder a shell on Windows accepts.
 # `$HOME` and `${HOME}` are Git Bash's, `%USERPROFILE%` cmd's, `$env:USERPROFILE`
 # PowerShell's; `$USERPROFILE` is what Git Bash makes of the same variable, and
@@ -1937,7 +1953,7 @@ def held_back_category(
             resolved = _word_as_path(destination, canonical_base)
             if resolved is None:
                 resolved = _canonical(os.path.join(canonical_base, _as_path(destination)))
-            if _is_within(resolved, canonical_root) and _is_data_file(resolved, canonical_root):
+            if _is_within(resolved, canonical_root) and _is_written_data(resolved, canonical_root):
                 return "data-file"
 
     never_send = load_never_send(home)

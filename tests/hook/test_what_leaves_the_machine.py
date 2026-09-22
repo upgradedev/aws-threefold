@@ -334,6 +334,39 @@ def test_a_command_that_writes_no_data_file_is_still_sent(command, payloads, stu
     assert held_back_lines() == []
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        "echo 'hooksPath = /dev/null' > .git/hooks/pre-commit",
+        "cp /dev/null .git/hooks/pre-commit",
+        "echo x >> .git/config",
+    ],
+)
+@pytest.mark.parametrize("mode", ["enforce", "observe"])
+def test_a_command_that_writes_under_git_is_still_sent_for_the_service_to_refuse(
+    command, mode, payloads, stub, run_hook, held_back_lines, monkeypatch
+) -> None:
+    """.git is a data directory for a Write, which carries the file's content.
+
+    A command carries only its text, and a command that redirects into
+    .git/hooks is what the service's protected-path rule exists to refuse.
+    Holding it back would let turning the agent's hooks off run unjudged.
+    """
+    monkeypatch.setenv("THREEFOLD_MODE", mode)
+    run_hook(payloads.command("claude-code", command))
+    assert len(stub.requests) == 1, held_back_lines()
+    assert held_back_lines() == []
+
+
+def test_a_heredoc_body_that_names_a_data_file_keeps_the_call_here(payloads, stub, run_hook, held_back_lines) -> None:
+    """The command's text is read without regard to quoting, so a redirection
+    inside a heredoc body counts as a place the call writes. Reading one that
+    is not there only ever keeps a call at home, which is the safe way to be
+    wrong about what leaves the machine."""
+    command = "cat > src/app.py <<'EOF'\ndef run():\n    os.system('sort rows > reports/q3.csv')\nEOF"
+    _held_back(stub, run_hook, payloads.command("claude-code", command), held_back_lines, "data-file")
+
+
 @pytest.mark.parametrize("relative", ["reports/q3.csv", "data/app.py", "outputs/run1/log.txt"])
 def test_a_write_and_the_shell_command_that_does_the_same_thing_agree(
     relative, payloads, stub, run_hook, held_back_lines, monkeypatch
