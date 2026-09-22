@@ -27,7 +27,7 @@ from threefold.application.evaluator import (
 from threefold.application.insights import summarise, with_layering_coverage
 from threefold.application.labels import is_labelled, project_label, public_row
 from threefold.domain.imports import LANGUAGE_BY_SUFFIX, declared_imports
-from threefold.domain.boundary_guard import MAX_PATHLIKE_LENGTH, looks_like_path
+from threefold.domain.boundary_guard import MAX_PATHLIKE_LENGTH, looks_like_path, redact_secrets
 from threefold.domain.layering_rules import (
     DEFAULT_RULES,
     UNSUPPORTED,
@@ -79,6 +79,11 @@ SERVED_SCRIPTS = {
     "/hooks/claude_code_hook.py": "threefold_hook.py",
     "/claude_code_hook.py": "threefold_hook.py",
 }
+
+# What the kill switch records when the caller names neither, which is what it
+# has always recorded for a caller that sent an empty body.
+DEFAULT_TERMINATION_OPERATOR = "Enterprise Security Admin"
+DEFAULT_TERMINATION_REASON = "Manual emergency kill-switch invoked"
 
 # Paths the deployed stack serves as pages rather than as JSON. The dashboard sits
 # at the root so the public URL opens the application itself.
@@ -684,8 +689,16 @@ def _route(event: Dict[str, Any], http_method: str, request_id: str) -> Dict[str
         if path.startswith("/sessions/") and path.endswith("/terminate") and http_method == "POST":
             target_session_id = unquote(path.replace("/sessions/", "").replace("/terminate", "").strip())
             body = _parse_body(event)
-            operator_name = body.get("operator_name", "Enterprise Security Admin")
-            reason = body.get("reason", "Manual emergency kill-switch invoked")
+            # Bounded and redacted before anything is frozen. models.py builds
+            # `trip_reason` out of these two, the sessions listing returns it as
+            # it is, and public_row() rewrites only the project and the
+            # developer, so on a stack whose reads are public this is text a
+            # caller publishes on a page every visitor can open. Taken from the
+            # body as they came, they were unbounded, untyped and unredacted,
+            # while the reason on a ledger row has been redacted and cut to 240
+            # characters since the ledger existed.
+            operator_name = _bounded_text(body, "operator_name", 120, DEFAULT_TERMINATION_OPERATOR)
+            reason = _bounded_text(body, "reason", 240, DEFAULT_TERMINATION_REASON)
             frozen_session = _evaluator.terminate_session(target_session_id, operator_name, reason)
 
             res_dict = {
@@ -1024,6 +1037,30 @@ def _project_warnings(project: Any) -> list:
         "project does not match this deployment's AllowedProjectPattern, so no rules "
         "can be saved for it and its calls are judged by the shared rules."
     ]
+
+
+def _bounded_text(body: Dict[str, Any], name: str, limit: int, default: str) -> str:
+    """A field a caller may leave out, kept only as bounded text with no credential in it.
+
+    Absent or empty is the default this route has always used, so a caller that
+    sends neither field still freezes a session. Anything that is not a string
+    is refused rather than stored as whatever the JSON held, because what is
+    stored is shown on a page. Over the limit is refused rather than cut, for
+    the reason `_required_text` gives: a record shortened on the way in says
+    something its author did not. What is kept is passed through
+    `redact_secrets`, as every reason the ledger keeps already is.
+    """
+    value = body.get(name)
+    if value is None or value == "":
+        return default
+    if not isinstance(value, str):
+        raise InvalidRequestError(f"{name} must be text.", name)
+    value = value.strip()
+    if not value:
+        return default
+    if len(value) > limit:
+        raise InvalidRequestError(f"{name} must be at most {limit} characters.", name)
+    return redact_secrets(value)
 
 
 def _required_text(body: Dict[str, Any], name: str, limit: int) -> str:
