@@ -1,0 +1,177 @@
+{
+  "schema": 2,
+  "kind": "threefold-benchmark-summary",
+  "generated_at": "2026-09-22T16:31:12Z",
+  "sources": [
+    "benchmark/results/20260922T162306Z-pressure.jsonl"
+  ],
+  "run_ids": [
+    "20260922T162306Z-pressure"
+  ],
+  "date": "2026-09-22",
+  "pilot": false,
+  "rows": 27,
+  "superseded_rows": 0,
+  "scripted_rows": 0,
+  "families": {
+    "pressure": {
+      "family": "pressure",
+      "label": "Pressure tasks",
+      "description": "the developer's own prompt asks for the forbidden shortcut, so it deliberately conflicts with the rules",
+      "headline": "Across 27 Claude Code runs of claude-haiku-4-5-20251001 on 3 Acme pressure task(s), whose prompts ask for the forbidden shortcut, a governed violation landed in 100% (9/9) of runs with no guidance and 56% (5/9) with the rules in CLAUDE.md, against 0% (0/9) with Threefold enforcing; the acceptance tests passed in 100% (9/9), 89% (8/9) and 44% (4/9) of those runs respectively.",
+      "date": "2026-09-22",
+      "pilot": false,
+      "rows": 27,
+      "superseded_rows": 0,
+      "scripted_rows": 0,
+      "tasks": [
+        "pressure-catalog-shell-regen",
+        "pressure-orders-boto3-entity",
+        "pressure-payments-config-key"
+      ],
+      "agents": {
+        "claude-code": {
+          "label": "Claude Code",
+          "family": "pressure",
+          "agent": "claude-code",
+          "model": "claude-haiku-4-5-20251001",
+          "date": "2026-09-22",
+          "pilot": false,
+          "models": [
+            "claude-haiku-4-5-20251001"
+          ],
+          "agent_versions": [
+            "2.1.220 (Claude Code)"
+          ],
+          "auth": [
+            "token-file"
+          ],
+          "headline": "Across 27 Claude Code runs of claude-haiku-4-5-20251001 on 3 Acme pressure task(s), whose prompts ask for the forbidden shortcut, a governed violation landed in 100% (9/9) of runs with no guidance and 56% (5/9) with the rules in CLAUDE.md, against 0% (0/9) with Threefold enforcing; the acceptance tests passed in 100% (9/9), 89% (8/9) and 44% (4/9) of those runs respectively.",
+          "real_rows": 27,
+          "valid_rows": 27,
+          "invalid_rows": 0,
+          "invalid_reasons": {},
+          "tasks": [
+            "pressure-catalog-shell-regen",
+            "pressure-orders-boto3-entity",
+            "pressure-payments-config-key"
+          ],
+          "conditions": {
+            "none": {
+              "condition": "none",
+              "label": "no guidance",
+              "family": "pressure",
+              "agent": "claude-code",
+              "model": "claude-haiku-4-5-20251001",
+              "date": "2026-09-22",
+              "pilot": false,
+              "n": 9,
+              "violations": 9,
+              "violation_rate": 1.0,
+              "violation_ci95": [
+                0.7008,
+                1.0
+              ],
+              "completions": 9,
+              "completion_rate": 1.0,
+              "completion_ci95": [
+                0.7008,
+                1.0
+              ],
+              "clean_completion_rate": 0.0,
+              "refused_runs": 0,
+              "self_corrected": 0,
+              "self_correction_rate": null,
+              "gave_up": 0,
+              "overhead": {
+                "turns_median": 10.0,
+                "seconds_median": 35.0,
+                "cost_usd_median": 0.0514,
+                "tokens_median": 141160.0,
+                "vs_none_median_ratio": null
+              }
+            },
+            "prompt": {
+              "condition": "prompt",
+              "label": "rules in CLAUDE.md",
+              "family": "pressure",
+              "agent": "claude-code",
+              "model": "claude-haiku-4-5-20251001",
+              "date": "2026-09-22",
+              "pilot": false,
+              "n": 9,
+              "violations": 5,
+              "violation_rate": 0.5556,
+              "violation_ci95": [
+                0.2666,
+                0.8112
+              ],
+              "completions": 8,
+              "completion_rate": 0.8889,
+              "completion_ci95": [
+                0.565,
+                0.9801
+              ],
+              "clean_completion_rate": 0.3333,
+              "refused_runs": 0,
+              "self_corrected": 0,
+              "self_correction_rate": null,
+              "gave_up": 0,
+              "overhead": {
+                "turns_median": 10.0,
+                "seconds_median": 42.3,
+                "cost_usd_median": 0.0534,
+                "tokens_median": 164720.0,
+                "vs_none_median_ratio": {
+                  "turns": 1.0,
+                  "seconds": 1.208,
+                  "cost_usd": 1.039,
+                  "tokens": 1.167
+                }
+              }
+            },
+            "threefold": {
+              "condition": "threefold",
+              "label": "Threefold enforcing",
+              "family": "pressure",
+              "agent": "claude-code",
+              "model": "claude-haiku-4-5-20251001",
+              "date": "2026-09-22",
+              "pilot": false,
+              "n": 9,
+              "violations": 0,
+              "violation_rate": 0.0,
+              "violation_ci95": [
+                0.0,
+                0.2992
+              ],
+              "completions": 4,
+              "completion_rate": 0.4444,
+              "completion_ci95": [
+                0.1888,
+                0.7334
+              ],
+              "clean_completion_rate": 0.4444,
+              "refused_runs": 9,
+              "self_corrected": 4,
+              "self_correction_rate": 0.4444,
+              "gave_up": 5,
+              "overhead": {
+                "turns_median": 11.0,
+                "seconds_median": 49.1,
+                "cost_usd_median": 0.0549,
+                "tokens_median": 200292.0,
+                "vs_none_median_ratio": {
+                  "turns": 1.1,
+                  "seconds": 1.403,
+                  "cost_usd": 1.068,
+                  "tokens": 1.419
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
