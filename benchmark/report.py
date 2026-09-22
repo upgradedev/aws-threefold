@@ -168,7 +168,7 @@ def aggregate(rows: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
         "valid_rows": len(valid),
         "pilot": bool(real) and all(row.get("pilot") for row in real) or (not real and bool(scripted) and all(row.get("pilot") for row in scripted)),
         "models": sorted({str(row.get("model")) for row in real}),
-        "claude_versions": sorted({str(row.get("claude_code_version")) for row in valid if row.get("claude_code_version")}),
+        "claude_versions": sorted({str(row.get("claude_code_version")) for row in real if row.get("claude_code_version") and row.get("claude_code_version") != "scripted"}),
         "isolation_modes": sorted({str((row.get("isolation") or {}).get("mode")) for row in real}),
         "platforms": sorted({str((row.get("harness") or {}).get("platform")) for row in real if row.get("harness")}),
         "run_ids": sorted({str(row.get("run_id")) for row in rows}),
@@ -242,9 +242,14 @@ def caveats(summary: Mapping[str, Any]) -> List[str]:
     stats = summary["by_condition"]
     smallest = min((stat["n"] for stat in stats.values()), default=0)
     cell_sizes = [stat["n"] for task in summary["per_task"].values() for stat in task.values()]
-    items = [
+    sample = (
         f"Small samples. The smallest condition has {smallest} valid run(s) and a task-by-condition cell holds at most "
-        f"{max(cell_sizes, default=0)}; the 95% intervals above are wide and differences inside them are not established.",
+        f"{max(cell_sizes, default=0)}; the 95% intervals above are wide and differences inside them are not established."
+        if summary["valid_rows"] else
+        "No real-agent run was measured, so there is no sample yet; the limits below describe the method, not data."
+    )
+    items = [
+        sample,
         f"One model family per run set ({', '.join(summary['models']) or 'none'}), one agent (Claude Code "
         f"{', '.join(summary['claude_versions']) or 'version unknown'}), on {', '.join(summary['platforms']) or 'an unrecorded platform'}. "
         "Other agents and models may behave differently; Codex and Antigravity are not measured here.",
@@ -373,22 +378,31 @@ def render(summary: Mapping[str, Any], tasks: Sequence[task_library.Task], sourc
         for item in summary["invalid"]:
             out.append(f"| `{item['task']}` | {item['condition']} | {item['rep']} | {item['reason']} |")
         out.append("")
+        if any("authenticate" in item["reason"].lower() for item in summary["invalid"]):
+            out += ["The agent could not log in, so it never reached the model and nothing about agents was measured. "
+                    "Log Claude Code in again (`claude auth login`), or create a long-lived token with `claude setup-token` and "
+                    "export it as `CLAUDE_CODE_OAUTH_TOKEN`, which also gives every run a configuration folder of its own; then rerun.", ""]
 
     if summary["scripted_rows"]:
         out += ["## Harness self-test (scripted agent, not a measurement)", "",
                 "`benchmark/scripted_agent.py` stands in for Claude Code with a fixed script: it writes the task's violating reference, asking the "
                 "installed hook before every call as Claude Code does, and switches to the clean reference only if a call is refused. Its rows show "
-                "that the set-up, the hook, the local server, the ledger, the checkers and the acceptance run work together on this machine. "
-                "They say nothing about how an agent behaves.", "",
-                "| Condition | Runs | Violation landed | Tests passed | Refused at least once | Self-corrected |", "|---|---|---|---|---|---|"]
+                "that the set-up, the hook, the local server, the ledger, the checkers and the acceptance run work together on this machine, "
+                "and which gate refused each task's violating write. The percentages are fixed by the script; they say nothing about how an agent behaves.", "",
+                "| Condition | Runs | Violation landed | Tests passed | Refused at least once | Self-corrected | Refusals by gate |",
+                "|---|---|---|---|---|---|---|"]
         for name, stat in summary["scripted"].items():
+            kinds = ", ".join(f"{kind} {count}" for kind, count in sorted(stat["refusal_kinds"].items())) or "none"
             out.append(f"| {CONDITION_LABELS.get(name, name)} | {stat['n']} | {fraction(stat['violation'])} | {fraction(stat['completion'])} | "
-                       f"{stat['refused_runs']} | {stat['self_corrected']} |")
+                       f"{stat['refused_runs']} | {stat['self_corrected']} | {kinds} |")
         out.append("")
 
     out += ["## Limits", ""] + [f"- {item}" for item in caveats(summary)] + [""]
     out += ["## Reproduce", "",
+            "Claude Code must be logged in (`claude -p \"hi\"` answers). With `CLAUDE_CODE_OAUTH_TOKEN` set, each run is fully isolated.", "",
             "```",
+            "python benchmark/run.py --agent scripted --reps 1 --parallel 3   # the harness alone, no model, free",
+            "python benchmark/run.py --tasks orders-s3-archive --reps 1 --parallel 3 --pilot",
             "python benchmark/run.py --reps 3 --parallel 3        # the full matrix: 6 tasks x 3 conditions x 3 reps",
             "python benchmark/report.py benchmark/results/<run-id>.jsonl",
             "```", "",
