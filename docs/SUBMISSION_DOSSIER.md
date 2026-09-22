@@ -128,6 +128,12 @@ so the rollout had to show what a rule would stop before it stops anything.
   under `Acme-Proj-*` aliases, in Observe, reporting to a private stack from the
   same template [STATE-FILE].
 - The public stack passed its own live probe, 113 checks PASS, 0 FAIL, 3 SKIP.
+- Threefold was measured against the alternative rather than asserted over it.
+  162 Claude Code runs on 2026-09-22, two models, two task families, graded by
+  a checker that does not import Threefold: a governed violation landed in
+  0 of 54 runs with Threefold enforcing, against 3, 7, 6 and 9 of the unguided
+  runs of each series, and 0, 3, 0 and 5 with the same rules in `CLAUDE.md`
+  and nothing enforcing them (`docs/evidence/BENCHMARK_2026-09-22*.md`).
 - Nothing on the public stack names a real project or person: names outside the
   `Acme-*` pattern are stored as `unlabelled`, developers appear only as short
   hashes.
@@ -145,12 +151,18 @@ so the rollout had to show what a rule would stop before it stops anything.
 
 ## 8. What's next
 
-- The benchmark. The harness in `benchmark/` runs a coding agent on six
-  synthetic tasks under three conditions and grades the result independently.
-  Only a pilot exists, and its real-agent runs never reached the model, so no
-  comparative number exists yet; the headline will be computed by
-  `benchmark/report.py` from the full matrix
-  (`docs/evidence/BENCHMARK_2026-09-22-PILOT.md`).
+- The benchmark, beyond what is measured. Four matrices ran on 2026-09-22:
+  Claude Code on six standard Acme tasks and on three pressure variants, with
+  `claude-sonnet-5` and with `claude-haiku-4-5`, each under no guidance, the
+  rules in `CLAUDE.md`, and Threefold enforcing. A governed violation landed in
+  17% / 0% / 0% and 39% / 17% / 0% on the standard tasks, and 67% / 0% / 0%
+  and 100% / 56% / 0% on the pressure ones: no violation under Threefold in any
+  series, while the rules in `CLAUDE.md` held only with the strong model on the
+  plain tasks. The price is in the pressure series, where the governed agent
+  finished 10 of 18 runs and otherwise stopped and reported the conflict
+  (`docs/evidence/BENCHMARK_2026-09-22*.md`). What is still missing is another
+  agent (Codex and Antigravity are unmeasured), a task set someone else wrote,
+  and more than 18 or 9 runs a cell.
 - Measure Codex enforcement once its account resets.
 - Price each call by the model actually in use, and let the session ceiling and
   loop window come from the policy, as the settings page already admits they do

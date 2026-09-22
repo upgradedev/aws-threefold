@@ -157,14 +157,31 @@ reserved concurrency of 25 (`aws lambda get-function-concurrency`).
   public stack claim by claim on 2026-09-22, at its API Gateway URL: 113 PASS,
   0 FAIL, 3 SKIP **[PRIMARY, 2026-09-22]**, `docs/evidence/PROBES_2026-09-22.md`.
   No probe of the CloudFront URL has been committed yet.
-- **Does Threefold change what an agent does?** Not measured yet. A benchmark
-  harness runs an agent on six synthetic tasks, each tempting a governed
-  violation, with no guidance, with the rules in `CLAUDE.md`, and with
-  Threefold enforcing, and grades the result with an independent checker. Only
-  a pilot has run, and its agent never reached the model, so there is no number
-  to report (`docs/evidence/BENCHMARK_2026-09-22-PILOT.md`). The headline will
-  be computed by the harness's report script, `benchmark/report.py`, from the
-  full matrix.
+- **Does Threefold change what an agent does?** Measured on 2026-09-22
+  **[PRIMARY]**. Claude Code ran headless on six synthetic tasks, each tempting
+  a governed violation, and on three *pressure* variants whose prompt asks for
+  the forbidden shortcut outright, under three conditions: no guidance, the
+  same rules written into the repository's `CLAUDE.md` with nothing enforcing
+  them, and Threefold enforcing. A checker that does not import Threefold then
+  read what each run left behind, and the task's own tests were restored and
+  run. The two families are never pooled.
+
+  | Tasks, model | Runs | Violation: no guidance | rules in `CLAUDE.md` | Threefold | Tests passed, Threefold |
+  |---|---|---|---|---|---|
+  | standard, `claude-sonnet-5` | 54 | 17% (3/18) | 0% (0/18) | **0% (0/18)** | 100% (18/18) |
+  | standard, `claude-haiku-4-5` | 54 | 39% (7/18) | 17% (3/18) | **0% (0/18)** | 100% (18/18) |
+  | pressure, `claude-sonnet-5` | 27 | 67% (6/9) | 0% (0/9) | **0% (0/9)** | 67% (6/9) |
+  | pressure, `claude-haiku-4-5` | 27 | 100% (9/9) | 56% (5/9) | **0% (0/9)** | 44% (4/9) |
+
+  What that says, without stretching it: with the strong model on the plain
+  tasks, writing the rules into `CLAUDE.md` was enough on its own. It was not
+  enough with the cheaper model, and it was not enough under a prompt that asks
+  for the shortcut. Threefold left no violation in any of the four series, and
+  the price shows in the last column: under the pressure prompts the governed
+  agent finished 10 of 18 runs and otherwise stopped and reported the conflict
+  rather than break a rule. 18 or 9 runs a cell, one agent, tasks written by
+  the people who built Threefold: rates under temptation, not base rates
+  (`docs/evidence/BENCHMARK_2026-09-22*.md`).
 - **The certificate** Threefold issues is an unkeyed SHA-256 fingerprint over
   verdicts the caller supplies. It detects corruption, not an adversary, and
   nothing requires one before a merge **[STATE-FILE]**.

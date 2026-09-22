@@ -164,6 +164,41 @@ reached its usage limit, so no claim is made for it and its edits count as
 governed at commit time only. Method and results:
 [`docs/evidence/ENFORCEMENT_2026-09-21.md`](docs/evidence/ENFORCEMENT_2026-09-21.md).
 
+**Does Threefold change what an agent does?** Measured on 2026-09-22. Claude
+Code ran headless on six synthetic Acme tasks, each tempting a governed
+violation, and on three *pressure* variants whose prompt asks for the forbidden
+shortcut outright, under three conditions: no guidance, the same rules written
+into the repository's own `CLAUDE.md` with nothing enforcing them, and
+Threefold enforcing. An independent checker (`benchmark/checks.py`, which does
+not import Threefold) then read the files each run left behind, and the task's
+own acceptance tests were restored and run. The two task families are reported
+apart and never pooled.
+
+| Tasks, model | Runs | Violation landed: no guidance | rules in `CLAUDE.md` | Threefold | Tests passed, Threefold |
+|---|---|---|---|---|---|
+| standard, `claude-sonnet-5` | 54 | 17% (3/18) | 0% (0/18) | **0% (0/18)** | 100% (18/18) |
+| standard, `claude-haiku-4-5` | 54 | 39% (7/18) | 17% (3/18) | **0% (0/18)** | 100% (18/18) |
+| pressure, `claude-sonnet-5` | 27 | 67% (6/9) | 0% (0/9) | **0% (0/9)** | 67% (6/9) |
+| pressure, `claude-haiku-4-5` | 27 | 100% (9/9) | 56% (5/9) | **0% (0/9)** | 44% (4/9) |
+
+The honest reading. With the strong model on the plain tasks, rules in
+`CLAUDE.md` were enough on their own: nothing enforced them and no violation
+landed. They were not enough with the cheaper model (17%), and they were not
+enough under a prompt that asks for the shortcut (56% with the cheaper model,
+where unguided runs violated every time). Threefold left no violation in any of
+the four series. The price is the last column: under the pressure prompts the
+governed agent finished 10 of 18 runs (6 of 9, then 4 of 9), and in the other 8
+it stopped and reported the conflict instead of finishing — among them every
+run of the task whose prompt forbids a new module, where the compliant design
+and the request cannot both be met. Samples are small (18 or 9 runs a cell) and
+the 95% intervals are wide; the tasks were written by the people who built
+Threefold, so these are rates under temptation and not base rates of everyday
+work. One agent (Claude Code 2.1.220, on Windows) and two models; Codex and
+Antigravity are not measured. Method, every result and its limits:
+[`docs/evidence/BENCHMARK_2026-09-22.md`](docs/evidence/BENCHMARK_2026-09-22.md)
+and the three reports beside it, and the dashboard's `#/proof` page carries the
+same four series.
+
 ### By hand, one agent at a time
 
 The hook is one standard-library file for three agents, served by the stack:
@@ -317,7 +352,10 @@ Also true, and recorded in `STATE.md` as not yet fixed [STATE-FILE]:
   last 50 calls.
 - Four of the five offline fallback panels on the demo page show canned text,
   labelled as simulated.
-- No comparative benchmark number exists yet (below).
+- The benchmark measures one agent (Claude Code) and two models on tasks this
+  project wrote, so it is not an independent comparison: Codex and Antigravity
+  are unmeasured, and under prompts that ask for the shortcut the governed
+  agent finished 10 of 18 runs (above).
 
 ---
 
@@ -376,7 +414,11 @@ Then open <http://localhost:8001/> or <http://localhost:8001/dashboard.html>.
 | [`docs/evidence/PROBES_2026-09-22.md`](docs/evidence/PROBES_2026-09-22.md) | `scripts/probe_live.py` against the public origin URL: 113 PASS, 0 FAIL, 3 SKIP, with every check's evidence line. No probe of the edge URL is committed yet |
 | [`docs/evidence/ENFORCEMENT_2026-09-21.md`](docs/evidence/ENFORCEMENT_2026-09-21.md) | Whether a deny stops the write, per agent, checked on the file system |
 | [`docs/evidence/DEPLOYMENT_2026-09-20.md`](docs/evidence/DEPLOYMENT_2026-09-20.md) | Raw output of the first deployment, including the CloudTrail events that show Bedrock called by the function's own role |
-| [`docs/evidence/BENCHMARK_2026-09-22-PILOT.md`](docs/evidence/BENCHMARK_2026-09-22-PILOT.md) | A **pilot** of the agent benchmark. Its three real-agent runs never reached the model (an expired login), so it measured nothing about agents; the scripted rows only prove the harness. No benchmark result exists yet. The headline will be computed by `benchmark/report.py` from the full matrix |
+| [`docs/evidence/BENCHMARK_2026-09-22.md`](docs/evidence/BENCHMARK_2026-09-22.md) | The standard-task matrix with `claude-sonnet-5`: 54 runs, a governed violation landed in 17% / 0% / 0% of runs with no guidance, with the rules in `CLAUDE.md` and with Threefold enforcing |
+| [`docs/evidence/BENCHMARK_2026-09-22-HAIKU.md`](docs/evidence/BENCHMARK_2026-09-22-HAIKU.md) | The same 54 runs with `claude-haiku-4-5`: 39% / 17% / 0% |
+| [`docs/evidence/BENCHMARK_2026-09-22-PRESSURE-SONNET.md`](docs/evidence/BENCHMARK_2026-09-22-PRESSURE-SONNET.md) | The three pressure tasks, whose prompt asks for the forbidden shortcut, with `claude-sonnet-5`: 27 runs, 67% / 0% / 0%, and the acceptance tests passed in 6 of the 9 governed runs |
+| [`docs/evidence/BENCHMARK_2026-09-22-PRESSURE-HAIKU.md`](docs/evidence/BENCHMARK_2026-09-22-PRESSURE-HAIKU.md) | The same 27 runs with `claude-haiku-4-5`: 100% / 56% / 0%, tests passed in 4 of the 9 governed runs |
+| [`docs/evidence/BENCHMARK_2026-09-22-PILOT.md`](docs/evidence/BENCHMARK_2026-09-22-PILOT.md) | The **pilot** that came before those four. Its three real-agent runs never reached the model (an expired login), so it measured nothing about agents and the scripted rows only prove the harness. Kept because the four matrices were run once that login was fixed |
 | [`docs/PROOF_OF_AWS_AGENT.md`](docs/PROOF_OF_AWS_AGENT.md) | The coding agent connected to AWS: what it ran, what AWS answered, and how to check it |
 
 ## Clean room

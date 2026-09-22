@@ -89,18 +89,25 @@
   > the file system that a refused file is not created, for Claude Code and for
   > Antigravity. Codex has not been measured yet, so we make no claim for it."
 
-## Scene 5: running it, and what is not claimed yet (2:15 to 2:45)
+## Scene 5: running it, and what the benchmark says (2:15 to 2:45)
 
 - **Visual:** the dashboard's overview; the CloudWatch dashboard
   `threefold-prod-operations` with its alarms; then the dashboard's `#/proof`
-  page, which shows the benchmark as a pilot with nothing measured yet.
+  page, on the table of the four measured series. Hold on the `Threefold`
+  column, which reads 0/18, 0/18, 0/9 and 0/9, and let the pressure rows'
+  "tests passed" column (67% and 44%) stay readable: the cost is part of the
+  claim, not a footnote.
 - **Narration:**
   > "It runs on AWS behind CloudFront and AWS WAF, on one Lambda function and one
   > DynamoDB table, with ten CloudWatch alarms and point-in-time recovery. A
-  > live probe checks the project's claims against the deployed stack. What is not
-  > measured, we do not claim: the benchmark comparing agents with and without
-  > Threefold has only run as a pilot, and its headline will come from the full
-  > run. Try the rollout yourself at the link below. It takes a minute."
+  > live probe checks the project's claims against the deployed stack. And we
+  > measured it: a hundred and sixty-two headless Claude Code runs, two models,
+  > graded by a checker that does not import Threefold. With the rules only
+  > written in CLAUDE.md, violations still landed — up to every run when the
+  > prompt itself asked for the shortcut. With Threefold enforcing, none did, in
+  > any series. The cost is honest too: under those prompts the agent finished
+  > ten of eighteen runs and otherwise stopped and reported the conflict. Try
+  > the rollout yourself at the link below. It takes a minute."
 - **End card:** `https://d1og72wpk4aqig.cloudfront.net/dashboard.html#/try`
 
 ---
@@ -117,7 +124,7 @@
 | Ten CloudWatch alarms | [PRIMARY, 2026-09-22] `aws cloudwatch describe-alarms --alarm-name-prefix threefold-prod-`: 10 alarms, all `OK` |
 | Point-in-time recovery | [PRIMARY, 2026-09-22] `aws dynamodb describe-continuous-backups`: `ENABLED` |
 | A live probe checks the claims | [PRIMARY, 2026-09-22] `docs/evidence/PROBES_2026-09-22.md`, run against the public origin URL: 113 PASS, 0 FAIL, 3 SKIP |
-| The benchmark has only run as a pilot | `docs/evidence/BENCHMARK_2026-09-22-PILOT.md`: its real-agent runs never reached the model, so no result exists |
+| 162 headless runs, two models, no violation under Threefold, and 10 of 18 pressure runs finished | [PRIMARY, 2026-09-22] the four reports `docs/evidence/BENCHMARK_2026-09-22.md`, `-HAIKU.md`, `-PRESSURE-SONNET.md` and `-PRESSURE-HAIKU.md`, from `benchmark/results/20260922T143932Z.jsonl`, `…145644Z.jsonl`, `…161455Z-pressure.jsonl` and `…162306Z-pressure.jsonl`. Violation landed, no guidance / rules in `CLAUDE.md` / Threefold: 17% / 0% / 0%, then 39% / 17% / 0%, then 67% / 0% / 0%, then 100% / 56% / 0%; acceptance tests passed under Threefold 100% (18/18), 100% (18/18), 67% (6/9), 44% (4/9). Grading is `benchmark/checks.py`, which does not import Threefold |
 
 ---
 
@@ -139,5 +146,8 @@
       repository after connecting. No real project or company name on screen.
 - [ ] CloudWatch console: `threefold-prod-operations` in eu-west-1, signed in
       as the operator. No account id, email address or other stack in frame.
-- [ ] Do not show a test count or any benchmark number: none is measured yet.
+- [ ] Do not show a test count. Benchmark numbers are fine now that four
+      matrices are measured, but only as the reports and `#/proof` state them,
+      with the two families apart and the pressure series' completion rate in
+      the same shot as its violation rate.
 - [ ] Final length between 2:35 and 2:45.
