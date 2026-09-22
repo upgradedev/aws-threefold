@@ -1551,8 +1551,12 @@ _COMPUTED_PLACE = re.compile(r"(?:\$\{|\$env:|\$)(?:old)?pwd(?![A-Za-z0-9_])|(?<
 # A `..` after a variable, a command's output or another user's home: it climbs
 # from somewhere the hook cannot see, so it may climb out of the list.
 _UNRESOLVED_CLIMB = re.compile(r"(?:[$%`]|~[^\s\\/]).*?[\\/})%]\.\.(?=$|[\\/])")
-# The command in pieces: runs of separators, redirections, and everything else.
-_SHELL_PIECES = re.compile(r"[;&|()\n]+|[<>]+|[^\s;&|()<>]+")
+# The command in pieces: redirections, runs of separators, and everything else.
+# A redirection is read before a separator so that bash's `>|`, which overrides
+# noclobber, is one redirection and not a `>` followed by a pipe. Read the
+# other way round the word after it was taken for a command's name and the
+# file it writes was never seen.
+_SHELL_PIECES = re.compile(r"[<>]+\|?|[;&|()\n]+|[^\s;&|()<>]+")
 _URL = re.compile(r"^[A-Za-z][A-Za-z0-9+.\-]+://")
 _DIRECTORY_CHANGES = frozenset(("cd", "chdir", "pushd", "popd", "set-location", "sl", "push-location", "pop-location"))
 _PUSHES = frozenset(("pushd", "push-location"))
@@ -1620,30 +1624,61 @@ def _next_separator(pieces: Sequence[str], index: int) -> str:
     return pieces[index] if index < len(pieces) else ""
 
 
-# Where a command puts bytes. Not the service's full reading of every write
-# route, which is a module of its own and cannot be imported into a file that
-# is downloaded alone: enough to know that a data file is being written, so
-# that it is kept here whichever tool wrote it. Reading a destination that is
-# not one only ever holds a call back, which is the safe way to be wrong.
+# Where a command puts bytes it is carrying itself. Not the service's full
+# reading of every write route, which is a module of its own and cannot be
+# imported into a file that is downloaded alone: enough to know that rows are
+# being written into a data file, so that they are kept here whichever tool
+# wrote them.
+#
+# Only a write whose bytes are in the command's own text counts, because those
+# bytes are the whole of what a command can leak: a command is sent as its
+# text, and nothing reads the files it names. `cp src/a.py data/a.py` names a
+# data file and carries none of it; `rm -rf src > out.csv` carries nothing at
+# all. Holding either back would take the call away from the service
+# altogether, so appending `> x.csv` to any command would hide it — unjudged
+# in enforce mode, and missing from the ledger in observe. That is the
+# reasoning the `.git` carve-out in _is_written_data already follows, read for
+# every destination instead of one directory.
 _TEE_LIKE = frozenset(("tee", "sponge", "tee-object", "out-file", "set-content", "add-content"))
 _COPY_LIKE = frozenset(("cp", "mv", "install", "rsync", "copy-item", "move-item"))
+# Commands whose operands are the bytes they write, so the rows are in the
+# command's text. A heredoc or a here-string is the other way to carry them.
+_WRITES_ITS_OPERANDS = frozenset(
+    ("echo", "echo.", "printf", "print", "write-output", "write-host", "set-content", "add-content")
+)
 
 
-def _command_write_targets(command: str) -> Iterator[str]:
-    """Each word a command writes to: a redirection, a tee, a copy's destination, a `dd of=`."""
+def _carried_write_targets(command: str) -> Iterator[str]:
+    """Each word a command writes bytes of its own text to.
+
+    A destination is a redirection, a tee, a copy's destination or a `dd of=`,
+    as before; it is only reported when the command that writes it carries
+    what it writes. Each simple command is read on its own, so `echo hi && rm
+    -rf src > out.csv` reports nothing: the `echo` carries a word and writes
+    nowhere, and the `rm` writes but carries nothing.
+    """
     pieces = _SHELL_PIECES.findall(command)
     at_command = True
+    targets: List[str] = []
+    carries = False
     index = 0
-    while index < len(pieces):
+    while index <= len(pieces):
+        if index == len(pieces) or pieces[index][0] in ";&|()\n":
+            if carries:
+                for target in targets:
+                    yield target
+            targets, carries, at_command = [], False, True
+            index += 1
+            continue
         piece = pieces[index]
         index += 1
-        if piece[0] in ";&|()\n":
-            at_command = True
-            continue
         if piece[0] in "<>":
+            if piece.startswith("<<"):
+                # `<<EOF` and `<<<word`: the body is part of the command text.
+                carries = True
             # `2>&1` puts a separator next, not a word, and names no file.
             if ">" in piece and index < len(pieces) and pieces[index][0] not in ";&|()\n<>":
-                yield _unquoted(pieces[index])
+                targets.append(_unquoted(pieces[index]))
                 index += 1
             at_command = False
             continue
@@ -1657,15 +1692,16 @@ def _command_write_targets(command: str) -> Iterator[str]:
             index += 1
         at_command = False
         named = [operand for operand in operands if not operand.startswith("-")]
+        if name in _WRITES_ITS_OPERANDS and named:
+            carries = True
         if name in _TEE_LIKE:
-            for operand in named:
-                yield operand
+            targets.extend(named)
         elif name in _COPY_LIKE and named:
-            yield named[-1]
+            targets.append(named[-1])
         elif name == "dd":
             for operand in operands:
                 if operand.lower().startswith("of="):
-                    yield operand[3:]
+                    targets.append(operand[3:])
 
 
 def _command_included(command: str, base: str, canonical_root: str, include: Sequence[str]) -> bool:
@@ -1946,8 +1982,12 @@ def held_back_category(
         # data/train.csv <<EOF` used to carry the same rows to the service
         # inside the command text, because this check only ever looked at a
         # call's targets and a command has none.
+        #
+        # Only the rows the command carries are kept, never a call that merely
+        # names a data file: a command is judged by its text, and a command
+        # held back is a command nothing judged.
         canonical_base = _canonical(base)
-        for destination in _command_write_targets(call.command):
+        for destination in _carried_write_targets(call.command):
             if not destination or destination.lower() in _DEVICE_TOKENS:
                 continue
             resolved = _word_as_path(destination, canonical_base)
