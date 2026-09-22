@@ -43,6 +43,7 @@ from threefold.infrastructure.security_middleware import (
     rfc7807_error,
     validate_request_security,
 )
+from threefold.interfaces import access_routes
 
 logger = logging.getLogger("threefold.api")
 logger.setLevel(logging.INFO)
@@ -55,7 +56,7 @@ _reviewer = BedrockArchitecturalReviewer(_bedrock_client)
 CORS_HEADERS = {
     "Content-Type": "application/json",
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With, X-API-Key, Idempotency-Key",
 }
 
@@ -948,6 +949,11 @@ def _route(event: Dict[str, Any], http_method: str, request_id: str) -> Dict[str
             if idempotency_key:
                 global_idempotency_cache.set(idempotency_key, 200, res_dict)
             return build_response(200, res_dict)
+
+        # Route 8: sign-in, the dashboard and what connecting a repository downloads.
+        served = access_routes.handle(path, http_method, event)
+        if served is not None:
+            return served
 
         return build_response(
             404,
