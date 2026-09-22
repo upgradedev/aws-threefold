@@ -44,6 +44,7 @@ from threefold.infrastructure.security_middleware import (
     validate_request_security,
 )
 from threefold.interfaces import access_routes
+from threefold.interfaces import draft_routes
 
 logger = logging.getLogger("threefold.api")
 logger.setLevel(logging.INFO)
@@ -883,6 +884,9 @@ def _route(event: Dict[str, Any], http_method: str, request_id: str) -> Dict[str
                     "scope": "layering rules only",
                 },
             )
+
+        if (drafted := draft_routes.handle(path, http_method, event)) is not None:
+            return drafted  # Route 6d2: POST /rules/draft, drafted by Bedrock, never saved.
 
         if path in ("/rules", "/rules/layering") and http_method == "POST":
             # The one POST that takes a bare array as well as an object: a rule
