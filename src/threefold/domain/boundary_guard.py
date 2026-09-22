@@ -361,7 +361,7 @@ class ArchitecturalBoundaryGuard:
             # over the command, exactly as `.git` was taken out of them on
             # 2026-09-22. A command that cannot be read this way is scanned
             # whole, as it always was.
-            spelled, skipped = _not_files(command, analysis)
+            spelled, skipped = not_file_words(command, analysis)
             for leaf in iter_string_leaves(arguments):
                 if looks_like_path(leaf) or leaf in skipped:
                     continue
@@ -540,7 +540,7 @@ def _words_that_are_not_files(argv: List[str]) -> List[str]:
     return []
 
 
-def _not_files(command: Any, analysis: Optional[ShellAnalysis]) -> Tuple[Dict[str, str], frozenset]:
+def not_file_words(command: Any, analysis: Optional[ShellAnalysis]) -> Tuple[Dict[str, str], frozenset]:
     """How to read a command leaf in place of itself, and which words to skip.
 
     A command sent as one string comes back with those words blanked, keeping
