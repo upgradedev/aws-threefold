@@ -20,7 +20,13 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from benchmark import harness, report, run, task_library  # noqa: E402
+from benchmark import credentials, harness, report, run, task_library  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _no_real_token_file(tmp_path, monkeypatch):
+    """The default token file names a real place on the owner's machine; no test may read it."""
+    monkeypatch.setattr(credentials, "DEFAULT_TOKEN_FILE", tmp_path / "no-such-token-file")
 
 
 def _options(**overrides):
@@ -183,7 +189,8 @@ def test_nothing_from_the_host_session_or_the_owner_s_settings_reaches_a_run(tmp
     assert not [key for key in env if key.startswith(("THREEFOLD", "ANTHROPIC")) or key == "CLAUDECODE"]
     assert "CLAUDE_CODE_ENTRYPOINT" not in env and "CLAUDE_CODE_SESSION_ID" not in env
     assert "AWS_ACCESS_KEY_ID" not in env and "AWS_PROFILE" not in env
-    assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "kept-for-login"
+    # A token exported in the owner's shell is not used: runs log in with a token file or the machine's login.
+    assert "CLAUDE_CODE_OAUTH_TOKEN" not in env
     assert Path(env["AWS_SHARED_CREDENTIALS_FILE"]).parent == tmp_path / "aws"
     assert not Path(env["AWS_SHARED_CREDENTIALS_FILE"]).exists()
     assert Path(env["NUGET_PACKAGES"]).is_relative_to(tmp_path)
@@ -191,8 +198,10 @@ def test_nothing_from_the_host_session_or_the_owner_s_settings_reaches_a_run(tmp
 
 
 def test_fresh_config_gives_each_run_its_own_configuration_folder_and_home(tmp_path):
-    env = harness.agent_environment({"CLAUDE_CODE_OAUTH_TOKEN": "t", "HOME": "/owner", "USERPROFILE": "C:/owner"},
-                                    tmp_path, "fresh-config")
+    from benchmark import credentials
+
+    env = harness.agent_environment({"HOME": "/owner", "USERPROFILE": "C:/owner"}, tmp_path, "fresh-config",
+                                    credentials.Credential("acme-fixture-token-0123456789"))
     assert Path(env["CLAUDE_CONFIG_DIR"]) == tmp_path / "claude-config"
     assert (tmp_path / "claude-config").is_dir()
     assert Path(env["HOME"]) == Path(env["USERPROFILE"]) == tmp_path / "agent-home"
@@ -268,10 +277,11 @@ def test_a_real_run_stops_before_measuring_when_the_flag_is_unknown(tmp_path, mo
 
 
 def test_isolation_follows_the_login_available():
-    assert harness.choose_isolation("auto", {"CLAUDE_CODE_OAUTH_TOKEN": "t"}) == "fresh-config"
-    assert harness.choose_isolation("auto", {}) == "user-config"
+    assert harness.choose_isolation("auto", True) == "fresh-config"
+    assert harness.choose_isolation("auto", False) == "user-config"
+    assert harness.choose_isolation("user-config", True) == "user-config"
     with pytest.raises(ValueError):
-        harness.choose_isolation("fresh-config", {})
+        harness.choose_isolation("fresh-config", False)
 
 
 def test_the_work_root_must_be_outside_the_repository_and_the_workspace(tmp_path):
@@ -420,8 +430,10 @@ def test_a_run_killed_before_the_model_answered_did_not_run(tmp_path):
     ({"subtype": "error_max_turns", "is_error": True, "terminal_reason": "max_turns"}, "max_turns", True),
     ({"subtype": "error_max_budget_usd", "is_error": True, "terminal_reason": "budget_exhausted"}, "budget", True),
     ({"subtype": "success", "is_error": True, "terminal_reason": "api_error", "result": "API Error: 529 overloaded"},
+     "cut_short:overloaded", False),
+    ({"subtype": "success", "is_error": True, "result": "Claude usage limit reached"}, "cut_short:usage_limit", False),
+    ({"subtype": "success", "is_error": True, "terminal_reason": "api_error", "result": "API Error: 500 internal"},
      "cut_short:api_error", False),
-    ({"subtype": "success", "is_error": True, "result": "Claude usage limit reached"}, "cut_short:error", False),
     ({"subtype": "error_during_execution", "is_error": True}, "cut_short:error_during_execution", False),
     ({"subtype": "success", "is_error": False, "terminal_reason": "model_error"}, "cut_short:model_error", False),
 ])
