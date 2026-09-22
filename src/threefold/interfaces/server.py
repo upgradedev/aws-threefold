@@ -7,6 +7,7 @@ Zero third-party dependencies required.
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import logging
 import sys
@@ -37,6 +38,11 @@ class ThreefoldHTTPRequestHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         self._handle_request("POST")
+
+    def do_DELETE(self) -> None:
+        # Signing out is a DELETE. Without this the standard library answered
+        # 501 before the handler was reached, as it once did for HEAD.
+        self._handle_request("DELETE")
 
     def do_HEAD(self) -> None:
         # The handler answers HEAD as GET with an empty body. Without this the
@@ -86,21 +92,39 @@ class ThreefoldHTTPRequestHandler(BaseHTTPRequestHandler):
         headers = response.get("headers", {})
         for h_name, h_val in headers.items():
             self.send_header(h_name, h_val)
-        self._send_cors_headers()
+        self._send_cors_headers(already_sent={name.lower() for name in headers})
         self.end_headers()
 
         resp_body = response.get("body", "")
         if method == "HEAD":
             return
-        if isinstance(resp_body, str):
+        # A download comes back base64-encoded with isBase64Encoded set, because
+        # that is the only way the Lambda proxy carries bytes. API Gateway
+        # decodes it before sending; this server has to do the same, or the
+        # bundle arrives as base64 text.
+        if response.get("isBase64Encoded") and isinstance(resp_body, str):
+            self.wfile.write(base64.b64decode(resp_body))
+        elif isinstance(resp_body, str):
             self.wfile.write(resp_body.encode("utf-8"))
         elif isinstance(resp_body, (bytes, bytearray)):
             self.wfile.write(resp_body)
 
-    def _send_cors_headers(self) -> None:
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
+    def _send_cors_headers(self, already_sent: frozenset = frozenset()) -> None:
+        """The CORS headers the deployed API sends, each once.
+
+        The handler's response already carries them for most routes, and a
+        header sent twice reaches the browser as a list.
+        """
+        for name, value in (
+            ("Access-Control-Allow-Origin", "*"),
+            ("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS"),
+            (
+                "Access-Control-Allow-Headers",
+                "Content-Type, Authorization, X-Requested-With, X-API-Key, Idempotency-Key",
+            ),
+        ):
+            if name.lower() not in already_sent:
+                self.send_header(name, value)
 
     def log_message(self, format: str, *args: Any) -> None:
         logger.info("%s - - [%s] %s", self.address_string(), self.log_date_time_string(), format % args)
