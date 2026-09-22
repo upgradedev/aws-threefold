@@ -131,12 +131,33 @@ def test_a_json_object_that_is_not_a_summary_is_refused(tmp_path: Path) -> None:
         build_proof.read_benchmark([path])
 
 
+@pytest.mark.parametrize("name, content", [
+    ("no-task.jsonl", (json.dumps({k: v for k, v in _run("none", 1).items() if k != "task"}) + "\n").encode("utf-8")),
+    ("not-utf8.jsonl", b"\xff\xfe\x00garbage\n"),
+    ("array.jsonl", b"[1, 2, 3]\n"),
+    ("number.jsonl", b"42\n"),
+    ("summary.json", json.dumps(dict(report.aggregate(MEASURED), by_condition={"none": {"n": 1}})).encode("utf-8")),
+])
+def test_malformed_benchmark_input_is_refused_without_a_trace_or_a_path(tmp_path, capsys, name, content) -> None:
+    path = tmp_path / name
+    path.write_bytes(content)
+    out = tmp_path / "proof.json"
+    assert build_proof.main(["--benchmark", str(path), "--out", str(out)]) == 2
+    printed = capsys.readouterr()
+    assert printed.err.startswith("build_proof: ") and "Traceback" not in printed.err and not out.exists()
+    assert str(tmp_path) not in printed.err and not build_proof.leaks(printed.err, ())
+
+
 def test_the_committed_snapshot_is_what_the_script_builds_from_the_committed_pilot_rows() -> None:
     committed = json.loads(COMMITTED.read_text(encoding="utf-8"))
     rebuilt = build_proof.build([PILOT])
     committed.pop("generated_at")
     rebuilt.pop("generated_at")
-    assert committed == rebuilt
+    # It reads benchmark/report.py and the benchmark's files, which another
+    # track may change: when they do, rebuild the snapshot rather than edit it.
+    assert committed == rebuilt, (
+        "src/threefold/web/proof.json is stale: run "
+        "python scripts/build_proof.py --benchmark benchmark/results/20260922T095056Z-pilot.jsonl")
     assert "private" not in committed, "The private section is the owner's to generate"
     assert committed["benchmark"]["pilot"] is True
 

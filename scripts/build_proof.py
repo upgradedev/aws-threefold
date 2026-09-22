@@ -145,6 +145,8 @@ def read_benchmark(paths: Sequence[Path]) -> Tuple[Mapping[str, Any], List[str]]
             text = Path(path).read_text(encoding="utf-8")
         except OSError as error:
             raise ProofError(f"{Path(path).name} could not be read ({error.strerror or 'unreadable'})") from None
+        except UnicodeDecodeError:
+            raise ProofError(f"{Path(path).name} is not UTF-8 text, so it is not a file benchmark/run.py wrote") from None
         parsed: Any = None
         if text.lstrip().startswith("{"):
             try:
@@ -158,13 +160,33 @@ def read_benchmark(paths: Sequence[Path]) -> Tuple[Mapping[str, Any], List[str]]
             summaries.append(parsed)
             continue
         try:
-            rows.extend(report.load_rows([path]))
+            loaded = report.load_rows([path])
         except ValueError as error:
             raise ProofError(str(error).replace(str(path), Path(path).name)) from None
+        # A line that is JSON but not an object (an array, a number) would
+        # reach report.py as a row it cannot read, and fail there with a trace.
+        for number, row in enumerate(loaded, start=1):
+            if not isinstance(row, dict):
+                raise ProofError(f"{Path(path).name}: result row {number} is not a JSON object")
+        rows.extend(loaded)
     if summaries and (rows or len(summaries) > 1):
         raise ProofError("a summary from benchmark/report.py cannot be combined with other results; give one summary, or the result rows")
-    summary = summaries[0] if summaries else report.aggregate(rows)
+    try:
+        summary = summaries[0] if summaries else report.aggregate(rows)
+    except (KeyError, TypeError, AttributeError, ValueError) as error:
+        raise ProofError(f"benchmark/report.py could not aggregate these rows ({_why(error)})") from None
     return summary, [_relative(Path(path)) for path in paths]
+
+
+def _why(error: Exception) -> str:
+    """What went wrong, by kind, without repeating anything that could be a path or a value from the input.
+
+    A missing field names the field report.py wanted, which is its own name,
+    not the input's; anything else is named by its type alone.
+    """
+    if isinstance(error, KeyError) and error.args and isinstance(error.args[0], str) and re.fullmatch(r"[a-z_]{1,40}", error.args[0]):
+        return f"a row or condition lacks the field {error.args[0]!r}"
+    return f"{type(error).__name__}, a value is not the shape report.py expects"
 
 
 def _rate(stat: Mapping[str, Any]) -> Dict[str, Any]:
@@ -504,7 +526,11 @@ def build(
     secrets: List[str] = []
     base = evidence_base(evidence_url)
     if benchmarks:
-        document["benchmark"] = benchmark_section(*read_benchmark(benchmarks))
+        summary, sources = read_benchmark(benchmarks)
+        try:
+            document["benchmark"] = benchmark_section(summary, sources)
+        except (KeyError, TypeError, AttributeError, ValueError) as error:
+            raise ProofError(f"the benchmark summary is not one benchmark/report.py produced ({_why(error)})") from None
         document["benchmark"]["evidence"] = _linked(document["benchmark"]["evidence"], base)
     if private_endpoint is not None:
         key = read_key(key_file)
