@@ -116,11 +116,12 @@ python scripts/threefold_install.py connect /path/to/acme-billing --project Acme
 **Modes.** `connect` installs in `managed` mode: each call is sent to be judged
 and the project's stage on the service decides, Observe or Enforce.
 `--mode observe` pins the machine instead: every call goes as a dry run, which
-the service judges and records and never refuses, whatever the stage says; the
+the service judges and records and no rule refuses, whatever the stage says; the
 older form `--repo PATH --project NAME` defaults to it. `--mode enforce` sends
 calls exactly as `managed` does, so the project's stage still decides on the
-service; what it adds is on the machine, where a write to the hooks' own files
-is refused whatever stage was last seen. A machine installed with
+service; what it adds is on the machine, where a file-tool write (`Write`,
+`Edit`, a patch) to the hooks' own files is refused whatever stage was last
+seen. A machine installed with
 `--mode observe` therefore reaches enforcement in two steps: install again with
 `--mode managed` or `--mode enforce` (or set `"mode"` in `.threefold.json`), and
 promote the project on the dashboard, or deploy the stack with
@@ -271,10 +272,20 @@ to point git at other hooks), shell writes whose content cannot be read on a
 path a rule covers, and destructive commands. A shell command is read for the
 writes it makes, so a heredoc into a domain file is judged like a `Write`.
 
-Also true, and recorded in `STATE.md` as not yet fixed [STATE-FILE]:
+Blind by design, as the hook's contract in `STATE.md` sets it [STATE-FILE] and
+`src/threefold/hooks/threefold_hook.py` implements it:
 
 - A call the hook holds back is not checked by anything, and while the service
   cannot be reached the hook fails open.
+- Everything under `.git` is a data directory to the hook. Outside `enforce`
+  mode (and `managed` mode while the project enforces), where the hook refuses
+  it on the machine, a `Write` or `Edit` to `.git/hooks/` or `.git/config` is
+  held back: it is not sent, so an attempt to switch the pre-commit check off
+  that way never shows up in Observe or the review queue. The same write made
+  through a shell command is sent, and recorded under `PROTECTED_PATH`.
+
+Also true, and recorded in `STATE.md` as not yet fixed [STATE-FILE]:
+
 - Three of the five keys `/policy/config` returns are enforced by nothing:
   `max_session_budget_usd` and `loop_history_window` are stored and read by no
   gate, and `blocked_patterns` is read by no module. The settings page says so

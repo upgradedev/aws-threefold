@@ -203,11 +203,22 @@ the owner paired that endpoint with the key file in `THREEFOLD_HOME/config.json`
   `never_send.txt`), `not-included` (outside the `include` globs) and
   `no-project` (no project configured). `held_back.log` records the time and
   the category only. A call held back is not checked by anything.
-- A write to the files that decide whether the hooks run (`.claude/settings*.json`,
-  `.codex/hooks.json`, `.codex/config.toml`, `.agents/hooks.json`,
-  `.threefold.json`, `.git/hooks/`, `.git/config`) is refused locally in
-  `enforce` mode, and in `managed` mode only while the stage last seen for the
-  project is `enforce`. Otherwise it is sent as its path, without its content.
+- A write made with a file tool (`Write`, `Edit`, a patch, `write_to_file` and
+  the like) to the files that decide whether the hooks run
+  (`.claude/settings*.json`, `.codex/hooks.json`, `.codex/config.toml`,
+  `.agents/hooks.json`, `.threefold.json`, `.git/hooks/`, `.git/config`) is
+  refused locally in `enforce` mode, and in `managed` mode only while the stage
+  last seen for the project is `enforce`. Otherwise the two differ by where the
+  file lives. The agent settings files and `.threefold.json` are sent as their
+  path, without their content, and the service records the attempt under
+  `PROTECTED_PATH`, as a would-refuse in Observe. `.git/hooks/` and
+  `.git/config` sit under `.git`, a data directory, so a file-tool write to
+  them is held back as `data-file` (the bullet above): not sent, not recorded,
+  and so absent from Observe and the review queue, although it is the write
+  that would switch the pre-commit check off. A shell command that writes to
+  any of these files is not refused on the machine in any mode: it is sent
+  whole, and the service refuses it as `PROTECTED_PATH` where the project
+  enforces and records it as a would-refuse where it observes.
 
 **What leaves the machine,** for a call that is sent: the session id, the
 project alias, `anonymous` or a 12-hex hash of `THREEFOLD_DEVELOPER` computed
@@ -222,7 +233,7 @@ command's working directory as `cwd`; plus `agent`, `origin: "hook"`,
 |---|---|---|---|
 | `managed` | a real call | the project's stage on the service: Observe records, Enforce refuses | `connect` |
 | `observe` | `dry_run` | nobody refuses: a hard cap on this machine, whatever the stage | the older `--repo` installer form |
-| `enforce` | a real call | the project's stage on the service, as in `managed`; on the machine, a write to the hooks' own files is always refused | the hook alone, with no configuration |
+| `enforce` | a real call | the project's stage on the service, as in `managed`; on the machine, a file-tool write to the hooks' own files is always refused | the hook alone, with no configuration |
 
 The hook caches the `project_stage` each response names in
 `THREEFOLD_HOME/stage/`, which is how `managed` knows the stage without asking.
@@ -471,7 +482,7 @@ permission flow decides.
 What it costs. While the service is unreachable, nothing is judged by the
 service: no layering rule, no loop detection, no ledger row. What still holds
 is decided on the machine: a credential is refused, and in enforce (or managed
-at an enforcing stage) a write to the hooks' own files is refused. A team that
+at an enforcing stage) a file-tool write to the hooks' own files is refused. A team that
 prefers the other failure sets `THREEFOLD_FAIL_CLOSED=1`. The pre-commit check
 runs offline and catches what reached a commit.
 
