@@ -146,6 +146,21 @@ Parameters:
       'enforce' runs the gates as before. Page and simulation calls always
       enforce, so the public demo is the same under either value.
 
+  EdgeOriginSecret:
+    Type: String
+    Default: ''
+    NoEcho: true
+    AllowedPattern: '^$|^[A-Za-z0-9_-]{32,256}$'
+    ConstraintDescription: empty, or 32 to 256 URL-safe characters (letters, digits, '-' and '_')
+    Description: >-
+      The value the edge stack (deploy/edge.yml) sends in its X-Threefold-Edge
+      origin header, the same as that stack's EdgeOriginSecret. On a request
+      that carries it, the function rate-limits the viewer's own address rather
+      than the CloudFront server's, and points /install.py and sign-in links at
+      the edge. Empty, the default, trusts no edge header at all, which is right
+      for a stack with no edge in front of it: this API's URL is public, so any
+      caller could send those headers. NoEcho keeps it out of describe-stacks.
+
 Globals:
   Function:
     Timeout: 15
@@ -170,6 +185,9 @@ Globals:
         ALLOWED_PROJECT_PATTERN: !Ref AllowedProjectPattern
         PUBLIC_READS: !Ref PublicReads
         DEFAULT_HOOK_STAGE: !Ref DefaultHookStage
+        # Empty unless an edge is deployed in front of this stack; the
+        # middleware then ignores every header only the edge may set.
+        THREEFOLD_EDGE_SECRET: !Ref EdgeOriginSecret
 
 Resources:
   ThreefoldHttpApi:
