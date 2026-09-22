@@ -24,6 +24,8 @@ from threefold.infrastructure import auth_store, security_middleware
 from threefold.infrastructure.auth_store import AuthStore
 from threefold.infrastructure.security_middleware import (
     TokenBucketRateLimiter,
+    header_value,
+    rate_limit_bucket,
     rate_limit_key,
     validate_request_security,
     viewer_address,
@@ -212,6 +214,99 @@ def test_the_edge_without_a_readable_viewer_address_falls_back_to_the_source(edg
     assert rate_limit_key({"x-threefold-edge": EDGE_SECRET}, CLOUDFRONT_SERVER) == CLOUDFRONT_SERVER
 
 
+@pytest.mark.parametrize(
+    "address, expected",
+    [
+        # IPv4, and anything that is not an address, is its own bucket, unchanged.
+        ("198.51.100.10", "198.51.100.10"),
+        ("127.0.0.1", "127.0.0.1"),
+        ("unknown", "unknown"),
+        ("", ""),
+        # IPv6 is counted by its /64, written as a network so it cannot collide
+        # with the key of a single address.
+        ("2001:db8::1", "2001:db8::/64"),
+        ("2001:db8::7:1025", "2001:db8::/64"),
+        ("2001:db8:85a3::8a2e:370:7334", "2001:db8:85a3::/64"),
+        ("2001:db8:85a3:1::1", "2001:db8:85a3:1::/64"),
+        ("2001:DB8:0:0:ffff:ffff:ffff:ffff", "2001:db8::/64"),
+        ("::1", "::/64"),
+        # An IPv4 address written as IPv6 counts as the IPv4 address.
+        ("::ffff:198.51.100.10", "198.51.100.10"),
+    ],
+)
+def test_the_bucket_is_the_address_or_its_ipv6_prefix(address: str, expected: str) -> None:
+    assert rate_limit_bucket(address) == expected
+
+
+def test_an_ipv6_viewer_keeps_one_bucket_across_the_addresses_of_its_prefix(edge_secret) -> None:
+    """Rotating through the addresses of one /64 would otherwise buy a fresh bucket per address."""
+    keys = {
+        rate_limit_key(_through_edge(viewer), CLOUDFRONT_SERVER)
+        for viewer in ("[2001:db8:0:7::1]", "[2001:db8:0:7::2]", "[2001:db8:0:7:ffff:ffff:ffff:ffff]")
+    }
+    assert keys == {"2001:db8:0:7::/64"}
+    assert rate_limit_key(_through_edge("[2001:db8:0:8::1]"), CLOUDFRONT_SERVER) == "2001:db8:0:8::/64"
+
+
+def test_ipv6_as_cloudfront_writes_it_reaches_the_prefix_bucket(edge_secret) -> None:
+    headers = {"x-threefold-edge": EDGE_SECRET, "cloudfront-viewer-address": "2001:db8:85a3:0:0:8a2e:370:7334:60776"}
+    assert rate_limit_key(headers, CLOUDFRONT_SERVER) == "2001:db8:85a3::/64"
+
+
+def test_an_ipv6_source_address_is_counted_by_its_prefix_too() -> None:
+    """Without the edge's proof the source address is used, and the same rule applies to it."""
+    assert rate_limit_key({}, "2001:db8:0:9::1") == rate_limit_key({}, "2001:db8:0:9::2") == "2001:db8:0:9::/64"
+    assert rate_limit_key({}, VIEWER_A) == VIEWER_A
+
+
+def test_rotating_addresses_inside_one_ipv6_prefix_is_still_limited(edge_secret) -> None:
+    limiter = TokenBucketRateLimiter(refill_rate_per_sec=0.0, max_tokens=60.0)
+    results = [
+        validate_request_security(
+            _through_edge(f"[2001:db8:0:7::{i:x}]"), CLOUDFRONT_SERVER, "/status", rate_limiter=limiter
+        )
+        for i in range(1, 62)
+    ]
+    assert results[-1][0] is False
+    assert results[-1][1]["status"] == 429
+    allowed, _ = validate_request_security(
+        _through_edge("[2001:db8:0:8::1]"), CLOUDFRONT_SERVER, "/status", rate_limiter=limiter
+    )
+    assert allowed, "the next prefix over is another viewer"
+
+
+def test_a_header_under_two_spellings_with_different_values_is_no_header() -> None:
+    """Which spelling a dict yields first is not something a caller should decide."""
+    assert header_value({"X-Threefold-Edge": "a", "x-threefold-edge": "b"}, "X-Threefold-Edge") is None
+    assert header_value({"x-threefold-edge": "b", "X-Threefold-Edge": "a"}, "X-Threefold-Edge") is None
+    assert header_value({"X-Threefold-Edge": "a", "x-threefold-edge": "a"}, "X-Threefold-Edge") == "a"
+    assert header_value({"x-threefold-edge": "a"}, "X-THREEFOLD-EDGE") == "a"
+    assert header_value({}, "X-Threefold-Edge") is None
+
+
+@pytest.mark.parametrize("order", ["secret first", "wrong value first"])
+def test_an_extra_copy_of_the_secret_header_withdraws_the_proof_whatever_its_order(edge_secret, order) -> None:
+    pairs = [("x-threefold-edge", EDGE_SECRET), ("X-Threefold-Edge", "acme-wrong")]
+    if order == "wrong value first":
+        pairs.reverse()
+    headers = {**dict(pairs), "cloudfront-viewer-address": f"{VIEWER_A}:1"}
+    assert rate_limit_key(headers, CLOUDFRONT_SERVER) == CLOUDFRONT_SERVER
+
+
+def test_the_same_secret_under_two_spellings_is_still_the_proof(edge_secret) -> None:
+    headers = {"x-threefold-edge": EDGE_SECRET, "X-Threefold-Edge": EDGE_SECRET, "cloudfront-viewer-address": f"{VIEWER_A}:1"}
+    assert rate_limit_key(headers, CLOUDFRONT_SERVER) == VIEWER_A
+
+
+def test_two_different_viewer_addresses_leave_the_source_as_the_key(edge_secret) -> None:
+    headers = {
+        "x-threefold-edge": EDGE_SECRET,
+        "cloudfront-viewer-address": f"{VIEWER_A}:1",
+        "CloudFront-Viewer-Address": f"{VIEWER_B}:1",
+    }
+    assert rate_limit_key(headers, CLOUDFRONT_SERVER) == CLOUDFRONT_SERVER
+
+
 def _exhaust(limiter: TokenBucketRateLimiter, headers: dict, calls: int = 61) -> list[bool]:
     return [
         validate_request_security(headers, CLOUDFRONT_SERVER, "/status", rate_limiter=limiter)[0]
@@ -301,11 +396,20 @@ def test_a_spoofed_viewer_host_is_ignored_without_the_right_secret(package, edge
         'acme.cloudfront.net"; import os; "',
         "acme_edge.cloudfront.net",
         ("a" * 63 + ".") * 4 + "net",
+        # The Kelvin sign lower-cases to an ASCII "k": a name that only becomes
+        # a host name on the way in is not the one the viewer used.
+        "\u212a.example",
+        "d1acme0edge.cloudfront.\u212aet",
     ],
 )
 def test_a_viewer_host_that_is_not_a_plain_host_name_is_ignored(package, edge_secret, host) -> None:
     """It is written into a script and into links, so anything else keeps today's address."""
     assert _installer(_through_edge(host=host)) == f'ENDPOINT = "https://{API_DOMAIN}/prod/"\n'
+
+
+def test_two_different_viewer_hosts_are_no_viewer_host(package, edge_secret) -> None:
+    headers = {**_through_edge(), "X-Threefold-Viewer-Host": "acme-other.example"}
+    assert _installer(headers) == f'ENDPOINT = "https://{API_DOMAIN}/prod/"\n'
 
 
 def test_a_viewer_host_is_written_in_lower_case(package, edge_secret) -> None:

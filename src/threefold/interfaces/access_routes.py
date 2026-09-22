@@ -40,6 +40,7 @@ from threefold.infrastructure.security_middleware import (
     VIEWER_HOST_HEADER,
     configured_key_refs,
     edge_request_is_trusted,
+    header_value,
     operator_identity,
     presented_bearer,
     presented_key_ref,
@@ -286,11 +287,16 @@ def edge_base(event: Dict[str, Any]) -> Optional[str]:
     headers = event.get("headers") or {}
     if not edge_request_is_trusted(headers):
         return None
-    wanted = VIEWER_HOST_HEADER.lower()
-    host = next((v for k, v in headers.items() if str(k).lower() == wanted), None)
-    if not isinstance(host, str):
+    host = header_value(headers, VIEWER_HOST_HEADER)
+    if host is None:
         return None
-    host = host.strip().lower()
+    host = host.strip()
+    # ASCII before lower(): lower-casing folds some other characters into
+    # ASCII letters (the Kelvin sign becomes "k"), and a name that only became
+    # a host name on the way here is not the one the viewer typed.
+    if not host.isascii():
+        return None
+    host = host.lower()
     if not VIEWER_HOST_PATTERN.fullmatch(host):
         return None
     return f"https://{host}/"

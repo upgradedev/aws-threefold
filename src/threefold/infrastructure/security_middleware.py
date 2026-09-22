@@ -84,15 +84,28 @@ VIEWER_HOST_HEADER = "X-Threefold-Viewer-Host"
 # mistake rather than a secret, and trusting it would let anyone who guessed
 # it choose their own rate-limit bucket.
 MIN_EDGE_SECRET_LENGTH = 32
+# An IPv6 viewer is counted by its /64, the prefix one subscriber or one host
+# is ordinarily routed. Every address inside it is the viewer's to use, so a
+# key holding the full address would give a viewer a fresh bucket for each
+# address it rotated to, and one entry in the limiter's table for each.
+IPV6_BUCKET_PREFIX = 64
 
 
-def _header(headers: Dict[str, Any], name: str) -> Optional[str]:
-    """One header's value, whatever case the caller or API Gateway used for its name."""
+def header_value(headers: Dict[str, Any], name: str) -> Optional[str]:
+    """One header's value, whatever case the caller or API Gateway used for its name.
+
+    None when it is absent, and None when it arrives under two spellings of
+    its name with different values: which spelling a dict yields first depends
+    on how the event was built, so taking either would let an extra copy
+    decide whether the edge's proof holds. API Gateway lower-cases names and
+    joins repeats with a comma, so through it this never happens; the local
+    server and hand-built events pass names as they came.
+    """
     wanted = name.lower()
-    for key, value in (headers or {}).items():
-        if str(key).lower() == wanted and isinstance(value, str):
-            return value
-    return None
+    values = {
+        value for key, value in (headers or {}).items() if str(key).lower() == wanted and isinstance(value, str)
+    }
+    return values.pop() if len(values) == 1 else None
 
 
 def edge_request_is_trusted(headers: Dict[str, Any]) -> bool:
@@ -105,7 +118,7 @@ def edge_request_is_trusted(headers: Dict[str, Any]) -> bool:
     secret = os.environ.get(EDGE_SECRET_ENV, "").strip()
     if len(secret) < MIN_EDGE_SECRET_LENGTH:
         return False
-    presented = _header(headers, EDGE_SECRET_HEADER)
+    presented = header_value(headers, EDGE_SECRET_HEADER)
     if not presented:
         return False
     return hmac.compare_digest(presented.strip().encode("utf-8"), secret.encode("utf-8"))
@@ -167,18 +180,35 @@ def viewer_address(value: Optional[str]) -> Optional[str]:
     return str(address)
 
 
+def rate_limit_bucket(address: str) -> str:
+    """The bucket an address is counted in: itself, or its /64 when it is IPv6.
+
+    An IPv4 address, and anything that is not an address at all, is returned
+    exactly as given. An IPv4 address written as IPv6 (::ffff:198.51.100.10)
+    counts as the IPv4 address. The prefix is written as a network
+    ("2001:db8::/64"), so it can never collide with a single address's key.
+    """
+    ip = _ip(address) if isinstance(address, str) else None
+    if ip is None or ip.version == 4:
+        return address
+    if ip.ipv4_mapped is not None:
+        return str(ip.ipv4_mapped)
+    return str(ipaddress.IPv6Network((int(ip), IPV6_BUCKET_PREFIX), strict=False))
+
+
 def rate_limit_key(headers: Dict[str, Any], source_ip: str) -> str:
-    """The address the rate limiter counts a request against.
+    """The bucket the rate limiter counts a request against.
 
     The viewer's own address when the request proves it came through the edge
     and CloudFront said who the viewer was; the connection's source address
-    otherwise, as before.
+    otherwise, as before. Either way an IPv6 address is counted by its /64
+    (see rate_limit_bucket), and an IPv4 key is unchanged.
     """
     if edge_request_is_trusted(headers):
-        viewer = viewer_address(_header(headers, VIEWER_ADDRESS_HEADER))
+        viewer = viewer_address(header_value(headers, VIEWER_ADDRESS_HEADER))
         if viewer is not None:
-            return viewer
-    return source_ip
+            return rate_limit_bucket(viewer)
+    return rate_limit_bucket(source_ip)
 
 
 def rfc7807_error(
