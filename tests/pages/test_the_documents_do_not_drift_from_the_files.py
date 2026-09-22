@@ -16,6 +16,14 @@ ROOT = Path(__file__).resolve().parents[2]
 # What CloudFormation accepts for a template sent inline, in bytes.
 INLINE_TEMPLATE_LIMIT = 51200
 
+# A size written with digits, in any unit and however the digits are grouped.
+SIZE = r"\d[\d,]*(?:\.\d+)?\s*(?:bytes?|KiB|MiB|[kKMG]B|kilobytes?|megabytes?)\b"
+
+# A script a document names. Hyphens and dots are in the class because a name
+# that carries one is still a promise: `scripts/pre-commit-gate` is committed
+# under exactly that spelling.
+SCRIPT = r"scripts/[A-Za-z0-9_.-]+\.py"
+
 
 def _text(name: str) -> str:
     return " ".join((ROOT / name).read_text(encoding="utf-8").split())
@@ -30,9 +38,11 @@ def test_the_runbook_states_the_inline_limit_and_no_size_that_goes_stale() -> No
     runbook = _text("docs/RUNBOOK.md")
     assert "51,200 bytes" in runbook, "The runbook's deploy section must name the limit it works around"
 
-    # The only byte count in the runbook is the limit itself. A size read off a
-    # file is wrong the next time that file is edited, which is how this broke.
-    counts = set(re.findall(r"\d{1,3},\d{3} bytes", runbook))
+    # The only size in the runbook is the limit itself. A size read off a file
+    # is wrong the next time that file is edited, which is how this broke. It is
+    # matched however it is spelled — grouped or not, in bytes, kilobytes or
+    # kibibytes — so the guard cannot be walked around by writing "48 KiB".
+    counts = set(re.findall(SIZE, runbook))
     assert counts == {"51,200 bytes"}, f"The runbook records sizes that go stale: {sorted(counts - {'51,200 bytes'})}"
 
     template = _size("deploy/template.yml")
@@ -51,7 +61,7 @@ def test_the_enforcement_evidence_promises_no_script_that_is_not_committed() -> 
     assert "the check is a script that can be rerun" not in evidence
     assert "No script in this repository runs it" in evidence
 
-    named = set(re.findall(r"scripts/[A-Za-z0-9_]+\.py", evidence))
+    named = set(re.findall(SCRIPT, evidence))
     missing = {name for name in named if not (ROOT / name).exists()}
     # A script the evidence names as existing would have to be committed; the
     # one it names as missing is named in the sentence that says it is missing.
