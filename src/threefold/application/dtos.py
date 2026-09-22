@@ -201,9 +201,10 @@ class EvaluationResultDTO:
     project_stage: Optional[str] = None
     # What to send instead, from application/fix_proposer.py: {kind, summary,
     # steps, writes, validated, checks}. Set on a refusal and on a page's
-    # observation, None otherwise. It lives on the response alone: its writes
-    # carry the caller's own source, so the ledger keeps only its kind and
-    # whether it was validated.
+    # observation when the call fits the ceiling for its kind of fix
+    # (evaluator.fix_max_chars), None otherwise. It lives on the response
+    # alone: its writes carry the caller's own source, so the ledger keeps
+    # only its kind and whether it was validated.
     suggested_fix: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:

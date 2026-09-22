@@ -6,7 +6,8 @@ in Observe a hook prints nothing, so a fix computed there would cost time on
 every call and reach nobody. The fix rides on the verdict and never on the
 ledger, whose rows anyone reads on the public stack; the ledger keeps what kind
 of fix was offered and whether the gates passed it. And a fix is paid for on
-the verdict's clock, so what it may add is held to the gate's own budget.
+the verdict's clock, so what it may add is held to the gate's own budget, by a
+ceiling on what the call carries that depends on what the fix has to do.
 """
 from __future__ import annotations
 
@@ -18,14 +19,17 @@ import pytest
 
 from threefold.application import evaluator as evaluator_module
 from threefold.application.dtos import ToolCallRequestDTO
-from threefold.application.evaluator import FIX_MAX_CONTENT_CHARS, GovernanceEvaluator, carries_more_than
+from threefold.application.evaluator import (
+    FIX_ADVICE_MAX_CHARS,
+    FIX_CREDENTIAL_MAX_CHARS,
+    FIX_REWRITE_MAX_CHARS,
+    GovernanceEvaluator,
+    carries_more_than,
+    fix_max_chars,
+)
 from threefold.domain.boundary_guard import ArchitecturalBoundaryGuard, iter_string_leaves
 from threefold.domain.layering_rules import violations
 from threefold.domain.models import ToolActionType, ToolInvocation
-
-# The budget TRAPS.md sets for the gates (Trap 3): past 10 ms a verdict degrades
-# the developer's experience, and a fix is paid for inside the verdict.
-GATE_BUDGET_SECONDS = 0.010
 
 PROJECT = "Acme-Fixes"
 DOMAIN_PATH = "src/acme_orders/domain/acme_order.py"
@@ -55,9 +59,12 @@ def _domain_write(content: str = DOMAIN_WRITE, path: str = DOMAIN_PATH) -> Dict[
     return {"file_path": path, "content": content}
 
 
-def _python_domain_file(size: int) -> str:
-    """A refused Python domain file of about `size` characters, built rather than spelled out."""
-    parts = ["import boto3\n"]
+def _python_domain_file(size: int, head: str = "import boto3\n") -> str:
+    """A Python file of about `size` characters beginning with `head`, built rather than spelled out.
+
+    With the default head it is a domain file the layering rule refuses.
+    """
+    parts = [head]
     length = len(parts[0])
     index = 0
     while True:
@@ -263,76 +270,128 @@ def test_a_row_without_a_fix_is_exactly_what_it_was(evaluator, recorded) -> None
     assert not any("fix" in key for key in raw[0])
 
 
-# ---------------------------------------------------------------- what it may cost
+# ---------------------------------------------------------------- how much a call may carry
 
 
-def _time_the_fix(evaluator: GovernanceEvaluator, monkeypatch, request_for, runs: int = 25):
-    """The time evaluate_tool_call spends on the fix, best of `runs`, and the last verdict.
-
-    Best of many, as timeit takes it, with a pause between runs: a wall clock
-    also counts whatever else the machine is doing, and with seven runs a busy
-    moment across the whole suite once pushed every one of them past the
-    budget. The fastest of runs spread over half a second is the one that
-    measures the code rather than the neighbours.
-    """
-    spent: List[float] = []
-    real = GovernanceEvaluator._suggest_fix
-
-    def timed(request: Any, result: Any, rules: Any) -> Any:
-        started = time.perf_counter()
-        try:
-            return real(request, result, rules)
-        finally:
-            spent.append(time.perf_counter() - started)
-
-    monkeypatch.setattr(GovernanceEvaluator, "_suggest_fix", staticmethod(timed))
-    result = None
-    for index in range(runs):
-        result = evaluator.evaluate_tool_call(request_for(index))
-        time.sleep(0.01)
-    return min(spent), result
+ACME_KEY = "AKIA" + "IOSFODNN7EXAMPLE"
+CREDENTIAL_MODULE_HEAD = f"import os\n\nACME_KEY = '{ACME_KEY}'\n"
+PAD = "# " + "acme " * 2_000
 
 
-def test_a_large_refused_write_adds_nothing_the_gate_budget_would_notice(evaluator, monkeypatch) -> None:
-    """A 20,000 character domain file: the proposer would take about 60 ms to rewrite and check it.
-
-    Measured on the development machine [PRIMARY], 2026-09-22, best of nine:
-    the gate alone takes about 10 ms on this file, all of Trap 3's budget, and
-    a full fix six times that. So a call this large is refused without a fix,
-    and what the refusal pays for that decision is counting its characters,
-    about 0.01 ms.
-    """
-    content = _python_domain_file(20_000)
-    assert len(content) > 19_000
-    spent, result = _time_the_fix(evaluator, monkeypatch, lambda index: _request(f"fix-large-{index}", _domain_write(content)))
-    assert result.status == "BLOCKED_BOUNDARY_VIOLATION", "The refusal stands"
-    assert result.suggested_fix is None, "Too large to rewrite and check within the gate's budget"
-    assert spent < GATE_BUDGET_SECONDS, f"The fix step added {spent * 1000:.1f} ms to a large refusal"
+def _padded(head: str, size: int) -> str:
+    """`head`, then a comment, to exactly `size` characters."""
+    return (head + PAD * (size // len(PAD) + 1))[:size]
 
 
-def test_the_largest_write_that_is_sent_a_fix_stays_inside_the_gate_budget(evaluator, monkeypatch) -> None:
-    """The dearest case that still pays: Python, the slowest language to rewrite, at the size limit.
+def _exactly(arguments: Dict[str, Any], key: str, size: int) -> Dict[str, Any]:
+    """The arguments with `key` padded so that the call carries exactly `size` characters."""
+    rest = _carried(arguments) - len(arguments[key])
+    return dict(arguments, **{key: _padded(arguments[key], size - rest)})
 
-    Measured on the development machine [PRIMARY], 2026-09-22, best of nine:
-    about 5 ms just under 1,500 characters, against Trap 3's 10 ms.
-    """
-    arguments = _domain_write(_python_domain_file(FIX_MAX_CONTENT_CHARS - 60))
-    assert FIX_MAX_CONTENT_CHARS - 120 < _carried(arguments) <= FIX_MAX_CONTENT_CHARS
-    spent, result = _time_the_fix(evaluator, monkeypatch, lambda index: _request(f"fix-limit-{index}", dict(arguments)))
+
+def test_each_kind_of_verdict_reads_its_own_ceiling() -> None:
+    for key in ("LOOP", "BUDGET", "HALTED_SESSION", "PROTECTED_PATH"):
+        assert fix_max_chars(key) == FIX_ADVICE_MAX_CHARS, key
+    assert fix_max_chars("CREDENTIAL") == FIX_CREDENTIAL_MAX_CHARS
+    for key in ("UNREADABLE_WRITE", "python-domain-stays-pure", "java-domain-stays-pure"):
+        assert fix_max_chars(key) == FIX_REWRITE_MAX_CHARS, key
+    assert FIX_REWRITE_MAX_CHARS < FIX_CREDENTIAL_MAX_CHARS < FIX_ADVICE_MAX_CHARS
+
+
+def test_a_loop_past_the_rewrite_ceiling_is_still_told_what_repeated(evaluator) -> None:
+    arguments = {"file_path": "src/acme/app.py", "content": _padded("x = 1\n", 3_000)}
+    assert _carried(arguments) > FIX_REWRITE_MAX_CHARS
+    results = [evaluator.evaluate_tool_call(_request("fix-loop-3k", dict(arguments))) for _ in range(3)]
+    assert results[-1].status == "BLOCKED_LOOP_DETECTED"
+    assert results[-1].suggested_fix["kind"] == "loop"
+
+
+def test_a_protected_path_past_the_rewrite_ceiling_is_told_the_governed_way(evaluator) -> None:
+    arguments = {"file_path": ".claude/settings.json", "content": _padded('{"hooks": {}}\n', 3_000)}
+    result = evaluator.evaluate_tool_call(_request("fix-protected-3k", arguments))
     assert result.status == "BLOCKED_BOUNDARY_VIOLATION"
-    assert result.suggested_fix is not None and result.suggested_fix["validated"] is True
-    assert spent < GATE_BUDGET_SECONDS, f"The fix added {spent * 1000:.1f} ms at the size limit"
+    assert result.suggested_fix["kind"] == "protected_path"
 
 
-def test_one_character_past_the_limit_is_sent_no_fix(evaluator, proposals) -> None:
-    content = _python_domain_file(FIX_MAX_CONTENT_CHARS - 120)
-    padding = FIX_MAX_CONTENT_CHARS + 1 - _carried(_domain_write(content))
+def test_a_destructive_command_past_the_rewrite_ceiling_is_told_what_to_do_instead(evaluator) -> None:
+    arguments = {"command": _padded("rm -rf / ", 2_000)}
+    result = evaluator.evaluate_tool_call(_request("fix-destructive-2k", arguments, tool_name="Bash", action_type="COMMAND_EXEC"))
+    assert result.status == "BLOCKED_BOUNDARY_VIOLATION"
+    assert result.suggested_fix["kind"] == "destructive_command"
+
+
+def test_a_halted_session_past_the_rewrite_ceiling_is_told_how_it_resumes(evaluator) -> None:
+    page = dict(origin="page", agent="page", explain=True)
+    loop = _request("sim-fix-halted-2k", {"file_path": "src/acme/service.py", "instruction": "fix typo"}, tool_name="edit_file", **page)
+    for _ in range(3):
+        evaluator.evaluate_tool_call(loop)
+    after = evaluator.evaluate_tool_call(
+        _request("sim-fix-halted-2k", {"file_path": "src/acme/app.py", "content": _padded("x = 1\n", 2_000)}, **page)
+    )
+    assert after.status == "BLOCKED_CIRCUIT_BREAKER"
+    assert after.suggested_fix["kind"] == "halted_session"
+
+
+def test_a_call_over_its_cost_cap_past_the_rewrite_ceiling_is_told_how_to_split_it(evaluator) -> None:
+    arguments = {"file_path": "src/acme/app.py", "content": _padded("x = 1\n", 2_000)}
+    result = evaluator.evaluate_tool_call(
+        _request("fix-budget-2k", arguments, projected_input_tokens=10**9, projected_output_tokens=10**9)
+    )
+    assert result.status == "BLOCKED_CIRCUIT_BREAKER"
+    assert result.suggested_fix["kind"] == "budget"
+
+
+def test_a_credential_past_the_rewrite_ceiling_is_still_rewritten_and_checked(evaluator) -> None:
+    arguments = {"file_path": "src/acme/acme_client.py", "content": _python_domain_file(2_900, head=CREDENTIAL_MODULE_HEAD)}
+    assert FIX_REWRITE_MAX_CHARS < _carried(arguments) <= FIX_CREDENTIAL_MAX_CHARS
+    result = evaluator.evaluate_tool_call(_request("fix-credential-3k", arguments))
+    assert result.status == "BLOCKED_SECRET_DETECTED"
+    fix = result.suggested_fix
+    assert fix["kind"] == "credential" and fix["validated"] is True
+    assert ACME_KEY not in json.dumps(fix), "A fix never repeats the credential"
+
+
+def test_one_character_past_the_rewrite_ceiling_is_sent_no_fix(evaluator, proposals) -> None:
+    content = _python_domain_file(FIX_REWRITE_MAX_CHARS - 120)
+    padding = FIX_REWRITE_MAX_CHARS + 1 - _carried(_domain_write(content))
     assert padding > 0
     arguments = _domain_write(content + "#" * padding)
-    assert _carried(arguments) == FIX_MAX_CONTENT_CHARS + 1
+    assert _carried(arguments) == FIX_REWRITE_MAX_CHARS + 1
     result = evaluator.evaluate_tool_call(_request("fix-past-limit", arguments))
     assert result.status == "BLOCKED_BOUNDARY_VIOLATION" and result.suggested_fix is None
     assert proposals == []
+
+
+@pytest.mark.parametrize(
+    "kind, ceiling, arguments, padded, overrides, status",
+    [
+        (
+            "credential",
+            FIX_CREDENTIAL_MAX_CHARS,
+            {"file_path": "src/acme/acme_client.py", "content": f"ACME_KEY = '{ACME_KEY}'\n"},
+            "content",
+            {},
+            "BLOCKED_SECRET_DETECTED",
+        ),
+        ("protected_path", FIX_ADVICE_MAX_CHARS, {"file_path": ".claude/settings.json", "content": "{}\n"}, "content", {}, "BLOCKED_BOUNDARY_VIOLATION"),
+        (
+            "destructive_command",
+            FIX_ADVICE_MAX_CHARS,
+            {"command": "rm -rf / "},
+            "command",
+            {"tool_name": "Bash", "action_type": "COMMAND_EXEC"},
+            "BLOCKED_BOUNDARY_VIOLATION",
+        ),
+    ],
+)
+def test_each_ceiling_is_where_its_fix_stops(kind, ceiling, arguments, padded, overrides, status, evaluator, proposals) -> None:
+    at = evaluator.evaluate_tool_call(_request(f"fix-at-{kind}", _exactly(arguments, padded, ceiling), **overrides))
+    assert at.status == status
+    assert at.suggested_fix is not None and at.suggested_fix["kind"] == kind
+    asked = len(proposals)
+    past = evaluator.evaluate_tool_call(_request(f"fix-past-{kind}", _exactly(arguments, padded, ceiling + 1), **overrides))
+    assert past.status == status and past.suggested_fix is None
+    assert len(proposals) == asked, "Past its ceiling the proposer is not even asked"
 
 
 def test_measuring_a_call_stops_as_soon_as_the_answer_is_known() -> None:
@@ -354,4 +413,101 @@ def test_arguments_too_deep_to_walk_count_as_too_large() -> None:
     nested: Any = "leaf"
     for _ in range(5_000):
         nested = [nested]
-    assert carries_more_than({"content": nested}, FIX_MAX_CONTENT_CHARS) is True
+    assert carries_more_than({"content": nested}, FIX_REWRITE_MAX_CHARS) is True
+
+
+# ---------------------------------------------------------------- what it may cost
+#
+# Trap 3's budget is 10 ms of gate on the development machine, and a test run
+# is not that machine: coverage alone took the verdict on the reference call
+# below from 10 ms to 23 ms there, and a CI runner is slower again, so a ceiling
+# written in milliseconds failed under the repository's own CI command. The
+# budget is held as a workload instead: what a whole verdict costs, in the same
+# process and under the same instrumentation, on a refused Python domain Write
+# of REFERENCE_CHARS characters, which took the development machine's verdict
+# about 10 ms [PRIMARY], 2026-09-22, best of nine. There the dearest fix of each
+# kind at its ceiling took 0.48 to 0.60 of it, and 0.32 to 0.53 under coverage:
+# instrumentation slows both sides by about as much. So the comparison leaves
+# room for a noisy runner without being loose: a ceiling roughly doubled would
+# fail it.
+
+REFERENCE_CHARS = 20_000
+
+
+def _against_the_budget(evaluator: GovernanceEvaluator, monkeypatch, request_for, runs: int = 15):
+    """The fix step on request_for(i), and a whole verdict on the reference call, best of `runs` each.
+
+    Interleaved, so a busy moment slows both rather than one of them; the best
+    of each, as timeit takes it, because the fastest run is the one that
+    measures the code rather than whatever else the machine was doing.
+    Returns (fix seconds, budget seconds, the last verdict).
+    """
+    spent: List[float] = []
+    real = GovernanceEvaluator._suggest_fix
+
+    def timed(*args: Any) -> Any:
+        started = time.perf_counter()
+        try:
+            return real(*args)
+        finally:
+            spent.append(time.perf_counter() - started)
+
+    monkeypatch.setattr(GovernanceEvaluator, "_suggest_fix", staticmethod(timed))
+    reference = _domain_write(_python_domain_file(REFERENCE_CHARS))
+    fixes: List[float] = []
+    budgets: List[float] = []
+    result = None
+    for index in range(runs):
+        started = time.perf_counter()
+        evaluator.evaluate_tool_call(_request(f"fix-reference-{index}", dict(reference)))
+        budgets.append(time.perf_counter() - started)
+        spent.clear()
+        result = evaluator.evaluate_tool_call(request_for(index))
+        fixes.append(spent[-1])
+    return min(fixes), min(budgets), result
+
+
+# The dearest case under each ceiling, as measured: Python, the slowest language
+# to rewrite, for the two rewrites, and a protected path, the dearest advice,
+# for the third. Each carries between its ceiling less 120 characters and its
+# ceiling.
+DEAREST = [
+    ("layering", FIX_REWRITE_MAX_CHARS, _domain_write(_python_domain_file(FIX_REWRITE_MAX_CHARS - 60)), True),
+    (
+        "credential",
+        FIX_CREDENTIAL_MAX_CHARS,
+        {"file_path": "src/acme/acme_client.py", "content": _python_domain_file(FIX_CREDENTIAL_MAX_CHARS - 60, head=CREDENTIAL_MODULE_HEAD)},
+        True,
+    ),
+    ("protected_path", FIX_ADVICE_MAX_CHARS, {"file_path": ".claude/settings.json", "content": _python_domain_file(FIX_ADVICE_MAX_CHARS - 60)}, False),
+]
+
+
+@pytest.mark.parametrize("kind, ceiling, arguments, validated", DEAREST, ids=[case[0] for case in DEAREST])
+def test_the_dearest_fix_of_each_kind_stays_inside_the_gate_budget(kind, ceiling, arguments, validated, evaluator, monkeypatch) -> None:
+    assert ceiling - 120 < _carried(arguments) <= ceiling
+    spent, budget, result = _against_the_budget(
+        evaluator, monkeypatch, lambda index: _request(f"fix-dearest-{kind}-{index}", dict(arguments))
+    )
+    fix = result.suggested_fix
+    assert fix is not None and fix["kind"] == kind and fix["validated"] is validated
+    assert spent < budget, (
+        f"The {kind} fix at its ceiling took {spent * 1000:.1f} ms, more than the {budget * 1000:.1f} ms a whole "
+        f"verdict took here on the {REFERENCE_CHARS:,} character reference, which is Trap 3's 10 ms on the development machine"
+    )
+
+
+def test_a_large_refused_write_pays_only_for_counting_its_characters(evaluator, monkeypatch) -> None:
+    """A refused domain Write the size of the reference itself: far past the rewrite ceiling, so no fix.
+
+    What the refusal pays for that decision is reading its rule key and
+    counting its characters as far as the ceiling, a few microseconds on the
+    development machine against the verdict's 10 ms.
+    """
+    content = _python_domain_file(REFERENCE_CHARS)
+    spent, budget, result = _against_the_budget(
+        evaluator, monkeypatch, lambda index: _request(f"fix-large-{index}", _domain_write(content))
+    )
+    assert result.status == "BLOCKED_BOUNDARY_VIOLATION", "The refusal stands"
+    assert result.suggested_fix is None, "Too large to rewrite and check within the gate's budget"
+    assert spent < budget / 20, f"Deciding against a fix took {spent * 1000:.2f} ms against a {budget * 1000:.1f} ms verdict"
