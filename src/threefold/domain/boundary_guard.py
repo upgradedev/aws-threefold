@@ -143,8 +143,26 @@ class ArchitecturalBoundaryGuard:
         re.compile(r"(^|[/\\])domain([/\\])core([/\\])frozen_", re.IGNORECASE),
     ]
 
+    # What a command line must not name. The repository's own `.git` is not a
+    # credential store, and read-only commands name it all the time to leave it
+    # out (`find . -path ./.git -prune`, `grep --exclude-dir=.git`, `tree -I
+    # .git`): the benchmark of 2026-09-22 found an agent refused for exactly
+    # that, in a task where nothing was wrong. Writes under `.git` are still
+    # refused by the governance check on what a command writes (2b and 2c
+    # below), and deleting it is a destructive command. `.git-credentials`, the
+    # file git's store helper keeps passwords in, stays protected.
+    COMMAND_PROTECTED_PATTERNS: List[re.Pattern] = [
+        pattern for pattern in PROTECTED_PATH_PATTERNS if pattern.pattern != r"\.git(?![A-Za-z0-9_])"
+    ] + [re.compile(r"\.git-credentials(?![A-Za-z0-9_])", re.IGNORECASE)]
+
     DESTRUCTIVE_COMMANDS: List[re.Pattern] = [
         re.compile(r"\brm\s+-rf\s+(/|\*|~|\$HOME)", re.IGNORECASE),
+        # The repository's history, whatever the order or spelling of the flags.
+        re.compile(
+            r"\brm\s+(-[A-Za-z]*\s+|--[a-z-]+\s+)*(-[A-Za-z]*r[A-Za-z]*|--recursive)\s+(-[A-Za-z]*\s+|--[a-z-]+\s+)*"
+            r"(\./)?\.git/?(\s|$|;|&|\|)",
+            re.IGNORECASE,
+        ),
         re.compile(r"\bformat\s+[a-z]:", re.IGNORECASE),
         re.compile(r"\bgit\s+push\s+.*(--force|-f)\b", re.IGNORECASE),
         re.compile(r"\bdrop\s+database\b", re.IGNORECASE),
@@ -233,7 +251,7 @@ class ArchitecturalBoundaryGuard:
             for leaf in iter_string_leaves(arguments):
                 if looks_like_path(leaf):
                     continue
-                for pattern in cls.PROTECTED_PATH_PATTERNS:
+                for pattern in cls.COMMAND_PROTECTED_PATTERNS:
                     if pattern.search(leaf):
                         return False, (
                             f"Command '{leaf[:120]}' reaches a protected path or credential store"
