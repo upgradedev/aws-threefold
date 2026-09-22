@@ -1545,6 +1545,55 @@ def _next_separator(pieces: Sequence[str], index: int) -> str:
     return pieces[index] if index < len(pieces) else ""
 
 
+# Where a command puts bytes. Not the service's full reading of every write
+# route, which is a module of its own and cannot be imported into a file that
+# is downloaded alone: enough to know that a data file is being written, so
+# that it is kept here whichever tool wrote it. Reading a destination that is
+# not one only ever holds a call back, which is the safe way to be wrong.
+_TEE_LIKE = frozenset(("tee", "sponge", "tee-object", "out-file", "set-content", "add-content"))
+_COPY_LIKE = frozenset(("cp", "mv", "install", "rsync", "copy-item", "move-item"))
+
+
+def _command_write_targets(command: str) -> Iterator[str]:
+    """Each word a command writes to: a redirection, a tee, a copy's destination, a `dd of=`."""
+    pieces = _SHELL_PIECES.findall(command)
+    at_command = True
+    index = 0
+    while index < len(pieces):
+        piece = pieces[index]
+        index += 1
+        if piece[0] in ";&|()\n":
+            at_command = True
+            continue
+        if piece[0] in "<>":
+            # `2>&1` puts a separator next, not a word, and names no file.
+            if ">" in piece and index < len(pieces) and pieces[index][0] not in ";&|()\n<>":
+                yield _unquoted(pieces[index])
+                index += 1
+            at_command = False
+            continue
+        name = _unquoted(piece).lower()
+        if not at_command:
+            continue
+        if at_command and name in _KEEPS_COMMAND_POSITION:
+            continue
+        operands = []
+        while index < len(pieces) and pieces[index][0] not in ";&|()\n<>":
+            operands.append(_unquoted(pieces[index]))
+            index += 1
+        at_command = False
+        named = [operand for operand in operands if not operand.startswith("-")]
+        if name in _TEE_LIKE:
+            for operand in named:
+                yield operand
+        elif name in _COPY_LIKE and named:
+            yield named[-1]
+        elif name == "dd":
+            for operand in operands:
+                if operand.lower().startswith("of="):
+                    yield operand[3:]
+
+
 def _command_included(command: str, base: str, canonical_root: str, include: Sequence[str]) -> bool:
     """Whether a command runs inside the include globs and names no path outside them.
 
@@ -1813,6 +1862,20 @@ def held_back_category(
             return "outside-root"
         if include is not None and not _command_included(call.command, base, canonical_root, include):
             return "not-included"
+        # A data file is a data file whichever tool wrote it. A Write of
+        # data/train.csv is held back and its rows stay here; `cat >
+        # data/train.csv <<EOF` used to carry the same rows to the service
+        # inside the command text, because this check only ever looked at a
+        # call's targets and a command has none.
+        canonical_base = _canonical(base)
+        for destination in _command_write_targets(call.command):
+            if not destination or destination.lower() in _DEVICE_TOKENS:
+                continue
+            resolved = _word_as_path(destination, canonical_base)
+            if resolved is None:
+                resolved = _canonical(os.path.join(canonical_base, _as_path(destination)))
+            if _is_within(resolved, canonical_root) and _is_data_file(resolved, canonical_root):
+                return "data-file"
 
     never_send = load_never_send(home)
     if never_send.problem is not None:

@@ -287,6 +287,67 @@ def test_a_move_out_of_a_data_directory_is_held_back(payloads, stub, run_hook, h
     _held_back(stub, run_hook, payloads.codex_patch(patch), held_back_lines, "data-file", ["--agent", "codex"])
 
 
+# --- a data file written by a shell command ----------------------------------------
+#
+# The same file, written the other way. A Write of data/train.csv is held back
+# and the rows stay here; `cat > data/train.csv <<EOF` carried the same rows to
+# the service inside arguments.command, because the data check only ever looked
+# at a call's targets and a command has none.
+
+WRITES_A_DATA_FILE = [
+    "cat > data/train.csv <<'EOF'\npatient_id,diagnosis\n1001,synthetic-a\n1002,synthetic-b\nEOF",
+    "printf 'a\\tb\\n' > outputs/report.tsv",
+    "echo 1001,synthetic-a >> reports/q3.csv",
+    "sort rows.txt | tee reports/q3.csv",
+    "cp src/app.py data/app.py",
+    "mv notes.txt outputs/notes.txt",
+    "dd if=/dev/zero of=model/weights.safetensors",
+    "rsync -a src/ node_modules/acme/",
+]
+
+
+@pytest.mark.parametrize("command", WRITES_A_DATA_FILE)
+@pytest.mark.parametrize("agent", AGENTS)
+def test_a_command_that_writes_a_data_file_is_held_back(
+    agent, command, payloads, stub, run_hook, held_back_lines, monkeypatch
+) -> None:
+    monkeypatch.setenv("THREEFOLD_MODE", "observe")
+    _held_back(stub, run_hook, payloads.command(agent, command), held_back_lines, "data-file", ["--agent", agent])
+
+
+WRITES_CODE = [
+    "cat > src/app.py <<'EOF'\nx = 1\nEOF",
+    "printf 'x = 1\\n' > src/app.py",
+    "python -m pytest -q > /dev/null 2>&1",
+    "cp src/app.py src/copy.py",
+    "cat data/train.csv | head -n 5",
+    "ls data",
+]
+
+
+@pytest.mark.parametrize("command", WRITES_CODE)
+def test_a_command_that_writes_no_data_file_is_still_sent(command, payloads, stub, run_hook, held_back_lines) -> None:
+    """Reading a data file is not writing one, and /dev/null is nobody's data."""
+    code, out, err = run_hook(payloads.command("claude-code", command))
+    assert (code, out, err) == (0, "", "")
+    assert len(stub.requests) == 1
+    assert held_back_lines() == []
+
+
+@pytest.mark.parametrize("relative", ["reports/q3.csv", "data/app.py", "outputs/run1/log.txt"])
+def test_a_write_and_the_shell_command_that_does_the_same_thing_agree(
+    relative, payloads, stub, run_hook, held_back_lines, monkeypatch
+) -> None:
+    """The contract is about the file, not about which tool wrote it."""
+    monkeypatch.setenv("THREEFOLD_MODE", "observe")
+    _held_back(stub, run_hook, payloads.write("claude-code", relative, "a,b\n"), held_back_lines, "data-file")
+    (machine_log := held_back_lines())  # noqa: F841 - read once so the next run appends to it
+    code, out, err = run_hook(payloads.command("claude-code", f"printf 'a,b\\n' > {relative}"))
+    assert (code, out, err) == (0, "", "")
+    assert stub.requests == []
+    assert held_back_lines()[-1].endswith(" data-file")
+
+
 # --- the never-send list ----------------------------------------------------------
 
 def _never_send(machine, text: str) -> None:
