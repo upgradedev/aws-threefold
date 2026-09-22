@@ -1231,6 +1231,33 @@ def test_the_import_readers_it_reuses_are_still_there() -> None:
         assert hasattr(import_readers, name), name
 
 
+def test_the_layering_matchers_it_reuses_are_still_there_and_still_agree() -> None:
+    """Every flagged import is found with the gate's own matchers; a rename or a change of meaning there must fail here."""
+    from threefold.application.fix_proposer import _flagged_modules
+    from threefold.domain import layering_rules
+
+    for name in ("_forbidden_by", "_specificity"):
+        assert hasattr(layering_rules, name), name
+    for rule_id, (path, content, modules, _, _) in SHIPPED_CASES.items():
+        flagged = _flagged_modules(path, content, DEFAULT_RULES)
+        found, _ = violations(path, content, DEFAULT_RULES)
+        assert {item["module"] for item in found} <= set(flagged), rule_id
+        assert all(any(module.startswith(name) for name in modules) for module in flagged), (rule_id, flagged)
+
+
+def test_a_long_fix_loses_its_middle_steps_never_the_closing_ones() -> None:
+    """Rotating the credential and the gates having been run are the last steps, and the ones that matter most."""
+    command = (
+        "cat > src/domain/a.py <<'EOF'\nimport boto3\nKEY = \"" + ACCESS_KEY + "\"\nEOF\n"
+        "cat > src/domain/b.py <<'EOF'\nimport requests\nTOKEN = \"" + GITHUB_TOKEN + "\"\nEOF"
+    )
+    fix = _fix(*_refused("Bash", {"command": command}, action="COMMAND_EXEC"))
+    _assert_really_passes(fix)
+    assert any("left out here to keep this short" in step for step in fix["steps"])
+    assert any("rotate it" in step for step in fix["steps"])
+    assert fix["steps"][-1].startswith("Threefold ran the credential scan and the same gates")
+
+
 # --- every refusal in the suite ------------------------------------------------------------
 #
 # The fixtures other tests use to prove the gate refuses something are the best
