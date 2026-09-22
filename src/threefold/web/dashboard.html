@@ -1260,8 +1260,9 @@
           }
         }, err => {
           if (!ctx.alive()) return;
+          const saved = Array.isArray(err.saved) ? err.saved : [];
           const kept = {};
-          (Array.isArray(err.saved) ? err.saved : []).forEach(r => { kept[rowKey(r)] = true; });
+          saved.forEach(r => { kept[rowKey(r)] = true; });
           const back = rows.filter(r => !kept[rowKey(r)]);
           restore(back);
           draw();
@@ -1271,6 +1272,13 @@
             : 'The labels were not saved: ' + err.message + '.') + ' ' + (back.length === rows.length
               ? 'The calls are back in the queue.'
               : plural(back.length, 'call') + ' back in the queue; ' + plural(rows.length - back.length, 'call') + ' had already been saved.');
+          // A chunk that landed before one failed is labelled on the service and
+          // out of the queue, so it needs the same Undo the whole group gets when
+          // nothing fails. Without it those rows can only be cleared one by one.
+          if (saved.length) {
+            const words = value === 'correct' ? 'correct' : 'false alarm';
+            toast(plural(saved.length, 'call') + ' had already been marked ' + words + '.', 'Undo', () => undo(saved));
+          }
         });
       }
 

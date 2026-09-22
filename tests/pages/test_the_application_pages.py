@@ -790,6 +790,48 @@ def test_a_chunk_that_fails_puts_back_only_the_labels_that_did_not_land(tmp_path
     assert "20 calls back in the queue" in out["error"] and "100 calls had already been saved" in out["error"]
 
 
+def test_the_chunk_that_landed_before_a_failure_is_offered_the_same_undo(tmp_path: Path) -> None:
+    """Chunking made a group non-atomic, so a half-saved group needs its Undo.
+
+    The rows of the chunk that landed are labelled on the service and gone from
+    the queue. The error line says so; without an Undo beside it the only way
+    back is the call screen, one row at a time.
+    """
+    out = dash(
+        r"""
+  const many = [];
+  for (let i = 1; i <= 120; i++) many.push(row(i));
+  let seen = 0;
+  const sent = [];
+  answer = contract({
+    '/api/decisions': { status: 200, body: { items: many, next_cursor: null } },
+    'POST /api/projects/Acme-Billing/reviews': (u, i, body) => {
+      seen += 1;
+      const labels = body.items.map(x => x.label).filter((v, k, a) => a.indexOf(v) === k).join('+');
+      sent.push(labels + ':' + body.items.length);
+      return seen === 2
+        ? { status: 500, body: { detail: 'The table is unavailable.' } }
+        : { status: 200, body: { updated: body.items.length, skipped: [] } };
+    }
+  });
+  await visit('#/review');
+  await click('label-group', { 'data-group': JSON.stringify(['Acme-Billing', 'java-domain-stays-pure']), 'data-label': 'correct' });
+  await tick();
+  out.offer = el('toast-root').innerHTML;
+  const toastId = (out.offer.match(/data-toast="(toast-\d+)"/) || [])[1];
+  await click('toast', { 'data-toast': toastId });
+  await tick();
+  out.sent = sent.slice();
+  out.back = (view().match(/data-action="label-one"/g) || []).length / 2;
+""",
+        tmp_path,
+    )
+    assert "100 calls had already been marked correct." in out["offer"], f"No Undo was offered: {out['offer']!r}"
+    assert ">Undo</button>" in out["offer"]
+    assert out["sent"] == ["correct:100", "correct:20", "clear:100"], "The Undo clears exactly the chunk that landed"
+    assert out["back"] == 120, "Every call in the group is back in the queue"
+
+
 def test_an_undo_whose_second_chunk_fails_puts_back_the_calls_it_did_clear(tmp_path: Path) -> None:
     """Chunking made undo non-atomic, so a half-done undo must still be visible."""
     out = dash(
