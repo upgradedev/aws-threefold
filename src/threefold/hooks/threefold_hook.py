@@ -2186,6 +2186,17 @@ MAX_FIX_SUMMARY_CHARS = 200
 # characters, cleaning looks at one character at a time, and a response may be
 # a megabyte, so what lies past this is not looked at.
 MAX_FIX_SUMMARY_READ = 1_000
+# Every other word a refusal borrows from the network: the reason, the status,
+# the explanation, a problem's title and detail. The fix summary was cleaned
+# and cut because the hook trusts nothing the network sends; these were handed
+# to the agent raw, as far as the megabyte the hook will read. A repository's
+# committed .threefold.json can name the endpoint, so the server that chose
+# those words is not always the owner's.
+MAX_REASON_CHARS = 500
+MAX_REASON_READ = 4_000
+MAX_STATUS_CHARS = 60
+# What the agent reads in the end, whatever the parts add up to.
+MAX_DENY_REASON_CHARS = 2_000
 
 
 def _printable(text: str) -> str:
@@ -2194,6 +2205,24 @@ def _printable(text: str) -> str:
         " " if unicodedata.category(character) in _UNPRINTABLE_CATEGORIES or ord(character) in _TAG_BLOCK else character
         for character in text
     )
+
+
+def _one_line(value: Any, limit: int = MAX_REASON_CHARS, read: int = MAX_REASON_READ) -> str:
+    """Anything the network sent as one readable line: visible characters only, whitespace collapsed, cut.
+
+    Cleaning looks at one character at a time and a response may be a
+    megabyte, so what lies past `read` is never looked at.
+    """
+    if not isinstance(value, str):
+        return ""
+    return " ".join(_printable(value[:read]).split())[:limit].rstrip()
+
+
+def _bounded(reason: str) -> str:
+    """The whole deny reason, cut to what an agent's context can be asked to carry."""
+    if len(reason) <= MAX_DENY_REASON_CHARS:
+        return reason
+    return reason[:MAX_DENY_REASON_CHARS - 1].rstrip() + "…"
 
 
 def fix_line(verdict: Dict[str, Any]) -> Optional[str]:
@@ -2208,7 +2237,7 @@ def fix_line(verdict: Dict[str, Any]) -> Optional[str]:
     fix = verdict.get("suggested_fix")
     if not isinstance(fix, dict) or not isinstance(fix.get("summary"), str):
         return None
-    summary = " ".join(_printable(fix["summary"][:MAX_FIX_SUMMARY_READ]).split())[:MAX_FIX_SUMMARY_CHARS].rstrip()
+    summary = _one_line(fix["summary"], MAX_FIX_SUMMARY_CHARS, MAX_FIX_SUMMARY_READ)
     if not summary:
         return None
     label = "Suggested fix, checked by Threefold" if fix.get("validated") is True else "Suggested fix"
@@ -2219,31 +2248,40 @@ def refusal_reason(verdict: Dict[str, Any]) -> str:
     """The service's refusal in words, with its explanation attributed to its source.
 
     A suggested fix, when the service sends one, follows as a line of its own.
+
+    Every word here came over the network, so every word is cleaned and cut
+    the way the fix summary is: a status, a reason and an explanation are the
+    service's sentences, not a place for a few hundred kilobytes, invisible
+    tag characters or a direction override the person never sees.
     """
-    status = str(verdict.get("status") or "BLOCKED")
-    reason = verdict.get("reason") or status
+    status = _one_line(verdict.get("status"), MAX_STATUS_CHARS, MAX_STATUS_CHARS * 4) or "BLOCKED"
+    reason = _one_line(verdict.get("reason")) or status
     detail = f"Threefold refused this call ({status}). {reason}"
-    explanation = verdict.get("bedrock_explanation")
+    explanation = _one_line(verdict.get("bedrock_explanation"))
     if explanation:
         label = "Bedrock" if verdict.get("explanation_source") == "bedrock" else "Deterministic explanation"
         detail = f"{detail}\n{label}: {explanation}"
     suggestion = fix_line(verdict)
     if suggestion:
         detail = f"{detail}\n{suggestion}"
-    return detail
+    return _bounded(detail)
 
 
 def client_error_reason(code: int, problem: Any, phrase: str) -> str:
-    """A 4xx in words: the status and the problem's title, which the service always sets."""
+    """A 4xx in words: the status and the problem's title, which the service always sets.
+
+    The title, the detail and the reason phrase are the server's words too,
+    and are cleaned and cut like everything else it sends.
+    """
     problem = problem if isinstance(problem, dict) else {}
-    title = problem.get("title") or problem.get("message") or phrase or "Client Error"
-    detail = problem.get("detail")
+    title = _one_line(problem.get("title")) or _one_line(problem.get("message")) or _one_line(phrase) or "Client Error"
+    detail = _one_line(problem.get("detail"))
     text = f"Threefold refused this call: the service answered HTTP {code} {title}."
     if detail and detail != title:
         text = f"{text} {detail}"
     if code in (401, 403):
         text = f"{text} Check THREEFOLD_API_KEY, or api_key_file in .threefold.json."
-    return text
+    return _bounded(text)
 
 
 # --- the decision ----------------------------------------------------------------
