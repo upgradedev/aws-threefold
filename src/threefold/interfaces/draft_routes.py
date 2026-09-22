@@ -59,12 +59,9 @@ from threefold.application.rule_drafter import (
 )
 from threefold.domain.layering_rules import UNSUPPORTED
 from threefold.infrastructure.bedrock_client import BedrockGovernanceClient
+from threefold.infrastructure import security_middleware
 from threefold.infrastructure.metrics_emf import emit_threefold_emf_metrics
-from threefold.infrastructure.security_middleware import (
-    _require_operator_key,
-    reads_are_public,
-    rfc7807_error,
-)
+from threefold.infrastructure.security_middleware import reads_are_public, rfc7807_error
 
 logger = logging.getLogger("threefold.api.drafts")
 
@@ -137,8 +134,24 @@ def _private_draft_refused(event: Dict[str, Any], path: str) -> Optional[Dict[st
     """The problem a private stack answers an unauthorised draft with, or None to go on."""
     if reads_are_public():
         return None
+    # The operator check is the middleware's own, and private to it, in a file
+    # another track is changing. It is looked up here, when a private stack
+    # needs it, rather than imported by name: a rename then refuses drafts on a
+    # private stack, and the tests that expect the operator's draft to pass say
+    # so, instead of failing the router's import and taking every route down.
+    require_operator_key = getattr(security_middleware, "_require_operator_key", None)
+    if require_operator_key is None:
+        logger.error("The middleware's operator check is missing; private drafts are refused")
+        return rfc7807_error(
+            403,
+            "Drafting Is Private Here",
+            "This deployment keeps its rules private, and the operator could not be checked, "
+            "so no rule was drafted.",
+            path,
+            error_type="urn:threefold:error:reads-private",
+        )
     headers = event.get("headers") or {}
-    allowed, problem = _require_operator_key(
+    allowed, problem = require_operator_key(
         headers if isinstance(headers, dict) else {},
         path,
         closed_title="Drafting Is Private Here",

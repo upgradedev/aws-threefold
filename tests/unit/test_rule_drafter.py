@@ -795,6 +795,22 @@ def test_on_a_stack_with_private_reads_the_operator_drafts_against_the_rules_in_
     assert body["rule"]["id"] == GOOD["id"]
 
 
+def test_a_private_stack_refuses_drafts_if_the_operator_check_ever_disappears(
+    fake, monkeypatch
+) -> None:
+    """The check is borrowed from another track's module; losing it must close, not open."""
+    from threefold.infrastructure import security_middleware
+
+    monkeypatch.setenv("PUBLIC_READS", "false")
+    monkeypatch.setenv("THREEFOLD_API_KEYS", "acme-operator-key")
+    monkeypatch.delattr(security_middleware, "_require_operator_key")
+    client = fake(answer(GOOD))
+    status, body, _ = _post({"description": DESCRIPTION}, key="acme-operator-key")
+    assert status == 403, body
+    assert body["type"] == "urn:threefold:error:reads-private"
+    assert client.runtime.calls == []
+
+
 def test_the_route_answers_502_not_500_for_answers_nested_past_the_stack(fake, capsys) -> None:
     deep = "[" * TOO_DEEP + "]" * TOO_DEEP
     nested = "Here: " + '{"a":' * TOO_DEEP + "1" + "}" * TOO_DEEP
