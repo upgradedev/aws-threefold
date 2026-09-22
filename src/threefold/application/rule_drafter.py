@@ -606,6 +606,10 @@ def generated_examples(rule: Dict[str, Any]) -> List[Dict[str, Any]]:
     if path is None:
         return []
     language = language_for(path) or _guess_language(rule)
+    # A language taught to the import reader after this was written has no
+    # template here yet. No example is better than a draft that fails with 500.
+    if language not in _IMPORT_TEMPLATES:
+        return []
     forbidden = _module_for(rule.get("forbid_imports") or [])
     allowed = _module_for(rule.get("allow_imports") or [])
     template = _IMPORT_TEMPLATES[language]
