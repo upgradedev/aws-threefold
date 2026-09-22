@@ -556,7 +556,8 @@ def test_past_the_cap_the_fix_is_advice_naming_every_import_its_rule_and_the_per
     assert fix["writes"] == [] and fix["checks"] == [], "Nothing was rewritten, so there is nothing to hand out or to have checked"
     first, layer, size = fix["steps"]
     assert first == "In src/domain/acme_order.py, remove the imports of boto3, requests: rule 'python-domain-stays-pure' forbids them there."
-    assert "an adapter under src/infrastructure/ that implements it: the layering rules permit them there" in layer
+    assert "an adapter under src/infrastructure/ that implements it: no layering rule in force forbids them there" in layer
+    assert "permit" not in layer, "Only the moved imports were matched, so nothing is claimed about the adapter passing"
     assert "comes to over 1,500 characters" in size and "no code is proposed" in size
     assert fix["summary"] == (
         "No checked fix: too large to rewrite within the verdict (over 1,500 characters); "

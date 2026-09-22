@@ -115,8 +115,8 @@ FIX_REWRITE_MAX_CHARS = 1_500
 # A layering refusal past the rewrite ceiling: the proposer is asked with
 # max_content_chars=FIX_REWRITE_MAX_CHARS, so it rewrites nothing and answers
 # in words from the one read of the imports its diagnosis makes: which imports
-# to move, the rule that forbids each, and the first layer the rules permit
-# them in. Validated false and no writes. That read is a parse of the whole
+# to move, the rule that forbids each, and the first candidate layer where no
+# rule forbids them. Validated false and no writes. That read is a parse of the whole
 # file, as the gate's own is, so it has a ceiling too. Measured as the tests
 # measure it, the fix step against a whole verdict on the 20,000 character
 # reference beside it, interleaved, best of 15 and of 25 [PRIMARY], 2026-09-22:

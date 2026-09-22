@@ -60,11 +60,12 @@ What it costs. A layering fix rewrites at most `max_content_chars` of a call's
 writes, taken together: MAX_CONTENT_CHARS (24 KB) unless the caller says
 otherwise, and the evaluator passes 1,500. Past it the fix is advice in words
 from the one read of the imports the diagnosis already made: every import to
-move, the rule that forbids each, and the first layer the rules permit them in,
-found by matching those imports against the rules at each candidate adapter
-path, with no second parse and nothing written. Below it, a layering fix reads
-the file a fixed number of times (about six parses, however many imports it
-moves; a test holds this), then judges the small port and adapter. Measured on
+move, the rule that forbids each, and the first candidate layer where no rule
+forbids them, found by matching those imports against the rules at each
+candidate adapter path, with no second parse and nothing written. Below it, a
+layering fix reads the file a fixed number of times (about six parses, however
+many imports it moves; a test holds this), then judges the small port and
+adapter. Measured on
 the development machine [PRIMARY], 2026-09-22, medians: the shipped fixtures of
 170 to 330 bytes take 2 to 5 ms; files just under 24 KB take about 100 ms for
 Python or TypeScript and 45 ms for Java, five to seven times what the gate alone
@@ -333,8 +334,8 @@ def propose_fix(
     of every write the fix would have to change, taken together. Past it the fix
     is advice in words from the one read of the imports the diagnosis already
     made: validated false, no writes, and steps that name every import to move,
-    the rule that forbids each, and the first layer the rules permit it in. The
-    evaluator passes a small value here so that a large refused write still gets
+    the rule that forbids each, and the first candidate layer where no rule
+    forbids them. The evaluator passes a small value here so that a large refused write still gets
     that much within the gate's budget, where a rewrite would not fit.
 
     Never raises: a fault here must not turn a refusal into a 500.
@@ -1881,13 +1882,19 @@ def _fix_sites(sites: List[_Site], rules: List[Dict[str, Any]], max_content_char
 def _permitted_layer(
     path: str, modules: Sequence[str], rules: List[Dict[str, Any]], rule_ids: Sequence[str]
 ) -> Tuple[str, List[str]]:
-    """The first directory an adapter holding `modules` could live in that the rules permit. (directory, tried)
+    """The first directory for an adapter holding `modules` where no rule forbids them. (directory, tried)
 
     The candidates are _plan_layers' own, derived from the rules' patterns, in
-    the same order, and each is asked the layering question for the adapter
-    file _plan_layers would write there. Nothing is written or parsed: the
-    modules are already known, so this is a match of each against the rules
-    covering that path. The directory is empty when every candidate is refused.
+    the same order, and each is asked whether a rule covering the adapter file
+    _plan_layers would write there flags one of the modules. Nothing is written
+    or parsed: the modules are already known, so this is a match of each
+    against the rules covering that path. The directory is empty when every
+    candidate forbids them.
+
+    It asks less than _plan_layers does. The rewrite judges the adapter's whole
+    text, its import of the port back into the domain included, with every gate;
+    this judges only the imports being moved. So the advice says no rule
+    forbids them there, never that an adapter there would pass.
     """
     language = language_for(path)
     flavour = _script_flavour(path) if language == "typescript" else language
@@ -1905,7 +1912,8 @@ def _too_large(path: str, group: List[_Site], rules: List[Dict[str, Any]], cap: 
     """Advice in words for writes too large to rewrite, from the one read of their imports already made.
 
     It names every import to move and the rule that forbids each, and the
-    first layer the rules permit them in, or says that no candidate layer does.
+    first candidate layer where no rule forbids them, or says that every
+    candidate does.
     It carries no code and no checks, because nothing was rewritten to check.
     """
     flagged: Dict[str, str] = {}
@@ -1930,8 +1938,8 @@ def _too_large(path: str, group: List[_Site], rules: List[Dict[str, Any]], cap: 
     if directory:
         steps.append(
             f"Declare a port in the domain for what {path} needs from {shown}, and move the {imports} into an adapter "
-            f"under {directory}/ that implements it: the layering rules permit {them} there. Pass the adapter in from "
-            "outside the domain."
+            f"under {directory}/ that implements it: no layering rule in force forbids {them} there. Pass the adapter in "
+            "from outside the domain."
         )
         why = f"too large to rewrite within the verdict (over {cap:,} characters); move {named} behind a port, adapter under {_short(directory)}"
     else:
