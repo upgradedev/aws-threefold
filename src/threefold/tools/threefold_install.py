@@ -1,17 +1,47 @@
 #!/usr/bin/env python3
 """Puts Threefold in front of the coding agents of one repository, and takes it out again.
 
+    threefold_install.py connect [PATH] [--project NAME] [--agents auto|LIST]
+        [--mode managed|observe|enforce] [--endpoint URL] [--api-key-file F]
+        [--include GLOB ...] [--dry-run] [--no-open]
+    threefold_install.py disconnect [PATH] [--dry-run]
+    threefold_install.py status
+    threefold_install.py open [--next /projects/NAME] [--endpoint URL]
+
+and the older form, which keeps working exactly as it did:
+
     threefold_install.py --repo PATH --project Acme-Payments
-        [--agents claude-code,codex,antigravity] [--mode observe|enforce]
+        [--agents claude-code,codex,antigravity] [--mode observe|managed|enforce]
         [--endpoint URL] [--api-key-file PATH] [--include GLOB ...]
         [--uninstall] [--dry-run]
 
-What it does, in order:
+`connect` is the one command a team runs. Every part has a default: PATH is
+the current directory, the project is `Acme-<folder name>` made to fit the
+alias pattern, the agents are the ones found on this machine (Claude Code by
+~/.claude or `claude` on PATH, Codex by ~/.codex or `codex`, Antigravity by
+~/.gemini/antigravity, ~/.antigravity or `antigravity`, all three when none is
+found), and the mode is managed, so the project's stage on the dashboard
+decides and every project starts in Observe. Run again on a connected folder,
+it keeps the project, mode and include list it finds there unless told
+otherwise. It ends by sending one harmless dry-run call, printing whether the
+stack recorded it, and opening the dashboard on the project: through a
+sign-in link when an operator key is configured for the endpoint, so nobody
+pastes a key into a browser. `status` lists every install on this machine and
+asks the stack for each project's stage; `open` signs in to the dashboard on
+its own; `disconnect` is the uninstall below.
 
-1. Copies the hook, the pre-commit check and the engine that check runs on into
+What an install does, in order:
+
+1. Puts the hook, the pre-commit check and the engine that check runs on into
    THREEFOLD_HOME (`~/.threefold` unless set): `bin/threefold_hook.py`,
    `bin/threefold_cli.py` and `lib/threefold/`. One shared copy serves every
    repository, so updating Threefold is one install, not one per repository.
+   From a checkout they are copied from the source tree. The copy a stack
+   serves at /install.py has that stack's URL baked in; it downloads them
+   from the stack's /dist/threefold-bundle.zip instead, writes a file only
+   when its sha256 matches the stack's /dist/manifest.json, and keeps a copy
+   of itself as `bin/threefold_install.py` for `status`, `open` and
+   `disconnect` later.
 2. Writes `<repo>/.threefold.json` with the project, the mode, and the endpoint
    and key file when given. Never the key itself.
 3. Merges one PreToolUse entry per agent into `.claude/settings.local.json`,
@@ -24,6 +54,8 @@ What it does, in order:
    says where the check has to be added by hand.
 5. Lists every working-tree file it wrote in `.git/info/exclude`, never in
    `.gitignore`: the repository's own ignore rules are its owners' to change.
+6. Notes the install in `THREEFOLD_HOME/installs/index.json`, which `status`
+   reads and an uninstall prunes.
 
 A file git already tracks is never written. Codex and Antigravity project hook
 files are usually committed, and the entry names this machine's Python and
@@ -33,21 +65,24 @@ was left alone and what to add by hand instead. With `--endpoint` and
 `--api-key-file` together, the pair is also written to THREEFOLD_HOME/config.json,
 which is what lets the hook send the key to an endpoint a repository names.
 
-The mode defaults to observe. A rule set introduced to a team for the first
-time should show what it would stop for a week before it stops anything.
+The older form's mode defaults to observe, as it always has; `connect`'s to
+managed, whose projects start in Observe on the stack. Either way a rule set
+introduced to a team shows what it would stop before it stops anything.
 
-`--uninstall` removes exactly what an install added, from a record kept in the
-git directory. A file that was there before is put back byte for byte, from
-the copy the record keeps, as long as it still holds exactly what the install
-wrote; one changed by hand since keeps the change and loses only the install's
-entry. The shared copies in THREEFOLD_HOME stay, because other repositories
-may be using them. `--dry-run` prints every step and writes nothing at all.
+`--uninstall` (or `disconnect`) removes exactly what an install added, from a
+record kept in the git directory. A file that was there before is put back
+byte for byte, from the copy the record keeps, as long as it still holds
+exactly what the install wrote; one changed by hand since keeps the change and
+loses only the install's entry. The shared copies in THREEFOLD_HOME stay,
+because other repositories may be using them. `--dry-run` prints every step
+and writes nothing at all, here or on the stack: no download, no call, no
+browser.
 
 `--include GLOB`, repeatable, writes an `include` list into `.threefold.json`:
 globs relative to that directory, and the hook then sends only calls inside
 them. A glob that is empty, only `.`, absolute or contains `..` is refused,
 because it could name nothing inside the directory. So is `--include` with a
-`--repo` below the top of a repository: the file goes to the top, where the
+directory below the top of a repository: the file goes to the top, where the
 globs would be read relative to a directory other than the one they were
 written for.
 
@@ -57,40 +92,68 @@ being refused. Only `.threefold.json` and the three agents' settings files are
 written there, merged as above; there is no pre-commit hook, so nothing checks
 a commit, and nothing is written under any `.git`, including a `.git` folder
 git itself does not accept. The install record is kept in
-`THREEFOLD_HOME/installs/<16 hex of the directory's path>.json`, so `--uninstall`
+`THREEFOLD_HOME/installs/<16 hex of the directory's path>.json`, so an uninstall
 still removes exactly what was added. With `--include` this is how a
-workspace governs only the repositories the owner chose.
+workspace governs only the repositories the owner chose. The home folder
+itself is refused: its `.claude` and `.codex` are the agents' own
+configuration for every project, not a project's.
 
 Codex reads a project's hooks only when that project is trusted in Codex. This
 script does not edit `~/.codex/config.toml` to trust it: that is a decision
 about the whole machine, and it is the developer's.
 
-Standard library only.
+Standard library only, and ASCII only, so it survives being piped into Python
+by a shell that re-encodes what it pipes.
 """
 from __future__ import annotations
 
 import argparse
 import base64
 import hashlib
+import http.client
+import importlib.util
+import io
 import json
 import os
 import re
+import secrets
 import shutil
 import subprocess
 import sys
+import unicodedata
+import urllib.error
+import urllib.parse
+import urllib.request
+import webbrowser
+import zipfile
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 # In a checkout this file is src/threefold/tools/threefold_install.py, beside
 # the CLI, one folder from the hook and two from the engine's package root.
 # The stack serves it from there too, so these are the only paths it derives.
-HERE = Path(__file__).resolve().parent
-SOURCE = HERE.parents[1]
-HOOK_SOURCE = SOURCE / "threefold" / "hooks" / "threefold_hook.py"
-CLI_SOURCE = HERE / "threefold_cli.py"
+# Piped into Python (`curl ... | python3 - connect`) there is no file at all,
+# and so nothing beside it to copy: only a served copy can install from there.
+try:
+    HERE: Optional[Path] = Path(__file__).resolve().parent
+except NameError:
+    HERE = None
+SOURCE: Optional[Path] = HERE.parents[1] if HERE is not None and len(HERE.parents) > 1 else None
+HOOK_SOURCE: Optional[Path] = SOURCE / "threefold" / "hooks" / "threefold_hook.py" if SOURCE is not None else None
+CLI_SOURCE: Optional[Path] = HERE / "threefold_cli.py" if HERE is not None else None
+
+# The stack replaces this with its own URL when it serves the file at
+# /install.py. Replaced, the copy is a served one: its endpoint is the stack
+# that served it, and it installs from that stack's bundle rather than from a
+# source tree it does not have. The comparison value below is spelled in two
+# pieces so the stack's replacement cannot reach it too.
+BAKED_ENDPOINT = "__THREEFOLD_ENDPOINT__"
+_UNBAKED = "__THREEFOLD" "_ENDPOINT__"
 
 PROJECT_PATTERN = re.compile(r"^Acme-[A-Za-z0-9-]{1,40}$")
 AGENTS = ("claude-code", "codex", "antigravity")
+MODES = ("managed", "observe", "enforce")
+COMMANDS = ("connect", "disconnect", "status", "open")
 
 # The file each agent reads its project hooks from, and the tools that reach
 # the hook. The same matchers the enforcement measurement of 2026-09-21 used.
@@ -100,14 +163,41 @@ AGENT_SETTINGS = {
     "antigravity": (".agents/hooks.json", "write_to_file|replace_file_content|multi_replace_file_content|run_command"),
 }
 
+# How each agent shows that it is installed: a folder in the home folder, or
+# its command on PATH. ~/.claude and ~/.codex are the folders the hook already
+# treats as those agents' own; Antigravity keeps its state under ~/.gemini,
+# which the hook protects for the same reason, in an antigravity folder.
+AGENT_SIGNS = {
+    "claude-code": ((".claude",), "claude"),
+    "codex": ((".codex",), "codex"),
+    "antigravity": ((".gemini/antigravity", ".antigravity"), "antigravity"),
+}
+
 CONFIG_FILE = ".threefold.json"
 HOME_CONFIG = "config.json"
 EXCLUDE_KEY = "git:info/exclude"
 MANIFEST_NAME = "threefold-install.json"
 INSTALLS_DIR = "installs"
+INDEX_NAME = "index.json"
 PRE_COMMIT_MARKER = "# threefold pre-commit: installed by threefold_install.py"
 CHAINED_NAME = "pre-commit.before-threefold"
 EXCLUDE_MARKER = "# threefold: files written by threefold_install.py"
+
+# What a served bundle may put in THREEFOLD_HOME, and nothing else: a path the
+# manifest names that is not one of these is refused before anything is
+# written, so no bundle can place a file outside bin/ and lib/threefold/.
+BUNDLE_PATH = re.compile(
+    r"^(?:bin/threefold_(?:hook|cli)\.py|lib/threefold/__init__\.py|lib/threefold/domain/[A-Za-z0-9_]{1,64}\.py)$"
+)
+REQUIRED_BUNDLE_FILES = ("bin/threefold_hook.py", "bin/threefold_cli.py", "lib/threefold/__init__.py")
+INSTALLER_COPY = "bin/threefold_install.py"
+MAX_BUNDLE_BYTES = 20_000_000
+MAX_BUNDLE_FILE_BYTES = 5_000_000
+MAX_JSON_BYTES = 1_000_000
+DEFAULT_TIMEOUT_SECONDS = 4.0
+DOWNLOAD_TIMEOUT_SECONDS = 20.0
+SESSION_PREFIX = "threefold-connect-"
+NEXT_ROUTE = re.compile(r"^/[A-Za-z0-9/_\-]{0,200}$")
 
 CODEX_TRUST_NOTE = (
     "Codex loads a project's .codex/hooks.json only when the project is trusted in Codex. "
@@ -119,11 +209,19 @@ class InstallError(Exception):
     """Something that stops the install before anything is written."""
 
 
+class Unreachable(Exception):
+    """The stack could not be asked: no connection, a timeout, or an answer too large to read."""
+
+
 # --- small helpers -------------------------------------------------------------------
 
 def threefold_home() -> Path:
     configured = (os.environ.get("THREEFOLD_HOME") or "").strip()
     return Path(os.path.expanduser(configured or os.path.join("~", ".threefold"))).resolve()
+
+
+def user_home() -> Path:
+    return Path(os.path.expanduser("~")).resolve()
 
 
 def forward(path: Any) -> str:
@@ -134,6 +232,10 @@ def quoted(path: Any) -> str:
     """A path for a command line: forward slashes, and quotes only when a space needs them."""
     text = forward(path)
     return f'"{text}"' if " " in text else text
+
+
+def with_slash(url: str) -> str:
+    return url if url.endswith("/") else url + "/"
 
 
 def hook_command(home: Path, agent: str) -> str:
@@ -187,6 +289,20 @@ def _passed_over_git(start: Path, top: Path) -> bool:
             return True
         current = current.parent
     return False
+
+
+def refuse_home_folder(root: Path) -> None:
+    """The home folder and a drive's root are not projects.
+
+    Installed there, `.claude/settings.local.json` and `.codex/hooks.json` land
+    in the agents' own configuration folders, where they govern every project
+    on the machine under one project's name, which nobody asked for.
+    """
+    if os.path.normcase(str(root)) == os.path.normcase(str(user_home())) or root.parent == root:
+        raise InstallError(
+            f"{forward(root)} is your home folder or a drive's root, where the agents keep their own settings for "
+            "every project; connect a repository, or a folder that holds repositories, instead"
+        )
 
 
 def workspace_record(home: Path, root: Path) -> Path:
@@ -253,6 +369,14 @@ def read_json_object(path: Path) -> Dict[str, Any]:
     return document
 
 
+def read_json_quietly(path: Path) -> Dict[str, Any]:
+    """A file's JSON object, or empty for anything that is not one. For reading only, never before a write."""
+    try:
+        return read_json_object(path) if path.is_file() else {}
+    except (InstallError, UnicodeDecodeError):
+        return {}
+
+
 def dump_json(document: Dict[str, Any]) -> str:
     return json.dumps(document, indent=2) + "\n"
 
@@ -265,23 +389,186 @@ def _text_or_none(path: Path) -> Optional[str]:
         return None
 
 
+def python_command() -> str:
+    return "python" if os.name == "nt" else "python3"
+
+
+# --- the stack, over HTTP -----------------------------------------------------------------
+
+def served_endpoint() -> Optional[str]:
+    """The endpoint baked into a served copy, or None when this copy runs from a checkout."""
+    value = BAKED_ENDPOINT.strip()
+    if value == _UNBAKED or not value.lower().startswith(("https://", "http://")):
+        return None
+    return with_slash(value)
+
+
+def api_timeout() -> float:
+    """The hook's own THREEFOLD_TIMEOUT, so a slow stack is waited for exactly as long as the hook waits."""
+    try:
+        value = float((os.environ.get("THREEFOLD_TIMEOUT") or "").strip() or DEFAULT_TIMEOUT_SECONDS)
+    except ValueError:
+        return DEFAULT_TIMEOUT_SECONDS
+    return value if value > 0 else DEFAULT_TIMEOUT_SECONDS
+
+
+def http_request(
+    method: str, url: str, body: Optional[Dict[str, Any]] = None, key: Optional[str] = None,
+    timeout: Optional[float] = None, limit: int = MAX_JSON_BYTES,
+) -> Tuple[int, bytes]:
+    """One request, returning (status, body). A refusal is a status; only no answer at all raises Unreachable.
+
+    HTTPError is caught before URLError on purpose: it is a subclass, and the
+    other order files every 401 under "could not be reached".
+    """
+    headers = {"Accept": "application/json", "User-Agent": "threefold-install"}
+    data = None
+    if body is not None:
+        data = json.dumps(body).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    if key:
+        headers["X-API-Key"] = key
+    request = urllib.request.Request(url, data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(request, timeout=timeout or api_timeout()) as response:
+            raw = response.read(limit + 1)
+            status = response.status
+    except urllib.error.HTTPError as error:
+        try:
+            raw = error.read(limit + 1) or b""
+        except (OSError, http.client.HTTPException):
+            raw = b""
+        finally:
+            error.close()
+        return error.code, raw[:limit]
+    except (urllib.error.URLError, OSError, http.client.HTTPException, ValueError) as error:
+        reason = getattr(error, "reason", error)
+        raise Unreachable(type(reason).__name__ if isinstance(reason, BaseException) else str(reason)[:120]) from None
+    if len(raw) > limit:
+        raise Unreachable(f"the answer from {url} was larger than {limit} bytes")
+    return status, raw
+
+
+def http_json(method: str, url: str, body: Optional[Dict[str, Any]] = None, key: Optional[str] = None,
+              timeout: Optional[float] = None) -> Tuple[int, Any]:
+    """One request whose answer is read as JSON, or None when it is not JSON."""
+    code, raw = http_request(method, url, body, key, timeout)
+    try:
+        return code, json.loads(raw.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError, RecursionError):
+        return code, None
+
+
+def _digest(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _sha(value: Any) -> Optional[str]:
+    return value.lower() if isinstance(value, str) and re.fullmatch(r"[0-9a-fA-F]{64}", value) else None
+
+
+def fetch_bundle(endpoint: str) -> Tuple[List[Tuple[str, bytes]], Dict[str, Any]]:
+    """Every file the stack's bundle holds, each checked against the stack's manifest, or an InstallError.
+
+    The manifest's list decides what is read and where it goes, never the
+    archive's own names: each file is read by the name the manifest gives, the
+    name must be one Threefold installs, and its bytes must hash to the sha256
+    the manifest gives, all before anything is written. A bundle that is short,
+    swapped or cut off on the way installs nothing rather than half of itself.
+    """
+    timeout = max(api_timeout(), DOWNLOAD_TIMEOUT_SECONDS)
+    try:
+        code, manifest = http_json("GET", endpoint + "dist/manifest.json", timeout=timeout)
+        if code != 200 or not isinstance(manifest, dict):
+            raise InstallError(f"{endpoint}dist/manifest.json answered HTTP {code} rather than a manifest")
+        code, bundle = http_request("GET", endpoint + "dist/threefold-bundle.zip", timeout=timeout, limit=MAX_BUNDLE_BYTES)
+        if code != 200:
+            raise InstallError(f"{endpoint}dist/threefold-bundle.zip answered HTTP {code}")
+    except Unreachable as failure:
+        raise InstallError(f"the hook could not be downloaded from {endpoint} ({failure})") from None
+
+    whole = manifest.get("bundle_sha256")
+    if whole is not None and _sha(whole) != _digest(bundle):
+        raise InstallError("the bundle does not match the sha256 its manifest gives for it, so nothing was written")
+    entries = manifest.get("files")
+    if not isinstance(entries, list) or not entries:
+        raise InstallError(f"{endpoint}dist/manifest.json lists no files")
+    try:
+        archive = zipfile.ZipFile(io.BytesIO(bundle))
+    except (zipfile.BadZipFile, ValueError):
+        raise InstallError("the bundle the stack served is not a zip file, so nothing was written") from None
+
+    files: List[Tuple[str, bytes]] = []
+    with archive:
+        for entry in entries:
+            path = entry.get("path") if isinstance(entry, dict) else None
+            expected = _sha(entry.get("sha256")) if isinstance(entry, dict) else None
+            if not isinstance(path, str) or not BUNDLE_PATH.match(path):
+                raise InstallError(f"the manifest names {str(path)[:80]!r}, which is not a file Threefold installs, so nothing was written")
+            if expected is None:
+                raise InstallError(f"the manifest gives no sha256 for {path}, so nothing was written")
+            if any(name == path for name, _ in files):
+                continue
+            try:
+                info = archive.getinfo(path)
+                if info.file_size > MAX_BUNDLE_FILE_BYTES:
+                    raise InstallError(f"{path} in the bundle is larger than {MAX_BUNDLE_FILE_BYTES} bytes, so nothing was written")
+                data = archive.read(info)
+            except KeyError:
+                raise InstallError(f"{path} is in the manifest but not in the bundle, so nothing was written") from None
+            except (zipfile.BadZipFile, RuntimeError, OSError, NotImplementedError, EOFError, ValueError):
+                raise InstallError(f"{path} could not be read from the bundle, so nothing was written") from None
+            size = entry.get("bytes")
+            if _digest(data) != expected or (isinstance(size, int) and not isinstance(size, bool) and size != len(data)):
+                raise InstallError(f"{path} in the bundle does not match the sha256 in the manifest, so nothing was written")
+            files.append((path, data))
+    missing = [path for path in REQUIRED_BUNDLE_FILES if not any(name == path for name, _ in files)]
+    if missing:
+        raise InstallError(f"the bundle has no {', '.join(missing)}, so nothing was written")
+    return files, manifest
+
+
+def own_source() -> Optional[bytes]:
+    """The bytes of the file running now, when there is one to read."""
+    try:
+        return Path(__file__).read_bytes()
+    except (NameError, OSError):
+        return None
+
+
+def installer_copy(endpoint: str, manifest: Dict[str, Any]) -> Optional[bytes]:
+    """What to keep as bin/threefold_install.py: this file, or when piped, the stack's copy checked by its hash."""
+    mine = own_source()
+    if mine is not None:
+        return mine
+    expected = _sha(manifest.get("installer_sha256"))
+    if expected is None:
+        return None
+    try:
+        code, data = http_request("GET", endpoint + "install.py", timeout=max(api_timeout(), DOWNLOAD_TIMEOUT_SECONDS))
+    except Unreachable:
+        return None
+    return data if code == 200 and _digest(data) == expected else None
+
+
 # --- the plan ---------------------------------------------------------------------------
 
 class Plan:
     """Steps described first and carried out second, so --dry-run is the same code minus the writes."""
 
-    def __init__(self, dry_run: bool, out: Any) -> None:
+    def __init__(self, dry_run: bool, out: Any, prefix: str = "threefold: ") -> None:
         self.dry_run = dry_run
         self.out = out
+        self.prefix = prefix
         self.steps: List[Tuple[str, Optional[Callable[[], None]]]] = []
 
     def add(self, description: str, action: Optional[Callable[[], None]] = None) -> None:
         self.steps.append((description, action))
 
     def run(self) -> None:
-        prefix = "would " if self.dry_run else ""
+        would = "would " if self.dry_run else ""
         for description, action in self.steps:
-            print(f"threefold: {prefix}{description}" if action else f"threefold: {description}", file=self.out)
+            print(f"{self.prefix}{would}{description}" if action else f"{self.prefix}{description}", file=self.out)
             if action and not self.dry_run:
                 action()
 
@@ -299,17 +586,6 @@ def _write_bytes(path: Path, data: bytes) -> Callable[[], None]:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(data)
     return action
-
-
-def _copy(source: Path, target: Path) -> Callable[[], None]:
-    def action() -> None:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(source, target)
-    return action
-
-
-def _digest(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
 
 
 def load_manifest(path: Path) -> Dict[str, Any]:
@@ -354,24 +630,111 @@ def is_tracked(root: Path, relative: str) -> bool:
     return code == 0
 
 
-# --- install ------------------------------------------------------------------------------
+# --- the shared copies ------------------------------------------------------------------------
 
 def shared_copies(plan: Plan, home: Path) -> None:
-    targets = [(HOOK_SOURCE, home / "bin" / "threefold_hook.py"), (CLI_SOURCE, home / "bin" / "threefold_cli.py")]
+    """The hook, the check and the engine in THREEFOLD_HOME: from the stack when served, else from the checkout."""
+    endpoint = served_endpoint()
+    if endpoint:
+        served_copies(plan, home, endpoint)
+        return
+    if HOOK_SOURCE is None or CLI_SOURCE is None or SOURCE is None or not HOOK_SOURCE.is_file() or not CLI_SOURCE.is_file():
+        raise InstallError(
+            "this copy of the installer has neither a stack's address baked in nor a Threefold checkout around it; "
+            "take it from a stack's /install.py, or run it from src/threefold/tools in a checkout"
+        )
     engine = SOURCE / "threefold"
+    targets = [(HOOK_SOURCE, home / "bin" / "threefold_hook.py"), (CLI_SOURCE, home / "bin" / "threefold_cli.py")]
     targets.append((engine / "__init__.py", home / "lib" / "threefold" / "__init__.py"))
     targets.extend((module, home / "lib" / "threefold" / "domain" / module.name) for module in sorted((engine / "domain").glob("*.py")))
-    changed = [(source, target) for source, target in targets if not target.is_file() or target.read_bytes() != source.read_bytes()]
+    changed = [(target, source.read_bytes()) for source, target in targets if not target.is_file() or target.read_bytes() != source.read_bytes()]
+    _plan_copies(plan, home, changed, f"copy the hook, the pre-commit check and the engine into {forward(home)}")
+
+
+def served_copies(plan: Plan, home: Path, endpoint: str) -> None:
+    if plan.dry_run:
+        # Nothing is fetched on a dry run either: it asks nothing of the stack.
+        plan.add(
+            f"download the hook, the pre-commit check and the engine from {endpoint}dist/threefold-bundle.zip, check "
+            f"each file against {endpoint}dist/manifest.json, and put them in {forward(home)}",
+            lambda: None,
+        )
+        return
+    files, manifest = fetch_bundle(endpoint)
+    targets = [(home / path, data) for path, data in files]
+    copy = installer_copy(endpoint, manifest)
+    if copy is not None:
+        targets.append((home / INSTALLER_COPY, copy))
+    changed = [(target, data) for target, data in targets if not target.is_file() or target.read_bytes() != data]
+    _plan_copies(
+        plan, home, changed,
+        f"install the hook, the pre-commit check and the engine from {endpoint} into {forward(home)}, each file "
+        "checked against the stack's manifest",
+    )
+    if copy is None:
+        plan.add(f"note: no copy of the installer was kept in {forward(home / 'bin')}; take it again from {endpoint}install.py")
+
+
+def _plan_copies(plan: Plan, home: Path, changed: List[Tuple[Path, bytes]], description: str) -> None:
     if not changed:
         plan.add(f"the shared copies in {forward(home)} are current")
         return
 
     def action() -> None:
-        for source, target in changed:
-            _copy(source, target)()
+        for target, data in changed:
+            _write_bytes(target, data)()
 
-    plan.add(f"copy the hook, the pre-commit check and the engine into {forward(home)} ({len(changed)} file(s))", action)
+    plan.add(f"{description} ({len(changed)} file(s))", action)
 
+
+# --- the list of installs on this machine --------------------------------------------------------
+
+def index_path(home: Path) -> Path:
+    return home / INSTALLS_DIR / INDEX_NAME
+
+
+def _index_key(path: str) -> str:
+    return os.path.normcase(os.path.normpath(path))
+
+
+def load_index(home: Path) -> List[Dict[str, Any]]:
+    """The installs this machine has, as written on install. A file that cannot be read lists none."""
+    document = read_json_quietly(index_path(home))
+    entries = document.get("installs")
+    if not isinstance(entries, list):
+        return []
+    return [entry for entry in entries if isinstance(entry, dict) and isinstance(entry.get("path"), str)]
+
+
+def _index_text(entries: List[Dict[str, Any]]) -> str:
+    return dump_json({"version": 1, "installs": entries})
+
+
+def index_step(plan: Plan, home: Path, entry: Dict[str, Any]) -> None:
+    """Adds or replaces this install's line in the index. Nothing is written when it already says this."""
+    entries = load_index(home)
+    others = [item for item in entries if _index_key(item["path"]) != _index_key(entry["path"])]
+    updated = sorted(others + [entry], key=lambda item: _index_key(item["path"]))
+    if updated == entries:
+        return
+    plan.add(f"note the install in {forward(index_path(home))}", _write_text(index_path(home), _index_text(updated)))
+
+
+def unindex_step(plan: Plan, home: Path, root: Path) -> bool:
+    """Takes this install out of the index, deleting the file when it lists nothing else. Whether it was listed."""
+    entries = load_index(home)
+    kept = [item for item in entries if _index_key(item["path"]) != _index_key(forward(root))]
+    if len(kept) == len(entries):
+        return False
+    path = index_path(home)
+    if kept:
+        plan.add(f"take {forward(root)} out of {forward(path)}", _write_text(path, _index_text(kept)))
+    else:
+        plan.add(f"delete {forward(path)}, which lists no other install", path.unlink)
+    return True
+
+
+# --- install ------------------------------------------------------------------------------
 
 def _created_dirs(root: Path, relative: str) -> List[str]:
     """The directories above a repository file that do not exist yet, outermost first."""
@@ -391,19 +754,26 @@ def workspace_note(root: Path) -> str:
     )
 
 
-def install(
-    args: argparse.Namespace, root: Path, home: Path, out: Any, workspace: bool = False, includes: Sequence[str] = ()
-) -> int:
-    agents = [name.strip() for name in args.agents.split(",") if name.strip()]
+def parse_agents(value: str) -> List[str]:
+    agents = [name.strip() for name in value.split(",") if name.strip()]
     unknown = [name for name in agents if name not in AGENTS]
     if unknown or not agents:
         raise InstallError(f"--agents takes a comma-separated list of {', '.join(AGENTS)}")
+    return agents
+
+
+def plan_install(
+    args: argparse.Namespace, root: Path, home: Path, out: Any, workspace: bool = False,
+    includes: Sequence[str] = (), prefix: str = "threefold: ",
+) -> Tuple[Plan, List[str]]:
+    """Every step of an install, described but not yet carried out, and the agents it registers."""
+    agents = parse_agents(args.agents)
     if args.endpoint and not args.endpoint.lower().startswith(("https://", "http://")):
         raise InstallError("--endpoint must be an http(s) URL")
 
     manifest_path = record_path(root, home, workspace)
     manifest = _merged_manifest(load_manifest(manifest_path))
-    plan = Plan(args.dry_run, out)
+    plan = Plan(args.dry_run, out, prefix)
     written: List[str] = []
     if workspace:
         manifest["workspace"] = forward(root)
@@ -421,7 +791,7 @@ def install(
     endpoint = ""
     key_file: Optional[Path] = None
     if args.endpoint:
-        endpoint = args.endpoint if args.endpoint.endswith("/") else args.endpoint + "/"
+        endpoint = with_slash(args.endpoint)
         config["endpoint"] = endpoint
     if args.api_key_file:
         key_file = Path(os.path.expanduser(args.api_key_file)).resolve()
@@ -466,6 +836,7 @@ def install(
         trusted_endpoint_step(plan, home, endpoint, key_file)
 
     # One entry per agent, merged into whatever the file already holds.
+    registered: List[str] = []
     for agent in agents:
         relative, matcher = AGENT_SETTINGS[agent]
         path = root / relative
@@ -498,9 +869,11 @@ def install(
             # entry someone added by hand is in a file this script never wrote.
             if any(item.get("file") == relative for item in manifest["entries"]):
                 written.append(relative)
+            registered.append(agent)
             plan.add(f"{relative} already runs the hook for {agent}")
             continue
         written.append(relative)
+        registered.append(agent)
         entries.append({"matcher": matcher, "hooks": [{"type": "command", "command": command}]})
         if not path.exists():
             for directory in _created_dirs(root, relative):
@@ -521,6 +894,20 @@ def install(
         exclude_step(plan, root, written, manifest)
 
     plan.add(f"record what was installed in {forward(manifest_path)}", _write_text(manifest_path, dump_json(manifest)))
+    # Every agent whose hook runs here now, from this install or an earlier
+    # one: a second install for fewer agents takes none of the others out.
+    recorded_files = {item.get("file") for item in manifest["entries"] if isinstance(item, dict)}
+    running = [agent for agent in AGENTS if agent in registered or AGENT_SETTINGS[agent][0] in recorded_files]
+    index_step(plan, home, {
+        "path": forward(root), "project": args.project, "mode": args.mode, "agents": running, "workspace": workspace,
+    })
+    return plan, agents
+
+
+def install(
+    args: argparse.Namespace, root: Path, home: Path, out: Any, workspace: bool = False, includes: Sequence[str] = ()
+) -> int:
+    plan, agents = plan_install(args, root, home, out, workspace, includes)
     plan.run()
     if "codex" in agents:
         print(f"threefold: {CODEX_TRUST_NOTE}", file=out)
@@ -664,12 +1051,14 @@ def _without_our_entries(document: Dict[str, Any], commands: Sequence[str]) -> T
     return document, removed
 
 
-def uninstall(args: argparse.Namespace, root: Path, home: Path, out: Any, workspace: bool = False) -> int:
+def uninstall(
+    args: argparse.Namespace, root: Path, home: Path, out: Any, workspace: bool = False, prefix: str = "threefold: "
+) -> int:
     manifest_path = record_path(root, home, workspace)
     manifest = load_manifest(manifest_path)
     exact = bool(manifest)
     manifest = _merged_manifest(manifest)
-    plan = Plan(args.dry_run, out)
+    plan = Plan(args.dry_run, out, prefix)
     if workspace:
         plan.add(f"workspace mode: {forward(root)} is not a repository git recognises, so nothing under .git is touched")
     if not exact:
@@ -733,13 +1122,15 @@ def uninstall(args: argparse.Namespace, root: Path, home: Path, out: Any, worksp
 
     if manifest_path.is_file():
         plan.add("delete the install record", manifest_path.unlink)
-        if workspace:
+    listed = unindex_step(plan, home, root)
+    if workspace or listed:
+        installs = home / INSTALLS_DIR
 
-            def remove_installs_if_empty(directory: Path = manifest_path.parent) -> None:
-                if directory.is_dir() and not any(directory.iterdir()):
-                    directory.rmdir()
+        def remove_installs_if_empty(directory: Path = installs) -> None:
+            if directory.is_dir() and not any(directory.iterdir()):
+                directory.rmdir()
 
-            plan.add(f"remove {forward(manifest_path.parent)}/ if no other workspace record is left in it", remove_installs_if_empty)
+        plan.add(f"remove {forward(installs)}/ if nothing else is left in it", remove_installs_if_empty)
     plan.add(
         f"note: the shared copies in {forward(home)}, and any endpoint paired with a key file in its "
         f"{HOME_CONFIG}, were kept, because other repositories may use them; delete them by hand once none does"
@@ -797,15 +1188,488 @@ def _restorable(manifest: Dict[str, Any], key: str, path: Path) -> Optional[byte
         return None
 
 
+# --- connect: the defaults ---------------------------------------------------------------------
+
+def default_project(root: Path) -> str:
+    """`Acme-<folder name>`, made to fit ^Acme-[A-Za-z0-9-]{1,40}$.
+
+    Accents are taken off, anything else outside [A-Za-z0-9-] becomes a
+    hyphen, runs of hyphens become one, and a leading `acme` word is dropped
+    so acme-ledger becomes Acme-ledger rather than Acme-acme-ledger. A name
+    with nothing left is named by a short hash of its path instead, which says
+    nothing about it.
+    """
+    name = unicodedata.normalize("NFKD", root.name).encode("ascii", "ignore").decode("ascii")
+    name = re.sub(r"[^A-Za-z0-9-]+", "-", name)
+    name = re.sub(r"-{2,}", "-", name).strip("-")
+    name = re.sub(r"^acme(?:-|$)", "", name, flags=re.IGNORECASE)
+    name = name[:40].strip("-")
+    if not name:
+        name = "Repo-" + hashlib.sha256(os.path.normcase(str(root)).encode("utf-8")).hexdigest()[:8]
+    return f"Acme-{name}"
+
+
+def detect_agents(home: Optional[Path] = None, search_path: Optional[str] = None) -> List[Tuple[str, str]]:
+    """The agents installed on this machine, each with the reason it was taken to be there."""
+    home = home or user_home()
+    found: List[Tuple[str, str]] = []
+    for agent in AGENTS:
+        folders, command = AGENT_SIGNS[agent]
+        why = next((f"~/{folder} exists" for folder in folders if (home / folder).is_dir()), None)
+        if why is None and shutil.which(command, path=search_path):
+            why = f"{command} is on PATH"
+        if why:
+            found.append((agent, why))
+    return found
+
+
+def load_hook_module(home: Path) -> Optional[Any]:
+    """The hook, for its configuration code: the installed copy, else the checkout's. None when neither loads."""
+    for candidate in (home / "bin" / "threefold_hook.py", HOOK_SOURCE):
+        if candidate is None or not candidate.is_file():
+            continue
+        try:
+            spec = importlib.util.spec_from_file_location("threefold_hook_for_install", candidate)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            return module
+        except Exception:  # noqa: BLE001 - a copy that does not load is one this command does without
+            continue
+    return None
+
+
+def resolved_settings(hook: Optional[Any], directory: Path) -> Optional[Any]:
+    """What the hook itself would send under from this directory: project, endpoint, key, and why not a key."""
+    if hook is None:
+        return None
+    try:
+        return hook.resolve_settings({"cwd": str(directory)})
+    except Exception:  # noqa: BLE001 - reading configuration must not take the command down
+        return None
+
+
+def installer_command(home: Path) -> str:
+    """How to run this installer again: the kept copy for a served one, this file for a checkout."""
+    if served_endpoint() and (home / INSTALLER_COPY).is_file():
+        return f"{python_command()} {quoted(home / INSTALLER_COPY)}"
+    try:
+        return f"{python_command()} {quoted(Path(__file__).resolve())}"
+    except NameError:
+        return f"{python_command()} threefold_install.py"
+
+
+def open_url(url: str) -> bool:
+    """Opens a page in the browser, and says whether one opened. A machine with no browser is not an error."""
+    try:
+        return bool(webbrowser.open(url))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+# --- connect: the proof and the dashboard ------------------------------------------------------
+
+def first_call(endpoint: str, project: str, agent: str, mode: str, key: Optional[str], developer: str) -> Tuple[bool, str, Optional[str]]:
+    """Sends one harmless dry-run call as a hook would, and says whether the stack recorded it.
+
+    `git status` is read-only and a dry run is never refused and never trips a
+    session, so the call proves the path from this machine to the ledger and
+    changes nothing. Returns (recorded, a line to print, the project's stage).
+    """
+    body = {
+        "session_id": SESSION_PREFIX + secrets.token_hex(4),
+        "project_name": project,
+        "developer": developer,
+        "tool_name": "Bash",
+        "action_type": "COMMAND_EXEC",
+        "arguments": {"command": "git status"},
+        "agent": agent,
+        "origin": "hook",
+        "explain": False,
+        "dry_run": True,
+        "hook_mode": mode,
+    }
+    try:
+        code, document = http_json("POST", endpoint + "evaluate-tool-call", body, key)
+    except Unreachable as failure:
+        return False, (
+            f"not recorded: {endpoint} could not be reached ({failure}). Until it can, the hook lets every call "
+            "through, and your agents work as before"
+        ), None
+    if code == 200 and isinstance(document, dict) and document.get("verdict_id"):
+        stage = document.get("project_stage")
+        stage = stage if stage in ("observe", "enforce") else None
+        line = f"recorded: {document.get('status') or 'judged'}, project stage {stage or 'not reported'}"
+        warnings = [str(item)[:200] for item in document.get("warnings") or [] if isinstance(item, str)]
+        return True, "; ".join([line] + warnings), stage
+    if code in (401, 403):
+        return False, (
+            f"not recorded: the stack answered HTTP {code}; it needs its operator key. Connect again with "
+            "--api-key-file naming the file that holds it"
+        ), None
+    title = document.get("title") if isinstance(document, dict) else None
+    return False, f"not recorded: the stack answered HTTP {code}{' ' + str(title)[:120] if title else ''}", None
+
+
+def signin_link(endpoint: str, route: str, key: str) -> Tuple[Optional[str], str]:
+    """A single-use sign-in link to `route`, or (None, why not). The key goes in a header, never in the link."""
+    try:
+        code, document = http_json("POST", endpoint + "api/auth/links", {"next": route}, key)
+    except Unreachable as failure:
+        return None, f"no sign-in link: {endpoint} could not be reached ({failure})"
+    url = document.get("url") if isinstance(document, dict) else None
+    if code in (200, 201) and isinstance(url, str):
+        if url.startswith("dashboard.html"):
+            url = endpoint + url
+        # Only a page of the stack that was asked. Anything else is not opened,
+        # whatever the answer says, because the browser would carry the code there.
+        if url.startswith(endpoint) and not any(c.isspace() for c in url):
+            return url, ""
+        return None, "no sign-in link: the stack answered with a link to somewhere else, which was not opened"
+    if code in (401, 403):
+        return None, f"no sign-in link: the stack answered HTTP {code} to the operator key"
+    return None, f"no sign-in link: the stack answered HTTP {code}"
+
+
+def show_dashboard(endpoint: str, route: str, key: Optional[str], out: Any, label: str = "dashboard") -> None:
+    """Opens the dashboard on `route`, signed in when there is a key, and prints what happened in one or two lines."""
+    page = f"{endpoint}dashboard.html#{route}"
+    link, why = signin_link(endpoint, route, key) if key else (None, "")
+    if link:
+        if open_url(link):
+            print(f"  {label:<10}  {page}  (opened in your browser, signed in)", file=out)
+        else:
+            # No browser here: the link is the only way in, so it is printed,
+            # with what makes printing it tolerable.
+            print(f"  {label:<10}  {page}", file=out)
+            print(f"  {'':<10}  sign in within 2 minutes, once, at: {link}", file=out)
+        return
+    opened = open_url(page)
+    print(f"  {label:<10}  {page}{'  (opened in your browser)' if opened else ''}", file=out)
+    if why:
+        print(f"  {'':<10}  {why}", file=out)
+
+
+# --- connect -----------------------------------------------------------------------------------
+
+def connect(args: argparse.Namespace, out: Any) -> int:
+    home = threefold_home()
+    named = Path(args.path).expanduser()
+    root, workspace = locate(named)
+    refuse_home_folder(root)
+    existing = read_json_quietly(root / CONFIG_FILE)
+    kept: List[str] = []
+
+    project = args.project
+    project_note = ""
+    if not project:
+        previous = existing.get("project")
+        if isinstance(previous, str) and PROJECT_PATTERN.match(previous):
+            project, project_note = previous, "(kept from .threefold.json)"
+            kept.append("project")
+        else:
+            project, project_note = default_project(root), "(from the folder name; --project NAME picks another)"
+    if not PROJECT_PATTERN.match(project):
+        # The alias is what the dashboard shows. A real name typed here would
+        # be published by the first tool call.
+        raise InstallError("--project must match ^Acme-[A-Za-z0-9-]{1,40}$, an alias rather than a real name")
+
+    mode = args.mode
+    if not mode:
+        previous = existing.get("mode")
+        mode = previous if previous in MODES else "managed"
+        if previous in MODES:
+            kept.append("mode")
+
+    endpoint = with_slash(args.endpoint) if args.endpoint else served_endpoint()
+    previous_endpoint = existing.get("endpoint") if isinstance(existing.get("endpoint"), str) else None
+    if not endpoint and previous_endpoint:
+        endpoint = with_slash(previous_endpoint)
+        kept.append("endpoint")
+    api_key_file = args.api_key_file
+    previous_key = existing.get("api_key_file")
+    if not api_key_file and isinstance(previous_key, str) and previous_endpoint and endpoint == with_slash(previous_endpoint):
+        # Only with the endpoint it was written for: a key file must never
+        # follow a project to a stack nobody paired it with.
+        api_key_file = previous_key
+        kept.append("key file")
+
+    includes = include_globs(args.include)
+    if not args.include and isinstance(existing.get("include"), list):
+        # Dropping a workspace's list on a second connect would send every
+        # repository the owner left out, so it stays unless replaced.
+        includes = include_globs([item for item in existing["include"] if isinstance(item, str)])
+        if includes:
+            kept.append("include list")
+    if args.include and os.path.normcase(str(named.resolve())) != os.path.normcase(str(root)):
+        # Globs given here were written for the directory named; kept ones
+        # were written for the root, where they already are.
+        raise InstallError(
+            f"--include globs are relative to the directory given, but {forward(named.resolve())} is inside the "
+            f"repository {forward(root)}, and .threefold.json would be written there instead; connect "
+            f"{forward(root)} with globs relative to it"
+        )
+
+    if args.agents.strip().lower() == "auto":
+        detected = detect_agents()
+        agents = [agent for agent, _ in detected] or list(AGENTS)
+        if detected:
+            agent_line = ", ".join(f"{agent} ({why})" for agent, why in detected)
+        else:
+            agent_line = (
+                "all three, because none was found (looked for ~/.claude or claude, ~/.codex or codex, "
+                "~/.gemini/antigravity, ~/.antigravity or antigravity)"
+            )
+    else:
+        agents = parse_agents(args.agents)
+        agent_line = ", ".join(agents)
+
+    hook = load_hook_module(home)
+    before = resolved_settings(hook, root)
+    shown_endpoint = endpoint or (before.endpoint if before is not None else "")
+
+    print(f"Threefold connect: {forward(root)}", file=out)
+    print(f"  {'folder':<10}  {'a workspace, not a git repository' if workspace else 'a git repository'}", file=out)
+    print(f"  {'project':<10}  {project} {project_note}".rstrip(), file=out)
+    print(f"  {'mode':<10}  {mode}: {mode_line(mode)}", file=out)
+    print(f"  {'agents':<10}  {agent_line}", file=out)
+    print(f"  {'endpoint':<10}  {shown_endpoint or 'the hook default'}", file=out)
+    if kept:
+        print(f"  {'kept':<10}  the {', '.join(kept)} already in .threefold.json; pass them to change them", file=out)
+    print("", file=out)
+
+    install_args = argparse.Namespace(
+        project=project, mode=mode, agents=",".join(agents), endpoint=endpoint, api_key_file=api_key_file,
+        dry_run=args.dry_run,
+    )
+    plan, agents = plan_install(install_args, root, home, out, workspace, includes, prefix="  ")
+    plan.run()
+    print("", file=out)
+
+    route = f"/projects/{project}"
+    if args.dry_run:
+        base = shown_endpoint or "<the hook default>/"
+        print(f"  {'first call':<10}  would send one dry-run call (Bash: git status) to {base}evaluate-tool-call", file=out)
+        print(f"  {'dashboard':<10}  would open {base}dashboard.html#{route}", file=out)
+        print("", file=out)
+        print("Nothing was written, sent or opened: this was a dry run.", file=out)
+        return 0
+
+    hook = load_hook_module(home)
+    settings = resolved_settings(hook, root)
+    if settings is None:
+        print(f"  {'first call':<10}  not sent: the installed hook could not be loaded to read its configuration", file=out)
+    else:
+        for note in settings.notes:
+            print(f"  {'note':<10}  {note}", file=out)
+        sent_as = settings.project or project
+        if sent_as != project:
+            print(f"  {'note':<10}  THREEFOLD_PROJECT in your environment names {sent_as}, which the hook sends instead", file=out)
+        developer = hook.developer_id() if hasattr(hook, "developer_id") else "anonymous"
+        # The mode the hook will send under, which the environment can override.
+        sent_mode = settings.mode if settings.mode in MODES else mode
+        _, line, stage = first_call(settings.endpoint, sent_as, agents[0], sent_mode, settings.api_key, developer)
+        if stage and hasattr(hook, "remember_stage"):
+            # The hook starts from the stage the stack just named, not from none.
+            hook.remember_stage(str(home), sent_as, stage)
+        print(f"  {'first call':<10}  {line}", file=out)
+        route = f"/projects/{sent_as}"
+        if args.no_open:
+            print(f"  {'dashboard':<10}  {settings.endpoint}dashboard.html#{route}", file=out)
+            if settings.api_key:
+                print(f"  {'':<10}  to sign in from this machine: {installer_command(home)} open", file=out)
+        else:
+            show_dashboard(settings.endpoint, route, settings.api_key, out)
+
+    print("", file=out)
+    print("Next", file=out)
+    for line in next_steps(agents, mode, home, root):
+        print(f"  - {line}", file=out)
+    return 0
+
+
+def mode_line(mode: str) -> str:
+    if mode == "managed":
+        return "the project's stage on the dashboard decides; it starts in Observe"
+    if mode == "observe":
+        return "every call is recorded as a dry run and nothing is refused, whatever the stage"
+    return "every call is judged and refused when it breaks a rule, whatever the stage"
+
+
+def next_steps(agents: Sequence[str], mode: str, home: Path, root: Path) -> List[str]:
+    lines = []
+    if "claude-code" in agents:
+        lines.append("Claude Code: start a new session in this folder; a running one keeps the hooks it started with.")
+    if "codex" in agents:
+        lines.append("Codex: trust this project in Codex, which loads .codex/hooks.json only for trusted projects.")
+    if "antigravity" in agents:
+        lines.append("Antigravity: if it asks whether to trust this workspace's hooks, say yes.")
+    if mode == "managed":
+        lines.append(
+            "In Observe every call is recorded and nothing but a credential is refused. Mark what it would refuse on "
+            "the dashboard, then Promote the project when that reads right."
+        )
+    command = installer_command(home)
+    lines.append(f"status: {command} status")
+    lines.append(f"undo:   {command} disconnect {quoted(root)}")
+    return lines
+
+
+# --- disconnect, status, open --------------------------------------------------------------------
+
+def disconnect(args: argparse.Namespace, out: Any) -> int:
+    home = threefold_home()
+    root, workspace = locate(Path(args.path).expanduser())
+    print(f"Threefold disconnect: {forward(root)}", file=out)
+    code = uninstall(args, root, home, out, workspace, prefix="  ")
+    if not args.dry_run:
+        print("Disconnected. Agents started here from now on run without Threefold.", file=out)
+    return code
+
+
+def project_stage(endpoint: str, project: str, key: Optional[str]) -> str:
+    """The project's stage as the stack reports it, or `unknown`. Best effort: nothing here is worth failing over."""
+    try:
+        code, document = http_json("GET", endpoint + "api/projects/" + urllib.parse.quote(project, safe=""), key=key)
+    except Unreachable:
+        return "unknown"
+    if code in (401, 403):
+        return "unknown (the stack needs its operator key)"
+    if code != 200 or not isinstance(document, dict):
+        return "unknown"
+    config = document.get("config") if isinstance(document.get("config"), dict) else {}
+    readiness = document.get("readiness") if isinstance(document.get("readiness"), dict) else {}
+    summary = readiness.get("summary") if isinstance(readiness.get("summary"), dict) else {}
+    for stage in (config.get("stage"), summary.get("stage"), document.get("stage")):
+        if stage in ("observe", "enforce"):
+            return stage
+    return "unknown"
+
+
+def status(args: argparse.Namespace, out: Any) -> int:
+    home = threefold_home()
+    entries = load_index(home)
+    if not entries:
+        print("Threefold is not connected to anything on this machine yet.", file=out)
+        print(f"Connect a repository with: {installer_command(home)} connect PATH", file=out)
+        return 0
+    hook = load_hook_module(home)
+    print(f"Threefold on this machine: {len(entries)} connected", file=out)
+    for entry in entries:
+        path = Path(entry["path"])
+        present = (path / CONFIG_FILE).is_file()
+        config = read_json_quietly(path / CONFIG_FILE)
+        project = config.get("project") if isinstance(config.get("project"), str) else entry.get("project")
+        mode = config.get("mode") if config.get("mode") in MODES else entry.get("mode") or "enforce"
+        agents = [agent for agent in entry.get("agents") or [] if agent in AGENTS]
+        stage = "unknown"
+        settings = resolved_settings(hook, path) if present else None
+        if settings is not None and isinstance(project, str) and project:
+            stage = project_stage(settings.endpoint, project, settings.api_key)
+        print("", file=out)
+        print(f"  {forward(path)}{'' if present else '  (its .threefold.json is gone)'}", file=out)
+        print(f"    project {project or 'none'}   mode {mode}   stage {stage}", file=out)
+        print(f"    agents  {', '.join(agents) or 'none'}{'   (workspace)' if entry.get('workspace') else ''}", file=out)
+        if settings is not None:
+            print(f"    stack   {settings.endpoint}", file=out)
+    return 0
+
+
+def open_dashboard(args: argparse.Namespace, out: Any) -> int:
+    home = threefold_home()
+    hook = load_hook_module(home)
+    settings = resolved_settings(hook, Path.cwd())
+    if args.endpoint:
+        if not args.endpoint.lower().startswith(("https://", "http://")):
+            raise InstallError("--endpoint must be an http(s) URL")
+        endpoint = with_slash(args.endpoint)
+    elif settings is not None and settings.endpoint_source != "default":
+        endpoint = settings.endpoint
+    elif served_endpoint():
+        endpoint = served_endpoint()
+    elif settings is not None:
+        endpoint = settings.endpoint
+    else:
+        raise InstallError("no stack is configured here; pass --endpoint URL")
+    route = args.next
+    if not route:
+        project = settings.project if settings is not None else ""
+        route = f"/projects/{project}" if PROJECT_PATTERN.match(project or "") else "/overview"
+    if not NEXT_ROUTE.match(route):
+        raise InstallError("--next takes a dashboard route such as /projects/Acme-Ledger")
+    key = operator_key(hook, settings, endpoint, home)
+    print(f"Threefold: {endpoint}", file=out)
+    show_dashboard(endpoint, route, key, out)
+    if not key:
+        print(f"  {'':<10}  no operator key is configured for this stack here, so the dashboard opens without signing "
+              "in; a private stack needs connect --api-key-file first", file=out)
+    return 0
+
+
+def operator_key(hook: Optional[Any], settings: Optional[Any], endpoint: str, home: Path) -> Optional[str]:
+    """The key the hook would send to this endpoint, or the one the owner paired with it at home."""
+    if settings is not None and settings.endpoint == endpoint and settings.api_key:
+        return settings.api_key
+    if hook is None or not hasattr(hook, "_read_key_file"):
+        return None
+    pairs = read_json_quietly(home / HOME_CONFIG).get("trusted_endpoints")
+    for pair in pairs if isinstance(pairs, list) else []:
+        if not isinstance(pair, dict) or not isinstance(pair.get("endpoint"), str) or with_slash(pair["endpoint"].strip()) != endpoint:
+            continue
+        value = pair.get("api_key_file")
+        if isinstance(value, str) and value.strip():
+            path = Path(os.path.expanduser(value.strip()))
+            path = path if path.is_absolute() else home / path
+            return hook._read_key_file(str(path), "THREEFOLD_HOME/config.json", [])
+    return None
+
+
 # --- entry point -----------------------------------------------------------------------------
 
-def main(argv: Optional[Sequence[str]] = None, out: Any = None) -> int:
-    out = out or sys.stdout
+USAGE = """usage: threefold_install.py <command> [options]
+
+  connect [PATH]      govern the agents working in PATH (default: here)
+  disconnect [PATH]   take Threefold out of PATH again, exactly
+  status              every connected folder on this machine, and its stage
+  open                sign in to the dashboard from this machine
+
+  threefold_install.py <command> --help   says more about each
+  threefold_install.py --repo PATH ...    the older form, unchanged
+"""
+
+
+def command_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="threefold_install.py", description=__doc__.split("\n\n", 1)[0])
+    commands = parser.add_subparsers(dest="command", required=True)
+
+    connect_parser = commands.add_parser("connect", help="govern the agents working in a folder")
+    connect_parser.add_argument("path", nargs="?", default=".", help="the repository or workspace, default here")
+    connect_parser.add_argument("--project", help="its alias, Acme-<name>; default Acme-<folder name>")
+    connect_parser.add_argument("--agents", default="auto", help="auto (default: the ones on this machine), or a comma-separated list")
+    connect_parser.add_argument("--mode", choices=MODES, help="default managed: the project's stage decides")
+    connect_parser.add_argument("--endpoint", help="the stack; default the one that served this installer")
+    connect_parser.add_argument("--api-key-file", help="a file holding the operator key; its path is written, never its content")
+    connect_parser.add_argument("--include", action="append", metavar="GLOB", help="repeatable; only calls inside these globs are sent")
+    connect_parser.add_argument("--dry-run", action="store_true", help="print every step and write, send and open nothing")
+    connect_parser.add_argument("--no-open", action="store_true", help="print the dashboard's address instead of opening it")
+
+    disconnect_parser = commands.add_parser("disconnect", help="take Threefold out of a folder again")
+    disconnect_parser.add_argument("path", nargs="?", default=".", help="the repository or workspace, default here")
+    disconnect_parser.add_argument("--dry-run", action="store_true", help="print every step and write nothing")
+
+    commands.add_parser("status", help="every connected folder on this machine, and its stage")
+
+    open_parser = commands.add_parser("open", help="sign in to the dashboard from this machine")
+    open_parser.add_argument("--next", help="the dashboard route to land on, such as /projects/Acme-Ledger")
+    open_parser.add_argument("--endpoint", help="the stack; default the one configured here")
+    return parser
+
+
+def legacy_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="threefold_install.py", description=__doc__.split("\n\n", 1)[0])
     parser.add_argument("--repo", required=True, help="the repository to govern")
     parser.add_argument("--project", help="its alias, Acme-<name>; required to install")
     parser.add_argument("--agents", default=",".join(AGENTS), help="comma-separated, default all three")
-    parser.add_argument("--mode", choices=("observe", "enforce"), default="observe")
+    parser.add_argument("--mode", choices=("observe", "managed", "enforce"), default="observe")
     parser.add_argument("--endpoint", help="the service, default the public stack")
     parser.add_argument("--api-key-file", help="a file holding the key; its path is written, never its content")
     parser.add_argument(
@@ -814,30 +1678,54 @@ def main(argv: Optional[Sequence[str]] = None, out: Any = None) -> int:
     )
     parser.add_argument("--uninstall", action="store_true", help="remove what an install added")
     parser.add_argument("--dry-run", action="store_true", help="print every step and write nothing")
-    args = parser.parse_args(argv)
+    return parser
 
+
+def legacy(argv: Sequence[str], out: Any) -> int:
+    args = legacy_parser().parse_args(argv)
+    if not args.endpoint and served_endpoint():
+        args.endpoint = served_endpoint()
+    root, workspace = locate(Path(args.repo))
+    home = threefold_home()
+    if args.uninstall:
+        return uninstall(args, root, home, out, workspace)
+    if not args.project or not PROJECT_PATTERN.match(args.project):
+        # The alias is what the public ledger shows. A real name typed here
+        # would be published by the first tool call.
+        raise InstallError("--project must match ^Acme-[A-Za-z0-9-]{1,40}$, an alias rather than a real name")
+    refuse_home_folder(root)
+    includes = include_globs(args.include)
+    named = Path(args.repo).resolve()
+    if includes and os.path.normcase(str(named)) != os.path.normcase(str(root)):
+        # The globs were written relative to the directory named, and the
+        # hook reads them relative to the one holding .threefold.json.
+        # Written at the top of the checkout instead, they would name other
+        # directories, or none, and nothing would say so.
+        raise InstallError(
+            f"--include globs are relative to the directory given, but {forward(named)} is inside the repository "
+            f"{forward(root)}, and .threefold.json would be written there instead; give --repo {forward(root)} "
+            "with globs relative to it"
+        )
+    return install(args, root, home, out, workspace, includes)
+
+
+def main(argv: Optional[Sequence[str]] = None, out: Any = None) -> int:
+    out = out or sys.stdout
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if not argv or argv[0] in ("-h", "--help", "help"):
+        print(USAGE, file=out, end="")
+        return 0 if argv else 2
     try:
-        root, workspace = locate(Path(args.repo))
-        home = threefold_home()
-        if args.uninstall:
-            return uninstall(args, root, home, out, workspace)
-        if not args.project or not PROJECT_PATTERN.match(args.project):
-            # The alias is what the public ledger shows. A real name typed here
-            # would be published by the first tool call.
-            raise InstallError("--project must match ^Acme-[A-Za-z0-9-]{1,40}$, an alias rather than a real name")
-        includes = include_globs(args.include)
-        named = Path(args.repo).resolve()
-        if includes and os.path.normcase(str(named)) != os.path.normcase(str(root)):
-            # The globs were written relative to the directory named, and the
-            # hook reads them relative to the one holding .threefold.json.
-            # Written at the top of the checkout instead, they would name other
-            # directories, or none, and nothing would say so.
-            raise InstallError(
-                f"--include globs are relative to the directory given, but {forward(named)} is inside the repository "
-                f"{forward(root)}, and .threefold.json would be written there instead; give --repo {forward(root)} "
-                "with globs relative to it"
-            )
-        return install(args, root, home, out, workspace, includes)
+        if argv[0] not in COMMANDS:
+            return legacy(argv, out)
+        args = command_parser().parse_args(argv)
+        if args.command == "connect":
+            return connect(args, out)
+        if args.command == "disconnect":
+            return disconnect(args, out)
+        if args.command == "status":
+            return status(args, out)
+        return open_dashboard(args, out)
     except InstallError as error:
         print(f"threefold: {error}. Nothing was changed.", file=out)
         return 2
