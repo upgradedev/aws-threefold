@@ -524,7 +524,7 @@ def test_connect_reports_the_endpoint_and_mode_the_committed_file_decides(machin
     assert result.code == 0, result.out
     assert header(result.out, "endpoint") == other, result.out
     assert header(result.out, "mode").startswith("observe"), result.out
-    assert header(result.out, "committed"), "the header says the committed file decided these"
+    assert "the tracked .threefold.json decides it" in result.out, "the header says what decided these"
     paired = json.loads((machine.threefold_home / "config.json").read_text(encoding="utf-8"))
     assert stack.endpoint not in json.dumps(paired.get("trusted_endpoints", [])), \
         "an endpoint the hook will not use is not paired with the key file"
@@ -537,7 +537,52 @@ def test_a_committed_file_that_agrees_says_nothing_extra(machine, stack, committ
                  "--endpoint", stack.endpoint, "--mode", "managed", "--no-open")
     assert result.code == 0, result.out
     assert header(result.out, "endpoint") == stack.endpoint
-    assert header(result.out, "committed") == ""
+    assert header(result.out, "in force") == ""
+
+
+def test_a_committed_file_that_sets_no_mode_names_the_default_and_not_the_commit(machine, committed_config) -> None:
+    """The difference here is the hook's own fallback, not anything in the commit.
+
+    connect defaults to managed and the hook falls back to enforce, so a
+    tracked .threefold.json that sets no mode at all made the line fire. It
+    said the commit decided, and the reader went to change a file that says
+    nothing about the mode.
+    """
+    (machine.repo / ".threefold.json").write_text(json.dumps({"project": "Acme-Cloned"}), encoding="utf-8")
+    assert _git(machine.repo, "add", ".threefold.json").returncode == 0
+    assert _git(machine.repo, "commit", "-qm", "configure threefold").returncode == 0
+    result = run(installer, "connect", str(machine.repo), "--agents", "claude-code",
+                 "--endpoint", _closed_endpoint(), "--no-open", "--dry-run")
+    assert result.code == 0, result.out
+    assert header(result.out, "mode").startswith("enforce"), result.out
+    assert "nothing sets it, so the hook's own default applies" in result.out, result.out
+    assert "the tracked .threefold.json decides it" not in result.out, result.out
+
+
+def test_a_variable_in_the_environment_is_named_when_it_is_what_decides(
+    machine, stack, committed_config, monkeypatch
+) -> None:
+    """The environment is read before any file, so it, not the commit, is named."""
+    committed_config()
+    monkeypatch.setenv("THREEFOLD_ENDPOINT", stack.endpoint)
+    monkeypatch.setenv("THREEFOLD_MODE", "observe")
+    result = run(installer, "connect", str(machine.repo), "--agents", "claude-code",
+                 "--endpoint", _closed_endpoint(), "--mode", "enforce", "--no-open")
+    assert result.code == 0, result.out
+    assert header(result.out, "endpoint") == stack.endpoint, result.out
+    assert header(result.out, "mode").startswith("observe"), result.out
+    assert "THREEFOLD_ENDPOINT in the environment decides it" in result.out, result.out
+    assert "THREEFOLD_MODE or THREEFOLD_DRY_RUN in the environment decides it" in result.out, result.out
+    assert "the tracked .threefold.json decides it" not in result.out, result.out
+
+
+def test_a_committed_include_list_is_reported(machine, stack, committed_config) -> None:
+    """The list decides which of a workspace's folders are sent at all, so it is shown."""
+    committed_config(endpoint=stack.endpoint, mode="managed", include=["repos/acme-a/**"])
+    result = run(installer, "connect", str(machine.repo), "--agents", "claude-code",
+                 "--endpoint", stack.endpoint, "--mode", "managed", "--no-open")
+    assert result.code == 0, result.out
+    assert "include: the tracked .threefold.json sends only what matches repos/acme-a/**" in result.out, result.out
 
 
 def test_an_untracked_configuration_still_pairs_the_endpoint_with_its_key_file(machine, stack) -> None:

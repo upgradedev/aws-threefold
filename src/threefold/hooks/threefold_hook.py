@@ -1142,13 +1142,17 @@ def read_config(path: str) -> Dict[str, Any]:
 class Settings:
     """What one call is sent under, and where each part came from. Never holds a key in its repr."""
 
-    __slots__ = ("project", "endpoint", "endpoint_source", "mode", "api_key", "include", "notes")
+    __slots__ = ("project", "endpoint", "endpoint_source", "mode", "mode_source", "api_key", "include", "notes")
 
     def __init__(self) -> None:
         self.project = ""
         self.endpoint = DEFAULT_ENDPOINT
         self.endpoint_source = "default"
         self.mode = "enforce"
+        # Which layer decided the mode: "env", "repo", "home", or "default"
+        # for the fallback below. connect prints it, so that a mode nobody
+        # asked for is explained by what set it rather than by a guess.
+        self.mode_source = "default"
         self.api_key: Optional[str] = None
         # None: every call inside the root may be sent, as before include
         # existed. A list, even an empty one: only calls inside its globs.
@@ -1230,22 +1234,24 @@ def resolve_settings(payload: Dict[str, Any]) -> Settings:
             settings.notes.append(f"the endpoint in {label} is not an http(s) URL and was ignored.")
 
     mode = _env("THREEFOLD_MODE").lower()
+    mode_source = "env" if mode else ""
     if mode and mode not in MODES:
         settings.notes.append(f"THREEFOLD_MODE must be enforce, managed or observe; {mode[:20]!r} was ignored.")
-        mode = ""
+        mode, mode_source = "", ""
     if not mode and _flag("THREEFOLD_DRY_RUN"):
-        mode = "observe"
-    for _, label, document, _ in layers:
+        mode, mode_source = "observe", "env"
+    for source, label, document, _ in layers:
         if mode:
             break
         value = document.get("mode")
         if value is None:
             continue
         if isinstance(value, str) and value.strip().lower() in MODES:
-            mode = value.strip().lower()
+            mode, mode_source = value.strip().lower(), source
         else:
             settings.notes.append(f"the mode in {label} must be enforce, managed or observe, and was ignored.")
     settings.mode = mode or "enforce"
+    settings.mode_source = mode_source or "default"
 
     key: Optional[str] = None
     key_file: Optional[str] = None

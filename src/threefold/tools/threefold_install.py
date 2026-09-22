@@ -1482,6 +1482,31 @@ def resolved_settings(hook: Optional[Any], directory: Path) -> Optional[Any]:
         return None
 
 
+def decided_by(source: str, setting: str) -> str:
+    """Why the hook will use a value the command line did not ask for.
+
+    The hook resolves each setting in one order - the environment, then the
+    repository's .threefold.json, then THREEFOLD_HOME/config.json, then its
+    own default - and reports which layer answered. Naming the layer matters:
+    a committed file is changed with a commit, a variable by unsetting it, and
+    a default by writing the setting down somewhere. A line that named the
+    commit for all three sent people to change the wrong one.
+    """
+    if source == "env":
+        named = "THREEFOLD_ENDPOINT" if setting == "endpoint" else "THREEFOLD_MODE or THREEFOLD_DRY_RUN"
+        return f"{named} in the environment decides it, before any file"
+    if source == "repo":
+        return f"the tracked {CONFIG_FILE} decides it, and a file git tracks is left as it is"
+    if source == "home":
+        return "THREEFOLD_HOME/config.json decides it, because nothing nearer sets it"
+    if source == "default":
+        return (
+            f"nothing sets it, so the hook's own default applies; connect cannot write it into a {CONFIG_FILE} "
+            "git tracks"
+        )
+    return "the hook decides it, not the command line"
+
+
 def installer_command(home: Path) -> str:
     """How to run this installer again: the kept copy for a served one, this file for a checkout."""
     if served_endpoint() and (home / INSTALLER_COPY).is_file():
@@ -1660,19 +1685,26 @@ def connect(args: argparse.Namespace, out: Any) -> int:
     before = resolved_settings(hook, root)
     shown_endpoint = endpoint or (before.endpoint if before is not None else "")
     shown_mode = mode
-    # A .threefold.json the repository committed is left as it is, and the
-    # hook reads it, so it decides where the calls go and in what mode. The
-    # header used to print what the command line asked for instead, which
-    # named a stack the developer's calls never reached.
+    # A .threefold.json the repository committed is left as it is, so what
+    # the hook will send under is not always what the command line asked for.
+    # The header used to print the request, which named a stack the
+    # developer's calls never reached. Printing the hook's own answer is only
+    # half of it: the environment is read before that file and the hook's
+    # fallback after it, so a line that named the commit for either sent the
+    # reader to change a file that had nothing to do with it.
     committed = before is not None and not workspace and is_tracked(root, CONFIG_FILE)
-    differs: List[str] = []
+    in_force: List[str] = []
     if committed:
         if before.endpoint and shown_endpoint and before.endpoint != shown_endpoint:
-            differs.append("endpoint")
+            in_force.append(f"endpoint: {decided_by(getattr(before, 'endpoint_source', ''), 'endpoint')}")
         shown_endpoint = before.endpoint or shown_endpoint
-        if before.mode in MODES and before.mode != mode:
-            differs.append("mode")
-        shown_mode = before.mode if before.mode in MODES else mode
+        if before.mode != mode:
+            in_force.append(f"mode: {decided_by(getattr(before, 'mode_source', ''), 'mode')}")
+        shown_mode = before.mode
+        if before.include:
+            in_force.append(
+                f"include: the tracked {CONFIG_FILE} sends only what matches {', '.join(before.include)}"
+            )
 
     print(f"Threefold connect: {forward(root)}", file=out)
     print(f"  {'folder':<10}  {'a workspace, not a git repository' if workspace else 'a git repository'}", file=out)
@@ -1680,13 +1712,10 @@ def connect(args: argparse.Namespace, out: Any) -> int:
     print(f"  {'mode':<10}  {shown_mode}: {mode_line(shown_mode)}", file=out)
     print(f"  {'agents':<10}  {agent_line}", file=out)
     print(f"  {'endpoint':<10}  {shown_endpoint or 'the hook default'}", file=out)
-    if differs:
-        named = " and ".join(differs)
-        print(
-            f"  {'committed':<10}  the tracked {CONFIG_FILE} decides the {named} here, so the {named} above is its; "
-            f"what the command line asked for differs from it and is not what the hook will use",
-            file=out,
-        )
+    label = "in force"
+    for line in in_force:
+        print(f"  {label:<10}  {line}", file=out)
+        label = ""
     if kept:
         print(f"  {'kept':<10}  the {', '.join(kept)} already in .threefold.json; pass them to change them", file=out)
     print("", file=out)
