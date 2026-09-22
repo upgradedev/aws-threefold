@@ -1,115 +1,189 @@
-# Taming Autonomous Coding Agents: How We Built Threefold with Amazon Bedrock and AWS Serverless
+# Refuse the edit, not the pull request: governing coding agents on AWS with deterministic gates and Amazon Bedrock
 
-**Published for:** AWS Builder Center  
-**Hackathon:** AWS Zero to Shipped 2026  
-**Category:** `#workplace-efficiency` · **Lane:** `#community`  
-**GitHub Repository:** `https://github.com/upgradedev/threefold-aws`
+**For:** AWS Builder Center
+**Hackathon:** AWS Zero to Shipped 2026 · **Category:** `#workplace-efficiency` · **Lane:** `#community`
+**Try it, no account:** <https://d1og72wpk4aqig.cloudfront.net/dashboard.html#/try>
 
----
-
-## Introduction: The Hidden Risk of Autonomous Coding Agents
-
-In 2026, AI coding agents are no longer just completion tools—they are autonomous workers executing terminal commands, editing multi-file codebases, and orchestrating complex deployments. Using foundation models on Amazon Bedrock, agents can solve difficult engineering problems in minutes.
-
-However, as software teams scale autonomous agent usage, engineering managers and developers face two dangerous failure modes:
-
-1. **The Infinite Thrashing Loop:** When an agent encounters a broken test or syntax error, it can enter a recursive edit-test loop, repeating the same tool actions and burning hundreds of thousands of tokens (and hundreds of cloud dollars) before a developer notices.
-2. **Architectural Drift & Secret Ingestion:** Agents lack intrinsic awareness of enterprise boundaries. They will casually inspect `.env` files, read AWS credentials into prompt contexts, or introduce forbidden infrastructure packages into clean domain models.
-
-To solve this, we built **Threefold**: an autonomous governance proxy, real-time cost circuit-breaker, and architectural compliance sidecar powered by **Amazon Bedrock** and **AWS Serverless**.
+A claim about the live stacks is tagged **[PRIMARY, 2026-09-22]** when it was
+checked that day with a read-only request or an AWS `describe`/`get`/`list`
+call, and **[STATE-FILE]** when it is taken from the project's state ledger
+and was not re-measured for this article.
 
 ---
 
-## The Core Philosophy: "Deterministic Code Trips the Breaker; Bedrock Explains Why"
+## The moment that matters
 
-When building guardrails for autonomous agents, a common mistake is using another prompt to check the first prompt. LLM-based guardrails suffer from non-zero latency, non-deterministic outputs, and token costs of their own.
+A coding agent asked to archive orders to S3 can take the shortest path:
+`import boto3` in the domain entity, because that makes the test pass. Every
+architecture check most teams run (import linters, architecture tests) would
+flag it, in CI, after the agent has moved on to the next file and built on top
+of the mistake.
 
-Threefold adopts an **air-gapped hybrid architecture**:
-1. **Deterministic perimeter:** every agent tool call is intercepted by standard-library Python running four checks, with no model on the critical path:
-   - *Secret Scanner:* Blocks AWS Access Keys (`AKIA...`), GitHub tokens, and private keys at the argument boundary.
-   - *Boundary Guard:* Prohibits reading `.env` files or importing outer-layer dependencies into pure domain code.
-   - *Loop & Thrashing Detector:* Hashes tool calls into N-gram signatures to detect monomorphic loops ($\ge 3$ identical calls) or ping-pong thrashing.
-   - *Cost Circuit Breaker:* Calculates exact USD spend using tiered model pricing ($3/M in, $15/M out) and trips the breaker if budget ceilings are breached.
-2. **Cognitive Explanation (Amazon Bedrock):** When actions are approved or blocked, **Claude Haiku 4.5 via the Bedrock Converse API** analyzes the architectural trade-offs, providing clear, human-readable explanations to the engineering lead.
+There is exactly one moment when that edit can still be refused cheaply: when
+the agent asks to make it. Claude Code, Codex and Antigravity all let a hook
+see a tool call before it runs and deny it. Threefold is a hook and a small
+service on AWS that uses that moment.
+
+## Deterministic code decides, Bedrock explains
+
+The first design rule was that no model sits between an agent and its verdict.
+A verdict has to be the same for the same call, fast enough to sit in front of
+every edit, free to repeat, and immune to what the call itself says. A model
+is none of those, and it would be reading text an agent wrote, which is where
+a prompt injection would live.
+
+So the gates are standard-library Python:
+
+- **Layering rules**, per project, that an architect writes as three things:
+  which paths a rule covers, what they may not depend on, and what is allowed
+  anyway. Imports are read from each file's own statements in Python, Java, C#
+  and TypeScript, so `from boto3 import client` is caught as surely as
+  `import boto3`, and a commented-out import is not.
+- **Credentials**, ten shapes at any depth of the arguments.
+- **Protected paths**: the agents' own hook settings, `.git/hooks`,
+  `git commit --no-verify`, and every other way to switch the hooks off.
+- **Every shell route to a write.** Refuse an agent's `Write` and it may reach
+  for `cat > file <<'EOF'`. The service reads a command for the writes it makes
+  (redirections, heredocs, `sed -i`, `cp`, `git apply` and more) and judges
+  readable content exactly like a `Write`.
+- **Loops**: any repeating cycle of byte-identical calls, up to period six. A
+  repeated `git status` or `gh run view` is noted and never refused, and a
+  hook's loop refuses the repeating call without halting the developer's
+  session.
+- **Spend**: a ceiling on the tokens a caller declares, which bounds honest
+  overruns rather than an adversary.
+
+Amazon Bedrock has two jobs, both after the fact. When a person is reading a
+page, Claude Haiku 4.5, through the `eu.` cross-region inference profile and
+the Converse API, phrases a refusal in a sentence; the prompt tells it the gate
+has already decided and never to contradict it, and every response carries
+`explanation_source` so a reader knows whether a model or the code wrote the
+sentence. A hook always sends `explain: false`, so a real agent's verdict never
+waits on a model. And on the rules page, Bedrock drafts a layering rule from an
+architect's sentence, which is then treated as untrusted: parsed, validated like
+a save, set to observe, and tried on example files. Nothing is saved without an
+operator.
+
+## A refusal that says what to do instead
+
+A deny that only says no sends the agent back to guess, and its next guess
+can be the same call spelled differently. So a refusal carries a fix when one
+fits: the file rewritten through a port and an adapter, or an environment
+lookup in place of a literal credential. A fix that would itself be refused is
+worse than none, so every write it proposes is run back through the same gates
+with the same rules before it is offered, and the response says whether all of
+them passed. The hook appends the fix's one-line summary to the deny reason.
+No model writes the fix.
+
+## Rolling a rule out without breaking every team at once
+
+A rule switched on everywhere at once is a rule that gets uninstalled on its
+first false alarm. So every connected project starts in **Observe**: calls are
+judged and recorded, and no rule refuses anything. A credential is still
+refused by the hook on the developer's own machine, and so is a request the
+service cannot take at all, such as a body over 1 MB, since the hook reads any
+4xx answer other than 429 as a refusal. The dashboard shows what each rule
+*would* have refused. An operator marks each of those correct or a false alarm,
+and each rule reads its state from the labels: **Ready** when everything it
+flagged was correct, **Quiet** when it flagged nothing, **Noisy** after a false
+alarm. **Promote** moves the project to Enforce with the rules that earned it,
+and the others keep observing. **Demote** is one click.
+
+Connecting a repository is one command, copied from the dashboard:
+
+```bash
+curl -fsSL https://d1og72wpk4aqig.cloudfront.net/install.py -o threefold.py && python3 threefold.py connect --project Acme-Billing
+```
+
+The stack serves `install.py` with its own address written in. It downloads the
+hook and the pre-commit check, keeps a file only when its SHA-256 matches the
+stack's manifest, registers the hook for the agents it finds, lists everything
+it wrote in `.git/info/exclude`, sends one harmless call, and opens the project
+page. An operator of a private stack signs in with `threefold.py open`, which
+trades the key in a local file for a single-use link, so no key is ever pasted
+into a browser.
+
+## What runs on AWS
 
 ```
- ┌──────────────────────┐          ┌──────────────────────┐          ┌──────────────────────┐
- │ Autonomous Coding    │          │ Deterministic Safety │          │ Amazon Bedrock       │
- │ Agent (Tool Call)    │─────────►│ Gatekeeper (no model)│─────────►│ (Claude Haiku 4.5)   │
- └──────────────────────┘          └──────────┬───────────┘          └──────────┬───────────┘
-                                              │                                 │
-                                      Evaluates Secrets,               Synthesizes Plain-
-                                      Loops, Budgets & Arch            Language Architecture
-                                              │                               Review
-                                              ▼                                 │
-                                   ┌──────────────────────┐                     ▼
-                                   │  Circuit Breaker     │          ┌──────────────────────┐
-                                   │  (Tripped or Safe)   │          │ SHA-256 Fingerprint  │
-                                   └──────────────────────┘          │ for CI/CD Gates      │
-                                                                     └──────────────────────┘
+agent ─► hook (local checks) ─┐
+browser ─────────────────────►├─► CloudFront + AWS WAF (us-east-1)
+                              │     ├─► S3, private, origin access control: the pages
+                              │     └─► API Gateway HTTP API (eu-west-1)
+                              │           └─► one Lambda, Python 3.11 on arm64
+                              │                 ├─► DynamoDB, one table
+                              │                 ├─► Bedrock, Claude Haiku 4.5
+                              │                 └─► CloudWatch: EMF, 10 alarms, X-Ray
 ```
 
----
+Checked on the live stacks **[PRIMARY, 2026-09-22]**: the web ACL is attached
+to the deployed distribution (`aws cloudfront list-distributions`), the ten
+alarms exist and were all `OK` (`aws cloudwatch describe-alarms`),
+point-in-time recovery is `ENABLED` on the table
+(`aws dynamodb describe-continuous-backups`), and the function runs with a
+reserved concurrency of 25 (`aws lambda get-function-concurrency`).
 
-## Technical Highlights
+- **One Lambda function** answers every route, so the page's "try it" and a
+  hook's verdict run the same code. The price: page reads and verdicts share one
+  reserved concurrency of 25 [PRIMARY, 2026-09-22: `get-function-concurrency`],
+  and nothing keeps them apart. API Gateway's throttle (100 requests a second,
+  burst 200) applies to each route separately, and the edge limits each
+  address; both bound a flood, and neither stops dashboard loads from crowding
+  out verdicts.
+- **One DynamoDB table** holds sessions, the decision ledger by day, daily
+  rollups written with `ADD` so charts stay exact however busy the ledger is,
+  rules, project stages and sign-in records (stored only as hashes). All of it
+  is read by key except the sessions listing, a bounded scan; TTLs expire it and
+  point-in-time recovery backs it up.
+- **CloudFront** serves the pages from a private bucket and sends the API paths
+  to the function with a secret origin header, so the function believes the
+  viewer's address and host only from the edge. That fixed two real problems:
+  every viewer of one edge server shared one rate-limit bucket, and an
+  installer fetched from the edge pointed its hook past the firewall. Fetched
+  from the edge, `install.py` now names the edge; fetched from the API URL, it
+  names the API URL **[PRIMARY, 2026-09-22]**. The secret is not
+  authentication; the API's own URL stays public.
+- **The hook fails open.** If the service cannot answer, the agent's own
+  permissions decide, because a governance outage that stopped every developer
+  would end the rollout. `THREEFOLD_FAIL_CLOSED=1` flips that.
 
-### 1. Amazon Bedrock Converse API Integration
-We integrated the Bedrock Converse API to deliver high-level architectural assessments of agent actions. By isolating the LLM from direct hardware actuation, we ensure the agent can never bypass its own governance rules.
+## What was measured, and what was not
 
-```python
-# Extract from src/threefold/infrastructure/bedrock_client.py
-response = bedrock_runtime.converse(
-    modelId="eu.anthropic.claude-haiku-4-5-20251001-v1:0",
-    messages=[{"role": "user", "content": [{"text": user_content}]}],
-    system=[{"text": "You are Threefold, an autonomous software governance agent..."}],
-    inferenceConfig={"maxTokens": 256, "temperature": 0.2}
-)
-```
+- **Does a deny stop the write?** Measured per agent on the file system on
+  2026-09-21: in Claude Code 2.1.220 and the Antigravity desktop app the
+  refused file was not created. Codex was not measured, so nothing is claimed
+  for it **[STATE-FILE]**, `docs/evidence/ENFORCEMENT_2026-09-21.md`.
+- **Does the live stack do what the documents say?** A probe script checked the
+  public stack claim by claim on 2026-09-22, at its API Gateway URL: 113 PASS,
+  0 FAIL, 3 SKIP **[PRIMARY, 2026-09-22]**, `docs/evidence/PROBES_2026-09-22.md`.
+  No probe of the CloudFront URL has been committed yet.
+- **Does Threefold change what an agent does?** Not measured yet. A benchmark
+  harness runs an agent on six synthetic tasks, each tempting a governed
+  violation, with no guidance, with the rules in `CLAUDE.md`, and with
+  Threefold enforcing, and grades the result with an independent checker. Only
+  a pilot has run, and its agent never reached the model, so there is no number
+  to report (`docs/evidence/BENCHMARK_2026-09-22-PILOT.md`). The headline will
+  be computed by the harness's report script, `benchmark/report.py`, from the
+  full matrix.
+- **The certificate** Threefold issues is an unkeyed SHA-256 fingerprint over
+  verdicts the caller supplies. It detects corruption, not an adversary, and
+  nothing requires one before a merge **[STATE-FILE]**.
 
-### 2. ARM64 Graviton2 Serverless Architecture
-Threefold runs on **AWS Lambda** (arm64) behind an **Amazon API Gateway HTTP API**. The deterministic gates hold no model call, so a blocked call never waits on Bedrock; only the explanation for an allowed call does. Neither cold start nor gate latency has been measured, so neither is quoted here.
+## Takeaways
 
-### 3. Cryptographic Governance Certificates
-When a coding agent completes a compliant task, Threefold issues a **Governance Certificate** with a 64-character SHA-256 fingerprint.
+1. **Put hard limits in deterministic code** and give the model the jobs it is
+   good at: explaining to a person, and proposing drafts a deterministic check
+   then validates.
+2. **Make every rule earn its enforcement.** Observe, label, promote, and demote
+   in one click.
+3. **Give the agent a fix, and check the fix with the same gate.**
+4. **Measure the enforcement per agent.** A hook's deny is a request, and
+   whether an agent honours it is an empirical question.
 
-The fingerprint is an unkeyed SHA-256 of the payload. It detects accidental corruption and casual edits, and it is not tamper-evidence against an adversary: anyone who changes the payload can recompute the hash. Making it real means signing with KMS and shipping a verifier that checks the signature, which is not done.
+## Try it
 
-The record looks like this:
-```json
-{
-  "certificate_id": "CERT-TF-9F4B18A72C3D",
-  "session_id": "session-compliant-01",
-  "verdict_status": "COMPLIANT_APPROVED",
-  "total_cost_usd": 0.0384,
-  "all_passed": true,
-  "sha256_fingerprint": "e58b5f39c2d1b82736e4f3a1d95018b26182c0b471928374a56b2c81928374fa"
-}
-```
-Nothing verifies this certificate yet. Making a CI check refuse a pull request whose session has no valid certificate is the next piece of work, and it is the part that would make the certificate load-bearing rather than decorative.
-
----
-
-## The 4 Guided User Journeys (Try It Live)
-
-Open [`src/threefold/web/index.html`](../src/threefold/web/index.html) or open <https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/>:
-
-1. **Journey 1 · Runaway Tool Loop:** Watch the simulator fire 3 identical tool calls. On iteration 3, the circuit breaker instantly trips with a red visual alert, freezing the session and preserving your budget.
-2. **Journey 2 · Secret Leakage Intercept:** Simulate an agent passing an AWS Access Key (`AKIAIOSFODNN7EXAMPLE`) in a command argument. Blocked instantly at the perimeter before leaving the machine.
-3. **Journey 3 · Clean Architecture Guard:** Simulate an agent attempting to inject `import boto3` into a domain aggregate. Blocked with a dependency inversion error.
-4. **Journey 4 · Compliant Execution & Certificate:** Run 4 safe development operations. Review Bedrock's architectural commentary and export the certificate to JSON.
-
----
-
-## Key Takeaways for AWS Builders
-
-1. **Hard limits belong in deterministic code:** Do not rely on prompt engineering to enforce financial or security boundaries. Hard circuit breakers must be deterministic.
-2. **Agent governance enables autonomy:** Rather than restricting developers from using coding agents, automated governance gives teams the confidence to grant agents more autonomy while ensuring safety.
-3. **Serverless is the ideal governance layer:** Threefold costs **$0.00/month** when developers are offline, scaling instantly to govern thousands of concurrent agent tool calls during peak development hours.
-
----
-
-## Experience Threefold
-
-- **Repository:** [`github.com/upgradedev/threefold-aws`](https://github.com/upgradedev/threefold-aws)
-- **Hermetic Test Suite:** 65 tests passing in under a second (`python -m pytest repos/threefold/tests -v`).
-- **Interactive Live Dashboard:** Open `src/threefold/web/index.html` in any browser. Zero installation required.
+- The two-stage rollout on a sandbox project of your own, in about a minute:
+  <https://d1og72wpk4aqig.cloudfront.net/dashboard.html#/try>
+- The demo, where the third identical call halts the session:
+  <https://d1og72wpk4aqig.cloudfront.net/>
+- The operations dashboard: <https://d1og72wpk4aqig.cloudfront.net/dashboard.html#/overview>
