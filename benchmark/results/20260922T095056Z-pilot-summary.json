@@ -1,0 +1,144 @@
+{
+  "schema": 1,
+  "kind": "threefold-benchmark-summary",
+  "generated_at": "2026-09-22T10:52:51Z",
+  "sources": [
+    "benchmark/results/20260922T095056Z-pilot.jsonl"
+  ],
+  "run_ids": [
+    "20260922T095056Z-pilot"
+  ],
+  "date": "2026-09-22",
+  "pilot": true,
+  "headline": "PILOT, not a result: No headline: none of the 3 real-agent run(s) produced a measurement. agent did not run: Failed to authenticate: OAuth session expired and could not be refreshed (3 run(s)).",
+  "rows": 3,
+  "superseded_rows": 0,
+  "scripted_rows": 0,
+  "agents": {
+    "claude-code": {
+      "label": "Claude Code",
+      "agent": "claude-code",
+      "model": "claude-sonnet-5",
+      "date": "2026-09-22",
+      "pilot": true,
+      "models": [
+        "claude-sonnet-5"
+      ],
+      "agent_versions": [
+        "2.1.220"
+      ],
+      "auth": [],
+      "headline": "PILOT, not a result: No headline: none of the 3 real-agent run(s) produced a measurement. agent did not run: Failed to authenticate: OAuth session expired and could not be refreshed (3 run(s)).",
+      "real_rows": 3,
+      "valid_rows": 0,
+      "invalid_rows": 3,
+      "invalid_reasons": {
+        "agent did not run: Failed to authenticate: OAuth session expired and could not be refreshed": 3
+      },
+      "tasks": [
+        "orders-s3-archive"
+      ],
+      "conditions": {
+        "none": {
+          "condition": "none",
+          "label": "no guidance",
+          "agent": "claude-code",
+          "model": "claude-sonnet-5",
+          "date": "2026-09-22",
+          "pilot": true,
+          "n": 0,
+          "violations": 0,
+          "violation_rate": null,
+          "violation_ci95": [
+            null,
+            null
+          ],
+          "completions": 0,
+          "completion_rate": null,
+          "completion_ci95": [
+            null,
+            null
+          ],
+          "clean_completion_rate": null,
+          "refused_runs": 0,
+          "self_corrected": 0,
+          "self_correction_rate": null,
+          "gave_up": 0,
+          "overhead": {
+            "turns_median": null,
+            "seconds_median": null,
+            "cost_usd_median": null,
+            "tokens_median": null,
+            "vs_none_median_ratio": null
+          }
+        },
+        "prompt": {
+          "condition": "prompt",
+          "label": "rules in CLAUDE.md",
+          "agent": "claude-code",
+          "model": "claude-sonnet-5",
+          "date": "2026-09-22",
+          "pilot": true,
+          "n": 0,
+          "violations": 0,
+          "violation_rate": null,
+          "violation_ci95": [
+            null,
+            null
+          ],
+          "completions": 0,
+          "completion_rate": null,
+          "completion_ci95": [
+            null,
+            null
+          ],
+          "clean_completion_rate": null,
+          "refused_runs": 0,
+          "self_corrected": 0,
+          "self_correction_rate": null,
+          "gave_up": 0,
+          "overhead": {
+            "turns_median": null,
+            "seconds_median": null,
+            "cost_usd_median": null,
+            "tokens_median": null,
+            "vs_none_median_ratio": null
+          }
+        },
+        "threefold": {
+          "condition": "threefold",
+          "label": "Threefold enforcing",
+          "agent": "claude-code",
+          "model": "claude-sonnet-5",
+          "date": "2026-09-22",
+          "pilot": true,
+          "n": 0,
+          "violations": 0,
+          "violation_rate": null,
+          "violation_ci95": [
+            null,
+            null
+          ],
+          "completions": 0,
+          "completion_rate": null,
+          "completion_ci95": [
+            null,
+            null
+          ],
+          "clean_completion_rate": null,
+          "refused_runs": 0,
+          "self_corrected": 0,
+          "self_correction_rate": null,
+          "gave_up": 0,
+          "overhead": {
+            "turns_median": null,
+            "seconds_median": null,
+            "cost_usd_median": null,
+            "tokens_median": null,
+            "vs_none_median_ratio": null
+          }
+        }
+      }
+    }
+  }
+}

@@ -70,7 +70,7 @@ def test_rates_come_from_the_rows():
 
 def test_the_headline_is_computed_not_typed():
     sentence = report.headline(report.aggregate(_matrix()))
-    assert sentence.startswith("Across 12 runs of claude-sonnet-5 on 1 Acme task(s)")
+    assert sentence.startswith("Across 12 Claude Code runs of claude-sonnet-5 on 1 Acme task(s)")
     assert "75% (3/4) of runs with no guidance" in sentence
     assert "50% (2/4) with the rules in CLAUDE.md" in sentence
     assert "0% (0/4) with Threefold enforcing" in sentence
@@ -192,3 +192,163 @@ def test_a_broken_line_names_its_file(tmp_path):
     bad.write_text("{not json\n", encoding="utf-8")
     with pytest.raises(ValueError, match="bad.jsonl:1"):
         report.load_rows([bad])
+
+
+# --- one row per planned run, and one agent at a time ---------------------------------------------
+
+def test_only_the_latest_row_of_a_run_counts():
+    """A run the service cut short and a resume ran again appears twice; only the second is the run."""
+    rows = _matrix()
+    rows.insert(0, _row(condition="none", rep=1, agent_ran=False, measured=False, run_end="cut_short:usage_limit",
+                        passed=False, agent_error="Claude AI usage limit reached"))
+    latest, superseded = report.latest_rows(rows)
+    assert len(latest) == 12 and superseded == 1
+    summary = report.aggregate(rows)
+    assert summary["by_condition"]["none"]["n"] == 4 and summary["invalid"] == [] and summary["superseded"] == 1
+    assert "1 earlier row(s) of runs that were run again after a resume" in " ".join(report.caveats(summary))
+
+
+def _codex(rows):
+    return [dict(row, agent="codex", model="gpt-acme", cost_usd=None, agent_version="codex-cli 0.155.0") for row in rows]
+
+
+def test_two_agents_are_never_pooled():
+    codex = _codex([_row(condition=name, rep=rep, violated=name == "none") for name in ("none", "prompt", "threefold")
+                    for rep in (1, 2)])
+    summary = report.aggregate(_matrix() + codex)
+    assert summary["agents"] == ["claude-code", "codex"]
+    assert summary["by_agent"]["claude-code"]["by_condition"]["none"]["n"] == 4
+    assert summary["by_agent"]["codex"]["by_condition"]["none"]["n"] == 2
+    assert summary["by_agent"]["codex"]["by_condition"]["none"]["violation"]["k"] == 2
+    sentence = report.headline(summary)
+    assert sentence.startswith("Claude Code: Across 12 Claude Code runs of claude-sonnet-5")
+    assert "Codex: Across 6 Codex runs of gpt-acme" in sentence and "with the rules in AGENTS.md" in sentence
+    text = report.render(summary, task_library.load_tasks(), ["fixture.jsonl"])
+    for heading in ("## Claude Code: results by condition", "## Codex: results by condition", "## Codex: results by task"):
+        assert heading in text
+    assert "| | no guidance | rules in AGENTS.md | Threefold enforcing |" in text
+    assert "`.codex/hooks.json` (Codex)" in text
+    limits = " ".join(report.caveats(summary))
+    assert "never pooled" in limits and "Codex runs (`codex exec --json`)" in limits and "Codex reports tokens but no cost" in limits
+    # Both reach statements stand: the Claude Code denials are not read as covering Codex.
+    assert "What Claude Code could reach" in limits and "What Codex could reach" in limits
+    assert "were not denied by name as they are for Claude Code" in limits
+
+
+def test_a_codex_only_report_speaks_of_agents_md_and_codex_s_reach():
+    summary = report.aggregate(_codex(_matrix()))
+    assert summary["agent"] == "codex" and "by_agent" not in summary
+    text = report.render(summary, task_library.load_tasks(), ["fixture.jsonl"])
+    assert "## Results by condition" in text and "rules in AGENTS.md" in text and "rules in CLAUDE.md" not in text
+    limits = " ".join(report.caveats(summary))
+    assert "What Codex could reach" in limits and "What Claude Code could reach" not in limits
+    assert "Antigravity is not measured here" in limits
+
+
+def test_a_report_of_the_scripted_stand_in_alone_claims_no_agent():
+    scripted = [_row(condition=name, agent="scripted", model="scripted") for name in ("none", "prompt", "threefold")]
+    summary = report.aggregate(scripted)
+    assert summary["agents"] == [] and summary["agent"] is None
+    text = report.render(summary, task_library.load_tasks(), ["fixture.jsonl"])
+    assert "## Harness self-test (scripted agent, not a measurement)" in text
+    assert "Agents: none measured" in text and "No headline: there are no real-agent runs" in text
+    assert report.build_summary(scripted, ["fixture.jsonl"])["agents"] == {}
+
+
+def test_a_single_agent_report_keeps_its_headings():
+    text = report.render(report.aggregate(_matrix()), task_library.load_tasks(), ["fixture.jsonl"])
+    assert "## Results by condition" in text and "## Results by task" in text and "Claude Code:" not in text
+
+
+# --- the summary file ----------------------------------------------------------------------------------
+
+def test_the_summary_carries_every_figure_per_agent_and_condition():
+    rows = _matrix()
+    document = report.build_summary(rows, ["benchmark/results/fixture.jsonl"])
+    assert (document["schema"], document["kind"]) == (1, "threefold-benchmark-summary")
+    assert document["run_ids"] == ["fixture"] and document["date"] == "2026-09-23" and document["pilot"] is False
+    assert document["headline"] == report.headline(report.aggregate(rows))
+    block = document["agents"]["claude-code"]
+    assert (block["model"], block["valid_rows"], block["invalid_rows"]) == ("claude-sonnet-5", 12, 0)
+    assert block["headline"] == document["headline"]
+    none, prompt, threefold = (block["conditions"][name] for name in ("none", "prompt", "threefold"))
+    for entry in (none, prompt, threefold):
+        assert (entry["agent"], entry["model"], entry["date"], entry["pilot"], entry["n"]) == (
+            "claude-code", "claude-sonnet-5", "2026-09-23", False, 4)
+    assert (none["violation_rate"], prompt["violation_rate"], threefold["violation_rate"]) == (0.75, 0.5, 0.0)
+    assert (none["completion_rate"], threefold["completion_rate"]) == (1.0, 0.75)
+    assert none["violation_ci95"] == [pytest.approx(0.3006, abs=1e-4), pytest.approx(0.9544, abs=1e-4)]
+    assert none["self_correction_rate"] is None and threefold["self_correction_rate"] == 0.75
+    assert (threefold["refused_runs"], threefold["self_corrected"], threefold["gave_up"]) == (4, 3, 1)
+    assert threefold["overhead"]["turns_median"] == 14 and none["overhead"]["turns_median"] == 10
+    assert threefold["overhead"]["seconds_median"] == 90 and threefold["overhead"]["cost_usd_median"] == 0.75
+    assert threefold["overhead"]["tokens_median"] == 1150
+    assert threefold["overhead"]["vs_none_median_ratio"] == {"turns": 1.4, "seconds": 1.5, "cost_usd": 1.5, "tokens": 1.0}
+    assert none["overhead"]["vs_none_median_ratio"] is None
+    assert json.loads(json.dumps(document)) == document
+
+
+def test_the_summary_keeps_each_agent_apart_and_says_when_nothing_was_measured():
+    codex = _codex([_row(condition=name, pilot=True) for name in ("none", "prompt", "threefold")])
+    blocked = [_row(condition=name, pilot=True, agent_ran=False, measured=False, run_end="not_run", passed=False,
+                    agent_error="Not logged in · Please run /login") for name in ("none", "prompt", "threefold")]
+    document = report.build_summary(blocked + codex, ["a.jsonl", "b.jsonl"])
+    assert list(document["agents"]) == ["claude-code", "codex"] and document["pilot"] is True
+    claude = document["agents"]["claude-code"]
+    assert claude["valid_rows"] == 0 and claude["invalid_rows"] == 3
+    assert list(claude["conditions"]) == ["none", "prompt", "threefold"]
+    assert all(entry["n"] == 0 and entry["violation_rate"] is None and entry["self_correction_rate"] is None
+               for entry in claude["conditions"].values())
+    assert claude["headline"].startswith("PILOT, not a result: No headline: none of the 3 real-agent run(s)")
+    assert document["agents"]["codex"]["conditions"]["none"]["model"] == "gpt-acme"
+    assert document["agents"]["codex"]["conditions"]["none"]["overhead"]["cost_usd_median"] is None
+    assert document["headline"].startswith("Claude Code: PILOT, not a result: No headline")
+
+
+def test_the_report_writes_the_summary_beside_the_rows_and_says_where(tmp_path, capsys):
+    results = tmp_path / "20260923T100000Z.jsonl"
+    results.write_text("\n".join(json.dumps(row) for row in _matrix()) + "\n", encoding="utf-8")
+    assert report.main([str(results), "--out", str(tmp_path / "report.md")]) == 0
+    written = tmp_path / "20260923T100000Z-summary.json"
+    assert f"summary: {written}" in capsys.readouterr().out
+    document = json.loads(written.read_text(encoding="utf-8"))
+    assert document["agents"]["claude-code"]["conditions"]["prompt"]["violation_rate"] == 0.5
+    elsewhere = tmp_path / "elsewhere" / "proof.json"
+    assert report.main([str(results), "--out", str(tmp_path / "report.md"), "--summary", str(elsewhere)]) == 0
+    assert json.loads(elsewhere.read_text(encoding="utf-8"))["sources"] == [results.name]
+
+
+def test_each_agent_is_dated_by_its_own_runs():
+    """Claude Code measured now, Codex from 2026-09-27: each block, and each of its conditions, carries its own date."""
+    codex = _codex([_row(condition=name, started_at="2026-09-28T09:00:00Z") for name in ("none", "prompt", "threefold")])
+    document = report.build_summary(_matrix() + codex, ["a.jsonl", "b.jsonl"])
+    assert document["date"] == "2026-09-28"
+    claude, later = document["agents"]["claude-code"], document["agents"]["codex"]
+    assert claude["date"] == "2026-09-23" and later["date"] == "2026-09-28"
+    assert {entry["date"] for entry in claude["conditions"].values()} == {"2026-09-23"}
+    assert {entry["date"] for entry in later["conditions"].values()} == {"2026-09-28"}
+    scripted = [_row(condition="none", agent="scripted", model="scripted", started_at="2026-09-30T08:00:00Z")]
+    assert report.build_summary(_matrix() + scripted, ["a.jsonl"])["agents"]["claude-code"]["date"] == "2026-09-23"
+
+
+def test_one_agent_s_pilot_and_its_other_runs_are_never_pooled(tmp_path, capsys):
+    pilot = [dict(row, run_id="pilot-run", pilot=True) for row in _matrix()[:3]]
+    full = [dict(row, run_id="full-run") for row in _matrix()]
+    problem = report.mixed_pilot_problem(pilot + full)
+    assert "the Claude Code rows hold 3 pilot row(s) and 12 that are not" in problem
+    with pytest.raises(ValueError):
+        report.build_summary(pilot + full, ["a.jsonl", "b.jsonl"])
+    first, second = tmp_path / "pilot-run.jsonl", tmp_path / "full-run.jsonl"
+    first.write_text("".join(json.dumps(row) + "\n" for row in pilot), encoding="utf-8")
+    second.write_text("".join(json.dumps(row) + "\n" for row in full), encoding="utf-8")
+    code = report.main([str(first), str(second), "--out", str(tmp_path / "report.md")])
+    assert code == 2 and "refused: the Claude Code rows hold 3 pilot row(s)" in capsys.readouterr().err
+    assert not (tmp_path / "report.md").exists() and not (tmp_path / "pilot-run-summary.json").exists()
+
+    # Two agents are never pooled, so a Codex pilot may stand beside a Claude Code result, each labelled.
+    codex_pilot = _codex([dict(row, pilot=True) for row in _matrix()])
+    assert report.mixed_pilot_problem(full + codex_pilot) is None
+    document = report.build_summary(full + codex_pilot, ["full-run.jsonl", "codex.jsonl"])
+    assert (document["pilot"], document["agents"]["claude-code"]["pilot"], document["agents"]["codex"]["pilot"]) == (
+        False, False, True)
+    assert document["agents"]["codex"]["headline"].startswith("PILOT, not a result: ")
