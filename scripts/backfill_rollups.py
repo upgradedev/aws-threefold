@@ -19,6 +19,14 @@ written, and a row claimed by an earlier run of this script is skipped. A run
 interrupted between the claim and the add under-counts that one row rather
 than counting any row twice, and says how many it claimed.
 
+Each row is filed under the label the recording path would file it under, not
+under the name stored on it: a row written before labelling existed keeps
+whatever its caller sent, and a rollup under that name is one no read ever asks
+for. The label comes from `ALLOWED_PROJECT_PATTERN`, the same variable the
+function reads, so a stack deployed with its own `AllowedProjectPattern` is
+backfilled with that pattern set in the environment; the run prints the pattern
+it used.
+
 Reads the stack's table name from CloudFormation when given `--stack`. Uses the
 caller's AWS credentials; prints counts only, never row contents.
 """
@@ -37,6 +45,7 @@ SRC = Path(__file__).resolve().parents[1] / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
+from threefold.application.labels import allowed_project_pattern, project_label  # noqa: E402
 from threefold.application.rule_keys import rule_key  # noqa: E402
 from threefold.infrastructure.dynamo_repo import (  # noqa: E402
     DECISION_PARTITION,
@@ -69,11 +78,20 @@ def as_decision(item: Dict[str, Any]) -> Dict[str, Any]:
     The stage a row was judged under is what the read path says of old rows:
     observe for a dry run, enforce otherwise. The key is derived by the same
     function that gives an old row its key on the way out to a reader.
+
+    The project is labelled by the same function the recording path labels it
+    with, because the label is what the rollup is filed under. A row written
+    before labelling existed keeps whatever name its caller sent, and filed
+    under that name its counts sat in a rollup no read ever asks for: the
+    unfiltered overview relabels every rollup it reads, so the call showed up
+    under 'unlabelled' there, while a read filtered to 'unlabelled' fetches
+    that one item by name and never saw it. One project then read fewer calls
+    filtered than unfiltered, and fewer than the ledger listed.
     """
     return {
         "timestamp": str(item.get("timestamp") or ""),
         "status": item.get("status", ""),
-        "project_name": item.get("project_name") or "unlabelled",
+        "project_name": project_label(item.get("project_name")),
         "agent": item.get("agent") or "unknown",
         "origin": item.get("origin") or "unknown",
         "stage": item.get("stage") or ("observe" if item.get("dry_run") else "enforce"),
@@ -158,6 +176,10 @@ def main(argv: Optional[Sequence[str]] = None, out: Any = None) -> int:
         print("could not reach DynamoDB with these credentials", file=out)
         return 2
     days = max(1, min(args.days, 31))
+    # Printed, because a stack whose AllowedProjectPattern is not the default
+    # is backfilled correctly only when the same pattern is in the environment,
+    # and a run that used the wrong one should say so in its own output.
+    print(f"labelling projects with {allowed_project_pattern().pattern}", file=out)
     totals = backfill(repo, days, datetime.datetime.now(datetime.timezone.utc).date(), args.dry_run, out)
     print(json.dumps(dict(totals, dry_run=args.dry_run, days=days)), file=out)
     return 0

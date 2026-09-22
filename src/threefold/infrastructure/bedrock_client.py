@@ -46,6 +46,46 @@ def _client_config() -> Optional[Any]:
     return Config(**CLIENT_TIMEOUTS)
 
 
+def redact_arguments(value: Any) -> Any:
+    """A copy of the call's arguments with every string in them redacted, keys included.
+
+    Redacted before the structure is serialised, not after. `json.dumps` writes
+    a newline as the two characters backslash and n, so a token that began a
+    line ends up with a word character directly in front of it, and the
+    ``(?<![A-Za-z0-9_])`` lookbehind most of the credential patterns carry then
+    does not match: the token is not redacted and leaves for the model
+    verbatim, on the very call that was refused for carrying it. A tab, a
+    carriage return and any non-ASCII character, escaped as ``\\uXXXX``, do the
+    same. `SecretScanner.scan_arguments` learned this for scanning and says so
+    in its own docstring; this is the same lesson for what is sent.
+
+    Strings, the dicts and lists around them, and dictionary keys are all
+    walked, because an argument holds a secret at any depth. Anything else is
+    left as it is and redacted by the serialiser below, which renders it with
+    `redact_secrets(str(...))` rather than with `str` alone.
+    """
+    if isinstance(value, str):
+        return redact_secrets(value)
+    if isinstance(value, dict):
+        return {redact_arguments(key): redact_arguments(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [redact_arguments(item) for item in value]
+    return value
+
+
+def arguments_for_prompt(arguments: Any, limit: int = MAX_PROMPT_ARGUMENTS_CHARS) -> str:
+    """The arguments as the model sees them: redacted, serialised, then bounded.
+
+    Redacted twice over, once at the leaves and once on the serialised text, so
+    neither an escape introduced by serialising nor an object that renders as a
+    string with a credential in it gets past.
+    """
+    serialised = json.dumps(
+        redact_arguments(arguments), default=lambda obj: redact_secrets(str(obj))
+    )
+    return prompt_safe(serialised, limit)
+
+
 def prompt_safe(text: str, limit: int = MAX_PROMPT_ARGUMENTS_CHARS) -> str:
     """Redacts credentials, then truncates, in that order.
 
@@ -145,12 +185,14 @@ class BedrockGovernanceClient:
         # Nothing leaves for the model that the ledger would not keep: no
         # developer, credentials redacted, and the arguments cut to about 2 KB.
         # The reason is redacted too, because a protected-path refusal quotes
-        # the command it refused.
+        # the command it refused. The arguments are redacted at their leaves
+        # before they are serialised, because serialising them first defeats
+        # the patterns; see arguments_for_prompt.
         user_content = (
             f"Project: {prompt_safe(str(request.project_name), 120)}\n"
             f"Tool requested: {prompt_safe(str(request.tool_name), 120)} "
             f"({prompt_safe(str(request.action_type), 40)})\n"
-            f"Arguments: {prompt_safe(json.dumps(request.arguments, default=str))}\n"
+            f"Arguments: {arguments_for_prompt(request.arguments)}\n"
             f"Deterministic verdict: {evaluation.status}\n"
             f"Deterministic reason: {prompt_safe(evaluation.reason or '', 600)}\n"
             f"Session cost so far: ${evaluation.current_session_cost_usd:.4f}\n\n"

@@ -107,3 +107,74 @@ def test_a_dry_run_writes_nothing_and_says_what_it_would_add() -> None:
     totals = backfill_rollups.backfill(repo, 1, TODAY, dry_run=True, out=out)
     assert totals["added"] == 0 and table.writes == 0 and not repo.rollups
     assert "would add 3 row(s)" in out.getvalue()
+
+
+def test_a_row_from_before_the_labels_is_filed_under_the_label_a_read_asks_for() -> None:
+    """The rollup's sort key is the label, because that is what every read names.
+
+    A row written before labelling existed keeps whatever project name its
+    caller sent. Filed under that name, its counts sat in an item nothing
+    reads: the unfiltered overview relabels every rollup, so the call showed up
+    under 'unlabelled' there, while a read filtered to 'unlabelled' fetches
+    that one item by name and never found it. The project then read fewer calls
+    filtered than unfiltered, and fewer than the ledger listed.
+    """
+    table = FakeTable([
+        _row("legacy", status="APPROVED", project_name="a-legacy-repository-name"),
+        _row("labelled", status="APPROVED", project_name="Acme-Ledger"),
+    ])
+    repo = FakeRepo(table)
+    backfill_rollups.backfill(repo, 1, TODAY, dry_run=False, out=io.StringIO())
+
+    assert sorted(project for _, project in repo.rollups) == ["Acme-Ledger", "unlabelled"]
+    assert repo.rollups[("2026-09-22", "unlabelled")]["calls"] == 1
+    assert ("2026-09-22", "a-legacy-repository-name") not in repo.rollups
+
+
+def test_a_row_with_no_project_at_all_is_filed_under_unlabelled_too() -> None:
+    table = FakeTable([_row("empty", status="APPROVED", project_name="")])
+    repo = FakeRepo(table)
+    backfill_rollups.backfill(repo, 1, TODAY, dry_run=False, out=io.StringIO())
+    assert list(repo.rollups) == [("2026-09-22", "unlabelled")]
+
+
+def test_the_backfill_labels_by_the_pattern_the_stack_deploys_with(monkeypatch) -> None:
+    """A stack with its own AllowedProjectPattern is backfilled with that pattern."""
+    monkeypatch.setenv("ALLOWED_PROJECT_PATTERN", r"^Acme-[A-Za-z0-9-]{1,40}$")
+    repo = FakeRepo(FakeTable([_row("other", status="APPROVED", project_name="Widget-Co")]))
+    backfill_rollups.backfill(repo, 1, TODAY, dry_run=False, out=io.StringIO())
+    assert list(repo.rollups) == [("2026-09-22", "unlabelled")]
+
+    monkeypatch.setenv("ALLOWED_PROJECT_PATTERN", r"^(Acme|Widget)-[A-Za-z0-9-]{1,40}$")
+    other = FakeRepo(FakeTable([_row("other", status="APPROVED", project_name="Widget-Co")]))
+    backfill_rollups.backfill(other, 1, TODAY, dry_run=False, out=io.StringIO())
+    assert list(other.rollups) == [("2026-09-22", "Widget-Co")]
+
+
+def test_a_backfilled_day_files_a_call_where_the_recording_path_files_it() -> None:
+    """The script's own promise: a backfilled day and a recorded day cannot disagree."""
+    from threefold.infrastructure.dynamo_repo import DynamoDBSessionRepository
+
+    recorded = DynamoDBSessionRepository(table_name="acme-backfill-parity")
+    assert recorded._table is None, "offline, so the rollup is counted in memory"
+    recorded.record_decision({
+        "timestamp": "2026-09-22T08:00:00+00:00",
+        "verdict_id": "V-parity",
+        "status": "APPROVED",
+        # Labelled on the way in by the DTO, so the store is given the label.
+        "project_name": "unlabelled",
+        "agent": "claude-code",
+        "origin": "hook",
+        "stage": "enforce",
+        "hook_mode": "managed",
+        "rule_key": "NONE",
+    })
+    filed_by_recording = {
+        item["SK"] for key, item in recorded._memory_store.items() if key.startswith("STATS#2026-09-22")
+    }
+
+    repo = FakeRepo(FakeTable([_row("legacy", status="APPROVED", project_name="a-legacy-repository-name")]))
+    backfill_rollups.backfill(repo, 1, TODAY, dry_run=False, out=io.StringIO())
+    filed_by_backfill = {project for _, project in repo.rollups}
+
+    assert filed_by_backfill == filed_by_recording == {"unlabelled"}

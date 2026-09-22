@@ -383,6 +383,18 @@ def is_protected_write(method: str, path: str) -> bool:
     return (method.upper(), path) in PROTECTED_WRITES or is_session_resume(method, path)
 
 
+def is_session_terminate(method: str, path: str) -> bool:
+    """True for POST /sessions/{id}/terminate, the kill switch.
+
+    Open on a stack whose reads are public, as STATE.md says: freezing a
+    session can only stop work, and the demo's visitors have no key to present.
+    It is not open on a stack that keeps its reads private, where the sessions
+    it can freeze are the owner's own agent sessions and the ids to name them
+    by are exactly what those private reads hold back.
+    """
+    return method.upper() == "POST" and path.startswith("/sessions/") and path.endswith("/terminate")
+
+
 # Sign-in. Minting a link is the one thing a session may not do: a session that
 # could mint links could renew itself forever, and a stolen one would never
 # lapse. The exchange, the sign-out and whoami are open, because each of them
@@ -481,6 +493,31 @@ ASSETS_PREFIX = "/assets/"
 def is_served_asset(method: str, path: str) -> bool:
     return method.upper() in ("GET", "HEAD") and path.startswith(ASSETS_PREFIX)
 
+# Two reads the router answers under two names each. The names live here rather
+# than in the router so the list below cannot miss one: the router spells its
+# own dispatch with these tuples, so a path it serves as a read is a path this
+# module decides as a read. Listed only as "/api/sessions" and "/api/insights",
+# the other two names skipped the private-read check below and answered a
+# PublicReads=false stack's session list and ledger summary to anyone.
+SESSIONS_READ_PATHS = ("/api/sessions", "/sessions.json")
+INSIGHTS_READ_PATHS = ("/api/insights", "/insights.json")
+
+# The POSTs that answer out of this stack's own sessions and ledger. The
+# certificate answers for a session this service has governed, with its project,
+# its developer and its spend, which is the row the sessions read will not show
+# without the operator; the two scenarios write synthetic calls into the ledger
+# the pages present as governed work. Named here, as the two reads above are, so
+# the router spells its dispatch with them and none can be missing from the set.
+CERTIFICATE_PATH = "/issue-certificate"
+LOOP_SCENARIO_PATH = "/simulate-loop"
+SECRET_SCENARIO_PATH = "/simulate-secret"
+SESSION_ANSWERING_POSTS = frozenset({CERTIFICATE_PATH, LOOP_SCENARIO_PATH, SECRET_SCENARIO_PATH})
+
+
+def is_session_answering_post(method: str, path: str) -> bool:
+    """True for a POST that answers out of, or seeds into, this stack's own ledger."""
+    return method.upper() == "POST" and path in SESSION_ANSWERING_POSTS
+
 # The reads the pages make. Opening a page and refusing the data it is built on
 # is the same regression as refusing the page, one step later: the console and
 # the rules screen rendered and then every fetch answered 401 the moment STAGE
@@ -490,8 +527,8 @@ def is_served_asset(method: str, path: str) -> bool:
 # the table name, region, model id and raw client errors.
 PAGE_READS = frozenset(
     {
-        "/api/insights",
-        "/api/sessions",
+        *INSIGHTS_READ_PATHS,
+        *SESSIONS_READ_PATHS,
         "/rules",
         "/rules/layering",
         "/policy/config",
@@ -544,6 +581,34 @@ def is_page_read(method: str, path: str) -> bool:
     # Trying a rule, or drafting one, changes nothing and records nothing, so
     # each is a read that happens to need a body.
     return verb == "POST" and path in PAGE_READ_POSTS
+
+
+def _private_read_refusal(
+    headers: Dict[str, str], path: str
+) -> Tuple[bool, Optional[Dict[str, Any]]]:
+    """The one answer a stack with PublicReads=false gives a read it will not serve.
+
+    Shared by the page reads listed above and by the default below, so a route
+    that is closed because nobody listed it as open says exactly what a listed
+    private read says, and a reader cannot tell from the answer which list a
+    path was on.
+    """
+    return _require_operator_key(
+        headers,
+        path,
+        closed_title="Reads Are Private Here",
+        closed_detail=(
+            "This deployment keeps its sessions, ledger and rules private and has no "
+            "operator key configured, so nothing here can be read. Set THREEFOLD_API_KEYS "
+            "on the function to read it."
+        ),
+        closed_type="urn:threefold:error:reads-private",
+        missing_detail=(
+            "This deployment keeps its sessions, ledger and rules private, so reading them "
+            "requires the operator key. Provide it via 'X-API-Key' or "
+            "'Authorization: Bearer <key>'."
+        ),
+    )
 
 
 def _require_operator_key(
@@ -738,6 +803,30 @@ def validate_request_security(
             ),
         )
 
+    # 3d. The kill switch, on a stack that keeps its reads private. It stays
+    # open where the reads are, because the demo's visitors have no key and
+    # freezing a session can only stop work. Where they are not, a stranger who
+    # learned a session id could freeze the owner's own agent session, and every
+    # later call in it comes back BLOCKED_CIRCUIT_BREAKER, so it is the
+    # operator's as the reads beside it are.
+    if is_session_terminate(verb, path) and not reads_are_public():
+        return _require_operator_key(
+            headers,
+            path,
+            closed_title="Sessions Cannot Be Frozen Here",
+            closed_detail=(
+                "This deployment keeps its sessions private and has no operator key "
+                "configured, so nobody can freeze one. Set THREEFOLD_API_KEYS on the "
+                "function to enable the kill switch."
+            ),
+            closed_type="urn:threefold:error:reads-private",
+            missing_detail=(
+                "This deployment keeps its sessions private, so freezing one requires the "
+                "operator: the key via 'X-API-Key' or 'Authorization: Bearer <key>', or a "
+                "sign-in session via 'Authorization: Bearer <token>'."
+            ),
+        )
+
     # 4. The pages, the hook and what connecting downloads, open on every stack.
     if path in PUBLIC_PATHS or is_served_asset(verb, path):
         return True, None
@@ -747,25 +836,63 @@ def validate_request_security(
     # they return is that stack's real use. Writes to the same paths were
     # decided in step 3. When keys are enforced, the kill switch under
     # /sessions/{id}/terminate needs one like every other unlisted call; a
-    # deployment that enforces no key, as the demo stack does, answers it
-    # anonymously, and STATE.md says so.
+    # deployment that enforces no key and keeps its reads public, as the demo
+    # stack does, answers it anonymously, and STATE.md says so. Where the reads
+    # are private, step 3d above has already closed it.
     if is_page_read(verb, path):
         if reads_are_public():
             return True, None
+        return _private_read_refusal(headers, path)
+
+    # 4c. Every other read, on a stack that keeps its reads private. Steps 4 and
+    # 4b name what is open there: the pages, the hook, the installer and the
+    # bundle, and the reads those pages make. A GET that is on neither list is
+    # closed rather than open, so a read added later, or a second name for one
+    # already listed, is the operator's until somebody lists it rather than
+    # anonymous until somebody notices. That is how /sessions.json and
+    # /insights.json came to answer a private stack's session list and ledger
+    # summary to a caller with no credential at all: they were aliases of two
+    # listed reads and were not themselves listed. A public stack is untouched,
+    # here as everywhere else, because the ship gate depends on it.
+    if verb == "GET" and not reads_are_public():
+        return _private_read_refusal(headers, path)
+
+    # 4d. The same, for the reads that arrive as POST because they answer for a
+    # session the caller names. Step 4c closes a read nobody listed, but only a
+    # GET, so on a PublicReads=false stack `POST /issue-certificate` still
+    # answered an anonymous caller with the owner's project, developer and spend
+    # for any session id they knew, and the two scenarios still seeded synthetic
+    # calls into a ledger that carries real use. Closed here exactly as step 3c
+    # closes a sandbox, and for the same two reasons.
+    #
+    # The recording routes are deliberately not here. `/evaluate-tool-call` and
+    # the universal adapter are how a machine this stack governs reports to it,
+    # and that report arrives without a key today, so closing them would stop
+    # the work this stack exists to record rather than a reader of it. What that
+    # leaves open is stated plainly rather than implied: a caller who already
+    # knows a session id can send a call into it, read that session's cost and
+    # halt state back, and — because the spend gate believes the token counts a
+    # caller declares, which STATE.md records as its own open gap — trip it, so
+    # the owner's next call in that session is refused by the circuit breaker.
+    # That is the end state step 3d closes the kill switch to prevent, reached
+    # the other way. Closing it needs the machines that report here to carry a
+    # key first; until they do, closing it would silence them instead.
+    if is_session_answering_post(verb, path) and not reads_are_public():
         return _require_operator_key(
             headers,
             path,
-            closed_title="Reads Are Private Here",
+            closed_title="Sessions Are Private Here",
             closed_detail=(
-                "This deployment keeps its sessions, ledger and rules private and has no "
-                "operator key configured, so nothing here can be read. Set THREEFOLD_API_KEYS "
-                "on the function to read it."
+                "This deployment keeps its sessions and ledger private and has no operator "
+                "key configured, so nothing here can certify a session or seed a scenario "
+                "into it. Set THREEFOLD_API_KEYS on the function to enable them."
             ),
             closed_type="urn:threefold:error:reads-private",
             missing_detail=(
-                "This deployment keeps its sessions, ledger and rules private, so reading them "
-                "requires the operator key. Provide it via 'X-API-Key' or "
-                "'Authorization: Bearer <key>'."
+                "This deployment keeps its sessions and ledger private, so certifying a "
+                "session, or seeding a scenario into it, requires the operator: the key via "
+                "'X-API-Key' or 'Authorization: Bearer <key>', or a sign-in session via "
+                "'Authorization: Bearer <token>'."
             ),
         )
 
