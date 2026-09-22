@@ -36,6 +36,8 @@ from threefold.application.dtos import (
     ToolCallRequestDTO,
 )
 from threefold.application.labels import is_labelled
+from threefold.application import projects as stages
+from threefold.application.projects import SIMULATED_SESSION_PREFIX
 from threefold.application.rule_keys import (
     FROZEN_SESSION_REASON,
     HALTED_SESSION_REASONS,
@@ -79,9 +81,10 @@ RULES_REFRESH_SECONDS = 30.0
 # through names that fit the pattern would grow this without end.
 MAX_PROJECTS_HELD = 128
 
-# Session ids the dashboard's scenarios mint. Their loop halt is the demo: call
-# three refused and the session frozen, so they keep it whatever origin says.
-SIMULATED_SESSION_PREFIX = "sim-"
+# Session ids the dashboard's scenarios mint (SIMULATED_SESSION_PREFIX,
+# imported above). Their loop halt is the demo: call three refused and the
+# session frozen, so they keep it whatever origin says, and for the same reason
+# a project's stage never applies to them.
 
 # The note a repeated read or poll leaves on its approval instead of a trip.
 READ_OR_POLL_REPEAT = "Repeat of a read or poll, recorded rather than refused"
@@ -113,6 +116,19 @@ class _HeldRules:
     """
 
     rules: Optional[List[Dict[str, Any]]]
+    read_at: float
+
+
+@dataclass
+class _HeldConfig:
+    """One project's stage configuration as a container last read it.
+
+    `config` is None when the project has never been configured, remembered
+    for the same reason _HeldRules remembers "no rules": otherwise every call
+    from a project on the stack's default stage would cost a read.
+    """
+
+    config: Optional[Dict[str, Any]]
     read_at: float
 
 
@@ -192,6 +208,11 @@ class GovernanceEvaluator:
         # interval the shared set is, one project at a time, least recently
         # used first out.
         self._project_rules: "OrderedDict[str, _HeldRules]" = OrderedDict()
+        # A project's stage, held the same way and for the same interval, so
+        # an evaluation costs no extra read most of the time, a promotion
+        # applies at once on the container that took it, and on every other
+        # container within RULES_REFRESH_SECONDS.
+        self._project_configs: "OrderedDict[str, _HeldConfig]" = OrderedDict()
 
     def _adopt_saved_policy(self) -> None:
         """Applies the stored policy, so a cold container does not start on defaults."""
@@ -311,6 +332,76 @@ class GovernanceEvaluator:
         self._project_rules.move_to_end(project)
         while len(self._project_rules) > MAX_PROJECTS_HELD:
             self._project_rules.popitem(last=False)
+
+    # ------------------------------------------------------------ project stage
+
+    def project_config(self, project: Optional[str], fresh: bool = False) -> Optional[Dict[str, Any]]:
+        """A project's stage configuration, or None when it has none.
+
+        Read at most once per interval, like a project's rules, unless `fresh`
+        asks for the stored copy, as the routes that change it do. A read that
+        fails keeps what this container holds, and one that fails before
+        anything is held reads as "not configured" until the next interval: the
+        stack's default stage, which is the same staleness a warm container
+        already accepts for rules. A name outside AllowedProjectPattern is never
+        looked up, because no configuration can be saved for it.
+        """
+        if not is_labelled(project):
+            return None
+        loader = getattr(self.session_repo, "load_project_config", None)
+        if loader is None:
+            return None
+        now = time.monotonic()
+        held = self._project_configs.get(project)
+        if not fresh and held is not None and now - held.read_at < RULES_REFRESH_SECONDS:
+            self._project_configs.move_to_end(project)
+            return held.config
+        kept = held.config if held is not None else None
+        try:
+            config = stages.normalise_config(loader(project))
+        except Exception as exc:
+            logger.warning("Could not read a project's stage; keeping the one held: %s", exc)
+            config = kept
+        self._hold_config(project, config, now)
+        return config
+
+    def save_project_config(self, project: str, config: Dict[str, Any], ttl_seconds: Optional[int] = None) -> Dict[str, Any]:
+        """Stores a project's configuration and holds it at once on this container."""
+        if not is_labelled(project):
+            raise InvalidRequestError(
+                "project must match this deployment's AllowedProjectPattern.", "project"
+            )
+        cleaned = stages.normalise_config(config) or stages.new_config(
+            datetime.datetime.now(datetime.timezone.utc).isoformat()
+        )
+        saver = getattr(self.session_repo, "save_project_config", None)
+        if saver is not None:
+            saver(project, cleaned, ttl_seconds=ttl_seconds)
+        self._hold_config(project, cleaned, time.monotonic())
+        return cleaned
+
+    def list_project_configs(self) -> Dict[str, Dict[str, Any]]:
+        """Every configured project, by name, as stored."""
+        lister = getattr(self.session_repo, "list_project_configs", None)
+        if lister is None:
+            return {}
+        found = {}
+        for name, raw in (lister() or {}).items():
+            cleaned = stages.normalise_config(raw)
+            if cleaned is not None:
+                found[name] = cleaned
+        return found
+
+    def stage_for(self, project: Optional[str]) -> Tuple[str, Optional[Dict[str, Any]]]:
+        """The project's stage and the configuration it came from."""
+        config = self.project_config(project)
+        return stages.stage_of(config), config
+
+    def _hold_config(self, project: str, config: Optional[Dict[str, Any]], read_at: float) -> None:
+        self._project_configs[project] = _HeldConfig(config=config, read_at=read_at)
+        self._project_configs.move_to_end(project)
+        while len(self._project_configs) > MAX_PROJECTS_HELD:
+            self._project_configs.popitem(last=False)
 
     def update_rules(self, raw_rules, project: Optional[str] = None) -> list:
         """Replaces the layering rules and stores them, or changes nothing.
@@ -527,10 +618,20 @@ class GovernanceEvaluator:
         for whom, last week, which is the only question a platform owner has.
         """
         # Resolved once, so every gate in this call reads the same set even if
-        # a refresh lands halfway through.
-        rules, _ = self.rules_in_force(getattr(request, "project_name", None))
-        result = self._decide(request, rules, dry_run=bool(getattr(request, "dry_run", False)))
-        self._record_decision(request, result, rules)
+        # a refresh lands halfway through. The stage is resolved the same way.
+        project = getattr(request, "project_name", None)
+        rules, _ = self.rules_in_force(project)
+        project_stage, config = self.stage_for(project)
+        stage = stages.judged_stage(request, project_stage)
+        result = self._decide(
+            request,
+            rules,
+            dry_run=bool(getattr(request, "dry_run", False)),
+            stage=stage,
+            observe_keys=stages.observe_keys(request, config, stage),
+        )
+        result.project_stage = project_stage
+        self._record_decision(request, result, rules, stage=stage)
         return result
 
     @staticmethod
@@ -551,6 +652,7 @@ class GovernanceEvaluator:
         request: ToolCallRequestDTO,
         result: EvaluationResultDTO,
         rules: Optional[List[Dict[str, Any]]] = None,
+        stage: str = stages.ENFORCE,
     ) -> None:
         """Appends one row to the decision ledger, best effort.
 
@@ -580,6 +682,12 @@ class GovernanceEvaluator:
                     "agent": str(getattr(request, "agent", "") or "unknown")[:40],
                     "origin": str(getattr(request, "origin", "") or "unknown")[:40],
                     "dry_run": bool(getattr(request, "dry_run", False)),
+                    # The stage the call was judged under, and the mode the
+                    # hook was told to send in. Kept apart from dry_run, which
+                    # stays what the caller asked for: an observe-stage call
+                    # was not a dry run, it was a project not yet enforcing.
+                    "stage": stage,
+                    "hook_mode": str(getattr(request, "hook_mode", "") or "unknown")[:40],
                     "status": result.status,
                     "rule": self._rule_that_fired(result),
                     # What readiness, reviews and a project's stage group by:
@@ -636,41 +744,96 @@ class GovernanceEvaluator:
         return "NONE"
 
     def _decide(
-        self, request: ToolCallRequestDTO, rules: List[Dict[str, Any]], dry_run: bool = False
+        self,
+        request: ToolCallRequestDTO,
+        rules: List[Dict[str, Any]],
+        dry_run: bool = False,
+        stage: str = stages.ENFORCE,
+        observe_keys: frozenset = frozenset(),
     ) -> EvaluationResultDTO:
-        """Evaluates tool invocation against all deterministic safety gates."""
+        """Evaluates tool invocation against all deterministic safety gates.
+
+        `stage` is the one the call is judged under. Observe is judged exactly
+        as a dry run is. Enforce runs the gates, except that a refusal whose
+        rule key is in `observe_keys` becomes an observation.
+        """
         session = self.get_or_create_session(
             session_id=request.session_id,
             developer_id=request.developer_id,
             project_name=request.project_name,
             budget_usd=request.budget_usd,
         )
-        if not dry_run:
+        if dry_run or stage == stages.OBSERVE:
+            # The loop and cost gates trip the session object they are handed, so a
+            # dry run hands them a copy and never writes a halt: a call that is only
+            # being watched must not stop the real session it belongs to. A call the
+            # gates approve is recorded as any approved call is, so the loop gate
+            # still sees the history it needs on the next dry run.
+            halted_before = session.is_tripped
+            found = self._run_gates(request, copy.deepcopy(session), rules, may_halt=False)
+            if dry_run:
+                return self._as_observed(found, halted_before)
+            return self._as_observed(found, halted_before, lead="Observe stage, not enforced.", dry_run=False)
+        if not observe_keys:
             return self._run_gates(request, session, rules, may_halt=True)
-        # The loop and cost gates trip the session object they are handed, so a
-        # dry run hands them a copy and never writes a halt: a call that is only
-        # being watched must not stop the real session it belongs to. A call the
-        # gates approve is recorded as any approved call is, so the loop gate
-        # still sees the history it needs on the next dry run.
+        return self._enforce_except(request, session, rules, observe_keys)
+
+    def _enforce_except(
+        self,
+        request: ToolCallRequestDTO,
+        session: AgentSession,
+        rules: List[Dict[str, Any]],
+        observe_keys: frozenset,
+    ) -> EvaluationResultDTO:
+        """Enforces every rule but the ones the project still observes.
+
+        Which rule refused is only known once the gates have run, and a gate
+        that refuses may already have halted the session by then: the loop gate
+        does for CI, the cost gate does for everyone. So the gates run first on
+        a copy, as a dry run does, and nothing is written. A call they approve
+        was recorded then, as any approved call is. A refusal under an observed
+        key becomes an observation. Any other refusal is judged again on the
+        real session, which is safe because a refusal writes nothing but its
+        halt, and gives the same answer because the gates are deterministic
+        over the same history.
+        """
         halted_before = session.is_tripped
         found = self._run_gates(request, copy.deepcopy(session), rules, may_halt=False)
-        return self._as_observed(found, halted_before)
+        if found.status == VerdictStatus.APPROVED.value:
+            return found
+        key = self._rule_key(found, rules)
+        if key in observe_keys:
+            return self._as_observed(
+                found,
+                halted_before,
+                lead=f"Rule {key} is observed in this project, not enforced.",
+                dry_run=False,
+            )
+        return self._run_gates(request, session, rules, may_halt=True)
 
-    def _as_observed(self, found: EvaluationResultDTO, halted_before: bool) -> EvaluationResultDTO:
-        """Turns what the gates found in a dry run into an approval that records it.
+    def _as_observed(
+        self,
+        found: EvaluationResultDTO,
+        halted_before: bool,
+        lead: str = "Dry run, not enforced.",
+        dry_run: bool = True,
+    ) -> EvaluationResultDTO:
+        """Turns what the gates found into an approval that records it.
 
-        A fresh verdict rather than an edited one, so the proof hash covers the
-        status and reason the caller is actually given.
+        For a dry run, an observe-stage call, or a refusal under a rule the
+        project still observes; `lead` says which, and `dry_run` stays what the
+        caller asked for. A fresh verdict rather than an edited one, so the
+        proof hash covers the status and reason the caller is actually given.
         """
         if found.status == VerdictStatus.APPROVED.value:
-            found.dry_run = True
+            found.dry_run = dry_run
             return found
         rule = self._rule_that_fired(found)
         verdict = GovernanceVerdict.create(
             session_id=found.session_id,
             status=VerdictStatus.APPROVED,
             risk_level=RiskLevel(found.risk_level),
-            reason=f"Dry run, not enforced. This call would have been refused: {found.reason}",
+            reason=f"{lead} This call would have been refused: {found.reason}",
             # Left as the gates found them. The invariant did fail; it was only
             # not enforced, and a certificate over this verdict should say so.
             rule_evaluations=found.rule_evaluations,
@@ -686,7 +849,7 @@ class GovernanceEvaluator:
             session_tripped=halted_before,
             proof_hash=verdict.proof_hash,
             timestamp=verdict.timestamp,
-            dry_run=True,
+            dry_run=dry_run,
         )
         observed.observations = [found.reason]
         observed.observed_rules = [rule]

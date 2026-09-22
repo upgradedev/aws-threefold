@@ -6,6 +6,7 @@ import logging
 import os
 import time
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from typing import Any, Dict, List, Optional
 from threefold.domain.models import AgentSession, ToolActionType, ToolInvocation
 
@@ -32,6 +33,20 @@ MIN_SCAN_PAGE_SIZE = 100
 # team's architecture can never overwrite everyone else's.
 PROJECT_RULES_PREFIX = "CONFIG#rules#"
 
+# A project's stage configuration lives under this prefix plus its name, the
+# way its rules do. A second copy is kept under one partition, with the name as
+# the sort key, so every configured project is listed by one Query rather than
+# by scanning a table that is mostly ledger. Both are written on every save;
+# the first is the one a single read and the evaluator trust.
+PROJECT_CONFIG_PREFIX = "CONFIG#project#"
+PROJECT_INDEX_PARTITION = "CONFIG#projects"
+PROJECT_CONFIG_FIELDS = (
+    "stage", "observe_rules", "created_at", "updated_at", "promoted_at", "demoted_at", "sandbox", "history",
+)
+
+# Pages of the project index a listing may read, each at most 1 MB.
+MAX_INDEX_PAGES = 20
+
 # Who last resumed a halted session, why, when, and which halt they cleared.
 # Kept on the session row beside trip_reason and terminated_by, because that is
 # where the halt itself is recorded. They travel as plain attributes on the
@@ -39,6 +54,21 @@ PROJECT_RULES_PREFIX = "CONFIG#rules#"
 # them yet, and a row written without them would drop the record on the very
 # next approved call, which rewrites the whole item.
 RESUME_FIELDS = ("resumed_by", "resume_reason", "resumed_at", "resumed_from")
+
+
+def _plain(value: Any) -> Any:
+    """A value read from DynamoDB with its Decimals turned back into numbers.
+
+    The resource API hands every number back as a Decimal, which json.dumps
+    refuses, so anything that reaches a response passes through here first.
+    """
+    if isinstance(value, Decimal):
+        return int(value) if value == value.to_integral_value() else float(value)
+    if isinstance(value, dict):
+        return {key: _plain(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_plain(item) for item in value]
+    return value
 
 
 class SessionConflictError(RuntimeError):
@@ -341,6 +371,10 @@ class DynamoDBSessionRepository:
                     # application layer gives those one on the way out, because
                     # reading it off a reason is its business, not the store's.
                     "rule_key": row.get("rule_key", "") or "",
+                    # A row from before stages was enforced unless it was a
+                    # dry run, which is what it says it was judged under.
+                    "stage": row.get("stage") or ("observe" if row.get("dry_run") else "enforce"),
+                    "hook_mode": row.get("hook_mode", "unknown") or "unknown",
                 }
             )
         cleaned.sort(key=lambda d: d["timestamp"], reverse=True)
@@ -437,6 +471,101 @@ class DynamoDBSessionRepository:
         self._memory_store[memory_key] = item
         self._last_persistence_mode = "memory"
         return True
+
+    # ------------------------------------------------------------ project stage
+
+    @staticmethod
+    def _config_from_item(item: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """The configuration an item holds, or None when it has expired.
+
+        DynamoDB deletes an expired item some time after its ttl, not at it, so
+        a sandbox a day old is treated as gone here rather than whenever the
+        sweeper arrives.
+        """
+        if not item:
+            return None
+        expires = item.get("ttl")
+        if expires is not None:
+            try:
+                if int(expires) < int(time.time()):
+                    return None
+            except (TypeError, ValueError):
+                pass
+        return {name: _plain(item[name]) for name in PROJECT_CONFIG_FIELDS if name in item}
+
+    def load_project_config(self, project: str) -> Optional[Dict[str, Any]]:
+        """Reads one project's stage configuration, or None when it has none.
+
+        A failed read raises, as a failed read of rules does: None means "never
+        configured", and a warm container would take it as an instruction to
+        fall back to the stack's default stage.
+        """
+        key = f"{PROJECT_CONFIG_PREFIX}{project}"
+        if self._table is not None:
+            try:
+                res = self._table.get_item(Key={"PK": key, "SK": "METADATA"})
+            except Exception as exc:
+                logger.warning("Failed to read the stage of %s from DynamoDB: %s", key, exc)
+                raise
+            return self._config_from_item(res.get("Item"))
+        return self._config_from_item(self._memory_store.get(f"{key}#METADATA"))
+
+    def save_project_config(
+        self, project: str, config: Dict[str, Any], ttl_seconds: Optional[int] = None
+    ) -> bool:
+        """Persists a project's configuration, and its copy in the project index.
+
+        `ttl_seconds` is for a sandbox, which is gone a day after it was made;
+        a real project's configuration never expires.
+        """
+        fields = {name: config.get(name) for name in PROJECT_CONFIG_FIELDS if config.get(name) is not None}
+        extra: Dict[str, Any] = {}
+        if ttl_seconds:
+            extra["ttl"] = int(time.time()) + int(ttl_seconds)
+        primary = dict({"PK": f"{PROJECT_CONFIG_PREFIX}{project}", "SK": "METADATA"}, **fields, **extra)
+        index = dict({"PK": PROJECT_INDEX_PARTITION, "SK": project}, **fields, **extra)
+        if self._table is not None:
+            try:
+                self._table.put_item(Item=primary)
+                self._table.put_item(Item=index)
+                self._memory_store[f"{primary['PK']}#METADATA"] = primary
+                self._memory_store[f"{PROJECT_INDEX_PARTITION}#{project}"] = index
+                self._last_persistence_mode = "dynamodb"
+                return True
+            except Exception as exc:
+                logger.warning("DynamoDB save of the stage of %s failed, writing to memory: %s", project, exc)
+        self._memory_store[f"{primary['PK']}#METADATA"] = primary
+        self._memory_store[f"{PROJECT_INDEX_PARTITION}#{project}"] = index
+        self._last_persistence_mode = "memory"
+        return True
+
+    def list_project_configs(self) -> Dict[str, Dict[str, Any]]:
+        """Every configured project, by name, from the project index."""
+        items: List[Dict[str, Any]] = []
+        if self._table is not None:
+            try:
+                kwargs: Dict[str, Any] = {
+                    "KeyConditionExpression": "PK = :pk",
+                    "ExpressionAttributeValues": {":pk": PROJECT_INDEX_PARTITION},
+                }
+                for _ in range(MAX_INDEX_PAGES):
+                    response = self._table.query(**kwargs)
+                    items.extend(response.get("Items", []))
+                    if not response.get("LastEvaluatedKey"):
+                        break
+                    kwargs["ExclusiveStartKey"] = response["LastEvaluatedKey"]
+            except Exception as exc:
+                logger.warning("Failed to list configured projects: %s", exc)
+                items = []
+        if not items:
+            prefix = f"{PROJECT_INDEX_PARTITION}#"
+            items = [item for key, item in self._memory_store.items() if key.startswith(prefix)]
+        found: Dict[str, Dict[str, Any]] = {}
+        for item in items:
+            config = self._config_from_item(item)
+            if config is not None and item.get("SK"):
+                found[str(item["SK"])] = config
+        return found
 
     def save_session(self, session: AgentSession, force: bool = False) -> bool:
         """Persists complete session state to DynamoDB.

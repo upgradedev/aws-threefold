@@ -16,6 +16,11 @@ from threefold.application.labels import label_project
 # these fields existed, is "unknown" without a warning.
 KNOWN_AGENTS = ("claude-code", "codex", "antigravity", "pre-commit", "ci", "page")
 KNOWN_ORIGINS = ("hook", "page", "ci")
+# How the hook on the developer's machine was told to send: `observe` sends
+# every call as a dry run, `managed` leaves the decision to the project's stage
+# on the server, `enforce` never sends a dry run. Echoed onto the ledger so the
+# dashboard can say which machines a promotion will actually reach.
+KNOWN_HOOK_MODES = ("observe", "managed", "enforce")
 UNKNOWN = "unknown"
 
 
@@ -93,6 +98,8 @@ class ToolCallRequestDTO:
     explain: bool = True
     # Recorded as observed, never refused, and never trips the session.
     dry_run: bool = False
+    # The hook's own mode, from KNOWN_HOOK_MODES, or "unknown".
+    hook_mode: str = UNKNOWN
     # What was changed about the request on the way in, returned to the caller.
     warnings: List[str] = field(default_factory=list)
 
@@ -150,6 +157,7 @@ class ToolCallRequestDTO:
             origin=origin,
             explain=_flag(body, "explain", True),
             dry_run=_flag(body, "dry_run", False),
+            hook_mode=_closed_set(body, "hook_mode", KNOWN_HOOK_MODES, warnings),
             warnings=warnings,
         )
 
@@ -186,6 +194,11 @@ class EvaluationResultDTO:
     # What the service changed about the request, such as a project name it
     # recorded as "unlabelled". Always a list, so a client never tests for it.
     warnings: List[str] = field(default_factory=list)
+    # The calling project's stage on this stack, "observe" or "enforce": its
+    # own when it has been configured, the stack's default otherwise. Reported
+    # on every verdict, whether or not the stage applied to this call, so a
+    # hook in observe mode still learns what a managed hook would be held to.
+    project_stage: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)

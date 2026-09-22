@@ -39,6 +39,20 @@ def _stack_parameters_start_at_their_defaults(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _hooks_are_enforced_unless_a_test_says_otherwise(monkeypatch):
+    """Every test written before stages existed keeps the meaning it had.
+
+    A project nobody has configured is in the stack's DEFAULT_HOOK_STAGE, and
+    the deployed default is observe, where a hook's call is never refused. The
+    suite's hook tests were written when every hook call was enforced, so the
+    suite runs with enforce; a test of the observe default unsets this with
+    monkeypatch.
+    """
+    monkeypatch.setenv("DEFAULT_HOOK_STAGE", "enforce")
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _reset_the_shared_rate_limiter():
     """Stops the suite from rate limiting itself.
 
@@ -73,13 +87,22 @@ def _project_rules_do_not_outlive_their_test():
     handlers = sys.modules.get("threefold.interfaces.api_handlers")
     if handlers is None:
         return
-    from threefold.infrastructure.dynamo_repo import PROJECT_RULES_PREFIX
+    from threefold.infrastructure.dynamo_repo import (
+        PROJECT_CONFIG_PREFIX,
+        PROJECT_INDEX_PARTITION,
+        PROJECT_RULES_PREFIX,
+    )
 
     evaluator = handlers._evaluator
-    held = getattr(evaluator, "_project_rules", None)
-    if held is not None:
-        held.clear()
+    # A project's stage is held and stored the same way its rules are, and a
+    # stage saved in one test would decide a call in another just as quietly.
+    for name in ("_project_rules", "_project_configs"):
+        held = getattr(evaluator, name, None)
+        if held is not None:
+            held.clear()
     store = getattr(evaluator.session_repo, "_memory_store", None) or {}
     shared = f"{PROJECT_RULES_PREFIX}METADATA"
     for key in [k for k in store if k.startswith(PROJECT_RULES_PREFIX) and k != shared]:
+        del store[key]
+    for key in [k for k in store if k.startswith((PROJECT_CONFIG_PREFIX, f"{PROJECT_INDEX_PARTITION}#"))]:
         del store[key]
