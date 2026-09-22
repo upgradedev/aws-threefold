@@ -7,7 +7,7 @@ import os
 import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from threefold.domain.models import AgentSession, ToolActionType, ToolInvocation
 
 logger = logging.getLogger(__name__)
@@ -94,6 +94,51 @@ def rollup_counters(decision: Dict[str, Any]) -> tuple:
 # them yet, and a row written without them would drop the record on the very
 # next approved call, which rewrites the whole item.
 RESUME_FIELDS = ("resumed_by", "resume_reason", "resumed_at", "resumed_from")
+
+
+def _decision_key(timestamp: str, verdict_id: str) -> Dict[str, str]:
+    """The key a decision was written under: its day, then its time and verdict."""
+    return {"PK": f"{DECISION_PARTITION}#{str(timestamp)[:10]}", "SK": f"{timestamp}#{verdict_id}"}
+
+
+def clean_decision(row: Dict[str, Any]) -> Dict[str, Any]:
+    """A stored ledger row as every reader gets it, whatever year it was written in."""
+    return {
+        "verdict_id": row.get("verdict_id", ""),
+        "timestamp": row.get("timestamp", ""),
+        "session_id": row.get("session_id", ""),
+        "developer_id": row.get("developer_id", ""),
+        "project_name": row.get("project_name", ""),
+        "tool_name": row.get("tool_name", ""),
+        "action_type": row.get("action_type", ""),
+        # Rows written before request v2 carry neither, and say so.
+        "agent": row.get("agent", "unknown") or "unknown",
+        "origin": row.get("origin", "unknown") or "unknown",
+        "dry_run": bool(row.get("dry_run", False)),
+        "status": row.get("status", ""),
+        "rule": row.get("rule", "NONE"),
+        "target": row.get("target", ""),
+        "reason": row.get("reason", ""),
+        "observed_rule": row.get("observed_rule", ""),
+        # Rows written before every rule was kept carry one name only.
+        "observed_rules": list(row.get("observed_rules") or ([row["observed_rule"]] if row.get("observed_rule") else [])),
+        "observed_reason": row.get("observed_reason", ""),
+        "observed_target": row.get("observed_target", ""),
+        "cost_usd": float(row.get("cost_usd", 0) or 0),
+        # Empty on rows written before the key existed. The application layer
+        # gives those one on the way out, because reading it off a reason is
+        # its business, not the store's.
+        "rule_key": row.get("rule_key", "") or "",
+        # A row from before stages was enforced unless it was a dry run, which
+        # is what it says it was judged under.
+        "stage": row.get("stage") or ("observe" if row.get("dry_run") else "enforce"),
+        "hook_mode": row.get("hook_mode", "unknown") or "unknown",
+        # A review is stored on the row it is about. Who made it is kept as a
+        # short hash and is not handed to readers of the row.
+        "review": row.get("review") or None,
+        "reviewed_at": row.get("reviewed_at") or None,
+        "review_note": row.get("review_note") or None,
+    }
 
 
 def _plain(value: Any) -> Any:
@@ -497,43 +542,117 @@ class DynamoDBSessionRepository:
                 and str(item.get("timestamp", ""))[:10] in wanted
             ]
 
-        cleaned = []
-        for row in rows:
-            cleaned.append(
-                {
-                    "verdict_id": row.get("verdict_id", ""),
-                    "timestamp": row.get("timestamp", ""),
-                    "session_id": row.get("session_id", ""),
-                    "developer_id": row.get("developer_id", ""),
-                    "project_name": row.get("project_name", ""),
-                    "tool_name": row.get("tool_name", ""),
-                    "action_type": row.get("action_type", ""),
-                    # Rows written before request v2 carry neither, and say so.
-                    "agent": row.get("agent", "unknown") or "unknown",
-                    "origin": row.get("origin", "unknown") or "unknown",
-                    "dry_run": bool(row.get("dry_run", False)),
-                    "status": row.get("status", ""),
-                    "rule": row.get("rule", "NONE"),
-                    "target": row.get("target", ""),
-                    "reason": row.get("reason", ""),
-                    "observed_rule": row.get("observed_rule", ""),
-                    # Rows written before every rule was kept carry one name only.
-                    "observed_rules": list(row.get("observed_rules") or ([row["observed_rule"]] if row.get("observed_rule") else [])),
-                    "observed_reason": row.get("observed_reason", ""),
-                    "observed_target": row.get("observed_target", ""),
-                    "cost_usd": float(row.get("cost_usd", 0) or 0),
-                    # Empty on rows written before the key existed. The
-                    # application layer gives those one on the way out, because
-                    # reading it off a reason is its business, not the store's.
-                    "rule_key": row.get("rule_key", "") or "",
-                    # A row from before stages was enforced unless it was a
-                    # dry run, which is what it says it was judged under.
-                    "stage": row.get("stage") or ("observe" if row.get("dry_run") else "enforce"),
-                    "hook_mode": row.get("hook_mode", "unknown") or "unknown",
-                }
-            )
+        cleaned = [clean_decision(row) for row in rows]
         cleaned.sort(key=lambda d: d["timestamp"], reverse=True)
         return cleaned[:limit]
+
+    def read_decision_day(
+        self, day: str, after: Optional[str] = None, limit: int = 200
+    ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+        """One page of one day's decisions, newest first, and where the next page starts.
+
+        `after` is the sort key of the last row a caller has seen; the second
+        value is the sort key to pass as `after` next time, or None when the day
+        is exhausted. Each row carries its sort key as `_sk` so a caller that
+        stops part way through a page can resume exactly after the last row it
+        kept rather than after the last row this page happened to hold.
+        """
+        partition = f"{DECISION_PARTITION}#{day}"
+        if self._table is not None:
+            kwargs: Dict[str, Any] = {
+                "KeyConditionExpression": "PK = :pk",
+                "ExpressionAttributeValues": {":pk": partition},
+                "ScanIndexForward": False,
+                "Limit": max(1, int(limit)),
+            }
+            if after:
+                kwargs["ExclusiveStartKey"] = {"PK": partition, "SK": after}
+            try:
+                response = self._table.query(**kwargs)
+            except Exception as exc:
+                logger.warning("Failed to read the decision ledger for %s: %s", day, exc)
+            else:
+                items = response.get("Items", [])
+                last = response.get("LastEvaluatedKey") or {}
+                rows = [dict(clean_decision(item), _sk=str(item.get("SK", ""))) for item in items]
+                return rows, (str(last["SK"]) if last.get("SK") else None)
+        prefix = f"{partition}#"
+        keyed = sorted(
+            ((key[len(prefix):], item) for key, item in self._memory_store.items() if key.startswith(prefix)),
+            key=lambda pair: pair[0],
+            reverse=True,
+        )
+        if after:
+            keyed = [pair for pair in keyed if pair[0] < after]
+        page = keyed[: max(1, int(limit))]
+        rows = [dict(clean_decision(item), _sk=sort_key) for sort_key, item in page]
+        more = len(keyed) > len(page)
+        return rows, (page[-1][0] if more and page else None)
+
+    def get_decision(self, timestamp: str, verdict_id: str) -> Optional[Dict[str, Any]]:
+        """One decision by the two values every row carries, or None."""
+        key = _decision_key(timestamp, verdict_id)
+        if self._table is not None:
+            try:
+                item = self._table.get_item(Key=key).get("Item")
+            except Exception as exc:
+                logger.warning("Failed to read a decision: %s", exc)
+            else:
+                return clean_decision(item) if item else None
+        item = self._memory_store.get(f"{key['PK']}#{key['SK']}")
+        return clean_decision(item) if item else None
+
+    def label_decision(
+        self,
+        timestamp: str,
+        verdict_id: str,
+        project: str,
+        label: Optional[str],
+        note: str = "",
+        reviewed_by: str = "anonymous",
+        reviewed_at: str = "",
+    ) -> Optional[Dict[str, Any]]:
+        """Stores a review on the ledger row itself, or clears it when `label` is None.
+
+        Conditional on the row existing and belonging to `project`, so a label
+        sent under one project's name can never land on another's row. Returns
+        the row as it was before, which says what the label replaced, or None
+        when the condition failed.
+        """
+        key = _decision_key(timestamp, verdict_id)
+        if self._table is not None:
+            names = {"#project": "project_name"}
+            values: Dict[str, Any] = {":project": project}
+            if label is None:
+                expression = "REMOVE review, reviewed_at, review_note, reviewed_by"
+            else:
+                expression = "SET review = :label, reviewed_at = :at, review_note = :note, reviewed_by = :by"
+                values.update({":label": label, ":at": reviewed_at, ":note": note, ":by": reviewed_by})
+            try:
+                response = self._table.update_item(
+                    Key=key,
+                    UpdateExpression=expression,
+                    ConditionExpression="attribute_exists(PK) AND #project = :project",
+                    ExpressionAttributeNames=names,
+                    ExpressionAttributeValues=values,
+                    ReturnValues="ALL_OLD",
+                )
+                return clean_decision(response.get("Attributes") or {})
+            except Exception as exc:
+                code = ((getattr(exc, "response", None) or {}).get("Error") or {}).get("Code", "")
+                if type(exc).__name__ == "ConditionalCheckFailedException" or code == "ConditionalCheckFailedException":
+                    return None
+                logger.warning("DynamoDB review update failed, labelling in memory: %s", exc)
+        stored = self._memory_store.get(f"{key['PK']}#{key['SK']}")
+        if not stored or stored.get("project_name") != project:
+            return None
+        before = clean_decision(stored)
+        if label is None:
+            for name in ("review", "reviewed_at", "review_note", "reviewed_by"):
+                stored.pop(name, None)
+        else:
+            stored.update(review=label, reviewed_at=reviewed_at, review_note=note, reviewed_by=reviewed_by)
+        return before
 
     def load_policy(self) -> Optional[Dict[str, Any]]:
         """Reads the saved policy, so settings outlive the container that set them."""
