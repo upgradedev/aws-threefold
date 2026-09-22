@@ -9,6 +9,12 @@
 - B1, ledger and stages: `src/threefold/application/**`, `src/threefold/domain/**`, `src/threefold/infrastructure/dynamo_repo.py`, `src/threefold/interfaces/app_routes.py` (new), `tests/unit/**` except A's, `tests/integration/test_app_*.py` (new), `tests/conftest.py`
 - B2, access and distribution: `src/threefold/infrastructure/security_middleware.py`, `src/threefold/infrastructure/auth_store.py` (new), `src/threefold/interfaces/access_routes.py` (new), `deploy/**`, `tests/security/**`, `tests/integration/test_access_*.py` (new); the only track besides the owner that touches `deploy/`
 - D, the application pages: `src/threefold/web/**` (including new `dashboard.html` and `assets/`), `tests/pages/**`, `README.md`, `docs/*.md`
+- E1, edge: `deploy/edge.yml` (new: CloudFront, S3 with origin access control, WAF, in us-east-1), `scripts/publish_web.py` (new), `tests/unit/test_edge_*.py` (new)
+- E2, operations hardening: `deploy/template.yml` sections other than B2's parameter, environment and table grants (alarms, dashboard, tracing, throttling, point-in-time recovery, access logs), `tests/integration/test_the_template_*.py`
+- E3, benchmark: `benchmark/**` (new), `docs/evidence/BENCHMARK_*.md` (new)
+- E4, live probes: `scripts/probe_live.py` (new), `tests/unit/test_probe_live.py` (new)
+- E5, rule drafting with Bedrock: `src/threefold/application/rule_drafter.py` (new), `src/threefold/interfaces/draft_routes.py` (new), `tests/unit/test_rule_drafter.py` (new)
+- E6, validated fix per refusal: `src/threefold/application/fix_proposer.py` (new), `tests/unit/test_fix_proposer.py` (new); wired into verdicts by the owner after B1 merges
 - Shared, one dispatch line each: `src/threefold/interfaces/api_handlers.py`, `src/threefold/web/openapi.json`, `docs/openapi.yaml`
 - Owner: `STATE.md`, `LOG.md`, `TRAPS.md`, `CLAUDE.md`; merges and deploys
 
