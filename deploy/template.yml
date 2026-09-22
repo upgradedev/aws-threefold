@@ -120,9 +120,8 @@ Resources:
       # before the function runs, so a flood costs neither an invocation nor a
       # table write. For an HTTP API only the two throttling fields and
       # DetailedMetricsEnabled apply here. Per-route metrics stay off: the
-      # alarms and the dashboard read the stage's own Count, 4xx, 5xx and
-      # Latency, which API Gateway publishes without them, and each route's
-      # metrics would be billed as custom metrics.
+      # stage's own Count, 4xx, 5xx and Latency are published without them,
+      # and each route's metrics would be billed as custom metrics.
       DefaultRouteSettings:
         ThrottlingBurstLimit: !Ref ApiThrottleBurstLimit
         ThrottlingRateLimit: !Ref ApiThrottleRateLimit
@@ -296,7 +295,7 @@ Resources:
       LogGroupName: !Sub '/aws/vendedlogs/apigateway/${AWS::StackName}/access'
       # Shorter than the function's 30 days: every line holds a client's
       # address, which is personal data, and two weeks is enough to look into
-      # an incident that an alarm has already raised.
+      # an incident while it is still fresh.
       RetentionInDays: 14
 
 # Each turns an operations parameter's value for "none" into no property or
