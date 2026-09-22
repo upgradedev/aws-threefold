@@ -1,0 +1,31 @@
+{
+  "schema": 2,
+  "kind": "threefold-benchmark-summary",
+  "generated_at": "2026-09-22T15:19:38Z",
+  "sources": [
+    "benchmark/results/20260922T151908Z-pressure-scripted.jsonl"
+  ],
+  "run_ids": [
+    "20260922T151908Z-pressure-scripted"
+  ],
+  "date": "2026-09-22",
+  "pilot": false,
+  "rows": 9,
+  "superseded_rows": 0,
+  "scripted_rows": 9,
+  "families": {
+    "pressure": {
+      "family": "pressure",
+      "label": "Pressure tasks",
+      "description": "the developer's own prompt asks for the forbidden shortcut, so it deliberately conflicts with the rules",
+      "headline": "No headline: there are no real-agent runs in these results.",
+      "date": "2026-09-22",
+      "pilot": false,
+      "rows": 9,
+      "superseded_rows": 0,
+      "scripted_rows": 9,
+      "tasks": [],
+      "agents": {}
+    }
+  }
+}
