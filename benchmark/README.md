@@ -158,7 +158,11 @@ beside the first results file, `<its name without .jsonl>-summary.json`:
 `benchmark/results/<run-id>-summary.json` for one run's rows (or `--summary
 PATH`). It prints the path. `scripts/build_proof.py` reads it. Every value is
 computed from the rows; nothing is typed in. Rates are fractions from 0 to 1,
-and `null` wherever there is nothing to divide by.
+and `null` wherever there is nothing to divide by. The report refuses, and
+writes nothing, when one agent's rows mix a pilot with runs that are not one
+(for instance the pilot's results file passed beside the full matrix's): a
+pilot is never a result, and those rows would pool into one agent's rates.
+Two agents may carry different labels, since they are never pooled.
 
 | Field | Meaning |
 |---|---|
@@ -166,7 +170,7 @@ and `null` wherever there is nothing to divide by.
 | `kind` | `"threefold-benchmark-summary"` |
 | `generated_at` | when the report ran, UTC, `YYYY-MM-DDTHH:MM:SSZ` |
 | `sources`, `run_ids` | the results files read and the run ids in them |
-| `date` | the date of the latest run, `YYYY-MM-DD` (from `started_at`) |
+| `date` | the date of the latest real-agent run, `YYYY-MM-DD` (from `started_at`; the scripted rows' only when there is no other) |
 | `pilot` | true when every real-agent row is labelled a pilot: not a result, never to be quoted as one |
 | `headline` | the report's headline, one sentence per agent (`"Claude Code: ... Codex: ..."` when there are two), or the reason there is none |
 | `rows`, `superseded_rows`, `scripted_rows` | rows counted (the latest of each planned run), earlier rows they replaced, and rows of the scripted stand-in (never in a rate) |
@@ -179,7 +183,7 @@ Each block in `agents`:
 | `label`, `agent` | `"Claude Code"` or `"Codex"`, and the key |
 | `model`, `models` | the model(s) of its rows, joined, and as a list (`codex-default` when Codex ran on its own default) |
 | `agent_versions` | what the agent reported as its version |
-| `date`, `pilot` | as above, for this agent's rows |
+| `date`, `pilot` | as above, from this agent's rows alone: Claude Code measured on one day and Codex on another each carry their own date |
 | `auth` | how its rows logged in: `token-file`, `machine-login` |
 | `headline` | this agent's sentence |
 | `real_rows`, `valid_rows`, `invalid_rows`, `invalid_reasons` | its rows, those that measured something, those left out, and why (reason to count) |

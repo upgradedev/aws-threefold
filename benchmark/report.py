@@ -11,7 +11,9 @@ reason and left out of every rate, because counting it as "no violation" would
 flatter whichever condition it happened to fall in. Rows from the scripted
 stand-in agent are shown only in their own section, as a test of the harness,
 and never enter a rate or the headline. When every real-agent row is labelled a
-pilot, so are the report's title, file name and headline.
+pilot, so are the report's title, file name and headline, and one agent's
+pilot rows are never reported together with its other rows: the report
+refuses them rather than pool a pilot into a result.
 
 Agents are never pooled: Claude Code and Codex rows each get their own
 results, headline and summary block, because a rate across two agents would
@@ -99,6 +101,26 @@ def latest_rows(rows: Sequence[Mapping[str, Any]]) -> Tuple[List[Mapping[str, An
 
 def is_scripted(row: Mapping[str, Any]) -> bool:
     return row.get("agent") == "scripted"
+
+
+def mixed_pilot_problem(rows: Sequence[Mapping[str, Any]]) -> Optional[str]:
+    """Why these rows must not make one report, or None: an agent whose rows mix a pilot with runs that are not one.
+
+    A pilot is never a result, and every rate is per agent, so one agent's
+    pilot rows and its other rows would pool into one set of rates, one
+    headline and one summary block for the proof page. Two agents may differ:
+    they are never pooled, and each block says whether it is a pilot. The
+    scripted stand-in never enters a rate, so its label does not matter.
+    """
+    labels: Dict[str, Counter] = {}
+    for row in latest_rows(rows)[0]:
+        if not is_scripted(row):
+            labels.setdefault(agent_of(row), Counter())[bool(row.get("pilot"))] += 1
+    mixed = [f"the {AGENT_LABELS.get(agent, agent)} rows hold {counts[True]} pilot row(s) and {counts[False]} that are not"
+             for agent, counts in labels.items() if len(counts) > 1]
+    if not mixed:
+        return None
+    return "; ".join(mixed) + ". A pilot is never a result: report the pilot's results file and the others separately"
 
 
 def _uses_threefold(row: Mapping[str, Any]) -> bool:
@@ -262,6 +284,9 @@ def aggregate(rows: Sequence[Mapping[str, Any]], agent: Optional[str] = None, in
         for task in tasks
     }
     scripted_conditions = _ordered_conditions(row["condition"] for row in scripted)
+    # The dates of the rows this summary describes: one agent's own when `agent` is given, so a report of two
+    # agents measured days apart dates each by its own runs; the scripted rows' only when there is nothing else.
+    dated = real or rows
     summary = {
         "agent": agent if agent else (agents[0] if len(agents) == 1 else None),
         "agents": [agent] if agent else agents,
@@ -276,7 +301,7 @@ def aggregate(rows: Sequence[Mapping[str, Any]], agent: Optional[str] = None, in
         "isolation_modes": sorted({str((row.get("isolation") or {}).get("mode")) for row in real}),
         "platforms": sorted({str((row.get("harness") or {}).get("platform")) for row in real if row.get("harness")}),
         "run_ids": sorted({str(row.get("run_id")) for row in rows}),
-        "dates": sorted({str(row.get("started_at", ""))[:10] for row in rows if row.get("started_at")}),
+        "dates": sorted({str(row.get("started_at", ""))[:10] for row in dated if row.get("started_at")}),
         "conditions": conditions,
         "by_condition": by_condition,
         "tasks": tasks,
@@ -779,8 +804,12 @@ def build_summary(rows: Sequence[Mapping[str, Any]], sources: Sequence[str],
     """The machine-readable summary scripts/build_proof.py reads: per agent and condition, and the headline, all computed.
 
     Rates are fractions from 0 to 1, None where there is nothing to divide by;
-    every field is described in benchmark/README.md.
+    every field is described in benchmark/README.md. Rows that mix one
+    agent's pilot with its other runs are refused (mixed_pilot_problem).
     """
+    problem = mixed_pilot_problem(rows)
+    if problem:
+        raise ValueError(problem)
     summary = aggregate(rows)
     now = now or datetime.datetime.now(datetime.timezone.utc)
     parts = OrderedDict((name, part) for name, part in sections(summary).items() if name)
@@ -814,6 +843,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                         help="default: <first results file without .jsonl>-summary.json, beside it")
     args = parser.parse_args(argv)
     rows = load_rows(args.results)
+    problem = mixed_pilot_problem(rows)
+    if problem:
+        print(f"refused: {problem}.", file=sys.stderr)
+        return 2
     summary = aggregate(rows)
     tasks = task_library.load_tasks()
     sources = []

@@ -316,3 +316,39 @@ def test_the_report_writes_the_summary_beside_the_rows_and_says_where(tmp_path, 
     elsewhere = tmp_path / "elsewhere" / "proof.json"
     assert report.main([str(results), "--out", str(tmp_path / "report.md"), "--summary", str(elsewhere)]) == 0
     assert json.loads(elsewhere.read_text(encoding="utf-8"))["sources"] == [results.name]
+
+
+def test_each_agent_is_dated_by_its_own_runs():
+    """Claude Code measured now, Codex from 2026-09-27: each block, and each of its conditions, carries its own date."""
+    codex = _codex([_row(condition=name, started_at="2026-09-28T09:00:00Z") for name in ("none", "prompt", "threefold")])
+    document = report.build_summary(_matrix() + codex, ["a.jsonl", "b.jsonl"])
+    assert document["date"] == "2026-09-28"
+    claude, later = document["agents"]["claude-code"], document["agents"]["codex"]
+    assert claude["date"] == "2026-09-23" and later["date"] == "2026-09-28"
+    assert {entry["date"] for entry in claude["conditions"].values()} == {"2026-09-23"}
+    assert {entry["date"] for entry in later["conditions"].values()} == {"2026-09-28"}
+    scripted = [_row(condition="none", agent="scripted", model="scripted", started_at="2026-09-30T08:00:00Z")]
+    assert report.build_summary(_matrix() + scripted, ["a.jsonl"])["agents"]["claude-code"]["date"] == "2026-09-23"
+
+
+def test_one_agent_s_pilot_and_its_other_runs_are_never_pooled(tmp_path, capsys):
+    pilot = [dict(row, run_id="pilot-run", pilot=True) for row in _matrix()[:3]]
+    full = [dict(row, run_id="full-run") for row in _matrix()]
+    problem = report.mixed_pilot_problem(pilot + full)
+    assert "the Claude Code rows hold 3 pilot row(s) and 12 that are not" in problem
+    with pytest.raises(ValueError):
+        report.build_summary(pilot + full, ["a.jsonl", "b.jsonl"])
+    first, second = tmp_path / "pilot-run.jsonl", tmp_path / "full-run.jsonl"
+    first.write_text("".join(json.dumps(row) + "\n" for row in pilot), encoding="utf-8")
+    second.write_text("".join(json.dumps(row) + "\n" for row in full), encoding="utf-8")
+    code = report.main([str(first), str(second), "--out", str(tmp_path / "report.md")])
+    assert code == 2 and "refused: the Claude Code rows hold 3 pilot row(s)" in capsys.readouterr().err
+    assert not (tmp_path / "report.md").exists() and not (tmp_path / "pilot-run-summary.json").exists()
+
+    # Two agents are never pooled, so a Codex pilot may stand beside a Claude Code result, each labelled.
+    codex_pilot = _codex([dict(row, pilot=True) for row in _matrix()])
+    assert report.mixed_pilot_problem(full + codex_pilot) is None
+    document = report.build_summary(full + codex_pilot, ["full-run.jsonl", "codex.jsonl"])
+    assert (document["pilot"], document["agents"]["claude-code"]["pilot"], document["agents"]["codex"]["pilot"]) == (
+        False, False, True)
+    assert document["agents"]["codex"]["headline"].startswith("PILOT, not a result: ")
