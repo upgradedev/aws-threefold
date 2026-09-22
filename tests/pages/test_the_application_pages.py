@@ -1142,6 +1142,37 @@ def test_the_walkthrough_says_where_it_runs_when_the_stack_is_private(tmp_path: 
     assert "does not let visitors make a sandbox" in out["refused"]
 
 
+def _ttl_days(module: str, name: str) -> int:
+    """The expiry a module compiles in, read from the source rather than restated."""
+    source = (ROOT / "src" / "threefold" / module).read_text(encoding="utf-8")
+    match = re.search(rf"^{name} = (.+)$", source, re.M)
+    assert match, f"{module} defines no {name}"
+    return round(eval(match.group(1), {"__builtins__": {}}) / 86400)  # noqa: S307 — an arithmetic literal from our own source
+
+
+def test_the_walkthrough_says_what_expires_in_a_day_and_what_stays_thirty(tmp_path: Path) -> None:
+    """Only the sandbox's stage configuration carries the 24-hour expiry.
+
+    Its calls and labels are ordinary ledger rows, which keep the 30-day
+    session expiry, so a page telling an anonymous visitor that the sandbox
+    "deletes itself within a day" promises a deletion that does not happen.
+    """
+    assert _ttl_days("application/projects.py", "SANDBOX_TTL_SECONDS") == 1
+    assert _ttl_days("infrastructure/dynamo_repo.py", "SESSION_TTL_SECONDS") == 30
+
+    out = dash(
+        r"""
+  answer = contract();
+  await visit('#/try');
+  out.step1 = text(view());
+""",
+        tmp_path,
+    )
+    assert "deletes itself within a day" not in out["step1"], "Nothing deletes the calls it recorded"
+    assert "Its stage expires within a day" in out["step1"]
+    assert "stay in the public call lists for 30 days" in out["step1"]
+
+
 # ------------------------------------------------------------------- charts
 
 

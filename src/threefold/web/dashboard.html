@@ -2040,7 +2040,7 @@
         }
         if (state.step === 1) {
           frame(stepCard('1 · Make a sandbox project',
-            'The stack creates a project of your own, in Observe, and sends about a dozen synthetic tool calls from Claude Code, Codex and Antigravity through the real evaluator. It deletes itself within a day.',
+            'The stack creates a project of your own, in Observe, and sends about a dozen synthetic tool calls from Claude Code, Codex and Antigravity through the real evaluator. Its stage expires within a day, and the project then drops out of the overview and the project list; the calls and the labels stay in the public call lists for 30 days.',
             state.resume ? html`<p class="text-xs text-gray-400">You started one earlier: <span class="font-mono text-gray-200">${state.resume}</span>. <button type="button" class="tf-link" data-action="try-resume">Continue with it</button> or make a new one.</p>` : '',
             primary('try-create', 'Make my sandbox')));
           return;
