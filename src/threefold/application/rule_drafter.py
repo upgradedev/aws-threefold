@@ -192,7 +192,17 @@ def draft_rule(
     description, project, cases = _checked_input(description, project, examples)
     if callable(existing_rules):
         existing_rules = existing_rules(project)
-    existing = list(existing_rules or [])
+    # Read back as a save would read them, before any model call. The draft is
+    # validated as one more member of this set, so a rule in force that did not
+    # validate on its own would otherwise surface only after the model had
+    # answered, as a problem the model was asked to repair and could not.
+    existing, unreadable = validate_rules(list(existing_rules or []))
+    notes: List[str] = []
+    if unreadable:
+        notes.append(
+            f"{len(unreadable)} rule(s) in force could not be read, so the draft was not checked "
+            "against them; POST /rules checks the whole set when the rule is saved."
+        )
     if len(existing) >= MAX_RULES:
         raise InvalidRequestError(
             f"The rules in force already number {len(existing)}, the most one set may hold, so a "
@@ -201,7 +211,6 @@ def draft_rule(
         )
 
     messages = [{"role": "user", "content": [{"text": _user_prompt(description, cases, existing)}]}]
-    notes: List[str] = []
     problems: List[str] = []
     candidate: Any = None
     rule: Optional[Dict[str, Any]] = None
@@ -298,13 +307,18 @@ def _checked_input(
             f"it is {len(description)}.",
             "description",
         )
+    # Read exactly as POST /rules/explain reads it, so the two routes cannot
+    # disagree about the same field: any text is a name, "" included, and one
+    # outside AllowedProjectPattern is answered with the same warning rather
+    # than refused. It is not stripped either, because explain judges the name
+    # as sent and a stripped one could match the pattern where the sent one
+    # does not.
     if project is not None:
-        if not isinstance(project, str) or not project.strip():
+        if not isinstance(project, str):
             raise InvalidRequestError(
-                "project must be a project name. Leave it out to draft for the shared rules.",
+                "project must be a string. Leave it out to draft for the shared rules.",
                 "project",
             )
-        project = project.strip()
         if len(project) > MAX_PROJECT_CHARS:
             raise InvalidRequestError(
                 f"project must be at most {MAX_PROJECT_CHARS} characters.", "project"
@@ -579,10 +593,13 @@ def _validated(
     mine = [p for p in problems if p.get("index") == len(existing)]
     if mine:
         return None, [str(p.get("reason")) for p in mine], notes
-    # A rule in force that no longer validates would shift the draft's place.
-    if len(usable) != len(existing) + 1:  # pragma: no cover
-        unreadable = "The rules in force could not be read back to check the draft beside them"
-        return None, [unreadable], notes
+    # `existing` was read back through validate_rules before the model was
+    # asked, and reading a set that has already been read back changes nothing,
+    # so the draft is always the last usable rule. Were that ever untrue, it is
+    # this code that is wrong and not the model's answer, so it is raised rather
+    # than sent back to the model as something to repair.
+    if problems or len(usable) != len(existing) + 1:  # pragma: no cover
+        raise RuntimeError("The rules in force changed when they were read back a second time")
     rule = usable[-1]
     if rule["mode"] != OBSERVE:  # pragma: no cover - set above; this keeps it true
         rule = dict(rule, mode=OBSERVE)

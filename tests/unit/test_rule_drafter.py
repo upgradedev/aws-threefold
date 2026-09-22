@@ -15,7 +15,6 @@ import pytest
 from threefold.application import rule_drafter
 from threefold.application.dtos import InvalidRequestError
 from threefold.application.rule_drafter import (
-    DRAFT_MAX_TOKENS,
     MAX_ATTEMPTS,
     RULE_KEYS,
     SYSTEM_PROMPT,
@@ -108,7 +107,7 @@ def test_a_valid_draft_comes_back_in_the_format_a_save_accepts() -> None:
 def test_the_model_is_asked_with_a_low_token_limit_and_no_randomness() -> None:
     _, client = draft(answer(GOOD))
     config = client.runtime.calls[0]["inferenceConfig"]
-    assert config["maxTokens"] == DRAFT_MAX_TOKENS <= 500
+    assert 0 < config["maxTokens"] <= 500, "A rule is about two hundred tokens of JSON"
     assert config["temperature"] == 0
     assert client.runtime.calls[0]["modelId"] == MODEL
     assert client.calls_made == 1
@@ -451,6 +450,24 @@ def test_a_project_that_is_not_text_is_refused_before_the_model_is_asked() -> No
     with pytest.raises(InvalidRequestError):
         draft_rule(DESCRIPTION, 7, None, client=client, existing_rules=[])
     assert client.runtime.calls == []
+
+
+def test_an_empty_project_is_a_name_as_it_is_for_explain() -> None:
+    result, _ = draft(answer(GOOD), project="")
+    assert result["project"] == ""
+
+
+def test_rules_in_force_that_do_not_validate_are_set_aside_before_the_model_is_asked() -> None:
+    """They used to surface after the answer, as a problem the model could not repair."""
+    unreadable = [{"id": "x", "when_path_matches": []}]
+    result, client = draft(answer(GOOD), existing_rules=unreadable)
+    assert result["attempts"] == 1 and len(client.runtime.calls) == 1
+    assert any("could not be read" in note for note in result["notes"])
+
+
+def test_without_the_rules_in_force_the_caller_is_told_the_id_was_not_checked() -> None:
+    result, _ = draft(answer(GOOD), existing_rules=None)
+    assert any("not checked against the rules in force" in note for note in result["notes"])
 
 
 # --- what leaves for the model ---------------------------------------------
