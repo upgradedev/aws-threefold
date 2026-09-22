@@ -70,11 +70,14 @@ def _service_call(command: List[str]) -> List[str]:
 class FakeAws:
     """Stands in for subprocess.run: records each AWS CLI call and answers it."""
 
-    def __init__(self, fail_on_put: int = 0, outputs=None) -> None:
+    def __init__(self, fail_on_put: int = 0, outputs=None, listing=None) -> None:
         self.calls: List[List[str]] = []
         self.bodies: dict = {}
         self.fail_on_put = fail_on_put
         self.puts = 0
+        # What list-objects-v2 --query Contents[].Key prints: a JSON list, or null
+        # for an empty bucket.
+        self.listing = listing
         self.outputs = outputs if outputs is not None else {
             "WebBucketName": "acme-edge-webbucket-1a2b3c",
             "DistributionId": "E2ACMEEDGE0001",
@@ -98,7 +101,15 @@ class FakeAws:
             return SimpleNamespace(returncode=0, stdout='{"ETag": "\\"x\\""}', stderr="")
         if call == ["cloudfront", "create-invalidation"]:
             return SimpleNamespace(returncode=0, stdout='{"Invalidation": {"Id": "I2ACME", "Status": "InProgress"}}', stderr="")
+        if call == ["s3api", "list-objects-v2"]:
+            assert command[command.index("--query") + 1] == "Contents[].Key"
+            return SimpleNamespace(returncode=0, stdout=json.dumps(self.listing) + "\n", stderr="")
+        if call == ["s3api", "delete-object"]:
+            return SimpleNamespace(returncode=0, stdout='{"DeleteMarker": true, "VersionId": "v2"}', stderr="")
         raise AssertionError(f"unexpected command {command}")
+
+    def deleted(self) -> List[str]:
+        return [c[c.index("--key") + 1] for c in self.calls if _service_call(c) == ["s3api", "delete-object"]]
 
     def puts_in_order(self) -> List[str]:
         return [c[c.index("--key") + 1] for c in self.calls if c[1:3] == ["s3api", "put-object"]]
@@ -323,6 +334,100 @@ def test_main_turns_a_failure_into_exit_code_one(web_root: Path, monkeypatch, ca
     code = publish_web.main(["--bucket", "acme-bucket", "--distribution-id", "E2ACME", "--web-root", str(web_root)])
     assert code == 1
     assert capsys.readouterr().err.startswith("publish_web: ")
+
+
+# --- what a publish leaves behind ------------------------------------------------------------
+
+
+def test_without_prune_nothing_is_listed_or_deleted(web_root: Path, aws: FakeAws) -> None:
+    """A page removed from the source stays at the edge; the docstring says so, and --prune is opt-in."""
+    result = run("--bucket", "acme-bucket", "--distribution-id", "E2ACME", "--web-root", str(web_root))
+    assert result.code == 0
+    assert not [c for c in aws.calls if _service_call(c) in (["s3api", "list-objects-v2"], ["s3api", "delete-object"])]
+    assert "only adds and overwrites" in publish_web.__doc__
+
+
+def test_prune_deletes_the_pages_and_assets_this_publish_did_not_write(web_root: Path, monkeypatch) -> None:
+    fake = FakeAws(listing=[
+        "index.html", "rules.html", "dashboard.html", "app", "assets/threefold.js",
+        "retired.html", "assets/old-chart.js", "assets/icons/gone.svg",
+        "backups/2026-09-01.tar", "notes/readme.html", "robots.txt",
+    ])
+    monkeypatch.setattr(publish_web.subprocess, "run", fake)
+    result = run("--bucket", "acme-bucket", "--distribution-id", "E2ACME", "--web-root", str(web_root), "--prune")
+    assert result.code == 0, result.err
+    assert fake.deleted() == ["assets/icons/gone.svg", "assets/old-chart.js", "retired.html"]
+    # Only keys of a shape this script writes are ever deleted; the rest are named and kept.
+    assert "left alone, not a key this script writes: backups/2026-09-01.tar, notes/readme.html, robots.txt" in result.out
+    for call in fake.calls:
+        if _service_call(call) == ["s3api", "delete-object"]:
+            assert call[call.index("--bucket") + 1] == "acme-bucket"
+            assert call[call.index("--region") + 1] == "us-east-1"
+
+
+def test_prune_runs_after_every_upload_and_before_the_invalidation(web_root: Path, monkeypatch) -> None:
+    fake = FakeAws(listing=["retired.html"])
+    monkeypatch.setattr(publish_web.subprocess, "run", fake)
+    run("--bucket", "acme-bucket", "--distribution-id", "E2ACME", "--web-root", str(web_root), "--prune")
+    services = [_service_call(call) for call in fake.calls]
+    last_put = max(i for i, s in enumerate(services) if s == ["s3api", "put-object"])
+    listing = services.index(["s3api", "list-objects-v2"])
+    delete = services.index(["s3api", "delete-object"])
+    invalidation = services.index(["cloudfront", "create-invalidation"])
+    assert last_put < listing < delete < invalidation
+
+
+def test_prune_on_an_empty_listing_deletes_nothing(web_root: Path, monkeypatch) -> None:
+    fake = FakeAws(listing=None)
+    monkeypatch.setattr(publish_web.subprocess, "run", fake)
+    result = run("--bucket", "acme-bucket", "--distribution-id", "E2ACME", "--web-root", str(web_root), "--prune")
+    assert result.code == 0
+    assert fake.deleted() == []
+    assert "nothing to delete" in result.out
+
+
+def test_prune_refuses_a_listing_it_cannot_read(web_root: Path, monkeypatch) -> None:
+    fake = FakeAws(listing={"Contents": "not a list"})
+    monkeypatch.setattr(publish_web.subprocess, "run", fake)
+    result = run("--bucket", "acme-bucket", "--distribution-id", "E2ACME", "--web-root", str(web_root), "--prune")
+    assert result.code == 1
+    assert "not a key list" in result.err
+    assert fake.deleted() == []
+    assert not any(_service_call(c) == ["cloudfront", "create-invalidation"] for c in fake.calls)
+
+
+def test_a_dry_run_with_prune_prints_the_listing_and_runs_nothing(web_root: Path, monkeypatch) -> None:
+    def forbidden(*args, **kwargs):
+        raise AssertionError("a dry run must not run anything")
+
+    monkeypatch.setattr(publish_web.subprocess, "run", forbidden)
+    result = run("--stack-name", "acme-edge", "--web-root", str(web_root), "--dry-run", "--prune")
+    assert result.code == 0
+    assert "would run: aws s3api list-objects-v2 --bucket '<WebBucketName of acme-edge>'" in result.out
+    assert "which keys would go is not known" in result.out
+
+
+@pytest.mark.parametrize(
+    "key, publishable",
+    [
+        ("index.html", True),
+        ("app", True),
+        ("assets/threefold.js", True),
+        ("assets/icons/acme.svg", True),
+        ("notes/readme.html", False),
+        ("robots.txt", False),
+        ("apps", False),
+        ("assets", False),
+    ],
+)
+def test_only_keys_of_a_shape_publish_writes_can_be_pruned(key: str, publishable: bool) -> None:
+    assert publish_web.is_publishable_key(key) is publishable
+
+
+def test_a_printed_command_quotes_hostile_values_for_a_posix_shell() -> None:
+    """Printed, never run: a value that looks like shell syntax is one quoted word."""
+    shown = publish_web._show(["aws", "s3api", "put-object", "--bucket", "acme; rm -rf /", "--key", "E1 $(whoami)"])
+    assert shown == "aws s3api put-object --bucket 'acme; rm -rf /' --key 'E1 $(whoami)'"
 
 
 def test_the_script_never_calls_a_shell() -> None:

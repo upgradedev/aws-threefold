@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Publishes the pages to the edge: the private bucket, then one invalidation.
 
-    publish_web.py --stack-name threefold-edge [--region us-east-1] [--dry-run]
-    publish_web.py --bucket NAME --distribution-id ID [--region us-east-1] [--dry-run]
+    publish_web.py --stack-name threefold-edge [--region us-east-1] [--prune] [--dry-run]
+    publish_web.py --bucket NAME --distribution-id ID [--region us-east-1] [--prune] [--dry-run]
 
 Reads src/threefold/web/*.html and every file under src/threefold/web/assets/,
 replaces __THREEFOLD_BASE_PATH__ with the empty string, because behind
@@ -17,9 +17,20 @@ path, well inside the thousand free paths a month.
 openapi.json is not uploaded: the function serves the document deployed with
 its code, and deploy/edge.yml sends /openapi.json to the function.
 
+A publish only adds and overwrites. A page deleted from src/threefold/web stays
+in the bucket, and the edge keeps serving it, until it is removed: --prune does
+that after the uploads, deleting every key this script could have written (a
+top-level .html page, "app", anything under assets/) that the publish did not
+just write. Keys of any other shape are listed and left alone, so a wrong
+bucket loses nothing but pages. The bucket is versioned, so a deletion leaves a
+delete marker, and the removed version stays restorable until the lifecycle
+rule expires it 30 days later; the same holds for every page a publish
+overwrites.
+
 --stack-name reads WebBucketName and DistributionId from the edge stack's
 outputs with "aws cloudformation describe-stacks". --dry-run prints every step,
-each AWS CLI command included, and runs none of them, not even that read.
+each AWS CLI command included, and runs none of them, not even that read or
+the listing --prune needs, so a dry run cannot say which keys would go.
 
 Standard library and the AWS CLI v2, called through subprocess.
 """
@@ -155,8 +166,12 @@ def _aws(profile: Optional[str]) -> List[str]:
 
 
 def _show(command: Sequence[str]) -> str:
-    # POSIX quoting reads the same in bash and PowerShell, and keeps /* from
-    # being expanded by a shell the printed line is pasted into.
+    # POSIX shell quoting, as bash reads it: it keeps /* and $(...) from being
+    # expanded by a shell the printed line is pasted into. PowerShell reads a
+    # single-quoted word literally too, so the line pastes there as well, except
+    # for a value that itself holds a single quote, which POSIX writes as '"'"'
+    # and PowerShell would need as ''. Nothing is ever run through a shell here;
+    # this is only what is printed.
     return shlex.join(list(command))
 
 
@@ -208,6 +223,42 @@ def put_object_command(bucket: str, item: WebObject, body_path: str, region: str
     ]
 
 
+def list_keys_command(bucket: str, region: str, profile: Optional[str]) -> List[str]:
+    # The CLI follows the listing's pages itself and --query joins them, so this
+    # is every key in the bucket, not the first thousand.
+    return _aws(profile) + [
+        "s3api", "list-objects-v2", "--bucket", bucket, "--query", "Contents[].Key", "--region", region, "--output", "json",
+    ]
+
+
+def delete_object_command(bucket: str, key: str, region: str, profile: Optional[str]) -> List[str]:
+    return _aws(profile) + [
+        "s3api", "delete-object", "--bucket", bucket, "--key", key, "--region", region, "--output", "json",
+    ]
+
+
+def is_publishable_key(key: str) -> bool:
+    """A key of a shape this script writes: a top-level page, the /app key, or an asset."""
+    return key == APP_KEY or (key.endswith(".html") and "/" not in key) or key.startswith("assets/")
+
+
+def stale_keys(listed: Sequence[str], planned: Sequence[str]) -> List[str]:
+    """Keys a publish could have written earlier and did not write this time."""
+    keep = set(planned)
+    return sorted(key for key in listed if is_publishable_key(key) and key not in keep)
+
+
+def bucket_keys(bucket: str, region: str, profile: Optional[str]) -> List[str]:
+    raw = run_aws(list_keys_command(bucket, region, profile))
+    try:
+        keys = json.loads(raw or "null") or []
+    except ValueError:
+        raise PublishError(f"list-objects-v2 for {bucket} answered something that is not a key list") from None
+    if not isinstance(keys, list) or not all(isinstance(key, str) for key in keys):
+        raise PublishError(f"list-objects-v2 for {bucket} answered something that is not a key list")
+    return keys
+
+
 def invalidation_command(distribution_id: str, profile: Optional[str]) -> List[str]:
     return _aws(profile) + [
         "cloudfront", "create-invalidation", "--distribution-id", distribution_id, "--paths", "/*", "--output", "json",
@@ -225,6 +276,11 @@ def _parse(argv: Optional[Sequence[str]]) -> argparse.Namespace:
     parser.add_argument("--region", default=DEFAULT_REGION, help=f"the edge stack's region (default {DEFAULT_REGION})")
     parser.add_argument("--profile", help="an AWS CLI profile; otherwise the CLI's own default")
     parser.add_argument("--web-root", type=Path, default=DEFAULT_WEB_ROOT, help="the directory the pages are read from")
+    parser.add_argument(
+        "--prune",
+        action="store_true",
+        help="after the uploads, delete pages and assets in the bucket that this publish did not write",
+    )
     parser.add_argument("--dry-run", action="store_true", help="print every step and run none of them")
     args = parser.parse_args(argv)
     if args.stack_name and (args.bucket or args.distribution_id):
@@ -232,6 +288,28 @@ def _parse(argv: Optional[Sequence[str]]) -> argparse.Namespace:
     if not args.stack_name and not (args.bucket and args.distribution_id):
         parser.error("give --stack-name, or both --bucket and --distribution-id")
     return args
+
+
+def prune(bucket: str, planned: Sequence[str], args: argparse.Namespace, out, prefix: str) -> None:
+    """Deletes the pages and assets in the bucket this publish did not write."""
+    command = list_keys_command(bucket, args.region, args.profile)
+    print(f"prune s3://{bucket}: delete pages and assets this publish did not write", file=out)
+    print(f"  {prefix}{_show(command)}", file=out)
+    if args.dry_run:
+        print("  (the listing is not run in a dry run, so which keys would go is not known)", file=out)
+        return
+    listed = bucket_keys(bucket, args.region, args.profile)
+    foreign = sorted(key for key in listed if not is_publishable_key(key))
+    if foreign:
+        print(f"  left alone, not a key this script writes: {', '.join(foreign)}", file=out)
+    stale = stale_keys(listed, planned)
+    if not stale:
+        print("  nothing to delete", file=out)
+    for key in stale:
+        command = delete_object_command(bucket, key, args.region, args.profile)
+        print(f"delete s3://{bucket}/{key}", file=out)
+        print(f"  {prefix}{_show(command)}", file=out)
+        run_aws(command)
 
 
 def publish(args: argparse.Namespace, out=None) -> int:
@@ -275,6 +353,11 @@ def publish(args: argparse.Namespace, out=None) -> int:
             print(f"  {prefix}{_show(command)}", file=out)
             if not dry:
                 run_aws(command)
+
+    # After the uploads, so no page is ever missing while a visitor loads it, and
+    # before the invalidation, so the edge forgets the removed pages with the rest.
+    if args.prune:
+        prune(bucket, [item.key for item in objects], args, out, prefix)
 
     command = invalidation_command(distribution_id, args.profile)
     print(f"invalidate /* on {distribution_id}", file=out)
