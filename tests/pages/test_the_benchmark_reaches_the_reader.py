@@ -121,16 +121,25 @@ def test_every_document_carries_each_series_own_rates() -> None:
     """The rates that tell the series apart, in every document that names them.
 
     A document quoting one series and calling it "the benchmark" would pool
-    what the reports refuse to pool, so each series' unguided rate and its
-    rate with the rules in `CLAUDE.md` alone must be there.
+    what the reports refuse to pool, so each series' three conditions must be
+    there in order: unguided, with the rules in `CLAUDE.md` alone, and with
+    Threefold enforcing.
+
+    The whole run is required, not the rates one at a time. A bare percentage
+    is found in another series' figure or inside a longer one ("0%" sits in
+    "100%"), so a document could drop a cell and still pass; a document states
+    the three of a series either as the run "a% / b% / c%" or, where it carries
+    the table, as the three cells the summaries state.
     """
     measured = _measured()
     for name in DOCUMENTS:
         body = _text(name)
         for label, series in measured.items():
-            for condition in ("none", "prompt"):
-                percent = f"{round(series[condition]['violation_rate'] * 100)}%"
-                assert percent in body, f"{name} does not carry {label}, {condition} = {percent}"
+            run = " / ".join(f"{round(series[c]['violation_rate'] * 100)}%" for c in CONDITIONS)
+            cells = [_share(series[c]["violations"], series[c]["n"], series[c]["violation_rate"]) for c in CONDITIONS]
+            assert run in body or all(cell in body for cell in cells), (
+                f"{name} does not carry {label} as {run}, nor as the cells {cells}"
+            )
 
 
 def test_the_tables_state_every_cell_as_the_summaries_have_it() -> None:
