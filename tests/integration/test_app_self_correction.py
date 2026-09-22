@@ -9,7 +9,9 @@ Names are synthetic, as the clean-room rule requires.
 """
 from __future__ import annotations
 
+import datetime
 import json
+import time
 
 import pytest
 
@@ -29,13 +31,30 @@ def _a_ledger_of_its_own(monkeypatch):
     monkeypatch.setattr(api_handlers, "_evaluator", GovernanceEvaluator(session_repo=DynamoDBSessionRepository()))
 
 
+def _next_instant() -> None:
+    """Returns once the clock the ledger stamps calls with has moved on.
+
+    A real agent's calls are seconds apart. This machine's clock may tick only
+    once a millisecond, so calls made back to back can share a timestamp, and
+    the ledger records no other order: the figure then reads them as possibly
+    simultaneous, which is right for the ledger and not what these tests are
+    about. Waiting for the next tick gives each call its own instant, as a real
+    session's calls have. The rule for tied calls has its own unit tests.
+    """
+    start = datetime.datetime.now(datetime.timezone.utc)
+    while datetime.datetime.now(datetime.timezone.utc) <= start:
+        time.sleep(0.0005)
+
+
 @pytest.fixture
 def corrected() -> str:
     """A project in enforce whose agent was refused once and then wrote the same file cleanly."""
     name = fresh_project("Acme-Correct")
     session = f"{name}-cc"
     assert hook_call(name, session, DOMAIN_WRITE)["status"].startswith("BLOCKED")
+    _next_instant()
     hook_call(name, session, README, tool="Read", action="FILE_READ")
+    _next_instant()
     assert hook_call(name, session, CLEAN_WRITE)["status"] == "APPROVED"
     # A second session that was refused and walked away.
     assert hook_call(name, f"{name}-cx", DOMAIN_WRITE, agent="codex")["status"].startswith("BLOCKED")
@@ -101,6 +120,25 @@ def test_a_store_that_cannot_page_the_ledger_gives_the_unread_figure(monkeypatch
 
     monkeypatch.setattr(api_handlers, "_evaluator", GovernanceEvaluator(session_repo=_NoLedger()))
     assert get("/api/overview")["self_correction"] == ledger.self_correction_unread()
+
+
+def test_commands_are_left_out_because_the_ledger_keeps_only_their_program() -> None:
+    name = fresh_project("Acme-Shell")
+    session = f"{name}-cc"
+    refused = hook_call(name, session, {"command": "git commit --no-verify -m wip"}, tool="Bash", action="COMMAND_EXEC")
+    assert refused["status"].startswith("BLOCKED")
+    _next_instant()
+    assert hook_call(name, session, {"command": "git status"}, tool="Bash", action="COMMAND_EXEC")["status"] == "APPROVED"
+    _next_instant()
+    heredoc = {"command": "cat > src/acme/domain/order.py <<'PY'\nimport boto3\nPY"}
+    assert hook_call(name, session, heredoc, tool="Bash", action="COMMAND_EXEC")["status"].startswith("BLOCKED")
+    _next_instant()
+    assert hook_call(name, session, CLEAN_WRITE)["status"] == "APPROVED"
+    figure = get("/api/overview", project=name)["self_correction"]
+    # Neither `git status` correcting a refused commit, nor a refused shell
+    # write scored as never corrected: both refusals are left out.
+    assert (figure["refusals_considered"], figure["self_corrected"], figure["rate"]) == (0, 0, None)
+    assert get("/api/overview", project=name)["totals"]["refused"] == 2
 
 
 def test_every_row_the_figure_reads_is_reduced_first(monkeypatch) -> None:

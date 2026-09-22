@@ -125,6 +125,78 @@ def test_a_row_read_twice_counts_once() -> None:
     assert figure(rows + [dict(rows[0])])["refusals_considered"] == 1
 
 
+
+# ---------------------------------------------------------------- calls that share an instant
+
+
+def _at(stamp: str, status: str, target: str, verdict_id: str, action: str = "FILE_WRITE") -> dict:
+    return {"verdict_id": verdict_id, "timestamp": f"2026-09-22T10:00:00.{stamp}+00:00", "session_id": "acme-session-1",
+            "origin": "hook", "project_name": "Acme-Orders", "status": status, "target": target, "action_type": action}
+
+
+@pytest.mark.parametrize("read_id, write_id", [("VERDICT-000001", "VERDICT-FFFFFF"), ("VERDICT-FFFFFF", "VERDICT-000001")])
+def test_calls_that_share_an_instant_are_never_ordered_by_their_random_ids(read_id: str, write_id: str) -> None:
+    # On a clock that ticks once a millisecond, the read and the clean write
+    # after a refusal can share a timestamp. Which id sorts first is chance,
+    # so the answer must be the same either way: the write may have been the
+    # second call, and a tie never makes it look sooner than that.
+    rows = [_at("053932", REFUSED, DOMAIN, "VERDICT-AAAAAA"),
+            _at("054931", "APPROVED", "README.md", read_id, "FILE_READ"),
+            _at("054931", "APPROVED", DOMAIN, write_id)]
+    for ordering in (rows, list(reversed(rows)), [rows[2], rows[0], rows[1]]):
+        result = figure(ordering)
+        assert (result["self_corrected"], result["median_calls_to_correct"]) == (1, 2)
+
+
+@pytest.mark.parametrize("read_id", ["VERDICT-000001", "VERDICT-FFFFFF"])
+def test_a_call_at_the_refusals_own_instant_counts_as_in_between_but_never_as_its_answer(read_id: str) -> None:
+    shared = [_at("066617", REFUSED, DOMAIN, "VERDICT-888888"), _at("066617", "APPROVED", "README.md", read_id, "FILE_READ"),
+              _at("067616", "APPROVED", DOMAIN, "VERDICT-123456")]
+    assert (figure(shared)["self_corrected"], figure(shared)["median_calls_to_correct"]) == (1, 2)
+    # An approval at the very instant of the refusal may have come before it.
+    same_instant = [_at("066617", REFUSED, DOMAIN, "VERDICT-888888"), _at("066617", "APPROVED", DOMAIN, read_id)]
+    assert (figure(same_instant)["refusals_considered"], figure(same_instant)["self_corrected"]) == (1, 0)
+
+
+def test_a_tie_at_the_edge_of_the_window_does_not_stretch_it() -> None:
+    refusal = _at("000000", REFUSED, DOMAIN, "VERDICT-0")
+    filler = [_at(f"{index:06d}", "APPROVED", f"src/acme/app/step_{index}.py", f"VERDICT-{index}") for index in range(1, 10)]
+    # The tenth and eleventh calls share an instant: the correction may have
+    # been the eleventh, so it is not counted inside a window of ten.
+    tied = [_at("000010", "APPROVED", DOMAIN, "VERDICT-10"), _at("000010", "APPROVED", ADAPTER, "VERDICT-11")]
+    assert figure([refusal] + filler + tied)["self_corrected"] == 0
+    assert figure([refusal] + filler + tied[:1])["median_calls_to_correct"] == 10
+
+
+# ---------------------------------------------------------------- commands
+
+
+def test_a_refused_command_is_not_considered_because_its_target_is_only_a_program() -> None:
+    rows = session((REFUSED, "git"), ("APPROVED", "git"))
+    for row in rows:
+        row["action_type"] = "COMMAND_EXEC"
+    # A refused `git commit --no-verify` followed by `git status` is not an
+    # agent correcting itself; the ledger cannot tell them apart.
+    assert figure(rows) == {"refusals_considered": 0, "self_corrected": 0, "rate": None, "median_calls_to_correct": None}
+
+
+def test_a_refused_shell_write_is_left_out_rather_than_scored_as_never_corrected() -> None:
+    rows = session((REFUSED, "cat"), ("APPROVED", DOMAIN))
+    rows[0]["action_type"] = "COMMAND_EXEC"
+    rows[1]["action_type"] = "FILE_WRITE"
+    result = figure(rows)
+    assert (result["refusals_considered"], result["rate"]) == (0, None)
+
+
+def test_a_command_is_never_a_correction_but_is_one_of_the_calls_in_between() -> None:
+    script = "scripts/deploy.sh"
+    rows = session((REFUSED, script), ("APPROVED", "./" + script), ("APPROVED", script))
+    rows[1]["action_type"] = "COMMAND_EXEC"
+    result = figure(rows)
+    assert (result["self_corrected"], result["median_calls_to_correct"]) == (1, 2)
+    assert figure(rows[:2])["self_corrected"] == 0, "Running the script is not writing it acceptably"
+
+
 # ---------------------------------------------------------------- the bounded read
 
 

@@ -2912,7 +2912,7 @@
       },
       "SelfCorrection": {
         "type": "object",
-        "description": "How often an agent that was refused went on to do the same thing acceptably, read from the ledger rather than the rollups because it is a question about the order of calls in a session. A refusal of a hook or ci call self-corrected when one of the next ten calls of the same session aimed at the same target and was approved or only observed. Page calls are never considered, and nothing is refused in the observe stage, so a project there considers no refusal. The read is bounded: complete is false when it stopped before the window's oldest day, and the figure then covers the newest rows_read rows only.",
+        "description": "How often an agent that was refused went on to do the same thing acceptably, read from the ledger rather than the rollups because it is a question about the order of calls in a session. A refusal of a hook or ci call self-corrected when one of the next ten calls of the same session aimed at the same file and was approved or only observed. Commands are left out on both sides: the ledger keeps only the program a command ran, never the rest of its line, so it cannot say which file a refused command was aimed at; a refused command is not considered, and a later command is never taken as a correction, though it counts as one of the calls in between. Calls recorded at the same instant are not ordered against each other: one that shares the refusal's instant is never its correction, and a tie can only lengthen a distance. Page calls are never considered, and nothing is refused in the observe stage, so a project there considers no refusal. The read is bounded: complete is false when it stopped before the window's oldest day, and the figure then covers the newest rows_read rows only.",
         "required": [
           "refusals_considered",
           "self_corrected",
@@ -2924,11 +2924,11 @@
         "properties": {
           "refusals_considered": {
             "type": "integer",
-            "description": "Refusals of hook and ci calls in the window whose target the ledger recorded. A refusal with no recorded target cannot be matched with anything and is left out."
+            "description": "Refusals of hook and ci calls in the window aimed at a file the ledger recorded. A refusal with no recorded target, or of a command, whose recorded target is only the program it ran, cannot be matched with anything and is left out."
           },
           "self_corrected": {
             "type": "integer",
-            "description": "Of those, the refusals followed within the next ten calls of the same session by a call to the same target that was not refused."
+            "description": "Of those, the refusals followed within the next ten calls of the same session by a call to the same file that was not refused and was not a command."
           },
           "rate": {
             "type": [
@@ -2942,7 +2942,7 @@
               "number",
               "null"
             ],
-            "description": "The median number of calls from a refusal to the call that corrected it, 1 being the very next call; null when nothing was corrected."
+            "description": "The median number of calls from a refusal to the call that corrected it, 1 being the very next call; null when nothing was corrected. Calls that share an instant with the correction are all counted as having come before it."
           },
           "rows_read": {
             "type": "integer",

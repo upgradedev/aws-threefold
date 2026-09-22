@@ -8,10 +8,11 @@ is a console that lies by omission.
 """
 from __future__ import annotations
 
+import bisect
 import datetime
 import statistics
 from collections import Counter, defaultdict
-from typing import Any, Dict, Iterable, List, Mapping
+from typing import Any, Dict, Iterable, List, Mapping, Optional
 
 # What the gates actually watch today. Shown on the console beside the counts,
 # so a zero is read as "nothing was refused here" rather than "nothing happens
@@ -244,7 +245,7 @@ SELF_CORRECTION_ORIGINS = ("hook", "ci")
 
 
 def _same_target(value: Any) -> str:
-    """A target as two calls to the same file or program are compared.
+    """A target as two calls to the same file are compared.
 
     A path an agent sends with backslashes, or with a leading "./", names the
     same file as one sent without; anything else is compared exactly.
@@ -255,6 +256,56 @@ def _same_target(value: Any) -> str:
     return text
 
 
+def _is_command(row: Mapping[str, Any]) -> bool:
+    """Whether a row records a command, whose target is only the program it ran.
+
+    The same test boundary_guard.describe_target applies when it decides what
+    to record: for a command it keeps the program name and never the rest of
+    the line, which is where a refused credential would be.
+    """
+    action = str(row.get("action_type") or "").upper()
+    return "COMMAND" in action or "EXEC" in action
+
+
+def _instant(row: Mapping[str, Any]) -> str:
+    return str(row.get("timestamp") or "")
+
+
+def _answers(row: Mapping[str, Any], target: str) -> bool:
+    """Whether a later call did acceptably what a refusal of `target` stopped."""
+    return (
+        not _is_refusal(str(row.get("status") or ""))
+        and not _is_command(row)
+        and _same_target(row.get("target")) == target
+    )
+
+
+def _calls_to_correct(calls: List[Mapping[str, Any]], instants: List[str], index: int, target: str, window: int) -> Optional[int]:
+    """How many calls it took to correct the refusal at `index`, or None if none did within `window`.
+
+    Calls recorded at the same instant have no order the ledger can recover:
+    on a clock that ticks once a millisecond one agent's calls can share one,
+    and the sort key that follows the timestamp is a random id. So nothing
+    here depends on how tied calls were sorted. A call recorded at the
+    refusal's own instant may have come before it, and is never taken as its
+    correction; and a correction's distance counts every call that may have
+    come between, which is those sharing the refusal's instant, those after
+    it, and all of those sharing the correction's own. A tie can only lengthen
+    the distance, never shorten it or stretch the window.
+    """
+    first = bisect.bisect_left(instants, instants[index])
+    later = bisect.bisect_right(instants, instants[index])
+    while later < len(calls):
+        end = bisect.bisect_right(instants, instants[later])
+        distance = end - first - 1
+        if distance > window:
+            return None
+        if any(_answers(calls[position], target) for position in range(later, end)):
+            return distance
+        later = end
+    return None
+
+
 def self_correction(rows: Iterable[Mapping[str, Any]], window: int = SELF_CORRECTION_WINDOW) -> Dict[str, Any]:
     """How often an agent that was refused went on to do the same thing acceptably.
 
@@ -262,15 +313,22 @@ def self_correction(rows: Iterable[Mapping[str, Any]], window: int = SELF_CORREC
     the next `window` calls of the same session, in time order, aimed at the
     same target and was not refused: approved, or only observed by a rule that
     is still watching. The distance is how many calls that took, 1 being the
-    very next one.
+    very next one. Calls that share a timestamp are not ordered against each
+    other; `_calls_to_correct` says how that is resolved.
 
     Every refusal counts on its own, so a target refused twice before the call
     that went through is two refusals, each corrected. A refusal whose target
-    the ledger did not record (a command with no program, arguments with no
-    path) is not considered at all: it cannot be matched with anything, and
-    scoring it as uncorrected would lower the rate for a reason that has
-    nothing to do with the agent. In the observe stage nothing is refused, so
-    such a window considers no refusal.
+    the ledger did not record (arguments with no path) is not considered at
+    all: it cannot be matched with anything, and scoring it as uncorrected
+    would lower the rate for a reason that has nothing to do with the agent.
+    Commands are left out on both sides for the same reason. The ledger keeps
+    only the program a command ran, so "the same target" would mean "the same
+    program": a refused `git commit --no-verify` would be corrected by any
+    later `git status`, and a refused shell write would never be corrected by
+    the Write to the same file its refusal tells the agent to use. A refused
+    command is therefore not considered, and a command is never taken as a
+    correction, though it still counts as one of the calls in between. In the
+    observe stage nothing is refused, so such a window considers no refusal.
 
     `rate` and `median_calls_to_correct` are None when there is nothing to
     divide or rank: none of none is not a rate, and a median of no distances
@@ -290,16 +348,16 @@ def self_correction(rows: Iterable[Mapping[str, Any]], window: int = SELF_CORREC
     considered = 0
     distances: List[int] = []
     for calls in sessions.values():
-        calls.sort(key=lambda call: (str(call.get("timestamp") or ""), str(call.get("verdict_id") or "")))
+        calls.sort(key=_instant)
+        instants = [_instant(call) for call in calls]
         for index, call in enumerate(calls):
             target = _same_target(call.get("target"))
-            if not _is_refusal(str(call.get("status") or "")) or not target:
+            if not _is_refusal(str(call.get("status") or "")) or not target or _is_command(call):
                 continue
             considered += 1
-            for distance, later in enumerate(calls[index + 1:index + 1 + window], start=1):
-                if _same_target(later.get("target")) == target and not _is_refusal(str(later.get("status") or "")):
-                    distances.append(distance)
-                    break
+            distance = _calls_to_correct(calls, instants, index, target, window)
+            if distance is not None:
+                distances.append(distance)
 
     corrected = len(distances)
     return {
