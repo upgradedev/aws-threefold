@@ -129,15 +129,28 @@ import zipfile
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
+def _own_path() -> Optional[Path]:
+    """This file, or None when it runs from no file.
+
+    Piped into Python (`curl ... | python3 - connect`), __file__ is `<stdin>`,
+    which names no file, or it is not set at all. Read as a path, `<stdin>`
+    put this file in the current directory, beside nothing it could install.
+    """
+    try:
+        name = __file__
+    except NameError:
+        return None
+    if not isinstance(name, str) or not name or name.startswith("<"):
+        return None
+    return Path(name).resolve()
+
+
 # In a checkout this file is src/threefold/tools/threefold_install.py, beside
 # the CLI, one folder from the hook and two from the engine's package root.
 # The stack serves it from there too, so these are the only paths it derives.
-# Piped into Python (`curl ... | python3 - connect`) there is no file at all,
-# and so nothing beside it to copy: only a served copy can install from there.
-try:
-    HERE: Optional[Path] = Path(__file__).resolve().parent
-except NameError:
-    HERE = None
+# Run from no file there is nothing beside it to copy: only a served copy,
+# which downloads what it installs, can run that way.
+HERE: Optional[Path] = _own_path().parent if _own_path() is not None else None
 SOURCE: Optional[Path] = HERE.parents[1] if HERE is not None and len(HERE.parents) > 1 else None
 HOOK_SOURCE: Optional[Path] = SOURCE / "threefold" / "hooks" / "threefold_hook.py" if SOURCE is not None else None
 CLI_SOURCE: Optional[Path] = HERE / "threefold_cli.py" if HERE is not None else None
@@ -165,8 +178,12 @@ AGENT_SETTINGS = {
 
 # How each agent shows that it is installed: a folder in the home folder, or
 # its command on PATH. ~/.claude and ~/.codex are the folders the hook already
-# treats as those agents' own; Antigravity keeps its state under ~/.gemini,
-# which the hook protects for the same reason, in an antigravity folder.
+# treats as those agents' own. For Antigravity the hook protects ~/.gemini,
+# but no measurement in this repository records which folder under it the
+# desktop app uses, so the two folders here are the ones this command's
+# contract names, not observed ones; ~/.gemini alone is not taken as
+# Antigravity, since other tools keep settings there. A miss costs little:
+# with no agent found, all three are registered.
 AGENT_SIGNS = {
     "claude-code": ((".claude",), "claude"),
     "codex": ((".codex",), "codex"),
@@ -530,9 +547,10 @@ def fetch_bundle(endpoint: str) -> Tuple[List[Tuple[str, bytes]], Dict[str, Any]
 
 def own_source() -> Optional[bytes]:
     """The bytes of the file running now, when there is one to read."""
+    path = _own_path()
     try:
-        return Path(__file__).read_bytes()
-    except (NameError, OSError):
+        return path.read_bytes() if path is not None else None
+    except OSError:
         return None
 
 
@@ -1252,10 +1270,8 @@ def installer_command(home: Path) -> str:
     """How to run this installer again: the kept copy for a served one, this file for a checkout."""
     if served_endpoint() and (home / INSTALLER_COPY).is_file():
         return f"{python_command()} {quoted(home / INSTALLER_COPY)}"
-    try:
-        return f"{python_command()} {quoted(Path(__file__).resolve())}"
-    except NameError:
-        return f"{python_command()} threefold_install.py"
+    path = _own_path()
+    return f"{python_command()} {quoted(path) if path is not None else 'threefold_install.py'}"
 
 
 def open_url(url: str) -> bool:

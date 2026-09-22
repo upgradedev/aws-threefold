@@ -26,6 +26,7 @@ import re
 import shutil
 import socket
 import subprocess
+import sys
 import threading
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -731,12 +732,42 @@ def test_a_served_dry_run_downloads_nothing(machine, stack, tmp_path) -> None:
     assert "would download the hook" in result.out
 
 
+def test_piped_into_python_the_installer_is_read_as_running_from_no_file(machine, stack) -> None:
+    """`python3 -` sets __file__ to `<stdin>`; read as a path it put the
+    installer in the current directory. Some runners leave __file__ unset."""
+    text = served_text(stack)
+    for namespace in ({"__name__": "piped_a", "__file__": "<stdin>"}, {"__name__": "piped_b"}):
+        exec(compile(text, "<stdin>", "exec"), namespace)
+        assert namespace["HERE"] is None and namespace["HOOK_SOURCE"] is None
+        assert namespace["own_source"]() is None
+        assert namespace["installer_command"](machine.threefold_home).endswith(" threefold_install.py")
+
+
+def test_a_served_copy_piped_into_python_connects_end_to_end(machine, stack) -> None:
+    """The macOS and Linux command, run as a shell runs it: the served text on
+    Python's stdin, `-` as the script, in the folder being connected."""
+    text = served_text(stack)
+    serve_bundle(stack, installer_bytes=text.encode("utf-8"))
+    result = subprocess.run(
+        [sys.executable, "-", "connect", "--agents", "claude-code", "--no-open"],
+        input=text.encode("utf-8"), capture_output=True, cwd=str(machine.repo), timeout=120,
+    )
+    out = result.stdout.decode("utf-8", "replace") + result.stderr.decode("utf-8", "replace")
+    assert result.returncode == 0, out
+    assert config_of(machine.repo) == {"project": "Acme-ledger", "mode": "managed", "endpoint": stack.endpoint}
+    assert (machine.threefold_home / "bin" / "threefold_install.py").read_bytes() == text.encode("utf-8")
+    assert (machine.threefold_home / "bin" / "threefold_hook.py").is_file()
+    assert len(stack.sent("POST", "evaluate-tool-call")) == 1
+    assert "first call  recorded" in out
+    assert "<stdin>" not in out
+
+
 def test_a_served_copy_piped_into_python_keeps_the_stacks_installer_when_its_hash_matches(machine, stack) -> None:
     """Piped, there is no file to copy, so the stack's own /install.py is fetched
     and kept only if it hashes to what the manifest says."""
     text = served_text(stack)
     serve_bundle(stack, installer_bytes=text.encode("utf-8"))
-    namespace: Dict[str, Any] = {"__name__": "threefold_install_piped"}
+    namespace: Dict[str, Any] = {"__name__": "threefold_install_piped", "__file__": "<stdin>"}
     exec(compile(text, "<stdin>", "exec"), namespace)
     assert namespace["HERE"] is None and namespace["HOOK_SOURCE"] is None
     namespace["open_url"] = lambda url: True
@@ -751,7 +782,7 @@ def test_a_piped_copy_keeps_no_installer_whose_hash_does_not_match(machine, stac
     text = served_text(stack)
     serve_bundle(stack, installer_bytes=text.encode("utf-8"))
     stack.files["install.py"] = b"# something else\n"
-    namespace: Dict[str, Any] = {"__name__": "threefold_install_piped_bad"}
+    namespace: Dict[str, Any] = {"__name__": "threefold_install_piped_bad", "__file__": "<stdin>"}
     exec(compile(text, "<stdin>", "exec"), namespace)
     namespace["open_url"] = lambda url: True
     out = io.StringIO()
