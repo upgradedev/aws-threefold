@@ -716,8 +716,11 @@ Resources:
       AlarmDescription: >-
         The average LatencyMs the service reports for the calls it evaluates
         passed SlowCallAlarmMs in two of the last three five-minute periods.
-        It is measured inside the handler, so unlike the function's Duration
-        it excludes cold starts and points at the gates, the table or Bedrock.
+        The handler measures it on /evaluate-tool-call alone, from routing the
+        request to the verdict, so it points at that route's gates, table
+        reads and Bedrock call, where the function's Duration covers every
+        route. Neither counts a cold start, which Lambda reports separately as
+        Init Duration.
       Namespace: !Sub 'Threefold/${AWS::StackName}'
       MetricName: LatencyMs
       Statistic: Average
