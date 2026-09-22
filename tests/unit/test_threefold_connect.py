@@ -238,6 +238,10 @@ def machine(tmp_path, monkeypatch):
     monkeypatch.setenv("no_proxy", "127.0.0.1,localhost")
     for name in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY", "all_proxy"):
         monkeypatch.delenv(name, raising=False)
+    # The installer reads configuration through the hook, whose walk from a
+    # checkout goes up to the first .threefold.json. One with no include list
+    # here ends that walk inside this test's directory, and changes nothing else.
+    (tmp_path / ".threefold.json").write_text("{}", encoding="utf-8")
     # Anything that falls through to home's endpoint meets a closed port, never the public stack.
     (home / ".threefold").mkdir()
     (home / ".threefold" / "config.json").write_text(json.dumps({"endpoint": _closed_endpoint()}), encoding="utf-8")
