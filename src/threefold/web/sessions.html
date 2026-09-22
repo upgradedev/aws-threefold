@@ -10,6 +10,9 @@
        Play CDN answers with no Access-Control-Allow-Origin header, so a browser
        would refuse a script carrying one and the page would lose every style. -->
   <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <!-- The layer every page shares: the navigation, the sign-in and the API base. -->
+  <link rel="stylesheet" href="assets/threefold.css" />
+  <script src="assets/threefold.js"></script>
   <script>
       // The server rewrites __THREEFOLD_BASE_PATH__ to the API Gateway stage prefix
       // when it serves this page, so the base is exact rather than guessed from the
@@ -71,7 +74,7 @@
           <p class="text-xs text-gray-400">Every session the service has actually evaluated · not a sample, not a mock</p>
         </div>
       </div>
-      <nav id="page-nav" class="flex items-center gap-2 text-xs"></nav>
+      <div id="page-nav" class="flex items-center gap-2 text-xs"></div>
     </div>
 
     <!-- LIVE API CONNECTION BAR -->
@@ -214,11 +217,11 @@
 
   <script>
     const NAV = [
-      { href: 'index.html', label: 'Dashboard' },
-      { href: 'console.html', label: 'Enforcement Console' },
+      { href: 'dashboard.html#/overview', label: 'Dashboard' },
       { href: 'rules.html', label: 'Architecture Rules' },
       { href: 'settings.html', label: 'Policy Settings' },
       { href: 'connect.html', label: 'Connect an agent' },
+      { href: 'index.html', label: 'Demo' },
       { href: 'swagger.html', label: 'OpenAPI 3.1' }
     ];
 
@@ -227,6 +230,9 @@
     let autoTimer = null;
 
     function renderNav() {
+      // The shared navigation, with the stack's kind and the sign-in state, when
+      // the shared layer loaded; this page's own links when it did not.
+      if (window.Threefold) { Threefold.mountNav(document.getElementById('page-nav'), { active: 'sessions' }); return; }
       document.getElementById('page-nav').innerHTML = NAV.map(item =>
         '<a href="' + PAGE_BASE + item.href + '" class="px-3 py-1.5 rounded-md bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700 transition">' + item.label + '</a>'
       ).join('');
@@ -295,8 +301,12 @@
     }
 
     function authHeaders(extra) {
-      const headers = Object.assign({ "Accept": "application/json" }, extra || {});
       const typed = document.getElementById("apiKeyInput").value.trim();
+      // A sign-in, like the stored key, goes only to the host that served this
+      // page; the shared layer sends the sign-in when there is one, and the
+      // stored key otherwise.
+      if (!typed && window.Threefold && baseIsThisOrigin(getApiBase())) return Threefold.authHeaders(extra);
+      const headers = Object.assign({ "Accept": "application/json" }, extra || {});
       const key = typed || (baseIsThisOrigin(getApiBase()) ? storedOperatorKey() : "");
       if (key) headers["X-API-Key"] = key;
       return headers;
@@ -429,7 +439,10 @@
           showRaw(data);
           document.getElementById('sessions-body').innerHTML =
             '<tr><td colspan="7" class="py-8 text-center text-red-400">The listing was refused with HTTP ' + res.status +
-            '. Nothing is shown rather than something invented.</td></tr>';
+            '. Nothing is shown rather than something invented.' +
+            (res.status === 401 || res.status === 403
+              ? ' This stack keeps its reads private: sign in with python threefold.py open, or store the operator key on the settings page.'
+              : '') + '</td></tr>';
           return;
         }
         sessions = Array.isArray(data.sessions) ? data.sessions : [];
@@ -563,6 +576,13 @@
     linkToSpec();
     document.getElementById('apiBaseInput').value = DEFAULT_API_BASE;
     loadSessions();
+    // A link may name a session, as the dashboard's call screen does. The id is
+    // only ever sent in the path, encoded, and shown escaped.
+    (function openLinkedSession() {
+      let linked = '';
+      try { linked = (new URLSearchParams(location.search).get('session') || '').trim().slice(0, 160); } catch (err) { linked = ''; }
+      if (linked) selectSession(linked);
+    })();
   </script>
 </body>
 </html>

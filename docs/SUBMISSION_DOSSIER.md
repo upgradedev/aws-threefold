@@ -40,7 +40,7 @@ Autonomous coding agents are rapidly transforming enterprise software engineerin
 - **State & Evidence Persistence:** Amazon DynamoDB single-table design with session history and budget attributes. The certificate is returned by the API and not archived; the S3 bucket the stack provisions for evidence bundles is unused.
 - **Observability:** Real-time AWS CloudWatch Embedded Metric Format (EMF) emitting zero-overhead structured telemetry directly to stdout.
 - **Security & Resilience:** Zero-trust token-bucket rate limiting (60 req/min), API Key authentication, RFC 7807 Problem Details, and exponential backoff with full jitter retry decorators.
-- **API & UI:** Complete OpenAPI 3.1 specifications, interactive Swagger UI (`src/threefold/web/swagger.html`), and a responsive single-page console (`src/threefold/web/index.html`) using vanilla JavaScript with zero external npm build dependencies.
+- **API & UI:** Complete OpenAPI 3.1 specifications, interactive Swagger UI (`src/threefold/web/swagger.html`), a public demo page (`src/threefold/web/index.html`), and an operations dashboard (`src/threefold/web/dashboard.html`: overview charts, projects with Observe and Enforce, a review queue, drill-down to each call, one-command connect and sign-in from the command line), all vanilla JavaScript with inline SVG charts and zero external npm build dependencies.
 - **Infrastructure as Code & CI/CD:** AWS SAM (`template.yml`), multi-stage Dockerfiles, Docker Compose, and GitHub Actions CI running 65 tests.
 
 ---

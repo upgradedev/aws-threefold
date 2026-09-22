@@ -10,6 +10,9 @@
        Play CDN answers with no Access-Control-Allow-Origin header, so a browser
        would refuse a script carrying one and the page would lose every style. -->
   <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <!-- The layer every page shares: the navigation, the sign-in and the API base. -->
+  <link rel="stylesheet" href="assets/threefold.css" />
+  <script src="assets/threefold.js"></script>
   <script>
       // The server rewrites __THREEFOLD_BASE_PATH__ to the API Gateway stage prefix
       // when it serves this page, so the base is exact rather than guessed from the
@@ -75,14 +78,16 @@
         </div>
       </div>
 
-      <!-- Circuit Breaker Status Indicator -->
-      <div class="flex items-center gap-3">
+      <!-- Circuit Breaker Status Indicator, and the shared navigation. The links in
+           #page-nav are what a reader gets when the shared layer does not load. -->
+      <div class="flex flex-wrap items-center justify-end gap-3">
         <div id="cb-indicator" class="flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium bg-emerald-950/80 text-emerald-400 border border-emerald-800">
           <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
           CIRCUIT BREAKER: ARMED
         </div>
-        <a href="console.html" class="text-xs px-3 py-1.5 rounded-md bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700 transition">
-          Enforcement Console ↗
+        <div id="page-nav" class="flex flex-wrap items-center gap-2">
+        <a href="dashboard.html#/overview" class="text-xs px-3 py-1.5 rounded-md bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700 transition">
+          Dashboard ↗
         </a>
         <a href="rules.html" class="text-xs px-3 py-1.5 rounded-md bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700 transition">
           Architecture Rules ↗
@@ -99,6 +104,7 @@
         <a href="swagger.html" class="text-xs px-3 py-1.5 rounded-md bg-purple-950 hover:bg-purple-900 text-purple-300 border border-purple-800 transition">
           OpenAPI 3.1 ↗
         </a>
+        </div>
       </div>
     </div>
   <!-- LIVE API CONNECTION & STATUS BAR
@@ -169,6 +175,19 @@
             put it in front of your own agent ↗
           </a>
           <span class="text-xs text-gray-500">— one file, standard library, served from this page</span>
+        </div>
+        <!-- The application behind the demo: the operations dashboard, and a minute's
+             walkthrough of the two-stage rollout on a sandbox project of your own. -->
+        <div class="flex flex-wrap items-center gap-2 pt-2 border-t border-gray-800/80 mt-2">
+          <a id="hero-try" href="dashboard.html#/try"
+             class="text-xs font-semibold px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white transition">
+            Try the two-stage rollout · about a minute ↗
+          </a>
+          <a id="hero-dashboard" href="dashboard.html#/overview"
+             class="text-xs font-semibold px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700 transition">
+            Open the operations dashboard ↗
+          </a>
+          <span class="text-xs text-gray-500">Observe first, so nothing breaks; enforce each rule when its record reads right.</span>
         </div>
       </div>
     </section>
@@ -974,6 +993,12 @@
     function linkHero() {
       const el = document.getElementById('hero-connect');
       if (el) el.href = PAGE_BASE + 'connect.html';
+      const tryIt = document.getElementById('hero-try');
+      if (tryIt) tryIt.href = PAGE_BASE + 'dashboard.html#/try';
+      const dashboard = document.getElementById('hero-dashboard');
+      if (dashboard) dashboard.href = PAGE_BASE + 'dashboard.html#/overview';
+      // The shared navigation replaces the header's own links when it loaded.
+      if (window.Threefold) Threefold.mountNav(document.getElementById('page-nav'), { active: 'demo' });
     }
 
     function renderContractStrip() {

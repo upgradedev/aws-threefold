@@ -1,0 +1,194 @@
+/*
+ * Threefold, the components every page shares. Plain CSS on purpose: the pages
+ * take their utilities from the Tailwind Play CDN, which does not process a
+ * stylesheet served beside them, so the few named pieces live here.
+ */
+
+:root {
+  --tf-bg: #0a0d18;
+  --tf-surface: #111827;
+  --tf-surface-2: #0b1020;
+  --tf-border: #1f2937;
+  --tf-border-strong: #374151;
+  --tf-text: #f3f4f6;
+  --tf-text-2: #9ca3af;
+  --tf-text-3: #6b7280;
+  --tf-accent: #8b5cf6;
+  --tf-focus: #a78bfa;
+}
+
+html { color-scheme: dark; }
+body { background-color: var(--tf-bg); color: var(--tf-text); }
+
+/* Every control shows where the keyboard is. */
+a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible,
+textarea:focus-visible, summary:focus-visible, [tabindex]:focus-visible {
+  outline: 2px solid var(--tf-focus);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+svg a:focus-visible { outline: none; }
+svg a:focus-visible .tf-mark { stroke: #ffffff; stroke-width: 2px; }
+
+.tf-card {
+  background: rgba(17, 24, 39, 0.72);
+  border: 1px solid var(--tf-border);
+  border-radius: 1rem;
+}
+.tf-card-quiet {
+  background: var(--tf-surface-2);
+  border: 1px solid var(--tf-border);
+  border-radius: 0.75rem;
+}
+.tf-card-link { display: block; transition: border-color .15s, background-color .15s; }
+.tf-card-link:hover { border-color: #4c1d95; background: rgba(17, 24, 39, 0.95); }
+
+.tf-section-title { font-size: 0.875rem; font-weight: 600; color: #fff; }
+.tf-section-sub { font-size: 0.6875rem; color: var(--tf-text-3); margin-top: 0.125rem; }
+
+/* Buttons */
+.tf-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 0.375rem;
+  padding: 0.4rem 0.75rem; border-radius: 0.5rem; font-size: 0.75rem; font-weight: 600;
+  background: #1f2937; color: #e5e7eb; border: 1px solid var(--tf-border-strong);
+  transition: background-color .15s, border-color .15s, opacity .15s; cursor: pointer; white-space: nowrap;
+}
+.tf-btn:hover { background: #374151; }
+.tf-btn:disabled, .tf-btn[aria-disabled="true"] { opacity: 0.45; cursor: not-allowed; }
+.tf-btn-primary { background: #7c3aed; border-color: #8b5cf6; color: #fff; }
+.tf-btn-primary:hover { background: #6d28d9; }
+.tf-btn-good { background: #064e3b; border-color: #047857; color: #a7f3d0; }
+.tf-btn-good:hover { background: #065f46; }
+.tf-btn-warn { background: #451a03; border-color: #92400e; color: #fde68a; }
+.tf-btn-warn:hover { background: #78350f; }
+.tf-btn-danger { background: #4c0519; border-color: #9f1239; color: #fecdd3; }
+.tf-btn-danger:hover { background: #881337; }
+.tf-btn-quiet { background: transparent; border-color: transparent; color: var(--tf-text-2); }
+.tf-btn-quiet:hover { background: #1f2937; color: #fff; }
+.tf-btn-sm { padding: 0.25rem 0.5rem; font-size: 0.6875rem; }
+.tf-icon-btn {
+  display: inline-flex; align-items: center; justify-content: center; width: 2.25rem; height: 2.25rem;
+  border-radius: 0.5rem; color: #d1d5db; border: 1px solid var(--tf-border-strong); background: #111827;
+}
+.tf-icon-btn:hover { background: #1f2937; }
+
+/* Links */
+.tf-link { color: #c4b5fd; text-decoration: underline; text-underline-offset: 2px; }
+.tf-link:hover { color: #ddd6fe; }
+.tf-link-quiet { color: #e5e7eb; }
+.tf-link-quiet:hover { color: #c4b5fd; text-decoration: underline; text-underline-offset: 2px; }
+.tf-link-row { border-radius: 0.375rem; padding: 0.125rem 0.25rem; margin: -0.125rem -0.25rem; }
+.tf-link-row:hover { background: #1f2937; }
+.tf-num-link { font-variant-numeric: tabular-nums; border-radius: 0.25rem; padding: 0 0.25rem; }
+.tf-num-link:hover { background: #1f2937; text-decoration: underline; text-underline-offset: 2px; }
+
+/* Navigation */
+.tf-nav-link {
+  display: inline-flex; align-items: center; padding: 0.375rem 0.625rem; border-radius: 0.375rem;
+  font-size: 0.75rem; font-weight: 500; color: #9ca3af; transition: color .15s, background-color .15s;
+}
+.tf-nav-link:hover { color: #fff; background: rgba(31, 41, 55, 0.7); }
+.tf-nav-current { color: #fff; background: #1f2937; box-shadow: inset 0 -2px 0 var(--tf-accent); }
+.tf-menu {
+  position: absolute; left: 0; right: 0; top: 100%; z-index: 45; padding: 0.75rem 1rem;
+  background: #05070f; border-bottom: 1px solid var(--tf-border); box-shadow: 0 18px 40px -12px rgba(0, 0, 0, 0.8);
+}
+
+/* Chips and badges */
+.tf-chip {
+  display: inline-flex; align-items: center; gap: 0.25rem; padding: 0.125rem 0.5rem; border-radius: 9999px;
+  font-size: 0.6875rem; font-weight: 600; line-height: 1.25rem; border: 1px solid; white-space: nowrap;
+}
+.tf-chip-gray { background: #111827; color: #d1d5db; border-color: #374151; }
+.tf-chip-sky { background: #082f49; color: #7dd3fc; border-color: #075985; }
+.tf-chip-emerald { background: #022c22; color: #6ee7b7; border-color: #065f46; }
+.tf-chip-amber { background: #451a03; color: #fcd34d; border-color: #92400e; }
+.tf-chip-rose { background: #4c0519; color: #fda4af; border-color: #9f1239; }
+.tf-chip-purple { background: #2e1065; color: #c4b5fd; border-color: #5b21b6; }
+.tf-chip-button { background: #111827; color: #d1d5db; border-color: #374151; cursor: pointer; }
+.tf-chip-button:hover { background: #1f2937; color: #fff; }
+.tf-dot { width: 0.5rem; height: 0.5rem; border-radius: 9999px; display: inline-block; flex-shrink: 0; }
+
+/* Commands */
+.tf-command { position: relative; }
+.tf-pre {
+  margin: 0; padding: 0.75rem 4.5rem 0.75rem 0.75rem; border-radius: 0.75rem; background: #05070f;
+  border: 1px solid var(--tf-border); font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 0.75rem;
+  color: #e5e7eb; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5;
+}
+.tf-copy {
+  position: absolute; top: 0.5rem; right: 0.5rem; padding: 0.2rem 0.55rem; border-radius: 0.375rem;
+  font-size: 0.6875rem; font-weight: 600; background: #1f2937; color: #d1d5db; border: 1px solid #374151; cursor: pointer;
+}
+.tf-copy:hover { background: #374151; color: #fff; }
+
+/* Form fields */
+.tf-input, .tf-select {
+  background: #05070f; border: 1px solid var(--tf-border-strong); border-radius: 0.5rem; color: #f3f4f6;
+  font-size: 0.75rem; padding: 0.4rem 0.6rem; min-width: 0;
+}
+.tf-input:focus, .tf-select:focus { border-color: var(--tf-accent); outline: none; }
+.tf-label { display: block; font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--tf-text-3); margin-bottom: 0.25rem; }
+.tf-segmented { display: inline-flex; padding: 0.125rem; border-radius: 0.5rem; background: #05070f; border: 1px solid var(--tf-border); flex-wrap: wrap; }
+.tf-segmented > * { padding: 0.25rem 0.6rem; border-radius: 0.375rem; font-size: 0.75rem; color: #9ca3af; }
+.tf-segmented > *:hover { color: #fff; }
+.tf-segmented > [aria-pressed="true"], .tf-segmented > [aria-current="true"] { background: #1f2937; color: #fff; box-shadow: inset 0 0 0 1px #4b5563; }
+
+/* Tables */
+.tf-table { width: 100%; font-size: 0.75rem; border-collapse: collapse; }
+.tf-table th { text-align: left; font-weight: 500; font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--tf-text-3); padding: 0.5rem 0.75rem 0.5rem 0; border-bottom: 1px solid var(--tf-border); white-space: nowrap; }
+.tf-table td, .tf-table tbody th { padding: 0.55rem 0.75rem 0.55rem 0; border-bottom: 1px solid rgba(31, 41, 55, 0.6); vertical-align: top; }
+/* A row's own header cell reads as data, not as a column heading. */
+.tf-table tbody th { text-transform: none; letter-spacing: normal; font-size: 0.75rem; font-weight: 400; color: inherit; white-space: normal; }
+.tf-table tbody tr:hover { background: rgba(5, 7, 15, 0.6); }
+.tf-table .num { text-align: right; font-family: 'JetBrains Mono', ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+.tf-scroll-x { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+/* Charts */
+.tf-figure { margin: 0; }
+.tf-svg { overflow: visible; }
+.tf-axis { fill: #6b7280; font-size: 10px; font-family: 'Inter', sans-serif; }
+.tf-donut-value { fill: #fff; font-size: 20px; font-weight: 600; font-family: 'Inter', sans-serif; }
+.tf-mark { transition: opacity .12s; }
+a:hover > .tf-mark, g:hover > .tf-mark { opacity: 0.78; }
+.tf-legend { display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; margin: 0.75rem 0 0; padding: 0; list-style: none; font-size: 0.6875rem; color: #9ca3af; }
+.tf-legend li { display: inline-flex; align-items: center; gap: 0.375rem; }
+.tf-swatch { width: 0.625rem; height: 0.625rem; border-radius: 2px; display: inline-block; flex-shrink: 0; }
+
+/* Tiles */
+.tf-tile { display: flex; flex-direction: column; gap: 0.25rem; padding: 1rem; min-width: 0; }
+.tf-tile-label { font-size: 0.6875rem; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; color: var(--tf-text-2); }
+.tf-tile-value { font-size: 1.75rem; line-height: 2.1rem; font-weight: 600; color: #fff; font-variant-numeric: tabular-nums; }
+.tf-tile-sub { font-size: 0.6875rem; color: var(--tf-text-3); }
+
+/* Loading */
+.tf-skeleton {
+  background: linear-gradient(90deg, #111827 0%, #1f2937 50%, #111827 100%);
+  background-size: 200% 100%; animation: tf-shimmer 1.4s ease-in-out infinite; border-radius: 0.5rem;
+}
+@keyframes tf-shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .tf-skeleton { animation: none; }
+  * { scroll-behavior: auto !important; transition: none !important; }
+}
+
+/* Steps */
+.tf-step { display: flex; gap: 0.875rem; }
+.tf-step-num {
+  width: 1.75rem; height: 1.75rem; border-radius: 9999px; display: inline-flex; align-items: center; justify-content: center;
+  font-size: 0.75rem; font-weight: 700; flex-shrink: 0; border: 1px solid #374151; background: #111827; color: #9ca3af;
+}
+.tf-step-num[data-state="current"] { background: #4c1d95; border-color: #8b5cf6; color: #fff; }
+.tf-step-num[data-state="done"] { background: #064e3b; border-color: #059669; color: #a7f3d0; }
+
+/* Dialog */
+.tf-overlay { position: fixed; inset: 0; z-index: 60; background: rgba(0, 0, 0, 0.65); backdrop-filter: blur(3px); display: flex; align-items: flex-end; justify-content: center; padding: 0; }
+@media (min-width: 640px) { .tf-overlay { align-items: center; padding: 1.5rem; } }
+.tf-dialog { width: 100%; max-width: 40rem; max-height: 92vh; overflow-y: auto; background: #0b1020; border: 1px solid #374151; border-radius: 1rem 1rem 0 0; }
+@media (min-width: 640px) { .tf-dialog { border-radius: 1rem; } }
+
+/* Toast */
+.tf-toast-root { position: fixed; left: 50%; bottom: 1rem; transform: translateX(-50%); z-index: 70; display: flex; flex-direction: column; gap: 0.5rem; width: calc(100% - 2rem); max-width: 28rem; }
+.tf-toast { display: flex; align-items: center; gap: 0.75rem; padding: 0.6rem 0.8rem; border-radius: 0.75rem; background: #111827; border: 1px solid #374151; font-size: 0.75rem; color: #e5e7eb; box-shadow: 0 10px 30px -10px rgba(0,0,0,.6); }
+
+.tf-break { overflow-wrap: anywhere; word-break: break-word; }
