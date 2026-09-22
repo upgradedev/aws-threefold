@@ -149,13 +149,19 @@ def _contract_routes() -> set[str]:
     return routes
 
 
+def _claimed_routes() -> set[str]:
+    """Routes a later track's claim in STATE.md adds to the dashboard, written "a new `#/x` route"."""
+    state = (ROOT / "STATE.md").read_text(encoding="utf-8")
+    return set(re.findall(r"a new `#(/[a-z]+)` route", state))
+
+
 # ------------------------------------------------------------------- routes
 
 
 def test_the_dashboard_declares_every_route_the_contract_lists() -> None:
     body = page_source("dashboard.html")
     declared = set(re.findall(r"\{ path: '([^']+)'", body))
-    assert declared == _contract_routes()
+    assert declared == _contract_routes() | _claimed_routes()
 
 
 def test_every_route_draws_a_screen_with_a_heading(tmp_path: Path) -> None:

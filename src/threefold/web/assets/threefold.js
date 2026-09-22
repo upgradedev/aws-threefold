@@ -437,6 +437,7 @@
     { id: 'sessions', label: 'Sessions', page: 'sessions.html' },
     { id: 'connect', label: 'Connect', page: 'dashboard.html', hash: '#/connect' },
     { id: 'settings', label: 'Settings', page: 'settings.html' },
+    { id: 'proof', label: 'Proof', page: 'dashboard.html', hash: '#/proof' },
     { id: 'demo', label: 'Demo', page: 'index.html' }
   ];
 

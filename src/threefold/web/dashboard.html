@@ -86,7 +86,8 @@
       { path: '/call', nav: 'overview', title: 'Call', view: viewCall },
       { path: '/connect', nav: 'connect', title: 'Connect', view: viewConnect },
       { path: '/signin', nav: '', title: 'Sign in', view: viewSignin },
-      { path: '/try', nav: 'demo', title: 'Try it', view: viewTry }
+      { path: '/try', nav: 'demo', title: 'Try it', view: viewTry },
+      { path: '/proof', nav: 'proof', title: 'Proof', view: viewProof }
     ];
 
     const DAY_CHOICES = [
@@ -192,6 +193,24 @@
     }
 
     function plural(n, one, many) { return num(n) + ' ' + (n === 1 ? one : (many || one + 's')); }
+
+    // Self-correction, as the overview and a project's page both word it. A
+    // window with no refusal says so rather than showing a rate of nothing,
+    // and a read that stopped short says how much it covered.
+    function selfCorrectionShown(sc) {
+      return !!(sc && typeof sc.refusals_considered === 'number' && sc.refusals_considered > 0);
+    }
+    function selfCorrectionWords(sc) {
+      if (!sc || typeof sc !== 'object') return 'not reported by this stack';
+      const partial = sc.complete === false ? ' · newest ' + plural(sc.rows_read, 'call') + ' read' : '';
+      if (!selfCorrectionShown(sc)) {
+        return (sc.complete === false ? 'no refusal to correct among the calls read' : 'no refusal to correct in this window') + partial;
+      }
+      const median = typeof sc.median_calls_to_correct === 'number'
+        ? ' · median ' + (Math.round(sc.median_calls_to_correct * 10) / 10) + (sc.median_calls_to_correct === 1 ? ' call' : ' calls')
+        : '';
+      return pct(sc.rate) + ' of ' + plural(sc.refusals_considered, 'refusal') + median + partial;
+    }
 
     function sum(list, key) { return (list || []).reduce((s, r) => s + (typeof r[key] === 'number' ? r[key] : 0), 0); }
 
@@ -538,6 +557,12 @@
           { label: 'Refused', metric: 'refused', value: t.refused, href: callsHref({ kind: 'refused', days }),
             sub: t.refused ? pct(t.refused / t.calls) + ' of calls, stopped before they ran' : 'nothing was refused in this window',
             spark: T.sparkline(series.map(r => r.refused || 0), { label: 'Refused per day', color: C.refused }) },
+          // Read from the ledger rather than the rollups: whether a refused
+          // agent then did the same thing acceptably is a question about the
+          // order of its calls. It opens the refusals it was counted over.
+          { label: 'Self-corrected', metric: 'self_corrected',
+            value: selfCorrectionShown(data.self_correction) ? data.self_correction.self_corrected : null,
+            href: callsHref({ kind: 'refused', days }), sub: selfCorrectionWords(data.self_correction) },
           { label: 'Would refuse', metric: 'would_refuse', value: t.would_refuse, href: callsHref({ kind: 'observed', days }),
             sub: t.would_refuse ? 'ran; a rule in Observe would have stopped them' : 'no observing rule flagged a call',
             spark: T.sparkline(series.map(r => r.observed || 0), { label: 'Would refuse per day', color: C.observed }) },
@@ -586,7 +611,7 @@
 
         ctx.render(html`${head}${fresh}
           <div class="space-y-4">
-            <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">${tiles.map(tile)}</div>
+            <div class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3">${tiles.map(tile)}</div>
             ${t.needs_review ? html`<a href="${reviewHref()}" class="tf-card tf-card-link flex flex-wrap items-center justify-between gap-3 px-5 py-3 border-sky-900/60">
                 <span class="text-sm text-sky-200"><strong class="text-white">${plural(t.needs_review, 'call')}</strong> a rule would have refused ${t.needs_review === 1 ? 'is' : 'are'} waiting for a label${t.false_alarms ? html`<span class="text-gray-400"> · ${plural(t.false_alarms, 'false alarm')} marked so far</span>` : ''}.</span>
                 <span class="tf-btn tf-btn-sm">Open the review queue ${raw(T.ICONS.arrow)}</span>
@@ -818,8 +843,14 @@
           ['Reviewed', summary.reviewed, 'reviewed'],
           ['False alarms', summary.false_alarms, 'false_alarms']
         ];
-        const statTiles = html`<div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        const corrected = summary.self_correction;
+        const statTiles = html`<div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3">
           ${stats.map(([label, value, metric]) => html`<div class="tf-card tf-tile"><span class="tf-tile-label">${label}</span><span class="tf-tile-value" data-metric="${metric}">${num(value)}</span></div>`)}
+          <a href="${callsHref({ project: name, kind: 'refused', days })}" class="tf-card tf-card-link tf-tile" aria-label="Self-corrected: ${selfCorrectionWords(corrected)}. Open the refusals it was counted over">
+            <span class="tf-tile-label">Self-corrected</span>
+            <span class="tf-tile-value" data-metric="self_corrected">${num(selfCorrectionShown(corrected) ? corrected.self_corrected : null)}</span>
+            <span class="tf-tile-sub">${selfCorrectionWords(corrected)}</span>
+          </a>
           <div class="tf-card tf-tile col-span-2 sm:col-span-1"><span class="tf-tile-label">Rules</span>
             <span class="flex flex-wrap gap-1 mt-1">
               <span class="tf-chip tf-chip-emerald">${num(summary.rules_ready)} ready</span>
@@ -2154,6 +2185,184 @@
         if (who && who.reads_public === false) draw();
       });
       Dash.tryState = state;
+    }
+
+    // ------------------------------------------------------------- proof
+
+    // The proof page: the snapshot scripts/build_proof.py wrote, shown as it
+    // was written. Every figure names its source and when it was taken, and a
+    // section the snapshot does not carry reads "not measured yet", never a
+    // zero. Nothing here computes a figure of its own.
+    const PROOF_SUB = 'What Threefold has been measured to do, and how. Every figure names where it came from and when it was taken.';
+
+    function notMeasured(what, next) {
+      return html`<div class="rounded-xl border border-dashed border-gray-800 p-4 space-y-1" data-state="empty">
+        <p class="text-sm font-semibold text-gray-200">Not measured yet</p>
+        <p class="text-xs text-gray-400">${what}</p>
+        ${next ? html`<p class="text-xs text-gray-500">${next}</p>` : ''}
+      </div>`;
+    }
+
+    function when(value) {
+      return typeof value === 'string' && value ? html`<time datetime="${value}">${value}</time>` : 'not recorded';
+    }
+
+    function provenance(source, snapshot) {
+      return html`<p class="text-[11px] text-gray-500 mt-4 pt-3 border-t border-gray-800" data-proof="provenance">
+        Source: <span class="text-gray-400">${source || 'not recorded'}</span> · Snapshot taken: <span class="text-gray-400">${when(snapshot)}</span>
+      </p>`;
+    }
+
+    // A rate as k of n, or what stands in for one when nothing was measured.
+    function share(stat) {
+      if (!stat || typeof stat.n !== 'number' || stat.n <= 0) return html`<span class="text-gray-500">not measured</span>`;
+      const interval = typeof stat.ci_low === 'number' && typeof stat.ci_high === 'number'
+        ? html`<span class="block text-[10px] text-gray-500">95% CI ${pct(stat.ci_low)}–${pct(stat.ci_high)}</span>` : '';
+      return html`<span class="font-mono">${pct(stat.rate)}</span> <span class="text-gray-500">(${num(stat.k)}/${num(stat.n)})</span>${interval}`;
+    }
+
+    function ratio(value) {
+      return typeof value === 'number' && isFinite(value) ? value.toFixed(2) + '×' : '—';
+    }
+
+    function overheadCell(condition) {
+      if (condition.condition === 'none') return html`<span class="text-gray-500">the baseline</span>`;
+      const o = condition.overhead;
+      if (!o || ['turns', 'seconds', 'cost'].every(k => typeof o[k] !== 'number')) return html`<span class="text-gray-500">not measured</span>`;
+      return html`<span class="font-mono text-[11px]">turns ${ratio(o.turns)} · time ${ratio(o.seconds)} · cost ${ratio(o.cost)}</span>`;
+    }
+
+    function correctedCell(condition) {
+      const sc = condition.self_correction || {};
+      if (typeof condition.n !== 'number' || condition.n <= 0) return html`<span class="text-gray-500">not measured</span>`;
+      if (!sc.refused_runs) return html`<span class="text-gray-500">no run was refused</span>`;
+      return html`<span class="font-mono">${pct(sc.rate)}</span> <span class="text-gray-500">(${num(sc.self_corrected)}/${num(sc.refused_runs)} refused runs)</span>`;
+    }
+
+    function benchmarkCard(b) {
+      const title = 'The benchmark';
+      if (!b || typeof b !== 'object') {
+        return card(title, null, notMeasured('This snapshot carries no benchmark result.',
+          'The benchmark gives a coding agent the same Acme tasks with no guidance, with the rules in CLAUDE.md, and with Threefold enforcing.'));
+      }
+      const conditions = Array.isArray(b.conditions) ? b.conditions : [];
+      const list = v => (Array.isArray(v) && v.length ? v.join(', ') : 'not recorded');
+      const pilot = b.pilot === true ? html`<div class="rounded-xl border border-amber-800 bg-amber-950/30 p-3 mb-4" data-proof="pilot" role="note">
+          <p class="text-sm font-semibold text-amber-200">PILOT: not a result</p>
+          <p class="text-xs text-amber-100/80">These runs prove the harness end to end. No figure below should be quoted as a measurement.</p>
+        </div>` : '';
+      const table = conditions.length ? html`<div class="tf-scroll-x mt-4"><table class="tf-table">
+          <thead><tr>
+            <th scope="col">Condition</th><th scope="col" class="num">Runs measured</th>
+            <th scope="col">Violation landed</th><th scope="col">Tests passed</th>
+            <th scope="col">Self-corrected</th><th scope="col">Overhead against no guidance</th>
+          </tr></thead>
+          <tbody>${conditions.map(c => html`<tr data-condition="${c.condition}">
+            <th scope="row" class="font-normal"><span class="text-gray-200">${c.label || c.condition}</span><span class="block text-[10px] text-gray-500 font-mono">${c.condition}</span></th>
+            <td class="num"><span class="font-mono">${num(c.n)}</span>${c.not_measured ? html`<span class="block text-[10px] text-amber-300">${plural(c.not_measured, 'run')} measured nothing</span>` : ''}</td>
+            <td>${share(c.violation)}</td>
+            <td>${share(c.completion)}</td>
+            <td>${correctedCell(c)}</td>
+            <td>${overheadCell(c)}</td>
+          </tr>`)}</tbody>
+        </table></div>` : notMeasured('The snapshot names no condition.');
+      const facts = [
+        ['Model', list(b.models)],
+        ['Agent', (b.agent || 'not recorded') + (Array.isArray(b.agent_versions) && b.agent_versions.length ? ' ' + b.agent_versions.join(', ') : '')],
+        ['Run on', list(b.dates)],
+        ['Real-agent runs measured', num(b.valid_rows) + ' of ' + num(b.real_rows)]
+      ];
+      return card(title, 'The same Acme tasks under each condition, judged by checkers that do not import Threefold.', html`
+        ${pilot}
+        <blockquote class="border-l-2 border-purple-700 pl-4 text-sm text-gray-200 tf-break" data-proof="headline">${b.headline || 'No headline was computed.'}</blockquote>
+        <p class="text-[11px] text-gray-500 mt-1">The headline sentence exactly as benchmark/report.py computed it from the rows.</p>
+        <dl class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4">${facts.map(([label, value]) => html`<div class="tf-card-quiet p-3 min-w-0"><dt class="tf-label">${label}</dt><dd class="text-xs text-gray-200 tf-break">${value}</dd></div>`)}</dl>
+        ${table}
+        ${provenance(b.source, b.snapshot_at)}`, 'min-w-0');
+    }
+
+    function ownUseCard(p) {
+      const title = 'The owner\'s own use';
+      const sub = 'Threefold governing the owner\'s real work, anonymised: aggregates only, never a project name, a path, a developer or a target.';
+      if (!p || typeof p !== 'object') {
+        return card(title, sub, notMeasured('This snapshot carries no totals from the owner\'s own work.',
+          'They are read from the owner\'s private stack with the operator key, and only the totals are kept.'));
+      }
+      const tiles = [
+        ['Days observed', num(p.days_observed), 'days_observed', typeof p.window_days === 'number' ? 'with a governed call, of the last ' + num(p.window_days) : 'with a governed call'],
+        ['Calls governed', num(p.calls_governed), 'calls_governed', 'judged and recorded'],
+        ['Would refuse', num(p.would_refuse), 'would_refuse', 'ran; a rule in Observe would have stopped them'],
+        ['Reviewed', num(p.reviewed), 'reviewed', 'would-refuse calls the owner labelled'],
+        ['False-alarm rate', pct(p.false_alarm_rate), 'false_alarm_rate', typeof p.false_alarms === 'number' && typeof p.reviewed === 'number' ? num(p.false_alarms) + ' of ' + num(p.reviewed) + ' reviewed' : 'not measured'],
+        ['Projects', num(p.projects), 'projects', 'counted, never named'],
+        ['Agents', num(p.agents), 'agents', 'counted, never named']
+      ];
+      return card(title, sub, html`
+        <div class="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-7 gap-3">${tiles.map(([label, value, metric, note]) => html`<div class="tf-card-quiet tf-tile">
+          <span class="tf-tile-label">${label}</span><span class="tf-tile-value" data-metric="${metric}">${value}</span><span class="tf-tile-sub">${note}</span>
+        </div>`)}</div>
+        ${p.self_correction ? html`<p class="text-xs text-gray-400 mt-3">Self-corrected: ${selfCorrectionWords(p.self_correction)}.</p>` : ''}
+        ${provenance(p.source, p.snapshot_at)}`, 'min-w-0');
+    }
+
+    function evidenceItem(item) {
+      if (!item || typeof item.path !== 'string') return '';
+      const href = typeof item.href === 'string' && /^https:\/\//.test(item.href) ? item.href : '';
+      return html`<li class="flex flex-wrap gap-x-2">${href
+        ? html`<a class="tf-link font-mono text-xs tf-break" href="${href}" rel="noopener">${item.path}</a>`
+        : html`<span class="font-mono text-xs text-gray-200 tf-break">${item.path}</span>`}<span class="text-xs text-gray-500">${item.label || ''}</span></li>`;
+    }
+
+    function methodCard(proof) {
+      const b = proof.benchmark && typeof proof.benchmark === 'object' ? proof.benchmark : {};
+      const items = [].concat(Array.isArray(b.evidence) ? b.evidence : [], Array.isArray(proof.method) ? proof.method : []);
+      const linked = items.some(i => i && typeof i.href === 'string' && /^https:\/\//.test(i.href));
+      const terms = [
+        ['Violation landed', 'the benchmark\'s own checkers found a governed violation in the files the agent left behind.'],
+        ['Tests passed', 'the task\'s acceptance tests, restored from the template first, all passed.'],
+        ['Self-corrected, in the benchmark', 'a run refused at least once that still finished with its tests passing and no violation.'],
+        ['Self-corrected, on the dashboard', 'a refusal of a hook or CI call followed, within the next ten calls of the same session, by a call to the same target that was not refused.'],
+        ['Overhead', 'the mean turns, seconds and cost of a run under a condition, over the same means with no guidance.'],
+        ['Reviewed and false-alarm rate', 'the would-refuse calls the owner labelled, and the share of them labelled false alarm.']
+      ];
+      return card('How this was measured', 'The definitions behind every figure above, and the files that hold the evidence.', html`
+        <dl class="space-y-2">${terms.map(([term, text]) => html`<div class="text-xs"><dt class="inline font-semibold text-gray-200">${term}:</dt> <dd class="inline text-gray-400">${text}</dd></div>`)}</dl>
+        <div class="mt-4 pt-3 border-t border-gray-800">
+          <p class="tf-label">Evidence</p>
+          ${items.length ? html`<ul class="space-y-1.5" data-proof="evidence">${items.map(evidenceItem)}</ul>` : notMeasured('The snapshot names no evidence file.')}
+          ${items.length && !linked ? html`<p class="text-[11px] text-gray-500 mt-2">Each is a file in the Threefold repository, at the path shown.</p>` : ''}
+          <p class="text-[11px] text-gray-500 mt-2">The live figures on this stack are read from <a class="tf-link" href="${T.specHref('GET', '/api/overview')}">GET /api/overview</a>, and this snapshot from <a class="tf-link" href="${T.specHref('GET', '/proof.json')}">GET /proof.json</a>.</p>
+        </div>`, 'min-w-0');
+    }
+
+    function viewProof(ctx) {
+      ctx.render(loadingView('Proof', PROOF_SUB, ['table', 'table']));
+      return T.api('/proof.json').then(body => {
+        if (!ctx.alive()) return;
+        const proof = body && typeof body === 'object' ? body : {};
+        const written = typeof proof.generated_at === 'string' && proof.generated_at
+          ? html`Snapshot written ${when(proof.generated_at)}` : 'The snapshot does not record when it was written';
+        const by = typeof proof.generated_by === 'string' && proof.generated_by ? html` by <span class="font-mono">${proof.generated_by}</span>` : '';
+        ctx.render(html`${pageTitle('Proof', PROOF_SUB)}
+          <p class="text-[11px] text-gray-500 -mt-3 mb-4" data-proof="generated">${written}${by}. It changes only when a new one is deployed.</p>
+          <div class="space-y-4">
+            ${benchmarkCard(proof.benchmark)}
+            ${ownUseCard(proof.private)}
+            ${methodCard(proof)}
+          </div>`);
+      }, err => {
+        if (!ctx.alive()) return;
+        if (err && err.kind === 'not_found') {
+          ctx.render(html`${pageTitle('Proof', PROOF_SUB)}<div class="tf-card p-6 md:p-8 space-y-3" data-state="empty">
+            <h2 class="text-lg font-semibold text-white">Not measured yet</h2>
+            <p class="text-sm text-gray-400 max-w-2xl">This stack has no proof snapshot deployed, so this page shows nothing rather than something invented.</p>
+            <p class="text-xs text-gray-500 max-w-2xl">A snapshot is written by <span class="font-mono">scripts/build_proof.py</span> from the benchmark's result rows and, when the owner adds them, the totals of the owner's own use.</p>
+            <div class="flex flex-wrap gap-2"><a class="tf-btn" href="#/overview">The overview</a><a class="tf-btn" href="#/try">Try it in a minute</a></div>
+          </div>`);
+          return;
+        }
+        ctx.render(html`${pageTitle('Proof', PROOF_SUB)}${failure(err, 'the proof snapshot')}`);
+      });
     }
 
     // ------------------------------------------------------------- start
