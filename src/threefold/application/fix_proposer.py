@@ -142,9 +142,17 @@ from threefold.domain import imports as import_readers
 from threefold.domain import layering_rules as layering_internals
 from threefold.domain.boundary_guard import (
     COMMAND_KEYS,
+    COMMAND_PATH_FOUND,
     CONTENT_KEYS,
+    CREDENTIAL_FOUND,
+    DESTRUCTIVE_FOUND,
+    GOVERNANCE_FOUND,
+    LAYERING_FOUND,
     PATH_KEYS,
+    PROTECTED_PATH_FOUND,
     REMOVED_KEYS,
+    TAMPERING_FOUND,
+    UNREADABLE_FOUND,
     UNREADABLE_WRITE,
     ArchitecturalBoundaryGuard,
     SecretScanner,
@@ -155,12 +163,22 @@ from threefold.domain.boundary_guard import (
     iter_string_leaves,
     iter_write_targets,
     looks_like_path,
+    named_path,
+    not_file_words,
     observe_layering,
     redact_secrets,
     shell_command,
+    shell_command_at,
+    shell_findings,
     shell_observations,
     shell_refusal,
+    target_paths,
     write_pairs,
+)
+from threefold.application.rule_keys import (
+    CREDENTIAL as CREDENTIAL_KEY,
+    PROTECTED_PATH as PROTECTED_PATH_KEY,
+    finding_key,
 )
 from threefold.domain.imports import declared_imports, language_for
 from threefold.domain.layering_rules import (
@@ -325,6 +343,7 @@ def propose_fix(
     phrase: Optional[Callable[[Dict[str, Any]], Optional[str]]] = None,
     max_write_bytes: int = MAX_WRITE_BYTES,
     max_content_chars: int = MAX_CONTENT_CHARS,
+    skip_keys: Collection[str] = (),
 ) -> Optional[Dict[str, Any]]:
     """The fix for a refused call, or None when there is nothing to fix.
 
@@ -352,11 +371,16 @@ def propose_fix(
     together, a call whose files each stay under it but together pass it gets
     the advice where it used to get a rewrite.
 
+    `skip_keys` are the rule keys the calling project is still only watching.
+    The gates stepped over those findings to reach the one that refused, and
+    the fix has to step over the same ones, or it answers for a rule nobody is
+    enforcing and names a file the call was not refused for.
+
     Never raises: a fault here must not turn a refusal into a 500.
     """
     try:
         active = normalise_rules(rules) if rules else list(DEFAULT_RULES if rules is None else [])
-        fix = _propose(request, result, active, max(0, int(max_content_chars)))
+        fix = _propose(request, result, active, max(0, int(max_content_chars)), skip_keys)
         if fix is None:
             return None
         fix.withheld = list(dict.fromkeys(fix.withheld + _withheld(_field(request, "arguments"))))
@@ -429,7 +453,11 @@ def _family(result: Any) -> Optional[str]:
 
 
 def _propose(
-    request: Any, result: Any, rules: List[Dict[str, Any]], max_content_chars: int = MAX_CONTENT_CHARS
+    request: Any,
+    result: Any,
+    rules: List[Dict[str, Any]],
+    max_content_chars: int = MAX_CONTENT_CHARS,
+    skip_keys: Collection[str] = (),
 ) -> Optional[_Fix]:
     family = _family(result)
     if family is None:
@@ -441,12 +469,19 @@ def _propose(
     if family == "loop":
         return _loop_fix(request, result)
     invocation = _invocation(request)
-    diagnosis = _diagnose(invocation, rules) or _diagnose_observed(invocation, rules)
+    diagnosis = _diagnose(invocation, rules, skip_keys) or _diagnose_observed(invocation, rules)
     if diagnosis is None:
         # The gates, asked again with the rules in force, find nothing: the
         # rules changed since, or the refusal came from somewhere this module
         # does not know. Guessing would be the noise this module exists to avoid.
         return None
+    if skip_keys:
+        # A rule the project is still only watching decided nothing here, so it
+        # decides nothing about the answer either. Rewriting a file only that
+        # rule flags would hand the agent work it was never stopped for, under
+        # a summary line — the one the hook prints — naming a rule that did not
+        # refuse the call.
+        rules = [rule for rule in rules if rule.get("id") not in skip_keys]
     if diagnosis.kind == KIND_CREDENTIAL:
         return _credential_fix(invocation, rules, diagnosis, max_content_chars)
     if diagnosis.kind == KIND_PROTECTED_PATH:
@@ -463,77 +498,114 @@ def _enforcing(rules: List[Dict[str, Any]]) -> bool:
     return any(rule.get("mode", ENFORCE) == ENFORCE for rule in rules)
 
 
-def _diagnose(invocation: ToolInvocation, rules: List[Dict[str, Any]]) -> Optional[_Diagnosis]:
+# What each of the guard's gates means to a reader who has to be told what to
+# do instead. The guard says which gate found a thing wrong; this says how the
+# fix for it is written.
+_DIAGNOSIS_FOR_FINDING = {
+    CREDENTIAL_FOUND: (KIND_CREDENTIAL, ""),
+    PROTECTED_PATH_FOUND: (KIND_PROTECTED_PATH, "protected"),
+    GOVERNANCE_FOUND: (KIND_PROTECTED_PATH, "hooks"),
+    TAMPERING_FOUND: (KIND_PROTECTED_PATH, "tampering"),
+    COMMAND_PATH_FOUND: (KIND_PROTECTED_PATH, "command"),
+    DESTRUCTIVE_FOUND: (KIND_DESTRUCTIVE, ""),
+    LAYERING_FOUND: (KIND_LAYERING, ""),
+    UNREADABLE_FOUND: (KIND_UNREADABLE, ""),
+}
+
+
+def _diagnose(
+    invocation: ToolInvocation, rules: List[Dict[str, Any]], skip_keys: Collection[str] = ()
+) -> Optional[_Diagnosis]:
     """The first check in evaluate_tool_boundary that refuses this call, and what it saw.
 
     The order is the guard's own, so the kind always names what actually
-    refused. A test holds the two together over every refusal in the suite.
+    refused. The questions are asked again here rather than taken from the
+    guard's own walk because they are asked through this module's memo of the
+    call's imports, which the fix then reuses: walking the guard again would
+    parse the agent's file a second time inside the verdict's own budget.
+
+    `skip_keys` are the rule keys this project is still only watching. The
+    gates stepped over those findings to reach the one that refused, so this
+    steps over the same ones: without that, a MultiEdit refused for its second
+    file was diagnosed from its first, and the summary the hook prints named a
+    rule that had refused nothing.
     """
     arguments = invocation.arguments if isinstance(invocation.arguments, dict) else {}
+    watched = frozenset(skip_keys)
 
     clean, message = SecretScanner.scan_arguments(arguments)
     if not clean:
+        # The guard asks nothing else once it finds one, and a credential is
+        # never a key a project stages, so this is the end either way.
+        if CREDENTIAL_KEY in watched:
+            return None
         return _Diagnosis(KIND_CREDENTIAL, label=message.rsplit(": ", 1)[-1])
 
-    path_like = [leaf for leaf in iter_string_leaves(arguments) if looks_like_path(leaf)]
-    for candidate in path_like:
-        if ArchitecturalBoundaryGuard.is_forbidden_file_access(candidate):
+    unstaged = PROTECTED_PATH_KEY not in watched
+    # The guard's own order, and the guard's own reading of the call: which
+    # argument is the command, and which of its words it never opens, are
+    # resolved once here as they are there, so the two cannot disagree about
+    # what the call named.
+    command_key, command = shell_command_at(invocation)
+    analysis = analysed(command, command_cwd(invocation)) if command is not None else None
+    spelled, skipped_words = not_file_words(command, analysis)
+
+    for candidate in target_paths(arguments, command_key, skipped_words):
+        if ArchitecturalBoundaryGuard.is_forbidden_file_access(candidate) and unstaged:
             return _Diagnosis(KIND_PROTECTED_PATH, why="protected", path=candidate)
 
     for target in governed_write_targets(invocation):
-        if is_governance_path(target):
+        if is_governance_path(target) and unstaged:
             return _Diagnosis(KIND_PROTECTED_PATH, why="hooks", path=target)
 
-    command = shell_command(invocation)
-    if command is not None:
-        analysis = analysed(command, command_cwd(invocation))
-        if shell_refusal(analysis, rules):
-            return _shell_diagnosis(analysis, rules)
+    if analysis is not None:
+        found = _shell_diagnosis(analysis, rules, watched)
+        if found is not None:
+            return found
 
     # The layering gate's question (layering_rules.evaluate: does an enforcing
     # rule flag one of the file's imports), asked through the memoised import
     # read so the fix that follows does not parse the same file again.
-    enforcing = [rule for rule in rules if rule.get("mode", ENFORCE) == ENFORCE]
+    enforcing = [
+        rule
+        for rule in rules
+        if rule.get("mode", ENFORCE) == ENFORCE and rule.get("id") not in watched
+    ]
     for target, content in write_pairs(arguments):
         if _flagged_modules(target, content, enforcing):
             return _Diagnosis(KIND_LAYERING, path=target)
 
+    path_like = [leaf for leaf in iter_string_leaves(arguments) if looks_like_path(leaf)]
     if invocation.action_type == ToolActionType.COMMAND_EXEC or command is not None or not path_like:
         for leaf in iter_string_leaves(arguments):
             for pattern in ArchitecturalBoundaryGuard.DESTRUCTIVE_COMMANDS:
-                found = pattern.search(leaf)
-                if found:
-                    return _Diagnosis(KIND_DESTRUCTIVE, detail=found.group(0))
+                found_text = pattern.search(leaf)
+                if found_text and unstaged:
+                    return _Diagnosis(KIND_DESTRUCTIVE, detail=found_text.group(0))
         for leaf in iter_string_leaves(arguments):
-            if looks_like_path(leaf):
+            if looks_like_path(leaf) or leaf in skipped_words:
                 continue
             for pattern in ArchitecturalBoundaryGuard.PROTECTED_PATH_PATTERNS:
-                found = pattern.search(leaf)
-                if found:
-                    return _Diagnosis(KIND_PROTECTED_PATH, why="command", detail=found.group(0))
+                found_text = pattern.search(spelled.get(leaf, leaf))
+                if found_text and unstaged:
+                    return _Diagnosis(KIND_PROTECTED_PATH, why="command", detail=found_text.group(0))
     return None
 
 
-def _shell_diagnosis(analysis: ShellAnalysis, rules: List[Dict[str, Any]]) -> _Diagnosis:
-    """Which of a command's writes shell_refusal refused, in shell_refusal's order."""
-    if analysis.tampering:
-        return _Diagnosis(KIND_PROTECTED_PATH, why="tampering", detail=analysis.tampering[0], analysis=analysis)
-    for write in analysis.writes:
-        if write.target is None:
+def _shell_diagnosis(
+    analysis: ShellAnalysis, rules: List[Dict[str, Any]], watched: Collection[str] = ()
+) -> Optional[_Diagnosis]:
+    """Which of a command's writes refused the call, in the guard's own order."""
+    for finding in shell_findings(analysis, rules):
+        if finding_key(finding) in watched:
             continue
-        if write.pattern:
-            if pattern_is_governance(write.target, write.deletes, write.tree):
-                return _Diagnosis(KIND_PROTECTED_PATH, why="hooks", path=shell_display(write.target), analysis=analysis)
-        elif is_governance_path(write.target, deletes=write.deletes):
-            return _Diagnosis(KIND_PROTECTED_PATH, why="hooks", path=write.target, analysis=analysis)
-    if analysis.truncated and _enforcing(rules):
-        return _Diagnosis(KIND_UNREADABLE, why="truncated", analysis=analysis)
-    for write in analysis.writes:
-        reason = shell_refusal(ShellAnalysis(writes=[write]), rules)
-        if reason:
-            kind = KIND_UNREADABLE if UNREADABLE_WRITE in reason else KIND_LAYERING
-            return _Diagnosis(kind, path=shell_display(write.target or ""), analysis=analysis)
-    return _Diagnosis(KIND_UNREADABLE, why="unknown", analysis=analysis)
+        kind, why = _DIAGNOSIS_FOR_FINDING.get(finding.kind, (KIND_PROTECTED_PATH, ""))
+        if finding.kind == UNREADABLE_FOUND:
+            return _Diagnosis(kind, why=finding.detail, path=finding.path, analysis=analysis)
+        return _Diagnosis(
+            kind, why=why, path=finding.path, detail=finding.detail, analysis=analysis
+        )
+    return None
 
 
 def _diagnose_observed(invocation: ToolInvocation, rules: List[Dict[str, Any]]) -> Optional[_Diagnosis]:
@@ -561,8 +633,8 @@ def _tool_sites(arguments: Any) -> List[_Site]:
         if isinstance(node, dict):
             path_value = ""
             for key, value in node.items():
-                if isinstance(value, str) and isinstance(key, str) and key.lower() in PATH_KEYS and looks_like_path(value):
-                    path_value = value
+                if isinstance(value, str) and isinstance(key, str) and key.lower() in PATH_KEYS and named_path(value):
+                    path_value = named_path(value)
             owner = path_value or inherited
             if owner:
                 removed = next(

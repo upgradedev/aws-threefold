@@ -23,6 +23,7 @@ from threefold.domain.loop_detector import LoopDetector
 from threefold.domain.layering_rules import DEFAULT_RULES, normalise_rules, validate_rules
 from threefold.domain.boundary_guard import (
     ArchitecturalBoundaryGuard,
+    CREDENTIAL_FOUND as CREDENTIAL_FINDING,
     describe_target,
     iter_string_leaves,
     observe_layering,
@@ -44,11 +45,13 @@ from threefold.application.projects import SIMULATED_SESSION_PREFIX
 from threefold.application.rule_keys import (
     BUDGET as BUDGET_KEY,
     CREDENTIAL as CREDENTIAL_KEY,
+    finding_key,
     FROZEN_SESSION_REASON,
     HALTED_SESSION as HALTED_SESSION_KEY,
     HALTED_SESSION_REASONS,
     FIXED_KEYS,
     LOOP as LOOP_KEY,
+    NONE as NONE_KEY,
     PROTECTED_PATH as PROTECTED_PATH_KEY,
     rule_key as rule_key_of,
     with_rule_key,
@@ -271,6 +274,45 @@ class _HeldConfig:
 
     config: Optional[Dict[str, Any]]
     read_at: float
+
+
+@dataclass(frozen=True)
+class _Observed:
+    """One thing a gate found that this project is still only watching.
+
+    `invariant` is the one the finding fails, kept false on the approval so a
+    certificate over the verdict still says the gate found something; `key` is
+    what readiness, the review queue and a promotion group by.
+    """
+
+    key: str
+    reason: str
+    invariant: str
+    path: str = ""
+
+
+class _EveryKey:
+    """Every rule, watching. What Observe and a dry run are.
+
+    A frozenset cannot spell "including every layering rule anyone might
+    declare", and the alternative — collecting the ids first — would make the
+    stage depend on the rules rather than on the project.
+    """
+
+    def __contains__(self, key: object) -> bool:
+        return True
+
+    def __bool__(self) -> bool:
+        return True
+
+
+EVERY_KEY = _EveryKey()
+
+# Which invariant each of the guard's gates fails. A credential fails the
+# secret invariant and everything else the boundary one, which is what the
+# gates themselves have always recorded.
+def _INVARIANT_FOR_FINDING(finding: Any) -> str:
+    return "SECRET_LEAKAGE_FREE" if finding.kind == CREDENTIAL_FINDING else "ARCHITECTURAL_BOUNDARY_SAFE"
 
 
 def is_read_or_poll(invocation: ToolInvocation) -> bool:
@@ -828,7 +870,15 @@ class GovernanceEvaluator:
             limit = fix_max_chars(key, runs_a_command(request))
             if carries_more_than(getattr(request, "arguments", None), limit):
                 return None
-            return propose_fix(request, result, rules, **fix_options(key))
+            # The proposer asks the guard's questions again to say what to do
+            # instead, and it has to step over the same watched findings the
+            # gates did, or it would answer for a rule nobody is enforcing and
+            # name a file the call was not refused for. Passed only when there
+            # were any, so an ordinary verdict asks for exactly what it always
+            # asked for.
+            skipped = getattr(result, "skipped_keys", None) or frozenset()
+            options = dict(fix_options(key), skip_keys=skipped) if skipped else fix_options(key)
+            return propose_fix(request, result, rules, **options)
         except Exception as exc:
             # The proposer never raises, and measuring a call that the gates
             # already read should not either; if either ever does, the caller
@@ -837,8 +887,33 @@ class GovernanceEvaluator:
             return None
 
     @staticmethod
+    def _decided(result: EvaluationResultDTO, key: str, skipped: List[_Observed]) -> EvaluationResultDTO:
+        """Marks a verdict with the gate that decided it and the ones it stepped over.
+
+        Carried beside the verdict rather than inside it: the response's shape
+        is a contract, and these are how this module talks to itself. The key is
+        the one thing that must not be read back out of the reason, because the
+        reason quotes the caller's own command.
+        """
+        result.decided_key = key
+        result.skipped_keys = frozenset(item.key for item in skipped)
+        if skipped:
+            result.observations = [item.reason for item in skipped]
+            result.observed_rules = list(dict.fromkeys(item.key for item in skipped))
+            result.observed_target = next((item.path for item in skipped if item.path), "")
+        return result
+
+    @staticmethod
     def _rule_key(result: EvaluationResultDTO, rules: List[Dict[str, Any]]) -> str:
-        """The rule key of a verdict, read with the ids of the rules that judged it."""
+        """The rule key of a verdict: the gate that decided it, where one said so.
+
+        A verdict this evaluator produced carries its gate. A row or a verdict
+        from anywhere else falls back to reading the sentence, which is all
+        there is to read.
+        """
+        decided = getattr(result, "decided_key", None)
+        if isinstance(decided, str) and decided:
+            return decided
         return rule_key_of(
             {
                 "status": result.status,
@@ -918,7 +993,9 @@ class GovernanceEvaluator:
                     # The file the observation is about. The row's target is the
                     # first path in the call, which in a multi-file edit can be a
                     # different file from the one the rule would have refused.
-                    "observed_target": (getattr(result, "observed_target", "") or "")[:160],
+                    # Redacted like every other field a public page shows: a
+                    # path can carry a token as readily as a reason can.
+                    "observed_target": redact_secrets(getattr(result, "observed_target", "") or "")[:160],
                     "target": describe_target(request),
                     "cost_usd": result.current_session_cost_usd,
                     # Of a suggested fix, what kind it was and whether the gates
@@ -970,8 +1047,9 @@ class GovernanceEvaluator:
         """Evaluates tool invocation against all deterministic safety gates.
 
         `stage` is the one the call is judged under. Observe is judged exactly
-        as a dry run is. Enforce runs the gates, except that a refusal whose
-        rule key is in `observe_keys` becomes an observation.
+        as a dry run is: every rule watches, none enforces. Enforce runs the
+        gates, except that a finding whose rule key is in `observe_keys` is
+        recorded and the call is judged on by the rest.
         """
         session = self.get_or_create_session(
             session_id=request.session_id,
@@ -986,46 +1064,17 @@ class GovernanceEvaluator:
             # gates approve is recorded as any approved call is, so the loop gate
             # still sees the history it needs on the next dry run.
             halted_before = session.is_tripped
-            found = self._run_gates(request, copy.deepcopy(session), rules, may_halt=False)
-            if dry_run:
-                return self._as_observed(found, halted_before)
-            return self._as_observed(found, halted_before, lead="Observe stage, not enforced.", dry_run=False)
-        if not observe_keys:
-            return self._run_gates(request, session, rules, may_halt=True)
-        return self._enforce_except(request, session, rules, observe_keys)
-
-    def _enforce_except(
-        self,
-        request: ToolCallRequestDTO,
-        session: AgentSession,
-        rules: List[Dict[str, Any]],
-        observe_keys: frozenset,
-    ) -> EvaluationResultDTO:
-        """Enforces every rule but the ones the project still observes.
-
-        Which rule refused is only known once the gates have run, and a gate
-        that refuses may already have halted the session by then: the loop gate
-        does for CI, the cost gate does for everyone. So the gates run first on
-        a copy, as a dry run does, and nothing is written. A call they approve
-        was recorded then, as any approved call is. A refusal under an observed
-        key becomes an observation. Any other refusal is judged again on the
-        real session, which is safe because a refusal writes nothing but its
-        halt, and gives the same answer because the gates are deterministic
-        over the same history.
-        """
-        halted_before = session.is_tripped
-        found = self._run_gates(request, copy.deepcopy(session), rules, may_halt=False)
-        if found.status == VerdictStatus.APPROVED.value:
-            return found
-        key = self._rule_key(found, rules)
-        if key in observe_keys:
-            return self._as_observed(
-                found,
-                halted_before,
-                lead=f"Rule {key} is observed in this project, not enforced.",
-                dry_run=False,
+            lead = "Dry run, not enforced." if dry_run else "Observe stage, not enforced."
+            found = self._run_gates(
+                request, copy.deepcopy(session), rules, may_halt=False, observe_keys=EVERY_KEY, lead=lead
             )
-        return self._run_gates(request, session, rules, may_halt=True)
+            if found.status != VerdictStatus.APPROVED.value:
+                # Only a session that was already halted reaches here: nothing
+                # else refuses when every rule is watching.
+                return self._as_observed(found, halted_before, lead=lead, dry_run=dry_run)
+            found.dry_run = dry_run
+            return found
+        return self._run_gates(request, session, rules, may_halt=True, observe_keys=observe_keys)
 
     def _as_observed(
         self,
@@ -1069,6 +1118,7 @@ class GovernanceEvaluator:
         )
         observed.observations = [found.reason]
         observed.observed_rules = [rule]
+        observed.decided_key = getattr(found, "decided_key", None)
         return observed
 
     def _run_gates(
@@ -1077,11 +1127,23 @@ class GovernanceEvaluator:
         session: AgentSession,
         rules: List[Dict[str, Any]],
         may_halt: bool,
+        observe_keys: Any = frozenset(),
+        lead: Optional[str] = None,
     ) -> EvaluationResultDTO:
         """The gates themselves. `may_halt` is false only for a dry run.
 
         `rules` are the layering rules for the calling project, resolved once
         by the caller.
+
+        `observe_keys` are the rule keys this project is still only watching.
+        A finding under one of them is recorded and the call is judged on by
+        the gates that follow, rather than the first refusal deciding the whole
+        call: a MultiEdit whose first file broke a watched rule used to carry a
+        second file that broke an enforced one, and a heredoc under a watched
+        rule used to carry a force push after it. Every key that was hit is
+        recorded, not just the first, because an operator promotes a rule on
+        exactly that count. `lead` is the sentence such a call's approval opens
+        with; without one it names the first key that was only watching.
         """
         rule_evaluations: Dict[str, bool] = {
             "SECRET_LEAKAGE_FREE": True,
@@ -1089,6 +1151,12 @@ class GovernanceEvaluator:
             "LOOP_THRASHING_FREE": True,
             "BUDGET_CIRCUIT_BREAKER_SAFE": True,
         }
+
+        # What the project is only watching, in the order the gates found it.
+        # An approval carries these; a refusal carries the ones it stepped over
+        # to reach the gate that decided, so the fix it is sent is a fix for
+        # that gate and not for one nobody is enforcing.
+        watched: List[_Observed] = []
 
         # Pre-check: has the session already been frozen or tripped?
         if session.is_tripped:
@@ -1100,7 +1168,7 @@ class GovernanceEvaluator:
                 reason=f"{FROZEN_SESSION_REASON}: {session.trip_reason}",
                 rule_evaluations=rule_evaluations,
             )
-            return self._to_dto(session, verdict)
+            return self._decided(self._to_dto(session, verdict), HALTED_SESSION_KEY, watched)
 
         try:
             action_type = ToolActionType(request.action_type)
@@ -1113,12 +1181,22 @@ class GovernanceEvaluator:
             arguments=request.arguments,
         )
 
-        # Gate 1: Check for Secrets & Credentials
-        is_boundary_safe, boundary_reason = ArchitecturalBoundaryGuard.evaluate_tool_boundary(
-            invocation, rules=rules
-        )
-        if not is_boundary_safe:
-            if "Sensitive credential detected" in boundary_reason:
+        # Gate 1: Check for Secrets & Credentials, then every other boundary.
+        # The guard hands back one finding at a time, in the order it has always
+        # asked; a project that is still watching a rule steps over that
+        # finding and reads on, so the rest of the same call is still judged.
+        refusal: Optional[Any] = None
+        for finding in ArchitecturalBoundaryGuard.boundary_findings(invocation, rules=rules):
+            key = finding_key(finding)
+            if key in observe_keys:
+                watched.append(_Observed(key, finding.reason, _INVARIANT_FOR_FINDING(finding), finding.path))
+                continue
+            refusal = (key, finding)
+            break
+        if refusal is not None:
+            key, finding = refusal
+            boundary_reason = finding.reason
+            if key == CREDENTIAL_KEY:
                 rule_evaluations["SECRET_LEAKAGE_FREE"] = False
                 DomainEventPublisher.publish(
                     SecretLeakInterceptedEvent.create(
@@ -1134,7 +1212,7 @@ class GovernanceEvaluator:
                     reason=boundary_reason,
                     rule_evaluations=rule_evaluations,
                 )
-                return self._to_dto(session, verdict)
+                return self._decided(self._to_dto(session, verdict), key, watched)
             else:
                 rule_evaluations["ARCHITECTURAL_BOUNDARY_SAFE"] = False
                 DomainEventPublisher.publish(
@@ -1151,12 +1229,29 @@ class GovernanceEvaluator:
                     reason=boundary_reason,
                     rule_evaluations=rule_evaluations,
                 )
-                return self._to_dto(session, verdict)
+                return self._decided(self._to_dto(session, verdict), key, watched)
 
         # Gate 2: Check for Loop & Thrashing
         is_loop_free, loop_reason = self.loop_detector.evaluate_loop_risk(session.history, invocation)
         repeat_note = ""
-        if not is_loop_free and is_read_or_poll(invocation):
+        if not is_loop_free and LOOP_KEY in observe_keys and not is_read_or_poll(invocation):
+            # LOOP is still only being watched here. The repeat is recorded and
+            # the call runs, which is also how it joins the history: a call
+            # approved under a watched rule used to leave no trace at all, so
+            # the next identical one was judged against a history that never
+            # grew, and the runaway this gate exists for was never caught.
+            watched.append(
+                _Observed(
+                    LOOP_KEY,
+                    loop_reason if loop_halts_session(request) else (
+                        f"{loop_reason}. A hook's repeat is refused on its own and never halts the "
+                        "session, so the next different call is judged normally."
+                    ),
+                    "LOOP_THRASHING_FREE",
+                    "",
+                )
+            )
+        elif not is_loop_free and is_read_or_poll(invocation):
             # An agent waiting on CI or checking `git status` between edits
             # repeats itself by design, and halting it for that stopped real
             # work for a pattern that changes nothing. The call runs, joins the
@@ -1200,14 +1295,25 @@ class GovernanceEvaluator:
                 reason=reason,
                 rule_evaluations=rule_evaluations,
             )
-            return self._to_dto(session, verdict)
+            return self._decided(self._to_dto(session, verdict), LOOP_KEY, watched)
 
         # Gate 3: Check Cost & Budget Limits
         projected_usage = TokenCostCalculator.calculate(
             input_tokens=request.projected_input_tokens,
             output_tokens=request.projected_output_tokens,
         )
-        is_cost_safe, cost_reason = self.cost_breaker.evaluate_cost_risk(session, projected_usage)
+        if BUDGET_KEY in observe_keys:
+            # The breaker trips the session it is handed as it judges, so while
+            # the budget is only being watched it is handed a copy and the real
+            # session is left open.
+            is_cost_safe, cost_reason = self.cost_breaker.evaluate_cost_risk(
+                copy.deepcopy(session), projected_usage
+            )
+            if not is_cost_safe:
+                watched.append(_Observed(BUDGET_KEY, cost_reason, "BUDGET_CIRCUIT_BREAKER_SAFE", ""))
+            is_cost_safe = True
+        else:
+            is_cost_safe, cost_reason = self.cost_breaker.evaluate_cost_risk(session, projected_usage)
         if not is_cost_safe:
             rule_evaluations["BUDGET_CIRCUIT_BREAKER_SAFE"] = False
             # evaluate_cost_risk trips the session on a breach, so the halt is durable too.
@@ -1220,7 +1326,7 @@ class GovernanceEvaluator:
                 reason=cost_reason,
                 rule_evaluations=rule_evaluations,
             )
-            return self._to_dto(session, verdict)
+            return self._decided(self._to_dto(session, verdict), BUDGET_KEY, watched)
 
         # All gates passed. The write happens before the verdict is issued: if a
         # concurrent container has already halted this session, the write is
@@ -1245,24 +1351,33 @@ class GovernanceEvaluator:
                 reason=f"{FROZEN_SESSION_REASON}: {blocked_reason}",
                 rule_evaluations=rule_evaluations,
             )
-            return self._to_dto(stored or session, verdict)
+            return self._decided(self._to_dto(stored or session, verdict), HALTED_SESSION_KEY, watched)
 
+        for item in observe_layering(invocation, rules=rules):
+            watched.append(_Observed(item["rule_id"], item["reason"], "ARCHITECTURAL_BOUNDARY_SAFE", item.get("path", "")))
+        for item in watched:
+            # Left as the gates found them: the invariant did fail, it was only
+            # not enforced, and a certificate over this verdict should say so.
+            rule_evaluations[item.invariant] = False
+        reason = "All deterministic governance invariants satisfied"
+        if watched:
+            opening = lead or f"Rule {watched[0].key} is observed in this project, not enforced."
+            reason = f"{opening} This call would have been refused: {watched[0].reason}"
         verdict = GovernanceVerdict.create(
             session_id=session.session_id,
             status=VerdictStatus.APPROVED,
             risk_level=RiskLevel.LOW,
-            reason="All deterministic governance invariants satisfied",
+            reason=reason,
             rule_evaluations=rule_evaluations,
         )
-        approved = self._to_dto(session, verdict)
-        watched = observe_layering(invocation, rules=rules)
+        approved = self._decided(self._to_dto(session, verdict), watched[0].key if watched else NONE_KEY, [])
         if watched:
-            approved.observations = [item["reason"] for item in watched]
+            approved.observations = [item.reason for item in watched]
             # One rule watching two files of a multi-file edit is one rule that
             # would have refused this call, not two, and counting it twice
             # inflated the number an architect decides a rollout from.
-            approved.observed_rules = list(dict.fromkeys(item["rule_id"] for item in watched))
-            approved.observed_target = watched[0].get("path", "")
+            approved.observed_rules = list(dict.fromkeys(item.key for item in watched))
+            approved.observed_target = next((item.path for item in watched if item.path), "")
         if repeat_note:
             # Appended after any rule's observation, so the ledger's first
             # observed reason still belongs to its first observed rule. It names

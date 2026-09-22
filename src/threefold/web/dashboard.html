@@ -90,8 +90,12 @@
       { path: '/proof', nav: 'proof', title: 'Proof', view: viewProof }
     ];
 
+    // A day is the smallest thing a rollup holds, so the shortest window
+    // the service can answer is one UTC day — today, from 00:00 UTC. It was
+    // offered as '24 h' and worded 'the last 24 hours', which at 00:05 UTC
+    // described five minutes of calls. The names below say what it is.
     const DAY_CHOICES = [
-      { days: 1, label: '24 h' }, { days: 7, label: '7 d' }, { days: 14, label: '14 d' }, { days: 30, label: '30 d' }
+      { days: 1, label: 'Today' }, { days: 7, label: '7 d' }, { days: 14, label: '14 d' }, { days: 30, label: '30 d' }
     ];
     const REFRESH_MS = 30000;
 
@@ -180,7 +184,7 @@
       if (allowAny && Number.isInteger(n) && n >= 1 && n <= 30) return n;
       return DAY_CHOICES.some(c => c.days === n) ? n : fallback;
     }
-    function windowWords(days) { return days === 1 ? 'the last 24 hours' : 'the last ' + days + ' days'; }
+    function windowWords(days) { return days === 1 ? 'the day so far, UTC' : 'the last ' + days + ' days'; }
 
     // Days from a calendar day to today, inclusive, in UTC, which is how the
     // ledger keeps its days.
@@ -632,7 +636,7 @@
               ${card('Outcome', 'Every call ends approved, would refuse (ran, flagged by an observing rule) or refused.', html`${outcome}${origins}`, 'min-w-0')}
             </div>
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              ${card('By rule', 'What decided, refused and would refuse. A layering rule by its id, a gate by its key.', ruleBars, 'min-w-0')}
+              ${card('By rule', 'What decided, refused and would refuse. A layering rule by its id, a gate by its key. A call two rules would have refused counts under each, so these do not add up to the tiles.', ruleBars, 'min-w-0')}
               ${card('By agent', 'Calls each agent sent in this window.', agentBars, 'min-w-0')}
             </div>
             ${card('By project', 'Stage, and what each project\'s rules did. Open a project for its readiness and the Promote button.', projectsTable(byProject, days, true), 'min-w-0')}

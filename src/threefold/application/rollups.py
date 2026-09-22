@@ -55,26 +55,42 @@ def needs_review(rollups: Iterable[Mapping[str, Any]]) -> int:
     return max(0, _sum(items, "observed") - _sum(items, "reviewed:observed"))
 
 
-def review_deltas(kind: str, key: str, old: Optional[str], new: Optional[str]) -> Dict[str, int]:
+def review_deltas(kind: str, key: Any, old: Optional[str], new: Optional[str]) -> Dict[str, int]:
     """What a label moving from `old` to `new` changes in its day's counters.
 
     `review:<label>` counts labels of any flagged call; `<label>:<key>` counts
     them per rule; `reviewed:observed` and `reviewed:<key>` count only calls
     that were observed rather than refused, because those are the queue.
+
+    `key` is one key, or every key the call was counted under: a rollup counts
+    an observation once for each rule that would have refused it, so a label
+    on it has to move once for each too. The per-call counters move once
+    whatever the row's key is, because the reviewer labelled one call.
     """
+    names = [key] if isinstance(key, str) else [str(name) for name in key]
     deltas: Counter = Counter()
     for label, sign in ((old, -1), (new, 1)):
         if label not in LABELS:
             continue
         deltas[f"review:{label}"] += sign
-        deltas[f"{label}:{key}"] += sign
         if kind == "observed":
             deltas["reviewed:observed"] += sign
-            deltas[f"reviewed:{key}"] += sign
+        for name in dict.fromkeys(names):
+            deltas[f"{label}:{name}"] += sign
+            if kind == "observed":
+                deltas[f"reviewed:{name}"] += sign
     return {name: value for name, value in deltas.items() if value}
 
 
 def _window(days: int, today: datetime.date) -> List[str]:
+    """The UTC days a window covers, oldest first.
+
+    Whole days, because a rollup is a day's counters and nothing finer can be
+    read out of one. `days=1` is therefore today's partition: at 00:05 UTC that
+    is five minutes of calls, not twenty-four hours of them. The overview says
+    which day it starts at (`window_from`) so that nobody has to infer it from
+    the count and get it wrong.
+    """
     return [str(today - datetime.timedelta(days=offset)) for offset in range(days - 1, -1, -1)]
 
 
@@ -131,6 +147,7 @@ def overview(
 ) -> Dict[str, Any]:
     """GET /api/overview: tiles, a daily series, and totals by agent, origin, rule and project."""
     today = today or datetime.datetime.now(datetime.timezone.utc).date()
+    days_covered = _window(days, today)
     rollups, configs = _as_shown(rollups, configs)
     names = _projects_in(rollups, configs, project)
     shown = [item for item in rollups if item.get("project") in set(names)]
@@ -144,6 +161,10 @@ def overview(
     stage_counts = Counter(row["stage"] for row in by_project)
     return {
         "window_days": days,
+        # The first UTC day these numbers cover. `window_days` alone reads as a
+        # rolling window, and it is not one: a day is the smallest thing a
+        # rollup holds, so `days=1` is today since 00:00 UTC and nothing more.
+        "window_from": days_covered[0],
         "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "source": "rollups",
         "totals": {
@@ -163,7 +184,7 @@ def overview(
                 "observed": _sum(by_day.get(day, []), "observed"),
                 "refused": _sum(by_day.get(day, []), "refused"),
             }
-            for day in _window(days, today)
+            for day in days_covered
         ],
         "by_agent": _ranked(agents, "agent"),
         "by_origin": _ranked(_prefixed(shown, "origin:"), "origin"),

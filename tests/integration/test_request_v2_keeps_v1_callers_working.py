@@ -134,7 +134,11 @@ def test_a_dry_run_is_never_refused_and_records_what_would_have_refused_it() -> 
     assert status == 200
     assert verdict["status"] == "APPROVED", "A dry run is recorded as observed, never refused"
     assert verdict["dry_run"] is True
-    assert verdict["observed_rules"] == ["ARCHITECTURAL_BOUNDARY_SAFE"]
+    # The rule that would have refused, as it is for a rule whose own mode is
+    # observe. It named the invariant here only because a dry run reached the
+    # same act of watching by a different route, and a call that would have
+    # broken two rules then listed one invariant instead of both.
+    assert verdict["observed_rules"] == ["python-domain-stays-pure"]
     assert "would have been refused" in verdict["reason"]
     assert verdict["rule_evaluations"]["ARCHITECTURAL_BOUNDARY_SAFE"] is False, (
         "The invariant did fail; it was only not enforced"
@@ -143,7 +147,8 @@ def test_a_dry_run_is_never_refused_and_records_what_would_have_refused_it() -> 
     row = _ledger_row("v2-dry-boundary")
     assert row["status"] == "APPROVED"
     assert row["rule"] == "NONE", "Nothing refused the call, so no rule fired"
-    assert row["observed_rules"] == ["ARCHITECTURAL_BOUNDARY_SAFE"]
+    assert row["rule_key"] == "python-domain-stays-pure"
+    assert row["observed_rules"] == ["python-domain-stays-pure"]
     assert row["dry_run"] is True
 
 
@@ -166,7 +171,7 @@ def test_a_dry_run_loop_is_observed_and_never_trips_the_session() -> None:
     verdicts = [_post(call)[1] for _ in range(repeats)]
 
     assert [v["status"] for v in verdicts] == ["APPROVED"] * repeats
-    assert "LOOP_THRASHING_FREE" in (verdicts[-1]["observed_rules"] or []), (
+    assert "LOOP" in (verdicts[-1]["observed_rules"] or []), (
         "The repeated call is the loop the gate would have halted"
     )
     assert all(v["session_tripped"] is False for v in verdicts)
@@ -187,7 +192,7 @@ def test_a_dry_run_over_budget_does_not_trip_the_session() -> None:
     )
     assert status == 200
     assert verdict["status"] == "APPROVED"
-    assert verdict["observed_rules"] == ["BUDGET_CIRCUIT_BREAKER_SAFE"]
+    assert verdict["observed_rules"] == ["BUDGET"]
     assert _evaluator.session_repo.get_session(session_id).is_tripped is False
 
 

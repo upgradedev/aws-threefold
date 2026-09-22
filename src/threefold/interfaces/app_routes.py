@@ -27,7 +27,7 @@ from threefold.application import ledger, rollups
 from threefold.application import projects as stages
 from threefold.application.dtos import InvalidRequestError
 from threefold.application.labels import UNLABELLED, is_labelled, public_row
-from threefold.application.rule_keys import kind_of, stored_rule_key
+from threefold.application.rule_keys import kind_of, stored_rule_keys
 from threefold.application.sandbox import create_sandbox
 from threefold.infrastructure.idempotency import global_idempotency_cache
 from threefold.infrastructure.security_middleware import rfc7807_error
@@ -428,7 +428,7 @@ def _apply_review(project: str, item: ledger.ReviewItem, reviewed_by: str, now: 
 def _count_review(project: str, day: str, before: Dict[str, Any], label: Optional[str]) -> None:
     """Moves the label's counts in its day's rollup, best effort, like any rollup."""
     adjust = _repo("adjust_rollup")
-    deltas = rollups.review_deltas(kind_of(before), stored_rule_key(before), before.get("review"), label)
+    deltas = rollups.review_deltas(kind_of(before), stored_rule_keys(before), before.get("review"), label)
     if adjust is None or not deltas:
         return
     try:

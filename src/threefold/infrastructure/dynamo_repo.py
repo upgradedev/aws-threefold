@@ -62,6 +62,20 @@ def rollup_counters(decision: Dict[str, Any]) -> tuple:
     counted so the projects listing can say which modes a project's hooks run
     in without reading the ledger, and `last_seen` and `last:<rule_key>` are
     stamped for the times the readiness table shows.
+
+    An observation is counted once per rule that would have refused it, not
+    once for the first. Readiness is read out of these counters, and an
+    operator promotes a rule on what it flagged: a call two watched rules both
+    flagged, counted against one of them, left the other reading quiet and
+    promotable on evidence nobody ever collected. The by-rule breakdown is
+    therefore a count per rule and does not add up to the day's `observed`,
+    which is a count of calls; the two answer different questions.
+
+    Nothing here reads a reason or maps an invariant to a rule: that is the
+    application layer's business. The row's own two fields are only counted
+    together when they agree — `rule_key` is the first of `observed_rules` —
+    so a row that carries an invariant name from an older writer is counted
+    under its key alone, exactly as it was before.
     """
     status = str(decision.get("status") or "").upper()
     key = str(decision.get("rule_key") or "NONE")
@@ -82,10 +96,19 @@ def rollup_counters(decision: Dict[str, Any]) -> tuple:
     timestamp = str(decision.get("timestamp") or "")
     stamps = {"last_seen": timestamp} if timestamp else {}
     if kind != "approved":
-        counters[f"{kind}:{key}"] = 1
-        if timestamp:
-            stamps[f"last:{key}"] = timestamp
+        for name in rollup_rule_keys(decision, kind, key):
+            counters[f"{kind}:{name}"] = 1
+            if timestamp:
+                stamps[f"last:{name}"] = timestamp
     return counters, stamps
+
+
+def rollup_rule_keys(decision: Dict[str, Any], kind: str, key: str) -> List[str]:
+    """Every key one decision is counted under, in the order the row lists them."""
+    if kind != "observed":
+        return [key]
+    observed = [str(name) for name in (decision.get("observed_rules") or []) if name]
+    return list(dict.fromkeys([key] + observed)) if key in observed else [key]
 
 # Who last resumed a halted session, why, when, and which halt they cleared.
 # Kept on the session row beside trip_reason and terminated_by, because that is
