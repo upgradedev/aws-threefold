@@ -195,6 +195,23 @@ def test_the_overview_of_one_project_counts_only_it() -> None:
     assert [row["project"] for row in payload["by_project"]] == ["Acme-Two"]
 
 
+def test_a_name_the_pattern_no_longer_admits_is_shown_as_unlabelled(monkeypatch) -> None:
+    """The pattern is a stack parameter. Counts written under a name it admitted
+    yesterday must not put that name on a public page once it no longer does."""
+    monkeypatch.setenv("ALLOWED_PROJECT_PATTERN", r"^Team-[a-z]+$")
+    items = [
+        _rollup(TODAY, "Acme-Payments-Internal", calls=2, approved=2),
+        _rollup(TODAY, "unlabelled", calls=1, approved=1),
+        _rollup(TODAY, "Team-web", calls=4, approved=4),
+    ]
+    configs = {"Acme-Payments-Internal": stages.new_config("2026-09-20T00:00:00+00:00", stage="enforce")}
+    listed = rollups.projects_listing(items, configs)
+    assert {row["project"]: row["calls"] for row in listed} == {"unlabelled": 3, "Team-web": 4}
+    shown = rollups.overview(items, configs, days=1, today=TODAY)
+    assert {row["project"] for row in shown["by_project"]} == {"unlabelled", "Team-web"}
+    assert "Acme-Payments-Internal" not in str(shown) and "Acme-Payments-Internal" not in str(listed)
+
+
 def test_the_projects_listing_names_agents_and_hook_modes() -> None:
     items = [_rollup(TODAY, "Acme-One", calls=4, approved=4, **{
         "agent:codex": 3, "agent:claude-code": 1, "hook_mode:managed": 3, "hook_mode:observe": 1})]

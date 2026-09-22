@@ -16,6 +16,7 @@ from collections import Counter
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
 from threefold.application import projects as stages
+from threefold.application.labels import is_labelled, project_label
 from threefold.application.rule_keys import GATE_KEYS, NONE
 
 LABELS = ("correct", "false_alarm")
@@ -77,6 +78,23 @@ def _window(days: int, today: datetime.date) -> List[str]:
     return [str(today - datetime.timedelta(days=offset)) for offset in range(days - 1, -1, -1)]
 
 
+def _as_shown(
+    rollups: Iterable[Mapping[str, Any]], configs: Mapping[str, Mapping[str, Any]]
+) -> tuple:
+    """The rollups and configurations under the names a public page may carry.
+
+    A rollup's project is the name its calls were recorded under, which was
+    labelled when it was written. The pattern is a stack parameter, though, and
+    a name it admitted yesterday may not be admitted today: such a name is
+    shown as "unlabelled" and its counts merge there, as a ledger row's would.
+    A configuration under a name the pattern no longer admits applies to no
+    call, so it is not listed.
+    """
+    shown = [dict(item, project=project_label(item.get("project"))) for item in rollups]
+    live = {name: config for name, config in configs.items() if is_labelled(name)}
+    return shown, live
+
+
 def _is_expired_sandbox(project: str, configs: Mapping[str, Any]) -> bool:
     """A sandbox is gone a day after it was made; its counts stay out of the lists."""
     return project not in configs and bool(stages.SANDBOX_PATTERN.match(project))
@@ -113,6 +131,7 @@ def overview(
 ) -> Dict[str, Any]:
     """GET /api/overview: tiles, a daily series, and totals by agent, origin, rule and project."""
     today = today or datetime.datetime.now(datetime.timezone.utc).date()
+    rollups, configs = _as_shown(rollups, configs)
     names = _projects_in(rollups, configs, project)
     shown = [item for item in rollups if item.get("project") in set(names)]
     by_day: Dict[str, List[Mapping[str, Any]]] = {}
@@ -163,6 +182,7 @@ def overview(
 
 def projects_listing(rollups: List[Mapping[str, Any]], configs: Mapping[str, Mapping[str, Any]]) -> List[Dict[str, Any]]:
     """GET /api/projects: every configured project, and every project the rollups saw."""
+    rollups, configs = _as_shown(rollups, configs)
     listed = []
     for name in _projects_in(rollups, configs, None):
         own = [item for item in rollups if item.get("project") == name]
