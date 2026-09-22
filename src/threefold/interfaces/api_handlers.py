@@ -463,24 +463,13 @@ def _route(event: Dict[str, Any], http_method: str, request_id: str) -> Dict[str
             if not isinstance(tc, dict):
                 tc = body
 
-            tool_name = "unknown_tool"
-            tool_args = {}
-            if "type" in tc and tc["type"] == "tool_use":
-                tool_name = tc.get("name", "tool")
-                tool_args = tc.get("input", {})
-            # Detect format: OpenAI function_call
-            elif "function" in tc:
-                fn = tc["function"]
-                tool_name = fn.get("name", "function")
-                raw_args = fn.get("arguments", {})
-                tool_args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
-            elif "name" in tc and "arguments" in tc:
-                tool_name = tc["name"]
-                raw_args = tc["arguments"]
-                tool_args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
-            else:
-                tool_name = tc.get("tool_name", tc.get("name", "unknown_tool"))
-                tool_args = tc.get("arguments", tc.get("input", {}))
+            # Read, or refused. A shape this route cannot read used to be
+            # evaluated as unknown_tool with no arguments at all, and a call
+            # with no arguments passes every gate: the two shapes OpenAI
+            # actually returns, a message-level function_call and a tool_calls
+            # array, both landed there and came back APPROVED with a credential
+            # in the payload nobody had read.
+            tool_name, tool_args = _universal_tool_call(tc)
 
             # Infer action type
             action_type = "FILE_READ"
@@ -1037,6 +1026,95 @@ def _project_warnings(project: Any) -> list:
         "project does not match this deployment's AllowedProjectPattern, so no rules "
         "can be saved for it and its calls are judged by the shared rules."
     ]
+
+
+UNREADABLE_TOOL_CALL = (
+    "This adapter reads an Anthropic tool_use object, an OpenAI function_call, an OpenAI "
+    "tool_calls array of one, or {tool_name, arguments}. Send the tool call in one of "
+    "those shapes: a body naming no tool would be judged as a call with no arguments, "
+    "which every gate approves."
+)
+ARGUMENTS_MUST_BE_AN_OBJECT = (
+    "arguments must be a JSON object, or the JSON text of one, as OpenAI sends them. The "
+    "gates read the strings inside it, so anything else would be approved without having "
+    "been read."
+)
+
+
+def _tool_arguments(value: Any) -> Dict[str, Any]:
+    """One tool call's arguments as an object the gates can walk.
+
+    Anthropic sends them as an object and OpenAI as the JSON text of one, so
+    both are read. Absent is an empty object, which is what a tool that takes
+    no arguments sends. Anything else is refused rather than evaluated: the
+    gates scan the strings inside an object, so a number or a bare string
+    would be judged as a call carrying nothing.
+    """
+    if value is None:
+        return {}
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return {}
+        try:
+            value = json.loads(text)
+        except ValueError:
+            raise InvalidRequestError(ARGUMENTS_MUST_BE_AN_OBJECT, "arguments") from None
+    if not isinstance(value, dict):
+        raise InvalidRequestError(ARGUMENTS_MUST_BE_AN_OBJECT, "arguments")
+    return value
+
+
+def _tool_name(value: Any) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise InvalidRequestError("The tool call must name the tool it calls.", "name")
+    return value.strip()
+
+
+def _openai_function(call: Any) -> tuple:
+    """One OpenAI call: a tool call object, or the function object inside it."""
+    if isinstance(call, dict) and isinstance(call.get("function"), dict):
+        call = call["function"]
+    if not isinstance(call, dict):
+        raise InvalidRequestError(UNREADABLE_TOOL_CALL, "tool_call")
+    return _tool_name(call.get("name")), _tool_arguments(call.get("arguments"))
+
+
+def _universal_tool_call(tc: Any) -> tuple:
+    """The tool and the arguments inside one native payload, or a 400.
+
+    The shapes an agent actually emits, in the order they are told apart:
+    Anthropic's `tool_use` object, OpenAI's `tool_calls` array, OpenAI's
+    message-level `function_call`, a single OpenAI tool call object, and this
+    service's own `{tool_name, arguments}`. Anything else is refused. It used
+    to be approved instead, as a call named "unknown_tool" with no arguments,
+    which is a call every gate lets through.
+    """
+    if not isinstance(tc, dict):
+        raise InvalidRequestError(UNREADABLE_TOOL_CALL, "tool_call")
+    if tc.get("type") == "tool_use" or ("name" in tc and "input" in tc):
+        return _tool_name(tc.get("name")), _tool_arguments(tc.get("input"))
+    if "tool_calls" in tc:
+        calls = tc["tool_calls"]
+        # One request, one verdict. A batch would need a verdict each, and
+        # answering with one would leave the rest judged by nothing.
+        if not isinstance(calls, list) or len(calls) != 1:
+            raise InvalidRequestError(
+                "tool_calls must hold exactly one tool call: this route answers with one "
+                "verdict, so send each call in its own request.",
+                "tool_calls",
+            )
+        return _openai_function(calls[0])
+    if "function_call" in tc:
+        return _openai_function(tc["function_call"])
+    if "function" in tc:
+        return _openai_function(tc)
+    if "tool_name" in tc or ("name" in tc and "arguments" in tc):
+        return (
+            _tool_name(tc.get("tool_name") if tc.get("tool_name") is not None else tc.get("name")),
+            _tool_arguments(tc.get("arguments")),
+        )
+    raise InvalidRequestError(UNREADABLE_TOOL_CALL, "tool_call")
 
 
 def _bounded_text(body: Dict[str, Any], name: str, limit: int, default: str) -> str:

@@ -35,7 +35,10 @@ paths:
           description: >-
             Normalized evaluation result, with the same verdict fields POST /evaluate-tool-call returns under evaluation
         '400':
-          description: The body is not a JSON object.
+          description: >-
+            The body is not a JSON object, or the tool call is not one this adapter reads: an Anthropic tool_use
+            object, an OpenAI function_call, a tool_calls array of exactly one call, or {tool_name, arguments} whose
+            arguments are an object or the JSON text of one
   /api/sessions:
     get:
       summary: List Governed Sessions
