@@ -45,6 +45,41 @@ function describe(text) { el('draft-description').value = text; updateDraftCount
 SIGNED_IN = "store['threefold-session'] = JSON.stringify({ token: 'tok-1', expires_at: new Date(Date.now() + 3600e3).toISOString() });\n"
 
 
+def function_body(source: str, signature: str) -> str:
+    """The body of one function in the page's script, found by matching its braces.
+
+    Braces inside strings, template literals and comments are skipped, so the
+    slice ends where the function does however the file is indented or wrapped.
+    """
+    start = source.index(signature) + len(signature)
+    opening = source.index("{", start)
+    depth, quote, i = 0, None, opening
+    while i < len(source):
+        char = source[i]
+        if quote:
+            if char == "\\":
+                i += 2
+                continue
+            if char == quote:
+                quote = None
+        elif char in "'\"`":
+            quote = char
+        elif source.startswith("//", i):
+            i = source.index("\n", i)
+            continue
+        elif source.startswith("/*", i):
+            i = source.index("*/", i) + 2
+            continue
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return source[opening : i + 1]
+        i += 1
+    raise AssertionError(f"{signature} has no closing brace")
+
+
 def rules_page(scenario: str, tmp_path: Path, before: str = "") -> dict:
     """Runs rules.html with the fixtures and a stack that answers GET /rules."""
     return run(
@@ -87,8 +122,14 @@ def test_a_save_is_sent_from_one_function_and_that_function_only_from_its_button
     elsewhere = body.replace('onclick="saveDraftedRule()"', "").replace("async function saveDraftedRule()", "")
     assert "saveDraftedRule(" not in elsewhere, "saveDraftedRule is called from somewhere other than its button"
     assert not re.search(r"addEventListener\([^)]*saveDraftedRule", body)
-    draft_fn = body.split("async function draftRule()", 1)[1].split("\n    }\n", 1)[0]
-    assert "'/rules/draft'" in draft_fn and "DEFAULT_API_BASE + '/rules'," not in draft_fn
+    draft_fn = function_body(body, "async function draftRule()")
+    assert "finally" in draft_fn, "The slice stops short of the end of draftRule, so the checks below would prove nothing"
+    # Every address draftRule builds, whatever the quoting, is the draft route,
+    # and it makes one request: no save, and no helper that sends one for it.
+    addresses = {match[1] for match in re.findall(r"DEFAULT_API_BASE\s*\+\s*(['\"`])(.*?)\1", draft_fn)}
+    assert addresses == {"/rules/draft"}, addresses
+    assert len(re.findall(r"\bfetch\s*\(", draft_fn)) == 1
+    assert not re.search(r"\b(save|saveDraftedRule)\s*\(", draft_fn)
 
 
 # ------------------------------------------------------------------ the form
@@ -108,6 +149,8 @@ def test_the_description_counter_and_the_draft_button_follow_the_600_character_c
   out.emoji = { disabled: el('draft-button').disabled, count: el('draft-description-count').innerText };
   describe('   ');
   out.blank = el('draft-button').disabled;
+  describe(' ');
+  out.pythonBlank = el('draft-button').disabled;
   await draftRule();
   out.sentWhenBlank = posts('/rules/draft').length;
 """,
@@ -120,6 +163,10 @@ def test_the_description_counter_and_the_draft_button_follow_the_600_character_c
     assert "text-red-400" in out["over"]["tone"] and "not cut" in out["over"]["hint"]
     assert out["emoji"] == {"disabled": False, "count": "600 / 600"}, "Characters are counted as the service counts them"
     assert out["blank"] is True and out["sentWhenBlank"] == 0
+    # The drafter refuses what Python's strip() empties, which is more than
+    # JavaScript's trim() does; the button follows the drafter.
+    assert "\x1c\x1f\x85 ".strip() == ""
+    assert out["pythonBlank"] is True
 
 
 def test_up_to_five_examples_each_with_a_counter_against_4000(tmp_path: Path) -> None:
@@ -247,7 +294,8 @@ def test_the_models_words_are_shown_as_text_never_as_markup(tmp_path: Path) -> N
     undraftable: { status: 502, body: { detail: EVIL, problems: [EVIL], rejected_draft: { id: EVIL, forbid_imports: [EVIL] } } },
     declined: { status: 422, body: { detail: EVIL, unsupported: EVIL } },
     refused: { status: 400, body: { detail: EVIL, invalid_params: [{ name: EVIL }] } },
-    private: { status: 403, body: { detail: EVIL } }
+    private: { status: 403, body: { type: 'urn:threefold:error:invalid-credentials', detail: EVIL } },
+    forbidden: { status: 403, body: { detail: EVIL } }
   };
   describe('Billing domain classes may not reach persistence.');
   for (const name of Object.keys(cases)) {
@@ -309,7 +357,9 @@ def test_the_other_refusals_each_say_what_happened(tmp_path: Path) -> None:
     undraftable: { status: 502, body: { type: 'urn:threefold:error:undraftable-rule', detail: 'The model answered 2 time(s) and no answer was a usable rule, so nothing was drafted.', problems: ['forbid_imports is empty'], rejected_draft: { id: 'x', forbid_imports: [] } } },
     declined: { status: 422, body: { type: 'urn:threefold:error:not-a-layering-rule', detail: 'A size limit is not an import.' } },
     refused: { status: 400, body: { detail: 'description must be at most 600 characters; it is 601.', invalid_params: [{ name: 'description' }] } },
-    private: { status: 401, body: { detail: 'reading them requires the operator key' } },
+    private: { status: 401, body: { type: 'urn:threefold:error:missing-credentials', detail: 'reading them requires the operator key' } },
+    wrongKey: { status: 403, body: { type: 'urn:threefold:error:invalid-credentials', detail: 'The key or sign-in session presented is invalid or has expired.' } },
+    firewall: { status: 403, body: null },
     offline: 'network'
   };
   describe('Billing domain classes may not reach persistence.');
@@ -331,6 +381,12 @@ def test_the_other_refusals_each_say_what_happened(tmp_path: Path) -> None:
     assert "refused before the model was asked" in screens["refused"]["result"]
     assert "description" in screens["refused"]["result"]
     assert "needs the operator" in screens["private"]["result"] and "threefold.py open" in screens["private"]["result"]
+    assert "needs the operator" in screens["wrongKey"]["result"] and "invalid or has expired" in screens["wrongKey"]["result"]
+    # A 403 the middleware did not write, such as one from a firewall in front of
+    # the service, says what came back and claims no reason for it.
+    firewall = screens["firewall"]["result"]
+    assert "refused the draft with HTTP 403" in firewall
+    assert "private" not in firewall and "needs the operator" not in firewall
     assert "could not be reached" in screens["offline"]["result"]
 
 
@@ -394,6 +450,110 @@ def test_try_again_tries_the_edited_rule_with_explain_and_saves_nothing(tmp_path
     )
     assert "cannot be used as written" in out["unusable"] and "forbid_imports is empty" in out["unusable"]
     assert "not valid JSON" in out["notJson"]
+
+
+def test_try_again_claims_a_result_only_for_the_files_the_service_judged(tmp_path: Path) -> None:
+    """A failed request is no verdict: it is neither a match nor a mismatch, and never a success."""
+    out = rules_page(
+        r"""
+  answer = api({ 'GET /rules': { status: 200, body: IN_FORCE }, 'POST /rules/draft': { status: 200, body: drafted() } });
+  describe('Billing domain classes may not reach persistence.');
+  addDraftExample();
+  el('draft-ex-path-0').value = ORDER;
+  el('draft-ex-content-0').value = 'import javax.persistence.Entity;';
+  await draftRule();
+  await tick();
+  const screen = () => ({ validation: el('draft-validation').innerHTML, tried: el('draft-tried').innerHTML });
+  const limited = { status: 429, body: { type: 'urn:threefold:error:rate-limit-exceeded', detail: 'Rate limit exceeded.' } };
+
+  answer = api({ 'GET /rules': { status: 200, body: IN_FORCE }, 'POST /rules/explain': limited });
+  await retryDraft();
+  out.allFailed = screen();
+
+  let asked = 0;
+  answer = api({ 'GET /rules': { status: 200, body: IN_FORCE }, 'POST /rules/explain': () => (++asked === 1
+    ? { status: 200, body: { verdict: 'OBSERVE', violations: [{ mode: 'observe', reason: 'imports javax.persistence' }], note: '' } }
+    : limited) });
+  await retryDraft();
+  out.someFailed = screen();
+
+  answer = api({ 'GET /rules': { status: 200, body: IN_FORCE }, 'POST /rules/explain': { status: 200, body: { note: 'judged nothing' } } });
+  await retryDraft();
+  out.noVerdict = screen();
+  out.saves = posts('/rules').length;
+""",
+        tmp_path,
+    )
+    failed = out["allFailed"]
+    assert "could use the edited rule" not in failed["validation"], "Nothing was tried, so nothing is claimed"
+    assert "was not tried" in failed["validation"] and "Rate limit exceeded." in failed["validation"]
+    assert "none of the 2 could be tried" in failed["tried"] and "behaved as expected" not in failed["tried"]
+    assert failed["tried"].count('data-result="not-tried"') == 2
+
+    some = out["someFailed"]
+    assert "could use the edited rule" in some["validation"] and "1 of the 2 files could not be tried" in some["validation"]
+    assert "1 of 1 tried behaved as expected; 1 could not be tried." in some["tried"]
+
+    unread = out["noVerdict"]
+    assert "was not tried" in unread["validation"], "An answer without a verdict is not read as an allow"
+    assert "none of the 2 could be tried" in unread["tried"]
+    assert out["saves"] == 0
+
+
+def test_what_try_again_and_the_save_show_from_the_service_is_text_never_markup(tmp_path: Path) -> None:
+    out = rules_page(
+        r"""
+  answer = api({ 'GET /rules': { status: 200, body: IN_FORCE }, 'POST /rules/draft': { status: 200, body: drafted() } });
+  describe('Billing domain classes may not reach persistence.');
+  addDraftExample();
+  el('draft-ex-path-0').value = ORDER;
+  el('draft-ex-content-0').value = 'import javax.persistence.Entity;';
+  await draftRule();
+  await tick();
+  const explains = {
+    reason: { status: 200, body: { verdict: 'OBSERVE', violations: [{ mode: 'observe', reason: EVIL }], note: '' } },
+    note: { status: 200, body: { verdict: 'ALLOW', violations: [], note: EVIL } },
+    verdict: { status: 200, body: { verdict: EVIL, violations: [], note: '' } },
+    detail: { status: 429, body: { detail: EVIL } },
+    problems: { status: 400, body: { detail: 'unusable', problems: [{ index: 0, id: EVIL, reason: EVIL }] } }
+  };
+  out.tried = {};
+  for (const name of Object.keys(explains)) {
+    answer = api({ 'GET /rules': { status: 200, body: IN_FORCE }, 'POST /rules/explain': explains[name] });
+    el('draft-validation').innerHTML = '';
+    el('draft-tried').innerHTML = '';
+    await retryDraft();
+    out.tried[name] = el('draft-validation').innerHTML + el('draft-tried').innerHTML;
+  }
+
+  const saves = {
+    detail: { status: 500, body: { detail: EVIL } },
+    problems: { status: 400, body: { detail: 'unusable', problems: [{ index: 1, id: EVIL, reason: EVIL }] } }
+  };
+  out.saved = {};
+  for (const name of Object.keys(saves)) {
+    answer = api({ 'GET /rules': { status: 200, body: IN_FORCE }, 'POST /rules': saves[name] });
+    el('draft-save-result').innerHTML = '';
+    await saveDraftedRule();
+    out.saved[name] = el('draft-save-result').innerHTML;
+  }
+
+  // A saved rule whose id carries markup, with edits in the editor, reaches the
+  // note beside the editor's Save and the refusal that Save then gives.
+  answer = api({ 'GET /rules': { status: 200, body: IN_FORCE }, 'POST /rules': { status: 200, body: { count: 2, refresh_seconds: 30 } } });
+  el('editor').value = el('editor').value + ' ';
+  el('draft-rule').value = JSON.stringify(Object.assign({}, RULE, { id: EVIL }));
+  await saveDraftedRule();
+  await save();
+  out.saved.stale = el('rules-stale').innerHTML + el('draft-save-result').innerHTML + el('save-result').innerHTML;
+""",
+        tmp_path,
+        before=SIGNED_IN + "location.search = '?project=Acme-Billing';",
+    )
+    screens = {**{"try " + k: v for k, v in out["tried"].items()}, **{"save " + k: v for k, v in out["saved"].items()}}
+    for name, markup in screens.items():
+        assert "<img" not in markup and "<svg" not in markup, f"The {name} answer was written as markup"
+        assert "&lt;img" in markup, f"The {name} answer was not shown at all, so this test proves nothing there"
 
 
 # ------------------------------------------------------------------ saving
@@ -466,6 +626,7 @@ def test_save_to_project_sends_the_projects_rules_and_the_edited_rule_with_the_s
   out.firstRead = { url: sequence[0].url, method: sequence[0].method, auth: sequence[0].headers.Authorization };
   out.save = posts('/rules')[0];
   out.result = el('draft-save-result').innerHTML;
+  out.staleHidden = el('rules-stale').hidden;
 """,
         tmp_path,
         before=SIGNED_IN + "location.search = '?project=Acme-Billing';",
@@ -482,6 +643,109 @@ def test_save_to_project_sends_the_projects_rules_and_the_edited_rule_with_the_s
     assert "Saved to Acme-Billing, in observe" in result and "refuses nothing yet" in result
     assert "no rules of its own" in result, "Saving beside the shared default says the project now keeps a copy of it"
     assert "dashboard.html#/projects/Acme-Billing" in result and "promote" in result
+    assert out["staleHidden"] is True, "With the editor untouched the rules are read again, so nothing is stale"
+
+
+def test_a_drafted_rule_saved_under_edits_in_the_editor_is_not_undone_by_the_editors_save(tmp_path: Path) -> None:
+    """Both saves replace a whole set, so the editor's Save must not put back the set without the draft."""
+    out = rules_page(
+        r"""
+  out.editorBefore = JSON.parse(el('editor').value).rules.map(r => r.id);
+  // The architect is part way through an edit of their own below.
+  const own = JSON.parse(el('editor').value);
+  own.rules[0].description = 'Edited in the editor';
+  el('editor').value = JSON.stringify(own, null, 2);
+  describe('Billing domain classes may not reach persistence.');
+  await draftRule();
+  await tick();
+  await saveDraftedRule();
+  await tick();
+  out.storedAfterDraftSave = stored.rules.map(r => r.id);
+  out.editorKept = el('editor').value.indexOf('Edited in the editor') !== -1;
+  out.note = { hidden: el('rules-stale').hidden, text: el('rules-stale').innerHTML };
+  out.saveResult = el('draft-save-result').innerHTML;
+  const before = posts('/rules').length;
+  await save();
+  await tick();
+  out.editorSave = { sent: posts('/rules').length - before, said: el('save-result').innerHTML };
+  out.storedAfterEditorSave = stored.rules.map(r => r.id);
+  await load();
+  await tick();
+  out.afterRead = { hidden: el('rules-stale').hidden, editor: JSON.parse(el('editor').value).rules.map(r => r.id),
+                    listed: el('rules-list').innerHTML.indexOf('billing-domain-stays-pure') !== -1 };
+  await save();
+  await tick();
+  out.storedAfterReadAndSave = stored.rules.map(r => r.id);
+""",
+        tmp_path,
+        before=SIGNED_IN + "location.search = '?project=Acme-Billing';\n"
+        + "let stored = { rules: [{ id: 'own-rule', mode: 'enforce', when_path_matches: ['**/domain/**'], forbid_imports: ['boto3'] }], is_default: false };\n"
+        + "answer = api({\n"
+        + "  'GET /rules': () => ({ status: 200, body: { rules: JSON.parse(JSON.stringify(stored.rules)), count: stored.rules.length, is_default: stored.is_default, refresh_seconds: 30 } }),\n"
+        + "  'POST /rules/draft': { status: 200, body: drafted() },\n"
+        + "  'POST /rules': (u, init, body) => { stored = { rules: body.rules, is_default: false }; return { status: 200, body: { status: 'RULES_UPDATED', count: body.rules.length, refresh_seconds: 30 } }; }\n"
+        + "});\n",
+    )
+    assert out["editorBefore"] == ["own-rule"]
+    assert out["storedAfterDraftSave"] == ["own-rule", "billing-domain-stays-pure"]
+    assert out["editorKept"] is True, "The reader's own edits are not thrown away by a read they did not ask for"
+    note = out["note"]
+    assert note["hidden"] is False and "billing-domain-stays-pure" in note["text"] and "Read the rules again" in note["text"]
+    assert "Saved to Acme-Billing" in out["saveResult"] and "not read again here" in out["saveResult"]
+    assert out["editorSave"]["sent"] == 0 and "Nothing was sent" in out["editorSave"]["said"]
+    assert out["storedAfterEditorSave"] == ["own-rule", "billing-domain-stays-pure"], "The drafted rule survived"
+    after = out["afterRead"]
+    assert after["hidden"] is True and after["listed"] is True
+    assert after["editor"] == ["own-rule", "billing-domain-stays-pure"]
+    assert out["storedAfterReadAndSave"] == ["own-rule", "billing-domain-stays-pure"]
+
+
+def test_the_two_saves_never_run_at_once_and_draft_waits_for_a_save(tmp_path: Path) -> None:
+    out = rules_page(
+        r"""
+  const saved = (u, init, body) => ({ status: 200, body: { status: 'RULES_UPDATED', count: body.rules.length, refresh_seconds: 30 } });
+  answer = api({ 'GET /rules': { status: 200, body: IN_FORCE }, 'POST /rules/draft': { status: 200, body: drafted() }, 'POST /rules': saved });
+  describe('Billing domain classes may not reach persistence.');
+  await draftRule();
+  await tick();
+  const read = held();
+  answer = api({ 'GET /rules': () => read.promise.then(() => ({ status: 200, body: IN_FORCE })), 'POST /rules/draft': { status: 200, body: drafted() }, 'POST /rules': saved });
+  const draftSave = saveDraftedRule();
+  await tick();
+  out.duringDraftSave = { draftDisabled: el('draft-button').disabled, hint: el('draft-hint').innerText };
+  await draftRule();
+  out.draftsDuring = posts('/rules/draft').length;
+  await save();
+  out.editorDuring = el('save-result').innerHTML;
+  read.release();
+  await draftSave;
+  await tick();
+  out.afterDraftSave = { draftDisabled: el('draft-button').disabled, result: el('draft-save-result').innerHTML, saves: posts('/rules').length };
+
+  const write = held();
+  answer = api({ 'GET /rules': { status: 200, body: IN_FORCE }, 'POST /rules': (u, init, body) => write.promise.then(() => saved(u, init, body)) });
+  const editorSave = save();
+  await tick();
+  out.duringEditorSave = { disabled: el('draft-save-button').disabled, hint: el('draft-save-hint').innerText };
+  await saveDraftedRule();
+  out.savesDuringEditorSave = posts('/rules').length;
+  write.release();
+  await editorSave;
+  await tick();
+  out.afterEditorSave = el('draft-save-button').disabled;
+""",
+        tmp_path,
+        before=SIGNED_IN + "location.search = '?project=Acme-Billing';",
+    )
+    during = out["duringDraftSave"]
+    assert during["draftDisabled"] is True and "Saving the drafted rule" in during["hint"]
+    assert out["draftsDuring"] == 1, "A new draft waits, so the save's answer is never shown under a draft it was not about"
+    assert "still being saved" in out["editorDuring"]
+    after = out["afterDraftSave"]
+    assert after["draftDisabled"] is False and "Saved to Acme-Billing" in after["result"] and after["saves"] == 1
+    assert out["duringEditorSave"]["disabled"] is True and "waits for it" in out["duringEditorSave"]["hint"]
+    assert out["savesDuringEditorSave"] == 2, "Only the editor's save was sent"
+    assert out["afterEditorSave"] is False
 
 
 def test_a_rule_edited_out_of_observe_is_not_saved(tmp_path: Path) -> None:
