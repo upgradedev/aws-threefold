@@ -4,6 +4,11 @@
 **Hackathon:** AWS Zero to Shipped 2026 · **Category:** `#workplace-efficiency` · **Lane:** `#community`
 **Try it, no account:** <https://d1og72wpk4aqig.cloudfront.net/dashboard.html#/try>
 
+A claim about the live stacks is tagged **[PRIMARY, 2026-09-22]** when it was
+checked that day with a read-only request or an AWS `describe`/`get`/`list`
+call, and **[STATE-FILE]** when it is taken from the project's state ledger
+and was not re-measured for this article.
+
 ---
 
 ## The moment that matters
@@ -111,6 +116,13 @@ browser ─────────────────────►├─
                               │                 └─► CloudWatch: EMF, 10 alarms, X-Ray
 ```
 
+Checked on the live stacks **[PRIMARY, 2026-09-22]**: the web ACL is attached
+to the deployed distribution (`aws cloudfront list-distributions`), the ten
+alarms exist and were all `OK` (`aws cloudwatch describe-alarms`),
+point-in-time recovery is `ENABLED` on the table
+(`aws dynamodb describe-continuous-backups`), and the function runs with a
+reserved concurrency of 25 (`aws lambda get-function-concurrency`).
+
 - **One Lambda function** answers every route, so the page's "try it" and a
   hook's verdict run the same code. The price: page reads and verdicts share one
   reserved concurrency of 25 [PRIMARY, 2026-09-22: `get-function-concurrency`],
@@ -127,8 +139,10 @@ browser ─────────────────────►├─
   to the function with a secret origin header, so the function believes the
   viewer's address and host only from the edge. That fixed two real problems:
   every viewer of one edge server shared one rate-limit bucket, and an
-  installer fetched from the edge pointed its hook past the firewall. The
-  secret is not authentication; the API's own URL stays public.
+  installer fetched from the edge pointed its hook past the firewall. Fetched
+  from the edge, `install.py` now names the edge; fetched from the API URL, it
+  names the API URL **[PRIMARY, 2026-09-22]**. The secret is not
+  authentication; the API's own URL stays public.
 - **The hook fails open.** If the service cannot answer, the agent's own
   permissions decide, because a governance outage that stopped every developer
   would end the rollout. `THREEFOLD_FAIL_CLOSED=1` flips that.
@@ -138,19 +152,22 @@ browser ─────────────────────►├─
 - **Does a deny stop the write?** Measured per agent on the file system on
   2026-09-21: in Claude Code 2.1.220 and the Antigravity desktop app the
   refused file was not created. Codex was not measured, so nothing is claimed
-  for it.
+  for it **[STATE-FILE]**, `docs/evidence/ENFORCEMENT_2026-09-21.md`.
 - **Does the live stack do what the documents say?** A probe script checked the
-  public stack claim by claim on 2026-09-22: 113 PASS, 0 FAIL, 3 SKIP.
+  public stack claim by claim on 2026-09-22, at its API Gateway URL: 113 PASS,
+  0 FAIL, 3 SKIP **[PRIMARY, 2026-09-22]**, `docs/evidence/PROBES_2026-09-22.md`.
+  No probe of the CloudFront URL has been committed yet.
 - **Does Threefold change what an agent does?** Not measured yet. A benchmark
   harness runs an agent on six synthetic tasks, each tempting a governed
   violation, with no guidance, with the rules in `CLAUDE.md`, and with
   Threefold enforcing, and grades the result with an independent checker. Only
   a pilot has run, and its agent never reached the model, so there is no number
-  to report. The headline will be computed by the harness's report script from
-  the full matrix.
+  to report (`docs/evidence/BENCHMARK_2026-09-22-PILOT.md`). The headline will
+  be computed by the harness's report script, `benchmark/report.py`, from the
+  full matrix.
 - **The certificate** Threefold issues is an unkeyed SHA-256 fingerprint over
   verdicts the caller supplies. It detects corruption, not an adversary, and
-  nothing requires one before a merge.
+  nothing requires one before a merge **[STATE-FILE]**.
 
 ## Takeaways
 
