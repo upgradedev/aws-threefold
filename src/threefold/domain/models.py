@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from enum import Enum
 import hashlib
 import json
+import secrets
 from typing import Any, Dict, List, Optional
 
 
@@ -184,7 +185,14 @@ class GovernanceVerdict:
             sort_keys=True,
         )
         proof_hash = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-        verdict_id = f"VERDICT-{proof_hash[:12].upper()}"
+        # The id is the proof salted with a random value, not the proof alone.
+        # Two approvals in one session carry the same reason and invariants,
+        # so on a clock that ticks every millisecond they shared a timestamp,
+        # a proof and so an id, and the ledger, keyed by the id, kept one of
+        # the two. The proof stays over the fields the caller is given, so it
+        # still verifies from them.
+        salted = hashlib.sha256(f"{proof_hash}:{secrets.token_hex(8)}".encode("utf-8")).hexdigest()
+        verdict_id = f"VERDICT-{salted[:12].upper()}"
         return cls(
             verdict_id=verdict_id,
             session_id=session_id,

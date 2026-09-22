@@ -954,6 +954,13 @@ def _route(event: Dict[str, Any], http_method: str, request_id: str) -> Dict[str
         served = access_routes.handle(path, http_method, event)
         if served is not None:
             return served
+        # The application's routes (overview, decisions, projects and their stages,
+        # reviews, sandbox), imported here so that module can reach this one's
+        # evaluator without either needing the other loaded first.
+        from threefold.interfaces import app_routes
+        app_response = app_routes.handle(path, http_method, event)
+        if app_response is not None:
+            return app_response
 
         return build_response(
             404,

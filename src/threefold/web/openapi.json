@@ -215,6 +215,15 @@
                   },
                   "budget_usd": {
                     "type": "number"
+                  },
+                  "hook_mode": {
+                    "type": "string",
+                    "enum": [
+                      "observe",
+                      "managed",
+                      "enforce"
+                    ],
+                    "description": "The mode the hook on the developer's machine runs in: observe sends every call as a dry run, managed leaves the decision to the project's stage on the server, enforce never sends a dry run. Stored on the ledger row. Absent, or any other value, is recorded as 'unknown'; another value is reported in warnings."
                   }
                 }
               }
@@ -289,6 +298,14 @@
                         "type": "string"
                       },
                       "description": "What the service changed or ignored on the way in, for example a project name stored as 'unlabelled'. Always present, empty when nothing was changed."
+                    },
+                    "project_stage": {
+                      "type": "string",
+                      "enum": [
+                        "observe",
+                        "enforce"
+                      ],
+                      "description": "The calling project's stage on this stack: its own when configured, otherwise the stack's DEFAULT_HOOK_STAGE (default observe). The stage decides only calls with origin hook or ci that are not dry runs: observe judges them exactly as a dry run is judged, recorded and never refused; enforce runs the gates, except that a refusal under one of the project's observe_rules is recorded as an observation. Page and scenario calls always enforce. Reported on every verdict, whether or not it applied."
                     }
                   }
                 }
@@ -1574,6 +1591,984 @@
           }
         }
       }
+    },
+    "/api/overview": {
+      "get": {
+        "summary": "Tiles, a daily series and totals by agent, origin, rule and project, from the rollups",
+        "description": "Read from one rollup item per project and day, added to as every decision is recorded, so the numbers are exact however busy the ledger is. approved, observed and refused are disjoint: observed is a call that ran and that a rule would have refused, and a day's calls are the sum of the three. needs_review is the observed calls nobody has labelled; false_alarms the calls labelled false alarm.",
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "description": "The window, 1 to 30 days ending today.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 30,
+              "default": 7
+            }
+          },
+          {
+            "name": "project",
+            "in": "query",
+            "required": false,
+            "description": "Only this project.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "window_days, generated_at, source (always rollups), totals, series, by_agent, by_origin, by_rule, by_project, stages",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "window_days": {
+                      "type": "integer"
+                    },
+                    "generated_at": {
+                      "type": "string"
+                    },
+                    "source": {
+                      "type": "string",
+                      "enum": [
+                        "rollups"
+                      ]
+                    },
+                    "totals": {
+                      "type": "object",
+                      "properties": {
+                        "calls": {
+                          "type": "integer"
+                        },
+                        "approved": {
+                          "type": "integer"
+                        },
+                        "refused": {
+                          "type": "integer"
+                        },
+                        "would_refuse": {
+                          "type": "integer"
+                        },
+                        "needs_review": {
+                          "type": "integer"
+                        },
+                        "false_alarms": {
+                          "type": "integer"
+                        },
+                        "projects": {
+                          "type": "integer"
+                        },
+                        "agents": {
+                          "type": "integer"
+                        }
+                      }
+                    },
+                    "series": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "day": {
+                            "type": "string"
+                          },
+                          "approved": {
+                            "type": "integer"
+                          },
+                          "observed": {
+                            "type": "integer"
+                          },
+                          "refused": {
+                            "type": "integer"
+                          }
+                        }
+                      }
+                    },
+                    "by_agent": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "agent": {
+                            "type": "string"
+                          },
+                          "calls": {
+                            "type": "integer"
+                          }
+                        }
+                      }
+                    },
+                    "by_origin": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "origin": {
+                            "type": "string"
+                          },
+                          "calls": {
+                            "type": "integer"
+                          }
+                        }
+                      }
+                    },
+                    "by_rule": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "rule_key": {
+                            "type": "string"
+                          },
+                          "refused": {
+                            "type": "integer"
+                          },
+                          "would_refuse": {
+                            "type": "integer"
+                          }
+                        }
+                      }
+                    },
+                    "by_project": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "project": {
+                            "type": "string"
+                          },
+                          "stage": {
+                            "type": "string"
+                          },
+                          "configured": {
+                            "type": "boolean"
+                          },
+                          "calls": {
+                            "type": "integer"
+                          },
+                          "refused": {
+                            "type": "integer"
+                          },
+                          "would_refuse": {
+                            "type": "integer"
+                          },
+                          "needs_review": {
+                            "type": "integer"
+                          },
+                          "last_seen": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    "stages": {
+                      "type": "object",
+                      "properties": {
+                        "observe": {
+                          "type": "integer"
+                        },
+                        "enforce": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/decisions": {
+      "get": {
+        "summary": "The ledger's rows, newest first, filtered and a page at a time",
+        "description": "Reads the ledger day by day from today backwards. Each request reads a bounded number of ledger pages, so a filter that matches little may return fewer than limit rows with a next_cursor: follow it until it is null. The cursor is opaque and resumes exactly after the last row returned.",
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "description": "The window, 1 to 30 days ending today.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 30,
+              "default": 7
+            }
+          },
+          {
+            "name": "project",
+            "in": "query",
+            "required": false,
+            "description": "Only this project.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "rule",
+            "in": "query",
+            "required": false,
+            "description": "Only rows with this rule_key.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "description": "refused, observed (ran, and a rule would have refused it), approved (nothing flagged it), or all.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all",
+                "refused",
+                "observed",
+                "approved"
+              ],
+              "default": "all"
+            }
+          },
+          {
+            "name": "review",
+            "in": "query",
+            "required": false,
+            "description": "Only rows with this review, or with none.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "any",
+                "unreviewed",
+                "correct",
+                "false_alarm"
+              ],
+              "default": "any"
+            }
+          },
+          {
+            "name": "agent",
+            "in": "query",
+            "required": false,
+            "description": "Only this agent.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "session",
+            "in": "query",
+            "required": false,
+            "description": "Only this session.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "At most this many rows.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "The next_cursor of the previous page.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "items and next_cursor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/DecisionRow"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A kind, review or cursor this service does not know."
+          }
+        }
+      }
+    },
+    "/api/decision": {
+      "get": {
+        "summary": "One decision, with its session and the layering rule it was keyed by",
+        "parameters": [
+          {
+            "name": "timestamp",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "verdict_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "decision, session (or null) and rule (the layering rule's definition, or null for a gate)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "decision": {
+                      "$ref": "#/components/schemas/DecisionRow"
+                    },
+                    "session": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "session_id": {
+                          "type": "string"
+                        },
+                        "calls": {
+                          "type": "integer"
+                        },
+                        "cost_usd": {
+                          "type": "number"
+                        },
+                        "is_tripped": {
+                          "type": "boolean"
+                        }
+                      }
+                    },
+                    "rule": {
+                      "oneOf": [
+                        {
+                          "$ref": "#/components/schemas/LayeringRule"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "timestamp or verdict_id is missing."
+          },
+          "404": {
+            "description": "No such decision is recorded."
+          }
+        }
+      }
+    },
+    "/api/projects": {
+      "get": {
+        "summary": "Every configured project, and every project seen in the last 7 days",
+        "description": "Counts are over the last 7 days, from the rollups. A sandbox is listed until it expires.",
+        "responses": {
+          "200": {
+            "description": "projects",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "projects": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "project": {
+                            "type": "string"
+                          },
+                          "stage": {
+                            "type": "string",
+                            "enum": [
+                              "observe",
+                              "enforce"
+                            ]
+                          },
+                          "configured": {
+                            "type": "boolean",
+                            "description": "False for a project seen in the rollups with no configuration; its stage is then the stack default."
+                          },
+                          "observe_rules": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "created_at": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "promoted_at": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "last_seen": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "calls": {
+                            "type": "integer"
+                          },
+                          "refused": {
+                            "type": "integer"
+                          },
+                          "would_refuse": {
+                            "type": "integer"
+                          },
+                          "needs_review": {
+                            "type": "integer"
+                          },
+                          "agents": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "hook_modes": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{name}": {
+      "get": {
+        "summary": "One project: its configuration and whether each of its rules is ready to enforce",
+        "description": "A project's rules are its layering rules in force plus the gates LOOP, PROTECTED_PATH, UNREADABLE_WRITE and BUDGET. Read from the rollups over the window.",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "description": "The project, an Acme-style alias such as Acme-Billing.",
+            "schema": {
+              "type": "string",
+              "example": "Acme-Billing"
+            }
+          },
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "description": "The window, 1 to 30 days ending today.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 30,
+              "default": 14
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "project, config (null when never configured) and readiness",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "project": {
+                      "type": "string"
+                    },
+                    "config": {
+                      "oneOf": [
+                        {
+                          "$ref": "#/components/schemas/ProjectConfig"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "readiness": {
+                      "type": "object",
+                      "properties": {
+                        "summary": {
+                          "type": "object",
+                          "properties": {
+                            "stage": {
+                              "type": "string"
+                            },
+                            "days_observed": {
+                              "type": "integer"
+                            },
+                            "calls_observed": {
+                              "type": "integer"
+                            },
+                            "would_have_refused": {
+                              "type": "integer"
+                            },
+                            "reviewed": {
+                              "type": "integer"
+                            },
+                            "false_alarms": {
+                              "type": "integer"
+                            },
+                            "rules_ready": {
+                              "type": "integer"
+                            },
+                            "rules_quiet": {
+                              "type": "integer"
+                            },
+                            "rules_noisy": {
+                              "type": "integer"
+                            },
+                            "rules_needing_review": {
+                              "type": "integer"
+                            },
+                            "false_alarm_rate": {
+                              "type": "number"
+                            }
+                          }
+                        },
+                        "rules": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "rule_key": {
+                                "type": "string"
+                              },
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "layering",
+                                  "gate"
+                                ]
+                              },
+                              "mode_now": {
+                                "type": "string",
+                                "enum": [
+                                  "observe",
+                                  "enforce"
+                                ]
+                              },
+                              "would_refuse": {
+                                "type": "integer",
+                                "description": "Calls it flagged that ran, in the window."
+                              },
+                              "correct": {
+                                "type": "integer"
+                              },
+                              "false_alarms": {
+                                "type": "integer"
+                              },
+                              "unreviewed": {
+                                "type": "integer"
+                              },
+                              "last_seen": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "state": {
+                                "type": "string",
+                                "enum": [
+                                  "quiet",
+                                  "needs_review",
+                                  "ready",
+                                  "noisy"
+                                ],
+                                "description": "noisy if any false alarm, else needs_review if any unreviewed, else ready if it flagged anything, else quiet."
+                              },
+                              "recommendation": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The name is neither an alias this stack admits nor 'unlabelled'."
+          }
+        }
+      },
+      "post": {
+        "summary": "Create or change a project's configuration",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "description": "The project, an Acme-style alias such as Acme-Billing.",
+            "schema": {
+              "type": "string",
+              "example": "Acme-Billing"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "stage": {
+                    "type": "string",
+                    "enum": [
+                      "observe",
+                      "enforce"
+                    ]
+                  },
+                  "observe_rules": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The project and its stored configuration.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "project": {
+                      "type": "string"
+                    },
+                    "config": {
+                      "$ref": "#/components/schemas/ProjectConfig"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The name does not match AllowedProjectPattern, a stage is neither observe nor enforce, or a rule key is not one of the project's rules (its layering rules in force plus LOOP, PROTECTED_PATH, UNREADABLE_WRITE and BUDGET)."
+          }
+        }
+      }
+    },
+    "/api/projects/{name}/promote": {
+      "post": {
+        "summary": "Enforce the rules picked; every other rule of the project keeps observing",
+        "description": "Sets stage enforce and observe_rules to the project's rules minus enforce, and adds a history entry.",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "description": "The project, an Acme-style alias such as Acme-Billing.",
+            "schema": {
+              "type": "string",
+              "example": "Acme-Billing"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "enforce"
+                ],
+                "properties": {
+                  "enforce": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The project and its stored configuration.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "project": {
+                      "type": "string"
+                    },
+                    "config": {
+                      "$ref": "#/components/schemas/ProjectConfig"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The name does not match AllowedProjectPattern, a stage is neither observe nor enforce, or a rule key is not one of the project's rules (its layering rules in force plus LOOP, PROTECTED_PATH, UNREADABLE_WRITE and BUDGET)."
+          }
+        }
+      }
+    },
+    "/api/projects/{name}/demote": {
+      "post": {
+        "summary": "Back to observe, in one step",
+        "description": "Sets stage observe and adds a history entry. observe_rules is kept, so a promotion undone is one step to redo.",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "description": "The project, an Acme-style alias such as Acme-Billing.",
+            "schema": {
+              "type": "string",
+              "example": "Acme-Billing"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The project and its stored configuration.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "project": {
+                      "type": "string"
+                    },
+                    "config": {
+                      "$ref": "#/components/schemas/ProjectConfig"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The name does not match AllowedProjectPattern, a stage is neither observe nor enforce, or a rule key is not one of the project's rules (its layering rules in force plus LOOP, PROTECTED_PATH, UNREADABLE_WRITE and BUDGET)."
+          }
+        }
+      }
+    },
+    "/api/projects/{name}/reviews": {
+      "post": {
+        "summary": "Label what a rule flagged: correct, false alarm, or clear",
+        "description": "The label is stored on the ledger row itself, conditionally on the row belonging to this project, with reviewed_at, review_note and reviewed_by, which is 8 hex of a hash of the credential presented (X-API-Key or Authorization: Bearer), never the credential, or anonymous. A row of another project, a row nothing flagged, or an item that cannot be read is skipped with its reason.",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "description": "The project, an Acme-style alias such as Acme-Billing.",
+            "schema": {
+              "type": "string",
+              "example": "Acme-Billing"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "items"
+                ],
+                "properties": {
+                  "items": {
+                    "type": "array",
+                    "maxItems": 100,
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "timestamp",
+                        "verdict_id",
+                        "label"
+                      ],
+                      "properties": {
+                        "timestamp": {
+                          "type": "string"
+                        },
+                        "verdict_id": {
+                          "type": "string"
+                        },
+                        "label": {
+                          "type": "string",
+                          "enum": [
+                            "correct",
+                            "false_alarm",
+                            "clear"
+                          ]
+                        },
+                        "note": {
+                          "type": "string",
+                          "maxLength": 200
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "updated and skipped",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "updated": {
+                      "type": "integer"
+                    },
+                    "skipped": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "verdict_id": {
+                            "type": "string"
+                          },
+                          "reason": {
+                            "type": "string",
+                            "description": "other-project, not-found, nothing-flagged, or why the item could not be read."
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "items is not a list of 1 to 100 reviews, or the name does not match AllowedProjectPattern."
+          }
+        }
+      }
+    },
+    "/api/sandbox": {
+      "post": {
+        "summary": "A throwaway project, seeded, for trying the review and promotion walk",
+        "description": "Creates Acme-Sandbox-<8 hex> in observe with sandbox true and a 24 hour expiry, and sends a dozen synthetic hook calls from claude-code, codex and antigravity through the real evaluator. Several would be refused under more than one rule, and one of them is a false alarm: a test module under tests/domain/ that the domain rule's path pattern also covers.",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "project, calls_seeded and the dashboard url",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "project": {
+                      "type": "string"
+                    },
+                    "calls_seeded": {
+                      "type": "integer"
+                    },
+                    "url": {
+                      "type": "string",
+                      "example": "dashboard.html#/projects/Acme-Sandbox-0a1b2c3d"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "This stack's AllowedProjectPattern does not admit sandbox names."
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1636,6 +2631,200 @@
               "type": "string"
             },
             "description": "Exceptions, a list of at most 40. When an allow and a forbid both match, the more specific pattern decides."
+          }
+        }
+      },
+      "DecisionRow": {
+        "type": "object",
+        "description": "One ledger row, as a public page may show it: the project is an Acme-style alias or 'unlabelled' and the developer an 8-hex hash. Never the call's arguments or file content.",
+        "properties": {
+          "verdict_id": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "developer_id": {
+            "type": "string",
+            "description": "An 8-hex hash, never the value sent."
+          },
+          "project_name": {
+            "type": "string"
+          },
+          "tool_name": {
+            "type": "string"
+          },
+          "action_type": {
+            "type": "string"
+          },
+          "agent": {
+            "type": "string"
+          },
+          "origin": {
+            "type": "string"
+          },
+          "dry_run": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string"
+          },
+          "rule": {
+            "type": "string",
+            "description": "The invariant that failed, or NONE. Kept as it always was."
+          },
+          "rule_key": {
+            "type": "string",
+            "description": "What decided the call, and what readiness, reviews and observe_rules group by: the id of the layering rule that decided, or LOOP, PROTECTED_PATH (which also covers destructive commands), UNREADABLE_WRITE, CREDENTIAL, BUDGET, HALTED_SESSION, or NONE when nothing flagged the call. Set on observations as well as refusals. Rows written before it existed are given one on the way out."
+          },
+          "stage": {
+            "type": "string",
+            "enum": [
+              "observe",
+              "enforce"
+            ],
+            "description": "The stage the call was judged under. A dry run is observe, a page call is enforce."
+          },
+          "hook_mode": {
+            "type": "string",
+            "description": "observe, managed, enforce or unknown, as the hook sent it."
+          },
+          "target": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "observed_rules": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "observed_reason": {
+            "type": "string"
+          },
+          "observed_target": {
+            "type": "string"
+          },
+          "cost_usd": {
+            "type": "number"
+          },
+          "review": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "correct",
+              "false_alarm",
+              null
+            ]
+          },
+          "reviewed_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "review_note": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "category": {
+            "type": "string"
+          },
+          "category_label": {
+            "type": "string"
+          }
+        }
+      },
+      "ProjectConfig": {
+        "type": "object",
+        "description": "A project's stage configuration, stored at PK=CONFIG#project#<name>.",
+        "properties": {
+          "stage": {
+            "type": "string",
+            "enum": [
+              "observe",
+              "enforce"
+            ]
+          },
+          "observe_rules": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Rule keys whose refusals are recorded as observations while the project enforces."
+          },
+          "created_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "updated_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "promoted_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "demoted_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sandbox": {
+            "type": "boolean",
+            "description": "True for a sandbox, which is gone 24 hours after it was made."
+          },
+          "history": {
+            "type": "array",
+            "description": "The last 20 promotions and demotions.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "at": {
+                  "type": "string"
+                },
+                "action": {
+                  "type": "string",
+                  "enum": [
+                    "promote",
+                    "demote"
+                  ]
+                },
+                "by": {
+                  "type": "string",
+                  "description": "8 hex of a hash of the credential used, or anonymous."
+                },
+                "enforce": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "observe": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
           }
         }
       }
