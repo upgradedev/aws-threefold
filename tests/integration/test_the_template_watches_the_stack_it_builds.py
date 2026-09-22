@@ -11,11 +11,15 @@ traffic the public stack has to carry.
 
 The template is read as text, as the other template tests do, because PyYAML
 is not a dependency of this repository and CloudFormation's short tags would
-need a custom loader anyway. Names are synthetic, as the clean-room rule
-requires.
+need a custom loader anyway. The operations resources are also read as trees
+by a small reader below and compared whole, because a test that looks for one
+line cannot see a statistic, an operator or a policy action changed next to
+it. Names are synthetic, as the clean-room rule requires.
 """
 from __future__ import annotations
 
+import copy
+import functools
 import inspect
 import json
 import re
@@ -85,6 +89,136 @@ def _default(parameter: str) -> str:
     return match.group(1)
 
 
+# ------------------------------------------------------------------ reading a resource as a tree
+#
+# A regular expression can say a line is present, but not that nothing else in
+# the resource changed, so a mutated statistic or a widened policy statement
+# next to the line it looks for passes unseen. The operations resources are
+# therefore also read as trees and compared whole. This is just enough YAML for
+# this template: block mappings and sequences, plain and single-quoted scalars,
+# folded and literal blocks, and CloudFormation's short tags kept as the text
+# they are written as ("!Ref ThreefoldAlarmTopic"). Every scalar stays a
+# string, as CloudFormation hands parameters and properties over. Anything
+# outside that subset fails loudly rather than being misread.
+
+
+def _indent(line: str) -> int:
+    return len(line) - len(line.lstrip(" "))
+
+
+_KEY = re.compile(r"^([A-Za-z_][\w:.-]*):(?:\s+(.*))?$")
+_BLOCK_SCALAR = re.compile(r"^(?:(![A-Za-z]+)\s+)?([|>]-?)$")
+
+
+def _scalar(text: str) -> str:
+    if text.startswith("'"):
+        end = 1
+        while True:
+            end = text.index("'", end)
+            if text[end:end + 2] == "''":
+                end += 2
+                continue
+            break
+        rest = text[end + 1:].strip()
+        assert not rest or rest.startswith("#"), f"Text after a quoted scalar: {text!r}"
+        return text[1:end].replace("''", "'")
+    assert not text.startswith('"'), f"Double-quoted scalars are outside this reader: {text!r}"
+    return re.split(r"\s+#", text, maxsplit=1)[0].rstrip()
+
+
+class _TreeReader:
+    def __init__(self, text: str) -> None:
+        self.lines = text.splitlines()
+
+    def significant(self, index: int) -> int:
+        while index < len(self.lines) and (
+            not self.lines[index].strip() or self.lines[index].lstrip().startswith("#")
+        ):
+            index += 1
+        return index
+
+    def node(self, index: int, indent: int):
+        if self.lines[index].lstrip().startswith("- "):
+            return self.sequence(index, indent)
+        return self.mapping(index, indent)
+
+    def mapping(self, index: int, indent: int):
+        result: dict = {}
+        while True:
+            index = self.significant(index)
+            if index >= len(self.lines) or _indent(self.lines[index]) < indent:
+                return result, index
+            line = self.lines[index]
+            assert _indent(line) == indent, f"Unexpected indentation: {line!r}"
+            if line.lstrip().startswith("- "):
+                return result, index
+            match = _KEY.match(line.strip())
+            assert match, f"Not a key: {line!r}"
+            key = match.group(1)
+            assert key not in result, f"{key} is declared twice, and CloudFormation keeps only one"
+            result[key], index = self.value((match.group(2) or "").strip(), index, indent)
+
+    def sequence(self, index: int, indent: int):
+        items: list = []
+        while True:
+            index = self.significant(index)
+            line = self.lines[index] if index < len(self.lines) else ""
+            if index >= len(self.lines) or _indent(line) != indent or not line.lstrip().startswith("- "):
+                return items, index
+            content = line.strip()[2:].strip()
+            if _KEY.match(content):
+                # A mapping that starts on the dash line: read that line as the
+                # first key of a mapping indented to where the key begins.
+                self.lines[index] = " " * (indent + 2) + content
+                item, index = self.mapping(index, indent + 2)
+            else:
+                item, index = self.value(content, index, indent)
+            items.append(item)
+
+    def value(self, rest: str, index: int, indent: int):
+        block = _BLOCK_SCALAR.match(rest)
+        if block:
+            tag, style = block.group(1), block.group(2)
+            collected, following = [], index + 1
+            while following < len(self.lines) and (
+                not self.lines[following].strip() or _indent(self.lines[following]) > indent
+            ):
+                collected.append(self.lines[following])
+                following += 1
+            while collected and not collected[-1].strip():
+                collected.pop()
+            text = textwrap.dedent("\n".join(collected))
+            if style.startswith(">"):
+                text = " ".join(text.split())
+            return (f"{tag} {text}" if tag else text), following
+        if rest:
+            return _scalar(rest), index + 1
+        following = self.significant(index + 1)
+        if following < len(self.lines) and (
+            _indent(self.lines[following]) > indent
+            or (_indent(self.lines[following]) == indent and self.lines[following].lstrip().startswith("- "))
+        ):
+            return self.node(following, _indent(self.lines[following]))
+        return None, index + 1
+
+
+def _tree(text: str):
+    reader = _TreeReader(text)
+    start = reader.significant(0)
+    value, end = reader.node(start, _indent(reader.lines[start]))
+    assert reader.significant(end) == len(reader.lines), f"Unread from: {reader.lines[end]!r}"
+    return value
+
+
+@functools.lru_cache(maxsize=None)
+def _resource_tree(logical_id: str) -> dict:
+    return _tree(RESOURCES[logical_id])
+
+
+def _properties(logical_id: str) -> dict:
+    return copy.deepcopy(_resource_tree(logical_id)["Properties"])
+
+
 # ------------------------------------------------------------------ the table
 
 
@@ -116,6 +250,12 @@ def test_the_stage_throttles_every_route_by_parameter() -> None:
     # because an HTTP API has no execution logging.
     assert "LoggingLevel" not in body and "DataTraceEnabled" not in body
     assert "DetailedMetricsEnabled: true" not in body, "Per-route metrics are billed as custom metrics"
+    stage = _properties("ThreefoldHttpApi")
+    assert stage["DefaultRouteSettings"] == {
+        "ThrottlingBurstLimit": "!Ref ApiThrottleBurstLimit",
+        "ThrottlingRateLimit": "!Ref ApiThrottleRateLimit",
+    }
+    assert set(stage["AccessLogSettings"]) == {"DestinationArn", "Format"}
 
 
 def test_the_throttle_defaults_leave_room_for_a_judge_and_the_scorer() -> None:
@@ -227,9 +367,193 @@ def _alarm_on(metric: str, namespace: str) -> tuple[str, str]:
     raise AssertionError(f"No alarm reads {namespace} {metric}")
 
 
+_FUNCTION = [{"Name": "FunctionName", "Value": "!Ref ThreefoldFunction"}]
+_STAGE = [{"Name": "ApiId", "Value": "!Ref ThreefoldHttpApi"}, {"Name": "Stage", "Value": "prod"}]
+_OWN_NAMESPACE = f"!Sub '{STACK_NAMESPACE}'"
+_NOTIFY = {
+    "TreatMissingData": "notBreaching",
+    "AlarmActions": ["!Ref ThreefoldAlarmTopic"],
+    "OKActions": ["!Ref ThreefoldAlarmTopic"],
+}
+
+
+def _api_share(status: str, counted: str, floor: int) -> list[dict]:
+    """A share of the stage's requests, with a floor under which it reads 0."""
+
+    def stage_sum(metric_id: str, metric: str) -> dict:
+        return {
+            "Id": metric_id,
+            "ReturnData": "false",
+            "MetricStat": {
+                "Metric": {"Namespace": "AWS/ApiGateway", "MetricName": metric, "Dimensions": _STAGE},
+                "Period": "300",
+                "Stat": "Sum",
+            },
+        }
+
+    return [
+        stage_sum(counted, status),
+        stage_sum("requests", "Count"),
+        {
+            "Id": "rate",
+            "Label": f"{status} responses, percent of requests",
+            "Expression": f"IF(requests >= {floor}, 100 * FILL({counted}, 0) / requests, 0)",
+            "ReturnData": "true",
+        },
+    ]
+
+
+def _table_query(metric_id: str, metric: str) -> list[dict]:
+    return [{
+        "Id": metric_id,
+        "Expression": (
+            f"!Sub SELECT SUM({metric}) FROM SCHEMA(\"AWS/DynamoDB\", Operation, TableName) "
+            "WHERE TableName = '${ThreefoldTable}'"
+        ),
+        "Period": "300",
+        "ReturnData": "true",
+    }]
+
+
+# Every alarm, whole, except its description. Each value here is the one the
+# alarm's reasoning in the template depends on, so a statistic, a period, an
+# operator or a dimension that drifts is a failure rather than an alarm that
+# quietly can never fire, or never stops firing.
+EXPECTED_ALARMS: dict[str, dict] = {
+    "ThreefoldFunctionErrorsAlarm": {
+        "AlarmName": "!Sub '${AWS::StackName}-function-errors'",
+        "Namespace": "AWS/Lambda", "MetricName": "Errors", "Dimensions": _FUNCTION,
+        "Statistic": "Sum", "Period": "300", "EvaluationPeriods": "1",
+        "Threshold": "1", "ComparisonOperator": "GreaterThanOrEqualToThreshold", **_NOTIFY,
+    },
+    "ThreefoldFunctionThrottlesAlarm": {
+        "AlarmName": "!Sub '${AWS::StackName}-function-throttles'",
+        "Namespace": "AWS/Lambda", "MetricName": "Throttles", "Dimensions": _FUNCTION,
+        "Statistic": "Sum", "Period": "300", "EvaluationPeriods": "1",
+        "Threshold": "1", "ComparisonOperator": "GreaterThanOrEqualToThreshold", **_NOTIFY,
+    },
+    "ThreefoldFunctionDurationAlarm": {
+        "AlarmName": "!Sub '${AWS::StackName}-function-duration-p95'",
+        "Namespace": "AWS/Lambda", "MetricName": "Duration", "Dimensions": _FUNCTION,
+        "ExtendedStatistic": "p95", "Unit": "Milliseconds", "Period": "300",
+        "EvaluationPeriods": "3", "DatapointsToAlarm": "2",
+        "Threshold": "!Ref SlowCallAlarmMs", "ComparisonOperator": "GreaterThanThreshold", **_NOTIFY,
+    },
+    "ThreefoldApi5xxRateAlarm": {
+        "AlarmName": "!Sub '${AWS::StackName}-api-5xx-rate'",
+        "Metrics": _api_share("5xx", "failed", 10),
+        "EvaluationPeriods": "1",
+        "Threshold": "5", "ComparisonOperator": "GreaterThanOrEqualToThreshold", **_NOTIFY,
+    },
+    "ThreefoldApi4xxRateAlarm": {
+        "AlarmName": "!Sub '${AWS::StackName}-api-4xx-rate'",
+        "Metrics": _api_share("4xx", "refused", 20),
+        "EvaluationPeriods": "3", "DatapointsToAlarm": "3",
+        "Threshold": "25", "ComparisonOperator": "GreaterThanOrEqualToThreshold", **_NOTIFY,
+    },
+    "ThreefoldTableThrottlesAlarm": {
+        "AlarmName": "!Sub '${AWS::StackName}-table-throttled-requests'",
+        "Metrics": _table_query("throttled", "ThrottledRequests"),
+        "EvaluationPeriods": "1",
+        "Threshold": "1", "ComparisonOperator": "GreaterThanOrEqualToThreshold", **_NOTIFY,
+    },
+    "ThreefoldTableSystemErrorsAlarm": {
+        "AlarmName": "!Sub '${AWS::StackName}-table-system-errors'",
+        "Metrics": _table_query("failed", "SystemErrors"),
+        "EvaluationPeriods": "1",
+        "Threshold": "1", "ComparisonOperator": "GreaterThanOrEqualToThreshold", **_NOTIFY,
+    },
+    "ThreefoldHaltedSessionCallsAlarm": {
+        "AlarmName": "!Sub '${AWS::StackName}-halted-session-calls'",
+        "Namespace": _OWN_NAMESPACE, "MetricName": "CircuitBreakerTripped",
+        "Statistic": "Sum", "Period": "300", "EvaluationPeriods": "1",
+        "Threshold": "10", "ComparisonOperator": "GreaterThanOrEqualToThreshold", **_NOTIFY,
+    },
+    "ThreefoldEvaluationLatencyAlarm": {
+        "AlarmName": "!Sub '${AWS::StackName}-evaluation-latency'",
+        "Namespace": _OWN_NAMESPACE, "MetricName": "LatencyMs",
+        "Statistic": "Average", "Period": "300", "EvaluationPeriods": "3", "DatapointsToAlarm": "2",
+        "Threshold": "!Ref SlowCallAlarmMs", "ComparisonOperator": "GreaterThanThreshold", **_NOTIFY,
+    },
+    "ThreefoldCallVolumeAlarm": {
+        "AlarmName": "!Sub '${AWS::StackName}-call-volume'",
+        "Namespace": _OWN_NAMESPACE, "MetricName": "ToolCallsEvaluated",
+        "Statistic": "Sum", "Period": "300", "EvaluationPeriods": "3", "DatapointsToAlarm": "3",
+        "Threshold": "1500", "ComparisonOperator": "GreaterThanThreshold", **_NOTIFY,
+    },
+}
+
+
+def test_the_template_has_exactly_these_alarms() -> None:
+    """A deleted alarm is a failure nobody hears about; a new one needs its row above."""
+    assert set(_alarms()) == set(EXPECTED_ALARMS)
+
+
+@pytest.mark.parametrize("logical_id", sorted(EXPECTED_ALARMS))
+def test_each_alarm_is_exactly_the_alarm_it_is_meant_to_be(logical_id: str) -> None:
+    properties = _properties(logical_id)
+    description = properties.pop("AlarmDescription", "")
+    assert len(description) > 80, f"{logical_id} does not say what it means or what to do about it"
+    assert properties == EXPECTED_ALARMS[logical_id]
+
+
+def test_every_alarm_fires_when_its_measure_rises() -> None:
+    """Each alarm measures failures, throttles, slowness or volume.
+
+    With a less-than operator an alarm would sit in alarm on a quiet stack and
+    never fire on a flooded one.
+    """
+    for logical_id in _alarms():
+        operator = _properties(logical_id)["ComparisonOperator"]
+        assert operator in {"GreaterThanThreshold", "GreaterThanOrEqualToThreshold"}, logical_id
+
+
+def test_every_alarm_says_how_it_reads_its_metric() -> None:
+    """Nothing is left to a default: CloudFormation rejects some omissions only at deploy time."""
+    for logical_id in _alarms():
+        properties = _properties(logical_id)
+        assert int(properties["EvaluationPeriods"]) >= int(properties.get("DatapointsToAlarm", "1")), logical_id
+        if "Metrics" in properties:
+            assert not {"Namespace", "MetricName", "Statistic", "ExtendedStatistic", "Period"} & set(properties), (
+                f"{logical_id} mixes a single metric with metric math"
+            )
+            returned = [m for m in properties["Metrics"] if m["ReturnData"] == "true"]
+            assert len(returned) == 1, f"{logical_id} must return exactly one series to judge"
+            for metric in properties["Metrics"]:
+                if "MetricStat" in metric:
+                    assert metric["MetricStat"]["Stat"] and metric["MetricStat"]["Period"] == "300", logical_id
+                else:
+                    assert metric["Expression"] and metric.get("Period", "300") == "300", logical_id
+                    if metric["Expression"].startswith("!Sub SELECT"):
+                        assert metric.get("Period") == "300", f"{logical_id}: a Metrics Insights query needs its own period"
+        else:
+            assert ("Statistic" in properties) != ("ExtendedStatistic" in properties), logical_id
+            assert properties["Period"] == "300", logical_id
+
+
+def test_a_count_published_as_ones_is_alarmed_on_its_sum() -> None:
+    """The average of a stream of 1s is 1.
+
+    A filter that publishes 1 for each matching record makes a count only when
+    summed. Averaged, the halted-session alarm's threshold of 10 could never be
+    reached, and the call-volume alarm's 1,500 neither.
+    """
+    filters = _filters()
+    checked = 0
+    for logical_id in _alarms():
+        properties = _properties(logical_id)
+        if properties.get("Namespace") != _OWN_NAMESPACE:
+            continue
+        published = filters[properties["MetricName"]]
+        if published["value"] == "1":
+            assert properties.get("Statistic") == "Sum", f"{logical_id} averages a count"
+            checked += 1
+    assert checked >= 2
+
+
 def test_every_alarm_is_named_per_stack_explains_itself_and_notifies_the_topic() -> None:
     alarms = _alarms()
-    assert len(alarms) >= 9
+    assert set(alarms) == set(EXPECTED_ALARMS)
     for name, block in alarms.items():
         assert re.search(r"^      AlarmName: !Sub '\$\{AWS::StackName\}-[a-z0-9-]+'$", block, re.M), name
         assert re.search(r"^      AlarmDescription: ", block, re.M), f"{name} does not say what to do about it"
@@ -535,6 +859,46 @@ def test_the_topic_is_named_per_stack_and_only_this_accounts_services_publish() 
     assert "Principal: '*'" not in policy and "AWS: '*'" not in policy
 
 
+def test_the_topic_policy_grants_publish_on_this_topic_and_nothing_else() -> None:
+    """Each statement, whole: a widened action or resource is not a detail."""
+
+    def statement(sid: str, service: str) -> dict:
+        return {
+            "Sid": sid,
+            "Effect": "Allow",
+            "Principal": {"Service": service},
+            "Action": "sns:Publish",
+            "Resource": "!Ref ThreefoldAlarmTopic",
+            "Condition": {"StringEquals": {"aws:SourceAccount": "!Ref AWS::AccountId"}},
+        }
+
+    assert _properties("ThreefoldAlarmTopicPolicy") == {
+        "Topics": ["!Ref ThreefoldAlarmTopic"],
+        "PolicyDocument": {
+            "Version": "2012-10-17",
+            "Statement": [
+                statement("AlarmsOfThisAccount", "cloudwatch.amazonaws.com"),
+                statement("BudgetsOfThisAccount", "budgets.amazonaws.com"),
+            ],
+        },
+    }
+
+
+def test_the_topic_and_the_subscription_are_exactly_what_they_are_meant_to_be() -> None:
+    # No KmsMasterKeyId: CloudWatch cannot publish to a topic under the AWS
+    # managed key, and a key of its own is not worth its monthly charge here.
+    assert _properties("ThreefoldAlarmTopic") == {"TopicName": "!Sub '${AWS::StackName}-alarms'", "DisplayName": "Threefold"}
+    assert _resource_tree("ThreefoldAlarmEmailSubscription") == {
+        "Type": "AWS::SNS::Subscription",
+        "Condition": "HasAlarmEmail",
+        "Properties": {"TopicArn": "!Ref ThreefoldAlarmTopic", "Protocol": "email", "Endpoint": "!Ref AlarmEmail"},
+    }
+    assert _resource_tree("ThreefoldApiAccessLogGroup") == {
+        "Type": "AWS::Logs::LogGroup",
+        "Properties": {"LogGroupName": "!Sub '/aws/vendedlogs/apigateway/${AWS::StackName}/access'", "RetentionInDays": "14"},
+    }
+
+
 def test_email_is_subscribed_only_when_an_address_is_given() -> None:
     block = PARAMETERS["AlarmEmail"]
     assert _default("AlarmEmail") == ""
@@ -611,13 +975,24 @@ def _dashboard_body() -> str:
     return textwrap.dedent(match.group(1))
 
 
+# Each parameter in the body is filled with a number nothing else in it uses,
+# so a widget that follows the parameter is told apart from one that writes
+# today's default out as a literal and goes stale when the parameter changes.
+_PARAMETER_STANDINS = {"SlowCallAlarmMs": 98761, "ReservedConcurrency": 873}
+
+
 def _dashboard() -> dict:
-    """The body as CloudFormation would hand it over, with every reference filled."""
+    """The body as CloudFormation would hand it over, with every reference filled.
+
+    Each resource reference becomes "<LogicalId>", so a row can be checked
+    against the resource it is meant to read rather than against any value.
+    """
     body = _dashboard_body()
-    body = body.replace("${SlowCallAlarmMs}", _default("SlowCallAlarmMs"))
-    body = body.replace("${ReservedConcurrency}", _default("ReservedConcurrency"))
-    body = re.sub(r"\$\{AWS::StackName\}", "acme-stack", body)
-    body = re.sub(r"\$\{[^}]+\}", "resolved", body)
+    for name, standin in _PARAMETER_STANDINS.items():
+        body = body.replace("${%s}" % name, str(standin))
+    body = body.replace("${AWS::StackName}", "acme-stack").replace("${AWS::Region}", "<region>")
+    body = re.sub(r"\$\{(\w+)(\.\w+)?\}", lambda m: f"<{m.group(1)}{m.group(2) or ''}>", body)
+    assert "${" not in body, "A reference the dashboard test does not know how to fill"
     return json.loads(body)
 
 
@@ -640,7 +1015,81 @@ def test_the_dashboard_body_is_json_and_fits_the_grid() -> None:
     for widget in widgets:
         assert widget["x"] + widget["width"] <= 24, widget
         if widget["type"] == "metric":
-            assert widget["properties"]["region"] == "resolved", "Every metric widget names the stack's region"
+            assert widget["properties"]["region"] == "<region>", "Every metric widget names the stack's region"
+
+
+def _stage_name() -> str:
+    match = re.search(r"^      StageName: (\S+)$", RESOURCES["ThreefoldHttpApi"], re.M)
+    assert match, "The API declares no stage"
+    return match.group(1)
+
+
+def _row_dimensions(row: list) -> dict[str, str]:
+    names_and_values = row[2:-1] if isinstance(row[-1], dict) else row[2:]
+    assert len(names_and_values) % 2 == 0, f"{row}: dimensions come in name and value pairs"
+    return dict(zip(names_and_values[::2], names_and_values[1::2]))
+
+
+def test_every_dashboard_row_reads_this_stacks_own_resources() -> None:
+    """A row on another stage, function or table draws a flat line and says nothing."""
+    expected = {
+        "AWS/ApiGateway": {"ApiId": "<ThreefoldHttpApi>", "Stage": _stage_name()},
+        "AWS/Lambda": {"FunctionName": "<ThreefoldFunction>"},
+        "AWS/DynamoDB": {"TableName": "<ThreefoldTable>"},
+        "Threefold/acme-stack": {},
+    }
+    rows = _dashboard_metrics()
+    seen = set()
+    for row in rows:
+        if isinstance(row[0], dict):
+            query = row[0]["expression"]
+            if "AWS/DynamoDB" in query:
+                assert query.endswith("WHERE TableName = '<ThreefoldTable>'") or (
+                    "WHERE TableName = '<ThreefoldTable>' GROUP BY Operation" in query
+                ), f"{query} does not read this stack's table"
+            continue
+        namespace = row[0]
+        if namespace in expected:
+            assert _row_dimensions(row) == expected[namespace], f"{row} reads something other than this stack's own"
+            seen.add(namespace)
+    assert seen == set(expected), "Each of the stack's own sources has at least one row"
+
+
+def test_the_api_alarms_and_rows_name_the_stage_the_api_declares() -> None:
+    assert _stage_name() == "prod"
+    assert {"Name": "Stage", "Value": _stage_name()} in _STAGE
+
+
+def _widgets_reading(metric: str) -> list[dict]:
+    return [
+        widget for widget in _dashboard()["widgets"]
+        if any(isinstance(row[0], str) and row[1] == metric for row in widget["properties"].get("metrics", []))
+    ]
+
+
+def test_the_dashboard_lines_follow_the_alarms_and_the_parameters_they_draw() -> None:
+    """A threshold line drawn in the wrong place misleads more than none at all."""
+    halted_threshold = int(_properties("ThreefoldHaltedSessionCallsAlarm")["Threshold"])
+    expected_by_metric = {
+        "CircuitBreakerTripped": halted_threshold,
+        "LatencyMs": _PARAMETER_STANDINS["SlowCallAlarmMs"],
+        "Duration": _PARAMETER_STANDINS["SlowCallAlarmMs"],
+        "ConcurrentExecutions": _PARAMETER_STANDINS["ReservedConcurrency"],
+    }
+    assert _properties("ThreefoldEvaluationLatencyAlarm")["Threshold"] == "!Ref SlowCallAlarmMs"
+    assert _properties("ThreefoldFunctionDurationAlarm")["Threshold"] == "!Ref SlowCallAlarmMs"
+    annotated = 0
+    for widget in _dashboard()["widgets"]:
+        lines = widget["properties"].get("annotations", {}).get("horizontal", [])
+        if not lines:
+            continue
+        metrics = {row[1] for row in widget["properties"]["metrics"] if isinstance(row[0], str)}
+        drawn = metrics & set(expected_by_metric)
+        assert len(drawn) == 1, f"{widget['properties']['title']}: a line nobody checks"
+        assert [line["value"] for line in lines] == [expected_by_metric[drawn.pop()]], widget["properties"]["title"]
+        annotated += 1
+    assert annotated == 4
+    assert all(_widgets_reading(metric) for metric in expected_by_metric)
 
 
 def test_the_dashboard_shows_the_api_the_function_the_table_and_governance() -> None:
@@ -705,3 +1154,33 @@ def test_the_budget_is_off_unless_asked_for_and_reports_to_the_topic() -> None:
     assert re.search(r"^    DependsOn: ThreefoldAlarmTopicPolicy$", budget, re.M), (
         "Budgets checks that it may publish to the topic when the notification is created"
     )
+
+
+def test_the_budget_warns_at_four_fifths_spent_and_at_a_forecast_overrun() -> None:
+    """The whole budget, so a threshold typed as 8000 or a type of FORECASTED twice is caught."""
+
+    def notify(kind: str, percent: str) -> dict:
+        return {
+            "Notification": {
+                "NotificationType": kind,
+                "ComparisonOperator": "GREATER_THAN",
+                "Threshold": percent,
+                "ThresholdType": "PERCENTAGE",
+            },
+            "Subscribers": [{"SubscriptionType": "SNS", "Address": "!Ref ThreefoldAlarmTopic"}],
+        }
+
+    assert _resource_tree("ThreefoldMonthlyBudget") == {
+        "Type": "AWS::Budgets::Budget",
+        "Condition": "HasBudget",
+        "DependsOn": "ThreefoldAlarmTopicPolicy",
+        "Properties": {
+            "Budget": {
+                "BudgetName": "!Sub '${AWS::StackName}-account-monthly-cost'",
+                "BudgetType": "COST",
+                "TimeUnit": "MONTHLY",
+                "BudgetLimit": {"Amount": "!Ref MonthlyBudgetUsd", "Unit": "USD"},
+            },
+            "NotificationsWithSubscribers": [notify("ACTUAL", "80"), notify("FORECASTED", "100")],
+        },
+    }
