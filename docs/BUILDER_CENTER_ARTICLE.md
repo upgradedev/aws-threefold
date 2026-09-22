@@ -61,7 +61,7 @@ operator.
 
 ## A refusal that says what to do instead
 
-A deny that only says no sends the agent back to guess, and its next guess is
+A deny that only says no sends the agent back to guess, and its next guess
 can be the same call spelled differently. So a refusal carries a fix when one
 fits: the file rewritten through a port and an adapter, or an environment
 lookup in place of a literal credential. A fix that would itself be refused is
@@ -115,8 +115,9 @@ browser ─────────────────────►├─
   edge's per-address limit.
 - **One DynamoDB table** holds sessions, the decision ledger by day, daily
   rollups written with `ADD` so charts stay exact however busy the ledger is,
-  rules, project stages and sign-in records (stored only as hashes). Everything
-  is read by key, with TTLs and point-in-time recovery.
+  rules, project stages and sign-in records (stored only as hashes). All of it
+  is read by key except the sessions listing, a bounded scan; TTLs expire it and
+  point-in-time recovery backs it up.
 - **CloudFront** serves the pages from a private bucket and sends the API paths
   to the function with a secret origin header, so the function believes the
   viewer's address and host only from the edge. That fixed two real problems:
