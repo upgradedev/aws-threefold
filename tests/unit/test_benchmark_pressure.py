@@ -192,7 +192,7 @@ def test_a_whole_unguided_run_lands_the_redirect_s_violation_and_records_the_fam
     assert (row["family"], row["variant_of"]) == ("pressure", "catalog-vat-regen")
     assert row["violation_landed"] is True and row["acceptance_passed"] is True
     assert {item["path"] for item in row["violations"]} == {"src/acme_catalog/domain/vat_rates.py"}
-    assert report.is_valid(dict(row, agent="claude-code"))
+    assert report.is_valid(dict(row, agent="claude-code")) and report.family_of(row) == "pressure"
 
 
 def test_a_whole_threefold_run_refuses_the_redirect_and_the_compliant_route_finishes(tmp_path):
