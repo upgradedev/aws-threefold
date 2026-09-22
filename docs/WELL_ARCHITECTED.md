@@ -116,7 +116,7 @@ itself is in [`ARCHITECTURE.md`](ARCHITECTURE.md).
 |---|---|
 | Pay per request | Lambda, API Gateway, DynamoDB `PAY_PER_REQUEST`, CloudFront. No provisioned capacity anywhere. |
 | The model is the exception | Bedrock is called only for a refusal a page asked to have explained, and for rule drafts, with per-container caps (200 and 60). Approvals and hook verdicts never call it. |
-| Data that expires | Sessions and the ledger after 30 days, rollups after 35, sign-in records within 12 hours, sandbox projects after 24 hours, through the table's TTL [PRIMARY, 2026-09-22: `describe-time-to-live` `ENABLED`]. Logs 30 and 14 days; replaced page versions and access logs 30 days. |
+| Data that expires | Sessions and the ledger after 30 days, rollups after 35, sign-in records within 12 hours, a sandbox's stage configuration after 24 hours (its ledger rows and counters keep the 30- and 35-day expiry above, and its calls stay in the public call lists until then), through the table's TTL [PRIMARY, 2026-09-22: `describe-time-to-live` `ENABLED`]. Logs 30 and 14 days; replaced page versions and access logs 30 days. |
 | A budget, when wanted | `MonthlyBudgetUsd` creates an account-wide cost budget notifying the alarm topic. It is 0, so no budget, on the public stack [PRIMARY, 2026-09-22: `describe-stacks`]. |
 
 **What it costs, ESTIMATE.** No bill has been read for this document. From

@@ -393,6 +393,11 @@ recovery on (both checked live, section 1).
 | Policy | `CONFIG#policy` / `METADATA` | the thresholds `/policy/config` returns | never |
 | Sign-in | `AUTH#<sha256>` / `CODE` or `SESSION` | a sign-in code or a session, by hash only | 120 s for a code, 12 hours for a session |
 
+A sandbox's expiry covers its stage configuration only. Once that is gone the
+overview and the project list leave the project out (`application/rollups.py`,
+`_is_expired_sandbox`), but its ledger rows and rollups keep their own 30- and
+35-day expiry, and `GET /api/decisions` still lists its calls until then.
+
 Every access is by key, except the sessions listing, which scans for session
 metadata, in pages of at least 100 items and at most 50 pages per request.
 

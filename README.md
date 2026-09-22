@@ -39,12 +39,16 @@ policy, `x-frame-options: DENY`, `nosniff` and `referrer-policy: no-referrer`
 1. **The two-stage rollout, on a project of your own:**
    <https://d1og72wpk4aqig.cloudfront.net/dashboard.html#/try>. Five steps: make
    a sandbox project (`Acme-Sandbox-<8 hex>`, seeded with twelve synthetic hook
-   calls from all three agents through the real evaluator, gone after 24 hours),
-   see what its rules would have refused, label each call, promote, and send the
+   calls from all three agents through the real evaluator), see what its rules
+   would have refused, label each call, promote, and send the
    same kind of call again to watch it refused, with the fix it suggests. That
    last call is sent in a `sim-` session, and the service enforces every `sim-`
    session whatever the project's stage, so it would be refused without the
-   promotion too; a real hook's call follows the stage.
+   promotion too; a real hook's call follows the stage. After 24 hours the
+   sandbox's stage configuration expires and the project drops out of the
+   overview and the project list; its calls and labels stay in the public call
+   lists until the ledger's own 30-day expiry, and its daily counters stay in
+   the table, no longer shown, for 35 days.
 2. **The flagship demo:** <https://d1og72wpk4aqig.cloudfront.net/>. Scenario 1
    sends one `POST /simulate-loop`; the function evaluates the same call three
    times and the third is refused with `BLOCKED_LOOP_DETECTED`, halting that demo
