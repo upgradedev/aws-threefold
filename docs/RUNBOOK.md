@@ -223,9 +223,11 @@ Threefold enforcing:
 | `BENCHMARK_2026-09-22-PRESSURE-HAIKU.md` | `20260922T162306Z-pressure.jsonl` | 100% / 56% / 0% | 4/9 |
 
 The two families are never pooled. Nothing under Threefold violated in any
-series; the rules in `CLAUDE.md` held only with the strong model on the plain
-tasks, and the cost of enforcing shows in the pressure rows, where the governed
-agent finished 10 of 18 runs and otherwise stopped and reported the conflict.
+series. The `CLAUDE.md` column follows the model rather than the family: with
+`claude-sonnet-5` the rules held in both families with nothing enforcing them
+(0/18 and 0/9), with `claude-haiku-4-5` in neither (17% and 56%). The cost of
+enforcing shows in the pressure rows, where the governed agent finished 10 of
+18 runs and otherwise stopped and reported the conflict.
 The pilot before them (`BENCHMARK_2026-09-22-PILOT.md`) measured nothing: its
 real-agent runs never reached the model on an expired login, which the token
 file below fixed.

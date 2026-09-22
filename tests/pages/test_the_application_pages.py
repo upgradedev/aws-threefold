@@ -790,6 +790,38 @@ def test_a_chunk_that_fails_puts_back_only_the_labels_that_did_not_land(tmp_path
     assert "20 calls back in the queue" in out["error"] and "100 calls had already been saved" in out["error"]
 
 
+def test_an_undo_whose_second_chunk_fails_puts_back_the_calls_it_did_clear(tmp_path: Path) -> None:
+    """Chunking made undo non-atomic, so a half-done undo must still be visible."""
+    out = dash(
+        r"""
+  const many = [];
+  for (let i = 1; i <= 120; i++) many.push(row(i));
+  let seen = 0;
+  answer = contract({
+    '/api/decisions': { status: 200, body: { items: many, next_cursor: null } },
+    'POST /api/projects/Acme-Billing/reviews': (u, i, body) => {
+      seen += 1;
+      // 1 and 2 label the group; 3 and 4 undo it, and the last one fails.
+      return seen === 4
+        ? { status: 500, body: { detail: 'The table is unavailable.' } }
+        : { status: 200, body: { updated: body.items.length, skipped: [] } };
+    }
+  });
+  await visit('#/review');
+  await click('label-group', { 'data-group': JSON.stringify(['Acme-Billing', 'java-domain-stays-pure']), 'data-label': 'correct' });
+  await tick();
+  const toastId = (el('toast-root').innerHTML.match(/data-toast="(toast-\d+)"/) || [])[1];
+  await click('toast', { 'data-toast': toastId });
+  await tick();
+  out.back = (view().match(/data-action="label-one"/g) || []).length / 2;
+  out.toast = text(el('toast-root').innerHTML);
+""",
+        tmp_path,
+    )
+    assert out["back"] == 100, "The chunk the service did clear is unreviewed again, so it comes back"
+    assert "100 calls back in the queue" in out["toast"] and "was not saved" in out["toast"]
+
+
 # ------------------------------------------------------------ calls and call
 
 

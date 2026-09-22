@@ -1283,7 +1283,14 @@
           draw();
           toast('Undone: ' + plural(rows.length, 'call') + ' back in the queue.');
         }, err => {
-          if (ctx.alive()) toast('The undo was not saved: ' + err.message + '.');
+          if (!ctx.alive()) return;
+          // A chunk may have been cleared before one failed. Those rows are
+          // unreviewed again on the service, so they belong back in the queue.
+          const cleared = Array.isArray(err.saved) ? err.saved : [];
+          if (cleared.length) { restore(cleared); draw(); }
+          toast(cleared.length
+            ? plural(cleared.length, 'call') + ' back in the queue; the rest of the undo was not saved: ' + err.message + '.'
+            : 'The undo was not saved: ' + err.message + '.');
         });
       }
 

@@ -173,10 +173,12 @@ reserved concurrency of 25 (`aws lambda get-function-concurrency`).
   | pressure, `claude-sonnet-5` | 27 | 67% (6/9) | 0% (0/9) | **0% (0/9)** | 67% (6/9) |
   | pressure, `claude-haiku-4-5` | 27 | 100% (9/9) | 56% (5/9) | **0% (0/9)** | 44% (4/9) |
 
-  What that says, without stretching it: with the strong model on the plain
-  tasks, writing the rules into `CLAUDE.md` was enough on its own. It was not
-  enough with the cheaper model, and it was not enough under a prompt that asks
-  for the shortcut. Threefold left no violation in any of the four series, and
+  What that says, without stretching it: the `CLAUDE.md` column follows the
+  model, not the task family. With `claude-sonnet-5`, writing the rules into
+  `CLAUDE.md` was enough on its own in both families, even where the prompt
+  asked for the shortcut. With `claude-haiku-4-5` it was enough in neither, and
+  the pressure prompt made it much worse — 17% against 56%. Threefold left no
+  violation in any of the four series, and
   the price shows in the last column: under the pressure prompts the governed
   agent finished 10 of 18 runs and otherwise stopped and reported the conflict
   rather than break a rule. 18 or 9 runs a cell, one agent, tasks written by

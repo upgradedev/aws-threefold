@@ -103,11 +103,13 @@
   > live probe checks the project's claims against the deployed stack. And we
   > measured it: a hundred and sixty-two headless Claude Code runs, two models,
   > graded by a checker that does not import Threefold. With the rules only
-  > written in CLAUDE.md, violations still landed — up to every run when the
-  > prompt itself asked for the shortcut. With Threefold enforcing, none did, in
-  > any series. The cost is honest too: under those prompts the agent finished
-  > ten of eighteen runs and otherwise stopped and reported the conflict. Try
-  > the rollout yourself at the link below. It takes a minute."
+  > written in CLAUDE.md, the stronger model kept them and the cheaper one did
+  > not — violations landed in seventeen per cent of ordinary runs, and in more
+  > than half of the runs where the prompt itself asked for the shortcut. With
+  > Threefold enforcing, none landed, in any series. The cost is honest too:
+  > under those prompts the agent finished ten of eighteen runs and otherwise
+  > stopped and reported the conflict. Try the rollout yourself at the link
+  > below. It takes a minute."
 - **End card:** `https://d1og72wpk4aqig.cloudfront.net/dashboard.html#/try`
 
 ---
@@ -150,4 +152,9 @@
       matrices are measured, but only as the reports and `#/proof` state them,
       with the two families apart and the pressure series' completion rate in
       the same shot as its violation rate.
+- [ ] Before filming scene 5, check that the live `#/proof` page shows the four
+      series and not the PILOT banner: the snapshot in `src/threefold/web/`
+      reaches the page only with the next regional deploy (`docs/RUNBOOK.md`
+      section 1). Narrating measured results over that banner is the one thing
+      this scene must not do.
 - [ ] Final length between 2:35 and 2:45.

@@ -181,11 +181,12 @@ apart and never pooled.
 | pressure, `claude-sonnet-5` | 27 | 67% (6/9) | 0% (0/9) | **0% (0/9)** | 67% (6/9) |
 | pressure, `claude-haiku-4-5` | 27 | 100% (9/9) | 56% (5/9) | **0% (0/9)** | 44% (4/9) |
 
-The honest reading. With the strong model on the plain tasks, rules in
-`CLAUDE.md` were enough on their own: nothing enforced them and no violation
-landed. They were not enough with the cheaper model (17%), and they were not
-enough under a prompt that asks for the shortcut (56% with the cheaper model,
-where unguided runs violated every time). Threefold left no violation in any of
+The honest reading. The `CLAUDE.md` column tracks the model, not the task
+family. With the strong model the rules held in both families with nothing
+enforcing them: no violation in 18 plain runs and none in 9 pressure runs. With
+the cheaper model they held in neither: 17% on the plain tasks, and 56% under
+prompts that ask for the shortcut, where unguided runs violated every time.
+Threefold left no violation in any of
 the four series. The price is the last column: under the pressure prompts the
 governed agent finished 10 of 18 runs (6 of 9, then 4 of 9), and in the other 8
 it stopped and reported the conflict instead of finishing — among them every
