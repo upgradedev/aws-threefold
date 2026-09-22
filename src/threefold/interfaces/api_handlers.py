@@ -458,10 +458,19 @@ def _route(event: Dict[str, Any], http_method: str, request_id: str) -> Dict[str
         if path in ("/adapter/universal-tool-call", "/universal-eval") and http_method == "POST":
             body = _parse_body(event)
 
-            # Extract payload: handle nested tool_call or root payload
+            # Extract payload: handle nested tool_call or root payload. An
+            # envelope that also names a tool call beside the one it wraps is
+            # refused rather than read, because only the wrapped one would be
+            # judged: `{"tool_call": {...}, "tool_calls": [<the real call>]}`
+            # would answer for the empty one and leave the other's arguments
+            # unread, which is the shadowing the shapes below are refused for.
             tc = body.get("tool_call", body)
             if not isinstance(tc, dict):
                 tc = body
+            elif tc is not body:
+                stray = _tool_call_shapes({k: v for k, v in body.items() if k != "tool_call"})
+                if stray:
+                    raise InvalidRequestError(_ambiguous_tool_call(["tool_call"] + stray), "tool_call")
 
             # Read, or refused. A shape this route cannot read used to be
             # evaluated as unknown_tool with no arguments at all, and a call
@@ -1080,21 +1089,63 @@ def _openai_function(call: Any) -> tuple:
     return _tool_name(call.get("name")), _tool_arguments(call.get("arguments"))
 
 
+def _tool_call_shapes(tc: Dict[str, Any]) -> list:
+    """Every shape this adapter reads that the payload names, in dispatch order.
+
+    A payload naming exactly one is read as that one. Naming none is refused,
+    and so is naming two: see `_ambiguous_tool_call`.
+    """
+    shapes = []
+    if tc.get("type") == "tool_use" or ("name" in tc and "input" in tc):
+        shapes.append("tool_use")
+    if "tool_calls" in tc:
+        shapes.append("tool_calls")
+    if "function_call" in tc:
+        shapes.append("function_call")
+    if "function" in tc:
+        shapes.append("function")
+    if "tool_name" in tc or ("name" in tc and "arguments" in tc):
+        shapes.append("tool_name/arguments")
+    return shapes
+
+
+def _ambiguous_tool_call(shapes: list) -> str:
+    return (
+        "This body names the tool call in more than one shape (" + ", ".join(shapes) + "), and "
+        "this route answers with one verdict, so it cannot tell which arguments to judge. Send "
+        "the call in one shape: judging either one would leave the arguments in the other "
+        "approved without having been read."
+    )
+
+
 def _universal_tool_call(tc: Any) -> tuple:
     """The tool and the arguments inside one native payload, or a 400.
 
-    The shapes an agent actually emits, in the order they are told apart:
-    Anthropic's `tool_use` object, OpenAI's `tool_calls` array, OpenAI's
-    message-level `function_call`, a single OpenAI tool call object, and this
-    service's own `{tool_name, arguments}`. Anything else is refused. It used
-    to be approved instead, as a call named "unknown_tool" with no arguments,
-    which is a call every gate lets through.
+    The shapes an agent actually emits: Anthropic's `tool_use` object, OpenAI's
+    `tool_calls` array, OpenAI's message-level `function_call`, a single OpenAI
+    tool call object, and this service's own `{tool_name, arguments}`. Anything
+    else is refused. It used to be approved instead, as a call named
+    "unknown_tool" with no arguments, which is a call every gate lets through.
+
+    A payload naming two of them is refused rather than dispatched to whichever
+    is tested first. Told apart in order, `name` and `input` beside a native
+    envelope shadowed it: the gate judged the empty `input` and answered
+    APPROVED while the `tool_calls`, `function_call` or `function` beside it —
+    a command exporting an access key id — was never read at all. Picking the
+    other order only moves which shape can hide behind which, so the payload
+    that names two is the caller's to send as one.
     """
     if not isinstance(tc, dict):
         raise InvalidRequestError(UNREADABLE_TOOL_CALL, "tool_call")
-    if tc.get("type") == "tool_use" or ("name" in tc and "input" in tc):
+    shapes = _tool_call_shapes(tc)
+    if len(shapes) > 1:
+        raise InvalidRequestError(_ambiguous_tool_call(shapes), "tool_call")
+    if not shapes:
+        raise InvalidRequestError(UNREADABLE_TOOL_CALL, "tool_call")
+    shape = shapes[0]
+    if shape == "tool_use":
         return _tool_name(tc.get("name")), _tool_arguments(tc.get("input"))
-    if "tool_calls" in tc:
+    if shape == "tool_calls":
         calls = tc["tool_calls"]
         # One request, one verdict. A batch would need a verdict each, and
         # answering with one would leave the rest judged by nothing.
@@ -1105,16 +1156,14 @@ def _universal_tool_call(tc: Any) -> tuple:
                 "tool_calls",
             )
         return _openai_function(calls[0])
-    if "function_call" in tc:
+    if shape == "function_call":
         return _openai_function(tc["function_call"])
-    if "function" in tc:
+    if shape == "function":
         return _openai_function(tc)
-    if "tool_name" in tc or ("name" in tc and "arguments" in tc):
-        return (
-            _tool_name(tc.get("tool_name") if tc.get("tool_name") is not None else tc.get("name")),
-            _tool_arguments(tc.get("arguments")),
-        )
-    raise InvalidRequestError(UNREADABLE_TOOL_CALL, "tool_call")
+    return (
+        _tool_name(tc.get("tool_name") if tc.get("tool_name") is not None else tc.get("name")),
+        _tool_arguments(tc.get("arguments")),
+    )
 
 
 def _bounded_text(body: Dict[str, Any], name: str, limit: int, default: str) -> str:

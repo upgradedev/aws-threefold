@@ -181,3 +181,77 @@ def test_the_adapter_and_the_native_route_agree_on_the_same_call() -> None:
     )
     assert adapter_status == 200
     assert adapter["evaluation"]["status"] == json.loads(native["body"])["status"]
+
+
+# The shapes are told apart in one order, so before this a payload naming two of
+# them was judged as whichever was tested first and the other was never read.
+# `name` and `input` were tested first, so adding them to any native payload
+# shadowed it: the gate judged the empty `input`, answered APPROVED, and the
+# `tool_calls`, `function_call` or `function` beside it — the command exporting
+# an access key id — reached nobody. These send the credential in the shape a
+# caller means and a decoy in the shape that used to win.
+SHADOWING_DECOYS = {
+    "tool_calls behind an empty input": dict(
+        _openai_tool_calls("adapter-shadow-1", "run_command", LEAKING_COMMAND), name="run_command", input={}
+    ),
+    "function_call behind a null input": dict(
+        _openai_function_call("adapter-shadow-2", "run_command", LEAKING_COMMAND), name="run_command", input=None
+    ),
+    "a function object behind an empty input": {
+        "session_id": "adapter-shadow-3",
+        "function": {"name": "run_command", "arguments": json.dumps(LEAKING_COMMAND)},
+        "name": "run_command",
+        "input": {},
+    },
+    "arguments behind an empty input": {
+        "session_id": "adapter-shadow-4",
+        "name": "run_command",
+        "input": {},
+        "arguments": json.dumps(LEAKING_COMMAND),
+    },
+    "arguments behind a declared tool_use": {
+        "session_id": "adapter-shadow-5",
+        "type": "tool_use",
+        "name": "run_command",
+        "arguments": json.dumps(LEAKING_COMMAND),
+    },
+    "a tool_calls array beside a wrapped tool_call": {
+        "session_id": "adapter-shadow-6",
+        "tool_call": {"type": "tool_use", "name": "run_command", "input": {}},
+        "tool_calls": [{"function": {"name": "run_command", "arguments": json.dumps(LEAKING_COMMAND)}}],
+    },
+}
+
+
+@pytest.mark.parametrize("decoy", sorted(SHADOWING_DECOYS))
+def test_a_second_shape_cannot_shadow_the_one_carrying_the_arguments(decoy) -> None:
+    """Refused, because judging either would leave the other's arguments unread."""
+    status, problem = _post(SHADOWING_DECOYS[decoy])
+    assert status == 400, problem
+    assert problem["invalid_params"][0]["name"] == "tool_call"
+    assert "more than one shape" in problem["detail"]
+
+
+@pytest.mark.parametrize("decoy", sorted(SHADOWING_DECOYS))
+def test_the_shadowed_payload_is_the_one_the_native_route_refuses(decoy) -> None:
+    """The decoy is what makes it ambiguous: the call inside it is a refusal."""
+    status, body = _post(
+        {
+            "session_id": f"adapter-unshadowed-{abs(hash(decoy)) % 10000}",
+            "function_call": {"name": "run_command", "arguments": json.dumps(LEAKING_COMMAND)},
+        }
+    )
+    assert status == 200, body
+    assert body["evaluation"]["status"] == "BLOCKED_SECRET_DETECTED"
+
+
+def test_a_credential_in_the_wrapped_call_is_still_read_when_nothing_shadows_it() -> None:
+    """The envelope the pages use keeps working: one shape, judged as it always was."""
+    status, body = _post(
+        {
+            "session_id": "adapter-wrapped-ok",
+            "tool_call": {"type": "tool_use", "name": "run_command", "input": LEAKING_COMMAND},
+        }
+    )
+    assert status == 200, body
+    assert body["evaluation"]["status"] == "BLOCKED_SECRET_DETECTED"
