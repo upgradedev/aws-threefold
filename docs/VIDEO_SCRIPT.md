@@ -64,7 +64,8 @@
 
   The installer lists what it wrote, sends one dry-run call, reports it
   recorded, and opens the project page. Cut to Claude Code asked to write
-  `import boto3` into a domain file in a project promoted to Enforce: the deny
+  `import boto3` into a domain file of a project promoted to Enforce on a stack
+  you operate (see the checklist): the deny
   appears with the rule's name and the fix's one-line summary, and the file is
   not created.
 - **Narration:**
