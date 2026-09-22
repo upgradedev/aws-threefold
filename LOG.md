@@ -195,3 +195,10 @@
 - A private stack for real use, `threefold-dogfood`, is up with `PublicReads=false`: its ledger answers 401 without the operator key. Its address and key live in `~/.threefold/` only.
 - Deployed to both stacks. Live smoke tests: day 2 15/15, day 1 21/21.
 - Tests 659 → 1715.
+
+## 2026-09-22T18:00:00+03:00 — The owner's real work is governed, in observe
+- A short never-send term is a word, not a substring: on the owner's repositories one three-letter term matched 136 files as a substring and 38 where it started a word. The preflight now says what a match costs (calls carrying a term go unjudged; the file itself does not), instead of advising exclusion.
+- A workspace root can govern only the repositories it lists (`include` in `.threefold.json`), and a folder git does not recognise installs in workspace mode, with nothing written under any `.git`. An adversarial review found four ways the list could fail open (a nested checkout, `..` inside a word, an unreadable file, a `cd` to a computed place); each now holds the call back.
+- Installed in observe mode at nine locations the owner approved, under aliases `Acme-Proj-*`: one repository-and-workspace, two workspace roots with include lists, and six repositories, three agents each, with a pre-commit check in the seven git repositories. Everything written is listed in each repository's `.git/info/exclude`, and `git status` shows none of it. The aliases, the list of locations and the private stack's address live only in `~/.threefold/`.
+- Verified with synthetic calls through the exact registered command: writes inside a listed repository reach the private stack, and a domain import there is recorded as observed and not refused; writes into repositories the owner excluded, into repositories not listed and into a workspace's own files are held back and never reached the stack; a credential is refused on the machine.
+- Codex joins when its account resets on 2026-09-27, and only for projects the owner trusts in Codex.
