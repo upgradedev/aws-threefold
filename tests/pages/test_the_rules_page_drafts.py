@@ -169,7 +169,7 @@ def test_the_project_defaults_to_the_one_in_the_address_and_follows_the_page_unt
   showSharedSet();
   await tick();
   out.kept = el('draft-project').value;
-  el('draft-project').value = 'Globex-Billing';
+  el('draft-project').value = 'billing-team';
   describe('Billing domain classes may not reach persistence.');
   out.foreign = { disabled: el('draft-button').disabled, hint: el('draft-hint').innerText };
 """,
