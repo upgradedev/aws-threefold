@@ -93,10 +93,10 @@
 
 - **Visual:** the dashboard's overview; the CloudWatch dashboard
   `threefold-prod-operations` with its alarms; then the dashboard's `#/proof`
-  page, on the table of the four measured series. Hold on the `Threefold`
-  column, which reads 0/18, 0/18, 0/9 and 0/9, and let the pressure rows'
-  "tests passed" column (67% and 44%) stay readable: the cost is part of the
-  claim, not a footnote.
+  page, on the table of the four measured series. Hold on the Threefold
+  column, which reads 0% in every row, and let the pressure rows' "tests
+  passed" figures (67% and 44%) stay readable in the same shot: the cost is
+  part of the claim, not a footnote.
 - **Narration:**
   > "It runs on AWS behind CloudFront and AWS WAF, on one Lambda function and one
   > DynamoDB table, with ten CloudWatch alarms and point-in-time recovery. A
