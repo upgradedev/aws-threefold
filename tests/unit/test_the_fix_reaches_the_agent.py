@@ -344,6 +344,19 @@ def test_each_kind_of_verdict_reads_its_own_ceiling() -> None:
     assert FIX_LAYERING_ADVICE_MAX_CHARS < REFERENCE_CHARS, "The reference is the refused write too large for any fix"
 
 
+def test_the_published_contract_states_every_ceiling_the_evaluator_applies() -> None:
+    """The served document says when suggested_fix is null; it must name the numbers this module uses."""
+    from pathlib import Path
+
+    served = Path(evaluator_module.__file__).resolve().parents[1] / "web" / "openapi.json"
+    spec = json.loads(served.read_text(encoding="utf-8"))
+    result = spec["paths"]["/evaluate-tool-call"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
+    description = result["properties"]["suggested_fix"]["description"]
+    for ceiling in (FIX_REWRITE_MAX_CHARS, FIX_LAYERING_ADVICE_MAX_CHARS, FIX_CREDENTIAL_MAX_CHARS, FIX_ADVICE_MAX_CHARS):
+        assert f"{ceiling:,} " in description, f"The contract does not state the {ceiling:,} character ceiling"
+    assert "validated false and no writes" in description, "The contract says what a layering fix past the rewrite cap is"
+
+
 def test_a_call_runs_a_command_as_the_guard_reads_one() -> None:
     assert runs_a_command(_request("cmd-1", {"command": "ls"}, tool_name="Bash", action_type="COMMAND_EXEC"))
     assert runs_a_command(_request("cmd-2", {"command": "ls"})), "A call that carries `command` runs it, whatever it says it is"

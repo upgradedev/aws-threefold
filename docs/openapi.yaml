@@ -289,12 +289,16 @@ paths:
                       Set on a refusal, and on an observation only when the request sent explain true and its origin
                       is neither hook nor ci, since a hook in Observe prints nothing; null otherwise. Also null
                       when the call carries more text, counted over every string in its arguments, than its kind
-                      of fix can be worked out for within the gate's own 10 ms budget: 1,500 characters for a fix
-                      that rewrites the call (layering, unreadable_write), 3,000 for a credential, and 24,000 for
-                      advice (loop, budget, halted_session, protected_path, destructive_command). Past its ceiling
-                      the refusal goes out as it always did, without one. A starting point, never applied automatically.
-                      Never stored: the ledger row keeps only suggested_fix_kind and suggested_fix_validated. A
-                      hook appends the summary, and nothing else, to its deny reason.
+                      of fix can be worked out for within the gate's own 10 ms budget: 1,500 characters for an unreadable_write
+                      and for any call that runs a command, 8,000 for a layering refusal of a call that runs none,
+                      3,000 for a credential, and 24,000 for advice (loop, budget, halted_session, protected_path,
+                      destructive_command). A layering fix is rewritten and checked only while the content it would
+                      rewrite comes to 1,500 characters or less; past that, up to its ceiling, it is advice in words
+                      with validated false and no writes, naming the imports to move, the rule that forbids each
+                      and the first candidate layer where no rule forbids them. Past its ceiling the refusal goes
+                      out as it always did, without one. A starting point, never applied automatically. Never stored:
+                      the ledger row keeps only suggested_fix_kind and suggested_fix_validated. A hook appends the
+                      summary, and nothing else, to its deny reason.
                     required:
                     - kind
                     - summary
