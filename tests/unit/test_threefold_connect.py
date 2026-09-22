@@ -390,6 +390,47 @@ def test_the_home_folder_is_refused_and_nothing_is_written(machine, stack) -> No
     assert stack.requests == []
 
 
+def test_disconnecting_the_home_folder_is_refused_and_leaves_the_agents_own_hooks_alone(machine, stack) -> None:
+    """connect refuses the home folder; disconnect went in anyway.
+
+    With no install record there, uninstall falls back to removing any entry
+    whose command names the hook, so a Threefold entry a developer registered
+    by hand at user level went, and with it governance for every project of
+    that agent on the machine.
+    """
+    hooks = machine.home / ".codex" / "hooks.json"
+    hooks.parent.mkdir(parents=True, exist_ok=True)
+    registered = {
+        "hooks": {"PreToolUse": [
+            {"matcher": "Bash", "hooks": [
+                {"type": "command", "command": "python3 /opt/acme/threefold_hook.py --agent codex"},
+                {"type": "command", "command": "python3 /opt/acme/audit.py"},
+            ]},
+        ]},
+    }
+    hooks.write_text(json.dumps(registered), encoding="utf-8")
+    before = snapshot(machine.home)
+
+    result = run(installer, "disconnect", str(machine.home))
+    assert result.code == 2, result.out
+    assert "home folder" in result.out
+    assert snapshot(machine.home) == before
+    assert json.loads(hooks.read_text(encoding="utf-8")) == registered
+
+
+def test_the_legacy_uninstall_refuses_the_home_folder_too(machine, stack) -> None:
+    hooks = machine.home / ".codex" / "hooks.json"
+    hooks.parent.mkdir(parents=True, exist_ok=True)
+    hooks.write_text(json.dumps({"hooks": {"PreToolUse": [
+        {"matcher": "Bash", "hooks": [{"type": "command", "command": "python3 /opt/acme/threefold_hook.py --agent codex"}]},
+    ]}}), encoding="utf-8")
+    before = snapshot(machine.home)
+    result = run(installer, "--repo", str(machine.home), "--uninstall")
+    assert result.code == 2, result.out
+    assert "home folder" in result.out
+    assert snapshot(machine.home) == before
+
+
 def test_a_project_that_is_not_an_alias_is_refused(machine, stack) -> None:
     result = connect(machine, stack, "--project", "Acme Ledger")
     assert result.code == 2 and "must match" in result.out

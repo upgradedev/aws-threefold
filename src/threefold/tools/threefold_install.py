@@ -1681,6 +1681,12 @@ def next_steps(agents: Sequence[str], mode: str, home: Path, root: Path) -> List
 def disconnect(args: argparse.Namespace, out: Any) -> int:
     home = threefold_home()
     root, workspace = locate(Path(args.path).expanduser())
+    # connect refuses the home folder because the .claude and .codex there are
+    # the agents' configuration for every project on the machine. Disconnect
+    # went in anyway, and with no install record to work from it removes any
+    # entry whose command names the hook: a user-level entry registered by
+    # hand would have gone, and governance for every project with it.
+    refuse_home_folder(root)
     print(f"Threefold disconnect: {forward(root)}", file=out)
     code = uninstall(args, root, home, out, workspace, prefix="  ")
     if not args.dry_run:
@@ -1850,6 +1856,7 @@ def legacy(argv: Sequence[str], out: Any) -> int:
     root, workspace = locate(Path(args.repo))
     home = threefold_home()
     if args.uninstall:
+        refuse_home_folder(root)
         return uninstall(args, root, home, out, workspace)
     if not args.project or not PROJECT_PATTERN.match(args.project):
         # The alias is what the public ledger shows. A real name typed here
