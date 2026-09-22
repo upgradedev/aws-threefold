@@ -1990,8 +1990,37 @@ def post_evaluation(body: Dict[str, Any], base: Optional[str] = None, api_key: A
         raise ServiceUnavailable(_describe_failure(error, timeout)) from None
 
 
+# What a summary line may not carry into the agent's context: C0 and C1
+# control characters, the Unicode line and paragraph separators, and the
+# direction overrides that can make a line read differently from what it holds.
+_UNPRINTABLE = re.compile(r"[\x00-\x1f\x7f-\x9f  ‎‏‪-‮⁦-⁩]+")
+MAX_FIX_SUMMARY_CHARS = 200
+
+
+def fix_line(verdict: Dict[str, Any]) -> Optional[str]:
+    """The suggested fix as one line of the deny reason, or None when there is none.
+
+    Only the summary: the steps and the proposed files are for a page to show,
+    and an agent's context is not where a whole module goes. "Checked by
+    Threefold" only when the service says every proposed write passed the same
+    gates. The summary is cleaned here although the service sends one clean
+    line, because this hook trusts nothing the network sends.
+    """
+    fix = verdict.get("suggested_fix")
+    if not isinstance(fix, dict) or not isinstance(fix.get("summary"), str):
+        return None
+    summary = " ".join(_UNPRINTABLE.sub(" ", fix["summary"]).split())[:MAX_FIX_SUMMARY_CHARS].rstrip()
+    if not summary:
+        return None
+    label = "Suggested fix, checked by Threefold" if fix.get("validated") is True else "Suggested fix"
+    return f"{label}: {summary}"
+
+
 def refusal_reason(verdict: Dict[str, Any]) -> str:
-    """The service's refusal in words, with its explanation attributed to its source."""
+    """The service's refusal in words, with its explanation attributed to its source.
+
+    A suggested fix, when the service sends one, follows as a line of its own.
+    """
     status = str(verdict.get("status") or "BLOCKED")
     reason = verdict.get("reason") or status
     detail = f"Threefold refused this call ({status}). {reason}"
@@ -1999,6 +2028,9 @@ def refusal_reason(verdict: Dict[str, Any]) -> str:
     if explanation:
         label = "Bedrock" if verdict.get("explanation_source") == "bedrock" else "Deterministic explanation"
         detail = f"{detail}\n{label}: {explanation}"
+    suggestion = fix_line(verdict)
+    if suggestion:
+        detail = f"{detail}\n{suggestion}"
     return detail
 
 
