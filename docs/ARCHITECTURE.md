@@ -322,7 +322,10 @@ landing elsewhere in that window is judged under the old stage.
 The request's `hook_mode` is recorded on the ledger row and plays no part in
 choosing the stage, so a machine in `enforce` mode is refused only where the
 project enforces. The last step of the `#/try` walkthrough sends its call in a
-`sim-` session, so that refusal does not depend on the promotion before it.
+`try-` session, not a `sim-` one, so the stage decides it: the same call is
+recorded and approved before the promotion and refused after it, which is the
+one thing the walkthrough sets out to show
+(`tests/pages/test_the_walkthrough_proves_the_promotion.py`).
 
 **Rule key.** Every ledger row carries `rule_key`: the id of the layering rule
 that decided, or `LOOP`, `PROTECTED_PATH`, `UNREADABLE_WRITE`, `CREDENTIAL`,

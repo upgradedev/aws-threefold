@@ -45,9 +45,11 @@ policy, `x-frame-options: DENY`, `nosniff` and `referrer-policy: no-referrer`
    calls from all three agents through the real evaluator), see what its rules
    would have refused, label each call, promote, and send the
    same kind of call again to watch it refused, with the fix it suggests. That
-   last call is sent in a `sim-` session, and the service enforces every `sim-`
-   session whatever the project's stage, so it would be refused without the
-   promotion too; a real hook's call follows the stage. After 24 hours the
+   last call is sent in a `try-` session, which the project's stage decides like
+   any hook's call: one step earlier the same call was recorded and approved,
+   and it is refused only because the project now enforces. (`sim-` sessions
+   enforce whatever the stage, which is why the walkthrough does not use one.)
+   After 24 hours the
    sandbox's stage configuration expires and the project drops out of the
    overview and the project list; its calls and labels stay in the public call
    lists until the ledger's own 30-day expiry, and its daily counters stay in

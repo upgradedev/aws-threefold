@@ -45,23 +45,23 @@
      `java-domain-stays-pure` checked; the noisy Python rule keeps observing.
   5. **Send it again.** Frame the result panel: the refusal, the fix Threefold
      suggests with whether that fix passed the same gates, and the sentence
-     from Amazon Bedrock. This call runs in a `sim-` demo session, which the
-     service enforces whatever the project's stage, so it shows what a refusal
-     carries and is not evidence that the promotion caused it. The narration
-     says so, and scene 4 shows the promotion refusing a real agent. Keep the
-     step-5 card's own sentence ("now in Enforce. This time the rule in force
-     refuses it") out of frame: it claims more than a `sim-` call shows.
+     from Amazon Bedrock. This call runs in a `try-` session, which the
+     project's stage decides exactly as it decides a real hook's call, so the
+     refusal is evidence that the promotion caused it: the same call was
+     recorded and approved one step earlier, in Observe. The step-5 card's own
+     sentence ("now in Enforce. This time the rule in force refuses it") can
+     stay in frame.
 - **Narration:**
   > "Every project starts in Observe. Calls are judged and recorded, and the
   > dashboard shows what each rule would have refused. You mark each one correct
   > or a false alarm. A rule whose every flag was correct is Ready; the one with
   > a false alarm is Noisy and keeps observing. Promote the project with the
   > rules that earned it, and from then on a hook's call that breaks one of them
-  > is refused. The walkthrough's last call shows what a refusal carries: the
-  > rule's reason, a fix that has itself been run through the same gates, and a
-  > sentence from Amazon Bedrock for the person reading. That one is a demo
-  > call, always enforced. Next, the same promotion refuses a real agent.
-  > Demote is one click."
+  > is refused. The walkthrough sends that same call again, and this time it is
+  > refused: the rule's reason, a fix that has itself been run through the same
+  > gates, and a sentence from Amazon Bedrock for the person reading. Nothing
+  > about the call changed; the stage did. Next, the same promotion refuses a
+  > real agent. Demote is one click."
 
 ## Scene 4: one command, and a real agent refused (1:45 to 2:15)
 
@@ -110,7 +110,7 @@
 | Claim | Source |
 |---|---|
 | A promoted sandbox refuses a real hook's call, and a demoted one records it | [PRIMARY, 2026-09-22] `docs/evidence/PROBES_2026-09-22.md`, group "application": a hook `Write` of `import boto3` into `src/domain/` answered `APPROVED` with the would-refuse recorded before promotion, `BLOCKED_BOUNDARY_VIOLATION` with `project_stage` `enforce` after it, and `APPROVED` again after demotion. The probe's sessions are named `probe-<run id>-*`, not `sim-` |
-| The walkthrough's last call is always enforced | `dashboard.html` sends it with `session_id` from `T.newSessionId('sim-')`; `application/projects.py`, `stage_applies`, returns false for any `sim-` session |
+| The walkthrough's last call is decided by the promotion | `dashboard.html` sends it with `session_id` from `T.newSessionId('try-')`, so `application/projects.py`, `stage_applies`, applies the project's stage to it as to any hook's call. `tests/pages/test_the_walkthrough_proves_the_promotion.py` sends that call to a fresh sandbox before and after promoting it: `APPROVED` with `project_stage` `observe`, then `BLOCKED_BOUNDARY_VIOLATION` with `enforce` |
 | Visitors can promote only sandbox projects on the public stack | `infrastructure/security_middleware.py`: a project write is open without a key only where reads are public and the name is `Acme-Sandbox-<8 hex>`; the public stack has no operator key [STATE-FILE] |
 | A refused file is not created, for Claude Code and Antigravity; Codex not measured | [STATE-FILE], `docs/evidence/ENFORCEMENT_2026-09-21.md` |
 | Behind CloudFront and AWS WAF | [PRIMARY, 2026-09-22] `aws cloudfront list-distributions`: the distribution behind `d1og72wpk4aqig.cloudfront.net` is `Deployed` with the web ACL `threefold-prod-edge-web-acl` attached |
