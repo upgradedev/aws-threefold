@@ -19,6 +19,7 @@ from __future__ import annotations
 import inspect
 import json
 import re
+import textwrap
 import uuid
 from pathlib import Path
 
@@ -598,3 +599,92 @@ def test_every_reference_in_the_template_resolves() -> None:
         assert name in known, f"${{{name}}} names nothing"
     for name in re.findall(r"^    Condition: (\w+)$", TEMPLATE, re.M) + re.findall(r"!If \[(\w+),", TEMPLATE):
         assert name in conditions, f"Condition {name} is not defined"
+
+
+# ------------------------------------------------------------------ the dashboard
+
+
+def _dashboard_body() -> str:
+    block = RESOURCES["ThreefoldOperationsDashboard"]
+    match = re.search(r"^      DashboardBody: !Sub \|\n((?:(?: {8}.*)?\n)+)", block, re.M)
+    assert match, "The dashboard body is not a !Sub block"
+    return textwrap.dedent(match.group(1))
+
+
+def _dashboard() -> dict:
+    """The body as CloudFormation would hand it over, with every reference filled."""
+    body = _dashboard_body()
+    body = body.replace("${SlowCallAlarmMs}", _default("SlowCallAlarmMs"))
+    body = body.replace("${ReservedConcurrency}", _default("ReservedConcurrency"))
+    body = re.sub(r"\$\{AWS::StackName\}", "acme-stack", body)
+    body = re.sub(r"\$\{[^}]+\}", "resolved", body)
+    return json.loads(body)
+
+
+def test_the_dashboard_is_named_per_stack() -> None:
+    assert re.search(
+        r"^      DashboardName: !Sub '\$\{AWS::StackName\}-operations'$", RESOURCES["ThreefoldOperationsDashboard"], re.M
+    ), "Dashboard names are unique in a region; two stacks with one name overwrite each other"
+
+
+def _dashboard_metrics() -> list[list]:
+    rows = []
+    for widget in _dashboard()["widgets"]:
+        rows.extend(widget["properties"].get("metrics", []))
+    return rows
+
+
+def test_the_dashboard_body_is_json_and_fits_the_grid() -> None:
+    widgets = _dashboard()["widgets"]
+    assert widgets
+    for widget in widgets:
+        assert widget["x"] + widget["width"] <= 24, widget
+        if widget["type"] == "metric":
+            assert widget["properties"]["region"] == "resolved", "Every metric widget names the stack's region"
+
+
+def test_the_dashboard_shows_the_api_the_function_the_table_and_governance() -> None:
+    rows = _dashboard_metrics()
+    plain = [row for row in rows if isinstance(row[0], str)]
+    namespaces = {row[0] for row in plain}
+    assert {"AWS/ApiGateway", "AWS/Lambda", "AWS/DynamoDB", "Threefold/acme-stack"} <= namespaces
+    governance = {row[1] for row in plain if row[0] == "Threefold/acme-stack"}
+    assert governance >= {"ToolCallsEvaluated", "VerdictApproved", "CircuitBreakerTripped", "LatencyMs", "CurrentSessionCostUSD"}, (
+        "Calls evaluated, approvals, trips, latency and spend"
+    )
+    assert governance <= set(_filters()), "The dashboard shows a governance metric no filter publishes"
+    api = {row[1] for row in plain if row[0] == "AWS/ApiGateway"}
+    assert {"Count", "4xx", "5xx", "Latency"} <= api
+    queries = [row[0]["expression"] for row in rows if isinstance(row[0], dict)]
+    assert any("SUM(ThrottledRequests)" in q for q in queries) and any("SUM(SystemErrors)" in q for q in queries)
+
+
+def test_the_dashboard_shows_only_shared_metrics_the_service_emits_at_those_dimensions() -> None:
+    emitted = _emitted()
+    record_dimensions = _default_emf_dimensions()
+    for row in _dashboard_metrics():
+        if not isinstance(row[0], str) or not row[0].startswith("Threefold/") or row[0] == "Threefold/acme-stack":
+            continue
+        namespace, metric = row[0], row[1]
+        assert (namespace, metric) in emitted, f"{namespace} {metric} is not emitted by the handler"
+        assert emitted[(namespace, metric)], f"{namespace} {metric} is emitted with other dimensions"
+        dimensions = dict(zip(row[2:-1:2], row[3:-1:2]))
+        assert dimensions == record_dimensions, f"{metric}: the widget's dimensions are not the ones emitted"
+
+
+def _default_emf_dimensions() -> dict[str, str]:
+    import contextlib
+    import io
+
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        emit_threefold_emf_metrics({"TemplateProbe": 1.0})
+    record = json.loads(buffer.getvalue())
+    keys = record["_aws"]["CloudWatchMetrics"][0]["Dimensions"][0]
+    return {key: record[key] for key in keys}
+
+
+def test_the_dashboard_alarm_widget_lists_every_alarm() -> None:
+    body = _dashboard_body()
+    listed = set(re.findall(r'"\$\{(\w+)\.Arn\}"', body))
+    assert listed == set(_alarms()), "An alarm missing from the widget is an alarm nobody looks at"

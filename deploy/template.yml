@@ -743,6 +743,214 @@ Resources:
       OKActions:
         - !Ref ThreefoldAlarmTopic
 
+  ThreefoldOperationsDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub '${AWS::StackName}-operations'
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "text", "x": 0, "y": 0, "width": 24, "height": 2,
+              "properties": {
+                "markdown": "## ${AWS::StackName}\nThe API, the function and the table of this stack, and the governance numbers read from this stack's own log. The last row is account-wide: Bedrock and the service's shared metric namespaces cannot tell the two stacks apart."
+              }
+            },
+            {
+              "type": "alarm", "x": 0, "y": 2, "width": 24, "height": 4,
+              "properties": {
+                "title": "Alarms",
+                "alarms": [
+                  "${ThreefoldFunctionErrorsAlarm.Arn}",
+                  "${ThreefoldFunctionThrottlesAlarm.Arn}",
+                  "${ThreefoldFunctionDurationAlarm.Arn}",
+                  "${ThreefoldApi5xxRateAlarm.Arn}",
+                  "${ThreefoldApi4xxRateAlarm.Arn}",
+                  "${ThreefoldTableThrottlesAlarm.Arn}",
+                  "${ThreefoldTableSystemErrorsAlarm.Arn}",
+                  "${ThreefoldHaltedSessionCallsAlarm.Arn}",
+                  "${ThreefoldEvaluationLatencyAlarm.Arn}",
+                  "${ThreefoldCallVolumeAlarm.Arn}"
+                ]
+              }
+            },
+            {
+              "type": "metric", "x": 0, "y": 6, "width": 6, "height": 6,
+              "properties": {
+                "title": "Tool calls evaluated and approved",
+                "region": "${AWS::Region}", "view": "timeSeries", "stacked": false, "period": 300, "stat": "Sum",
+                "metrics": [
+                  ["Threefold/${AWS::StackName}", "ToolCallsEvaluated", {"id": "calls", "label": "Evaluated"}],
+                  ["Threefold/${AWS::StackName}", "VerdictApproved", {"id": "approved", "label": "Approved"}],
+                  [{"expression": "calls - FILL(approved, 0)", "id": "notapproved", "label": "Not approved: refused, or would have been under observe"}]
+                ]
+              }
+            },
+            {
+              "type": "metric", "x": 6, "y": 6, "width": 6, "height": 6,
+              "properties": {
+                "title": "Calls on a halted session",
+                "region": "${AWS::Region}", "view": "timeSeries", "stacked": false, "period": 300, "stat": "Sum",
+                "metrics": [
+                  ["Threefold/${AWS::StackName}", "CircuitBreakerTripped", {"label": "Circuit breaker tripped, the halting call included"}]
+                ],
+                "annotations": {"horizontal": [{"label": "Alarm", "value": 10}]}
+              }
+            },
+            {
+              "type": "metric", "x": 12, "y": 6, "width": 6, "height": 6,
+              "properties": {
+                "title": "Evaluation latency, ms",
+                "region": "${AWS::Region}", "view": "timeSeries", "stacked": false, "period": 300,
+                "metrics": [
+                  ["Threefold/${AWS::StackName}", "LatencyMs", {"stat": "Average", "label": "Average"}],
+                  ["Threefold/${AWS::StackName}", "LatencyMs", {"stat": "Maximum", "label": "Maximum"}]
+                ],
+                "annotations": {"horizontal": [{"label": "Slow-call alarm", "value": ${SlowCallAlarmMs}}]}
+              }
+            },
+            {
+              "type": "metric", "x": 18, "y": 6, "width": 6, "height": 6,
+              "properties": {
+                "title": "Session spend, USD",
+                "region": "${AWS::Region}", "view": "timeSeries", "stacked": false, "period": 300,
+                "metrics": [
+                  ["Threefold/${AWS::StackName}", "CurrentSessionCostUSD", {"stat": "Maximum", "label": "Highest session spend, as callers declare it"}]
+                ]
+              }
+            },
+            {
+              "type": "metric", "x": 0, "y": 12, "width": 8, "height": 6,
+              "properties": {
+                "title": "API requests",
+                "region": "${AWS::Region}", "view": "timeSeries", "stacked": false, "period": 300, "stat": "Sum",
+                "metrics": [
+                  ["AWS/ApiGateway", "Count", "ApiId", "${ThreefoldHttpApi}", "Stage", "prod", {"label": "Requests"}]
+                ]
+              }
+            },
+            {
+              "type": "metric", "x": 8, "y": 12, "width": 8, "height": 6,
+              "properties": {
+                "title": "API errors",
+                "region": "${AWS::Region}", "view": "timeSeries", "stacked": false, "period": 300, "stat": "Sum",
+                "metrics": [
+                  ["AWS/ApiGateway", "4xx", "ApiId", "${ThreefoldHttpApi}", "Stage", "prod", {"label": "4xx"}],
+                  ["AWS/ApiGateway", "5xx", "ApiId", "${ThreefoldHttpApi}", "Stage", "prod", {"label": "5xx"}]
+                ]
+              }
+            },
+            {
+              "type": "metric", "x": 16, "y": 12, "width": 8, "height": 6,
+              "properties": {
+                "title": "API latency, ms",
+                "region": "${AWS::Region}", "view": "timeSeries", "stacked": false, "period": 300,
+                "metrics": [
+                  ["AWS/ApiGateway", "Latency", "ApiId", "${ThreefoldHttpApi}", "Stage", "prod", {"stat": "p50", "label": "Latency p50"}],
+                  ["AWS/ApiGateway", "Latency", "ApiId", "${ThreefoldHttpApi}", "Stage", "prod", {"stat": "p95", "label": "Latency p95"}],
+                  ["AWS/ApiGateway", "IntegrationLatency", "ApiId", "${ThreefoldHttpApi}", "Stage", "prod", {"stat": "p95", "label": "Integration latency p95"}]
+                ]
+              }
+            },
+            {
+              "type": "metric", "x": 0, "y": 18, "width": 8, "height": 6,
+              "properties": {
+                "title": "Function invocations, errors, throttles",
+                "region": "${AWS::Region}", "view": "timeSeries", "stacked": false, "period": 300, "stat": "Sum",
+                "metrics": [
+                  ["AWS/Lambda", "Invocations", "FunctionName", "${ThreefoldFunction}", {"label": "Invocations"}],
+                  ["AWS/Lambda", "Errors", "FunctionName", "${ThreefoldFunction}", {"label": "Errors"}],
+                  ["AWS/Lambda", "Throttles", "FunctionName", "${ThreefoldFunction}", {"label": "Throttles"}]
+                ]
+              }
+            },
+            {
+              "type": "metric", "x": 8, "y": 18, "width": 8, "height": 6,
+              "properties": {
+                "title": "Function duration, ms",
+                "region": "${AWS::Region}", "view": "timeSeries", "stacked": false, "period": 300,
+                "metrics": [
+                  ["AWS/Lambda", "Duration", "FunctionName", "${ThreefoldFunction}", {"stat": "p50", "label": "p50"}],
+                  ["AWS/Lambda", "Duration", "FunctionName", "${ThreefoldFunction}", {"stat": "p95", "label": "p95"}],
+                  ["AWS/Lambda", "Duration", "FunctionName", "${ThreefoldFunction}", {"stat": "Maximum", "label": "Maximum"}]
+                ],
+                "annotations": {"horizontal": [{"label": "Slow-call alarm", "value": ${SlowCallAlarmMs}}]}
+              }
+            },
+            {
+              "type": "metric", "x": 16, "y": 18, "width": 8, "height": 6,
+              "properties": {
+                "title": "Function concurrency",
+                "region": "${AWS::Region}", "view": "timeSeries", "stacked": false, "period": 60,
+                "metrics": [
+                  ["AWS/Lambda", "ConcurrentExecutions", "FunctionName", "${ThreefoldFunction}", {"stat": "Maximum", "label": "Running at once"}]
+                ],
+                "annotations": {"horizontal": [{"label": "Reservation, 0 means none", "value": ${ReservedConcurrency}}]}
+              }
+            },
+            {
+              "type": "metric", "x": 0, "y": 24, "width": 8, "height": 6,
+              "properties": {
+                "title": "Table capacity consumed",
+                "region": "${AWS::Region}", "view": "timeSeries", "stacked": false, "period": 300, "stat": "Sum",
+                "metrics": [
+                  ["AWS/DynamoDB", "ConsumedReadCapacityUnits", "TableName", "${ThreefoldTable}", {"label": "Read units"}],
+                  ["AWS/DynamoDB", "ConsumedWriteCapacityUnits", "TableName", "${ThreefoldTable}", {"label": "Write units"}]
+                ]
+              }
+            },
+            {
+              "type": "metric", "x": 8, "y": 24, "width": 8, "height": 6,
+              "properties": {
+                "title": "Table throttles and server errors",
+                "region": "${AWS::Region}", "view": "timeSeries", "stacked": false, "period": 300,
+                "metrics": [
+                  [{"expression": "SELECT SUM(ThrottledRequests) FROM SCHEMA(\"AWS/DynamoDB\", Operation, TableName) WHERE TableName = '${ThreefoldTable}'", "id": "throttled", "label": "Throttled requests", "period": 300}],
+                  [{"expression": "SELECT SUM(SystemErrors) FROM SCHEMA(\"AWS/DynamoDB\", Operation, TableName) WHERE TableName = '${ThreefoldTable}'", "id": "failed", "label": "Server errors", "period": 300}]
+                ]
+              }
+            },
+            {
+              "type": "metric", "x": 16, "y": 24, "width": 8, "height": 6,
+              "properties": {
+                "title": "Table latency by operation, ms",
+                "region": "${AWS::Region}", "view": "timeSeries", "stacked": false, "period": 300,
+                "metrics": [
+                  [{"expression": "SELECT AVG(SuccessfulRequestLatency) FROM SCHEMA(\"AWS/DynamoDB\", Operation, TableName) WHERE TableName = '${ThreefoldTable}' GROUP BY Operation", "id": "latency", "period": 300}]
+                ]
+              }
+            },
+            {
+              "type": "metric", "x": 0, "y": 30, "width": 12, "height": 6,
+              "properties": {
+                "title": "Bedrock tokens by model, whole account",
+                "region": "${AWS::Region}", "view": "timeSeries", "stacked": false, "period": 3600,
+                "metrics": [
+                  [{"expression": "SELECT SUM(InputTokenCount) FROM SCHEMA(\"AWS/Bedrock\", ModelId) GROUP BY ModelId", "id": "input", "period": 3600}],
+                  [{"expression": "SELECT SUM(OutputTokenCount) FROM SCHEMA(\"AWS/Bedrock\", ModelId) GROUP BY ModelId", "id": "output", "period": 3600}]
+                ]
+              }
+            },
+            {
+              "type": "metric", "x": 12, "y": 30, "width": 12, "height": 6,
+              "properties": {
+                "title": "Demo and operator events, both stacks",
+                "region": "${AWS::Region}", "view": "timeSeries", "stacked": false, "period": 3600, "stat": "Sum",
+                "metrics": [
+                  ["Threefold/SafetyTrips", "LoopDetected", "Project", "Acme-Core", "Environment", "Production", {"label": "Demo loop halted"}],
+                  ["Threefold/Security", "SecretLeakBlocked", "Project", "Acme-Core", "Environment", "Production", {"label": "Demo secret refused"}],
+                  ["Threefold/Audits", "CertificatesIssued", "Project", "Acme-Core", "Environment", "Production", {"label": "Certificates issued"}],
+                  ["Threefold/Audits", "CertificatesRefused", "Project", "Acme-Core", "Environment", "Production", {"label": "Certificates refused"}],
+                  ["Threefold/Audits", "LayeringRulesUpdated", "Project", "Acme-Core", "Environment", "Production", {"label": "Rules saved"}],
+                  ["Threefold/Emergency", "SessionManuallyTerminated", "Project", "Acme-Core", "Environment", "Production", {"label": "Sessions terminated"}],
+                  ["Threefold/Emergency", "SessionResumed", "Project", "Acme-Core", "Environment", "Production", {"label": "Sessions resumed"}],
+                  ["Threefold/Operations", "HealthCheck", "Project", "Acme-Core", "Environment", "Production", {"label": "Status probes"}]
+                ]
+              }
+            }
+          ]
+        }
+
 # Each turns an operations parameter's value for "none" into no property or
 # no resource at all, rather than a resource configured with nothing.
 Conditions:
@@ -750,6 +958,9 @@ Conditions:
   HasAlarmEmail: !Not [!Equals [!Ref AlarmEmail, '']]
 
 Outputs:
+  OperationsDashboardUrl:
+    Description: The CloudWatch dashboard for this stack
+    Value: !Sub 'https://${AWS::Region}.console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#dashboards/dashboard/${ThreefoldOperationsDashboard}'
   AlarmTopicArn:
     Description: The SNS topic every alarm of this stack notifies
     Value: !Ref ThreefoldAlarmTopic
