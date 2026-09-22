@@ -621,12 +621,17 @@ class DynamoDBSessionRepository:
         """
         key = _decision_key(timestamp, verdict_id)
         if self._table is not None:
-            names = {"#project": "project_name"}
+            # Every name through a placeholder, so no attribute can collide with
+            # one of DynamoDB's reserved words.
+            names = {
+                "#project": "project_name", "#review": "review", "#at": "reviewed_at",
+                "#note": "review_note", "#by": "reviewed_by",
+            }
             values: Dict[str, Any] = {":project": project}
             if label is None:
-                expression = "REMOVE review, reviewed_at, review_note, reviewed_by"
+                expression = "REMOVE #review, #at, #note, #by"
             else:
-                expression = "SET review = :label, reviewed_at = :at, review_note = :note, reviewed_by = :by"
+                expression = "SET #review = :label, #at = :at, #note = :note, #by = :by"
                 values.update({":label": label, ":at": reviewed_at, ":note": note, ":by": reviewed_by})
             try:
                 response = self._table.update_item(

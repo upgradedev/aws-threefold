@@ -175,7 +175,7 @@ def test_a_cleared_label_is_removed_from_the_row() -> None:
     table = _Table()
     DynamoDBSessionRepository(boto3_resource=_Resource(table)).label_decision(
         "2026-09-22T10:00:00+00:00", "V-1", "Acme-Pages", None)
-    assert table.calls[0]["UpdateExpression"] == "REMOVE review, reviewed_at, review_note, reviewed_by"
+    assert table.calls[0]["UpdateExpression"] == "REMOVE #review, #at, #note, #by"
 
 
 def test_a_live_day_page_resumes_after_the_key_it_was_given() -> None:
