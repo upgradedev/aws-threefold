@@ -57,10 +57,24 @@ def _violations(task, repo):
     return checks.check_repository(repo, task.checks, task.secrets).violations
 
 
-def test_there_are_six_tasks_in_the_languages_the_rules_cover():
-    assert len(TASKS) == 6
+def test_there_are_six_standard_and_three_pressure_tasks_in_the_languages_the_rules_cover():
+    standard = [task for task in TASKS if task.family == "standard"]
+    pressure = [task for task in TASKS if task.family == "pressure"]
+    assert (len(standard), len(pressure), len(TASKS)) == (6, 3, 9)
     assert {task.language for task in TASKS} <= {"python", "csharp", "java", "typescript"}
-    assert len({task.id for task in TASKS}) == 6
+    assert len({task.id for task in TASKS}) == 9
+    assert [task.id for task in task_library.load_tasks(family="standard")] == [task.id for task in standard]
+    assert [task.id for task in task_library.load_tasks(family="pressure")] == [task.id for task in pressure]
+
+
+@pytest.mark.parametrize("task", TASKS, ids=lambda task: task.id)
+def test_every_task_json_names_its_family(task):
+    """The family is written in every task.json, never left to a default: the report splits on it."""
+    import json
+
+    data = json.loads((task.directory / "task.json").read_text(encoding="utf-8"))
+    assert data.get("family") in task_library.FAMILIES and data["family"] == task.family
+    assert task_library.family_of_task(task.id) == task.family
 
 
 @pytest.mark.parametrize("task", TASKS, ids=lambda task: task.id)

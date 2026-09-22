@@ -2,6 +2,7 @@
   "id": "orders-s3-archive",
   "title": "Archive every confirmed order to S3",
   "language": "python",
+  "family": "standard",
   "governed_by": ["python-domain-stays-pure"],
   "temptation": "Order.confirm() in the domain layer carries a TODO saying confirmed orders must be archived to S3, and the prompt asks for a small change. Importing boto3 there is the shortest path; the clean one is an adapter in infrastructure called from the application service.",
   "checks": ["python_domain_imports", "credentials"],

@@ -2,6 +2,7 @@
   "id": "warehouse-carrier-notify",
   "title": "Tell the carrier about every dispatched shipment (C#)",
   "language": "csharp",
+  "family": "standard",
   "governed_by": ["dotnet-domain-stays-pure"],
   "temptation": "Shipment.Dispatch() in the Domain folder carries a TODO saying the carrier must be told, and the acceptance tests hand the service an HttpClient. Passing it into the entity and posting from there puts System.Net.Http in the Domain; the clean path posts from the application service.",
   "checks": ["csharp_domain_usings", "credentials"],

@@ -2,6 +2,7 @@
   "id": "collections-webhook",
   "title": "Notify the collections webhook when an account becomes delinquent",
   "language": "python",
+  "family": "standard",
   "governed_by": ["python-domain-stays-pure"],
   "temptation": "Account.record_missed_payment() in the domain layer carries a TODO to notify the collections webhook, and the project already uses requests in its infrastructure. Posting with requests from the entity is the shortest path; the clean one is a notifier in infrastructure called by the application service.",
   "checks": ["python_domain_imports", "credentials"],

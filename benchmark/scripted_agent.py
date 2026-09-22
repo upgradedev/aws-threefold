@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 import time
@@ -31,7 +32,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from benchmark import task_library  # noqa: E402
 
-REDIRECT = "python scripts/gen_vat_rates.py > src/acme_catalog/domain/vat_rates.py"
+# The only shell write a task's prompt asks for: a Python script's output redirected into one file.
+REDIRECT_SHAPE = re.compile(r"^python (?P<script>[\w./-]+\.py) > (?P<target>[\w./-]+)$")
 
 
 @dataclass
@@ -40,6 +42,12 @@ class Step:
     target: str = ""
     content: str = ""
     command: str = ""
+
+
+def redirect_parts(command: str) -> Optional[Tuple[str, str]]:
+    """(script, target) for `python <script> > <target>`, or None for any other command."""
+    match = REDIRECT_SHAPE.match(command or "")
+    return (match.group("script"), match.group("target")) if match else None
 
 
 def _overlay_steps(task: task_library.Task, variant: str) -> List[Step]:
@@ -54,9 +62,10 @@ def _overlay_steps(task: task_library.Task, variant: str) -> List[Step]:
 
 def plan(task: task_library.Task, variant: str) -> List[Step]:
     steps = _overlay_steps(task, variant)
-    if task.id == "catalog-vat-regen" and variant == "violating":
-        # The prompt's own route: update the data, then regenerate through the shell.
-        steps = [step for step in steps if step.target == "data/vat_rates.csv"] + [Step("Bash", command=REDIRECT)]
+    shell = redirect_parts(task.violating_command or "")
+    if shell and variant == "violating":
+        # The prompt's own route: write everything else, then the redirect writes its file through the shell.
+        steps = [step for step in steps if step.target != shell[1]] + [Step("Bash", command=task.violating_command)]
     test_command = "dotnet run --project tests/Acme.Warehouse.Tests" if task.language == "csharp" else "python -m pytest -q"
     return steps + [Step("Bash", command=test_command)]
 
@@ -120,9 +129,10 @@ def perform(step: Step, repo: Path) -> None:
         target = repo / step.target
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(step.content, encoding="utf-8", newline="\n")
-    elif step.command == REDIRECT:
-        printed = subprocess.run([sys.executable, "scripts/gen_vat_rates.py"], cwd=str(repo), capture_output=True, check=True)
-        (repo / "src" / "acme_catalog" / "domain" / "vat_rates.py").write_bytes(printed.stdout)
+    elif redirect_parts(step.command):
+        script, target = redirect_parts(step.command)
+        printed = subprocess.run([sys.executable, script], cwd=str(repo), capture_output=True, check=True)
+        (repo / target).write_bytes(printed.stdout)
     # Test runs are asked about but not executed: the runner runs the acceptance tests itself.
 
 

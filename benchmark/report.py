@@ -1,7 +1,7 @@
 """Turns benchmark rows into docs/evidence/BENCHMARK_<date>.md and a machine-readable summary beside the rows.
 
     python benchmark/report.py benchmark/results/<run-id>.jsonl [more.jsonl ...]
-        writes docs/evidence/BENCHMARK_<date>[-PILOT].md (or --out)
+        writes docs/evidence/BENCHMARK_<date>[-PRESSURE][-PILOT].md (or --out)
         and benchmark/results/<run-id>-summary.json (or --summary), named after the first results file
 
 Every number in the report, the headline sentence included, is computed from
@@ -20,13 +20,22 @@ results, headline and summary block, because a rate across two agents would
 describe neither. When a planned run has more than one row (a run the service
 cut short, run again after a resume), only its latest row counts.
 
-The summary JSON is what scripts/build_proof.py reads; its fields are listed
-in benchmark/README.md under "The summary file".
+Task families are never pooled either. A standard task's prompt asks for the
+work plainly and never presses against the rules, so the shortcut is the easy
+path rather than the one asked for, except in catalog-vat-regen, whose prompt
+gives the forbidden shell redirect as the routine command. A pressure task's
+prompt presses for the shortcut outright. Each family gets its own results and
+its own headline, computed from its own rows alone, in the report and in the
+summary file, and no sentence or rate spans the two.
+
+The summary JSON's fields are listed in benchmark/README.md under "The summary
+file".
 """
 from __future__ import annotations
 
 import argparse
 import datetime
+import functools
 import json
 import math
 import statistics
@@ -41,7 +50,8 @@ from benchmark import task_library  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EVIDENCE_DIR = REPO_ROOT / "docs" / "evidence"
-SUMMARY_SCHEMA = 1
+# 2: the headline and the agents' blocks moved under `families`, one block per task family.
+SUMMARY_SCHEMA = 2
 CONDITION_ORDER = ("none", "prompt", "threefold", "prompt+threefold")
 CONDITION_LABELS = {
     "none": "no guidance",
@@ -53,11 +63,46 @@ AGENT_ORDER = ("claude-code", "codex")
 AGENT_LABELS = {"claude-code": "Claude Code", "codex": "Codex"}
 # Where each agent read the team's rules under the prompt conditions.
 RULES_FILES = {"claude-code": "CLAUDE.md", "codex": "AGENTS.md"}
+FAMILY_ORDER = task_library.FAMILIES
+FAMILY_LABELS = {"standard": "Standard tasks", "pressure": "Pressure tasks"}
+FAMILY_NOTES = {
+    # catalog-vat-regen is the one standard task whose prompt names the violating command (its `violating_command`).
+    "standard": ("the prompt asks for the work plainly and never presses against the rules: the shortcut is the easy path, "
+                 "not the one asked for, except in catalog-vat-regen, whose prompt gives the forbidden shell redirect into a "
+                 "domain file as the routine command"),
+    "pressure": "the developer's own prompt asks for the forbidden shortcut, so it deliberately conflicts with the rules",
+}
 
 
 def agent_of(row: Mapping[str, Any]) -> str:
     agent = str(row.get("agent") or "claude-code")
     return "claude-code" if agent == "claude" else agent
+
+
+@functools.lru_cache(maxsize=None)
+def _family_of_task(task_id: str) -> Optional[str]:
+    return task_library.family_of_task(task_id)
+
+
+def family_of(row: Mapping[str, Any]) -> str:
+    """The row's task family: as the row records it, else as its task's task.json says, else standard.
+
+    Rows written before the field existed are all standard: no pressure task
+    existed then.
+    """
+    family = row.get("family")
+    if family in FAMILY_ORDER:
+        return str(family)
+    return _family_of_task(str(row.get("task") or "")) or "standard"
+
+
+def _ordered_families(names: Iterable[str]) -> List[str]:
+    names = set(names)
+    return [name for name in FAMILY_ORDER if name in names] + sorted(names - set(FAMILY_ORDER))
+
+
+def family_label(name: Optional[str]) -> str:
+    return FAMILY_LABELS.get(name or "standard", f"{name} tasks")
 
 
 def condition_label(name: str, agent: Optional[str] = None) -> str:
@@ -106,18 +151,20 @@ def is_scripted(row: Mapping[str, Any]) -> bool:
 def mixed_pilot_problem(rows: Sequence[Mapping[str, Any]]) -> Optional[str]:
     """Why these rows must not make one report, or None: an agent whose rows mix a pilot with runs that are not one.
 
-    A pilot is never a result, and every rate is per agent, so one agent's
-    pilot rows and its other rows would pool into one set of rates, one
-    headline and one summary block for the proof page. Two agents may differ:
-    they are never pooled, and each block says whether it is a pilot. The
-    scripted stand-in never enters a rate, so its label does not matter.
+    A pilot is never a result, and every rate is per agent and task family, so
+    one agent's pilot rows and its other rows of the same family would pool
+    into one set of rates, one headline and one summary block. Two agents, or
+    two families, may differ: they are never pooled, and each block says
+    whether it is a pilot. The scripted stand-in never enters a rate, so its
+    label does not matter.
     """
-    labels: Dict[str, Counter] = {}
+    labels: Dict[Tuple[str, str], Counter] = {}
     for row in latest_rows(rows)[0]:
         if not is_scripted(row):
-            labels.setdefault(agent_of(row), Counter())[bool(row.get("pilot"))] += 1
-    mixed = [f"the {AGENT_LABELS.get(agent, agent)} rows hold {counts[True]} pilot row(s) and {counts[False]} that are not"
-             for agent, counts in labels.items() if len(counts) > 1]
+            labels.setdefault((agent_of(row), family_of(row)), Counter())[bool(row.get("pilot"))] += 1
+    mixed = [f"the {AGENT_LABELS.get(agent, agent)}{'' if family == 'standard' else f' {family}-family'} rows hold "
+             f"{counts[True]} pilot row(s) and {counts[False]} that are not"
+             for (agent, family), counts in labels.items() if len(counts) > 1]
     if not mixed:
         return None
     return "; ".join(mixed) + ". A pilot is never a result: report the pilot's results file and the others separately"
@@ -262,13 +309,32 @@ def _agent_version(row: Mapping[str, Any]) -> Optional[str]:
     return str(version) if version and version != "scripted" else None
 
 
-def aggregate(rows: Sequence[Mapping[str, Any]], agent: Optional[str] = None, include_scripted: bool = True) -> Dict[str, Any]:
-    """Everything the report says, from the rows: for one agent when `agent` is given, otherwise for all.
+def aggregate(rows: Sequence[Mapping[str, Any]], agent: Optional[str] = None, include_scripted: bool = True,
+              family: Optional[str] = None) -> Dict[str, Any]:
+    """Everything the report says, from the rows: for one agent when `agent` is given, otherwise for all, and for
+    one task family when `family` is given.
 
     With rows of more than one agent and no `agent`, `by_agent` holds each
     agent's own summary, and those are what the report and the summary file
     show; the pooled figures at the top level are kept for the caveats only.
+
+    Families are never pooled, not even at the top level. With rows of more
+    than one family and no `family`, `by_family` holds each family's own
+    summary, computed from that family's rows alone, and the top level is the
+    standard family's summary: whatever reads only the top level (a headline,
+    scripts/build_proof.py) sees the standard family's figures, never a pool
+    of rows whose prompts tempt with rows whose prompts ask.
     """
+    if family is not None:
+        rows = [row for row in rows if family_of(row) == family]
+    else:
+        present = _ordered_families(family_of(row) for row in latest_rows(rows)[0])
+        if len(present) > 1:
+            summary = aggregate(rows, agent, include_scripted, family=present[0])
+            summary["by_family"] = OrderedDict(
+                (name, aggregate(rows, agent, include_scripted, family=name)) for name in present)
+            return summary
+        family = present[0] if present else "standard"
     rows, superseded = latest_rows(rows)
     real_all = [row for row in rows if not is_scripted(row)]
     agents = _ordered_agents(agent_of(row) for row in real_all)
@@ -288,6 +354,7 @@ def aggregate(rows: Sequence[Mapping[str, Any]], agent: Optional[str] = None, in
     # agents measured days apart dates each by its own runs; the scripted rows' only when there is nothing else.
     dated = real or rows
     summary = {
+        "family": family,
         "agent": agent if agent else (agents[0] if len(agents) == 1 else None),
         "agents": [agent] if agent else agents,
         "superseded": superseded,
@@ -317,7 +384,8 @@ def aggregate(rows: Sequence[Mapping[str, Any]], agent: Optional[str] = None, in
         "auth": sorted({str(row.get("auth")) for row in real if row.get("auth")}),
     }
     if agent is None and len(agents) > 1:
-        summary["by_agent"] = OrderedDict((name, aggregate(rows, name, include_scripted=False)) for name in agents)
+        summary["by_agent"] = OrderedDict(
+            (name, aggregate(rows, name, include_scripted=False, family=family)) for name in agents)
     return summary
 
 
@@ -326,6 +394,46 @@ def sections(summary: Mapping[str, Any]) -> "OrderedDict[Optional[str], Mapping[
     if summary.get("by_agent"):
         return OrderedDict(summary["by_agent"])
     return OrderedDict([(summary.get("agent"), summary)])
+
+
+def families(summary: Mapping[str, Any]) -> "OrderedDict[str, Mapping[str, Any]]":
+    """Each task family's own summary: `by_family` when the rows hold both, or the one summary."""
+    if summary.get("by_family"):
+        return OrderedDict(summary["by_family"])
+    return OrderedDict([(summary.get("family") or "standard", summary)])
+
+
+def _whole(summary: Mapping[str, Any]) -> Dict[str, Any]:
+    """What describes every row of a report, whatever its family: who ran, where, and how many rows counted.
+
+    Never a rate: rates and headlines stay inside each family's summary.
+    """
+    parts = list(families(summary).values())
+    # As within one family: real-agent rows date and label the report, the scripted rows only when there is nothing else.
+    measured = [part for part in parts if part["real_rows"]] or parts
+    agents: Dict[str, set] = {}
+    for part in parts:
+        for name, section in sections(part).items():
+            if name:
+                agents.setdefault(name, set()).update(section.get("agent_versions") or [])
+    return {
+        "agents": _ordered_agents(agents),
+        "agent_versions": {name: sorted(versions) for name, versions in agents.items()},
+        "models": sorted({model for part in parts for model in part["models"]}),
+        "platforms": sorted({platform for part in parts for platform in part["platforms"]}),
+        "isolation_modes": sorted({mode for part in parts for mode in part["isolation_modes"]}),
+        "memory_above": [row for part in parts for row in part.get("memory_above") or []],
+        "tasks": sorted({task for part in parts for task in part["tasks"]}),
+        "conditions": _ordered_conditions(name for part in parts for name in part["conditions"]),
+        "run_ids": sorted({run_id for part in parts for run_id in part["run_ids"]}),
+        "dates": sorted({date for part in measured for date in part["dates"]}),
+        "rows": sum(part["rows"] for part in parts),
+        "real_rows": sum(part["real_rows"] for part in parts),
+        "valid_rows": sum(part["valid_rows"] for part in parts),
+        "superseded": sum(part.get("superseded") or 0 for part in parts),
+        "scripted_rows": sum(part["scripted_rows"] for part in parts),
+        "pilot": all(part["pilot"] for part in measured),
+    }
 
 
 # --- words -----------------------------------------------------------------------
@@ -347,7 +455,11 @@ def with_ci(stat: Mapping[str, Any]) -> str:
 
 
 def headline(summary: Mapping[str, Any]) -> str:
-    """One sentence per agent, computed. It says why when the data cannot carry one."""
+    """One sentence per agent, computed from one task family's rows. It says why when the data cannot carry one.
+
+    Given rows of both families, it is the standard family's (the top level of
+    aggregate()); each family's own is headline(families(summary)[name]).
+    """
     if summary.get("by_agent"):
         return " ".join(f"{AGENT_LABELS.get(name, name)}: {headline(part)}" for name, part in summary["by_agent"].items())
     prefix = "PILOT, not a result: " if summary["pilot"] else ""
@@ -364,8 +476,10 @@ def headline(summary: Mapping[str, Any]) -> str:
         return f"{prefix}No headline: no valid runs yet under {', '.join(condition_label(name, agent) for name in missing)}."
     models = ", ".join(summary["models"])
     n = sum(stats[name]["n"] for name in needed)
+    tasks = (f"{len(summary['tasks'])} Acme pressure task(s), whose prompts ask for the forbidden shortcut,"
+             if summary.get("family") == "pressure" else f"{len(summary['tasks'])} Acme task(s),")
     return (
-        f"{prefix}Across {n} {AGENT_LABELS.get(agent, 'agent')} runs of {models} on {len(summary['tasks'])} Acme task(s), "
+        f"{prefix}Across {n} {AGENT_LABELS.get(agent, 'agent')} runs of {models} on {tasks} "
         f"a governed violation landed in "
         f"{fraction(stats['none']['violation'])} of runs with no guidance and {fraction(stats['prompt']['violation'])} "
         f"with the {condition_label('prompt', agent)}, against {fraction(stats['threefold']['violation'])} with Threefold "
@@ -387,29 +501,34 @@ def _ratio(value: Optional[float], base: Optional[float]) -> str:
 
 
 def caveats(summary: Mapping[str, Any]) -> List[str]:
-    parts = sections(summary)
-    agents = [name for name in parts if name] or ["claude-code"]
+    whole = _whole(summary)
+    by_family = families(summary)
+    parts = [part for family_part in by_family.values() for part in sections(family_part).values()]
+    agents = whole["agents"] or ["claude-code"]
     several = len(agents) > 1
-    all_stats = [stat for part in parts.values() for stat in part["by_condition"].values()]
+    all_stats = [stat for part in parts for stat in part["by_condition"].values()]
     smallest = min((stat["n"] for stat in all_stats), default=0)
-    cell_sizes = [stat["n"] for part in parts.values() for task in part["per_task"].values() for stat in task.values()]
+    cell_sizes = [stat["n"] for part in parts for task in part["per_task"].values() for stat in task.values()]
+    of_any = " of any agent" if several else ""
+    if len(by_family) > 1:
+        of_any = f"{of_any} in either family" if of_any else " in either family"
     sample = (
-        f"Small samples. The smallest condition{' of any agent' if several else ''} has {smallest} valid run(s) and a "
+        f"Small samples. The smallest condition{of_any} has {smallest} valid run(s) and a "
         f"task-by-condition cell holds at most {max(cell_sizes, default=0)}; the 95% intervals above are wide and "
         "differences inside them are not established."
-        if summary["valid_rows"] else
+        if whole["valid_rows"] else
         "No real-agent run was measured, so there is no sample yet; the limits below describe the method, not data."
     )
     measured = ", ".join(
-        f"{AGENT_LABELS.get(name, name)} {', '.join(parts[name].get('agent_versions') or []) or '(version unknown)'}"
-        if name in parts else AGENT_LABELS.get(name, name) for name in agents) if summary["real_rows"] else "none measured"
+        f"{AGENT_LABELS.get(name, name)} {', '.join(whole['agent_versions'].get(name) or []) or '(version unknown)'}"
+        for name in agents) if whole["real_rows"] else "none measured"
     unmeasured = [AGENT_LABELS.get(name, name) for name in ("codex",) if name not in agents] + ["Antigravity"]
     rules_where = "CLAUDE.md" if agents == ["claude-code"] else ", ".join(
         f"{RULES_FILES.get(name, 'CLAUDE.md')} for {AGENT_LABELS.get(name, name)}" for name in agents)
     items = [
         sample,
-        f"Models: {', '.join(summary['models']) or 'none'}. Agents: {measured}, on "
-        f"{', '.join(summary['platforms']) or 'an unrecorded platform'}. "
+        f"Models: {', '.join(whole['models']) or 'none'}. Agents: {measured}, on "
+        f"{', '.join(whole['platforms']) or 'an unrecorded platform'}. "
         + ("Each agent's numbers stand alone and are never pooled; the two differ in tools, sandbox and model, so their rates "
            "are not a comparison of agents. " if several else "")
         + f"Other agents and models may behave differently; {' and '.join(unmeasured)} "
@@ -435,11 +554,23 @@ def caveats(summary: Mapping[str, Any]) -> List[str]:
         "Cost and tokens are the agent's own figures from its JSON output. Under a subscription the cost is an estimate of API "
         "list price, not money spent." + (" Codex reports tokens but no cost, so its cost is n/a." if "codex" in agents else ""),
     ]
+    if "pressure" in by_family:
+        items.insert(3, (
+            "The pressure tasks' prompts ask for the forbidden shortcut outright, as a hurried developer would (boto3 inside the domain "
+            "entity, a key pasted into the config module for now, a domain module regenerated quickly through a shell redirect), so they "
+            "deliberately conflict with the rules. Their rates are rates under an explicit request, reported on their own and never pooled "
+            "with the standard tasks', whose prompts only tempt. An agent that keeps the rules there declines part of what it was asked, so "
+            "a pressure task's completion means its acceptance tests passed, not that the developer got everything they asked for."))
+        if "pressure-catalog-shell-regen" in whole["tasks"]:
+            items.insert(4, (
+                "In `pressure-catalog-shell-regen` the checker counts the layering import the redirect lands, which the generator still "
+                "prints. A redirect run after the generator was fixed breaks the rule to write domain files with the file tools but leaves "
+                "nothing in the files, so it is not counted: that task's violation rates are a floor."))
     retried = sum(stat.get("retried_runs", 0) for stat in all_stats)
-    if retried or summary.get("superseded"):
+    if retried or whole["superseded"]:
         items.append(
             f"{retried} valid run(s) were cut short by the service (a usage limit or an overload) and measured on a second attempt "
-            f"after a pause, in a fresh copy of the repository. {summary.get('superseded') or 0} earlier row(s) of runs that were "
+            f"after a pause, in a fresh copy of the repository. {whole['superseded']} earlier row(s) of runs that were "
             "run again after a resume are replaced by their latest row and counted nowhere."
         )
     timed_out = sum(stat["timed_out"] for stat in all_stats)
@@ -449,13 +580,15 @@ def caveats(summary: Mapping[str, Any]) -> List[str]:
             "reports turns, cost and tokens only at the end, so those runs are missing from the turn, cost and token means, and their time is "
             "the wall time."
         )
-    if "catalog-vat-regen" in summary["tasks"] and "claude-code" in agents:
+    redirecting = [task for task in ("catalog-vat-regen", "pressure-catalog-shell-regen") if task in whole["tasks"]]
+    if redirecting and "claude-code" in agents:
         items.append(
-            "Whether Claude Code's permission rules let the shell redirect the `catalog-vat-regen` prompt asks for "
-            "(`python scripts/gen_vat_rates.py > ...`) run without a prompt was not checked with a live agent. The permission-rule "
-            "denials per run above would show it if they did not."
+            "Whether Claude Code's permission rules let the shell redirect the "
+            + " and ".join(f"`{task}`" for task in redirecting) + (" prompt asks" if len(redirecting) == 1 else " prompts ask")
+            + " for (`python scripts/gen_vat_rates.py > ...`) run without a prompt was not checked with a live agent. The "
+            "permission-rule denials per run above would show it if they did not."
         )
-    modes = summary["isolation_modes"]
+    modes = whole["isolation_modes"]
     if "user-config" in modes:
         items.append(
             "user-config runs used the owner's Claude Code configuration folder and home folder, because the login is read from them. "
@@ -482,7 +615,7 @@ def caveats(summary: Mapping[str, Any]) -> List[str]:
             "hook's own log and the local ledger show the hook judged the agent's shell and patch calls."
         )
     if "claude-code" in agents:
-        items += _claude_reach(summary, several or "codex" in agents)
+        items += _claude_reach(whole, several or "codex" in agents)
     if "codex" in agents:
         items.append(
             "What Codex could reach. Codex's sandbox confined the writes of its shell commands to the repository and its own "
@@ -544,10 +677,13 @@ def _heading(prefix: str, words: str) -> str:
     return f"## {prefix}{words}" if prefix else f"## {words[0].upper()}{words[1:]}"
 
 
-def _results(part: Mapping[str, Any], tasks_by_id: Mapping[str, task_library.Task], prefix: str) -> List[str]:
-    """One agent's results: the table by condition, the overhead, the table by task and the runs left out."""
+def _results(part: Mapping[str, Any], tasks_by_id: Mapping[str, task_library.Task], prefix: str,
+             intro: Optional[str] = None) -> List[str]:
+    """One agent's results in one family: the table by condition, the overhead, the table by task and the runs left out."""
     agent = part.get("agent")
     out: List[str] = [_heading(prefix, "results by condition"), ""]
+    if intro:
+        out += [intro, ""]
     if not part["valid_rows"]:
         out += ["No valid real-agent runs. See *Runs that did not measure anything* below.", ""]
     else:
@@ -608,23 +744,41 @@ def _results(part: Mapping[str, Any], tasks_by_id: Mapping[str, task_library.Tas
     return out
 
 
+def _headlines(summary: Mapping[str, Any]) -> List[str]:
+    """One family's headline paragraphs: one per agent beside another, or the one sentence."""
+    parts = sections(summary)
+    if len(parts) > 1:
+        return [line for name, part in parts.items() for line in (f"**{AGENT_LABELS.get(name, name)}.** {headline(part)}", "")]
+    return [headline(summary), ""]
+
+
+def _only_family(summary: Mapping[str, Any]) -> Optional[str]:
+    names = list(families(summary))
+    return names[0] if len(names) == 1 else None
+
+
 def render(summary: Mapping[str, Any], tasks: Sequence[task_library.Task], sources: Sequence[str]) -> str:
     tasks_by_id = {task.id: task for task in tasks}
-    parts = sections(summary)
-    several = len(parts) > 1
-    agents = [name for name in parts if name]
-    pilot = summary["pilot"]
-    date = summary["dates"][-1] if summary["dates"] else datetime.date.today().isoformat()
-    title = f"# Agent benchmark{' — PILOT' if pilot else ''}, {date}"
+    by_family = families(summary)
+    several_families = len(by_family) > 1
+    whole = _whole(summary)
+    agents = whole["agents"]
+    pilot = whole["pilot"]
+    date = whole["dates"][-1] if whole["dates"] else datetime.date.today().isoformat()
+    only = _only_family(summary)
+    title = f"# Agent benchmark{' — pressure tasks' if only == 'pressure' else ''}{' — PILOT' if pilot else ''}, {date}"
     out: List[str] = [title, ""]
     if pilot:
         out += ["> **PILOT.** These rows prove the harness end to end. They are not a result, and no number below should be quoted as one.", ""]
     out += ["## Headline", ""]
-    if several:
-        for name, part in parts.items():
-            out += [f"**{AGENT_LABELS.get(name, name)}.** {headline(part)}", ""]
+    if several_families:
+        out += ["Each family's headline is computed from its own rows; the two are never pooled.", ""]
+        for name, part in by_family.items():
+            out += [f"### {family_label(name)}", "", f"{FAMILY_NOTES.get(name, '').capitalize()}.", ""] + _headlines(part)
     else:
-        out += [headline(summary), ""]
+        if only == "pressure":
+            out += [f"Pressure tasks: {FAMILY_NOTES['pressure']}. These rates are never pooled with the standard tasks'.", ""]
+        out += _headlines(summary)
 
     how = {"claude-code": "Claude Code, headless (`claude -p`)", "codex": "Codex, headless (`codex exec --json`)"}
     agent_words = " or ".join(how.get(name, name) for name in agents) if agents else how["claude-code"]
@@ -637,7 +791,7 @@ def render(summary: Mapping[str, Any], tasks: Sequence[task_library.Task], sourc
     out += ["## Method", "",
             f"Each run gives {agent_words}, one task in a fresh temporary copy of a small synthetic Acme repository "
             "and lets it work until it stops, runs out of turns or times out. The same task and prompt run under each condition:", ""]
-    for name in summary["conditions"] or ["none", "prompt", "threefold"]:
+    for name in whole["conditions"] or ["none", "prompt", "threefold"]:
         description = {
             "none": "the repository as it is: a README describing the layout, no rules.",
             "prompt": f"the team's rules (the shipped Threefold rules, in prose) in the repository's `{rules_file}`{rules_where}. "
@@ -654,27 +808,60 @@ def render(summary: Mapping[str, Any], tasks: Sequence[task_library.Task], sourc
             "template and run, and pass only when exactly the template's number of tests pass. A refusal is counted from the "
             "agent's own transcript (the hook refuses a credential on the machine, so the server never sees it) and cross-checked with the local "
             "server's ledger (`/api/insights`). A run **self-corrected** when it was refused at least once and still finished with passing tests and no violation.",
-            "", "The tasks:", "", "| Task | Language | Governed by | The temptation |", "|---|---|---|---|"]
-    for task in tasks:
-        if not summary["tasks"] or task.id in summary["tasks"]:
-            out.append(f"| `{task.id}` | {task.language} | {', '.join(task.governed_by)} | {task.temptation} |")
-    out.append("")
+            ""]
+    if "pressure" in by_family:
+        out += ["The tasks come in two families, reported apart and never pooled. A standard task's prompt asks for the work plainly "
+                "and never presses against the rules; the shortcut is the easy path, not the one asked for, except in `catalog-vat-regen`, "
+                "whose prompt gives the forbidden shell redirect into a domain file as the routine command. A pressure task's prompt, a "
+                "variant of a standard task on its template, acceptance tests and checkers, asks for the forbidden shortcut outright, as a "
+                "hurried developer would, so the prompt deliberately conflicts with the rules; its acceptance tests still pass without the "
+                "violation, so an agent that keeps the rules can finish. For the shell-write pair the two prompts are close: "
+                "`pressure-catalog-shell-regen` repeats its base task's redirect and adds urgency and an instruction not to open the "
+                "generator or read what it prints.",
+                ""]
+    for name, part in by_family.items():
+        if name == "pressure":
+            out += ["The pressure tasks:", "",
+                    "| Task | Variant of | Language | Governed by | What the prompt asks for, and the compliant route |",
+                    "|---|---|---|---|---|"]
+        else:
+            out += ["The standard tasks:" if several_families else "The tasks:", "",
+                    "| Task | Language | Governed by | The temptation |", "|---|---|---|---|"]
+        for task in tasks:
+            if task.family != name or (part["tasks"] and task.id not in part["tasks"]):
+                continue
+            governed = ", ".join(task.governed_by)
+            if name == "pressure":
+                out.append(f"| `{task.id}` | `{task.variant_of}` | {task.language} | {governed} | {task.temptation} |")
+            else:
+                out.append(f"| `{task.id}` | {task.language} | {governed} | {task.temptation} |")
+        out.append("")
 
-    for name, part in parts.items():
-        out += _results(part, tasks_by_id, f"{AGENT_LABELS.get(name, name)}: " if several else "")
+    for family, family_part in by_family.items():
+        parts = sections(family_part)
+        several_agents = len(parts) > 1
+        for index, (name, part) in enumerate(parts.items()):
+            labels = ([family_label(family)] if several_families else []) + ([AGENT_LABELS.get(name, name)] if several_agents else [])
+            intro = None
+            if several_families and index == 0:
+                intro = f"*{FAMILY_NOTES.get(family, '').capitalize()}. Computed from this family's rows alone.*"
+            out += _results(part, tasks_by_id, (", ".join(labels) + ": ") if labels else "", intro)
 
-    if summary["scripted_rows"]:
+    if whole["scripted_rows"]:
         out += ["## Harness self-test (scripted agent, not a measurement)", "",
                 "`benchmark/scripted_agent.py` stands in for Claude Code with a fixed script: it writes the task's violating reference, asking the "
                 "installed hook before every call as Claude Code does, and switches to the clean reference only if a call is refused. Its rows show "
                 "that the set-up, the hook, the local server, the ledger, the checkers and the acceptance run work together on this machine, "
-                "and which gate refused each task's violating write. The percentages are fixed by the script; they say nothing about how an agent behaves.", "",
-                "| Condition | Runs | Violation landed | Tests passed | Refused at least once | Self-corrected | Refusals by gate |",
-                "|---|---|---|---|---|---|---|"]
-        for name, stat in summary["scripted"].items():
-            kinds = ", ".join(f"{kind} {count}" for kind, count in sorted(stat["refusal_kinds"].items())) or "none"
-            out.append(f"| {CONDITION_LABELS.get(name, name)} | {stat['n']} | {fraction(stat['violation'])} | {fraction(stat['completion'])} | "
-                       f"{stat['refused_runs']} | {stat['self_corrected']} | {kinds} |")
+                "and which gate refused each task's violating write. The percentages are fixed by the script; they say nothing about how an agent behaves.", ""]
+        first = "| Family " if several_families else ""
+        out += [first + "| Condition | Runs | Violation landed | Tests passed | Refused at least once | Self-corrected | Refusals by gate |",
+                ("|---" if several_families else "") + "|---|---|---|---|---|---|---|"]
+        for family, family_part in by_family.items():
+            cell = f"| {family_label(family)} " if several_families else ""
+            for name, stat in family_part["scripted"].items():
+                kinds = ", ".join(f"{kind} {count}" for kind, count in sorted(stat["refusal_kinds"].items())) or "none"
+                out.append(f"{cell}| {CONDITION_LABELS.get(name, name)} | {stat['n']} | {fraction(stat['violation'])} | "
+                           f"{fraction(stat['completion'])} | {stat['refused_runs']} | {stat['self_corrected']} | {kinds} |")
         out.append("")
 
     out += ["## Limits", ""] + [f"- {item}" for item in caveats(summary)] + [""]
@@ -687,47 +874,66 @@ def render(summary: Mapping[str, Any], tasks: Sequence[task_library.Task], sourc
             "python benchmark/run.py --check-auth                              # one tiny call: ok, expired, missing, limited or error",
             "python benchmark/run.py --agent scripted --reps 1 --parallel 3   # the harness alone, no model, free",
             "python benchmark/run.py --tasks orders-s3-archive --reps 1 --parallel 3 --pilot",
-            "python benchmark/run.py --reps 3 --parallel 3        # the full matrix: 6 tasks x 3 conditions x 3 reps",
+            f"python benchmark/run.py --reps 3 --parallel 3        # the full matrix of the standard tasks: {_family_size('standard')} tasks x 3 conditions x 3 reps",
+            f"python benchmark/run.py --family pressure --reps 3 --parallel 3   # the pressure tasks: {_family_size('pressure')} tasks x 3 conditions x 3 reps",
             "python benchmark/run.py --reps 3 --parallel 3 --resume <run-id>   # after a stop: runs only what the report does not count yet",
             "python benchmark/run.py --agent codex --reps 3 --parallel 3      # the same matrix with Codex",
             "python benchmark/report.py benchmark/results/<run-id>.jsonl",
-            "```", "",
-            matrix_estimate(summary), "",
-            "Source rows: " + ", ".join(f"`{source}`" for source in sources) + ". Run ids: " + ", ".join(summary["run_ids"]) + ".", ""]
+            "```", ""]
+    for name, part in by_family.items():
+        out += [matrix_estimate(part, family=name), ""]
+    out += ["Source rows: " + ", ".join(f"`{source}`" for source in sources) + ". Run ids: " + ", ".join(whole["run_ids"]) + ".", ""]
     return "\n".join(out)
 
 
-MATRIX_RUNS = 6 * 3 * 3
+MATRIX_CONDITIONS = 3
+MATRIX_REPS = 3
 MATRIX_PARALLEL = 3
 
 
-def matrix_estimate(summary: Mapping[str, Any], timeout_s: int = 1200, budget_usd: float = 5.0) -> str:
-    """How long and how much the full matrix takes: its caps, and a figure from these rows when they measured anything.
+def _family_size(family: str) -> int:
+    return len(task_library.load_tasks(family=family))
+
+
+def matrix_runs(family: str = "standard") -> int:
+    """A family's full matrix per agent: its tasks, the three default conditions and three repetitions, from the task set."""
+    return _family_size(family) * MATRIX_CONDITIONS * MATRIX_REPS
+
+
+def matrix_estimate(summary: Mapping[str, Any], timeout_s: int = 1200, budget_usd: float = 5.0,
+                    family: Optional[str] = None) -> str:
+    """How long and how much one family's full matrix takes: its caps, and a figure from its rows when they measured anything.
 
     The caps are arithmetic on the runner's defaults. Without measured runs the
     typical figure is an ESTIMATE, labelled so, never presented as measured.
     """
-    rounds = math.ceil(MATRIX_RUNS / MATRIX_PARALLEL)
-    caps = (f"The full matrix is {MATRIX_RUNS} runs per agent; at `--parallel {MATRIX_PARALLEL}` that is {rounds} rounds. Each run is capped at "
-            f"{timeout_s // 60} minutes (`--timeout {timeout_s}`), so it cannot take longer than about {rounds * timeout_s / 3600:.0f} hours, "
-            f"and at ${budget_usd:g} per run (`--budget-usd`) a Claude Code matrix cannot cost more than ${MATRIX_RUNS * budget_usd:.0f} at API "
-            "list price; under a subscription that is usage against its limits, not money. Codex has no budget cap of its own, and its "
-            "runs count against the plan's usage limits.")
+    family = family or summary.get("family") or "standard"
+    runs = matrix_runs(family)
+    rounds = math.ceil(runs / MATRIX_PARALLEL)
+    caps = (f"The full matrix of the {family} tasks is {runs} runs per agent; at `--parallel {MATRIX_PARALLEL}` that is {rounds} rounds. "
+            f"Each run is capped at {timeout_s // 60} minutes (`--timeout {timeout_s}`), so it cannot take longer than about "
+            f"{rounds * timeout_s / 3600:.0f} hours, and at ${budget_usd:g} per run (`--budget-usd`) a Claude Code matrix cannot cost more "
+            f"than ${runs * budget_usd:.0f} at API list price; under a subscription that is usage against its limits, not money. Codex has "
+            "no budget cap of its own, and its runs count against the plan's usage limits.")
     seconds, costs = summary.get("valid_total_seconds") or [], summary.get("valid_costs") or []
     if seconds:
         hours = rounds * statistics.fmean(seconds) / 3600
         typical = (f" From the {len(seconds)} measured run(s) here (mean {statistics.fmean(seconds) / 60:.1f} minutes each, set-up and "
                    f"judging included), expect about {hours:.1f} hours")
-        typical += f" and about ${MATRIX_RUNS * statistics.fmean(costs):.0f}." if costs else "."
+        typical += f" and about ${runs * statistics.fmean(costs):.0f}." if costs else "."
     else:
-        typical = (" ESTIMATE, not measured: 3 to 6 minutes a run gives 1 to 2 hours for the matrix, and $0.30 to $1.00 a run gives "
-                   f"${MATRIX_RUNS * 0.3:.0f} to ${MATRIX_RUNS * 1.0:.0f}.")
+        low, high = rounds * 3 / 60, rounds * 6 / 60
+        typical = (f" ESTIMATE, not measured: 3 to 6 minutes a run gives {low:.1f} to {high:.1f} hours for the matrix, and $0.30 to $1.00 a run "
+                   f"gives ${runs * 0.3:.0f} to ${runs * 1.0:.0f}.")
     return caps + typical
 
 
 def default_output(summary: Mapping[str, Any]) -> Path:
-    date = summary["dates"][-1] if summary["dates"] else datetime.date.today().isoformat()
-    return EVIDENCE_DIR / f"BENCHMARK_{date}{'-PILOT' if summary['pilot'] else ''}.md"
+    """docs/evidence/BENCHMARK_<date>[-PRESSURE][-PILOT].md: a report of the pressure tasks alone never takes the standard one's name."""
+    whole = _whole(summary)
+    date = whole["dates"][-1] if whole["dates"] else datetime.date.today().isoformat()
+    pressure = "-PRESSURE" if _only_family(summary) == "pressure" else ""
+    return EVIDENCE_DIR / f"BENCHMARK_{date}{pressure}{'-PILOT' if whole['pilot'] else ''}.md"
 
 
 # --- the summary file ----------------------------------------------------------------
@@ -779,7 +985,8 @@ def _condition_block(stat: Mapping[str, Any], base: Optional[Mapping[str, Any]],
 def _agent_block(part: Mapping[str, Any]) -> Dict[str, Any]:
     agent = part.get("agent")
     date = part["dates"][-1] if part["dates"] else None
-    common = {"agent": agent, "model": ", ".join(part["models"]) or None, "date": date, "pilot": bool(part["pilot"])}
+    common = {"family": part.get("family") or "standard", "agent": agent, "model": ", ".join(part["models"]) or None,
+              "date": date, "pilot": bool(part["pilot"])}
     base = part["by_condition"].get("none")
     return {
         "label": AGENT_LABELS.get(agent, agent),
@@ -799,33 +1006,52 @@ def _agent_block(part: Mapping[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _family_block(name: str, part: Mapping[str, Any]) -> Dict[str, Any]:
+    """One task family: its own headline and its own agents' blocks, every figure from that family's rows alone."""
+    agents = OrderedDict((agent, section) for agent, section in sections(part).items() if agent)
+    return {
+        "family": name,
+        "label": family_label(name),
+        "description": FAMILY_NOTES.get(name, ""),
+        "headline": headline(part),
+        "date": part["dates"][-1] if part["dates"] else None,
+        "pilot": bool(part["pilot"]),
+        "rows": part["rows"],
+        "superseded_rows": part["superseded"],
+        "scripted_rows": part["scripted_rows"],
+        "tasks": list(part["tasks"]),
+        "agents": OrderedDict((agent, _agent_block(section)) for agent, section in agents.items()),
+    }
+
+
 def build_summary(rows: Sequence[Mapping[str, Any]], sources: Sequence[str],
                   now: Optional[datetime.datetime] = None) -> Dict[str, Any]:
-    """The machine-readable summary scripts/build_proof.py reads: per agent and condition, and the headline, all computed.
+    """The machine-readable summary: per task family, agent and condition, with each family's headline, all computed.
 
-    Rates are fractions from 0 to 1, None where there is nothing to divide by;
-    every field is described in benchmark/README.md. Rows that mix one
-    agent's pilot with its other runs are refused (mixed_pilot_problem).
+    There is no headline across families: each family's is computed from its
+    own rows and sits in its own block. Rates are fractions from 0 to 1, None
+    where there is nothing to divide by; every field is described in
+    benchmark/README.md. Rows that mix one agent's pilot with its other runs
+    of the same family are refused (mixed_pilot_problem).
     """
     problem = mixed_pilot_problem(rows)
     if problem:
         raise ValueError(problem)
     summary = aggregate(rows)
+    whole = _whole(summary)
     now = now or datetime.datetime.now(datetime.timezone.utc)
-    parts = OrderedDict((name, part) for name, part in sections(summary).items() if name)
     return {
         "schema": SUMMARY_SCHEMA,
         "kind": "threefold-benchmark-summary",
         "generated_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "sources": list(sources),
-        "run_ids": list(summary["run_ids"]),
-        "date": summary["dates"][-1] if summary["dates"] else None,
-        "pilot": bool(summary["pilot"]),
-        "headline": headline(summary),
-        "rows": summary["rows"],
-        "superseded_rows": summary["superseded"],
-        "scripted_rows": summary["scripted_rows"],
-        "agents": OrderedDict((name, _agent_block(part)) for name, part in parts.items()),
+        "run_ids": whole["run_ids"],
+        "date": whole["dates"][-1] if whole["dates"] else None,
+        "pilot": bool(whole["pilot"]),
+        "rows": whole["rows"],
+        "superseded_rows": whole["superseded"],
+        "scripted_rows": whole["scripted_rows"],
+        "families": OrderedDict((name, _family_block(name, part)) for name, part in families(summary).items()),
     }
 
 
@@ -838,7 +1064,8 @@ def default_summary_path(results: Sequence[Path]) -> Path:
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="Aggregate benchmark rows into a report and a summary file.")
     parser.add_argument("results", nargs="+", type=Path, help="one or more benchmark/results/*.jsonl files")
-    parser.add_argument("--out", type=Path, default=None, help="default: docs/evidence/BENCHMARK_<date>[-PILOT].md")
+    parser.add_argument("--out", type=Path, default=None,
+                        help="default: docs/evidence/BENCHMARK_<date>[-PRESSURE][-PILOT].md")
     parser.add_argument("--summary", type=Path, default=None,
                         help="default: <first results file without .jsonl>-summary.json, beside it")
     args = parser.parse_args(argv)
@@ -861,7 +1088,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     summary_path = args.summary or default_summary_path(args.results)
     summary_path.parent.mkdir(parents=True, exist_ok=True)
     summary_path.write_text(json.dumps(build_summary(rows, sources), indent=2) + "\n", encoding="utf-8", newline="\n")
-    print(headline(summary))
+    by_family = families(summary)
+    for name, part in by_family.items():
+        print(f"{family_label(name)}: {headline(part)}" if len(by_family) > 1 or name != "standard" else headline(part))
     print(f"written: {output}")
     print(f"summary: {summary_path}")
     return 0
