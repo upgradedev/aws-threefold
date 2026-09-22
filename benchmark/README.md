@@ -40,6 +40,14 @@ Options: `--tasks`, `--conditions`, `--reps`, `--model` (default
 A run whose agent never reached the model, or a Threefold run in which the hook
 never fired, is listed with its reason and kept out of every rate.
 
+## Checked on this machine, 2026-09-22, Claude Code 2.1.220
+
+From Claude Code's own debug log (`--debug-file`), with the runner's exact command:
+
+- The permission lists are applied whole: "Adding 31 allow rule(s)" and "Adding 25 deny rule(s)", with `Bash(python -m pip:*)` intact.
+- The hook is registered from `.claude/settings.local.json` under `--setting-sources project,local`: with the hook installed the log finds that file and records a `hook_registered` event at start-up; in a control run without it the file is reported missing and no such event appears. Whether it then fires on each governed call is checked per run (`hook_fired`).
+- The headless login did not work: every `claude -p` answered "Failed to authenticate: OAuth session expired and could not be refreshed", with and without `--setting-sources` and with the whole inherited environment, so the pilot measured no agent. `claude auth status` still reported a login, because it reads the stored credential without refreshing it.
+
 ## Files
 
 - `tasks/<id>/` — `task.json` (prompt, checks, acceptance command), `repo/` (the template), `reference/clean` and `reference/violating` (solutions the suite uses to prove each task measures what it claims)
