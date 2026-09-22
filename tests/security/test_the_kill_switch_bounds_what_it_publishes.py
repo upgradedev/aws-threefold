@@ -125,3 +125,43 @@ def test_a_freeze_that_names_neither_field_still_records_the_defaults() -> None:
     assert _trip_reason("kill-default-1") == (
         f"MANUALLY_TERMINATED by {DEFAULT_OPERATOR}: {DEFAULT_REASON}"
     )
+
+
+# Synthetic, and the key id AWS prints in its own documentation. Twenty
+# characters in, twenty-five out: "[AWS_ACCESS_KEY REDACTED]" is longer than
+# what it replaces, which is what the two tests below are about.
+SYNTHETIC_KEY_ID = "AKIA" + "IOSFODNN7EXAMPLE"
+
+
+def _reason_packed_with_key_ids(length: int) -> str:
+    """A reason at exactly `length` characters, most of it key ids."""
+    packed = " ".join([SYNTHETIC_KEY_ID] * (length // (len(SYNTHETIC_KEY_ID) + 1)))
+    return (packed + " " + "x" * length)[:length]
+
+
+def test_a_reason_the_labels_push_past_the_bound_is_refused() -> None:
+    """Measured before redacting only, it passed the bound and was stored past it.
+
+    The route answers that a reason is at most 240 characters, and what a reader
+    of the sessions page sees is the redacted text. A 240-character reason packed
+    with key ids came back through `redact_secrets` at about 300, so the answer
+    the caller was given about their own record was not true of it.
+    """
+    reason = _reason_packed_with_key_ids(240)
+    assert len(reason) == 240
+    status, problem = _freeze("kill-grown-1", {"reason": reason})
+    assert status == 400, problem
+    assert problem["invalid_params"][0]["name"] == "reason"
+    assert "240" in problem["detail"]
+    assert _trip_reason("kill-grown-1") is None
+
+
+def test_what_a_freeze_publishes_is_never_longer_than_the_bound_it_states() -> None:
+    """One key id still fits inside 240 characters, so it is kept and redacted."""
+    reason = f"saw {SYNTHETIC_KEY_ID} in the log"
+    status, body = _freeze("kill-grown-2", {"reason": reason})
+    assert status == 200, body
+    published = _trip_reason("kill-grown-2")
+    assert SYNTHETIC_KEY_ID not in published
+    assert "[AWS_ACCESS_KEY REDACTED]" in published
+    assert len(published) <= len(f"MANUALLY_TERMINATED by {DEFAULT_OPERATOR}: ") + 240

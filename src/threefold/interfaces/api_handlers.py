@@ -1234,7 +1234,8 @@ def _bounded_text(body: Dict[str, Any], name: str, limit: int, default: str) -> 
     stored is shown on a page. Over the limit is refused rather than cut, for
     the reason `_required_text` gives: a record shortened on the way in says
     something its author did not. What is kept is passed through
-    `redact_secrets`, as every reason the ledger keeps already is.
+    `redact_secrets`, as every reason the ledger keeps already is, and measured
+    again after that, because a label is longer than what it replaces.
     """
     value = body.get(name)
     if value is None or value == "":
@@ -1246,7 +1247,19 @@ def _bounded_text(body: Dict[str, Any], name: str, limit: int, default: str) -> 
         return default
     if len(value) > limit:
         raise InvalidRequestError(f"{name} must be at most {limit} characters.", name)
-    return redact_secrets(value)
+    kept = redact_secrets(value)
+    if len(kept) > limit:
+        # Checked again because a label is longer than most of what it replaces:
+        # a 20-character key id becomes "[AWS_ACCESS_KEY REDACTED]", 25. Measured
+        # only before, a reason packed with key ids passed the bound on the way
+        # in and was stored at about 300 characters, which is not what the
+        # refusal above promises a reader of the page.
+        raise InvalidRequestError(
+            f"{name} must be at most {limit} characters once the credentials in it are "
+            "replaced by their labels, and a label is longer than what it replaces.",
+            name,
+        )
+    return kept
 
 
 def _required_text(body: Dict[str, Any], name: str, limit: int) -> str:
