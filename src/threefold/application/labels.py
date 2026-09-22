@@ -111,8 +111,16 @@ def public_row(row: Dict[str, Any]) -> Dict[str, Any]:
     """A ledger or session row as an open page may show it.
 
     A copy, so the rows the caller holds are not rewritten underneath it.
+
+    Of a suggested fix, a row carries `suggested_fix_kind` and
+    `suggested_fix_validated` and they pass as they are. The fix itself never
+    does: its writes are the caller's own source, and on a stack with
+    PublicReads=true this is what anyone reads. The ledger never stores it, so
+    the line below should never find one; it is here so a row that somehow
+    held one still does not reach an open page.
     """
     shown = dict(row)
+    shown.pop("suggested_fix", None)
     if "project_name" in shown:
         shown["project_name"] = project_label(shown.get("project_name"))
     if "developer_id" in shown:

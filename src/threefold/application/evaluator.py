@@ -24,9 +24,11 @@ from threefold.domain.layering_rules import DEFAULT_RULES, normalise_rules, vali
 from threefold.domain.boundary_guard import (
     ArchitecturalBoundaryGuard,
     describe_target,
+    iter_string_leaves,
     observe_layering,
     redact_secrets,
 )
+from threefold.application.fix_proposer import propose_fix
 from threefold.application.dtos import (
     EvaluationResultDTO,
     InvalidRequestError,
@@ -88,6 +90,40 @@ MAX_PROJECTS_HELD = 128
 
 # The note a repeated read or poll leaves on its approval instead of a trip.
 READ_OR_POLL_REPEAT = "Repeat of a read or poll, recorded rather than refused"
+
+# The most text a call may carry and still be sent a suggested fix, counted
+# over every string in its arguments. A fix is not free: fix_proposer rewrites
+# what the call wrote and then runs the gates again on every file it proposes,
+# five to seven times what the gate itself costs on the same content. Measured
+# on the development machine [PRIMARY], 2026-09-22, best of nine, for a refused
+# Python domain Write: 1,200 characters took 4.6 ms, 1,600 took 5.6 ms, 2,000
+# took 7.4 ms, 4,000 took 12 ms, and one just under the proposer's own 24,000
+# character cap took about 90 ms; Java and TypeScript cost about half as much.
+# TRAPS.md gives a verdict 10 ms of gate, and the fix rides on the verdict, so
+# past this size a refusal goes out without one: its status and reason are
+# what they always were, and nobody waits for advice that would cost more than
+# the gate it explains. Raising this spends that budget; the tests in
+# tests/unit/test_the_fix_reaches_the_agent.py measure what it costs.
+FIX_MAX_CONTENT_CHARS = 1_500
+
+
+def carries_more_than(arguments: Any, limit: int) -> bool:
+    """Whether the strings in a call's arguments come to more than `limit` characters.
+
+    Stops counting as soon as the answer is known, so a call near the payload
+    ceiling costs no more to measure than one at the limit. Arguments nested
+    too deep to walk count as more: the gate already judged them, and a fix is
+    the one thing here that can be left out.
+    """
+    total = 0
+    try:
+        for leaf in iter_string_leaves(arguments):
+            total += len(leaf)
+            if total > limit:
+                return True
+    except RecursionError:
+        return True
+    return False
 
 
 class UnusableRulesError(ValueError):
@@ -636,8 +672,38 @@ class GovernanceEvaluator:
             observe_keys=stages.observe_keys(request, config, stage),
         )
         result.project_stage = project_stage
+        # After the stage and observe_rules have had their say, so the fix is
+        # for the verdict the caller is actually given, and checked against the
+        # same rules that judged the call.
+        result.suggested_fix = self._suggest_fix(request, result, rules)
         self._record_decision(request, result, rules, stage=stage)
         return result
+
+    @staticmethod
+    def _suggest_fix(
+        request: ToolCallRequestDTO,
+        result: EvaluationResultDTO,
+        rules: List[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        """The fix for this verdict, when someone will read it and it fits the budget.
+
+        A refusal always has a reader: the hook prints its summary in the deny
+        reason and a page shows all of it. An observation has one only on a
+        page, which sends explain true: in Observe a hook prints nothing at
+        all, so a fix computed for a hook's would-refuse would cost time on
+        every such call and reach no agent. A repeated read carries a note but
+        no observing rule, and nothing would have refused it, so it gets none.
+
+        No `phrase` is passed. A model call has no place inside a verdict's
+        latency, and the summary the proposer writes is already one clean line.
+        """
+        refused = result.status != VerdictStatus.APPROVED.value
+        page_observation = bool(getattr(request, "explain", True)) and bool(getattr(result, "observed_rules", None))
+        if not (refused or page_observation):
+            return None
+        if carries_more_than(getattr(request, "arguments", None), FIX_MAX_CONTENT_CHARS):
+            return None
+        return propose_fix(request, result, rules)
 
     @staticmethod
     def _rule_key(result: EvaluationResultDTO, rules: List[Dict[str, Any]]) -> str:
@@ -669,6 +735,8 @@ class GovernanceEvaluator:
         recorder = getattr(self.session_repo, "record_decision", None)
         if recorder is None:
             return
+        fix = getattr(result, "suggested_fix", None)
+        fix = fix if isinstance(fix, dict) else None
         try:
             recorder(
                 {
@@ -718,6 +786,14 @@ class GovernanceEvaluator:
                     "observed_target": (getattr(result, "observed_target", "") or "")[:160],
                     "target": describe_target(request),
                     "cost_usd": result.current_session_cost_usd,
+                    # Of a suggested fix, what kind it was and whether the gates
+                    # passed it, and nothing else. Its writes are the caller's
+                    # own source and its steps and summary quote paths and code;
+                    # on a stack with PublicReads=true anyone reads every row.
+                    # None when there was no fix, which the store leaves out, so
+                    # an approval's row is exactly what it was before.
+                    "suggested_fix_kind": str(fix.get("kind") or "")[:40] if fix else None,
+                    "suggested_fix_validated": (fix.get("validated") is True) if fix else None,
                 }
             )
         except Exception as exc:  # pragma: no cover - the ledger must not break a verdict

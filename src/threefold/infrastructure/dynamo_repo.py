@@ -103,7 +103,7 @@ def _decision_key(timestamp: str, verdict_id: str) -> Dict[str, str]:
 
 def clean_decision(row: Dict[str, Any]) -> Dict[str, Any]:
     """A stored ledger row as every reader gets it, whatever year it was written in."""
-    return {
+    cleaned = {
         "verdict_id": row.get("verdict_id", ""),
         "timestamp": row.get("timestamp", ""),
         "session_id": row.get("session_id", ""),
@@ -139,6 +139,12 @@ def clean_decision(row: Dict[str, Any]) -> Dict[str, Any]:
         "reviewed_at": row.get("reviewed_at") or None,
         "review_note": row.get("review_note") or None,
     }
+    # Only on a row whose call was sent a suggested fix, and only these two of
+    # it: the fix itself, its writes, steps and summary, is never stored.
+    if row.get("suggested_fix_kind"):
+        cleaned["suggested_fix_kind"] = str(row["suggested_fix_kind"])
+        cleaned["suggested_fix_validated"] = row.get("suggested_fix_validated") is True
+    return cleaned
 
 
 def _plain(value: Any) -> Any:
