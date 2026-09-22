@@ -401,6 +401,13 @@ def describe_target(request: Any) -> str:
     `…?access_token=…` put the token into the one field the ledger publishes
     word for word on a stack whose reads are public, beside a reason that was
     redacted. Every descriptor now leaves through the same redaction.
+
+    The paths are the ones `target_paths` finds, which is what every other
+    reader of a path key was moved to: on the shape heuristic alone this said
+    nothing at all about `Write {file_path: 'src/acme/domain/order line.py'}`,
+    so the ledger row for exactly the write a space used to hide recorded an
+    empty target, and /api/decisions said a rule was broken without saying
+    what the call was aimed at.
     """
     action = str(getattr(request, "action_type", "")).upper()
     arguments = getattr(request, "arguments", None)
@@ -408,16 +415,15 @@ def describe_target(request: Any) -> str:
         return ""
 
     if "COMMAND" in action or "EXEC" in action:
-        for key in ("command", "cmd", "script", "shell"):
+        for key in COMMAND_KEYS:
             value = arguments.get(key)
             if isinstance(value, str) and value.strip():
                 program = value.strip().split()[0]
                 return redact_secrets(program)[:60]
         return ""
 
-    for candidate in iter_string_leaves(arguments):
-        if looks_like_path(candidate):
-            return redact_secrets(candidate)[:160]
+    for candidate in target_paths(arguments):
+        return redact_secrets(candidate)[:160]
     return ""
 
 

@@ -16,9 +16,17 @@ from __future__ import annotations
 
 import pytest
 
-from threefold.domain.boundary_guard import ArchitecturalBoundaryGuard, looks_like_path, write_pairs
+from threefold.application.dtos import ToolCallRequestDTO
+from threefold.application.evaluator import GovernanceEvaluator
+from threefold.domain.boundary_guard import (
+    ArchitecturalBoundaryGuard,
+    describe_target,
+    looks_like_path,
+    write_pairs,
+)
 from threefold.domain.layering_rules import DEFAULT_RULES
 from threefold.domain.models import ToolActionType, ToolInvocation
+from threefold.infrastructure.dynamo_repo import DynamoDBSessionRepository
 
 FORBIDDEN = "import boto3\n"
 
@@ -86,6 +94,50 @@ def test_the_pairing_finds_the_spaced_path() -> None:
     assert write_pairs({"file_path": "src/domain/order service.py", "content": FORBIDDEN}) == [
         ("src/domain/order service.py", FORBIDDEN)
     ]
+
+
+SPACED_TARGETS = [
+    ({"file_path": "src/domain/order line.py", "content": FORBIDDEN}, "src/domain/order line.py"),
+    ({"file_path": "my project/.claude/settings.json", "content": "{}"}, "my project/.claude/settings.json"),
+    ({"notebook_path": "notebooks/a b.ipynb"}, "notebooks/a b.ipynb"),
+    ({"edits": [{"file_path": "src/domain/a b.py", "new_string": FORBIDDEN}]}, "src/domain/a b.py"),
+]
+
+
+@pytest.mark.parametrize("arguments, expected", SPACED_TARGETS)
+def test_the_ledger_descriptor_names_a_spaced_path(arguments: dict, expected: str) -> None:
+    """What the ledger says a call was aimed at reads the path key too.
+
+    `describe_target` was left on the shape heuristic while every other reader
+    of a path key moved off it, so the row for exactly the write a space used
+    to hide recorded an empty target.
+    """
+    request = ToolInvocation(
+        tool_name="Write", action_type=ToolActionType.FILE_WRITE, arguments=arguments
+    )
+    assert describe_target(request) == expected
+
+
+def test_the_recorded_refusal_says_what_the_call_was_aimed_at() -> None:
+    """End to end: /api/decisions should not say a rule was broken and nothing else."""
+    repo = DynamoDBSessionRepository(table_name="spaced-target-test")
+    evaluator = GovernanceEvaluator(session_repo=repo)
+    request = ToolCallRequestDTO(
+        session_id="spaced-target-1",
+        developer_id="anonymous",
+        project_name="Acme-Spaced",
+        tool_name="Write",
+        action_type="FILE_WRITE",
+        arguments={"file_path": "src/domain/order line.py", "content": FORBIDDEN},
+        agent="claude-code",
+        origin="hook",
+    )
+    verdict = evaluator.evaluate_tool_call(request)
+    assert verdict.status == "BLOCKED_BOUNDARY_VIOLATION"
+
+    rows = [row for row in repo.list_decisions(days=1) if row.get("session_id") == "spaced-target-1"]
+    assert rows, "the refusal should have been recorded"
+    assert rows[0]["target"] == "src/domain/order line.py"
 
 
 def test_the_heredoc_route_was_never_open_and_still_is_not() -> None:
