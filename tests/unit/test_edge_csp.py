@@ -38,10 +38,11 @@ so a scan gone blind fails here rather than passing over nothing.
 It also checks the other way: every host the policy names is used by some
 page, so a removed dependency does not leave its host allowed.
 
-Walked in a browser on 2026-09-22 with this policy served as a header: every
-page rendered, the Tailwind Play CDN styled them, the Google Fonts loaded,
-Swagger UI rendered all its operations, inline onclick handlers ran, and an
-unlisted script host was refused.
+When this policy was first written (2026-09-22) it was walked in a browser,
+served as a header: every page rendered, the Tailwind Play CDN styled them,
+the Google Fonts loaded, Swagger UI rendered all its operations, inline
+onclick handlers ran, and an unlisted script host was refused. The policy has
+not changed since; a change to it, or a new page, needs that walk again.
 """
 from __future__ import annotations
 
