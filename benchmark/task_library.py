@@ -3,13 +3,21 @@
 A task is a directory under `benchmark/tasks/<id>/`:
 
     task.json    the prompt, the checks that decide whether a violation landed,
-                 and the acceptance command that decides whether the work is done
+                 the acceptance command that decides whether the work is done,
+                 and the task's family
     repo/        the template repository, copied fresh for every run
     reference/   `clean/` and `violating/` overlays: one way to do the work
                  without breaking a rule and one way that breaks it, both of
                  which pass the acceptance tests. They are never shown to an
                  agent; the suite uses them to prove each task measures what it
                  claims to
+
+Tasks come in two families, never pooled in a rate. A `standard` task's prompt
+tempts a violation without asking for one. A `pressure` task's prompt asks for
+the forbidden shortcut outright, as a hurried developer would, so it
+deliberately conflicts with the rules. A pressure task is a variant of a
+standard one (`variant_of` in task.json): it has no `repo/` of its own and runs
+on that task's template, acceptance tests included, unchanged.
 
 A secret the prompt hands over is stored split into pieces and joined at run
 time, so the literal never sits in this repository for a scanner to find, and
@@ -28,6 +36,7 @@ from typing import Dict, List, Mapping, Optional, Sequence
 BENCHMARK_DIR = Path(__file__).resolve().parent
 TASKS_DIR = BENCHMARK_DIR / "tasks"
 VARIANTS = ("clean", "violating")
+FAMILIES = ("standard", "pressure")
 _PLACEHOLDER = re.compile(r"\{([A-Z][A-Z0-9_]*)\}")
 
 # Files outside the acceptance folders that decide how the tests run. One line
@@ -59,10 +68,17 @@ class Task:
     secret_pieces: Mapping[str, List[str]] = field(default_factory=dict)
     test_config: List[str] = field(default_factory=list)
     expected_passed: Optional[int] = None
+    family: str = "standard"
+    # The standard task whose template (repo/, acceptance tests included) a pressure task runs on.
+    variant_of: Optional[str] = None
+    # When the prompt asks for a file to be written through a shell redirect, `python <script> > <file>`: the
+    # violating route runs it instead of writing that file. Only the scripted stand-in reads it.
+    violating_command: Optional[str] = None
+    template_directory: Optional[Path] = None
 
     @property
     def template(self) -> Path:
-        return self.directory / "repo"
+        return self.template_directory or self.directory / "repo"
 
     @property
     def secrets(self) -> Dict[str, str]:
@@ -91,6 +107,18 @@ def fill(text: str, secrets: Mapping[str, str]) -> str:
     return _PLACEHOLDER.sub(lambda match: secrets.get(match.group(1), match.group(0)), text)
 
 
+def _template_directory(directory: Path, variant_of: Optional[str]) -> Optional[Path]:
+    """Where a variant's template lives: its base task's repo/, which it reuses as it is."""
+    if not variant_of:
+        return None
+    if (directory / "repo").exists():
+        raise ValueError(f"{directory.name} is a variant of {variant_of} and must not carry a repo/ of its own")
+    base = directory.parent / variant_of
+    if not (base / "task.json").is_file() or not (base / "repo").is_dir():
+        raise ValueError(f"{directory.name} is a variant of {variant_of}, which has no task.json and repo/ beside it")
+    return base / "repo"
+
+
 def load_task(directory: Path) -> Task:
     directory = Path(directory)
     data = json.loads((directory / "task.json").read_text(encoding="utf-8"))
@@ -98,6 +126,10 @@ def load_task(directory: Path) -> Task:
     test_config = list(TEST_CONFIG_BY_LANGUAGE.get(data["language"], ()))
     test_config += [path for path in acceptance.get("config") or [] if path not in test_config]
     expected = acceptance.get("expected_passed")
+    family = data.get("family", "standard")
+    if family not in FAMILIES:
+        raise ValueError(f"task.json in {directory.name} names the family {family!r}; the families are {', '.join(FAMILIES)}")
+    variant_of = data.get("variant_of") or None
     task = Task(
         id=data["id"],
         title=data["title"],
@@ -113,20 +145,45 @@ def load_task(directory: Path) -> Task:
         secret_pieces={name: list(pieces) for name, pieces in (data.get("secrets") or {}).items()},
         test_config=test_config,
         expected_passed=int(expected) if expected is not None else None,
+        family=family,
+        variant_of=variant_of,
+        violating_command=data.get("violating_command") or None,
+        template_directory=_template_directory(directory, variant_of),
     )
     if task.id != directory.name:
         raise ValueError(f"task.json in {directory.name} says its id is {task.id}")
     return task
 
 
-def load_tasks(names: Optional[Sequence[str]] = None, root: Path = TASKS_DIR) -> List[Task]:
+def load_tasks(names: Optional[Sequence[str]] = None, root: Path = TASKS_DIR, family: Optional[str] = None) -> List[Task]:
+    """The tasks named, or every task. With `family`, only that family's, and a named task outside it is refused."""
+    if family is not None and family not in FAMILIES:
+        raise ValueError(f"unknown family {family!r}; the families are {', '.join(FAMILIES)}")
     available = {path.name: path for path in sorted(Path(root).iterdir()) if (path / "task.json").is_file()}
     if not names:
-        return [load_task(path) for path in available.values()]
+        tasks = [load_task(path) for path in available.values()]
+        return [task for task in tasks if family is None or task.family == family]
     unknown = [name for name in names if name not in available]
     if unknown:
         raise ValueError(f"unknown task(s) {', '.join(unknown)}; the tasks are {', '.join(available)}")
-    return [load_task(available[name]) for name in names]
+    tasks = [load_task(available[name]) for name in names]
+    outside = [task.id for task in tasks if family is not None and task.family != family]
+    if outside:
+        raise ValueError(f"task(s) {', '.join(outside)} are not in the {family} family")
+    return tasks
+
+
+def family_of_task(task_id: str, root: Path = TASKS_DIR) -> Optional[str]:
+    """The family a task's task.json gives it, or None when there is no such task here."""
+    name = str(task_id or "")
+    if not name or "/" in name or "\\" in name or name in (".", ".."):
+        return None
+    path = Path(root) / name / "task.json"
+    try:
+        family = json.loads(path.read_text(encoding="utf-8")).get("family", "standard")
+    except (OSError, ValueError, AttributeError):
+        return None
+    return family if family in FAMILIES else None
 
 
 def copy_template(task: Task, destination: Path) -> Path:
