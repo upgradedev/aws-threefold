@@ -1812,6 +1812,7 @@ def held_back_category(
     home: str,
     include: Optional[Sequence[str]] = None,
     notes: Optional[List[str]] = None,
+    project: str = "",
 ) -> Optional[str]:
     """Why this call must not leave the machine, or None if it may.
 
@@ -1828,6 +1829,10 @@ def held_back_category(
     never-send list itself could not be read, which is why everything is
     staying here. It names the file and what is wrong with it, never a line
     of it.
+
+    `project` is the alias the hook adds to the request from the environment
+    or a configuration file. It goes on every call and the dashboard shows it,
+    so it is read against the never-send list like anything the agent sent.
     """
     cwd = project_root(payload)
     canonical_root = _canonical(governed_root(payload))
@@ -1885,7 +1890,7 @@ def held_back_category(
                 f"{never_send.problem}. Nothing is sent until it can be; save it as UTF-8 and try again."
             )
         return "never-send"
-    if mentions_never_send(raw_text, payload, never_send.terms):
+    if mentions_never_send(raw_text, [payload, project], never_send.terms):
         return "never-send"
     return None
 
@@ -2346,7 +2351,7 @@ def handle(raw_text: Optional[str], forced_agent: Optional[str] = None) -> Tuple
                 "whether the agent's hooks run. Nothing was sent. A person changes that file, not the agent.",
             ), notes
 
-    category = held_back_category(call, payload, raw_text or "", home, settings.include, notes)
+    category = held_back_category(call, payload, raw_text or "", home, settings.include, notes, project)
     if category:
         record_held_back(home, category)
         return None, notes

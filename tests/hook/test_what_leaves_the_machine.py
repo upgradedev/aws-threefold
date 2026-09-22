@@ -396,6 +396,37 @@ def test_a_never_send_list_saved_with_a_byte_order_mark_still_works(machine, pay
     assert stub.requests == []
 
 
+def test_a_project_alias_holding_a_never_send_term_is_never_sent_from_the_environment(
+    machine, payloads, stub, run_hook, held_back_lines, monkeypatch
+) -> None:
+    """The alias goes on every call and the dashboard shows it, so it is part of what leaves.
+
+    The list was only ever read against the agent's own payload, and the
+    project name is the hook's own addition to the request.
+    """
+    _never_send(machine, "Globex\n")
+    monkeypatch.setenv("THREEFOLD_PROJECT", "Acme-Globex-Portal")
+    _held_back(stub, run_hook, payloads.write("claude-code", "src/app.py", "x = 1\n"), held_back_lines, "never-send")
+
+
+def test_a_project_alias_holding_a_never_send_term_is_never_sent_from_a_config_file(
+    machine, payloads, stub, run_hook, held_back_lines, monkeypatch
+) -> None:
+    _never_send(machine, "globex\n")
+    monkeypatch.delenv("THREEFOLD_PROJECT", raising=False)
+    (machine.project / ".threefold.json").write_text(
+        json.dumps({"project": "Acme-Globex-Portal", "mode": "enforce"}), encoding="utf-8"
+    )
+    _held_back(stub, run_hook, payloads.write("claude-code", "src/app.py", "x = 1\n"), held_back_lines, "never-send")
+
+
+def test_a_project_alias_that_names_nothing_on_the_list_is_still_sent(machine, payloads, stub, run_hook, monkeypatch) -> None:
+    _never_send(machine, "globex\n")
+    monkeypatch.setenv("THREEFOLD_PROJECT", "Acme-Payments")
+    run_hook(payloads.write("claude-code", "src/app.py", "x = 1\n"))
+    assert len(stub.requests) == 1
+
+
 def _never_send_bytes(machine, raw: bytes) -> None:
     machine.threefold_home.mkdir(parents=True, exist_ok=True)
     (machine.threefold_home / "never_send.txt").write_bytes(raw)
