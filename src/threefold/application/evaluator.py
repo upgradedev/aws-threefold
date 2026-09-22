@@ -729,8 +729,12 @@ class GovernanceEvaluator:
         reason and a page shows all of it. An observation has one only on a
         page, which sends explain true: in Observe a hook prints nothing at
         all, so a fix computed for a hook's would-refuse would cost time on
-        every such call and reach no agent. A repeated read carries a note but
-        no observing rule, and nothing would have refused it, so it gets none.
+        every such call and reach no agent. A hook or CI caller counts as not
+        explaining whatever `explain` says, because a body that leaves it out
+        is read as true, and a v1 or third-party hook that sends none would
+        otherwise pay for a fix on every would-refuse. A repeated read carries
+        a note but no observing rule, and nothing would have refused it, so it
+        gets none.
 
         Which ceiling applies depends on what the fix has to do, read off the
         verdict's rule key before the proposer is asked: see fix_max_chars.
@@ -739,7 +743,11 @@ class GovernanceEvaluator:
         latency, and the summary the proposer writes is already one clean line.
         """
         refused = result.status != VerdictStatus.APPROVED.value
-        page_observation = bool(getattr(request, "explain", True)) and bool(getattr(result, "observed_rules", None))
+        page_observation = (
+            getattr(request, "explain", False) is True
+            and getattr(request, "origin", "") not in stages.STAGED_ORIGINS
+            and bool(getattr(result, "observed_rules", None))
+        )
         if not (refused or page_observation):
             return None
         try:

@@ -270,6 +270,40 @@ def test_a_row_without_a_fix_is_exactly_what_it_was(evaluator, recorded) -> None
     assert not any("fix" in key for key in raw[0])
 
 
+# ---------------------------------------------------------------- when the fix has a reader
+
+
+def test_a_hook_body_that_leaves_explain_out_is_sent_no_fix_for_an_observation(evaluator, proposals, recorded, monkeypatch) -> None:
+    """A body without `explain` reads as explaining, so a v1 or third-party hook must not pay for a fix it never prints."""
+    monkeypatch.setenv("DEFAULT_HOOK_STAGE", "observe")
+    request = ToolCallRequestDTO.from_payload(
+        {
+            "session_id": "fix-hook-no-explain",
+            "project_name": PROJECT,
+            "tool_name": "Write",
+            "action_type": "FILE_WRITE",
+            "arguments": _domain_write(),
+            "agent": "claude-code",
+            "origin": "hook",
+            "hook_mode": "managed",
+        }
+    )
+    assert request.explain is True, "The premise: a body that leaves explain out reads as true"
+    observed = evaluator.evaluate_tool_call(request)
+    assert observed.status == "APPROVED" and observed.observed_rules
+    assert observed.suggested_fix is None
+    assert proposals == [], "The proposer was not even asked"
+    assert not any("fix" in key and recorded[-1][key] is not None for key in recorded[-1])
+
+
+def test_a_ci_observation_is_sent_no_fix_even_when_it_asks_for_an_explanation(evaluator, proposals) -> None:
+    observed = evaluator.evaluate_tool_call(
+        _request("fix-ci-dry", _domain_write(), origin="ci", agent="ci", explain=True, dry_run=True)
+    )
+    assert observed.status == "APPROVED" and observed.observed_rules
+    assert observed.suggested_fix is None and proposals == []
+
+
 # ---------------------------------------------------------------- how much a call may carry
 
 
