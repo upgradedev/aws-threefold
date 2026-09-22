@@ -209,6 +209,16 @@ def test_a_repeated_read_is_noted_but_sent_no_fix(evaluator, proposals) -> None:
     assert proposals == [], "Nothing would have refused it, so nothing is proposed"
 
 
+def test_a_fault_in_the_fix_never_costs_the_verdict(evaluator, recorded, monkeypatch) -> None:
+    def broken(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("the proposer broke")
+
+    monkeypatch.setattr(evaluator_module, "propose_fix", broken)
+    result = evaluator.evaluate_tool_call(_request("fix-broken", _domain_write()))
+    assert result.status == "BLOCKED_BOUNDARY_VIOLATION" and result.suggested_fix is None
+    assert not any("fix" in key and recorded[-1][key] is not None for key in recorded[-1])
+
+
 def test_an_approval_is_sent_no_fix(evaluator, proposals) -> None:
     approved = evaluator.evaluate_tool_call(_request("fix-approved", {"file_path": "src/acme/app.py", "content": "x = 1\n"}))
     assert approved.status == "APPROVED" and approved.suggested_fix is None

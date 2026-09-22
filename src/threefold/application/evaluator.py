@@ -701,9 +701,16 @@ class GovernanceEvaluator:
         page_observation = bool(getattr(request, "explain", True)) and bool(getattr(result, "observed_rules", None))
         if not (refused or page_observation):
             return None
-        if carries_more_than(getattr(request, "arguments", None), FIX_MAX_CONTENT_CHARS):
+        try:
+            if carries_more_than(getattr(request, "arguments", None), FIX_MAX_CONTENT_CHARS):
+                return None
+            return propose_fix(request, result, rules)
+        except Exception as exc:  # pragma: no cover - the verdict stands without a fix
+            # The proposer never raises, and measuring a call that the gates
+            # already read should not either; if either ever does, the caller
+            # still gets its verdict rather than a 500.
+            logger.warning("Could not attach a suggested fix; the verdict stands on its own: %s", exc)
             return None
-        return propose_fix(request, result, rules)
 
     @staticmethod
     def _rule_key(result: EvaluationResultDTO, rules: List[Dict[str, Any]]) -> str:
