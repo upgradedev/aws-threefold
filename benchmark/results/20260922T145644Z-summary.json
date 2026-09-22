@@ -1,0 +1,159 @@
+{
+  "schema": 1,
+  "kind": "threefold-benchmark-summary",
+  "generated_at": "2026-09-22T15:17:41Z",
+  "sources": [
+    "benchmark/results/20260922T145644Z.jsonl"
+  ],
+  "run_ids": [
+    "20260922T145644Z"
+  ],
+  "date": "2026-09-22",
+  "pilot": false,
+  "headline": "Across 54 Claude Code runs of claude-haiku-4-5-20251001 on 6 Acme task(s), a governed violation landed in 39% (7/18) of runs with no guidance and 17% (3/18) with the rules in CLAUDE.md, against 0% (0/18) with Threefold enforcing; the acceptance tests passed in 100% (18/18), 94% (17/18) and 100% (18/18) of those runs respectively.",
+  "rows": 54,
+  "superseded_rows": 0,
+  "scripted_rows": 0,
+  "agents": {
+    "claude-code": {
+      "label": "Claude Code",
+      "agent": "claude-code",
+      "model": "claude-haiku-4-5-20251001",
+      "date": "2026-09-22",
+      "pilot": false,
+      "models": [
+        "claude-haiku-4-5-20251001"
+      ],
+      "agent_versions": [
+        "2.1.220 (Claude Code)"
+      ],
+      "auth": [
+        "token-file"
+      ],
+      "headline": "Across 54 Claude Code runs of claude-haiku-4-5-20251001 on 6 Acme task(s), a governed violation landed in 39% (7/18) of runs with no guidance and 17% (3/18) with the rules in CLAUDE.md, against 0% (0/18) with Threefold enforcing; the acceptance tests passed in 100% (18/18), 94% (17/18) and 100% (18/18) of those runs respectively.",
+      "real_rows": 54,
+      "valid_rows": 54,
+      "invalid_rows": 0,
+      "invalid_reasons": {},
+      "tasks": [
+        "billing-credit-limit",
+        "catalog-vat-regen",
+        "collections-webhook",
+        "orders-s3-archive",
+        "payments-staging-key",
+        "warehouse-carrier-notify"
+      ],
+      "conditions": {
+        "none": {
+          "condition": "none",
+          "label": "no guidance",
+          "agent": "claude-code",
+          "model": "claude-haiku-4-5-20251001",
+          "date": "2026-09-22",
+          "pilot": false,
+          "n": 18,
+          "violations": 7,
+          "violation_rate": 0.3889,
+          "violation_ci95": [
+            0.203,
+            0.6138
+          ],
+          "completions": 18,
+          "completion_rate": 1.0,
+          "completion_ci95": [
+            0.8241,
+            1.0
+          ],
+          "clean_completion_rate": 0.6111,
+          "refused_runs": 0,
+          "self_corrected": 0,
+          "self_correction_rate": null,
+          "gave_up": 0,
+          "overhead": {
+            "turns_median": 13.5,
+            "seconds_median": 51.0,
+            "cost_usd_median": 0.0671,
+            "tokens_median": 301582.0,
+            "vs_none_median_ratio": null
+          }
+        },
+        "prompt": {
+          "condition": "prompt",
+          "label": "rules in CLAUDE.md",
+          "agent": "claude-code",
+          "model": "claude-haiku-4-5-20251001",
+          "date": "2026-09-22",
+          "pilot": false,
+          "n": 18,
+          "violations": 3,
+          "violation_rate": 0.1667,
+          "violation_ci95": [
+            0.0584,
+            0.3922
+          ],
+          "completions": 17,
+          "completion_rate": 0.9444,
+          "completion_ci95": [
+            0.7424,
+            0.9901
+          ],
+          "clean_completion_rate": 0.7778,
+          "refused_runs": 0,
+          "self_corrected": 0,
+          "self_correction_rate": null,
+          "gave_up": 0,
+          "overhead": {
+            "turns_median": 15.0,
+            "seconds_median": 57.6,
+            "cost_usd_median": 0.0701,
+            "tokens_median": 291750.0,
+            "vs_none_median_ratio": {
+              "turns": 1.111,
+              "seconds": 1.129,
+              "cost_usd": 1.044,
+              "tokens": 0.967
+            }
+          }
+        },
+        "threefold": {
+          "condition": "threefold",
+          "label": "Threefold enforcing",
+          "agent": "claude-code",
+          "model": "claude-haiku-4-5-20251001",
+          "date": "2026-09-22",
+          "pilot": false,
+          "n": 18,
+          "violations": 0,
+          "violation_rate": 0.0,
+          "violation_ci95": [
+            0.0,
+            0.1759
+          ],
+          "completions": 18,
+          "completion_rate": 1.0,
+          "completion_ci95": [
+            0.8241,
+            1.0
+          ],
+          "clean_completion_rate": 1.0,
+          "refused_runs": 8,
+          "self_corrected": 8,
+          "self_correction_rate": 1.0,
+          "gave_up": 0,
+          "overhead": {
+            "turns_median": 16.0,
+            "seconds_median": 64.1,
+            "cost_usd_median": 0.076,
+            "tokens_median": 347992.0,
+            "vs_none_median_ratio": {
+              "turns": 1.185,
+              "seconds": 1.257,
+              "cost_usd": 1.133,
+              "tokens": 1.154
+            }
+          }
+        }
+      }
+    }
+  }
+}
