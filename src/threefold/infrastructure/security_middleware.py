@@ -820,8 +820,9 @@ def validate_request_security(
     # they return is that stack's real use. Writes to the same paths were
     # decided in step 3. When keys are enforced, the kill switch under
     # /sessions/{id}/terminate needs one like every other unlisted call; a
-    # deployment that enforces no key, as the demo stack does, answers it
-    # anonymously, and STATE.md says so.
+    # deployment that enforces no key and keeps its reads public, as the demo
+    # stack does, answers it anonymously, and STATE.md says so. Where the reads
+    # are private, step 3d above has already closed it.
     if is_page_read(verb, path):
         if reads_are_public():
             return True, None
