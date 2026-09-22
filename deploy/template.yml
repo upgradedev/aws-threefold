@@ -46,6 +46,17 @@ Parameters:
       a key from PolicyWriteApiKeys, exactly as a policy write does. The pages
       and the hook stay public either way.
 
+  DefaultHookStage:
+    Type: String
+    Default: observe
+    AllowedValues: ['observe', 'enforce']
+    Description: >-
+      The stage a hook or CI call is judged in when its project has no stage
+      of its own. 'observe' records what every rule would have refused and
+      refuses nothing, which is how a newly connected repository starts.
+      'enforce' runs the gates as before. Page and simulation calls always
+      enforce, so the public demo is the same under either value.
+
 Globals:
   Function:
     Timeout: 15
@@ -69,6 +80,7 @@ Globals:
         # an update that does not override them changes no behaviour.
         ALLOWED_PROJECT_PATTERN: !Ref AllowedProjectPattern
         PUBLIC_READS: !Ref PublicReads
+        DEFAULT_HOOK_STAGE: !Ref DefaultHookStage
 
 Resources:
   ThreefoldHttpApi:
@@ -76,7 +88,8 @@ Resources:
     Properties:
       StageName: prod
       CorsConfiguration:
-        AllowMethods: ['GET', 'POST', 'OPTIONS']
+        # DELETE is how the dashboard signs out of a session.
+        AllowMethods: ['GET', 'POST', 'DELETE', 'OPTIONS']
         # Idempotency-Key is sent by the dashboard's kill switch and by the sessions
         # console. Omitting it here fails the preflight whenever a page is served
         # from anywhere but this API's own origin.
@@ -101,6 +114,10 @@ Resources:
                 - dynamodb:PutItem
                 - dynamodb:GetItem
                 - dynamodb:UpdateItem
+                # A sign-in code is spent by a conditional delete, so two
+                # exchanges of one code cannot both succeed, and signing out
+                # deletes the session. Same table, no other resource.
+                - dynamodb:DeleteItem
                 - dynamodb:Query
                 # The sessions listing scans for session metadata. Without this the
                 # scan is refused, the repository silently falls back to whatever the
