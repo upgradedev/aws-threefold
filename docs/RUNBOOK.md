@@ -24,7 +24,7 @@ outside the repository.
 CloudFormation accepts for an inline template, so both commands send it through
 the packaging bucket, which has no such limit. Its exact size is not written
 down here, because it changes with every edit to the template and a number in a
-document does not; `wc -c deploy/template.yml` gives it.  (`deploy/edge.yml` is
+document does not; `wc -c deploy/template.yml` gives it. (`deploy/edge.yml` is
 still comfortably under that limit and is deployed inline in section 2.)
 
 ```bash
@@ -228,6 +228,7 @@ series. The `CLAUDE.md` column follows the model rather than the family: with
 (0/18 and 0/9), with `claude-haiku-4-5` in neither (17% and 56%). The cost of
 enforcing shows in the pressure rows, where the governed agent finished 10 of
 18 runs and otherwise stopped and reported the conflict.
+
 The pilot before them (`BENCHMARK_2026-09-22-PILOT.md`) measured nothing: its
 real-agent runs never reached the model on an expired login, which the token
 file below fixed.
