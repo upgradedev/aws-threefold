@@ -4,17 +4,18 @@
     python benchmark/run.py --reps 3 --parallel 3
 
 Each run gets a fresh copy of the task repository under the system temp folder
-(%TEMP%\\threefold-bench\\<run-id> on Windows), never inside the workspace. One
-row per run is appended to benchmark/results/<run-id>.jsonl as soon as the run
-ends, so an interrupted matrix keeps what it finished. Aggregate with
-benchmark/report.py.
+(%TEMP%\\threefold-bench\\<run-id> on Windows), never inside the workspace, or
+at the root of the same drive when a Claude memory file sits above the temp
+folder, because Claude Code would load it into every run. One row per run is
+appended to benchmark/results/<run-id>.jsonl as soon as the run ends, so an
+interrupted matrix keeps what it finished. Aggregate with benchmark/report.py.
 
 Before a real run, the machine needs a logged-in Claude Code: `claude auth
 status` must say loggedIn, and a first `claude -p "hi"` must answer rather than
 report an expired session. For the strongest isolation, create a long-lived
 token with `claude setup-token` and export it as CLAUDE_CODE_OAUTH_TOKEN: each
-run then gets a configuration folder of its own, so nothing from the owner's
-user-level CLAUDE.md, settings, skills or memory reaches the agent.
+run then gets a configuration folder and a home folder of its own, so nothing
+from the owner's settings, skills or memory reaches the agent.
 """
 from __future__ import annotations
 
@@ -22,6 +23,7 @@ import argparse
 import datetime
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -59,7 +61,9 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--claude", default=None, help="path to the claude executable (default: found on PATH)")
     parser.add_argument("--run-id", default=None)
     parser.add_argument("--pilot", action="store_true", help="label every row as a pilot, not a result")
-    parser.add_argument("--work-root", type=Path, default=None, help="default: <system temp>/threefold-bench/<run-id>")
+    parser.add_argument("--work-root", type=Path, default=None,
+                        help="default: <system temp>/threefold-bench/<run-id>, or <drive root>/threefold-bench/<run-id> "
+                             "when a CLAUDE.md sits above the temp folder")
     parser.add_argument("--results-dir", type=Path, default=RESULTS_DIR)
     parser.add_argument("--dry-run", action="store_true", help="print the plan and the agent command, run nothing")
     args = parser.parse_args(argv)
@@ -95,6 +99,55 @@ def claude_version(claude: str) -> str:
         return "unavailable"
 
 
+def claude_help(claude: str) -> str:
+    try:
+        completed = subprocess.run([claude, "--help"], capture_output=True, timeout=60)
+        return completed.stdout.decode("utf-8", "replace")
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def setting_sources_problem(help_text: str) -> Optional[str]:
+    """Why this Claude Code cannot take `--setting-sources project,local`, or None when it can.
+
+    The runner leans on that flag to keep the owner's user settings, hooks and
+    user-level CLAUDE.md out. Claude Code 2.1.220 lists its sources as `user,
+    project, local`; newer documentation names different ones (user,
+    workspace, machine, managed, sdk). A version that no longer knows
+    `project` and `local` would ignore or reject the flag, so the runner stops
+    before any run instead of measuring an agent that read the owner's setup.
+    """
+    start = help_text.find("--setting-sources")
+    if start == -1:
+        return "this Claude Code has no --setting-sources option"
+    following = help_text[start + len("--setting-sources"):]
+    next_option = re.search(r"\n\s+--?[A-Za-z]", following)
+    description = following[: next_option.start()] if next_option else following
+    words = set(re.findall(r"[a-z]+", description.lower()))
+    missing = [name for name in ("project", "local") if name not in words]
+    if missing:
+        return (f"this Claude Code's --setting-sources does not list {', '.join(missing)}; the runner passes "
+                "`--setting-sources project,local` and was checked against 2.1.220")
+    return None
+
+
+def default_work_root(run_id: str, temp: Optional[Path] = None) -> Path:
+    """<system temp>/threefold-bench/<run-id>, unless a Claude memory file sits above it.
+
+    Claude Code loads CLAUDE.md files from every folder above its working
+    directory. On Windows the system temp folder lies inside the home folder,
+    so when the owner keeps a ~/.claude/CLAUDE.md, every run below the temp
+    folder would read it as project instructions. The fallback is the same
+    folder name at the root of the temp folder's drive.
+    """
+    temp = Path(temp or tempfile.gettempdir())
+    candidates = [temp / "threefold-bench" / run_id, Path(temp.anchor or "/") / "threefold-bench" / run_id]
+    for candidate in candidates:
+        if not harness.claude_memory_above(candidate):
+            return candidate
+    return candidates[0]
+
+
 class ResultsFile:
     """Appends one JSON line per run, from any thread."""
 
@@ -123,10 +176,23 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     args = parse_args(argv)
     tasks = task_library.load_tasks(args.tasks)
     run_id = args.run_id or default_run_id(args.pilot, args.agent)
-    work_root = args.work_root or Path(tempfile.gettempdir()) / "threefold-bench" / run_id
+    work_root = args.work_root or default_work_root(run_id)
     harness.ensure_outside_workspace(work_root)
     claude = args.claude or shutil.which("claude") or "claude"
     isolation = harness.choose_isolation(args.isolation, os.environ) if args.agent == "claude" else "user-config"
+    if args.agent == "claude":
+        above = harness.claude_memory_above(work_root)
+        if above:
+            print("refused: Claude Code would load these memory files into every run as project instructions, because they sit "
+                  f"above the work root {work_root}: {', '.join(str(path) for path in above)}. Pass --work-root at a folder "
+                  "with no CLAUDE.md, CLAUDE.local.md, .claude/CLAUDE.md or .claude/rules above it.", file=sys.stderr)
+            return 2
+        if not args.dry_run:
+            problem = setting_sources_problem(claude_help(claude))
+            if problem:
+                print(f"refused: {problem}. Check `claude --help` and adjust harness.build_agent_command before measuring.",
+                      file=sys.stderr)
+                return 2
     options = harness.AgentOptions(
         agent=args.agent, claude=claude, model=args.model, max_turns=args.max_turns, timeout_s=args.timeout,
         budget_usd=args.budget_usd, isolation=isolation,

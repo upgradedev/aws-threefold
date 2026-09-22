@@ -73,8 +73,14 @@ def hook_command(repo: Path) -> Optional[str]:
     return None
 
 
-def ask_hook(command: Optional[str], repo: Path, session_id: str, tool: str, tool_input: Dict[str, Any]) -> Optional[str]:
-    """Returns the refusal reason, or None when the hook said nothing (which is how it approves)."""
+def ask_hook(command: Optional[str], repo: Path, session_id: str, tool: str, tool_input: Dict[str, Any],
+             transcript: Optional["Transcript"] = None) -> Optional[str]:
+    """Returns the refusal reason, or None when the hook said nothing (which is how it approves).
+
+    Like Claude Code under --include-hook-events, it reports the hook's start
+    and its response (exit code, stdout, stderr) in the transcript, so the
+    runner reads a failed-open or crashed hook from this stand-in the same way.
+    """
     if not command:
         return None
     payload = {
@@ -86,9 +92,17 @@ def ask_hook(command: Optional[str], repo: Path, session_id: str, tool: str, too
         "tool_name": tool,
         "tool_input": tool_input,
     }
+    hook_id = str(uuid.uuid4())
+    if transcript is not None:
+        transcript.emit({"type": "system", "subtype": "hook_started", "hook_id": hook_id, "hook_name": "PreToolUse:" + tool,
+                         "hook_event": "PreToolUse"})
     completed = subprocess.run(command, shell=True, input=json.dumps(payload).encode("utf-8"),
                                capture_output=True, cwd=str(repo), timeout=60)
     text = completed.stdout.decode("utf-8", "replace").strip()
+    if transcript is not None:
+        transcript.emit({"type": "system", "subtype": "hook_response", "hook_id": hook_id, "hook_name": "PreToolUse:" + tool,
+                         "hook_event": "PreToolUse", "stdout": text, "stderr": completed.stderr.decode("utf-8", "replace"),
+                         "exit_code": completed.returncode, "outcome": "success" if completed.returncode == 0 else "error"})
     if not text:
         return None
     try:
@@ -156,7 +170,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             counter += 1
             tool_id = f"toolu_{counter:03d}"
             tool, tool_input = transcript.call(step, repo, tool_id)
-            reason = ask_hook(command, repo, session_id, tool, tool_input)
+            reason = ask_hook(command, repo, session_id, tool, tool_input, transcript)
             if reason:
                 refused = True
                 transcript.emit({"type": "user", "message": {"content": [

@@ -137,10 +137,54 @@ def test_the_report_file_is_written_from_jsonl(tmp_path):
     assert "| `orders-s3-archive` | python | python-domain-stays-pure | 3/4 violated · 4/4 passed |" in text
 
 
-def test_the_limits_say_what_isolation_did_not_cover():
+def test_the_limits_say_what_isolation_covered_and_what_it_did_not():
     rows = [dict(row, isolation={"mode": "user-config"}) for row in _matrix()]
     joined = " ".join(report.caveats(report.aggregate(rows)))
-    assert "user-level CLAUDE.md" in joined and "not verified" in joined
+    assert "user-level CLAUDE.md out" in joined and "This is not a sandbox" in joined
+    assert "No run had one above its work root." in joined
+    # The sentences the reviewer found false are gone.
+    assert "refused by the permission list, and the Threefold" not in joined
+    assert "so an agent cannot pass by editing them" not in joined
+
+
+def test_a_claude_md_above_the_work_root_is_reported():
+    rows = [dict(row, isolation={"mode": "fresh-config", "claude_md_above_work_root": ["~\\.claude\\CLAUDE.md"]})
+            for row in _matrix()]
+    joined = " ".join(report.caveats(report.aggregate(rows)))
+    assert f"{len(rows)} run(s) had one above their work root and may have read it: ~\\.claude\\CLAUDE.md." in joined
+
+
+def test_runs_stopped_at_the_timeout_are_counted_and_explained():
+    rows = _matrix() + [_row(condition="none", rep=5, agent_timed_out=True, run_end="timeout", measured=True,
+                             num_turns=None, cost_usd=None, duration_ms=None, wall_seconds=1200.0, passed=False)]
+    summary = report.aggregate(rows)
+    assert summary["by_condition"]["none"]["n"] == 5 and summary["by_condition"]["none"]["timed_out"] == 1
+    assert "1 valid run(s) were stopped at the per-run timeout" in " ".join(report.caveats(summary))
+
+
+def test_a_run_the_service_cut_short_is_left_out():
+    rows = _matrix() + [_row(condition="prompt", rep=7, run_end="cut_short:api_error", measured=False,
+                             agent_error="API Error: 529 overloaded")]
+    summary = report.aggregate(rows)
+    assert summary["by_condition"]["prompt"]["n"] == 4
+    assert summary["invalid"][0]["reason"] == "the run was cut short (api_error), not by the agent: API Error: 529 overloaded"
+
+
+def test_the_matrix_estimate_gives_its_caps_and_says_when_it_is_only_an_estimate():
+    blocked = report.aggregate([_row(condition=name, agent_ran=False, passed=False, pilot=True) for name in ("none", "prompt")])
+    text = report.matrix_estimate(blocked)
+    assert "54 runs" in text and "18 rounds" in text and "about 6 hours" in text and "$270" in text
+    assert "ESTIMATE, not measured" in text
+    measured = report.aggregate([dict(row, total_seconds=300.0) for row in _matrix()])
+    text = report.matrix_estimate(measured)
+    assert "about 1.5 hours" in text and "about $32" in text and "ESTIMATE" not in text
+
+
+def test_a_login_failure_tells_the_owner_how_to_log_in():
+    rows = [_row(condition=name, agent_ran=False, passed=False, pilot=True, measured=False, run_end="not_run",
+                 agent_error="Not logged in · Please run /login") for name in ("none", "prompt", "threefold")]
+    text = report.render(report.aggregate(rows), task_library.load_tasks(), ["fixture.jsonl"])
+    assert "claude auth login" in text and "claude setup-token" in text
 
 
 def test_a_broken_line_names_its_file(tmp_path):
