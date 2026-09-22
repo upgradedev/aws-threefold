@@ -406,6 +406,8 @@ def _route(event: Dict[str, Any], http_method: str, request_id: str) -> Dict[str
         # Route 2: Single Tool Call Evaluation (Core Governance Gate)
         if path == "/evaluate-tool-call" and http_method == "POST":
             body = _parse_body(event)
+            # The id names a row on the sessions page, and naming one creates it.
+            _check_named_session(body)
             request = ToolCallRequestDTO.from_payload(body)
 
             if request.projected_input_tokens < 0 or request.projected_output_tokens < 0:
@@ -457,6 +459,7 @@ def _route(event: Dict[str, Any], http_method: str, request_id: str) -> Dict[str
         # Route 2b: Universal Multi-Agent Adapter (OpenAI / Anthropic format)
         if path in ("/adapter/universal-tool-call", "/universal-eval") and http_method == "POST":
             body = _parse_body(event)
+            _check_named_session(body)
 
             # Extract payload: handle nested tool_call or root payload. An
             # envelope that also names a tool call beside the one it wraps is
@@ -568,6 +571,7 @@ def _route(event: Dict[str, Any], http_method: str, request_id: str) -> Dict[str
         # Route 5: Issue Cryptographic Governance Certificate
         if path == "/issue-certificate" and http_method == "POST":
             body = _parse_body(event)
+            _check_named_session(body)
             session_id = body.get("session_id", "session-default")
             evaluations = body.get("evaluations", [])
             # Checked before the session is touched. A list of anything else
@@ -685,7 +689,9 @@ def _route(event: Dict[str, Any], http_method: str, request_id: str) -> Dict[str
 
         # Route 6b: Enterprise Emergency Kill Switch (Manual Session Freeze)
         if path.startswith("/sessions/") and path.endswith("/terminate") and http_method == "POST":
-            target_session_id = unquote(path.replace("/sessions/", "").replace("/terminate", "").strip())
+            target_session_id = _checked_session_id(
+                unquote(path.replace("/sessions/", "").replace("/terminate", "").strip())
+            )
             body = _parse_body(event)
             # Bounded and redacted before anything is frozen. models.py builds
             # `trip_reason` out of these two, the sessions listing returns it as
@@ -1164,6 +1170,56 @@ def _universal_tool_call(tc: Any) -> tuple:
         _tool_name(tc.get("tool_name") if tc.get("tool_name") is not None else tc.get("name")),
         _tool_arguments(tc.get("arguments")),
     )
+
+
+SESSION_ID_LIMIT = 200
+
+
+def _checked_session_id(value: Any) -> str:
+    """The session id a caller names, which naming creates and a page then shows.
+
+    Every route that names a session creates it: the two recording routes, the
+    certificate and the freeze. `/api/sessions` lists the id exactly as it
+    arrived, and `public_row()` rewrites only the project and the developer, so
+    on a stack whose reads are public the id is the piece of that row a caller
+    writes and every visitor reads. Unbounded and unredacted it was the third
+    piece of caller text on that page, beside the operator and the reason a
+    freeze writes, which are bounded and redacted.
+
+    Refused rather than cut or redacted, unlike those two: an id shortened or
+    rewritten on the way in would address a different session than the caller
+    named, so the freeze would lock one row and answer for another. 200
+    characters is far above what names a session in practice — an agent's is a
+    UUID — and the limit is on the id, never on how many sessions there may be.
+    """
+    if not isinstance(value, str) or not value.strip():
+        raise InvalidRequestError("session_id must be text.", "session_id")
+    named = value.strip()
+    if len(named) > SESSION_ID_LIMIT:
+        raise InvalidRequestError(
+            f"session_id must be at most {SESSION_ID_LIMIT} characters: naming a session "
+            "creates it, and the sessions page shows the id it was named by.",
+            "session_id",
+        )
+    if redact_secrets(named) != named:
+        raise InvalidRequestError(
+            "session_id must not carry a credential: naming a session creates it, and the "
+            "sessions page shows the id it was named by, as it arrived.",
+            "session_id",
+        )
+    return named
+
+
+def _check_named_session(body: Dict[str, Any]) -> None:
+    """The same check for a route that reads the id out of a body it may leave out.
+
+    A body naming no session gets the default this route has always used, so a
+    caller that names none is unaffected.
+    """
+    named = body.get("session_id")
+    if named is None or named == "":
+        return
+    _checked_session_id(named)
 
 
 def _bounded_text(body: Dict[str, Any], name: str, limit: int, default: str) -> str:
