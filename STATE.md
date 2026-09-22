@@ -1,6 +1,6 @@
 # Threefold — State Ledger
 
-**Last updated:** 2026-09-21
+**Last updated:** 2026-09-22
 **Hackathon:** AWS Zero to Shipped, submissions close 2026-10-02 23:59 PDT
 **Category:** `#workplace-efficiency` · **Lane:** `#community` (hedge to `#commercial-potential` / `#startup` decided 2026-09-28)
 **Entries permitted:** one. The Rules tab, ELIGIBILITY section, reads "Limit one entry per person." Threefold is that entry.
@@ -85,7 +85,7 @@ it, treat the later date as the one that governs teardown.
 
 | Requirement | State | Evidence `[PRIMARY]` |
 |---|---|---|
-| Live on AWS, public URL | **PASS** | `https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/` serves the dashboard itself, 200 and `text/html`, to an anonymous request with no API key. Stack `threefold-prod`, eu-west-1. The trailing slash is part of the URL: API Gateway answers the bare `/prod` with its own `{"message":"Not Found"}` before the function is reached, so every link to this project must carry it |
+| Live on AWS, public URL | **PASS** | Since 2026-09-22 the primary URL is the edge, `https://d1og72wpk4aqig.cloudfront.net/` (stack `threefold-prod-edge`, us-east-1: CloudFront, pages in a private S3 bucket behind Origin Access Control, WAF, security headers), which routes every JSON path to the API below. The API URL `https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/` still serves the dashboard itself, 200 and `text/html`, to an anonymous request with no API key. Stack `threefold-prod`, eu-west-1. The trailing slash is part of the URL: API Gateway answers the bare `/prod` with its own `{"message":"Not Found"}` before the function is reached, so every link to this project must carry it |
 | A visitor can run the demo | **PASS** | Walked in a browser: Scenario 1 sent one `POST /simulate-loop`, the function evaluated the same call three times inside that request, the response was `BLOCKED_LOOP_DETECTED`, and the panel showed a genuine Haiku 4.5 sentence under the heading "Amazon Bedrock (Claude Haiku 4.5)" |
 | Reachable by the AI scorer | **PASS** | `STAGE` is unset on the function, so the middleware defaults to `dev` and enforces no key. Verified by unauthenticated request. Do not read this off `/status`, which prints `"stage": "prod"`: that field has its own default and says nothing about whether a key is required |
 | Proof of coding agent connected to AWS | **PASS** | `docs/PROOF_OF_AWS_AGENT.md` rewritten around the real session: the commands run, the two defects AWS surfaced, and the CloudTrail principal. Raw output in `docs/evidence/DEPLOYMENT_2026-09-20.md` |
@@ -123,8 +123,12 @@ it, treat the later date as the one that governs teardown.
 | Public data carries no real names | Live on 2026-09-21: `/api/insights` and `/api/sessions` show only `Acme-*` projects or `unlabelled`, and developers only as 8-hex hashes. Project names outside `AllowedProjectPattern` are stored as `unlabelled` with a warning in the response |
 | A refusal cannot be walked around through the shell | Live on 2026-09-22: `cat > src/domain/acme_user.py <<'EOF'` with `import boto3`, and `echo 'import boto3' >> src/domain/x.py`, both answer `BLOCKED_BOUNDARY_VIOLATION`, the same as a `Write`; a rewrite of `.claude/settings.json` and `git commit --no-verify` are refused; an ordinary `pytest -q 2>&1 | tail -5` is approved. In the suite, 87 ordinary commands are approved and 113 bypass probes are refused |
 | A loop stops the loop, not the developer | Live on 2026-09-22: a hook polling `git status` four times is approved every time; a hook repeating `npm run build` is refused on the third call without halting the session, and the next different call is approved; the demo's own loop still freezes its session |
-| The owner's real work is governed | Since 2026-09-22, in observe mode, at nine locations of the owner's own work under aliases `Acme-Proj-*`, for Claude Code and Antigravity (Codex from 2026-09-27), reporting to the private stack. Checked with synthetic calls through the registered command: a write inside a listed repository reaches the private stack; a write into a repository the owner excluded is held back and never reaches it; a credential is refused on the machine. Nothing is refused for a rule in observe mode |
-| Test suite | 1941 passed in 58s. It is hermetic now: `THREEFOLD_OFFLINE` used to be set in a session fixture, which runs after the handler module has built its AWS clients at collection time, so the suite had been trying real endpoints (56 s per run, one readiness test failing on HEAD) until 2026-09-21. It never reached live data, because the default table name it would have used does not exist. Each test still starts with a full rate-limit bucket, and the rate limiter's own tests build their own instance |
+| The owner's real work is governed | Since 2026-09-22 at nine locations of the owner's own work under aliases `Acme-Proj-*`, three agents each (Codex from 2026-09-27, for projects trusted in Codex), reporting to the private stack. Switched from observe on the machine to managed the same day, with every project still in Observe on the server, so the switch changed nothing an agent sees; promotion is now a dashboard action. Re-checked after the switch with synthetic calls through the registered command, 9/9: a write inside a listed repository reaches the private stack and is recorded as observed; writes into excluded repositories and a workspace's own files are held back and never reach it; a credential is refused on the machine; `git status` shows no Threefold file |
+| The application is live | 2026-09-22, live checks 34/34 against both stacks: the dashboard, `/app`, its assets and `/install.py` (with the stack's own URL and a matching sha256 header) are served; the bundle's files match its manifest and the bundled hook is the repository's; on the public stack a sandbox is made and seeded, labelled anonymously, readiness follows the labels (the rule with a false alarm reads noisy), promotion makes the same kind of call refused with a Bedrock sentence while the noisy rule keeps observing, demotion makes it observed again, an unconfigured project's hook calls start in Observe, and a page call still enforces; on the private stack the overview is 401 without a key, the operator key mints a one-time link, the code works once, the session reads the private overview, cannot mint links, and ends at sign-out |
+| The dashboard's numbers cover the history | Daily rollups started with the 2026-09-22 deploy; `scripts/backfill_rollups.py` added every older ledger row exactly once (133 rows on the public stack, 184 on the private one), claiming each with a conditional update, and a second run added nothing |
+| Every claim, probed live | `scripts/probe_live.py`, 2026-09-22: API 113 PASS, 0 FAIL (`docs/evidence/PROBES_2026-09-22.md`); the edge 112 PASS, 1 FAIL (a page that does not exist answered 403 from S3, not 404; being fixed); the private stack, read-only with the key, 97 PASS, 0 FAIL. Through the edge, `/install.py` names the edge's own URL, and the bucket refuses a direct request |
+| A refusal carries a checked fix | Live 2026-09-22: a page Write of `import boto3` into a domain file is refused with `suggested_fix` of kind layering, validated true: the domain file behind an `OrderPort` and an adapter in `infrastructure/`, each passing the layering, credential, boundary and syntax checks. The ledger keeps only the fix's kind and whether it was checked; the hook's deny reason carries the summary line |
+| Test suite | 4066 passed, 5 skipped on 2026-09-22 after waves one to three merged (1941 at the start of the day). Hermetic: `THREEFOLD_OFFLINE` is set at import, the application-route tests run with a synthetic operator key, and the loop scenario test no longer depends on the order the directories run in |
 
 ## Known gaps, not yet fixed
 
@@ -173,6 +177,21 @@ hidden in a document that a judge would read as finished work.
    the framing gate wants one comparative number against two named baselines.
 8. No video and no Builder Center article. Neither is required by the rules, but
    the Builder Center project itself is, and it is owner-gated.
+
+9. The benchmark has no result yet. The harness, the tasks, the independent
+   checkers and the report are built and tested, but the pilot's real-agent runs
+   failed on an expired headless login, so `#/proof` says "not measured" and
+   no comparative number exists. The full matrix needs the owner's token file.
+10. Codex enforcement is unmeasured until its account resets on 2026-09-27; the
+    benchmark's Codex support is built and has not run.
+11. Behind the edge, a page that does not exist answers 403 from S3 rather than
+    404 (the bucket grants CloudFront `s3:GetObject` only). Being fixed.
+12. A refused write longer than 1,500 characters gets no suggested fix, because
+    the rewrite would cost more than the gate budget; advice in words above that
+    size is being added.
+13. `POST /rules/draft` is open on the public stack like `/rules/explain`; its
+    Bedrock spend is bounded per container (60 calls) and by the function's
+    reserved concurrency, not by an account-wide counter.
 
 ## Audit and what was done about it, 2026-09-20
 
@@ -259,7 +278,16 @@ traffic.
 
 ## Cost and teardown
 
-PAY_PER_REQUEST DynamoDB, one 256 MB arm64 Lambda, an HTTP API and an empty S3
-bucket. Bedrock calls are capped per container. Teardown is
-`aws cloudformation delete-stack --stack-name threefold-prod --region eu-west-1`,
-which must not run before judging completes.
+Regional stacks (`threefold-prod`, `threefold-dogfood`, eu-west-1): PAY_PER_REQUEST
+DynamoDB with point-in-time recovery, one 256 MB arm64 Lambda with X-Ray and 25
+reserved copies, an HTTP API with throttling and access logs, alarms to an SNS
+topic, a CloudWatch dashboard, and an S3 bucket nothing writes to. ESTIMATE, from
+list prices: a few USD a month each at demo traffic, most of it alarms and custom
+metrics. The edge (`threefold-prod-edge`, us-east-1): WAF about 9 USD a month
+(web ACL plus four rules) plus requests, CloudFront inside the free tier, the
+pages bucket and a log bucket for cents. Bedrock calls are capped per container.
+
+Teardown, never before judging completes: `aws cloudformation delete-stack` for
+`threefold-prod-edge` (us-east-1), then `threefold-prod` and `threefold-dogfood`
+(eu-west-1). The edge's two buckets are retained on purpose and must be emptied
+and deleted by hand.
