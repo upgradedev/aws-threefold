@@ -71,4 +71,4 @@ python benchmark/run.py --reps 3 --parallel 3        # the full matrix: 6 tasks 
 python benchmark/report.py benchmark/results/<run-id>.jsonl
 ```
 
-Source rows: `benchmark/results/20260922T083818Z-pilot.jsonl`, `benchmark/results/20260922T083845Z-scripted.jsonl`. Run ids: 20260922T083818Z-pilot, 20260922T083845Z-scripted.
+Source rows: `benchmark/results/20260922T084502Z-pilot.jsonl`, `benchmark/results/20260922T083845Z-scripted.jsonl`. Run ids: 20260922T083845Z-scripted, 20260922T084502Z-pilot.
