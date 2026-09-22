@@ -71,6 +71,11 @@ STILL_REFUSED = [
     "cat deploy.pem",
     "grep AWS_SECRET .env",
     "grep -rn x .env",
+    # git prints the file here, so this is a read of the store, not a question
+    # about the index.
+    "git log -p -- .env",
+    "git diff -- .env",
+    "git show HEAD:.env",
 ]
 
 

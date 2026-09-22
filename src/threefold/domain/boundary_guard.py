@@ -507,8 +507,10 @@ _PATTERN_FIRST = frozenset(("grep", "egrep", "fgrep", "rg", "ag", "ack", "jq", "
 # longer clear from the outside, so nothing is taken out.
 _PATTERN_FLAGS = ("-e", "-f", "--regexp", "--file", "--from-file", "--expression")
 _PATTERN_FLAG_PREFIXES = ("--regexp=", "--file=", "--from-file=", "--expression=")
-# git subcommands that name a path without reading what is in it.
-_GIT_ASKS = frozenset(("check-ignore", "status", "ls-files", "log"))
+# git subcommands that name a path without ever printing what is in it.
+# `diff` and `log -p` are deliberately not among them: both print the file, so
+# `git log -p -- .env` reaches the credential store as surely as `cat` does.
+_GIT_ASKS = frozenset(("check-ignore", "status", "ls-files"))
 _FIND_PATTERN_FLAGS = frozenset(
     ("-name", "-iname", "-path", "-ipath", "-wholename", "-iwholename", "-regex", "-iregex", "-lname", "-ilname")
 )
