@@ -877,7 +877,7 @@
           <table class="tf-table">
             <thead><tr>
               <th scope="col">Rule</th><th scope="col">Now</th>
-              <th scope="col" class="num">Would refuse</th><th scope="col" class="num">Correct</th>
+              <th scope="col" class="num">Would refuse</th><th scope="col" class="num">Refused</th><th scope="col" class="num">Correct</th>
               <th scope="col" class="num">False alarms</th><th scope="col" class="num">Unreviewed</th>
               <th scope="col">State</th><th scope="col">Recommendation</th>
             </tr></thead>
@@ -888,6 +888,7 @@
               </th>
               <td>${r.mode_now === 'enforce' ? html`<span class="tf-chip tf-chip-purple">enforce</span>` : html`<span class="tf-chip tf-chip-amber">observe</span>`}</td>
               <td class="num"><a class="tf-num-link" href="${callsHref({ project: name, rule: r.rule_key, kind: 'observed', days })}">${num(r.would_refuse)}</a></td>
+              <td class="num"><a class="tf-num-link ${r.refused ? 'text-rose-300' : ''}" href="${callsHref({ project: name, rule: r.rule_key, kind: 'refused', days })}">${num(r.refused || 0)}</a></td>
               <td class="num"><a class="tf-num-link text-emerald-300" href="${callsHref({ project: name, rule: r.rule_key, review: 'correct', days })}">${num(r.correct)}</a></td>
               <td class="num"><a class="tf-num-link ${r.false_alarms ? 'text-rose-300' : ''}" href="${callsHref({ project: name, rule: r.rule_key, review: 'false_alarm', days })}">${num(r.false_alarms)}</a></td>
               <td class="num">${r.unreviewed ? html`<a class="tf-num-link text-sky-300" href="${reviewHref({ project: name, rule: r.rule_key })}">${num(r.unreviewed)}</a>` : html`<span class="text-gray-500">${num(r.unreviewed)}</span>`}</td>

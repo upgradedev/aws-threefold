@@ -2015,6 +2015,9 @@ paths:
                             would_refuse:
                               type: integer
                               description: Calls it flagged that ran, in the window.
+                            refused:
+                              type: integer
+                              description: Calls it refused while already enforcing, in the window.
                             correct:
                               type: integer
                             false_alarms:

@@ -427,7 +427,7 @@ def expected_rule_state(rule: Dict[str, Any]) -> str:
         return "noisy"
     if _num(rule.get("unreviewed")) > 0:
         return "needs_review"
-    if _num(rule.get("would_refuse")) > 0:
+    if _num(rule.get("would_refuse")) + _num(rule.get("refused")) > 0:
         return "ready"
     return "quiet"
 

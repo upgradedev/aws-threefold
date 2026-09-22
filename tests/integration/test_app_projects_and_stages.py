@@ -114,6 +114,21 @@ def test_readiness_says_which_rules_enforce_after_a_promotion() -> None:
     assert rules["LOOP"]["mode_now"] == "observe"
 
 
+def test_a_rule_that_refused_while_enforcing_is_ready_and_shows_its_refusals() -> None:
+    """The live probe found a promoted rule reading Ready over a row of zeros.
+
+    Its refusals count towards whether it flagged anything, so the row carries
+    them too, and the state can be checked against the numbers beside it.
+    """
+    project = fresh_project()
+    post(f"/api/projects/{project}/promote", {"enforce": ["python-domain-stays-pure"]})
+    assert hook_call(project, f"{project}-s", DOMAIN_WRITE)["status"] == "BLOCKED_BOUNDARY_VIOLATION"
+    rules = {row["rule_key"]: row for row in get(f"/api/projects/{project}")["readiness"]["rules"]}
+    row = rules["python-domain-stays-pure"]
+    assert (row["would_refuse"], row["refused"], row["unreviewed"], row["state"]) == (0, 1, 0, "ready")
+    assert rules["LOOP"]["refused"] == 0 and rules["LOOP"]["state"] == "quiet"
+
+
 def test_observe_rules_can_be_set_directly() -> None:
     project = fresh_project()
     post(f"/api/projects/{project}", {"stage": "enforce", "observe_rules": ["python-domain-stays-pure"]})

@@ -259,6 +259,11 @@ def readiness(
                 "kind": "gate" if key in GATE_KEYS and key not in rule_by_id else "layering",
                 "mode_now": mode,
                 "would_refuse": observed,
+                # Refusals it made while already enforcing. They count towards
+                # whether it flagged anything, so a promoted rule that refused
+                # calls is Ready; shown beside would_refuse so that state can
+                # be read off the row rather than taken on trust.
+                "refused": refused,
                 "correct": correct,
                 "false_alarms": false_alarms,
                 "unreviewed": unreviewed,
