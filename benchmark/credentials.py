@@ -220,6 +220,10 @@ def check_codex_auth(codex: str, codex_home: Optional[Path], base_env: Optional[
         except FileNotFoundError:
             return AuthCheck("error", "machine-login", f"no Codex at {codex!r}",
                              "install Codex or pass --codex with the path to its executable, then run --check-auth again.")
+        except subprocess.TimeoutExpired:
+            return AuthCheck("error", "machine-login", "`codex login status` did not answer within 60 s",
+                             "run `codex login status` in a terminal to see what it waits for, then run "
+                             "`python benchmark/run.py --agent codex --check-auth` again.")
         status_text = sanitise(status.stdout.decode("utf-8", "replace") + " " + status.stderr.decode("utf-8", "replace"), 300)
         if status.returncode != 0 or "not logged in" in status_text.lower():
             return AuthCheck("missing", "machine-login", f"Codex is not logged in: {status_text.strip()}",

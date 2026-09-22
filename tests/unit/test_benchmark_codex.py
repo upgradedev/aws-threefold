@@ -169,6 +169,10 @@ def test_every_flag_the_command_passes_is_checked_against_the_help():
     assert "--dangerously-bypass-hook-trust" in problem and "--ignore-rules" in problem
     assert "--dangerously-bypass-approvals-and-sandbox" not in codex_agent.REQUIRED_EXEC_FLAGS
     assert codex_agent.exec_flags_problem(fake_agents.CODEX_EXEC_HELP) is None
+    # --model is passed only when a model is pinned, and is checked all the same.
+    assert "--model" in codex_agent.exec_flags_problem(HELP_0_155_0.replace("  -m, --model <MODEL>\n", ""))
+    pinned = codex_agent.build_command("codex", Path("C:/acme/repo"), "gpt-acme")
+    assert {part for part in pinned if part.startswith("--")} <= set(codex_agent.REQUIRED_EXEC_FLAGS)
 
 
 def test_a_path_that_cannot_be_a_toml_literal_is_refused():

@@ -404,6 +404,23 @@ def test_check_auth_without_a_token_file_or_a_login_says_missing_and_how_to_make
     assert "claude setup-token" in out and str(credentials.DEFAULT_TOKEN_FILE) in out
 
 
+def test_check_auth_tests_the_login_the_chosen_isolation_would_use(tmp_path, fake_bin, token, capsys):
+    """With --isolation user-config the matrix leaves the token file unused, so the check must too."""
+    value, path = token
+    assert _check(tmp_path, "--token-file", str(path), "--isolation", "user-config") == 0
+    printed = capsys.readouterr()
+    assert printed.out.startswith("check-auth: ok (machine-login)") and value not in printed.out + printed.err
+    (call,) = fake_agents.calls(fake_bin, "claude")
+    assert call["token_set"] is False and call["claude_config_dir"] is None
+
+
+def test_check_auth_with_fresh_config_and_no_token_file_calls_nothing(tmp_path, fake_bin, capsys):
+    assert _check(tmp_path, "--isolation", "fresh-config") == 1
+    out = capsys.readouterr().out
+    assert out.startswith("check-auth: missing (token-file): fresh-config needs a token file") and "claude setup-token" in out
+    assert fake_agents.calls(fake_bin, "claude") == []
+
+
 def test_check_auth_with_a_missing_or_malformed_token_file_calls_nothing(tmp_path, fake_bin, capsys):
     assert _check(tmp_path, "--token-file", str(tmp_path / "nowhere")) == 1
     assert capsys.readouterr().out.startswith("check-auth: missing (token-file): there is no token file")

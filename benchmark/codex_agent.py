@@ -50,7 +50,7 @@ HOOK_UNJUDGED_MARKER = "could not check this call"
 # Every option the command below passes, as `codex exec --help` spells it.
 REQUIRED_EXEC_FLAGS = (
     "--json", "--ephemeral", "--ignore-user-config", "--ignore-rules", "--dangerously-bypass-hook-trust",
-    "--cd", "--sandbox", "--config", "--enable", "--color",
+    "--cd", "--sandbox", "--config", "--enable", "--color", "--model",
 )
 SANDBOXES = ("workspace-write", "danger-full-access")
 DEFAULT_SANDBOX = "workspace-write"

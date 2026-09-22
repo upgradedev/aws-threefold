@@ -423,6 +423,14 @@ def check_auth_main(args: argparse.Namespace) -> int:
         result = credentials.check_codex_auth(codex, codex_home(), work_base=base)
     else:
         credential, shown, problem = _token_or_error(args)
+        if not problem:
+            # The login the matrix would use: with --isolation user-config a token file is left unused, so the
+            # check must not log in with it and report a login the runs never try.
+            try:
+                if harness.choose_isolation(args.isolation, credential is not None) != "fresh-config":
+                    credential = None
+            except ValueError as error:
+                problem = str(error)
         if problem:
             result = credentials.AuthCheck("missing", "token-file", problem, credentials.token_steps(shown))
         else:
