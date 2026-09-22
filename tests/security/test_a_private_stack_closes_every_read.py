@@ -39,7 +39,6 @@ from threefold.infrastructure.security_middleware import (
     PAGE_READS,
     PUBLIC_PATHS,
     SESSIONS_READ_PATHS,
-    is_served_asset,
 )
 from threefold.interfaces import access_routes, api_handlers, app_routes, draft_routes
 from threefold.interfaces.api_handlers import lambda_handler
@@ -120,10 +119,51 @@ def _as_routed(path: str) -> str:
     return collapsed or "/"
 
 
+# What a private stack hands to anyone: the pages a reader needs to adopt the
+# product or to sign in, the hook and the installer, the contract and the
+# committed proof snapshot. Written out rather than imported from the module
+# under test, so the walk below checks behaviour against a decision rather than
+# against the list that decides it. Adding a path to the middleware's own list
+# fails the pin under it until someone writes the path down here too, which is
+# the point: opening a read on the stack that carries real use is a decision.
+DECLARED_PUBLIC = {
+    "/",
+    "/index.html",
+    "/connect.html",
+    "/console.html",
+    "/rules.html",
+    "/sessions.html",
+    "/settings.html",
+    "/swagger.html",
+    "/status",
+    "/health",
+    "/docs",
+    "/openapi.json",
+    "/openapi.yaml",
+    "/proof.json",
+    "/hooks/threefold_hook.py",
+    "/hooks/claude_code_hook.py",
+    "/claude_code_hook.py",
+    "/dashboard.html",
+    "/app",
+    "/install.py",
+    "/dist/threefold-bundle.zip",
+    "/dist/manifest.json",
+    "/api/auth/sessions",
+    "/api/auth/whoami",
+}
+DECLARED_PUBLIC_PREFIX = "/assets/"
+
+
+def test_the_open_list_is_the_one_this_file_was_written_against() -> None:
+    """The pin: a path opened later is a path this file has to name as well."""
+    assert set(PUBLIC_PATHS) == DECLARED_PUBLIC
+
+
 def _declared_public(path: str) -> bool:
-    """Whether the middleware says this path is open on every stack."""
+    """Whether this path is one of those, as the request's path is routed."""
     routed = _as_routed(path)
-    return routed in PUBLIC_PATHS or is_served_asset("GET", routed)
+    return routed in DECLARED_PUBLIC or routed.startswith(DECLARED_PUBLIC_PREFIX)
 
 
 def _get(path: str, headers: dict | None = None) -> int:
