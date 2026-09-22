@@ -1,0 +1,439 @@
+"""Builds src/threefold/web/proof.json, the snapshot the dashboard's #/proof page shows.
+
+    python scripts/build_proof.py --benchmark benchmark/results/<run-id>.jsonl [--benchmark <more>]
+    python scripts/build_proof.py --benchmark <rows or summary> \\
+        --private-endpoint https://<host>/<stage>/ --key-file <file holding the operator key>
+
+Two sections, each optional, each naming where it came from and when its
+snapshot was taken. A section that was not measured is left out, and the page
+says "not measured yet" rather than showing a zero.
+
+benchmark   What benchmark/report.py computes from the result rows given, or
+            from a summary its aggregate() produced, per condition, with its
+            headline sentence exactly as report.headline() words it. Nothing
+            here recomputes a rate: the numbers are report.py's own, so the
+            page and docs/evidence/BENCHMARK_*.md cannot disagree.
+
+private     The owner's own use, from GET api/overview?days=30 and GET
+            api/projects on a private stack, read with the operator key. Only
+            aggregate numbers are kept, each checked to be a number; no text
+            read from the stack is copied at all.
+
+The key is read from a file and sent only in the X-API-Key header, over HTTPS
+or to this machine. It is never printed, written or put in a URL, and neither
+is the endpoint, a project name, a path or a developer. Before anything is
+written, every string in the output is checked against every project name the
+private stack returned, against the key, and against the shapes of an absolute
+path; if any matches, nothing is written.
+
+Sections are not carried over from an earlier snapshot: give every source each
+time, so a section never outlives the data it was built from unnoticed.
+
+Standard library only.
+"""
+from __future__ import annotations
+
+import argparse
+import datetime
+import json
+import math
+import re
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+from collections import Counter
+from pathlib import Path
+from typing import Any, Callable, Dict, Iterable, Iterator, List, Mapping, Optional, Sequence, Set, Tuple
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT))
+
+from benchmark import report  # noqa: E402
+
+DEFAULT_OUT = REPO_ROOT / "src" / "threefold" / "web" / "proof.json"
+SCHEMA = 1
+# The three conditions the headline compares. Each is listed even when no run
+# measured it, so the page shows the gap rather than a table that quietly
+# lost a row.
+HEADLINE_CONDITIONS = ("none", "prompt", "threefold")
+PRIVATE_WINDOW_DAYS = 30
+TIMEOUT_SECONDS = 20
+LOCAL_HOSTS = ("localhost", "127.0.0.1", "::1")
+# The bucket a name outside the stack's pattern is shown under. It names no
+# project, so it may appear in the output.
+UNLABELLED = "unlabelled"
+SUMMARY_KEYS = ("pilot", "by_condition", "real_rows", "valid_rows", "invalid_reasons", "models", "tasks")
+
+# The start of an absolute path on Windows, a UNC share, a home folder, or one
+# of the usual roots of a POSIX machine. Repository-relative paths, which the
+# evidence list carries on purpose, match none of these.
+ABSOLUTE_PATH = re.compile(
+    r"(?:^|[\s\"'(=])(?:[A-Za-z]:[\\/]|\\\\[^\\\s]|~[\\/]|/(?:Users|home|root|mnt|tmp|var|private|opt|srv|etc)/)"
+)
+TIMESTAMP = re.compile(r"^\d{4}-\d{2}-\d{2}(?:[T ][0-9:.]+(?:Z|[+-]\d{2}:?\d{2})?)?$")
+
+Opener = Callable[..., Any]
+
+
+class ProofError(RuntimeError):
+    """A step failed. The message never names the key, the endpoint, a project, a path or a developer."""
+
+
+# ---------------------------------------------------------------- small readers
+
+
+def _relative(path: Path) -> str:
+    """A source as the page may name it: its path in the repository, or its file name alone."""
+    try:
+        return Path(path).resolve().relative_to(REPO_ROOT).as_posix()
+    except ValueError:
+        return Path(path).name
+
+
+def _count(value: Any) -> Optional[int]:
+    """A count read from the stack, or None when it is not one: nothing else is copied."""
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
+
+
+def _number(value: Any) -> Optional[float]:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
+        return None
+    return value
+
+
+def _rounded(value: Optional[float], places: int = 4) -> Optional[float]:
+    return None if value is None else round(value, places)
+
+
+def _ratio(value: Optional[float], base: Optional[float]) -> Optional[float]:
+    """report.py's overhead: the ratio of two means, or None when either is missing."""
+    if value is None or not base:
+        return None
+    return round(value / base, 2)
+
+
+def _now() -> str:
+    return datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+# ---------------------------------------------------------------- the benchmark
+
+
+def read_benchmark(paths: Sequence[Path]) -> Tuple[Mapping[str, Any], List[str]]:
+    """The summary report.aggregate() gives for these files, and the files as the page names them.
+
+    A file holding one JSON object with `by_condition` is a summary aggregate()
+    already produced; anything else is result rows, one JSON object a line. A
+    summary cannot be merged with rows or with another summary without
+    recomputing it differently from report.py, so that is refused.
+    """
+    rows: List[Dict[str, Any]] = []
+    summaries: List[Mapping[str, Any]] = []
+    for path in paths:
+        try:
+            text = Path(path).read_text(encoding="utf-8")
+        except OSError as error:
+            raise ProofError(f"{Path(path).name} could not be read ({error.strerror or 'unreadable'})") from None
+        parsed: Any = None
+        if text.lstrip().startswith("{"):
+            try:
+                parsed = json.loads(text)
+            except ValueError:
+                parsed = None
+        if isinstance(parsed, dict) and "by_condition" in parsed:
+            missing = [key for key in SUMMARY_KEYS if key not in parsed]
+            if missing:
+                raise ProofError(f"{Path(path).name} is not a summary benchmark/report.py produced: it lacks {', '.join(missing)}")
+            summaries.append(parsed)
+            continue
+        try:
+            rows.extend(report.load_rows([path]))
+        except ValueError as error:
+            raise ProofError(str(error).replace(str(path), Path(path).name)) from None
+    if summaries and (rows or len(summaries) > 1):
+        raise ProofError("a summary from benchmark/report.py cannot be combined with other results; give one summary, or the result rows")
+    summary = summaries[0] if summaries else report.aggregate(rows)
+    return summary, [_relative(Path(path)) for path in paths]
+
+
+def _rate(stat: Mapping[str, Any]) -> Dict[str, Any]:
+    return {
+        "k": stat["k"],
+        "n": stat["n"],
+        "rate": _rounded(stat["rate"]),
+        "ci_low": _rounded(stat["ci_low"]),
+        "ci_high": _rounded(stat["ci_high"]),
+    }
+
+
+def _condition(name: str, stat: Mapping[str, Any], base: Optional[Mapping[str, Any]], unmeasured: int) -> Dict[str, Any]:
+    refused = stat["refused_runs"]
+    return {
+        "condition": name,
+        "label": report.CONDITION_LABELS.get(name, name),
+        "n": stat["n"],
+        "not_measured": unmeasured,
+        "violation": _rate(stat["violation"]),
+        "completion": _rate(stat["completion"]),
+        # report.py's definition, per run: refused at least once, and still
+        # finished with the acceptance tests passing and no violation.
+        "self_correction": {
+            "refused_runs": refused,
+            "self_corrected": stat["self_corrected"],
+            "rate": round(stat["self_corrected"] / refused, 4) if refused else None,
+        },
+        # Ratios of means against no guidance, as report.py prints them. The
+        # baseline itself has none.
+        "overhead": None if name == "none" else {
+            "against": "none",
+            "turns": _ratio(stat["turns_mean"], base["turns_mean"] if base else None),
+            "seconds": _ratio(stat["seconds_mean"], base["seconds_mean"] if base else None),
+            "cost": _ratio(stat["cost_mean"], base["cost_mean"] if base else None),
+        },
+    }
+
+
+def benchmark_section(summary: Mapping[str, Any], sources: Sequence[str]) -> Dict[str, Any]:
+    stats = summary["by_condition"]
+    names = list(HEADLINE_CONDITIONS) + [name for name in summary.get("conditions") or [] if name not in HEADLINE_CONDITIONS]
+    unmeasured = Counter(str(item.get("condition")) for item in summary.get("invalid") or [] if isinstance(item, Mapping))
+    base = stats.get("none") if stats.get("none", {}).get("n") else None
+    conditions = [
+        _condition(name, stats.get(name) or report.condition_stats([]), base, unmeasured.get(name, 0))
+        for name in names
+    ]
+    evidence = []
+    written = report.default_output(summary)
+    if written.is_file():
+        evidence.append({"label": "The report benchmark/report.py wrote: method, every result and its limits",
+                         "path": _relative(written)})
+    evidence += [{"label": "The result rows it was computed from", "path": source} for source in sources]
+    dates = list(summary.get("dates") or [])
+    return {
+        "source": "benchmark/report.py over " + ", ".join(sources),
+        "snapshot_at": dates[-1] if dates else None,
+        "pilot": bool(summary["pilot"]),
+        "headline": report.headline(summary),
+        "agent": "Claude Code",
+        "agent_versions": list(summary.get("claude_versions") or []),
+        "models": list(summary.get("models") or []),
+        "dates": dates,
+        "run_ids": list(summary.get("run_ids") or []),
+        "tasks": list(summary.get("tasks") or []),
+        "rows": summary.get("rows"),
+        "real_rows": summary["real_rows"],
+        "valid_rows": summary["valid_rows"],
+        "scripted_rows": summary.get("scripted_rows", 0),
+        "conditions": conditions,
+        "evidence": evidence,
+    }
+
+
+# ---------------------------------------------------------------- the owner's own use
+
+
+def read_key(path: Path) -> str:
+    try:
+        key = Path(path).read_text(encoding="utf-8").strip()
+    except OSError:
+        raise ProofError("the key file could not be read") from None
+    if not key or any(character.isspace() for character in key):
+        raise ProofError("the key file must hold the operator key alone, on one line")
+    return key
+
+
+def endpoint_base(url: str) -> str:
+    """The stack's base URL with a trailing slash, or a refusal to send a key there."""
+    parts = urllib.parse.urlsplit(url or "")
+    if parts.scheme not in ("https", "http") or not parts.hostname:
+        raise ProofError("--private-endpoint must be the stack's https:// address")
+    if parts.username or parts.password or parts.query or parts.fragment:
+        raise ProofError("--private-endpoint must be a plain address, with no credentials, query or fragment in it")
+    if parts.scheme == "http" and parts.hostname not in LOCAL_HOSTS:
+        raise ProofError("the operator key is sent only over HTTPS, or to this machine")
+    return url if url.endswith("/") else url + "/"
+
+
+def fetch_json(base: str, route: str, key: str, opener: Optional[Opener] = None) -> Mapping[str, Any]:
+    """GET one route with the key in its header. Errors name the route, never the address or the key."""
+    request = urllib.request.Request(base + route, headers={"X-API-Key": key, "Accept": "application/json"})
+    shown = "GET /" + route.split("?", 1)[0]
+    try:
+        with (opener or urllib.request.urlopen)(request, timeout=TIMEOUT_SECONDS) as response:
+            body = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as error:
+        raise ProofError(f"the private stack answered HTTP {error.code} to {shown}") from None
+    except (urllib.error.URLError, OSError, ValueError, UnicodeError):
+        raise ProofError(f"the private stack could not be read at {shown}") from None
+    if not isinstance(body, dict):
+        raise ProofError(f"the private stack's answer to {shown} is not a JSON object")
+    return body
+
+
+def read_private(url: str, key: str, opener: Optional[Opener] = None) -> Tuple[Mapping[str, Any], Mapping[str, Any]]:
+    base = endpoint_base(url)
+    overview = fetch_json(base, f"api/overview?days={PRIVATE_WINDOW_DAYS}", key, opener)
+    projects = fetch_json(base, "api/projects", key, opener)
+    return overview, projects
+
+
+def project_names(overview: Mapping[str, Any], projects: Mapping[str, Any]) -> Set[str]:
+    """Every project name the two answers carry: what the output must never contain."""
+    names: Set[str] = set()
+    for listing in (overview.get("by_project"), projects.get("projects")):
+        for row in listing if isinstance(listing, list) else []:
+            if isinstance(row, Mapping) and isinstance(row.get("project"), str):
+                names.add(row["project"])
+    names.discard("")
+    names.discard(UNLABELLED)
+    return names
+
+
+def private_section(overview: Mapping[str, Any]) -> Dict[str, Any]:
+    """The totals of the owner's own use: numbers only, each checked to be one."""
+    totals = overview.get("totals") if isinstance(overview.get("totals"), Mapping) else {}
+    series = overview.get("series") if isinstance(overview.get("series"), list) else []
+    stages = overview.get("stages") if isinstance(overview.get("stages"), Mapping) else {}
+    would_refuse = _count(totals.get("would_refuse"))
+    needs_review = _count(totals.get("needs_review"))
+    false_alarms = _count(totals.get("false_alarms"))
+    # The overview counts the would-refuse calls nobody has labelled, so the
+    # labelled ones are the difference. False alarms counts every label of
+    # that kind, which in a stack that only observes is the same calls.
+    reviewed = max(0, would_refuse - needs_review) if would_refuse is not None and needs_review is not None else None
+    generated = overview.get("generated_at")
+    figure = overview.get("self_correction") if isinstance(overview.get("self_correction"), Mapping) else None
+    return {
+        "source": f"GET /api/overview?days={PRIVATE_WINDOW_DAYS} and GET /api/projects on the owner's private stack, "
+                  "read with the operator key; only these totals were kept",
+        "snapshot_at": generated if isinstance(generated, str) and TIMESTAMP.match(generated) else None,
+        "window_days": _count(overview.get("window_days")),
+        "days_observed": sum(
+            1 for day in series
+            if isinstance(day, Mapping) and sum(_count(day.get(kind)) or 0 for kind in ("approved", "observed", "refused")) > 0
+        ),
+        "calls_governed": _count(totals.get("calls")),
+        "would_refuse": would_refuse,
+        "refused": _count(totals.get("refused")),
+        "reviewed": reviewed,
+        "false_alarms": false_alarms,
+        "false_alarm_rate": round(false_alarms / reviewed, 4) if reviewed and false_alarms is not None else None,
+        "projects": _count(totals.get("projects")),
+        "agents": _count(totals.get("agents")),
+        "stages": {stage: _count(stages.get(stage)) for stage in ("observe", "enforce")},
+        "self_correction": None if figure is None else {
+            "refusals_considered": _count(figure.get("refusals_considered")),
+            "self_corrected": _count(figure.get("self_corrected")),
+            "rate": _number(figure.get("rate")),
+            "median_calls_to_correct": _number(figure.get("median_calls_to_correct")),
+            "complete": figure.get("complete") is True,
+        },
+    }
+
+
+# ---------------------------------------------------------------- how it was measured
+
+
+METHOD = (
+    ("The benchmark harness, its tasks and its independent checkers", "benchmark/README.md"),
+    ("How the benchmark's rows become rates and a headline", "benchmark/report.py"),
+    ("How self-correction is computed from the ledger", "src/threefold/application/insights.py"),
+    ("The routes the owner's totals are read from", "src/threefold/web/openapi.json"),
+    ("How this snapshot was built, and what it refuses to write", "scripts/build_proof.py"),
+)
+
+
+def method_entries() -> List[Dict[str, str]]:
+    """The evidence files, by their path in the repository, only those that exist."""
+    return [{"label": label, "path": path} for label, path in METHOD if (REPO_ROOT / path).is_file()]
+
+
+# ---------------------------------------------------------------- the check before writing
+
+
+def _strings(value: Any) -> Iterator[str]:
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, Mapping):
+        for key, item in value.items():
+            yield str(key)
+            yield from _strings(item)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            yield from _strings(item)
+
+
+def leaks(document: Any, names: Iterable[str], secrets: Iterable[str] = ()) -> List[str]:
+    """What the document would give away, by kind only: the offending value is never repeated."""
+    lowered = [name.lower() for name in names if name]
+    kept = [secret for secret in secrets if secret]
+    found: Set[str] = set()
+    for text in _strings(document):
+        folded = text.lower()
+        if any(name in folded for name in lowered):
+            found.add("a project name read from the private stack")
+        if any(secret in text for secret in kept):
+            found.add("the operator key")
+        if ABSOLUTE_PATH.search(text):
+            found.add("an absolute path")
+    return sorted(found)
+
+
+def build(
+    benchmarks: Sequence[Path],
+    private_endpoint: Optional[str] = None,
+    key_file: Optional[Path] = None,
+    opener: Optional[Opener] = None,
+) -> Dict[str, Any]:
+    document: Dict[str, Any] = {"schema": SCHEMA, "generated_at": _now(), "generated_by": "scripts/build_proof.py"}
+    names: Set[str] = set()
+    secrets: List[str] = []
+    if benchmarks:
+        document["benchmark"] = benchmark_section(*read_benchmark(benchmarks))
+    if private_endpoint is not None:
+        key = read_key(key_file)
+        secrets.append(key)
+        overview, projects = read_private(private_endpoint, key, opener)
+        names = project_names(overview, projects)
+        document["private"] = private_section(overview)
+    document["method"] = method_entries()
+    problems = leaks(document, names, secrets)
+    if problems:
+        raise ProofError("refused to write: the snapshot would carry " + " and ".join(problems))
+    return document
+
+
+def main(argv: Optional[Sequence[str]] = None, opener: Optional[Opener] = None) -> int:
+    parser = argparse.ArgumentParser(description="Build the proof page's snapshot.")
+    parser.add_argument("--benchmark", action="append", type=Path, default=[],
+                        help="benchmark result rows (.jsonl) or a summary from benchmark/report.py; repeatable")
+    parser.add_argument("--private-endpoint", default=None, help="the private stack's https:// address")
+    parser.add_argument("--key-file", type=Path, default=None, help="a file holding the operator key, alone on one line")
+    parser.add_argument("--out", type=Path, default=DEFAULT_OUT, help="default: src/threefold/web/proof.json")
+    args = parser.parse_args(argv)
+    if (args.private_endpoint is None) != (args.key_file is None):
+        parser.error("--private-endpoint and --key-file go together")
+    if not args.benchmark and args.private_endpoint is None:
+        parser.error("nothing to build: give --benchmark, or --private-endpoint with --key-file")
+    try:
+        document = build(args.benchmark, args.private_endpoint, args.key_file, opener)
+    except ProofError as error:
+        print(f"build_proof: {error}", file=sys.stderr)
+        return 2
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    args.out.write_text(json.dumps(document, indent=2, ensure_ascii=False) + "\n", encoding="utf-8", newline="\n")
+    bench = document.get("benchmark")
+    said = [
+        (f"benchmark{' (PILOT)' if bench['pilot'] else ''}: {bench['valid_rows']} of {bench['real_rows']} real-agent run(s) measured"
+         if bench else "no benchmark section"),
+        "a private section of totals" if "private" in document else "no private section",
+    ]
+    print(f"{args.out.name} written: " + "; ".join(said))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
