@@ -22,8 +22,10 @@ trusted:
 - Alarms, the dashboard, the budget, the table's continuous backups: each
   service's API for the property the template sets, with the resource type the
   Service Authorization Reference gives each action.
-- Tracing: the transform attaches the AWSXrayWriteOnlyAccess managed policy to
-  the role it generates, next to AWSLambdaBasicExecutionRole.
+- Tracing: the AWS SAM developer guide, AWS::Serverless::Function, Tracing:
+  "AWS SAM adds the arn:aws:iam::aws:policy/AWSXrayWriteOnlyAccess policy to
+  the Lambda execution role that it creates", which also carries
+  AWSLambdaBasicExecutionRole from the stack's first deploy.
 
 The policy is matched as IAM matches it: an action pattern is case-insensitive
 with '*' and '?', a resource pattern is case-sensitive and its '*' crosses ':'
@@ -130,8 +132,12 @@ def _resources() -> Dict[str, str]:
     """Each resource's logical id and type."""
     section = re.search(r"^Resources:\n(.*?)^\S", TEMPLATE, re.S | re.M)
     assert section, "the template has no Resources section"
-    found = dict(re.findall(r"^  (\w+):\n(?:    #.*\n)*    Type: (\S+)$", section.group(1), re.M))
-    assert len(found) >= 20, "the scan has gone blind"
+    body = section.group(1)
+    found = dict(re.findall(r"^  (\w+):\n(?:    (?!Type:)\S.*\n|      .*\n)*?    Type: (\S+)$", body, re.M))
+    # Every resource declares a type, so a resource the pattern misses (one
+    # with Condition written above Type, say) shows up as a shortfall here
+    # instead of as a type nobody checked.
+    assert len(found) == len(re.findall(r"^    Type: ", body, re.M)) >= 20, "the scan has gone blind"
     return found
 
 
