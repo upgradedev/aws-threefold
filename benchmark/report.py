@@ -116,7 +116,7 @@ def _governance_problem(row: Mapping[str, Any]) -> Optional[str]:
         return None
     if row.get("hook_missing"):
         return (f"the Threefold hook never fired although the agent made {row.get('governed_calls')} governed call(s); "
-                "Claude Code did not load it, so this run did not measure Threefold")
+                f"{AGENT_LABELS.get(agent_of(row), 'the agent')} did not load it, so this run did not measure Threefold")
     if row.get("governance_problem"):
         return str(row["governance_problem"])
     if row.get("server_healthy_after") is False:
@@ -377,7 +377,7 @@ def caveats(summary: Mapping[str, Any]) -> List[str]:
     )
     measured = ", ".join(
         f"{AGENT_LABELS.get(name, name)} {', '.join(parts[name].get('agent_versions') or []) or '(version unknown)'}"
-        if name in parts else AGENT_LABELS.get(name, name) for name in agents)
+        if name in parts else AGENT_LABELS.get(name, name) for name in agents) if summary["real_rows"] else "none measured"
     unmeasured = [AGENT_LABELS.get(name, name) for name in ("codex",) if name not in agents] + ["Antigravity"]
     rules_where = "CLAUDE.md" if agents == ["claude-code"] else ", ".join(
         f"{RULES_FILES.get(name, 'CLAUDE.md')} for {AGENT_LABELS.get(name, name)}" for name in agents)
@@ -456,14 +456,22 @@ def caveats(summary: Mapping[str, Any]) -> List[str]:
             "Codex reports no turn count, so its turns are its tool calls and messages; a Threefold run counts only when the "
             "hook's own log and the local ledger show the hook judged the agent's shell and patch calls."
         )
-    if "claude-code" not in agents:
+    if "claude-code" in agents:
+        items += _claude_reach(summary, several or "codex" in agents)
+    if "codex" in agents:
         items.append(
             "What Codex could reach. Codex's sandbox confined the writes of its shell commands to the repository and its own "
             "temporary folders, and the environment gave installs no package index and AWS credentials that do not exist. "
-            "The owner's private folders were not denied by name as they are for Claude Code, and the test runners execute code "
-            "the agent wrote with the owner's rights, so this is not a sealed environment either."
+            "The owner's private folders (~/.threefold, ~/.claude, ~/.aws, ~/.ssh and the rest) were not denied by name as they "
+            "are for Claude Code, and the test runners execute code the agent wrote with the owner's rights, so this is not a "
+            "sealed environment either."
         )
-        return items
+    return items
+
+
+def _claude_reach(summary: Mapping[str, Any], named: bool) -> List[str]:
+    """What Claude Code runs could load from above their work root, and what they could reach."""
+    items: List[str] = []
     above = summary.get("memory_above") or []
     items.append(
         "Claude Code also loads CLAUDE.md, .claude/CLAUDE.md and .claude/rules from every folder above its working directory, as project "
@@ -474,7 +482,7 @@ def caveats(summary: Mapping[str, Any]) -> List[str]:
            "No run had one above its work root.")
     )
     items.append(
-        ("What Claude Code could reach. " if several or "codex" in agents else "What the agent could reach. ")
+        ("What Claude Code could reach. " if named else "What the agent could reach. ")
         + "Claude Code confined its file edits to the repository (whose .claude, .git and .threefold.json were "
         "denied), reads outside the repository were not granted, and the owner's ~/.threefold, ~/.claude, ~/.aws, ~/.ssh and other agent "
         "folders were denied by name. The shell was limited to prefix rules for the tasks' test, generator, dotnet and git commands, with "

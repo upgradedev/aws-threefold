@@ -272,7 +272,7 @@ def test_a_codex_run_whose_hook_never_ran_is_not_a_threefold_measurement():
     row = _codex_row(ledger={"reachable": True, "decisions": 0, "refused": 0}, hook_refusals=0, hook_events={})
     assert row["hook_missing"] and row["governed_calls"] == 3
     assert not report.is_valid(row)
-    assert "never fired although the agent made 3 governed call(s)" in report.invalid_reason(row)
+    assert "never fired although the agent made 3 governed call(s); Codex did not load it" in report.invalid_reason(row)
 
 
 def test_a_codex_run_whose_hook_ran_but_judged_nothing_is_not_a_measurement():

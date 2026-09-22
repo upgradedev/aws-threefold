@@ -230,6 +230,9 @@ def test_two_agents_are_never_pooled():
     assert "`.codex/hooks.json` (Codex)" in text
     limits = " ".join(report.caveats(summary))
     assert "never pooled" in limits and "Codex runs (`codex exec --json`)" in limits and "Codex reports tokens but no cost" in limits
+    # Both reach statements stand: the Claude Code denials are not read as covering Codex.
+    assert "What Claude Code could reach" in limits and "What Codex could reach" in limits
+    assert "were not denied by name as they are for Claude Code" in limits
 
 
 def test_a_codex_only_report_speaks_of_agents_md_and_codex_s_reach():
@@ -240,6 +243,16 @@ def test_a_codex_only_report_speaks_of_agents_md_and_codex_s_reach():
     limits = " ".join(report.caveats(summary))
     assert "What Codex could reach" in limits and "What Claude Code could reach" not in limits
     assert "Antigravity is not measured here" in limits
+
+
+def test_a_report_of_the_scripted_stand_in_alone_claims_no_agent():
+    scripted = [_row(condition=name, agent="scripted", model="scripted") for name in ("none", "prompt", "threefold")]
+    summary = report.aggregate(scripted)
+    assert summary["agents"] == [] and summary["agent"] is None
+    text = report.render(summary, task_library.load_tasks(), ["fixture.jsonl"])
+    assert "## Harness self-test (scripted agent, not a measurement)" in text
+    assert "Agents: none measured" in text and "No headline: there are no real-agent runs" in text
+    assert report.build_summary(scripted, ["fixture.jsonl"])["agents"] == {}
 
 
 def test_a_single_agent_report_keeps_its_headings():
