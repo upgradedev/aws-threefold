@@ -965,12 +965,18 @@
 
     // The line the hook appends to a refusal when the service sends a fix: the
     // summary only, cleaned and cut as the hook cleans and cuts it, so this
-    // panel prints what the agent would read.
-    const UNPRINTABLE = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u200e\u200f\u202a-\u202e\u2066-\u2069]+/g;
+    // panel prints what the agent would read. The same Unicode classes as the
+    // hook's _printable (controls, format characters, lone surrogates, line and
+    // paragraph separators, the whole tag block), and every length counted in
+    // code points, as Python counts, not in UTF-16 units. With those classes
+    // gone, JavaScript's \s and Python's split() see the same whitespace.
+    const UNPRINTABLE = /[\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}\u{E0000}-\u{E007F}]/gu;
+    const codePoints = (text, count) => Array.from(text).slice(0, count).join('');
     function fixLine(verdict) {
       const fix = verdict && verdict.suggested_fix;
       if (!fix || typeof fix !== 'object' || typeof fix.summary !== 'string') return '';
-      const summary = fix.summary.replace(UNPRINTABLE, ' ').split(/\s+/).filter(Boolean).join(' ').slice(0, 200).trimEnd();
+      const cleaned = codePoints(fix.summary, 1000).replace(UNPRINTABLE, ' ').split(/\s+/).filter(Boolean).join(' ');
+      const summary = codePoints(cleaned, 200).trimEnd();
       if (!summary) return '';
       return (fix.validated === true ? 'Suggested fix, checked by Threefold: ' : 'Suggested fix: ') + summary;
     }
