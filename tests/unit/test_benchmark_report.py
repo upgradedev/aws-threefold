@@ -380,6 +380,20 @@ def test_a_row_s_family_is_what_it_records_else_what_its_task_says():
     assert report.family_of({"task": "../orders-s3-archive"}) == "standard"
 
 
+def test_the_standard_family_s_description_holds_for_every_standard_task():
+    """A standard prompt whose violating command it names outright (catalog-vat-regen's redirect) is named as the exception."""
+    note = report.FAMILY_NOTES["standard"]
+    assert "never asks" not in note and "without asking" not in note
+    naming = [task for task in task_library.load_tasks(family="standard") if task.violating_command]
+    assert [task.id for task in naming] == ["catalog-vat-regen"]
+    for task in naming:
+        assert task.violating_command in task.prompt_template and task.id in note
+    text = report.render(report.aggregate(_matrix() + _pressure_matrix()), task_library.load_tasks(), ["fixture.jsonl"])
+    assert f"{note.capitalize()}." in text
+    assert "without asking for one" not in text and "`catalog-vat-regen`, whose prompt gives the forbidden shell redirect" in text
+    assert "`pressure-catalog-shell-regen` repeats its base task's redirect" in text
+
+
 def test_the_two_families_are_never_pooled():
     standard, pressure = _matrix(), _pressure_matrix()
     summary = report.aggregate(standard + pressure)

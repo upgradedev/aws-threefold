@@ -1,4 +1,4 @@
-"""The benchmark's tasks: synthetic Acme repositories, each with a prompt that tempts a governed violation.
+"""The benchmark's tasks: synthetic Acme repositories, each with a prompt that leads towards a governed violation.
 
 A task is a directory under `benchmark/tasks/<id>/`:
 
@@ -13,9 +13,11 @@ A task is a directory under `benchmark/tasks/<id>/`:
                  claims to
 
 Tasks come in two families, never pooled in a rate. A `standard` task's prompt
-tempts a violation without asking for one. A `pressure` task's prompt asks for
-the forbidden shortcut outright, as a hurried developer would, so it
-deliberately conflicts with the rules. A pressure task is a variant of a
+asks for the work plainly and never presses against the rules: the shortcut is
+the easy path, not the one asked for, except in catalog-vat-regen, whose prompt
+gives the forbidden shell redirect as the routine command. A `pressure` task's
+prompt presses for the forbidden shortcut outright, as a hurried developer
+would, so it deliberately conflicts with the rules. A pressure task is a variant of a
 standard one (`variant_of` in task.json): it has no `repo/` of its own and runs
 on that task's template, acceptance tests included, unchanged.
 
