@@ -457,8 +457,8 @@
       return html`<a href="${t.href}" class="tf-card tf-card-link tf-tile" aria-label="${t.label}: ${num(t.value)}. ${t.sub}. Open the rows behind it">
         <span class="tf-tile-label">${t.label}</span>
         <span class="flex items-end justify-between gap-2 min-w-0">
-          <span class="tf-tile-value" data-metric="${t.metric}">${num(t.value)}</span>
-          ${t.spark || ''}
+          <span class="tf-tile-value" data-metric="${t.metric}" title="${typeof t.value === 'number' ? t.value.toLocaleString('en-US') : ''}">${num(t.value)}</span>
+          ${t.spark ? html`<span class="hidden sm:inline-flex" aria-hidden="true">${t.spark}</span>` : ''}
         </span>
         <span class="tf-tile-sub">${t.sub}</span>
       </a>`;
@@ -1084,7 +1084,10 @@
           if (!map[key]) { map[key] = { key, project: row.project_name || '', rule: ruleKeyOf(row), items: [] }; order.push(key); }
           map[key].items.push(row);
         });
-        return order.map(k => map[k]);
+        // A project's groups sit together; within a project, the rule with the
+        // most waiting first. Each group keeps its calls newest first.
+        return order.map(k => map[k]).sort((a, b) =>
+          a.project.localeCompare(b.project) || b.items.length - a.items.length || a.rule.localeCompare(b.rule));
       }
 
       function filters() {
@@ -1934,8 +1937,11 @@
         }
         if (state.step === 4) {
           const rules = (state.readiness && state.readiness.rules) || [];
+          const noisy = rules.filter(r => r.state === 'noisy').length;
           frame(stepCard('4 · Promote to Enforce',
-            'Each rule now reads its state from your labels. Ready and Quiet rules are checked; the rule with a false alarm is Noisy and stays in Observe, where it records and refuses nothing.',
+            'Each rule now reads its state from your labels. Ready and Quiet rules are checked. ' + (noisy
+              ? (noisy === 1 ? 'The rule with a false alarm is Noisy and stays' : 'The rules with false alarms are Noisy and stay') + ' in Observe, where it records and refuses nothing.'
+              : 'No rule is Noisy: you marked every flag correct. An unchecked rule keeps observing.'),
             html`<ul class="space-y-2">${rules.map(r => html`<li>
               <label class="flex items-start gap-3 tf-card-quiet p-3 cursor-pointer">
                 <input type="checkbox" class="mt-0.5 accent-purple-500" data-change="try-toggle" data-rule="${r.rule_key}" ${state.selected.has(r.rule_key) ? raw('checked') : ''} />
@@ -1962,7 +1968,7 @@
           <p class="text-xs text-gray-300 tf-break">${r.reason || ''}</p>
           ${r.bedrock_explanation ? html`<div class="rounded-xl bg-purple-950/30 border border-purple-900/50 p-3 text-xs text-purple-100"><p class="tf-label !text-purple-300">${source}</p><p class="tf-break">${r.bedrock_explanation}</p></div>` : ''}
           <p class="text-xs text-gray-400">${refused
-            ? 'The same kind of call that ran in Observe is refused in Enforce, while the noisy rule keeps watching without refusing. That is the whole rollout: watch, label, promote, and back to Observe in one click if it bites wrong.'
+            ? 'The same kind of call that ran in Observe is refused in Enforce' + (state.observing && state.observing.length ? ', while ' + state.observing.join(', ') + (state.observing.length === 1 ? ' keeps' : ' keep') + ' watching without refusing' : '') + '. That is the whole rollout: watch, label, promote, and back to Observe in one click if it bites wrong.'
             : 'This call was not refused. The rule it was built from may not be in force, or the sandbox rules differ; the project page shows each rule\'s mode.'}</p>
           <div class="flex flex-wrap gap-2">
             <a class="tf-btn tf-btn-primary" href="${projectHref(state.project)}">Open ${state.project}</a>
@@ -2092,7 +2098,9 @@
           draw();
         },
         'try-promote': () => {
-          const enforce = ((state.readiness && state.readiness.rules) || []).filter(r => state.selected.has(r.rule_key)).map(r => r.rule_key);
+          const all = ((state.readiness && state.readiness.rules) || []).map(r => r.rule_key);
+          const enforce = all.filter(key => state.selected.has(key));
+          state.observing = all.filter(key => !state.selected.has(key));
           state.busy = true; state.error = null; draw();
           return T.api('/api/projects/' + encodeURIComponent(state.project) + '/promote', { method: 'POST', body: { enforce } })
             .then(() => planReplay(enforce))

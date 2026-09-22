@@ -477,27 +477,31 @@
         })}
         <a href="${PAGE_BASE}swagger.html" class="tf-nav-link text-gray-500" title="The published OpenAPI document">API</a>
       </nav>
-      <div class="flex items-center gap-1.5">${authChips(who)}</div>
+      <div class="flex items-center gap-1.5">${authChips(who, false)}</div>
       <button type="button" class="lg:hidden tf-icon-btn" data-tf-menu aria-expanded="false" aria-controls="tf-menu" aria-label="Open the menu">${raw(ICONS.menu)}</button>
-      <div id="tf-menu" class="hidden lg:hidden absolute left-0 right-0 top-full border-b border-gray-800 bg-gray-950/95 backdrop-blur px-4 py-3">
+      <div id="tf-menu" class="hidden lg:hidden tf-menu">
         <nav aria-label="Threefold, menu" class="grid grid-cols-2 gap-1">
           ${links.map(function (l) {
             return html`<a href="${l.href}" class="tf-nav-link${l.current ? ' tf-nav-current' : ''}"${l.current ? raw(' aria-current="page"') : ''}>${l.item.label}</a>`;
           })}
           <a href="${PAGE_BASE}swagger.html" class="tf-nav-link text-gray-500">API</a>
         </nav>
+        <div class="sm:hidden mt-3 pt-3 border-t border-gray-800 flex flex-wrap items-center gap-2">${authChips(who, true)}</div>
       </div>
     </div>`);
   }
 
   // The stack kind comes from the stack; the sign-in from the stack when it
-  // answers whoami, and from this browser alone when it does not.
-  function authChips(who) {
+  // answers whoami, and from this browser alone when it does not. In the bar on
+  // a narrow screen only the sign-in shows; the rest moves into the menu, which
+  // is drawn with `inMenu` set.
+  function authChips(who, inMenu) {
     var chips = [];
+    var wide = function (chip) { return inMenu ? chip : html`<span class="hidden sm:inline-flex">${chip}</span>`; };
     if (who && who.reads_public === true) {
-      chips.push(html`<span class="tf-chip tf-chip-sky" title="Anyone can read this stack's ledger: it is the public demo">Public demo</span>`);
+      chips.push(wide(html`<span class="tf-chip tf-chip-sky" title="Anyone can read this stack's ledger: it is the public demo">Public demo</span>`));
     } else if (who && who.reads_public === false) {
-      chips.push(html`<span class="tf-chip tf-chip-gray" title="This stack's ledger is read only by its operator">Private stack</span>`);
+      chips.push(wide(html`<span class="tf-chip tf-chip-gray" title="This stack's ledger is read only by its operator">Private stack</span>`));
     }
     var local = readSession();
     var via = who ? (who.authenticated ? who.via : null) : credentialInUse();
@@ -508,8 +512,10 @@
     }
     if (via === 'session') {
       var ends = expiryMs(who && who.expires_at ? who.expires_at : (local && local.expires_at));
-      chips.push(html`<span class="tf-chip tf-chip-emerald" title="Signed in to this stack from the command line">Signed in${isNaN(ends) ? '' : ' · until ' + clockTime(ends)}</span>`);
-      chips.push(html`<button type="button" class="tf-chip tf-chip-button" data-tf-signout>Sign out</button>`);
+      var until = isNaN(ends) ? '' : ' · until ' + clockTime(ends);
+      if (!inMenu) chips.push(html`<span class="tf-chip tf-chip-emerald" title="Signed in to this stack from the command line${until}">Signed in<span class="hidden sm:inline">${until}</span></span>`);
+      else chips.push(html`<span class="tf-chip tf-chip-emerald">Signed in${until}</span>`);
+      chips.push(wide(html`<button type="button" class="tf-chip tf-chip-button" data-tf-signout>Sign out</button>`));
     } else if (via === 'key') {
       chips.push(html`<a href="${PAGE_BASE}settings.html#operator-key" class="tf-chip tf-chip-amber" title="Using the operator key pasted on the settings page; signing in with python threefold.py open replaces it">Operator key</a>`);
     } else if (who && who.reads_public === false) {
