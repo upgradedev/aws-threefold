@@ -42,9 +42,12 @@
      alarm as a false alarm. Rules turn Ready or Noisy.
   4. **Promote.** Enforce the rules that earned it; the noisy one keeps
      observing.
-  5. **Send it again.** The same kind of call is refused for real, with the fix
+  5. **Send it again.** The same kind of call is refused, with the fix
      Threefold suggests, whether that fix passed the same gates, and a sentence
-     from Amazon Bedrock explaining the refusal.
+     from Amazon Bedrock explaining the refusal. The walkthrough sends this call
+     in a `sim-` session, which the service enforces whatever the stage, so the
+     narration below describes what the stage does for real hooks rather than
+     presenting this one refusal as caused by the promotion.
 - **Narration:**
   > "Every project starts in Observe. Calls are judged and recorded, and the
   > dashboard shows what each rule would have refused. You mark each one correct

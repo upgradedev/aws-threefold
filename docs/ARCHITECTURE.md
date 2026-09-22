@@ -222,7 +222,7 @@ command's working directory as `cwd`; plus `agent`, `origin: "hook"`,
 |---|---|---|---|
 | `managed` | a real call | the project's stage on the service: Observe records, Enforce refuses | `connect` |
 | `observe` | `dry_run` | nobody refuses: a hard cap on this machine, whatever the stage | the older `--repo` installer form |
-| `enforce` | a real call | the gates, except rules the project keeps observing | the hook alone, with no configuration |
+| `enforce` | a real call | the project's stage on the service, as in `managed`; on the machine, a write to the hooks' own files is always refused | the hook alone, with no configuration |
 
 The hook caches the `project_stage` each response names in
 `THREEFOLD_HOME/stage/`, which is how `managed` knows the stage without asking.
@@ -288,8 +288,13 @@ project's configured stage applies (`CONFIG#project#<name>`), or the stack's
 `DefaultHookStage` when the project has none (`observe` on the public stack
 **[PRIMARY, 2026-09-22]**). Observe evaluates the call as a dry run: recorded,
 never refused, never halting. Enforce runs the gates and turns a refusal whose
-rule key the project still observes into an observation. Page and simulation
-calls always enforce, so the demo behaves the same under any setting.
+rule key the project still observes into an observation. Page calls and every
+call in a `sim-` session always enforce, whatever their origin, so the demo
+behaves the same under any setting (`application/projects.py`, `stage_applies`).
+The request's `hook_mode` is recorded on the ledger row and plays no part in
+choosing the stage, so a machine in `enforce` mode is refused only where the
+project enforces. The last step of the `#/try` walkthrough sends its call in a
+`sim-` session, so that refusal does not depend on the promotion before it.
 
 **Rule key.** Every ledger row carries `rule_key`: the id of the layering rule
 that decided, or `LOOP`, `PROTECTED_PATH`, `UNREADABLE_WRITE`, `CREDENTIAL`,

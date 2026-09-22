@@ -41,7 +41,10 @@ policy, `x-frame-options: DENY`, `nosniff` and `referrer-policy: no-referrer`
    a sandbox project (`Acme-Sandbox-<8 hex>`, seeded with twelve synthetic hook
    calls from all three agents through the real evaluator, gone after 24 hours),
    see what its rules would have refused, label each call, promote, and send the
-   same kind of call again to watch it refused for real, with the fix it suggests.
+   same kind of call again to watch it refused, with the fix it suggests. That
+   last call is sent in a `sim-` session, and the service enforces every `sim-`
+   session whatever the project's stage, so it would be refused without the
+   promotion too; a real hook's call follows the stage.
 2. **The flagship demo:** <https://d1og72wpk4aqig.cloudfront.net/>. Scenario 1
    sends one `POST /simulate-loop`; the function evaluates the same call three
    times and the third is refused with `BLOCKED_LOOP_DETECTED`, halting that demo
@@ -111,14 +114,17 @@ python scripts/threefold_install.py connect /path/to/acme-billing --project Acme
 ```
 
 **Modes.** `connect` installs in `managed` mode: each call is sent to be judged
-and the project's stage on the dashboard decides, Observe or Enforce. Two
-modes pin the decision on the machine instead. `--mode observe` sends every
-call as a dry run, which the service judges and records and never refuses,
-whatever the stage says; the older form `--repo PATH --project NAME` defaults
-to it. `--mode enforce` sends every call to be refused when a rule in force
-says no. Rolling out by hand rather than from the dashboard is therefore
-`--mode observe` first, then, when the record reads right, `--mode enforce` (or
-`"mode": "enforce"` in `.threefold.json`).
+and the project's stage on the service decides, Observe or Enforce.
+`--mode observe` pins the machine instead: every call goes as a dry run, which
+the service judges and records and never refuses, whatever the stage says; the
+older form `--repo PATH --project NAME` defaults to it. `--mode enforce` sends
+calls exactly as `managed` does, so the project's stage still decides on the
+service; what it adds is on the machine, where a write to the hooks' own files
+is refused whatever stage was last seen. A machine installed with
+`--mode observe` therefore reaches enforcement in two steps: install again with
+`--mode managed` or `--mode enforce` (or set `"mode"` in `.threefold.json`), and
+promote the project on the dashboard, or deploy the stack with
+`DefaultHookStage=enforce` for projects that have no stage of their own.
 
 In every mode, a call carrying a credential is still refused on your machine
 and never sent, and a call the hook holds back is neither sent nor recorded.
