@@ -80,8 +80,40 @@ def test_the_draft_is_neither_a_public_path_nor_a_protected_write() -> None:
 
 
 def test_a_near_miss_is_not_read_as_the_draft_route() -> None:
-    for path in ("/rules/draft/", "/rules/drafts", "/rules/draft/x", "/Rules/draft", "/rules//draft"):
+    # A trailing slash or a doubled one is not a near miss: the router collapses
+    # repeated slashes and drops a trailing one before the middleware sees the
+    # path, so "/rules/draft/" and "/rules//draft" are the draft route itself,
+    # decided and answered as it is. The test below holds that end to end.
+    for path in ("/rules/drafts", "/rules/draft/x", "/Rules/draft", "/rules/draftx"):
         assert not is_page_read("POST", path), path
+
+
+@pytest.mark.parametrize("spelling", ["/prod/rules/draft", "/prod/rules/draft/", "/prod//rules//draft"])
+def test_every_spelling_the_router_reads_as_the_draft_is_decided_as_the_draft(monkeypatch, spelling) -> None:
+    """The router and the middleware see one normalised path, so no spelling slips past the ladder."""
+    import json
+
+    from threefold.interfaces import draft_routes
+    from threefold.interfaces.api_handlers import lambda_handler
+
+    class NoModel:
+        """Stands where the model client would be, so a regression fails here instead of drafting."""
+
+        def __getattr__(self, name):
+            raise AssertionError("An anonymous draft on a private stack reached the model client")
+
+    monkeypatch.setattr(draft_routes, "_client", NoModel())
+    monkeypatch.setenv("PUBLIC_READS", "false")
+    response = lambda_handler(
+        {
+            "rawPath": spelling,
+            "headers": {"Content-Type": "application/json"},
+            "requestContext": {"http": {"method": "POST", "sourceIp": "203.0.113.22"}, "stage": "prod"},
+            "body": json.dumps({"description": "Billing domain classes may not reach persistence."}),
+        }
+    )
+    assert response["statusCode"] == 401, response["body"]
+    assert json.loads(response["body"])["type"] == "urn:threefold:error:missing-credentials"
 
 
 # ------------------------------------------------------------- the public stack
