@@ -40,7 +40,7 @@ import json
 import re
 from collections import Counter
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
+from typing import Any, Callable, Dict, List, Mapping, Optional
 
 # The same words the Threefold hook prints in a refusal and when it lets a call
 # through unjudged; harness.py uses the same two constants for Claude Code.
@@ -268,7 +268,7 @@ def exec_help(codex: str, runner: Callable[..., Any]) -> str:
         return ""
 
 
-def isolation_facts(codex_home_files: Sequence[str] = ()) -> Dict[str, Any]:
+def isolation_facts() -> Dict[str, Any]:
     """What a Codex run's set-up does and does not keep out, recorded with every row."""
     return {
         "mode": "codex-user-login",
@@ -276,7 +276,6 @@ def isolation_facts(codex_home_files: Sequence[str] = ()) -> Dict[str, Any]:
         "home": "the owner's",
         "user_settings_and_hooks": "config.toml and execpolicy rules skipped; the runner refuses to start while "
                                    "CODEX_HOME holds AGENTS.md, AGENTS.override.md or hooks.json",
-        "codex_home_files": list(codex_home_files),
         "hook_trust": "--dangerously-bypass-hook-trust, and the repository trusted for this invocation only",
         "sandbox": "--sandbox as recorded in harness.codex_sandbox, approval_policy='never'",
         "reads": "whatever the Codex sandbox allows; the owner's private folders are not denied by name",

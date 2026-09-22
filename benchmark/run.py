@@ -429,7 +429,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     codex = args.codex or shutil.which("codex") or "codex"
     credential: Optional[credentials.Credential] = None
     isolation = "user-config"
-    codex_files: List[str] = []
     if args.agent == "claude-code":
         credential, shown, problem = _token_or_error(args)
         if problem:
@@ -480,7 +479,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         codex_home=codex_home() if args.agent == "codex" else None, agent_version=version,
     )
     plan = harness.RunPlan(run_id=run_id, work_root=work_root, options=options, pilot=args.pilot,
-                           credential=credential, codex_home_files=codex_files)
+                           credential=credential)
     planned = plan_runs(tasks, args.conditions, args.reps)
     done = done_keys(previous)
     runs = [(task, condition, rep) for task, condition, rep in planned

@@ -436,11 +436,10 @@ def choose_isolation(requested: str, has_token: bool) -> str:
     return "fresh-config" if has_token else "user-config"
 
 
-def isolation_facts(isolation: str, memory_above: Sequence[str] = (), agent: str = "claude-code",
-                    codex_home_files: Sequence[str] = ()) -> Dict[str, Any]:
+def isolation_facts(isolation: str, memory_above: Sequence[str] = (), agent: str = "claude-code") -> Dict[str, Any]:
     """What a run's isolation does and does not keep out, recorded with every row."""
     if agent == "codex":
-        return codex_agent.isolation_facts(codex_home_files)
+        return codex_agent.isolation_facts()
     shared = {
         "setting_sources": "project,local",
         # Claude Code 2.1.220 loads the user CLAUDE.md only when the user
@@ -1369,8 +1368,6 @@ class RunPlan:
     # The Claude Code login token (credentials.Credential), or None for the
     # machine's login. Never printed: its repr hides the token.
     credential: Any = field(default=None, repr=False)
-    # What CODEX_HOME held that the runner found (it refuses to start while any is there), recorded per row.
-    codex_home_files: Sequence[str] = ()
 
     @property
     def auth(self) -> str:
@@ -1466,7 +1463,7 @@ def run_one(task: Task, condition: str, rep: int, plan: RunPlan, base_env: Optio
         "prompt_sha256": sha256_text(task.prompt()),
         "rules_sha256": sha256_text(rules_text) if rules_text else None,
         "rules_file": RULES_FILE_NAME.get(options.agent, "CLAUDE.md") if rules_text else None,
-        "isolation": isolation_facts(options.isolation, memory_above, options.agent, plan.codex_home_files),
+        "isolation": isolation_facts(options.isolation, memory_above, options.agent),
         "harness": {"python": platform.python_version(), "platform": platform.system(), "max_turns": options.max_turns,
                     "timeout_s": options.timeout_s, "budget_usd": options.budget_usd},
         "harness_error": None,
