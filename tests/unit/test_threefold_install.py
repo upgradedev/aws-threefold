@@ -12,6 +12,7 @@ Names are synthetic, as the clean-room rule requires.
 """
 from __future__ import annotations
 
+import codecs
 import importlib.util
 import io
 import json
@@ -647,3 +648,61 @@ def test_an_existing_config_windows_powershell_wrote_in_utf_16_is_replaced_and_p
     assert json.loads((machine.repo / ".threefold.json").read_text(encoding="utf-8"))["include"] == ["services/billing/**"]
     assert run(machine, "--uninstall", project=None).code == 0
     assert (machine.repo / ".threefold.json").read_bytes() == original
+
+
+# --- what the installer copies from the hook ---------------------------------------------------
+#
+# The stack serves this file alone at /install.py, so it cannot import the
+# hook and keeps its own copy of two of its readings. These are what keep the
+# copies honest: if they ever disagree, connect would keep a configuration the
+# hook reads differently, or refuse a name the hook would send.
+
+HOOK_SOURCE = Path(__file__).resolve().parents[2] / "src" / "threefold" / "hooks" / "threefold_hook.py"
+
+
+def _hook():
+    spec = importlib.util.spec_from_file_location("threefold_hook_for_install", HOOK_SOURCE)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+SAMPLE = '{"project": "Acme-Ledger"}'
+ENCODED = [
+    SAMPLE.encode("utf-8"),
+    codecs.BOM_UTF8 + SAMPLE.encode("utf-8"),
+    SAMPLE.encode("utf-16"),
+    codecs.BOM_UTF16_BE + SAMPLE.encode("utf-16-be"),
+    SAMPLE.encode("utf-32"),
+    codecs.BOM_UTF32_BE + SAMPLE.encode("utf-32-be"),
+    SAMPLE.encode("utf-16-le"),
+    b"",
+    b"\xe9\xff",
+]
+
+
+@pytest.mark.parametrize("raw", ENCODED)
+def test_the_installer_decodes_a_file_exactly_as_the_hook_does(raw) -> None:
+    hook = _hook()
+    try:
+        theirs: object = hook._decode_config(raw)
+    except UnicodeDecodeError as error:
+        theirs = type(error)
+    try:
+        ours: object = installer.decode_text(raw)
+    except UnicodeDecodeError as error:
+        ours = type(error)
+    assert ours == theirs, raw
+
+
+TERMS_AND_TEXTS = [
+    ("globex", "Acme-Globex-Portal"), ("globex", "Acme-Payments"), ("xyz", "isspace"), ("xyz", "XYZ"),
+    ("xyz", "acme_xyz"), ("xyz", "xyzbilling"), ("xyz", "classpath-xyz"), ("orion", "Acme-ORION-1"),
+    ("acme", "Acme-Ledger"), ("zeta", "projekt-zeta"), ("ab", "Acme-Ab-One"),
+]
+
+
+@pytest.mark.parametrize(("term", "text"), TERMS_AND_TEXTS)
+def test_the_installer_reads_a_never_send_term_exactly_as_the_hook_does(term, text) -> None:
+    hook = _hook()
+    assert installer.term_occurs(text, term) == hook.term_occurs(text, term), (term, text)

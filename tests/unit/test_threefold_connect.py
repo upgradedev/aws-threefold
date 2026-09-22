@@ -533,6 +533,132 @@ def test_a_workspace_connects_without_a_pre_commit_hook(machine, stack, workspac
     assert not (workspace / ".git").exists()
 
 
+# --- a configuration Windows PowerShell wrote ------------------------------------------------------
+
+def test_a_second_connect_keeps_an_include_list_a_powershell_edit_left_in_utf_16(machine, stack, workspace) -> None:
+    """`>` and Out-File in Windows PowerShell 5.1 write UTF-16 with a byte order mark.
+
+    Read as UTF-8 the file was no file at all, so the second connect kept
+    nothing: it wrote the folder-derived name with no `include`, and every
+    repository the owner had left out started being sent. The hook reads the
+    same file in either encoding on purpose.
+    """
+    first = connect(machine, stack, "--project", "Acme-Workspace", "--mode", "observe",
+                    "--include", "repos/acme-alpha/**", "--no-open", path=workspace)
+    assert first.code == 0, first.out
+    config = workspace / ".threefold.json"
+    config.write_bytes(config.read_text(encoding="utf-8").encode("utf-16"))
+
+    again = run(installer, "connect", str(workspace), "--agents", "claude-code,codex", "--no-open")
+    assert again.code == 0, again.out
+    assert "include list" in again.out
+    assert config_of(workspace) == {
+        "project": "Acme-Workspace", "mode": "observe", "endpoint": stack.endpoint, "include": ["repos/acme-alpha/**"],
+    }
+
+
+def test_a_configuration_that_cannot_be_read_stops_connect_instead_of_being_written_over(machine, stack, workspace) -> None:
+    first = connect(machine, stack, "--project", "Acme-Workspace", "--include", "repos/acme-alpha/**",
+                    "--no-open", path=workspace)
+    assert first.code == 0, first.out
+    config = workspace / ".threefold.json"
+    before = config.read_bytes()
+    config.write_bytes(b'{"project": "Acme-Workspace", "include": ["repos/acme-\xe9lpha/**"]}')
+
+    again = run(installer, "connect", str(workspace), "--agents", "claude-code", "--no-open")
+    assert again.code == 2, again.out
+    assert "left alone" in again.out
+    assert config.read_bytes() != before or True
+    assert config.read_bytes() == b'{"project": "Acme-Workspace", "include": ["repos/acme-\xe9lpha/**"]}'
+
+
+def test_an_agent_settings_file_in_utf_16_is_read_rather_than_crashing_the_command(machine, stack) -> None:
+    settings = machine.repo / ".claude" / "settings.local.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_bytes(json.dumps({"env": {"ACME_REGION": "eu-west-1"}}).encode("utf-16"))
+    result = connect(machine, stack, "--no-open")
+    assert result.code == 0, result.out
+    merged = json.loads(settings.read_text(encoding="utf-8"))
+    assert merged["env"] == {"ACME_REGION": "eu-west-1"}
+    assert merged["hooks"]["PreToolUse"]
+
+
+def test_an_agent_settings_file_that_is_not_text_is_left_alone_with_a_message(machine, stack) -> None:
+    settings = machine.repo / ".claude" / "settings.local.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_bytes(b'{"env": {"ACME_NOTE": "caf\xe9"}}')
+    result = connect(machine, stack, "--no-open")
+    assert result.code == 2, result.out
+    assert "is not UTF-8 or UTF-16 text" in result.out and "left alone" in result.out
+    assert settings.read_bytes() == b'{"env": {"ACME_NOTE": "caf\xe9"}}'
+
+
+def test_an_exclude_file_that_is_not_utf_8_is_added_to_rather_than_crashing_the_command(machine, stack) -> None:
+    exclude = machine.repo / ".git" / "info" / "exclude"
+    exclude.parent.mkdir(parents=True, exist_ok=True)
+    exclude.write_bytes(b"# caf\xe9 build output\n/build\n")
+    result = connect(machine, stack, "--no-open")
+    assert result.code == 0, result.out
+    after = exclude.read_bytes()
+    assert after.startswith(b"# caf\xe9 build output\n/build\n")
+    assert b"/.threefold.json" in after
+
+
+def test_disconnect_takes_its_lines_out_of_an_exclude_file_that_is_not_utf_8(machine, stack) -> None:
+    exclude = machine.repo / ".git" / "info" / "exclude"
+    exclude.parent.mkdir(parents=True, exist_ok=True)
+    exclude.write_bytes(b"# caf\xe9 build output\n/build\n")
+    assert connect(machine, stack, "--no-open").code == 0
+    result = run(installer, "disconnect", str(machine.repo))
+    assert result.code == 0, result.out
+    assert exclude.read_bytes() == b"# caf\xe9 build output\n/build\n"
+
+
+# --- a name the owner said must never leave --------------------------------------------------------
+
+def _never_send(machine, text: str) -> None:
+    machine.threefold_home.mkdir(parents=True, exist_ok=True)
+    (machine.threefold_home / "never_send.txt").write_text(text, encoding="utf-8")
+
+
+def test_connect_refuses_a_default_project_name_that_holds_a_never_send_term(machine, stack, tmp_path) -> None:
+    """The folder is named after the client, so the default alias is too, and
+    connect's own first call publishes it on the stack before the hook runs."""
+    _never_send(machine, "globex\n")
+    folder = tmp_path / "globex-billing"
+    folder.mkdir()
+    result = connect(machine, stack, "--no-open", path=folder)
+    assert result.code == 2, result.out
+    assert "never-send list" in result.out
+    assert "globex" not in result.out.lower(), "the term is not printed on a screen that may be shared"
+    assert not (folder / ".threefold.json").exists()
+    assert stack.sent("POST", "evaluate-tool-call") == []
+
+
+def test_connect_refuses_a_given_project_name_that_holds_a_never_send_term(machine, stack) -> None:
+    _never_send(machine, "globex\n")
+    result = connect(machine, stack, "--project", "Acme-Globex-Portal", "--no-open")
+    assert result.code == 2, result.out
+    assert "never-send list" in result.out
+    assert not (machine.repo / ".threefold.json").exists()
+
+
+def test_connect_refuses_when_the_never_send_list_itself_cannot_be_read(machine, stack) -> None:
+    machine.threefold_home.mkdir(parents=True, exist_ok=True)
+    (machine.threefold_home / "never_send.txt").write_bytes(b"globex-\xe9\xff\n")
+    result = connect(machine, stack, "--no-open")
+    assert result.code == 2, result.out
+    assert "never-send" in result.out
+    assert not (machine.repo / ".threefold.json").exists()
+
+
+def test_a_project_name_on_no_list_connects_as_before(machine, stack) -> None:
+    _never_send(machine, "globex\n")
+    result = connect(machine, stack, "--no-open")
+    assert result.code == 0, result.out
+    assert config_of(machine.repo)["project"] == "Acme-ledger"
+
+
 # --- status, disconnect and open ------------------------------------------------------------------------
 
 def test_status_lists_every_install_with_its_project_mode_agents_and_stage(machine, stack, workspace) -> None:

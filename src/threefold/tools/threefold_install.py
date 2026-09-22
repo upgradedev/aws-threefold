@@ -109,6 +109,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import codecs
 import hashlib
 import http.client
 import importlib.util
@@ -369,12 +370,42 @@ def include_globs(values: Optional[Sequence[str]]) -> List[str]:
     return globs
 
 
+def decode_text(raw: bytes) -> str:
+    """UTF-8 with or without a byte order mark, or UTF-16 or UTF-32 by theirs.
+
+    Copied from the hook's _decode_config, because this file is served alone
+    at /install.py and cannot import it. A test compares the two over the same
+    bytes, so the installer and the hook cannot disagree about what a file
+    says. Windows PowerShell 5.1 writes UTF-16 with `>` and with Out-File, so
+    read as UTF-8 a settings file edited there was not a file at all: the
+    command died with a decoding traceback where it promised to leave the file
+    alone, and a .threefold.json read that way lost its include list.
+    """
+    for bom, codec in (
+        (codecs.BOM_UTF32_LE, "utf-32"),
+        (codecs.BOM_UTF32_BE, "utf-32"),
+        (codecs.BOM_UTF16_LE, "utf-16"),
+        (codecs.BOM_UTF16_BE, "utf-16"),
+    ):
+        if raw.startswith(bom):
+            return raw.decode(codec)
+    return raw.decode("utf-8-sig")
+
+
 def read_json_object(path: Path) -> Dict[str, Any]:
     """A settings file as an object, or an InstallError: a file that cannot be read is never overwritten."""
     try:
-        text = path.read_text(encoding="utf-8-sig")
+        raw = path.read_bytes()
     except OSError as error:
         raise InstallError(f"{path} could not be read ({type(error).__name__}), so it was left alone") from None
+    try:
+        text = decode_text(raw)
+    except UnicodeDecodeError:
+        raise InstallError(f"{path} is not UTF-8 or UTF-16 text, so it was left alone") from None
+    if "\x00" in text:
+        # UTF-16 without a byte order mark decodes as UTF-8 into NULs instead
+        # of raising, and json.loads would read it as no object at all.
+        raise InstallError(f"{path} is not the text it looks like: it holds NUL characters, so it was left alone")
     if not text.strip():
         return {}
     try:
@@ -392,6 +423,22 @@ def read_json_quietly(path: Path) -> Dict[str, Any]:
         return read_json_object(path) if path.is_file() else {}
     except (InstallError, UnicodeDecodeError):
         return {}
+
+
+def read_config_file(path: Path) -> Dict[str, Any]:
+    """The .threefold.json already there, or an InstallError when it exists and cannot be read.
+
+    What connect keeps on a second run it keeps from this file: the project,
+    the mode, the endpoint, the key file and, above all, the include list.
+    read_json_quietly turned a file it could not decode into no file at all,
+    so a workspace whose .threefold.json had been saved by Windows PowerShell
+    was rewritten under the folder-derived name with no `include` at all, and
+    every repository the owner had left out began to be sent. A file that
+    cannot be read now stops the command instead of being written over.
+    """
+    if not path.is_file():
+        return {}
+    return read_json_object(path)
 
 
 def dump_json(document: Dict[str, Any]) -> str:
@@ -1010,12 +1057,25 @@ def pre_commit_step(plan: Plan, root: Path, home: Path, manifest: Dict[str, Any]
     plan.add("install a pre-commit hook that runs the check", write_hook(False))
 
 
+def exclude_lines(path: Path) -> List[bytes]:
+    """.git/info/exclude as lines of bytes.
+
+    Never decoded. The file is git's, its lines are paths, and one of them may
+    hold a name in whatever encoding the checkout's owner writes: read as
+    UTF-8, a comment line with an accent in it killed the command with a
+    decoding traceback before anything was written. The lines this install
+    adds are ASCII, so comparing and writing bytes loses nothing and leaves
+    every other line exactly as it was.
+    """
+    try:
+        return path.read_bytes().splitlines()
+    except OSError:
+        return []
+
+
 def exclude_step(plan: Plan, root: Path, written: Sequence[str], manifest: Dict[str, Any]) -> None:
     exclude = git_path(root, "info/exclude")
-    try:
-        existing = exclude.read_text(encoding="utf-8").splitlines()
-    except OSError:
-        existing = []
+    existing = [line.decode("utf-8", errors="replace") for line in exclude_lines(exclude)]
     wanted = [f"/{relative}" for relative in written]
     missing = [line for line in wanted if line not in existing]
     if not missing:
@@ -1175,16 +1235,18 @@ def git_side_uninstall(plan: Plan, root: Path, manifest: Dict[str, Any], exact: 
     elif EXCLUDE_KEY in created and _unchanged_since_install(manifest, EXCLUDE_KEY, exclude):
         plan.add("delete .git/info/exclude, which the install created", exclude.unlink)
     elif exclude.is_file():
-        lines = exclude.read_text(encoding="utf-8").splitlines()
+        lines = exclude_lines(exclude)
         if exact:
             ours = set(manifest["exclude_lines"])
-        elif EXCLUDE_MARKER in lines:
+        elif EXCLUDE_MARKER.encode("utf-8") in lines:
             ours = {EXCLUDE_MARKER, f"/{CONFIG_FILE}"} | {f"/{relative}" for relative, _ in AGENT_SETTINGS.values()}
         else:
             ours = set()
-        kept = [line for line in lines if line not in ours]
+        removing = {text.encode("utf-8") for text in ours}
+        kept = [line for line in lines if line not in removing]
         if len(kept) != len(lines):
-            plan.add("take the install's lines out of .git/info/exclude", _write_text(exclude, "\n".join(kept) + ("\n" if kept else "")))
+            data = b"\n".join(kept) + (b"\n" if kept else b"")
+            plan.add("take the install's lines out of .git/info/exclude", _write_bytes(exclude, data))
 
 
 def _unchanged_since_install(manifest: Dict[str, Any], key: str, path: Path) -> bool:
@@ -1204,6 +1266,70 @@ def _restorable(manifest: Dict[str, Any], key: str, path: Path) -> Optional[byte
         return base64.b64decode(original)
     except ValueError:
         return None
+
+
+# --- the owner's never-send list ----------------------------------------------------------------
+#
+# Copied from the hook's read_never_send and term_occurs, because this file is
+# served alone at /install.py and cannot import them. A test compares the two
+# predicates over the same terms and texts, so the installer and the hook
+# cannot disagree about what counts as a mention.
+
+NEVER_SEND_NAME = "never_send.txt"
+SHORT_TERM = 4
+
+
+def term_occurs(text: str, term: str) -> bool:
+    """Whether a never-send term occurs in text, ignoring case; a short term only where it starts a word."""
+    folded = text.casefold()
+    if len(term) > SHORT_TERM or len(folded) != len(text):
+        return term in folded
+    start = folded.find(term)
+    while start != -1:
+        if not (start and text[start - 1].isalpha()):
+            return True
+        start = folded.find(term, start + 1)
+    return False
+
+
+def never_send_terms(home: Path) -> List[str]:
+    """The owner's never-send terms, or none when there is no list; an InstallError when there is one nobody can read."""
+    path = home / NEVER_SEND_NAME
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        if not path.exists():
+            return []
+        raise InstallError(f"{forward(path)} could not be opened, so nothing was checked against it") from None
+    try:
+        text = decode_text(raw)
+    except UnicodeDecodeError:
+        text = "\x00"
+    if "\x00" in text:
+        raise InstallError(
+            f"{forward(path)} is not UTF-8 or UTF-16 text, so your never-send terms could not be read and the "
+            "project name was not checked against them; save it as UTF-8 and connect again"
+        )
+    return [line.strip().casefold() for line in text.splitlines() if line.strip() and not line.strip().startswith("#")]
+
+
+def refuse_a_name_on_the_never_send_list(project: str, home: Path) -> None:
+    """A project name carrying a never-send term is refused before anything is written or sent.
+
+    The name goes on every call, the dashboard shows it, and connect's own
+    first call publishes it once on the stack before the hook ever runs. The
+    default name comes from the folder, which on the owner's machine may be a
+    client's. Neither the term nor the name is printed: this runs in a
+    terminal that may be shared or recorded, and the list exists to keep that
+    word off screens as much as off the wire.
+    """
+    for term in never_send_terms(home):
+        if term_occurs(project, term):
+            raise InstallError(
+                f"the project name contains a term from your never-send list in {forward(home / NEVER_SEND_NAME)}. "
+                "The name goes on every call and the dashboard shows it, so nothing was written or sent; "
+                "pass --project with an alias that does not name it"
+            )
 
 
 # --- connect: the defaults ---------------------------------------------------------------------
@@ -1372,7 +1498,7 @@ def connect(args: argparse.Namespace, out: Any) -> int:
     named = Path(args.path).expanduser()
     root, workspace = locate(named)
     refuse_home_folder(root)
-    existing = read_json_quietly(root / CONFIG_FILE)
+    existing = read_config_file(root / CONFIG_FILE)
     kept: List[str] = []
 
     project = args.project
@@ -1388,6 +1514,7 @@ def connect(args: argparse.Namespace, out: Any) -> int:
         # The alias is what the dashboard shows. A real name typed here would
         # be published by the first tool call.
         raise InstallError("--project must match ^Acme-[A-Za-z0-9-]{1,40}$, an alias rather than a real name")
+    refuse_a_name_on_the_never_send_list(project, home)
 
     mode = args.mode
     if not mode:
@@ -1709,6 +1836,7 @@ def legacy(argv: Sequence[str], out: Any) -> int:
         # The alias is what the public ledger shows. A real name typed here
         # would be published by the first tool call.
         raise InstallError("--project must match ^Acme-[A-Za-z0-9-]{1,40}$, an alias rather than a real name")
+    refuse_a_name_on_the_never_send_list(args.project, home)
     refuse_home_folder(root)
     includes = include_globs(args.include)
     named = Path(args.repo).resolve()
