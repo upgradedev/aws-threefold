@@ -244,6 +244,7 @@ PUBLIC_READS = [
     ("GET", "/policy/config", None),
     ("GET", "/sessions/perimeter-probe", None),
     ("POST", "/rules/explain", {"path": "src/domain/models.py", "content": "import boto3"}),
+    ("POST", "/rules/draft", {"description": "Domain modules may not import boto3."}),
 ]
 STILL_CLOSED = [
     ("POST", "/rules", {"rules": []}),
@@ -299,6 +300,7 @@ PRIVATE_READS = [
     ("GET", "/policy/config", None),
     ("GET", "/sessions/private-probe", None),
     ("POST", "/rules/explain", {"path": "src/domain/models.py", "content": "import boto3"}),
+    ("POST", "/rules/draft", {"description": "Domain modules may not import boto3."}),
 ]
 PAGES_THAT_STAY_OPEN = ["/", "/index.html", "/console.html", "/rules.html", "/sessions.html", "/settings.html"]
 

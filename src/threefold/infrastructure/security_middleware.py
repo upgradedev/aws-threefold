@@ -355,6 +355,16 @@ PAGE_READS = frozenset(
     }
 )
 
+# The reads that need a body, so they arrive as POST. Trying a rule changes
+# nothing and records nothing. Drafting one is the same kind of read with a model
+# call inside it: no rule is saved, no verdict is issued, no ledger row is
+# written, and the draft goes back only to the caller who asked. So both are
+# decided as a page's read: open where PublicReads is true, which is how the
+# public demo's visitors reach them with no key to present, and the operator's,
+# by key or sign-in session, on a stack that keeps its rules private and pays
+# for every draft. Putting a draft in force is POST /rules, a protected write.
+PAGE_READ_POSTS = frozenset({"/rules/explain", "/rules/draft"})
+
 PUBLIC_READS_ENV = "PUBLIC_READS"
 
 
@@ -380,9 +390,9 @@ def is_page_read(method: str, path: str) -> bool:
         or (path.startswith(PROJECTS_PATH + "/") and path.count("/") == 3)
     ):
         return True
-    # Trying a rule changes nothing and records nothing, so it is a read that
-    # happens to need a body.
-    return verb == "POST" and path == "/rules/explain"
+    # Trying a rule, or drafting one, changes nothing and records nothing, so
+    # each is a read that happens to need a body.
+    return verb == "POST" and path in PAGE_READ_POSTS
 
 
 def _require_operator_key(

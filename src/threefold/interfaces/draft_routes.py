@@ -4,23 +4,18 @@ The body is `{description, project?, examples?}`. The answer is one rule in the
 format `POST /rules` accepts, set to observe, with the verdict it gives on each
 example; see `threefold.application.rule_drafter` for how it is made and checked.
 
-Who may call it. The route follows PublicReads, as `POST /rules/explain` does:
-open to anyone on a stack whose reads are public, and operator-only on a stack
-deployed with PublicReads=false. It may be open on the public stack because it
-changes nothing. No rule is saved, no verdict is issued and no ledger row is
-written, and the draft goes back only to the caller who asked for it; putting it
-in force is a separate `POST /rules`, which needs the operator on every stack.
-The public stack has no operator key at all, so a closed route could never be
-tried there by the people the demonstration is for. A private stack has no such
-audience, and every draft is paid for by the account, so there it is closed.
-
-The gate is applied here, in the handler, because the security middleware
-decides explain by name in `is_page_read`, and that function belongs to another
-track. The handler asks the middleware's own operator check, so a private
-stack answers a draft exactly as it answers a private read: 403 when no key is
-configured, 401 without a key, 403 with a wrong one. Should the middleware
-later list `POST /rules/draft` beside explain, this check becomes redundant and
-stays harmless.
+Who may call it. The security middleware decides, by name, as it decides
+`POST /rules/explain`: both are listed in its `PAGE_READ_POSTS`, so a draft is
+open to anyone on a stack whose reads are public and needs the operator, by key
+or sign-in session, on a stack deployed with PublicReads=false. It may be open
+on the public stack because it changes nothing. No rule is saved, no verdict is
+issued and no ledger row is written, and the draft goes back only to the caller
+who asked for it; putting it in force is a separate `POST /rules`, which needs
+the operator on every stack. The public stack has no operator key at all, so a
+closed route could never be tried there by the people the demonstration is for.
+A private stack has no such audience, and every draft is paid for by the
+account, so there it is closed, and a request the middleware refuses never
+reaches this module, let alone the model.
 
 What sets it apart from explain is the bill: explain costs CPU, and every draft
 is one or two model calls. The brakes, and how far each one reaches:
@@ -59,9 +54,8 @@ from threefold.application.rule_drafter import (
 )
 from threefold.domain.layering_rules import UNSUPPORTED
 from threefold.infrastructure.bedrock_client import BedrockGovernanceClient
-from threefold.infrastructure import security_middleware
 from threefold.infrastructure.metrics_emf import emit_threefold_emf_metrics
-from threefold.infrastructure.security_middleware import reads_are_public, rfc7807_error
+from threefold.infrastructure.security_middleware import rfc7807_error
 
 logger = logging.getLogger("threefold.api.drafts")
 
@@ -130,45 +124,6 @@ def _drafting_client() -> BedrockGovernanceClient:
     return _client
 
 
-def _private_draft_refused(event: Dict[str, Any], path: str) -> Optional[Dict[str, Any]]:
-    """The problem a private stack answers an unauthorised draft with, or None to go on."""
-    if reads_are_public():
-        return None
-    # The operator check is the middleware's own, and private to it, in a file
-    # another track is changing. It is looked up here, when a private stack
-    # needs it, rather than imported by name: a rename then refuses drafts on a
-    # private stack, and the tests that expect the operator's draft to pass say
-    # so, instead of failing the router's import and taking every route down.
-    require_operator_key = getattr(security_middleware, "_require_operator_key", None)
-    if require_operator_key is None:
-        logger.error("The middleware's operator check is missing; private drafts are refused")
-        return rfc7807_error(
-            403,
-            "Drafting Is Private Here",
-            "This deployment keeps its rules private, and the operator could not be checked, "
-            "so no rule was drafted.",
-            path,
-            error_type="urn:threefold:error:reads-private",
-        )
-    headers = event.get("headers") or {}
-    allowed, problem = require_operator_key(
-        headers if isinstance(headers, dict) else {},
-        path,
-        closed_title="Drafting Is Private Here",
-        closed_detail=(
-            "This deployment keeps its rules private and has no operator key configured, so "
-            "rules cannot be drafted here. Set THREEFOLD_API_KEYS on the function to draft."
-        ),
-        closed_type="urn:threefold:error:reads-private",
-        missing_detail=(
-            "This deployment keeps its rules private, and every draft is a model call the "
-            "account pays for, so drafting requires the operator key. Provide it via "
-            "'X-API-Key' or 'Authorization: Bearer <key>'."
-        ),
-    )
-    return None if allowed else problem
-
-
 def handle(path: str, method: str, event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Answers `POST /rules/draft`, or returns None for any other request.
 
@@ -181,10 +136,6 @@ def handle(path: str, method: str, event: Dict[str, Any]) -> Optional[Dict[str, 
     # itself being loaded, and the helpers used below are defined further down
     # that module than its imports. By the time a request arrives it is whole.
     from threefold.interfaces import api_handlers as router
-
-    refused = _private_draft_refused(event, path)
-    if refused is not None:
-        return router.build_response(refused["status"], refused)
 
     body = router._parse_body(event)
     # Present means a project was named, as explain reads it: a null, a number
