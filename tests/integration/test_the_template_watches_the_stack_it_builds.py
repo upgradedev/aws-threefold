@@ -812,6 +812,55 @@ def test_the_filters_match_the_record_an_evaluated_call_actually_writes(capsys) 
     assert _pattern_matches(filters["CircuitBreakerTripped"]["pattern"], third)
 
 
+def test_a_call_let_through_by_a_dry_run_counts_as_approved(capsys) -> None:
+    """Why the dashboard cannot call calls - approved anything but refusals.
+
+    A dry run, and a hook call judged in observe, is recorded and never
+    refused: a rule that would have refused it adds an observation and the
+    verdict is still APPROVED, so the record says VerdictApproved = 1. The
+    approved line therefore holds those calls, and the difference between
+    evaluated and approved holds only real refusals.
+    """
+    session = f"acme-template-{uuid.uuid4().hex[:12]}"
+    call = {
+        "session_id": session,
+        "project_name": "Acme-Template",
+        "tool_name": "Write",
+        "action_type": "FILE_WRITE",
+        "arguments": {
+            "file_path": "src/main/java/acme/domain/Order.java",
+            "content": "package acme.domain;\nimport javax.persistence.Entity;\npublic class Order {}\n",
+        },
+        "agent": "page",
+        "origin": "page",
+    }
+    filters = _filters()
+    capsys.readouterr()
+    observed = _evaluate({**call, "dry_run": True})
+    refused = _evaluate({**call, "session_id": session + "-enforced", "dry_run": False})
+    records = [r for r in _records(capsys.readouterr().out) if "ToolCallsEvaluated" in r]
+    assert len(records) == 2
+
+    assert observed["status"] == "APPROVED" and observed["observations"], "A rule flagged it and let it through"
+    assert _pattern_matches(filters["VerdictApproved"]["pattern"], records[0])
+    assert refused["status"].startswith("BLOCKED_")
+    assert not _pattern_matches(filters["VerdictApproved"]["pattern"], records[1])
+
+    widget = next(w for w in _dashboard()["widgets"] if any(
+        isinstance(row[0], str) and row[1] == "VerdictApproved" for row in w["properties"].get("metrics", [])
+    ))
+    rows = widget["properties"]["metrics"]
+    approved = next(row[-1] for row in rows if isinstance(row[0], str) and row[1] == "VerdictApproved")
+    difference = next(row[0] for row in rows if isinstance(row[0], dict))
+    ids = {row[-1]["id"]: row[1] for row in rows if isinstance(row[0], str)}
+    assert ids == {"calls": "ToolCallsEvaluated", "approved": "VerdictApproved"}
+    assert difference["expression"] == "calls - FILL(approved, 0)"
+    assert difference["label"] == "Refused", "calls - approved holds refusals and nothing else"
+    assert "observe" in approved["label"] and "dry run" in approved["label"], (
+        "The approved line holds every call observe or a dry run let through, and should say so"
+    )
+
+
 def test_the_demo_loop_record_is_not_counted_as_a_governance_trip(capsys) -> None:
     from threefold.interfaces.api_handlers import lambda_handler
 

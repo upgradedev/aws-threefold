@@ -766,7 +766,7 @@ Resources:
             {
               "type": "text", "x": 0, "y": 0, "width": 24, "height": 2,
               "properties": {
-                "markdown": "## ${AWS::StackName}\nThe API, the function and the table of this stack, and the governance numbers read from this stack's own log. The last row is account-wide: Bedrock and the service's shared metric namespaces cannot tell the two stacks apart."
+                "markdown": "## ${AWS::StackName}\nThe API, the function and the table of this stack, and the governance numbers read from this stack's own log. A call judged in observe or as a dry run counts as approved even when a rule flags it; the application's own dashboard shows what rules would have refused. The last row is account-wide: Bedrock and the service's shared metric namespaces cannot tell the two stacks apart."
               }
             },
             {
@@ -790,12 +790,12 @@ Resources:
             {
               "type": "metric", "x": 0, "y": 6, "width": 6, "height": 6,
               "properties": {
-                "title": "Tool calls evaluated and approved",
+                "title": "Tool calls evaluated, approved and refused",
                 "region": "${AWS::Region}", "view": "timeSeries", "stacked": false, "period": 300, "stat": "Sum",
                 "metrics": [
                   ["Threefold/${AWS::StackName}", "ToolCallsEvaluated", {"id": "calls", "label": "Evaluated"}],
-                  ["Threefold/${AWS::StackName}", "VerdictApproved", {"id": "approved", "label": "Approved"}],
-                  [{"expression": "calls - FILL(approved, 0)", "id": "notapproved", "label": "Not approved: refused, or would have been under observe"}]
+                  ["Threefold/${AWS::StackName}", "VerdictApproved", {"id": "approved", "label": "Approved, including calls a rule flagged that observe or a dry run let through"}],
+                  [{"expression": "calls - FILL(approved, 0)", "id": "refused", "label": "Refused"}]
                 ]
               }
             },
