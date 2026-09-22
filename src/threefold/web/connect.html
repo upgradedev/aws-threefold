@@ -426,6 +426,12 @@
           <pre class="code mt-2 p-3 rounded-xl bg-gray-950 border border-gray-800 text-[11px] font-mono text-gray-300 max-h-64 overflow-y-auto" id="hook-output">Press a button above.</pre>
         </div>
 
+        <div id="probe-fix-container" class="hidden">
+          <p class="text-xs font-medium text-gray-400 uppercase">The suggested fix, in full</p>
+          <p class="text-[11px] text-gray-500 mt-1">The agent is shown only its summary, as the last line of the reason above. The steps and the files are for a person, and are here.</p>
+          <div id="probe-fix" class="mt-2 p-3 rounded-xl bg-gray-950 border border-gray-800 text-xs text-gray-300 space-y-2"></div>
+        </div>
+
         <div>
           <p class="text-xs font-medium text-gray-400 uppercase">The service's own answer</p>
           <pre class="code mt-2 p-3 rounded-xl bg-gray-950 border border-gray-800 text-[11px] font-mono text-gray-300 max-h-64 overflow-y-auto" id="raw-response">Nothing sent yet.</pre>
@@ -957,12 +963,61 @@
       };
     }
 
+    // The line the hook appends to a refusal when the service sends a fix: the
+    // summary only, cleaned and cut as the hook cleans and cuts it, so this
+    // panel prints what the agent would read.
+    const UNPRINTABLE = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u200e\u200f\u202a-\u202e\u2066-\u2069]+/g;
+    function fixLine(verdict) {
+      const fix = verdict && verdict.suggested_fix;
+      if (!fix || typeof fix !== 'object' || typeof fix.summary !== 'string') return '';
+      const summary = fix.summary.replace(UNPRINTABLE, ' ').split(/\s+/).filter(Boolean).join(' ').slice(0, 200).trimEnd();
+      if (!summary) return '';
+      return (fix.validated === true ? 'Suggested fix, checked by Threefold: ' : 'Suggested fix: ') + summary;
+    }
+
+    // The fix in full, for the reader of this page: every value is the
+    // service's and goes through escapeHtml, the proposed files included, and
+    // "checked" is claimed only when the service says the gates passed them.
+    function renderProbeFix(verdict) {
+      const container = document.getElementById('probe-fix-container');
+      const box = document.getElementById('probe-fix');
+      const fix = verdict && verdict.suggested_fix;
+      if (!fix || typeof fix !== 'object' || typeof fix.summary !== 'string') {
+        container.classList.add('hidden');
+        box.innerHTML = '';
+        return;
+      }
+      const checked = fix.validated === true;
+      const steps = Array.isArray(fix.steps) ? fix.steps.filter(s => typeof s === 'string') : [];
+      const writes = Array.isArray(fix.writes) ? fix.writes.filter(w => w && typeof w.path === 'string' && typeof w.content === 'string') : [];
+      box.innerHTML =
+        (checked
+          ? '<p><span class="px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-950 text-emerald-300 border border-emerald-800">Checked by Threefold: passes the same gates</span></p>'
+          : '') +
+        '<p class="text-gray-200">' + escapeHtml(fix.summary) + '</p>' +
+        (steps.length
+          ? '<ol class="list-decimal pl-5 space-y-1 text-gray-400">' + steps.map(s => '<li>' + escapeHtml(s) + '</li>').join('') + '</ol>'
+          : '') +
+        writes.map(w =>
+          '<p class="font-mono text-[11px] text-gray-400 pt-1">' + escapeHtml(w.path) +
+          (w.new_file === true ? ' · a new file: if it exists, add to it' : '') +
+          (typeof w.old_string === 'string' ? ' · an Edit: in place of the text replaced' : '') +
+          (w.partial === true ? ' · add with an Edit where the command put it' : '') + '</p>' +
+          '<pre class="code p-2 rounded bg-gray-900 border border-gray-800 text-[11px] font-mono text-gray-300 overflow-x-auto"><code>' +
+          escapeHtml(w.content) + '</code></pre>'
+        ).join('') +
+        '<p class="text-[11px] text-gray-500">A starting point, never applied automatically.</p>';
+      container.classList.remove('hidden');
+    }
+
     // The hook's reply for one agent, per the contract: a deny in that agent's
     // shape, or nothing at all. The reason here is built from the gate's reason
-    // alone, because the hook asks for no model sentence.
+    // alone, because the hook asks for no model sentence, and ends with the
+    // fix's summary line when the service sent one.
     function hookDecision(verdict, agentName) {
       if ((verdict.status || 'APPROVED') === 'APPROVED') return null;
-      const reason = 'Threefold refused this call. ' + (verdict.reason || verdict.status);
+      const line = fixLine(verdict);
+      const reason = 'Threefold refused this call. ' + (verdict.reason || verdict.status) + (line ? '\n' + line : '');
       if (agentName === 'antigravity') return { decision: 'deny', reason: reason };
       return {
         hookSpecificOutput: {
@@ -990,6 +1045,7 @@
       tag.className = 'text-xs px-2.5 py-1 rounded-full font-semibold bg-gray-800 text-gray-400';
       tag.innerText = 'Calling…';
       lastVerdict = null;
+      renderProbeFix(null);
       document.getElementById('hook-output').textContent = 'Waiting for the service…';
 
       const sessionId = newSessionId();
@@ -1012,6 +1068,7 @@
         }
         lastVerdict = data;
         renderDecision();
+        renderProbeFix(data);
         const denied = (data.status || 'APPROVED') !== 'APPROVED';
         setConnection(true, 'LIVE · ' + (data.status || 'ANSWERED'));
         tag.className = denied

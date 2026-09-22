@@ -1436,11 +1436,56 @@
       ['agent', 'Agent'], ['origin', 'Origin'], ['dry_run', 'Dry run'], ['tool_name', 'Tool'], ['action_type', 'Action'],
       ['session_id', 'Session'], ['developer_id', 'Developer (hash)'], ['cost_usd', 'Session cost so far'],
       ['review', 'Review'], ['reviewed_at', 'Reviewed at'], ['review_note', 'Review note'], ['category_label', 'Category'],
+      ['suggested_fix_kind', 'Suggested fix'], ['suggested_fix_validated', 'Fix checked by Threefold'],
       ['verdict_id', 'Verdict id']
     ];
 
+    // The two fields a ledger row keeps of a suggested fix. A row without one
+    // does not list them at all, rather than listing two dashes.
+    const FIX_FIELDS = { suggested_fix_kind: true, suggested_fix_validated: true };
+    const FIX_KINDS = {
+      layering: 'Move the import out of the domain',
+      credential: 'Read the credential from the environment',
+      protected_path: 'The governed way to change a protected path',
+      unreadable_write: 'A write the rule can read',
+      loop: 'Stop repeating the call',
+      budget: 'Within the budget',
+      halted_session: 'How the halted session resumes',
+      destructive_command: 'Instead of the destructive command'
+    };
+    // Own keys only: a kind the service spells "constructor" is a word, not the Object function.
+    function fixKindLabel(kind, fallback) {
+      return Object.prototype.hasOwnProperty.call(FIX_KINDS, kind) ? FIX_KINDS[kind] : fallback;
+    }
+
+    // A suggested fix, as the response to a call carries it. Every value is the
+    // service's and goes through html``; the proposed files are shown as code,
+    // and "checked" is claimed only when the service says the gates passed them.
+    function fixPanel(fix) {
+      if (!fix || typeof fix !== 'object' || typeof fix.summary !== 'string') return '';
+      const checked = fix.validated === true;
+      const steps = Array.isArray(fix.steps) ? fix.steps.filter(s => typeof s === 'string') : [];
+      const writes = Array.isArray(fix.writes) ? fix.writes.filter(w => w && typeof w.path === 'string' && typeof w.content === 'string') : [];
+      return html`<div class="rounded-xl bg-gray-950 border ${checked ? 'border-emerald-900/60' : 'border-gray-800'} p-3 space-y-3 text-xs" data-fix="${checked ? 'checked' : 'unchecked'}">
+        <div class="flex flex-wrap items-center gap-2">
+          <p class="tf-label !mb-0">Suggested fix</p>
+          ${typeof fix.kind === 'string' ? html`<span class="tf-chip tf-chip-gray">${fixKindLabel(fix.kind, fix.kind)}</span>` : ''}
+          ${checked ? html`<span class="tf-chip tf-chip-emerald">Checked by Threefold: passes the same gates</span>` : ''}
+        </div>
+        <p class="text-gray-200 tf-break">${fix.summary}</p>
+        ${steps.length ? html`<ol class="list-decimal pl-5 space-y-1 text-gray-300">${steps.map(s => html`<li class="tf-break">${s}</li>`)}</ol>` : ''}
+        ${writes.map(w => html`<div class="space-y-1">
+          <p class="font-mono text-gray-400 tf-break">${w.path}${w.new_file === true ? ' · a new file: if it exists, add to it' : ''}${w.partial === true ? ' · add this with an Edit where the command put it' : ''}${typeof w.old_string === 'string' ? ' · an Edit: in place of the text you replaced' : ''}</p>
+          <pre class="tf-pre !pr-3"><code>${w.content}</code></pre>
+        </div>`)}
+        <p class="text-[11px] text-gray-500">A starting point, never applied automatically.</p>
+      </div>`;
+    }
+
     function fieldValue(key, value) {
       if (value === null || value === undefined || value === '') return html`<span class="text-gray-600">—</span>`;
+      if (key === 'suggested_fix_kind') return html`${value} <span class="text-gray-500">(${fixKindLabel(value, 'a fix')})</span>`;
+      if (key === 'suggested_fix_validated') return value === true ? 'yes: every proposed write passed the same gates' : 'no: advice, not checked by the gates';
       if (key === 'timestamp' || key === 'reviewed_at') return html`${dateTime(value)} <span class="text-gray-500">(${timeAgo(value)})</span>`;
       if (key === 'cost_usd') return T.usd(Number(value));
       if (key === 'agent') return agentLabel(value);
@@ -1481,8 +1526,10 @@
         const session = state.data.session || null;
         const rule = state.data.rule || null;
         const outcome = outcomeOf(row);
+        const hasFix = typeof row.suggested_fix_kind === 'string' && row.suggested_fix_kind !== '';
         const known = {};
-        const rows = FIELD_ORDER.map(([key, label]) => { known[key] = true; return [key, label, row[key]]; })
+        FIELD_ORDER.forEach(([key]) => { known[key] = true; });
+        const rows = FIELD_ORDER.filter(([key]) => hasFix || !FIX_FIELDS[key]).map(([key, label]) => [key, label, row[key]])
           .concat(Object.keys(row).filter(k => !known[k]).sort().map(k => [k, k, row[k]]));
         const key = ruleKeyOf(row);
 
@@ -1529,6 +1576,13 @@
             </div>`
           : '';
 
+        const fixBody = hasFix
+          ? html`<div class="space-y-2 text-xs">
+              <p class="flex flex-wrap items-center gap-2"><span class="tf-chip tf-chip-gray">${fixKindLabel(row.suggested_fix_kind, row.suggested_fix_kind)}</span>${row.suggested_fix_validated === true ? html`<span class="tf-chip tf-chip-emerald">Checked by Threefold: passes the same gates</span>` : html`<span class="tf-chip tf-chip-gray">Not checked: advice in words</span>`}</p>
+              <p class="text-[11px] text-gray-500">The fix went back with the verdict, to the agent or the page that sent the call. The ledger keeps its kind and whether it was checked, never its files or its steps: those were the caller's own source.</p>
+            </div>`
+          : '';
+
         ctx.render(html`${crumb}
           ${pageTitle(html`<span class="font-mono">${row.tool_name || 'Call'}</span> <span class="font-mono text-gray-400 text-base md:text-lg tf-break">${targetOf(row)}</span>`,
             html`${outcomeChip(row)} ${reasonOf(row)}`,
@@ -1538,6 +1592,7 @@
             <div class="space-y-4 min-w-0">
               ${reviewBody ? card('Review', 'A rule in Observe flagged this call. Was it right to?', reviewBody) : ''}
               ${card('The rule', outcome === 'approved' ? 'Nothing flagged this call.' : 'What decided.', ruleBody)}
+              ${fixBody ? card('Suggested fix', 'Sent with the verdict.', fixBody) : ''}
               ${card('The session', null, sessionBody)}
               ${row.project_name && T.PROJECT_PATTERN.test(row.project_name) ? html`<a class="tf-card tf-card-link block p-4 text-xs text-gray-300" href="${projectHref(row.project_name)}">Open <span class="font-mono text-white">${row.project_name}</span>: its stage and readiness ${raw(T.ICONS.arrow)}</a>` : ''}
             </div>
@@ -1967,6 +2022,7 @@
           <div class="flex flex-wrap gap-2"><span class="tf-chip ${refused ? 'tf-chip-rose' : 'tf-chip-emerald'} font-mono">${r.status || '—'}</span>${r.project_stage ? html`<span class="tf-chip tf-chip-purple">stage ${r.project_stage}</span>` : ''}</div>
           <p class="text-xs text-gray-300 tf-break">${r.reason || ''}</p>
           ${r.bedrock_explanation ? html`<div class="rounded-xl bg-purple-950/30 border border-purple-900/50 p-3 text-xs text-purple-100"><p class="tf-label !text-purple-300">${source}</p><p class="tf-break">${r.bedrock_explanation}</p></div>` : ''}
+          ${fixPanel(r.suggested_fix)}
           <p class="text-xs text-gray-400">${refused
             ? 'The same kind of call that ran in Observe is refused in Enforce' + (state.observing && state.observing.length ? ', while ' + state.observing.join(', ') + (state.observing.length === 1 ? ' keeps' : ' keep') + ' watching without refusing' : '') + '. That is the whole rollout: watch, label, promote, and back to Observe in one click if it bites wrong.'
             : 'This call was not refused. The rule it was built from may not be in force, or the sandbox rules differ; the project page shows each rule\'s mode.'}</p>

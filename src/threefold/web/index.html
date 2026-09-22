@@ -349,6 +349,11 @@
             </div>
           </div>
 
+          <div id="fix-container" class="hidden">
+            <p class="text-xs font-medium text-gray-400 uppercase">Suggested Fix</p>
+            <div id="fix-box" class="mt-1 p-3 rounded-xl bg-gray-950 border border-gray-800 text-xs text-gray-300 space-y-2"></div>
+          </div>
+
           <div id="cert-container" class="hidden p-3 rounded-xl bg-emerald-950/20 border border-emerald-900/40 space-y-2">
             <div class="flex items-center justify-between">
               <span class="text-xs font-semibold text-emerald-400">Governance Certificate</span>
@@ -451,6 +456,39 @@
         `<strong>Simulated, offline demo, no model was reached:</strong> ${escapeHtml(text)}`;
     }
 
+    // The fix the service sent with a refusal: what to send instead. Only a
+    // live answer carries one; the offline panels invent none, so they show
+    // none. Every value in it is the service's and goes through escapeHtml,
+    // the proposed files included, and "checked" is claimed only when the
+    // service says every proposed write passed the same gates.
+    function renderFix(data) {
+      const container = document.getElementById('fix-container');
+      const box = document.getElementById('fix-box');
+      const fix = data && data.suggested_fix;
+      if (!fix || typeof fix !== 'object' || typeof fix.summary !== 'string') {
+        container.classList.add('hidden');
+        box.innerHTML = '';
+        return;
+      }
+      const checked = fix.validated === true;
+      const steps = Array.isArray(fix.steps) ? fix.steps.filter(s => typeof s === 'string') : [];
+      const writes = Array.isArray(fix.writes) ? fix.writes.filter(w => w && typeof w.path === 'string' && typeof w.content === 'string') : [];
+      box.innerHTML =
+        (checked
+          ? '<p><span class="px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-950 text-emerald-300 border border-emerald-800">Checked by Threefold: passes the same gates</span></p>'
+          : '') +
+        `<p class="text-gray-200">${escapeHtml(fix.summary)}</p>` +
+        (steps.length
+          ? '<ol class="list-decimal pl-5 space-y-1 text-gray-400">' + steps.map(s => `<li>${escapeHtml(s)}</li>`).join('') + '</ol>'
+          : '') +
+        writes.map(w =>
+          `<p class="font-mono text-[11px] text-gray-400 pt-1">${escapeHtml(w.path)}${w.new_file === true ? ' · a new file: if it exists, add to it' : ''}${typeof w.old_string === 'string' ? ' · an Edit: in place of the text replaced' : ''}${w.partial === true ? ' · add with an Edit where the command put it' : ''}</p>` +
+          `<pre class="p-2 rounded bg-gray-900 border border-gray-800 text-[11px] font-mono text-gray-300 overflow-x-auto whitespace-pre"><code>${escapeHtml(w.content)}</code></pre>`
+        ).join('') +
+        '<p class="text-[11px] text-gray-500">A starting point, never applied automatically.</p>';
+      container.classList.remove('hidden');
+    }
+
     function getApiBase() {
       const configured = document.getElementById("apiBaseInput").value.trim().replace(/\/+$/, "");
       return configured || DEFAULT_API_BASE;
@@ -531,6 +569,7 @@
       document.getElementById('inv-loop').innerText = '--';
       document.getElementById('inv-cost').innerText = '--';
       document.getElementById('bedrock-box').innerText = 'Awaiting agent action to evaluate architectural trade-offs and safety implications.';
+      renderFix(null);
       document.getElementById('cert-container').classList.add('hidden');
       document.getElementById('cert-origin').innerText = '';
     }
@@ -598,6 +637,7 @@
             document.getElementById('inv-cost').innerText = 'PASS';
 
             renderExplanation(data);
+            renderFix(data);
             return;
           }
         } catch (err) {
@@ -660,6 +700,7 @@
             document.getElementById('inv-cost').innerText = 'PASS';
 
             renderExplanation(data);
+            renderFix(data);
             return;
           }
         } catch (err) {
@@ -724,6 +765,7 @@
             document.getElementById('inv-cost').innerText = 'PASS';
 
             renderExplanation(data);
+            renderFix(data);
             return;
           }
         } catch (err) {
