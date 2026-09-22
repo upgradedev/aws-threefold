@@ -1705,6 +1705,8 @@ def run_one(task: Task, condition: str, rep: int, plan: RunPlan, base_env: Optio
         "agent_version": options.agent_version,
         "auth": plan.auth,
         "task": task.id,
+        "family": task.family,
+        "variant_of": task.variant_of,
         "language": task.language,
         "governed_by": task.governed_by,
         "condition": condition,
