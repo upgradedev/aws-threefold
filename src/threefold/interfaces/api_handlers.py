@@ -40,7 +40,10 @@ from threefold.infrastructure.bedrock_client import BedrockGovernanceClient
 from threefold.infrastructure.idempotency import global_idempotency_cache
 from threefold.infrastructure.metrics_emf import emit_threefold_emf_metrics
 from threefold.infrastructure.security_middleware import (
+    CERTIFICATE_PATH,
     INSIGHTS_READ_PATHS,
+    LOOP_SCENARIO_PATH,
+    SECRET_SCENARIO_PATH,
     SESSIONS_READ_PATHS,
     rfc7807_error,
     validate_request_security,
@@ -525,7 +528,7 @@ def _route(event: Dict[str, Any], http_method: str, request_id: str) -> Dict[str
             })
 
         # Route 3: Thrashing Loop Simulation
-        if path == "/simulate-loop" and http_method == "POST":
+        if path == LOOP_SCENARIO_PATH and http_method == "POST":
             session_id = f"sim-loop-{event.get('requestContext', {}).get('requestId', '001')[:6]}"
             req = ToolCallRequestDTO(
                 session_id=session_id,
@@ -548,7 +551,7 @@ def _route(event: Dict[str, Any], http_method: str, request_id: str) -> Dict[str
             return build_response(200, third_result.to_dict())
 
         # Route 4: Secret Leakage Simulation
-        if path == "/simulate-secret" and http_method == "POST":
+        if path == SECRET_SCENARIO_PATH and http_method == "POST":
             session_id = f"sim-sec-{event.get('requestContext', {}).get('requestId', '002')[:6]}"
             req = ToolCallRequestDTO(
                 session_id=session_id,
@@ -569,7 +572,7 @@ def _route(event: Dict[str, Any], http_method: str, request_id: str) -> Dict[str
             return build_response(200, result.to_dict())
 
         # Route 5: Issue Cryptographic Governance Certificate
-        if path == "/issue-certificate" and http_method == "POST":
+        if path == CERTIFICATE_PATH and http_method == "POST":
             body = _parse_body(event)
             _check_named_session(body)
             session_id = body.get("session_id", "session-default")

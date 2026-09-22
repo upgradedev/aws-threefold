@@ -502,6 +502,22 @@ def is_served_asset(method: str, path: str) -> bool:
 SESSIONS_READ_PATHS = ("/api/sessions", "/sessions.json")
 INSIGHTS_READ_PATHS = ("/api/insights", "/insights.json")
 
+# The POSTs that answer out of this stack's own sessions and ledger. The
+# certificate answers for a session this service has governed, with its project,
+# its developer and its spend, which is the row the sessions read will not show
+# without the operator; the two scenarios write synthetic calls into the ledger
+# the pages present as governed work. Named here, as the two reads above are, so
+# the router spells its dispatch with them and none can be missing from the set.
+CERTIFICATE_PATH = "/issue-certificate"
+LOOP_SCENARIO_PATH = "/simulate-loop"
+SECRET_SCENARIO_PATH = "/simulate-secret"
+SESSION_ANSWERING_POSTS = frozenset({CERTIFICATE_PATH, LOOP_SCENARIO_PATH, SECRET_SCENARIO_PATH})
+
+
+def is_session_answering_post(method: str, path: str) -> bool:
+    """True for a POST that answers out of, or seeds into, this stack's own ledger."""
+    return method.upper() == "POST" and path in SESSION_ANSWERING_POSTS
+
 # The reads the pages make. Opening a page and refusing the data it is built on
 # is the same regression as refusing the page, one step later: the console and
 # the rules screen rendered and then every fetch answered 401 the moment STAGE
@@ -840,6 +856,39 @@ def validate_request_security(
     # here as everywhere else, because the ship gate depends on it.
     if verb == "GET" and not reads_are_public():
         return _private_read_refusal(headers, path)
+
+    # 4d. The same, for the reads that arrive as POST because they answer for a
+    # session the caller names. Step 4c closes a read nobody listed, but only a
+    # GET, so on a PublicReads=false stack `POST /issue-certificate` still
+    # answered an anonymous caller with the owner's project, developer and spend
+    # for any session id they knew, and the two scenarios still seeded synthetic
+    # calls into a ledger that carries real use. Closed here exactly as step 3c
+    # closes a sandbox, and for the same two reasons.
+    #
+    # The recording routes are deliberately not here. `/evaluate-tool-call` and
+    # the universal adapter are how a machine this stack governs reports to it,
+    # and that report arrives without a key today, so closing them would stop
+    # the work this stack exists to record rather than a reader of it. What is
+    # left open by that is narrow and real: a caller who already knows a session
+    # id can send a call into it and read that session's own cost back.
+    if is_session_answering_post(verb, path) and not reads_are_public():
+        return _require_operator_key(
+            headers,
+            path,
+            closed_title="Sessions Are Private Here",
+            closed_detail=(
+                "This deployment keeps its sessions and ledger private and has no operator "
+                "key configured, so nothing here can certify a session or seed a scenario "
+                "into it. Set THREEFOLD_API_KEYS on the function to enable them."
+            ),
+            closed_type="urn:threefold:error:reads-private",
+            missing_detail=(
+                "This deployment keeps its sessions and ledger private, so certifying a "
+                "session, or seeding a scenario into it, requires the operator: the key via "
+                "'X-API-Key' or 'Authorization: Bearer <key>', or a sign-in session via "
+                "'Authorization: Bearer <token>'."
+            ),
+        )
 
     # 5. Authentication enforcement. A sign-in session is the operator here as
     # everywhere else; what follows is the key check as it always was, demo
