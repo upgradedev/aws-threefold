@@ -118,6 +118,7 @@ import json
 import os
 import re
 import secrets
+import shlex
 import shutil
 import subprocess
 import sys
@@ -247,9 +248,27 @@ def forward(path: Any) -> str:
 
 
 def quoted(path: Any) -> str:
-    """A path for a command line: forward slashes, and quotes only when a space needs them."""
+    """A path for a person to read and paste: forward slashes, and quotes only when a space needs them.
+
+    For a line a shell will run, use sh_quoted. This one is for the advice the
+    command prints.
+    """
     text = forward(path)
     return f'"{text}"' if " " in text else text
+
+
+def sh_quoted(path: Any) -> str:
+    """A path for a line a shell reads: forward slashes, quoted for sh.
+
+    The registered hook command and the pre-commit script are both read by a
+    shell -- Git Bash on Windows, /bin/sh elsewhere. Quoted only where a space
+    forced it, a home folder such as C:/Users/o'neil left an apostrophe open:
+    the agent's hook exited 2, which Claude Code reads as a refusal, so every
+    governed call was blocked, and the pre-commit script was a syntax error,
+    so every commit in the repository failed even in observe mode. A `$`, a
+    backtick or an `&` in the path would have run something else.
+    """
+    return shlex.quote(forward(path))
 
 
 def with_slash(url: str) -> str:
@@ -257,7 +276,7 @@ def with_slash(url: str) -> str:
 
 
 def hook_command(home: Path, agent: str) -> str:
-    return f"{quoted(sys.executable)} {quoted(home / 'bin' / 'threefold_hook.py')} --agent {agent}"
+    return f"{sh_quoted(sys.executable)} {sh_quoted(home / 'bin' / 'threefold_hook.py')} --agent {agent}"
 
 
 def git(repo: Path, *args: str, check: bool = True) -> Tuple[int, str]:
@@ -1007,7 +1026,7 @@ def trusted_endpoint_step(plan: Plan, home: Path, endpoint: str, key_file: Path)
 
 
 def pre_commit_script(home: Path) -> str:
-    cli = quoted(home / "bin" / "threefold_cli.py")
+    cli = sh_quoted(home / "bin" / "threefold_cli.py")
     return (
         "#!/bin/sh\n"
         f"{PRE_COMMIT_MARKER}; --uninstall removes it.\n"
@@ -1015,7 +1034,7 @@ def pre_commit_script(home: Path) -> str:
         f'chained="$(dirname "$0")/{CHAINED_NAME}"\n'
         'if [ -f "$chained" ]; then "$chained" "$@" || exit $?; fi\n'
         f'if [ -f {cli} ]; then\n'
-        f'  {quoted(sys.executable)} {cli} check --repo "$(git rev-parse --show-toplevel)" || exit $?\n'
+        f'  {sh_quoted(sys.executable)} {cli} check --repo "$(git rev-parse --show-toplevel)" || exit $?\n'
         "else\n"
         '  echo "threefold: the pre-commit check is missing from THREEFOLD_HOME, so this commit was not checked." >&2\n'
         "fi\n"

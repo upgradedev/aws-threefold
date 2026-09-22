@@ -18,6 +18,7 @@ import io
 import json
 import os
 import re
+import shlex
 import socket
 import subprocess
 import sys
@@ -706,3 +707,62 @@ TERMS_AND_TEXTS = [
 def test_the_installer_reads_a_never_send_term_exactly_as_the_hook_does(term, text) -> None:
     hook = _hook()
     assert installer.term_occurs(text, term) == hook.term_occurs(text, term), (term, text)
+
+
+# --- a home folder with a character a shell reads -----------------------------------------------
+#
+# The registered command and the pre-commit script are both read by a shell:
+# Git Bash on Windows, /bin/sh everywhere. Quoted only when they held a space,
+# a path such as C:/Users/o'neil left an apostrophe open. The agent's hook
+# then exited 2, which Claude Code reads as a refusal, so every governed call
+# was blocked; and the pre-commit script was a syntax error, so every commit
+# in the repository failed, even in observe mode.
+
+AWKWARD_FOLDERS = ["o'neil", "Acme Dev", "acme$home", "acme`tick", "acme&co", "acme(1)", "acme;rm", "acme!bang"]
+
+
+def _home_under(tmp_path: Path, folder: str, monkeypatch) -> Path:
+    monkeypatch.setenv("THREEFOLD_HOME", str(tmp_path / folder / ".threefold"))
+    return installer.threefold_home()
+
+
+@pytest.mark.parametrize("folder", AWKWARD_FOLDERS)
+def test_a_registered_hook_command_parses_back_to_the_paths_it_names(folder, tmp_path, monkeypatch) -> None:
+    home = _home_under(tmp_path, folder, monkeypatch)
+    command = installer.hook_command(home, "claude-code")
+    hook_path = installer.forward(home / "bin" / "threefold_hook.py")
+    # Quoted the way a shell needs, not only where a space forced it: `$`, a
+    # backtick and `&` all survive shlex.split unharmed and would not survive sh.
+    assert shlex.quote(hook_path) in command, command
+    words = shlex.split(command)
+    assert words[0] == installer.forward(sys.executable)
+    assert words[1] == hook_path
+    assert words[2:] == ["--agent", "claude-code"]
+
+
+@pytest.mark.parametrize("folder", AWKWARD_FOLDERS)
+def test_the_pre_commit_script_parses_back_to_the_paths_it_names(folder, tmp_path, monkeypatch) -> None:
+    home = _home_under(tmp_path, folder, monkeypatch)
+    cli = installer.forward(home / "bin" / "threefold_cli.py")
+    script = installer.pre_commit_script(home)
+    assert script.count(shlex.quote(cli)) == 2, script
+    for line in script.splitlines():
+        shlex.split(line)  # a stray quote is a ValueError here and a syntax error in sh
+        if "threefold_cli.py" in line:
+            assert cli in shlex.split(line), line
+    runs = next(line for line in script.splitlines() if "check --repo" in line)
+    assert shlex.split(runs)[:3] == [installer.forward(sys.executable), cli, "check"]
+
+
+@pytest.mark.parametrize("folder", ["o'neil", "Acme Dev"])
+def test_an_install_from_a_home_folder_with_an_apostrophe_writes_a_script_a_shell_can_read(
+    folder, machine, monkeypatch, tmp_path
+) -> None:
+    home = _home_under(tmp_path, folder, monkeypatch)
+    assert run(machine).code == 0
+    script = (machine.repo / ".git" / "hooks" / "pre-commit").read_text(encoding="utf-8")
+    for line in script.splitlines():
+        shlex.split(line)  # a stray quote is a ValueError here and a syntax error in sh
+    registered = json.loads((machine.repo / ".claude" / "settings.local.json").read_text(encoding="utf-8"))
+    command = registered["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+    assert shlex.split(command)[1] == installer.forward(home / "bin" / "threefold_hook.py")
