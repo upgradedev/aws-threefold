@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import ast
 import json
+import logging
+import re
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
@@ -20,7 +22,7 @@ import pytest
 
 from threefold.application.dtos import ToolCallRequestDTO
 from threefold.application.evaluator import GovernanceEvaluator
-from threefold.application.fix_proposer import MAX_SUMMARY_CHARS, MAX_WRITE_BYTES, propose_fix
+from threefold.application.fix_proposer import MAX_CONTENT_CHARS, MAX_SUMMARY_CHARS, MAX_WRITE_BYTES, propose_fix
 from threefold.domain import imports as import_readers
 from threefold.domain.boundary_guard import (
     CONTENT_KEYS,
@@ -413,7 +415,126 @@ def test_content_that_does_not_parse_is_fixed_by_the_line_reader() -> None:
     assert declared_imports(path, _write_at(fix, path)["content"])[1] == ["os", "typing"]
 
 
-# --- where there is nowhere to go -----------------------------------------------------
+# --- paths are data, never code --------------------------------------------------------
+
+
+def _only_declarations(source: str) -> None:
+    """Every statement a generated Python file holds is an import, a docstring or a class of methods.
+
+    Nothing runs at import time: a path that closed a docstring used to leave an
+    expression at module and class level, evaluated when the file was imported.
+    """
+    tree = ast.parse(source)
+    for node in tree.body:
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            continue
+        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+            continue
+        assert isinstance(node, ast.ClassDef), ast.dump(node)[:160]
+        assert not node.decorator_list and all(isinstance(base, ast.Name) for base in node.bases)
+        for item in node.body:
+            docstring = isinstance(item, ast.Expr) and isinstance(item.value, ast.Constant) and isinstance(item.value.value, str)
+            assert docstring or isinstance(item, ast.FunctionDef), ast.dump(item)[:160]
+
+
+def test_a_path_cannot_write_code_into_the_files_it_names() -> None:
+    path = 'src/domain/a"""+__import__("os").getcwd()+"""b.py'
+    assert looks_like_path(path)
+    fix = _fix(*_refused("Write", {"file_path": path, "content": "import boto3\n"}))
+    _assert_really_passes(fix)
+    for write in fix["writes"]:
+        compile(write["content"], "fix.py", "exec")
+        _only_declarations(write["content"])
+    assert any(check["gate"] == "syntax" and check["passed"] for check in fix["checks"])
+
+
+@pytest.mark.parametrize(
+    "path, content, adapter_path",
+    [
+        # \u and \N in a docstring are escapes, and the adapter used to stop parsing.
+        ("src\\acme\\domain\\user.py", "import boto3\n", "src/acme/infrastructure/user_adapter.py"),
+        ("src\\acme\\domain\\Nexus.py", "import boto3\n", "src/acme/infrastructure/Nexus_adapter.py"),
+        (
+            "web\\src\\domain\\user.ts",
+            "import axios from 'axios';\nexport const load = () => axios.get('/acme');\n",
+            "web/src/infrastructure/user.adapter.ts",
+        ),
+        (
+            "src\\main\\java\\com\\acme\\domain\\User.java",
+            "package com.acme.domain;\nimport java.sql.DriverManager;\nclass User {}\n",
+            "src/main/java/com/acme/infrastructure/UserAdapter.java",
+        ),
+        ("Acme.Billing\\Domain\\Invoice.cs", CS_DOMAIN, "Acme.Billing/Infrastructure/InvoiceAdapter.cs"),
+    ],
+)
+def test_a_windows_path_gets_the_same_fix_in_files_that_parse(path: str, content: str, adapter_path: str) -> None:
+    fix = _fix(*_refused("Write", {"file_path": path, "content": content}))
+    _assert_really_passes(fix)
+    assert _write_at(fix, path), "The domain write keeps the path exactly as the call sent it"
+    adapter = _write_at(fix, adapter_path)["content"]
+    assert "\\" not in adapter, "No backslash from a path reaches generated code"
+    for write in fix["writes"]:
+        if write["path"].endswith(".py"):
+            compile(write["content"], "fix.py", "exec")
+
+
+def test_a_quote_in_a_typescript_path_cannot_end_the_import_it_is_named_in() -> None:
+    path = "web/src/domain/o'neil.ts"
+    content = "import axios from 'axios';\nexport const load = () => axios.get('/acme');\n"
+    fix = _fix(*_refused("Write", {"file_path": path, "content": content}))
+    _assert_really_passes(fix)
+    adapter = _write_at(fix, "web/src/infrastructure/o'neil.adapter.ts")["content"]
+    assert "import type { ONeilPort } from \"../domain/o'neil\";" in adapter
+    assert "/** What o_neil needs from axios" in _write_at(fix, path)["content"]
+
+
+def test_the_summary_counts_every_library_it_moves() -> None:
+    content = "import boto3\nimport requests\nimport redis\nimport httpx\nimport flask\n"
+    fix = _fix(*_refused("Write", {"file_path": "src/domain/acme_many.py", "content": content}))
+    _assert_really_passes(fix)
+    assert "move boto3 and 4 more out of the domain" in fix["summary"], fix["summary"]
+
+
+# --- what a fix costs -------------------------------------------------------------------
+
+
+def test_a_file_too_large_to_rewrite_gets_advice_naming_what_to_move() -> None:
+    body = "".join(f"\n\ndef acme_rule_{index}(order):\n    return order.total * {index}\n" for index in range(700))
+    content = "import boto3\nimport requests\n" + body
+    assert len(content) > MAX_CONTENT_CHARS
+    fix = _fix(*_refused("Write", {"file_path": "src/domain/acme_huge.py", "content": content}))
+    assert fix["kind"] == "layering"
+    assert fix["validated"] is False and fix["writes"] == []
+    advice = " ".join(fix["steps"])
+    assert "boto3" in advice and "requests" in advice and "src/infrastructure" in advice
+
+
+def test_the_cost_of_a_fix_does_not_grow_with_the_number_of_imports(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Sixty forbidden imports took sixty rounds of parse, remove, parse; now any number takes the same reads."""
+    parses: List[int] = []
+    real_parse = ast.parse
+
+    def counting_parse(source: Any, *args: Any, **kwargs: Any) -> Any:
+        parses.append(len(source))
+        return real_parse(source, *args, **kwargs)
+
+    def parses_for(count: int) -> int:
+        imports = "".join(f"import boto3.m{index}\n" for index in range(count))
+        content = imports + "".join(f"\n\ndef rule_{index}(order):\n    return order.total * {index}\n" for index in range(120))
+        request, result = _refused("Write", {"file_path": "src/domain/acme_cost.py", "content": content})
+        parses.clear()
+        monkeypatch.setattr(ast, "parse", counting_parse)
+        try:
+            fix = propose_fix(request, result, DEFAULT_RULES, max_write_bytes=UNLIMITED)
+        finally:
+            monkeypatch.setattr(ast, "parse", real_parse)
+        assert fix is not None and fix["validated"] is True
+        # Only the reads of the large domain file count; the port and the adapter are small.
+        return sum(1 for size in parses if size >= len(content) // 2)
+
+    one, sixty = parses_for(1), parses_for(60)
+    assert one == sixty, (one, sixty)
+    assert sixty <= 6, sixty
 
 
 def test_no_permitted_layer_means_no_validated_fix() -> None:
@@ -711,6 +832,17 @@ def test_a_private_key_body_no_rewrite_can_reach_is_never_echoed(tool: str, argu
     assert PEM_BODY not in json.dumps(fix)
 
 
+def test_a_bare_credential_becomes_a_lookup_only_where_a_parser_can_prove_it_is_code() -> None:
+    """Outside any string, a lookup is right in Python that parses and unknowable anywhere else."""
+    parsed = _fix(*_refused("Write", {"file_path": "src/acme/settings.py", "content": "aws_access_key_id = " + ACCESS_KEY + "\n"}))
+    _assert_really_passes(parsed)
+    assert 'aws_access_key_id = os.environ["AWS_ACCESS_KEY_ID"]' in _write_at(parsed, "src/acme/settings.py")["content"]
+    prose = _fix(*_refused("Write", {"file_path": "src/acme/notes.py", "content": ACCESS_KEY + " is the key for the bucket\n"}))
+    assert prose["validated"] is False and prose["writes"] == []
+    typescript = _fix(*_refused("Write", {"file_path": "web/src/key.ts", "content": "const key = " + ACCESS_KEY + ";\n"}))
+    assert typescript["validated"] is False, "No parser here, so no bare lookup"
+
+
 def test_a_credential_inside_a_longer_string_is_not_turned_into_text_that_looks_like_code() -> None:
     """Quotes read on one line mistake a quote inside a triple-quoted string for a string of its own."""
     content = 'DOC = """\nSay "token: ' + GITHUB_TOKEN + '" to nobody.\n"""\n'
@@ -996,6 +1128,44 @@ def test_a_rule_key_on_the_verdict_decides_the_family() -> None:
     assert fix["kind"] == "loop"
 
 
+def test_the_loop_count_is_the_detectors_and_never_made_up() -> None:
+    """The count lives only in the detector's sentence: read when it is there, never a default when it is not."""
+    request = {"tool_name": "Bash", "action_type": "COMMAND_EXEC", "arguments": {"command": "make acme"}}
+    five = _fix(
+        request,
+        {
+            "status": "BLOCKED_LOOP_DETECTED",
+            "rule_key": "LOOP",
+            "reason": "Monomorphic loop detected: Tool 'Bash' invoked with identical arguments 5 consecutive times",
+        },
+    )
+    assert "called 5 times" in five["summary"]
+    cycle = _fix(
+        request,
+        {
+            "status": "BLOCKED_LOOP_DETECTED",
+            "rule_key": "LOOP",
+            "reason": "Ping-pong oscillation loop detected: Agent repeating the cycle (Bash -> Read) for the 4rd time",
+        },
+    )
+    assert "the cycle Bash -> Read was repeated 4 times" in cycle["summary"]
+    silent = _fix(request, {"status": "BLOCKED_LOOP_DETECTED", "rule_key": "LOOP", "reason": "Loop detected"})
+    assert "repeatedly" in silent["summary"] and not re.search(r"\d+ times", silent["summary"]), silent["summary"]
+
+
+def test_each_cost_sentence_gets_its_own_advice_and_any_other_gets_both() -> None:
+    request = {"tool_name": "Read", "action_type": "FILE_READ", "arguments": {"file_path": "README.md"}, "budget_usd": 5.0}
+    breaker = {"status": "BLOCKED_CIRCUIT_BREAKER", "rule_evaluations": {"BUDGET_CIRCUIT_BREAKER_SAFE": False}}
+    spent = _fix(
+        request,
+        dict(breaker, reason="Projected session cost $5.1000 exceeds allocated budget limit of $5.00", current_session_cost_usd=5.1),
+    )
+    assert "spent its budget ($5.10 of $5.00)" in spent["summary"]
+    other = _fix(request, dict(breaker, reason="The cost gate said no"))
+    assert other["kind"] == "budget" and "cost gate refused" in other["summary"]
+    assert any("max_single_call_usd or budget_usd" in step for step in other["steps"])
+
+
 # --- the answer's own properties -----------------------------------------------------------
 
 
@@ -1031,9 +1201,13 @@ def test_the_same_refusal_always_gets_the_same_fix() -> None:
         ({"tool_name": "Bash", "arguments": {"command": ["echo", 3]}}, {"rule_evaluations": {"ARCHITECTURAL_BOUNDARY_SAFE": False}}),
     ],
 )
-def test_nothing_it_is_handed_makes_it_raise(request_value: Any, result_value: Any) -> None:
-    fix = propose_fix(request_value, result_value, DEFAULT_RULES)
+def test_nothing_it_is_handed_makes_it_raise(request_value: Any, result_value: Any, caplog: pytest.LogCaptureFixture) -> None:
+    """Handled, not swallowed: propose_fix's blanket except would pass this test whatever happened inside."""
+    with caplog.at_level(logging.WARNING, logger="threefold.application.fix_proposer"):
+        fix = propose_fix(request_value, result_value, DEFAULT_RULES)
     assert fix is None or isinstance(fix, dict)
+    swallowed = [record.getMessage() for record in caplog.records if "Could not propose a fix" in record.getMessage()]
+    assert not swallowed, f"The input reached the blanket except: {swallowed}"
 
 
 def test_a_phrasing_hook_changes_only_the_summary() -> None:
@@ -1190,6 +1364,7 @@ def test_every_refusal_in_the_suite_gets_a_fix_and_every_validated_one_passes_th
     validated = 0
     layering_writes = 0
     layering_writes_validated = 0
+    layering_writes_unvalidated: List[str] = []
     kinds: Dict[str, int] = {}
     for origin, request, result in _corpus():
         seen += 1
@@ -1203,6 +1378,8 @@ def test_every_refusal_in_the_suite_gets_a_fix_and_every_validated_one_passes_th
         layering_writes += writes_layering
         if not fix["validated"]:
             assert fix.get("writes", []) == [], f"{origin}: an unvalidated fix handed out code"
+            if writes_layering:
+                layering_writes_unvalidated.append(f"{origin}: {fix['summary']}")
             continue
         validated += 1
         assert fix.get("writes") or fix["kind"] == "credential", f"{origin}: validated with nothing to write"
@@ -1210,14 +1387,18 @@ def test_every_refusal_in_the_suite_gets_a_fix_and_every_validated_one_passes_th
             passed, reason = _passes_gate(write, DEFAULT_RULES)
             assert passed, f"{origin}: a validated fix is refused at {write['path']}: {reason}"
         layering_writes_validated += writes_layering
-    # Floors, not exact counts, set near half of what the suite held when this
-    # was written (168 refusals, 110 validated). Other tracks add refusals, and
-    # each only makes this stronger; a collapse means the harvest broke, which
-    # would make the loop above pass by proving nothing.
-    assert seen >= 80, f"only {seen} refusals were found in the suite; the harvest is broken"
-    assert kinds.get("layering", 0) >= 35 and kinds.get("unreadable_write", 0) >= 15, kinds
-    assert kinds.get("credential", 0) >= 10 and kinds.get("protected_path", 0) >= 5, kinds
-    assert validated >= 50, f"only {validated} of {seen} refusals got a validated fix"
+    # Floors about 8% under what the suite held on 2026-09-22 (168 refusals:
+    # layering 72, unreadable_write 41, credential 44, protected_path 10; 106
+    # validated). Close enough that losing a tenth of the validated fixes
+    # fails here; loose enough that another track trimming a few fixtures
+    # does not. A collapse means the harvest broke, which would make the loop
+    # above pass by proving nothing.
+    assert seen >= 155, f"only {seen} refusals were found in the suite; the harvest is broken"
+    assert kinds.get("layering", 0) >= 66 and kinds.get("unreadable_write", 0) >= 38, kinds
+    assert kinds.get("credential", 0) >= 40 and kinds.get("protected_path", 0) >= 9, kinds
+    assert validated >= 98, f"only {validated} of {seen} refusals got a validated fix"
     # A Write refused by a shipped rule is the case this exists for: its content
     # is all there, and every shipped rule names a layer to move the import to.
-    assert layering_writes >= 12 and layering_writes_validated >= 0.8 * layering_writes, (layering_writes_validated, layering_writes)
+    # Every one gets a validated fix; one that does not is named here.
+    assert layering_writes >= 24, layering_writes
+    assert layering_writes_validated == layering_writes, layering_writes_unvalidated

@@ -56,14 +56,16 @@ uses; and the text of every secret found in the call, including the body of a
 private key the scanner knows only by its header, is withheld from the answer
 wherever it would otherwise appear.
 
-What it costs. Content over MAX_CONTENT_CHARS gets advice in words from one read
-of its imports; below it, a layering fix reads the file a fixed number of times
-(about six parses, however many imports it moves), then judges the small port
-and adapter. Measured on this development machine [PRIMARY], 2026-09-22: the
-shipped fixtures of a few hundred bytes take 3 to 6 ms; a 60 KB Python domain
-file with 60 forbidden imports takes about 7 times what the gate alone takes on
-it. A refused call pays this once, on top of the gate; an approved call never
-does.
+What it costs. Content over MAX_CONTENT_CHARS (24 KB) gets advice in words from
+one read of its imports; below it, a layering fix reads the file a fixed number
+of times (about six parses, however many imports it moves; a test holds this),
+then judges the small port and adapter. Measured on the development machine
+[PRIMARY], 2026-09-22, medians: the shipped fixtures of 170 to 330 bytes take 2
+to 5 ms; files just under the cap take about 100 ms for Python or TypeScript and
+45 ms for Java, five to seven times what the gate alone takes on the same file,
+however many of their imports move. Not measured on the Lambda, whose 256 MB
+share of a core will make both slower. A refused call pays this once, on top of
+the gate; an approved call never does.
 
 Wiring (for the owner, after B1 merges; this track changes none of these files):
 
@@ -2496,12 +2498,14 @@ def _substitute_powershell(text: str, start: int, end: int, name: str) -> str:
     return text[:start] + (lookup if whole_word else "$(" + lookup + ")") + text[end:]
 
 
-def _substitute(text: str, start: int, end: int, name: str, flavour: str) -> str:
+def _substitute(text: str, start: int, end: int, name: str, flavour: str, bare_lookup: bool = False) -> str:
     """The text with one secret replaced by the language's own way of reading `name`.
 
     Raises _CannotSubstitute where no lookup could stand in the secret's place
     and be read as one: a validated fix must still read the variable where the
-    secret was, not carry `${NAME}` as literal text.
+    secret was, not carry `${NAME}` as literal text. With `bare_lookup`, a
+    secret outside any string becomes the lookup itself; the caller must then
+    prove, with a parser, that the lookup landed in code.
     """
     if flavour == "shell":
         return _substitute_shell(text, start, end, name)
@@ -2524,6 +2528,8 @@ def _substitute(text: str, start: int, end: int, name: str, flavour: str) -> str
         # middle of a string or comment that began lines earlier; which one
         # cannot be told from here, and a lookup in the wrong one is either
         # literal text or code that does not parse.
+        if bare_lookup:
+            return text[:start] + lookup + text[end:]
         raise _CannotSubstitute("the credential does not sit in a string that can be found on its line")
     open_at, close_at, quote, prefix = literal
     inner_start = open_at + len(quote)
@@ -2544,7 +2550,7 @@ def _substitute(text: str, start: int, end: int, name: str, flavour: str) -> str
     return text[:literal_start] + joiner.join(parts) + text[literal_end:]
 
 
-def _replace_secrets(text: str, flavour: str) -> Tuple[str, List[str], bool, str]:
+def _replace_secrets(text: str, flavour: str, bare_lookup: bool = False) -> Tuple[str, List[str], bool, str]:
     """Every credential in the text replaced by a lookup. (text, names, clean afterwards, why not)"""
     current = text
     names: List[str] = []
@@ -2555,7 +2561,7 @@ def _replace_secrets(text: str, flavour: str) -> Tuple[str, List[str], bool, str
         for start, end, label in reversed(spans):
             name = _environment_name(current, start, label)
             try:
-                current = _substitute(current, start, end, name, flavour)
+                current = _substitute(current, start, end, name, flavour, bare_lookup)
             except _CannotSubstitute as why:
                 return text, names, False, str(why)
             names.append(name)
@@ -2661,9 +2667,17 @@ def _credential_fix(invocation: ToolInvocation, rules: List[Dict[str, Any]], dia
             continue
         flavour = _flavour(site.path)
         new_content, found_names, clean, why = _replace_secrets(site.content or "", flavour)
+        if not clean and flavour == "python" and site.shape == "write":
+            # A whole Python file can be parsed, so there a secret outside any
+            # string may become the lookup itself, provided the result parses:
+            # the count below then says whether the lookup landed in code.
+            # Nowhere else can that be checked, so nowhere else is it tried.
+            bare = _replace_secrets(site.content or "", flavour, bare_lookup=True)
+            if bare[2] and _python_lookups(bare[0]) is not None:
+                new_content, found_names, clean, why = bare
         if clean and flavour == "python":
             before, after = _python_lookups(site.content or ""), _python_lookups(new_content)
-            if before is not None and after is not None and after - before < len(found_names):
+            if after is not None and after - (before or 0) < len(found_names):
                 clean, why = False, "the credential sits inside a longer string, where a lookup would be text rather than code"
         if not clean:
             variable = (found_names or [_DEFAULT_ENVIRONMENT_NAMES.get(label, "API_KEY")])[0]
