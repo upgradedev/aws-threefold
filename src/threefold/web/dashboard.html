@@ -866,6 +866,7 @@
             ${stageBanner(name, stage, config, readiness)}
             ${statTiles}
             ${card('Readiness, rule by rule', 'Noisy if anything it flagged was a false alarm; else Needs review while anything is unlabelled; else Ready if it flagged anything; else Quiet.', readinessTable)}
+            ${T.PROJECT_PATTERN.test(name) ? html`<p class="text-xs"><a class="tf-link" data-link="draft-rule" href="${T.pageHref('rules.html' + query({ project: name }) + '#draft')}">Draft a rule for this project</a> <span class="text-gray-500">from a sentence, with Amazon Bedrock; it starts in Observe beside the rules above.</span></p>` : ''}
             <div class="grid grid-cols-1 lg:grid-cols-5 gap-4">
               ${card('Recent calls', recent && recent.length ? 'The newest first. Open one for everything the ledger holds.' : null, html`${recentBody}${recent && recent.length ? html`<p class="mt-3"><a class="tf-link text-xs" href="${callsHref({ project: name, days })}">All calls from ${name}</a></p>` : ''}`, 'lg:col-span-3 min-w-0')}
               <div class="lg:col-span-2 space-y-4 min-w-0">

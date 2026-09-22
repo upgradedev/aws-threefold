@@ -527,3 +527,31 @@ def test_a_save_that_cannot_read_the_projects_rules_first_sends_nothing(tmp_path
     assert out["saves"] == 0
     assert "Nothing was saved" in out["clash"] and "is used by an earlier rule" in out["clash"]
 
+
+# ------------------------------------------------------------ the way in
+
+
+def test_the_project_page_links_to_drafting_a_rule_for_that_project(tmp_path: Path) -> None:
+    out = run(
+        "dashboard.html",
+        r"""
+  const detail = name => ({ status: 200, body: { project: name, config: null, readiness: { summary: { stage: 'observe' }, rules: [] } } });
+  answer = api({
+    '/api/projects/Acme-Billing': detail('Acme-Billing'),
+    '/api/projects/unlabelled': detail('unlabelled'),
+    '/api/decisions': { status: 200, body: { items: [], next_cursor: null } }
+  });
+  await visit('#/projects/Acme-Billing');
+  out.named = el('view').innerHTML;
+  await visit('#/projects/unlabelled');
+  out.unlabelled = el('view').innerHTML;
+""",
+        tmp_path,
+    )
+    link = re.search(r'<a class="tf-link" data-link="draft-rule" href="([^"]+)">([^<]+)</a>', out["named"])
+    assert link, "The project page offers no way to draft a rule for the project"
+    assert link.group(1) == "https://example.test/prod/rules.html?project=Acme-Billing#draft"
+    assert link.group(2) == "Draft a rule for this project"
+    assert 'data-link="draft-rule"' not in out["unlabelled"], (
+        "A name outside the pattern would open the rules page on the shared set, not on this project"
+    )
