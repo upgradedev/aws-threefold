@@ -1932,6 +1932,9 @@ paths:
                     description: >-
                       source, snapshot_at, window_days, days_observed, calls_governed, would_refuse, refused, reviewed,
                       false_alarms, false_alarm_rate, projects, agents, stages and self_correction: numbers only.
+                      false_alarms and false_alarm_rate are null when calls were refused in the window, because
+                      the overview counts false alarms on refused calls as well and reviewed calls on would-refuse
+                      calls only.
                   method:
                     type: array
                     description: The evidence files, by their path in the repository.

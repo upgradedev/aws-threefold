@@ -141,13 +141,30 @@ def test_a_measured_snapshot_shows_each_figure_with_its_source_and_its_date(tmp_
     assert out["metrics"] == {"days_observed": "8", "calls_governed": "4,210", "would_refuse": "210", "reviewed": "150",
                               "false_alarm_rate": "8%", "projects": "9", "agents": "2"}
     assert "12 of 150 reviewed" in words and "of the last 30" in words
-    assert "Self-corrected: no refusal to correct in this window." in words
+    assert "Self-corrected: no agent (hook or CI) refusal in this window." in words
     assert page.count('data-proof="provenance"') == 2, "Both sections say where they came from and when"
     assert "2026-09-29T08:00:00+00:00" in page and "2026-09-30" in page
     assert "GET /api/overview?days=30 and GET /api/projects on the owner's private stack" in page
     # An evidence link is followed only when it is an https address.
     assert 'href="https://example.test/acme/threefold/blob/main/docs/evidence/BENCHMARK_2026-09-30.md"' in out["view"]
     assert "javascript:" not in out["view"]
+
+
+def test_a_false_alarm_rate_the_totals_cannot_give_says_why(tmp_path: Path) -> None:
+    out = proof(
+        r"""
+  const enforcing = JSON.parse(JSON.stringify(MEASURED));
+  Object.assign(enforcing.private, { refused: 6, reviewed: 2, false_alarms: null, false_alarm_rate: null });
+  answer = proofAnswer(enforcing);
+  await visit('#/proof');
+  out.text = text(view());
+  out.metrics = metrics(view());
+""",
+        tmp_path,
+    )
+    assert out["metrics"]["false_alarm_rate"] == "—", "No rate is a dash, never a figure over unlike counts"
+    assert "not given: calls were refused in this window, and these totals count their labels too" in out["text"]
+    assert "The rate is given only for a window in which nothing was refused" in out["text"]
 
 
 def test_no_snapshot_reads_not_measured_yet_and_shows_no_figure(tmp_path: Path) -> None:
@@ -240,13 +257,18 @@ def test_the_overview_tile_shows_self_correction_and_opens_the_refusals(tmp_path
 """,
         tmp_path,
     )
-    tile = re.search(r'<a href="([^"]+)"[^>]*aria-label="Self-corrected[^"]*"[^>]*>(.*?)</a>', out["full"], re.S)
+    tile = re.search(r'<a href="([^"]+)"[^>]*aria-label="(Self-corrected[^"]*)"[^>]*>(.*?)</a>', out["full"], re.S)
     assert tile, "The overview draws a Self-corrected tile"
     assert tile.group(1).replace("&amp;", "&") == "#/calls?kind=refused&days=7"
-    body = re.sub(r"<[^>]+>", " ", tile.group(2))
-    assert re.search(r'data-metric="self_corrected"[^>]*>5<', tile.group(2))
-    assert "42% of 12 refusals" in body and "median 2 calls" in body
-    assert "newest 2,000 calls read" in out["partial"] and "median 1.5 calls" in out["partial"]
+    body = re.sub(r"<[^>]+>", " ", tile.group(3))
+    assert re.search(r'data-metric="self_corrected"[^>]*>5<', tile.group(3))
+    assert "42% of 12 agent refusals" in body and "median 2 calls" in body
+    # The link opens every refusal, a larger set than was counted, and says so.
+    label = _unescaped(tile.group(2))
+    assert "Opens every refused call in this window" in label and "counted over" not in label
+    assert "a hook or CI call to a file" in label and "a refused command is left out" in label
+    assert "read stopped after the newest 2,000 calls" in out["partial"] and "of every project" not in out["partial"]
+    assert "median 1.5 calls" in out["partial"]
 
 
 def test_the_overview_tile_is_honest_when_there_was_nothing_to_correct(tmp_path: Path) -> None:
@@ -262,9 +284,24 @@ def test_the_overview_tile_is_honest_when_there_was_nothing_to_correct(tmp_path:
 """,
         tmp_path,
     )
-    assert "no refusal to correct in this window" in out["none"]
+    assert "no agent (hook or CI) refusal in this window" in out["none"]
     assert out["noneMetrics"]["self_corrected"] == "—", "No refusals is a dash, not a zero that reads as a failure"
     assert "not reported by this stack" in out["older"], "A stack that predates the field says so"
+
+
+def test_a_ledger_that_could_not_be_read_says_so_and_shows_no_figure(tmp_path: Path) -> None:
+    out = proof(
+        r"""
+  answer = contract({ '/api/overview': { status: 200, body: Object.assign(overviewBody(), { self_correction: { refusals_considered: 0, self_corrected: 0, rate: null, median_calls_to_correct: null, rows_read: 0, complete: false } }) } });
+  await visit('#/overview?days=7');
+  out.view = view();
+  out.metrics = metrics(view());
+""",
+        tmp_path,
+    )
+    assert "not measured: the ledger could not be read" in out["view"]
+    assert "no agent (hook or CI) refusal" not in out["view"], "An unread ledger is not a window with no refusal"
+    assert out["metrics"]["self_corrected"] == "—"
 
 
 def test_the_project_page_shows_the_same_figure_for_its_project(tmp_path: Path) -> None:
@@ -281,10 +318,18 @@ def test_the_project_page_shows_the_same_figure_for_its_project(tmp_path: Path) 
   answer = contract({ '/api/projects/Acme-Billing': { status: 200, body: quiet } });
   await visit('#/projects/Acme-Billing');
   out.quiet = view();
+  const partial = detailBody('enforce');
+  partial.readiness.summary.self_correction = { refusals_considered: 1, self_corrected: 1, rate: 1, median_calls_to_correct: 1, rows_read: 2000, complete: false };
+  answer = contract({ '/api/projects/Acme-Billing': { status: 200, body: partial } });
+  await visit('#/projects/Acme-Billing?days=30');
+  out.partial = view();
 """,
         tmp_path,
     )
     assert out["metrics"]["self_corrected"] == "3"
-    assert "75% of 4 refusals" in out["view"] and "median 1 call" in out["view"]
+    assert "75% of 4 agent refusals" in out["view"] and "median 1 call" in out["view"]
     assert 'href="#/calls?project=Acme-Billing&amp;kind=refused&amp;days=14"' in out["view"]
-    assert "no refusal to correct in this window" in out["quiet"]
+    assert "Opens every refused call of this project in this window" in out["view"]
+    assert "no agent (hook or CI) refusal in this window" in out["quiet"]
+    # A read cut short spent its rows on every project, not this one alone.
+    assert "read stopped after the newest 2,000 calls of every project" in out["partial"]

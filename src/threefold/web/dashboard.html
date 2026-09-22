@@ -194,22 +194,31 @@
 
     function plural(n, one, many) { return num(n) + ' ' + (n === 1 ? one : (many || one + 's')); }
 
-    // Self-correction, as the overview and a project's page both word it. A
-    // window with no refusal says so rather than showing a rate of nothing,
-    // and a read that stopped short says how much it covered.
+    // Self-correction, as the overview and a project's page both word it. It
+    // counts only an agent's refusals, from a hook or CI, of a call to a file:
+    // a page call is a visitor pressing a button, and for a command the ledger
+    // keeps only the program, so the Refused tile beside it can be larger. A
+    // window with no such refusal says so rather than showing a rate of
+    // nothing, and a read that stopped short says how much it covered: the
+    // rows it read are of every project, which a project's page says too.
+    const SELF_CORRECTION_SCOPE = 'It counts refusals of a hook or CI call to a file; a refused command is left out, because the ledger keeps only the program it ran.';
     function selfCorrectionShown(sc) {
       return !!(sc && typeof sc.refusals_considered === 'number' && sc.refusals_considered > 0);
     }
-    function selfCorrectionWords(sc) {
+    function selfCorrectionWords(sc, ofOneProject) {
       if (!sc || typeof sc !== 'object') return 'not reported by this stack';
-      const partial = sc.complete === false ? ' · newest ' + plural(sc.rows_read, 'call') + ' read' : '';
+      const read = typeof sc.rows_read === 'number' && sc.rows_read > 0;
+      if (sc.complete === false && !read) return 'not measured: the ledger could not be read';
+      const partial = sc.complete === false
+        ? ' · read stopped after the newest ' + plural(sc.rows_read, 'call') + (ofOneProject ? ' of every project' : '')
+        : '';
       if (!selfCorrectionShown(sc)) {
-        return (sc.complete === false ? 'no refusal to correct among the calls read' : 'no refusal to correct in this window') + partial;
+        return (sc.complete === false ? 'no agent (hook or CI) refusal among the calls read' : 'no agent (hook or CI) refusal in this window') + partial;
       }
       const median = typeof sc.median_calls_to_correct === 'number'
         ? ' · median ' + (Math.round(sc.median_calls_to_correct * 10) / 10) + (sc.median_calls_to_correct === 1 ? ' call' : ' calls')
         : '';
-      return pct(sc.rate) + ' of ' + plural(sc.refusals_considered, 'refusal') + median + partial;
+      return pct(sc.rate) + ' of ' + plural(sc.refusals_considered, 'agent refusal') + median + partial;
     }
 
     function sum(list, key) { return (list || []).reduce((s, r) => s + (typeof r[key] === 'number' ? r[key] : 0), 0); }
@@ -473,7 +482,7 @@
     }
 
     function tile(t) {
-      return html`<a href="${t.href}" class="tf-card tf-card-link tf-tile" aria-label="${t.label}: ${num(t.value)}. ${t.sub}. Open the rows behind it">
+      return html`<a href="${t.href}" class="tf-card tf-card-link tf-tile" aria-label="${t.label}: ${num(t.value)}. ${t.sub}. ${t.opens || 'Open the rows behind it'}">
         <span class="tf-tile-label">${t.label}</span>
         <span class="flex items-end justify-between gap-2 min-w-0">
           <span class="tf-tile-value" data-metric="${t.metric}" title="${typeof t.value === 'number' ? t.value.toLocaleString('en-US') : ''}">${num(t.value)}</span>
@@ -559,10 +568,12 @@
             spark: T.sparkline(series.map(r => r.refused || 0), { label: 'Refused per day', color: C.refused }) },
           // Read from the ledger rather than the rollups: whether a refused
           // agent then did the same thing acceptably is a question about the
-          // order of its calls. It opens the refusals it was counted over.
+          // order of its calls. The calls listing cannot filter by origin, so
+          // the link opens every refusal, and the label says so.
           { label: 'Self-corrected', metric: 'self_corrected',
             value: selfCorrectionShown(data.self_correction) ? data.self_correction.self_corrected : null,
-            href: callsHref({ kind: 'refused', days }), sub: selfCorrectionWords(data.self_correction) },
+            href: callsHref({ kind: 'refused', days }), sub: selfCorrectionWords(data.self_correction),
+            opens: SELF_CORRECTION_SCOPE + ' Opens every refused call in this window' },
           { label: 'Would refuse', metric: 'would_refuse', value: t.would_refuse, href: callsHref({ kind: 'observed', days }),
             sub: t.would_refuse ? 'ran; a rule in Observe would have stopped them' : 'no observing rule flagged a call',
             spark: T.sparkline(series.map(r => r.observed || 0), { label: 'Would refuse per day', color: C.observed }) },
@@ -846,10 +857,10 @@
         const corrected = summary.self_correction;
         const statTiles = html`<div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3">
           ${stats.map(([label, value, metric]) => html`<div class="tf-card tf-tile"><span class="tf-tile-label">${label}</span><span class="tf-tile-value" data-metric="${metric}">${num(value)}</span></div>`)}
-          <a href="${callsHref({ project: name, kind: 'refused', days })}" class="tf-card tf-card-link tf-tile" aria-label="Self-corrected: ${selfCorrectionWords(corrected)}. Open the refusals it was counted over">
+          <a href="${callsHref({ project: name, kind: 'refused', days })}" class="tf-card tf-card-link tf-tile" aria-label="Self-corrected: ${selfCorrectionWords(corrected, true)}. ${SELF_CORRECTION_SCOPE} Opens every refused call of this project in this window">
             <span class="tf-tile-label">Self-corrected</span>
             <span class="tf-tile-value" data-metric="self_corrected">${num(selfCorrectionShown(corrected) ? corrected.self_corrected : null)}</span>
-            <span class="tf-tile-sub">${selfCorrectionWords(corrected)}</span>
+            <span class="tf-tile-sub">${selfCorrectionWords(corrected, true)}</span>
           </a>
           <div class="tf-card tf-tile col-span-2 sm:col-span-1"><span class="tf-tile-label">Rules</span>
             <span class="flex flex-wrap gap-1 mt-1">
@@ -2293,7 +2304,9 @@
         ['Calls governed', num(p.calls_governed), 'calls_governed', 'judged and recorded'],
         ['Would refuse', num(p.would_refuse), 'would_refuse', 'ran; a rule in Observe would have stopped them'],
         ['Reviewed', num(p.reviewed), 'reviewed', 'would-refuse calls the owner labelled'],
-        ['False-alarm rate', pct(p.false_alarm_rate), 'false_alarm_rate', typeof p.false_alarms === 'number' && typeof p.reviewed === 'number' ? num(p.false_alarms) + ' of ' + num(p.reviewed) + ' reviewed' : 'not measured'],
+        ['False-alarm rate', pct(p.false_alarm_rate), 'false_alarm_rate', typeof p.false_alarm_rate === 'number' && typeof p.false_alarms === 'number' && typeof p.reviewed === 'number'
+          ? num(p.false_alarms) + ' of ' + num(p.reviewed) + ' reviewed'
+          : (typeof p.refused === 'number' && p.refused > 0 ? 'not given: calls were refused in this window, and these totals count their labels too' : 'not measured')],
         ['Projects', num(p.projects), 'projects', 'counted, never named'],
         ['Agents', num(p.agents), 'agents', 'counted, never named']
       ];
@@ -2321,9 +2334,9 @@
         ['Violation landed', 'the benchmark\'s own checkers found a governed violation in the files the agent left behind.'],
         ['Tests passed', 'the task\'s acceptance tests, restored from the template first, all passed.'],
         ['Self-corrected, in the benchmark', 'a run refused at least once that still finished with its tests passing and no violation.'],
-        ['Self-corrected, on the dashboard', 'a refusal of a hook or CI call followed, within the next ten calls of the same session, by a call to the same target that was not refused.'],
+        ['Self-corrected, on the dashboard', 'a refusal of a hook or CI call to a file followed, within the next ten calls of the same session, by a call to the same file that was not refused. A refused command is left out, and a command is never taken as the correction, because the ledger keeps only the program a command ran. Calls recorded at the same instant are not ordered against each other, so a tie can only lengthen the count of calls it took.'],
         ['Overhead', 'the mean turns, seconds and cost of a run under a condition, over the same means with no guidance.'],
-        ['Reviewed and false-alarm rate', 'the would-refuse calls the owner labelled, and the share of them labelled false alarm.']
+        ['Reviewed and false-alarm rate', 'the would-refuse calls the owner labelled, and the share of them labelled false alarm. The rate is given only for a window in which nothing was refused: the totals count false alarms on refused calls as well, and reviewed calls on would-refuse calls only.']
       ];
       return card('How this was measured', 'The definitions behind every figure above, and the files that hold the evidence.', html`
         <dl class="space-y-2">${terms.map(([term, text]) => html`<div class="text-xs"><dt class="inline font-semibold text-gray-200">${term}:</dt> <dd class="inline text-gray-400">${text}</dd></div>`)}</dl>

@@ -374,7 +374,9 @@ def _self_correction_totals(figure: Any) -> Optional[Dict[str, Any]]:
         return None
     if not isinstance(figure, Mapping):
         raise _not_the_contract("self_correction is not an object")
-    counts = {name: _count(figure.get(name)) for name in ("refusals_considered", "self_corrected")}
+    # rows_read is kept so the page can say how much a read that stopped short
+    # covered; it is a count of calls and names nothing.
+    counts = {name: _count(figure.get(name)) for name in ("refusals_considered", "self_corrected", "rows_read")}
     if None in counts.values() or not isinstance(figure.get("complete"), bool):
         raise _not_the_contract("self_correction does not carry its counts and complete")
     numbers = {}
