@@ -36,6 +36,12 @@ from threefold.application.dtos import (
     ToolCallRequestDTO,
 )
 from threefold.application.labels import is_labelled
+from threefold.application.rule_keys import (
+    FROZEN_SESSION_REASON,
+    HALTED_SESSION_REASONS,
+    rule_key as rule_key_of,
+    with_rule_key,
+)
 from threefold.domain.events import (
     ArchitecturalBoundaryViolatedEvent,
     DomainEventPublisher,
@@ -57,13 +63,15 @@ RULES_REFRESH_SECONDS = 30.0
 # How a refusal that comes from the session's own state, rather than from a
 # gate, begins. Both wear the same status, so this prefix is what tells a call
 # into an already halted session apart from the breach that halted it.
-FROZEN_SESSION_REASON = "Session execution frozen"
-
+#
 # The cost gate has a sentence of its own for a session that is already halted.
-# The pre-check above means it cannot be reached through this evaluator today,
+# The pre-check below means it cannot be reached through this evaluator today,
 # but a breaker that a caller supplies can return it, and reading that as a
 # spend problem is the mislabel this whole distinction exists to avoid.
-HALTED_SESSION_REASONS = (FROZEN_SESSION_REASON, "Session already tripped")
+#
+# FROZEN_SESSION_REASON and HALTED_SESSION_REASONS are defined beside the code
+# that reads a rule key off a verdict and imported above, so the sentence
+# written here and the sentence read there cannot drift apart.
 
 # How many projects' rules one container holds at once. The project name is
 # the caller's to send, and every labelled name that arrives gets an entry
@@ -378,9 +386,13 @@ class GovernanceEvaluator:
         return lister(limit=limit) if lister else []
 
     def list_decisions(self, days: int = 7, limit: int = 1000):
-        """Every decision in a window, for the console that reports on them."""
+        """Every decision in a window, for the console that reports on them.
+
+        A row written before rule keys existed is given the one it would have
+        been given, best effort, from the reason it kept.
+        """
         lister = getattr(self.session_repo, "list_decisions", None)
-        return lister(days=days, limit=limit) if lister else []
+        return [with_rule_key(row) for row in lister(days=days, limit=limit)] if lister else []
 
     def terminate_session(self, session_id: str, operator_name: str, reason: str) -> AgentSession:
         """Manual enterprise kill-switch to immediately freeze an agent session."""
@@ -518,10 +530,28 @@ class GovernanceEvaluator:
         # a refresh lands halfway through.
         rules, _ = self.rules_in_force(getattr(request, "project_name", None))
         result = self._decide(request, rules, dry_run=bool(getattr(request, "dry_run", False)))
-        self._record_decision(request, result)
+        self._record_decision(request, result, rules)
         return result
 
-    def _record_decision(self, request: ToolCallRequestDTO, result: EvaluationResultDTO) -> None:
+    @staticmethod
+    def _rule_key(result: EvaluationResultDTO, rules: List[Dict[str, Any]]) -> str:
+        """The rule key of a verdict, read with the ids of the rules that judged it."""
+        return rule_key_of(
+            {
+                "status": result.status,
+                "reason": result.reason,
+                "observed_rules": getattr(result, "observed_rules", None),
+                "observations": getattr(result, "observations", None),
+            },
+            [rule.get("id", "") for rule in rules or []],
+        )
+
+    def _record_decision(
+        self,
+        request: ToolCallRequestDTO,
+        result: EvaluationResultDTO,
+        rules: Optional[List[Dict[str, Any]]] = None,
+    ) -> None:
         """Appends one row to the decision ledger, best effort.
 
         Deliberately narrow: the tool, the rule, who and where, and a short
@@ -552,6 +582,11 @@ class GovernanceEvaluator:
                     "dry_run": bool(getattr(request, "dry_run", False)),
                     "status": result.status,
                     "rule": self._rule_that_fired(result),
+                    # What readiness, reviews and a project's stage group by:
+                    # the layering rule that decided, or the gate, or NONE. Set
+                    # on observations as well as refusals, because an
+                    # observation is the evidence a rule is promoted on.
+                    "rule_key": self._rule_key(result, rules or []),
                     # The reason distinguishes a layer being crossed from a
                     # credential store being reached. Both fail the same
                     # invariant and a reader acts on them differently.

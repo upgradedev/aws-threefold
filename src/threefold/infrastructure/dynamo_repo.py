@@ -337,6 +337,10 @@ class DynamoDBSessionRepository:
                     "observed_reason": row.get("observed_reason", ""),
                     "observed_target": row.get("observed_target", ""),
                     "cost_usd": float(row.get("cost_usd", 0) or 0),
+                    # Empty on rows written before the key existed. The
+                    # application layer gives those one on the way out, because
+                    # reading it off a reason is its business, not the store's.
+                    "rule_key": row.get("rule_key", "") or "",
                 }
             )
         cleaned.sort(key=lambda d: d["timestamp"], reverse=True)
