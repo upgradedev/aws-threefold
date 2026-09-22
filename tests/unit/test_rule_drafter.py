@@ -795,20 +795,31 @@ def test_on_a_stack_with_private_reads_the_operator_drafts_against_the_rules_in_
     assert body["rule"]["id"] == GOOD["id"]
 
 
-def test_a_private_stack_refuses_drafts_if_the_operator_check_ever_disappears(
-    fake, monkeypatch
-) -> None:
-    """The check is borrowed from another track's module; losing it must close, not open."""
-    from threefold.infrastructure import security_middleware
+def test_the_route_keeps_no_gate_of_its_own_now_the_middleware_decides_it() -> None:
+    """The handler once borrowed the middleware's private operator check by name.
 
+    That fallback existed only because the middleware did not list the route.
+    It does now, so a second gate in the handler would be a second copy of the
+    ladder to keep in step with the first, looked up by a private name.
+    """
+    import inspect
+
+    source = inspect.getsource(draft_routes)
+    assert not hasattr(draft_routes, "_private_draft_refused")
+    assert "_require_operator_key" not in source
+    assert "reads_are_public" not in source
+    assert not hasattr(draft_routes, "security_middleware"), "The route has no use for the module any more"
+
+
+def test_the_handler_alone_does_not_refuse_a_private_draft(fake, monkeypatch) -> None:
+    """Called past the middleware, the handler drafts: the refusal lives in one place."""
     monkeypatch.setenv("PUBLIC_READS", "false")
     monkeypatch.setenv("THREEFOLD_API_KEYS", "acme-operator-key")
-    monkeypatch.delattr(security_middleware, "_require_operator_key")
     client = fake(answer(GOOD))
-    status, body, _ = _post({"description": DESCRIPTION}, key="acme-operator-key")
-    assert status == 403, body
-    assert body["type"] == "urn:threefold:error:reads-private"
-    assert client.runtime.calls == []
+    event = {"headers": {}, "body": json.dumps({"description": DESCRIPTION})}
+    response = draft_routes.handle("/rules/draft", "POST", event)
+    assert response["statusCode"] == 200, response["body"]
+    assert len(client.runtime.calls) == 1
 
 
 def test_the_route_answers_502_not_500_for_answers_nested_past_the_stack(fake, capsys) -> None:
@@ -890,15 +901,25 @@ def test_a_draft_never_spends_the_explanations_calls(fake) -> None:
     assert api_handlers._bedrock_client.calls_made == before
 
 
-def test_where_keys_are_enforced_an_anonymous_draft_is_refused_before_the_model(
-    fake, monkeypatch
-) -> None:
-    """The route takes the default for an unlisted POST; it is not listed as an open read."""
+def test_where_keys_are_enforced_a_draft_is_decided_as_explain_is(fake, monkeypatch) -> None:
+    """A page's read: open while reads are public, the operator's once they are not.
+
+    It used to fall through to the key check every unlisted POST takes, so a
+    stack with keys enforced refused the draft and answered explain beside it.
+    """
     monkeypatch.setenv("ENFORCE_API_KEY", "true")
-    client = fake(answer(GOOD))
+    monkeypatch.setenv("THREEFOLD_API_KEYS", "acme-operator-key")
+    client = fake(answer(GOOD), answer(GOOD))
     status, body, _ = _post({"description": DESCRIPTION})
-    assert status == 401, body
-    assert client.runtime.calls == []
+    explained, _, _ = _post(SAMPLE, path="/prod/rules/explain")
+    assert status == explained == 200, body
+    assert len(client.runtime.calls) == 1
+
+    monkeypatch.setenv("PUBLIC_READS", "false")
+    status, body, _ = _post({"description": DESCRIPTION})
+    explained, _, _ = _post(SAMPLE, path="/prod/rules/explain")
+    assert status == explained == 401, body
+    assert len(client.runtime.calls) == 1, "A refused draft never reaches the model"
 
 
 def test_a_project_outside_the_pattern_is_drafted_with_a_warning(fake) -> None:

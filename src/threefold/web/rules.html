@@ -92,6 +92,96 @@
       </p>
     </section>
 
+    <!-- DRAFT ONE FROM A SENTENCE. Amazon Bedrock proposes the rule; everything
+         after the proposal is the service's own deterministic checking, the
+         validation a save uses and the verdicts the try panel gives. Drafting and
+         saving are two buttons on purpose: asking for a draft never saves one, and
+         a save only ever happens when Save to project is pressed. -->
+    <section id="draft" class="rounded-2xl bg-gray-900 border border-gray-800 p-5 space-y-4" aria-labelledby="draft-title">
+      <div class="flex items-start justify-between gap-3 flex-wrap border-b border-gray-800 pb-3">
+        <div class="max-w-4xl">
+          <h2 id="draft-title" class="text-sm font-semibold text-white">Draft a rule from a sentence <span class="ml-1"><a data-anchor="#/default/post_rules_draft" href="swagger.html" class="text-[10px] font-mono text-purple-400 hover:text-purple-300 underline">POST /rules/draft ↗</a></span></h2>
+          <p class="text-[11px] text-gray-500">
+            Say the boundary in words. Amazon Bedrock proposes one rule; Threefold checks it as a save would, sets it to
+            observe and tries it on your examples. Nothing is saved until you press Save to project.
+          </p>
+        </div>
+        <span class="px-2 py-0.5 rounded text-[10px] font-semibold border bg-amber-950 text-amber-300 border-amber-800">A drafted rule starts in OBSERVE</span>
+      </div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div class="space-y-3">
+          <label class="block">
+            <span class="flex items-baseline justify-between gap-2 text-[11px] uppercase tracking-wider text-gray-400">
+              <span>The boundary, in a sentence</span>
+              <span id="draft-description-count" class="normal-case tracking-normal font-mono text-gray-500" aria-live="polite"></span>
+            </span>
+            <textarea id="draft-description" rows="3" spellcheck="true"
+                      placeholder="Billing domain classes may not reach persistence or HTTP; java.util is fine."
+                      class="mt-1 w-full bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-purple-500"></textarea>
+          </label>
+          <label class="block">
+            <span class="text-[11px] uppercase tracking-wider text-gray-400">Project</span>
+            <input id="draft-project" type="text" placeholder="blank drafts for the shared set" autocomplete="off" spellcheck="false" maxlength="60"
+                   class="mt-1 w-64 max-w-full bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-purple-500" />
+          </label>
+          <p class="text-[11px] text-gray-500">
+            The draft is checked against that project's rules in force, so an id already in use is caught before you save.
+            It starts as the project chosen above.
+          </p>
+        </div>
+
+        <div class="space-y-2">
+          <div class="flex items-center justify-between gap-2">
+            <span class="text-[11px] uppercase tracking-wider text-gray-400">Examples <span id="draft-examples-count" class="normal-case tracking-normal font-mono text-gray-500"></span></span>
+            <button id="draft-add-example" type="button" onclick="addDraftExample()" class="text-[11px] px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700">Add an example</button>
+          </div>
+          <div id="draft-examples" class="space-y-2"></div>
+          <p class="text-[11px] text-gray-500">
+            Optional: files the rule should refuse or allow. Only each path, what it should do and the imports read in it
+            reach the model; the rest of the file stays with Threefold. Up to two more examples are built from the drafted rule itself.
+          </p>
+        </div>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-3">
+        <button id="draft-button" type="button" onclick="draftRule()" disabled
+                class="px-3 py-2 rounded-lg bg-purple-600 hover:bg-purple-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-semibold">Draft with Amazon Bedrock</button>
+        <span id="draft-hint" class="text-[11px] text-gray-500"></span>
+      </div>
+
+      <div id="draft-result" class="text-xs space-y-2" aria-live="polite"></div>
+
+      <!-- Shown only once a draft has arrived. The rule is kept as JSON in a
+           textarea and written there as a value, never as markup, so whatever
+           the model put in it is shown as text. -->
+      <div id="draft-box" hidden>
+        <div class="grid grid-cols-1 lg:grid-cols-5 gap-4">
+          <div class="lg:col-span-2 space-y-2">
+            <div class="flex items-center justify-between gap-2 flex-wrap">
+              <span class="text-[11px] uppercase tracking-wider text-gray-400">The drafted rule, yours to edit</span>
+              <span id="draft-mode"></span>
+            </div>
+            <textarea id="draft-rule" rows="14" spellcheck="false"
+                      class="w-full bg-gray-950 border border-gray-800 rounded-xl px-3 py-2 text-[11px] text-gray-200 font-mono focus:outline-none focus:border-purple-500"></textarea>
+            <div class="flex flex-wrap gap-2">
+              <button id="draft-retry-button" type="button" onclick="retryDraft()"
+                      class="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 disabled:opacity-40 text-gray-200 text-xs border border-gray-700">Try again <span class="font-mono text-[10px] text-gray-400">POST /rules/explain</span></button>
+              <button id="draft-save-button" type="button" onclick="saveDraftedRule()" disabled
+                      class="px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-semibold">Save to project</button>
+            </div>
+            <p id="draft-save-hint" class="text-[11px] text-gray-500"></p>
+            <p id="draft-save-note" class="text-[11px] text-gray-400"></p>
+            <div id="draft-save-result" class="text-xs"></div>
+          </div>
+          <div class="lg:col-span-3 space-y-2 min-w-0">
+            <div id="draft-validation" class="text-xs"></div>
+            <div id="draft-tried" class="text-xs"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <div class="grid grid-cols-1 lg:grid-cols-5 gap-6">
 
       <!-- THE RULES IN FORCE -->
@@ -173,6 +263,10 @@ public class Order { }</textarea>
             <input id="api-key" type="password" placeholder="needed to save; blank uses the key stored on the settings page"
                    class="mt-1 w-full bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-xs text-sky-300 font-mono focus:outline-none focus:border-sky-500" />
           </label>
+          <!-- Shown when a drafted rule was saved after the rules here were read:
+               the list and the editor then lack it, and Save below would replace
+               the set without it. -->
+          <div id="rules-stale" hidden class="p-3 rounded-xl bg-gray-950 border border-amber-800 space-y-2" role="status"></div>
           <button onclick="save()" id="save-button" class="w-full px-3 py-2 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold">Save and put in force</button>
           <div id="save-result"></div>
         </div>
@@ -247,6 +341,15 @@ public class Order { }</textarea>
     // quietly give one project a copy of another's gate.
     let inForceProject = null;
     let draftProject = null;
+    // Set when Save to project, in the draft panel, saved a rule to a project
+    // whose rules were already on screen here, and the list was not read again.
+    // Both save paths replace a whole set, so until they are read again the
+    // editor's Save would put back the set without that rule. `after` is the
+    // read ticket at that moment: only a read started later has seen the rule.
+    let rulesStale = null;
+    // True while the editor's Save runs, so the draft panel's save waits for it:
+    // two saves of one set in flight at once would each drop what the other adds.
+    let editorSaving = false;
 
     function escapeHtml(str) {
       // Everything is made a string first and then escaped. Returning a non-string
@@ -379,6 +482,7 @@ public class Order { }</textarea>
       currentProject = typed;
       rememberProject();
       describeTarget();
+      syncDraftProject();
       load();
     }
 
@@ -388,6 +492,7 @@ public class Order { }</textarea>
       currentProject = '';
       rememberProject();
       describeTarget();
+      syncDraftProject();
       load();
     }
 
@@ -400,6 +505,13 @@ public class Order { }</textarea>
         const data = await res.json();
         if (ticket !== loadTicket) return;
         if (!res.ok) throw new Error('HTTP ' + res.status);
+        // A read started after a drafted rule was saved has seen it, and the list
+        // and the editor are about to be rewritten from it, so nothing on screen
+        // is stale any more, whichever project it was read for.
+        if (rulesStale && ticket > rulesStale.after) {
+          rulesStale = null;
+          renderRulesStale();
+        }
         inForce = data.rules || [];
         inForceProject = asked;
         renderRules(inForce);
@@ -533,6 +645,10 @@ public class Order { }</textarea>
 
     async function save() {
       const out = document.getElementById('save-result');
+      if (draftSaving) {
+        out.innerHTML = '<p class="text-red-400">Nothing was sent: the drafted rule is still being saved, and this Save would replace the same set. Wait for it to finish.</p>';
+        return;
+      }
       // Checked before the draft itself: a draft that is valid but was read for
       // another project is the dangerous one, not a draft with problems.
       if (draftProject !== currentProject) {
@@ -544,11 +660,20 @@ public class Order { }</textarea>
           (currentProject || 'the shared set') + '.') + '</p>';
         return;
       }
+      // The editor was read before a drafted rule was saved to this project, so
+      // saving it would replace the set with one that lacks that rule.
+      if (rulesStale && draftProject === rulesStale.project) {
+        out.innerHTML = '<p class="text-red-400">' + escapeHtml('Nothing was sent. ' + staleRuleName() + ' was saved to ' + rulesStale.project +
+          ' after the rules in this editor were read, and saving them as they stand would take it away again. Read the rules again first; see the note above.') + '</p>';
+        return;
+      }
       const rules = validate();
       if (!rules) { out.innerHTML = '<p class="text-red-400">Nothing was sent: the draft has problems listed above.</p>'; return; }
       const headers = authHeaders({ 'Content-Type': 'application/json' }, document.getElementById('api-key').value);
       const button = document.getElementById('save-button');
       button.disabled = true;
+      editorSaving = true;
+      updateDraftSaveState();
       out.innerHTML = '<p class="text-gray-500">Saving…</p>';
       try {
         // Saved to the project on screen, never to a name half typed in the field.
@@ -582,10 +707,622 @@ public class Order { }</textarea>
         out.innerHTML = '<p class="text-red-400">' + escapeHtml(String(err)) + '</p>';
       } finally {
         button.disabled = false;
+        editorSaving = false;
+        updateDraftSaveState();
       }
     }
 
+    function staleRuleName() {
+      const id = rulesStale ? rulesStale.ruleId : null;
+      return typeof id === 'string' && id ? '"' + id + '"' : 'The drafted rule';
+    }
+
+    // The note beside the editor's Save while the rules here predate a drafted
+    // rule's save. Reading them again is the way out; it replaces the editor,
+    // which is said, because that is where the reader's own edits are.
+    function renderRulesStale() {
+      const box = document.getElementById('rules-stale');
+      if (!rulesStale) { box.hidden = true; box.innerHTML = ''; return; }
+      box.hidden = false;
+      box.innerHTML =
+        '<p class="text-amber-300">' + escapeHtml(staleRuleName() + ' was saved to ' + rulesStale.project + ' from the draft panel after the rules on this page were read, ' +
+          'so the list and this editor do not show it. Saving the editor as it stands would replace ' + rulesStale.project + '’s set without it, so Save sends nothing for ' +
+          rulesStale.project + ' until the rules are read again.') + '</p>' +
+        '<button type="button" onclick="load()" class="text-[11px] px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700">Read the rules again</button>' +
+        '<p class="text-[11px] text-gray-500">Reading them again replaces what is in the editor, so copy any edits you want to keep first.</p>';
+    }
+
+    // ------------------------------------------------ drafting from a sentence
+    //
+    // The caps are the drafter's own (rule_drafter.py). The service refuses a
+    // request past them rather than cutting it, so the page says so before it
+    // is sent: a description cut at 600 characters would be drafted from half
+    // a sentence. Lengths are counted in characters as the service counts them,
+    // not in UTF-16 units, so an emoji is one character here as it is there.
+    const DRAFT_MAX_DESCRIPTION = 600;
+    const DRAFT_MAX_EXAMPLES = 5;
+    const DRAFT_MAX_CONTENT = 4000;
+
+    // The example rows, kept here and written back into their fields after every
+    // redraw, so adding or removing a row never loses what was typed in another.
+    let draftExamples = [];
+    // The draft on screen: the project it was drafted for, the examples it was
+    // asked with and what came back. null when there is none, which is also
+    // what keeps Save to project disabled.
+    let lastDraft = null;
+    let drafting = false;
+    let draftSaving = false;
+    // Each request takes a ticket and only the latest may draw, as for the list.
+    let draftTicket = 0;
+    // The project field follows the project chosen above until the reader types
+    // in it; from then on it is theirs.
+    let draftProjectTouched = false;
+
+    function characters(text) { return Array.from(typeof text === 'string' ? text : '').length; }
+
+    // Blank as the drafter judges it. Python's str.strip(), which refuses an
+    // empty description there, also strips U+001C to U+001F and U+0085, which
+    // JavaScript's trim() keeps; a description of only those would enable Draft
+    // and then be refused with a 400.
+    const DRAFT_BLANK = /^[\s\x1c-\x1f\x85]*$/;
+
+    // The problem types the middleware answers a private stack's read with.
+    // Only these say the stack keeps its rules private; any other 401 or 403,
+    // such as one from a firewall in front of the service, is reported as it
+    // came, without a reason the page cannot know.
+    const PRIVATE_STACK_PROBLEMS = [
+      'urn:threefold:error:reads-private',
+      'urn:threefold:error:missing-credentials',
+      'urn:threefold:error:invalid-credentials'
+    ];
+
+    function refusedAsPrivate(res, d) {
+      return (res.status === 401 || res.status === 403) && PRIVATE_STACK_PROBLEMS.indexOf(d && d.type) !== -1;
+    }
+
+    function syncDraftProject() {
+      if (!draftProjectTouched) document.getElementById('draft-project').value = currentProject;
+    }
+
+    function draftProjectValue() {
+      return String(document.getElementById('draft-project').value || '').trim();
+    }
+
+    function readDraftExamples() {
+      draftExamples = draftExamples.map((example, i) => {
+        const path = document.getElementById('draft-ex-path-' + i);
+        const content = document.getElementById('draft-ex-content-' + i);
+        const expect = document.getElementById('draft-ex-expect-' + i);
+        return {
+          path: path ? String(path.value || '') : example.path,
+          content: content ? String(content.value || '') : example.content,
+          expect: expect ? (expect.value === 'allow' ? 'allow' : 'refuse') : example.expect
+        };
+      });
+      return draftExamples;
+    }
+
+    // Only literal markup is written here; each field's text is set as its
+    // value afterwards, so nothing a reader typed is ever parsed as markup.
+    function renderDraftExamples() {
+      const holder = document.getElementById('draft-examples');
+      if (!draftExamples.length) {
+        holder.innerHTML = '<p class="text-[11px] text-gray-600">No example yet.</p>';
+      } else {
+        holder.innerHTML = draftExamples.map((example, i) =>
+          '<div class="p-3 rounded-xl bg-gray-950 border border-gray-800 space-y-2">' +
+            '<div class="flex flex-wrap items-end gap-2">' +
+              '<label class="block flex-1 min-w-[12rem]"><span class="text-[10px] uppercase tracking-wider text-gray-500">Path</span>' +
+                '<input id="draft-ex-path-' + i + '" type="text" spellcheck="false" autocomplete="off" placeholder="src/main/java/com/acme/billing/domain/Order.java" ' +
+                'class="mt-1 w-full bg-gray-900 border border-gray-800 rounded-lg px-2 py-1.5 text-[11px] text-white font-mono focus:outline-none focus:border-purple-500" /></label>' +
+              '<label class="block"><span class="text-[10px] uppercase tracking-wider text-gray-500">Should be</span>' +
+                '<select id="draft-ex-expect-' + i + '" class="mt-1 block bg-gray-900 border border-gray-800 rounded-lg px-2 py-1.5 text-[11px] text-white focus:outline-none focus:border-purple-500">' +
+                  '<option value="refuse">refused</option><option value="allow">allowed</option></select></label>' +
+              '<button type="button" onclick="removeDraftExample(' + i + ')" class="text-[11px] px-2 py-1.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700">Remove</button>' +
+            '</div>' +
+            '<label class="block"><span class="flex items-baseline justify-between gap-2 text-[10px] uppercase tracking-wider text-gray-500"><span>Content</span>' +
+              '<span id="draft-ex-count-' + i + '" class="normal-case tracking-normal font-mono"></span></span>' +
+              '<textarea id="draft-ex-content-' + i + '" rows="3" spellcheck="false" ' +
+              'class="mt-1 w-full bg-gray-900 border border-gray-800 rounded-lg px-2 py-1.5 text-[11px] text-white font-mono focus:outline-none focus:border-purple-500"></textarea></label>' +
+          '</div>'
+        ).join('');
+        draftExamples.forEach((example, i) => {
+          document.getElementById('draft-ex-path-' + i).value = example.path;
+          document.getElementById('draft-ex-content-' + i).value = example.content;
+          document.getElementById('draft-ex-expect-' + i).value = example.expect;
+        });
+      }
+      updateDraftCounters();
+    }
+
+    function addDraftExample() {
+      readDraftExamples();
+      if (draftExamples.length >= DRAFT_MAX_EXAMPLES) return;
+      draftExamples.push({ path: '', content: '', expect: 'refuse' });
+      renderDraftExamples();
+    }
+
+    function removeDraftExample(index) {
+      readDraftExamples();
+      draftExamples.splice(index, 1);
+      renderDraftExamples();
+    }
+
+    // Whether the request can be sent as it stands, and if not, the one thing
+    // to fix first. The service stays the judge; this only spares a request it
+    // is certain to refuse.
+    function draftReadiness() {
+      const written = String(document.getElementById('draft-description').value || '');
+      const length = characters(written.trim());
+      if (drafting) return { ok: false, why: 'Drafting…' };
+      // A new draft would clear the one being saved, and the save's answer
+      // would then be shown under a draft it was never about.
+      if (draftSaving) return { ok: false, why: 'Saving the drafted rule. Draft again once it is saved.' };
+      if (!length || DRAFT_BLANK.test(written)) return { ok: false, why: 'Say the boundary in a sentence to draft a rule for it.' };
+      if (length > DRAFT_MAX_DESCRIPTION) {
+        return { ok: false, why: 'The description is ' + length + ' characters and the service drafts from at most ' + DRAFT_MAX_DESCRIPTION + '. Shorten it: it is not cut for you.' };
+      }
+      const project = draftProjectValue();
+      if (project && !PROJECT_PATTERN.test(project)) {
+        return { ok: false, why: 'The project is not a name this page will send. Use Acme- and then 1 to 40 letters, digits or dashes, or leave it blank for the shared set.' };
+      }
+      for (let i = 0; i < draftExamples.length; i++) {
+        if (!draftExamples[i].path.trim()) return { ok: false, why: 'Example ' + (i + 1) + ' has no path. Give it one, or remove it.' };
+        const size = characters(draftExamples[i].content);
+        if (size > DRAFT_MAX_CONTENT) {
+          return { ok: false, why: 'Example ' + (i + 1) + ' is ' + size + ' characters of content and at most ' + DRAFT_MAX_CONTENT + ' are tried. Keep the imports at the top of the file; they are what a rule reads.' };
+        }
+      }
+      return { ok: true, why: 'One or two model calls. Nothing is saved.' };
+    }
+
+    function updateDraftCounters() {
+      readDraftExamples();
+      const length = characters(document.getElementById('draft-description').value.trim());
+      const counter = document.getElementById('draft-description-count');
+      counter.innerText = length + ' / ' + DRAFT_MAX_DESCRIPTION;
+      counter.className = 'normal-case tracking-normal font-mono ' + (length > DRAFT_MAX_DESCRIPTION ? 'text-red-400' : 'text-gray-500');
+      draftExamples.forEach((example, i) => {
+        const size = characters(example.content);
+        const count = document.getElementById('draft-ex-count-' + i);
+        count.innerText = size + ' / ' + DRAFT_MAX_CONTENT;
+        count.className = 'normal-case tracking-normal font-mono ' + (size > DRAFT_MAX_CONTENT ? 'text-red-400' : 'text-gray-500');
+      });
+      document.getElementById('draft-examples-count').innerText = draftExamples.length + ' / ' + DRAFT_MAX_EXAMPLES;
+      document.getElementById('draft-add-example').disabled = draftExamples.length >= DRAFT_MAX_EXAMPLES;
+      const ready = draftReadiness();
+      document.getElementById('draft-button').disabled = !ready.ok;
+      const hint = document.getElementById('draft-hint');
+      hint.innerText = ready.why;
+      hint.className = 'text-[11px] ' + (ready.ok || drafting || draftSaving ? 'text-gray-500' : 'text-amber-300');
+    }
+
+    // The credential a save would carry: a key typed beside Save below, or the
+    // sign-in or stored key the shared layer holds. The service still decides;
+    // this only keeps a button from promising a save it will refuse.
+    function draftCredential() {
+      const typed = (document.getElementById('api-key').value || '').trim();
+      if (typed) return 'typed';
+      if (window.Threefold) return Threefold.credentialInUse();
+      return storedOperatorKey() ? 'key' : null;
+    }
+
+    function dashboardProjectHref(project) {
+      return PAGE_BASE + 'dashboard.html#/projects/' + encodeURIComponent(project);
+    }
+
+    function updateDraftSaveState() {
+      const button = document.getElementById('draft-save-button');
+      const hint = document.getElementById('draft-save-hint');
+      const note = document.getElementById('draft-save-note');
+      const project = lastDraft ? lastDraft.project : '';
+      let why = '';
+      if (!lastDraft) why = '';
+      else if (!project) why = 'This draft is for the shared set. Name a project above and draft again to save it to that project.';
+      else if (!draftCredential()) why = 'Saving needs the operator: sign in with python threefold.py open, or type the key beside Save and put in force below.';
+      else if (editorSaving) why = 'The editor below is saving a set. Save to project waits for it, because both replace a whole set.';
+      button.disabled = !lastDraft || !project || !draftCredential() || draftSaving || editorSaving;
+      hint.innerText = why;
+      note.innerHTML = lastDraft && project
+        ? 'Save to project reads ' + escapeHtml(project) + '’s rules in force and saves them back unchanged, with this rule after them. The new rule observes first: it records what it would refuse and refuses nothing. ' +
+          'Review what it flags, then promote it to enforce on <a href="' + escapeHtml(dashboardProjectHref(project)) + '" class="text-purple-300 hover:text-purple-200 underline">the project page ↗</a>.'
+        : '';
+    }
+
+    function verdictChip(verdict) {
+      const tone = verdict === 'REFUSE' ? 'bg-red-950 text-red-300 border-red-800'
+        : verdict === 'OBSERVE' ? 'bg-amber-950 text-amber-300 border-amber-800'
+        : verdict === 'ALLOW' ? 'bg-emerald-950 text-emerald-300 border-emerald-800'
+        : 'bg-gray-950 text-gray-400 border-gray-700';
+      return '<span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold border ' + tone + '">' + escapeHtml(verdict || '—') + '</span>';
+    }
+
+    // One row per file tried: what it should do, what the rule did and whether
+    // the two agree. A drafted rule watches, so the verdict that means "this
+    // rule would refuse it" is OBSERVE, and that is what a file expected to be
+    // refused has to show.
+    function renderTried(rows, heading) {
+      const holder = document.getElementById('draft-tried');
+      if (!rows.length) {
+        holder.innerHTML = '<p class="text-[11px] text-gray-500">' + escapeHtml(heading) + ': no example was tried.</p>';
+        return;
+      }
+      // Counted over the files that were judged. A file whose request failed has
+      // no verdict, so it is neither a match nor a mismatch and is counted apart.
+      const judged = rows.filter(row => row.matched === true || row.matched === false).length;
+      const agreed = rows.filter(row => row.matched === true).length;
+      const untried = rows.length - judged;
+      const summary = !judged ? 'none of the ' + rows.length + ' could be tried.'
+        : untried ? agreed + ' of ' + judged + ' tried behaved as expected; ' + untried + ' could not be tried.'
+        : agreed + ' of ' + rows.length + ' behaved as expected.';
+      holder.innerHTML =
+        '<p class="text-gray-300 mb-2">' + escapeHtml(heading) + ': ' + summary + '</p>' +
+        '<div class="overflow-x-auto"><table class="w-full text-[11px]">' +
+          '<thead><tr class="text-left text-gray-500 border-b border-gray-800">' +
+            '<th scope="col" class="py-1 pr-2 font-medium">File</th><th scope="col" class="py-1 pr-2 font-medium">Expected</th>' +
+            '<th scope="col" class="py-1 pr-2 font-medium">Verdict</th><th scope="col" class="py-1 font-medium">Result</th>' +
+          '</tr></thead><tbody>' +
+          rows.map(row =>
+            '<tr class="border-b border-gray-900 align-top">' +
+              '<td class="py-1.5 pr-2 min-w-[12rem]"><span class="font-mono text-gray-200 break-all">' + escapeHtml(row.path) + '</span>' +
+                '<span class="block text-[10px] text-gray-600">' + (row.origin === 'generated' ? 'built from the rule' : 'your example') + '</span>' +
+                (row.content_preview ? '<span class="block font-mono text-[10px] text-gray-500 break-all whitespace-pre-wrap">' + escapeHtml(row.content_preview) + '</span>' : '') +
+                (row.note ? '<span class="block text-[10px] text-gray-400">' + escapeHtml(row.note) + '</span>' : '') +
+              '</td>' +
+              '<td class="py-1.5 pr-2 text-gray-300">' + escapeHtml(row.expected === 'allow' ? 'allowed' : row.expected === 'refuse' ? 'refused' : row.expected) + '</td>' +
+              '<td class="py-1.5 pr-2">' + verdictChip(row.verdict) + '</td>' +
+              '<td class="py-1.5">' + (row.matched === true
+                ? '<span class="text-emerald-300" data-result="matched">✓ matched</span>'
+                : row.matched === false ? '<span class="text-red-300" data-result="mismatched">✗ mismatched</span>'
+                : '<span class="text-gray-500" data-result="not-tried">not tried</span>') + '</td>' +
+            '</tr>'
+          ).join('') +
+        '</tbody></table></div>';
+    }
+
+    function listOf(items, tone) {
+      return (Array.isArray(items) ? items : []).map(item => '<p class="' + tone + '">• ' + escapeHtml(item) + '</p>').join('');
+    }
+
+    function showDraftBox(show) {
+      document.getElementById('draft-box').hidden = !show;
+    }
+
+    function clearDraft() {
+      lastDraft = null;
+      showDraftBox(false);
+      document.getElementById('draft-rule').value = '';
+      document.getElementById('draft-mode').innerHTML = '';
+      document.getElementById('draft-validation').innerHTML = '';
+      document.getElementById('draft-tried').innerHTML = '';
+      document.getElementById('draft-save-result').innerHTML = '';
+      updateDraftSaveState();
+    }
+
+    function renderDraftMode(rule) {
+      const observing = rule && rule.mode === 'observe';
+      document.getElementById('draft-mode').innerHTML = observing
+        ? '<span class="px-2 py-0.5 rounded text-[10px] font-semibold border bg-amber-950 text-amber-300 border-amber-800">OBSERVE · records, never refuses</span>'
+        : '<span class="px-2 py-0.5 rounded text-[10px] font-semibold border bg-red-950 text-red-300 border-red-800">mode is ' + escapeHtml(rule && rule.mode != null ? rule.mode : 'missing, which means enforce') + '</span>';
+    }
+
+    function renderDraft(d, project, examples) {
+      lastDraft = { project: project, examples: examples, rule: d.rule, tried: Array.isArray(d.tried) ? d.tried : [] };
+      document.getElementById('draft-result').innerHTML =
+        '<div class="p-3 rounded-xl bg-gray-950 border border-gray-800 space-y-1">' +
+          '<p class="text-gray-200">Drafted by Amazon Bedrock' + (d.model ? ' <span class="font-mono text-[10px] text-gray-500">' + escapeHtml(d.model) + '</span>' : '') +
+            (typeof d.attempts === 'number' ? ' in ' + escapeHtml(d.attempts) + ' model call' + (d.attempts === 1 ? '' : 's') : '') +
+            ', for ' + escapeHtml(project || 'the shared set') + '. <span class="text-emerald-300">Not saved.</span></p>' +
+          listOf(d.warnings, 'text-[11px] text-amber-300') +
+          listOf(d.notes, 'text-[11px] text-gray-400') +
+        '</div>';
+      document.getElementById('draft-rule').value = JSON.stringify(d.rule || {}, null, 2);
+      renderDraftMode(d.rule);
+      const validation = d.validation || {};
+      document.getElementById('draft-validation').innerHTML = validation.ok === true
+        ? '<p class="text-emerald-300">Checked as POST /rules would check it' + (project ? ', beside ' + escapeHtml(project) + '’s rules in force' : '') + ': it can be saved as written.</p>'
+        : '<p class="text-red-400 font-semibold">The service did not accept the draft as written.</p>' + listOf(validation.errors, 'text-red-300');
+      renderTried(lastDraft.tried, 'Tried on ' + lastDraft.tried.length + ' example' + (lastDraft.tried.length === 1 ? '' : 's'));
+      document.getElementById('draft-save-result').innerHTML = '';
+      showDraftBox(true);
+      updateDraftSaveState();
+    }
+
+    function draftProblem(title, detail, extra) {
+      document.getElementById('draft-result').innerHTML =
+        '<div class="p-3 rounded-xl bg-gray-950 border border-red-900/60 space-y-1" role="alert">' +
+          '<p class="text-red-300 font-semibold">' + escapeHtml(title) + '</p>' +
+          (detail ? '<p class="text-[11px] text-gray-300">' + escapeHtml(detail) + '</p>' : '') +
+          (extra || '') +
+        '</div>';
+    }
+
+    async function draftRule() {
+      readDraftExamples();
+      if (!draftReadiness().ok) { updateDraftCounters(); return; }
+      const description = document.getElementById('draft-description').value.trim();
+      const project = draftProjectValue();
+      const examples = draftExamples.map(example => ({ path: example.path.trim(), content: example.content, expect: example.expect }));
+      const body = { description: description };
+      if (project) body.project = project;
+      if (examples.length) body.examples = examples;
+      const ticket = ++draftTicket;
+      drafting = true;
+      clearDraft();
+      document.getElementById('draft-result').innerHTML =
+        '<p class="text-gray-400" data-state="loading">Asking Amazon Bedrock for a draft. It is one or two model calls and can take several seconds; nothing is saved.</p>';
+      updateDraftCounters();
+      try {
+        // Drafting only: this sends POST /rules/draft and nothing else. A save
+        // is POST /rules, and only saveDraftedRule sends it.
+        const res = await fetch(DEFAULT_API_BASE + '/rules/draft', {
+          method: 'POST',
+          headers: authHeaders({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify(body)
+        });
+        let d = null;
+        try { d = await res.json(); } catch (err) { d = null; }
+        if (ticket !== draftTicket) return;
+        d = d && typeof d === 'object' ? d : {};
+        if (res.ok) {
+          renderDraft(d, project, examples);
+        } else if (res.status === 503) {
+          // Said as it is: no model, no draft. The page never shows a rule of
+          // its own in place of the one the model could not write.
+          draftProblem('Amazon Bedrock is not available, so no rule was drafted',
+            d.detail || 'The model could not be asked or did not answer.',
+            '<p class="text-[11px] text-gray-400">No rule is shown in its place. The editor further down takes one written by hand.</p>');
+        } else if (res.status === 502) {
+          draftProblem('The model answered, but not with a rule that can be used',
+            d.detail || '',
+            listOf(d.problems, 'text-[11px] text-red-300') +
+            (d.rejected_draft != null
+              ? '<p class="text-[10px] uppercase tracking-wider text-gray-500 mt-2">Its last answer, which was not used</p><pre class="font-mono text-[10px] text-gray-400 whitespace-pre-wrap break-all">' + escapeHtml(JSON.stringify(d.rejected_draft, null, 2)) + '</pre>'
+              : '') +
+            '<p class="text-[11px] text-gray-400">Nothing was saved. Say the boundary more plainly and draft again, or write the rule by hand in the editor below.</p>');
+        } else if (res.status === 422) {
+          draftProblem('That boundary is not one a layering rule can say', d.detail || '',
+            d.unsupported ? '<p class="text-[11px] text-gray-400">' + escapeHtml(d.unsupported) + '</p>' : '');
+        } else if (res.status === 400) {
+          const fields = (Array.isArray(d.invalid_params) ? d.invalid_params : []).map(p => p && p.name).filter(Boolean);
+          draftProblem('The request was refused before the model was asked', d.detail || ('HTTP ' + res.status),
+            fields.length ? '<p class="text-[11px] text-gray-400">Field: <span class="font-mono">' + escapeHtml(fields.join(', ')) + '</span></p>' : '');
+        } else if (refusedAsPrivate(res, d)) {
+          draftProblem('Drafting on this stack needs the operator',
+            'This stack keeps its rules private, and every draft is a model call the account pays for. ' + (d.detail || ''),
+            '<p class="text-[11px] text-gray-400">Sign in with <span class="font-mono">python threefold.py open</span>, or <a href="' + PAGE_BASE +
+            'settings.html#operator-key" class="text-purple-300 hover:text-purple-200 underline">store the operator key in this browser ↗</a>.</p>');
+        } else {
+          draftProblem('The service refused the draft with HTTP ' + res.status, d.detail || '');
+        }
+      } catch (err) {
+        if (ticket !== draftTicket) return;
+        draftProblem('The service could not be reached, so no rule was drafted', String(err));
+      } finally {
+        if (ticket === draftTicket) {
+          drafting = false;
+          updateDraftCounters();
+        }
+      }
+    }
+
+    // The edited rule as one object, or the reason it is not one yet.
+    function editedDraftRule() {
+      let parsed;
+      try {
+        parsed = JSON.parse(document.getElementById('draft-rule').value);
+      } catch (err) {
+        return { rule: null, why: 'The drafted rule is not valid JSON: ' + err.message };
+      }
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return { rule: null, why: 'The drafted rule must be one JSON object, as the model returned it.' };
+      }
+      return { rule: parsed, why: '' };
+    }
+
+    // How much of a file the drafter echoes back as content_preview. A preview
+    // is a label for a person: longer content is cut and ends in "...", and a
+    // credential is replaced by its label.
+    const DRAFT_PREVIEW_CHARS = 160;
+
+    // The verdicts POST /rules/explain gives, the only ones Try again judges.
+    const TRY_VERDICTS = ['REFUSE', 'OBSERVE', 'ALLOW'];
+
+    // The files Try again judges: the example rows as they stand now, so one
+    // can be added to test an edit, and the files the service built from the
+    // draft, but only those whose preview is provably the whole file. A cut or
+    // redacted preview is not the file that was tried, so judging it would put
+    // a verdict beside a file nobody sent; those are counted and named instead.
+    function retryCases() {
+      const cases = readDraftExamples()
+        .filter(example => example.path.trim())
+        .map(example => ({ path: example.path.trim(), content: example.content, expect: example.expect, origin: 'caller' }));
+      let partial = 0;
+      (lastDraft ? lastDraft.tried : []).forEach(row => {
+        if (!row || row.origin !== 'generated' || typeof row.path !== 'string') return;
+        const preview = typeof row.content_preview === 'string' ? row.content_preview : '';
+        const whole = characters(preview) <= DRAFT_PREVIEW_CHARS && !/\.\.\.$/.test(preview) && preview.indexOf(' REDACTED]') === -1;
+        if (!whole) { partial += 1; return; }
+        cases.push({ path: row.path, content: preview, expect: row.expected === 'allow' ? 'allow' : 'refuse', origin: 'generated' });
+      });
+      return { cases: cases, partial: partial };
+    }
+
+    async function retryDraft() {
+      if (!lastDraft) return;
+      const edited = editedDraftRule();
+      const out = document.getElementById('draft-validation');
+      if (!edited.rule) { out.innerHTML = '<p class="text-red-400">' + escapeHtml(edited.why) + '</p>'; return; }
+      renderDraftMode(edited.rule);
+      const { cases, partial } = retryCases();
+      const skipped = partial
+        ? '<p class="text-[11px] text-gray-400">' + partial + ' file' + (partial === 1 ? '' : 's') + ' built from the rule came back only as a shortened preview, so ' +
+          (partial === 1 ? 'it was' : 'they were') + ' not tried again. Draft again to rebuild ' + (partial === 1 ? 'it' : 'them') + ' from the rule.</p>'
+        : '';
+      if (!cases.length) { out.innerHTML = '<p class="text-amber-300">There is nothing to try the rule on. Add an example above.</p>' + skipped; return; }
+      const ticket = ++draftTicket;
+      const button = document.getElementById('draft-retry-button');
+      button.disabled = true;
+      out.innerHTML = '<p class="text-gray-400" data-state="loading">Trying your edited rule…</p>';
+      const rows = [];
+      try {
+        for (const example of cases) {
+          // Tried as a draft, alone: the rules in force are not consulted and
+          // nothing is saved or recorded.
+          const res = await fetch(DEFAULT_API_BASE + '/rules/explain', {
+            method: 'POST',
+            headers: authHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ path: example.path, content: example.content, rules: [edited.rule] })
+          });
+          let d = null;
+          try { d = await res.json(); } catch (err) { d = null; }
+          if (ticket !== draftTicket) return;
+          d = d && typeof d === 'object' ? d : {};
+          if (!res.ok) {
+            if (Array.isArray(d.problems) && d.problems.length) {
+              renderProblems(out, 'The edited rule cannot be used as written, so it was not tried', d.problems);
+              return;
+            }
+            if (refusedAsPrivate(res, d)) {
+              out.innerHTML = '<p class="text-red-400">This stack keeps its rules private, so trying a rule needs the operator. Sign in with python threefold.py open.</p>';
+              return;
+            }
+            rows.push({ path: example.path, expected: example.expect, origin: example.origin, verdict: null, matched: null, note: d.detail || ('HTTP ' + res.status) });
+            continue;
+          }
+          // Only the three verdicts explain gives are judged. Anything else is
+          // shown as it came and counted as not tried, never read as an allow.
+          if (TRY_VERDICTS.indexOf(d.verdict) === -1) {
+            rows.push({ path: example.path, expected: example.expect, origin: example.origin, verdict: d.verdict == null ? null : d.verdict, matched: null,
+              note: 'The service answered with no verdict this page can read, so this file is not counted.' });
+            continue;
+          }
+          const refused = d.verdict === 'REFUSE' || d.verdict === 'OBSERVE';
+          const first = Array.isArray(d.violations) && d.violations.length && d.violations[0] ? d.violations[0].reason : d.note;
+          rows.push({
+            path: example.path, expected: example.expect, origin: example.origin, verdict: d.verdict,
+            matched: example.expect === 'refuse' ? refused : !refused, note: first || ''
+          });
+        }
+        // Said only for what happened: the rule counts as tried once the service
+        // judged at least one file with it. When every request failed there is
+        // no result, and the first failure is named instead.
+        const judged = rows.filter(row => row.matched !== null).length;
+        const modeWarning = edited.rule.mode === 'observe' ? '' : '<p class="text-amber-300">Its mode is not observe, so Save to project will not send it: a new rule watches first.</p>';
+        if (!judged) {
+          const why = rows.length && rows[0].note ? ' The first answer: ' + rows[0].note : '';
+          out.innerHTML = '<p class="text-red-400">' + escapeHtml('The edited rule was not tried: none of the ' + rows.length + ' request' + (rows.length === 1 ? '' : 's') +
+            ' to POST /rules/explain came back with a verdict.' + why + ' Nothing was saved.') + '</p>' + modeWarning + skipped;
+        } else {
+          const untried = rows.length - judged;
+          out.innerHTML = '<p class="text-emerald-300">The service could use the edited rule and tried it as a draft, alone. Nothing was saved.</p>' +
+            (untried ? '<p class="text-amber-300">' + untried + ' of the ' + rows.length + ' files could not be tried; each one says why below.</p>' : '') +
+            modeWarning + skipped;
+        }
+        renderTried(rows, 'Tried again against your edited rule');
+      } catch (err) {
+        if (ticket !== draftTicket) return;
+        out.innerHTML = '<p class="text-red-400">The service could not be reached. ' + escapeHtml(String(err)) + '</p>';
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    // The one place a drafted rule is saved, and only from its own button. The
+    // project's current rules are read first and sent back with the new rule
+    // after them, because POST /rules replaces a whole set: sending the draft
+    // alone would take every other rule away from the project.
+    async function saveDraftedRule() {
+      const out = document.getElementById('draft-save-result');
+      if (!lastDraft || !lastDraft.project) { updateDraftSaveState(); return; }
+      if (!draftCredential() || editorSaving || draftSaving) { updateDraftSaveState(); return; }
+      const project = lastDraft.project;
+      const edited = editedDraftRule();
+      if (!edited.rule) { out.innerHTML = '<p class="text-red-400">Nothing was sent. ' + escapeHtml(edited.why) + '</p>'; return; }
+      if (edited.rule.mode !== 'observe') {
+        out.innerHTML = '<p class="text-red-400">Nothing was sent: a drafted rule is saved in observe, and this one says ' +
+          escapeHtml(edited.rule.mode == null ? 'no mode, which means enforce' : 'mode ' + JSON.stringify(edited.rule.mode)) +
+          '. Set "mode": "observe"; the project page promotes it to enforce once it has earned it.</p>';
+        return;
+      }
+      const typed = document.getElementById('api-key').value;
+      const button = document.getElementById('draft-save-button');
+      draftSaving = true;
+      updateDraftSaveState();
+      updateDraftCounters();
+      out.innerHTML = '<p class="text-gray-500">Reading ' + escapeHtml(project) + '’s rules, then saving…</p>';
+      try {
+        const read = await fetch(DEFAULT_API_BASE + '/rules?project=' + encodeURIComponent(project), { headers: authHeaders({}, typed) });
+        let current = null;
+        try { current = await read.json(); } catch (err) { current = null; }
+        if (!read.ok || !current || !Array.isArray(current.rules)) {
+          out.innerHTML = '<p class="text-red-400">' + escapeHtml(project) + '’s rules could not be read (HTTP ' + escapeHtml(read.status) +
+            '), so nothing was sent: saving the draft alone would replace every rule the project has.</p>';
+          return;
+        }
+        const rules = current.rules.concat([edited.rule]);
+        const res = await fetch(DEFAULT_API_BASE + '/rules', {
+          method: 'POST',
+          headers: authHeaders({ 'Content-Type': 'application/json' }, typed),
+          body: JSON.stringify({ project: project, rules: rules })
+        });
+        let d = null;
+        try { d = await res.json(); } catch (err) { d = null; }
+        d = d && typeof d === 'object' ? d : {};
+        if (!res.ok) {
+          if (Array.isArray(d.problems) && d.problems.length) {
+            renderProblems(out, 'Nothing was saved: the service cannot use the set with this rule in it', d.problems);
+            return;
+          }
+          let words = d.detail || ('Refused with HTTP ' + res.status);
+          if (d.type === 'urn:threefold:error:policy-write-disabled') words = 'This deployment has no operator key configured, so its rules can be read, drafted and tried but not changed.';
+          else if (res.status === 401) words = 'Saving needs the operator. Sign in with python threefold.py open, or type the key beside Save and put in force below.';
+          else if (res.status === 403) words = 'That key or sign-in was not accepted.';
+          out.innerHTML = '<p class="text-red-400">' + escapeHtml(words) + ' Nothing changed.</p>';
+          return;
+        }
+        const copied = current.is_default === true && current.rules.length
+          ? ' ' + escapeHtml(project) + ' had no rules of its own, so it now keeps the ' + escapeHtml(current.rules.length) + ' shared rule' + (current.rules.length === 1 ? '' : 's') + ' it was judged against, and this one after them.'
+          : '';
+        out.innerHTML = '<p class="text-emerald-400">Saved to ' + escapeHtml(project) + ', in observe: it records what it would refuse and refuses nothing yet.' + copied +
+          ' Other servers pick it up within ' + escapeHtml(Number(d.refresh_seconds) || refreshSeconds) + ' seconds. ' +
+          'When it has flagged only what it should, promote it on <a href="' + escapeHtml(dashboardProjectHref(project)) + '" class="text-purple-300 hover:text-purple-200 underline">the project page ↗</a>.</p>';
+        // Whatever this page read of the project before the save lacks the rule.
+        // It is marked stale first, so the editor's Save refuses to put back the
+        // set without it; a read that succeeds after this moment clears the mark.
+        const shownHere = inForceProject === project || draftProject === project;
+        if (shownHere) {
+          rulesStale = { project: project, ruleId: edited.rule.id, after: loadTicket };
+          renderRulesStale();
+        }
+        // The list is read again when it shows this project, unless the editor
+        // holds changes of the reader's own, which a read would replace. Then the
+        // note beside the editor's Save says what is stale and how to read again.
+        const editorUntouched = document.getElementById('editor').value === JSON.stringify({ rules: inForce }, null, 2);
+        if (currentProject === project && editorUntouched) await load();
+        else if (shownHere) {
+          out.innerHTML += '<p class="text-amber-300 mt-1">' + escapeHtml('The rules further down were read before this save and do not show the rule. ' +
+            'They are not read again here, so nothing in the editor is replaced, and its Save sends nothing until they are.') + '</p>';
+        }
+      } catch (err) {
+        out.innerHTML = '<p class="text-red-400">' + escapeHtml(String(err)) + ' Nothing is known to have changed.</p>';
+      } finally {
+        draftSaving = false;
+        updateDraftSaveState();
+        updateDraftCounters();
+      }
+    }
+
+    function draftFieldChanged(event) {
+      const id = event && event.target ? String(event.target.id || '') : '';
+      if (id === 'draft-project') draftProjectTouched = true;
+      if (id === 'draft-description' || id === 'draft-project' || id.indexOf('draft-ex-') === 0) updateDraftCounters();
+      if (id === 'api-key') updateDraftSaveState();
+    }
+
     document.addEventListener('input', event => { if (event.target && event.target.id === 'editor') validate(); });
+    document.addEventListener('input', draftFieldChanged);
+    document.addEventListener('change', draftFieldChanged);
     document.getElementById('project-input').addEventListener('keydown', event => { if (event.key === 'Enter') chooseProject(); });
     renderNav();
     // A link may name the project. It is held to the same pattern as a typed name.
@@ -598,6 +1335,20 @@ public class Order { }</textarea>
       }
     })();
     describeTarget();
+    syncDraftProject();
+    renderDraftExamples();
+    clearDraft();
+    renderRulesStale();
+    // A sign-in or sign-out in another part of the page changes whether a draft
+    // can be saved, so the button is told.
+    if (window.Threefold) Threefold.onAuthChange(updateDraftSaveState);
+    // The project page links here with #draft, to write a rule for that project.
+    try {
+      if (location.hash === '#draft') {
+        const field = document.getElementById('draft-description');
+        if (typeof field.focus === 'function') field.focus();
+      }
+    } catch (err) { /* the address is a convenience */ }
     load();
   </script>
 </body>
