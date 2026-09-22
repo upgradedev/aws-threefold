@@ -144,6 +144,7 @@ import re
 import shlex
 import socket
 import sys
+import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -1990,8 +1991,55 @@ def post_evaluation(body: Dict[str, Any], base: Optional[str] = None, api_key: A
         raise ServiceUnavailable(_describe_failure(error, timeout)) from None
 
 
+# What a summary line may not carry into the agent's context, by Unicode
+# category: control characters (Cc, C0 and C1), format characters (Cf: the
+# direction overrides and isolates, the zero-width characters, the byte order
+# mark, and the tag characters, which a person never sees and a model still
+# reads), lone surrogates (Cs), and the line and paragraph separators (Zl, Zp).
+# The whole tag block goes, its unassigned code points too, so a Unicode newer
+# than this Python cannot slip one through. connect.html prints the same line
+# with the same classes.
+_UNPRINTABLE_CATEGORIES = frozenset(("Cc", "Cf", "Cs", "Zl", "Zp"))
+_TAG_BLOCK = range(0xE0000, 0xE0080)
+MAX_FIX_SUMMARY_CHARS = 200
+# How much of a summary is read at all. The service sends at most 200
+# characters, cleaning looks at one character at a time, and a response may be
+# a megabyte, so what lies past this is not looked at.
+MAX_FIX_SUMMARY_READ = 1_000
+
+
+def _printable(text: str) -> str:
+    """The text with every character a person cannot see, or that breaks a line, turned into a space."""
+    return "".join(
+        " " if unicodedata.category(character) in _UNPRINTABLE_CATEGORIES or ord(character) in _TAG_BLOCK else character
+        for character in text
+    )
+
+
+def fix_line(verdict: Dict[str, Any]) -> Optional[str]:
+    """The suggested fix as one line of the deny reason, or None when there is none.
+
+    Only the summary: the steps and the proposed files are for a page to show,
+    and an agent's context is not where a whole module goes. "Checked by
+    Threefold" only when the service says every proposed write passed the same
+    gates. The summary is cleaned here although the service sends one clean
+    line, because this hook trusts nothing the network sends.
+    """
+    fix = verdict.get("suggested_fix")
+    if not isinstance(fix, dict) or not isinstance(fix.get("summary"), str):
+        return None
+    summary = " ".join(_printable(fix["summary"][:MAX_FIX_SUMMARY_READ]).split())[:MAX_FIX_SUMMARY_CHARS].rstrip()
+    if not summary:
+        return None
+    label = "Suggested fix, checked by Threefold" if fix.get("validated") is True else "Suggested fix"
+    return f"{label}: {summary}"
+
+
 def refusal_reason(verdict: Dict[str, Any]) -> str:
-    """The service's refusal in words, with its explanation attributed to its source."""
+    """The service's refusal in words, with its explanation attributed to its source.
+
+    A suggested fix, when the service sends one, follows as a line of its own.
+    """
     status = str(verdict.get("status") or "BLOCKED")
     reason = verdict.get("reason") or status
     detail = f"Threefold refused this call ({status}). {reason}"
@@ -1999,6 +2047,9 @@ def refusal_reason(verdict: Dict[str, Any]) -> str:
     if explanation:
         label = "Bedrock" if verdict.get("explanation_source") == "bedrock" else "Deterministic explanation"
         detail = f"{detail}\n{label}: {explanation}"
+    suggestion = fix_line(verdict)
+    if suggestion:
+        detail = f"{detail}\n{suggestion}"
     return detail
 
 
