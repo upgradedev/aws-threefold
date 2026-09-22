@@ -215,8 +215,9 @@ Each file takes the same shape:
 
 The stage applies to calls from hooks and CI. The demo's page and simulation
 calls always enforce, so the public demo behaves the same whatever a project's
-stage is. A machine pinned to `--mode observe` is never refused, whatever the
-dashboard says, and the project page flags such a machine among its agents.
+stage is. A machine pinned to `--mode observe` is never refused by the service,
+whatever the dashboard says, and the project page flags such a machine among
+its agents.
 
 A refusal comes with a **validated fix** when one fits: a rewritten file, a
 port and an adapter, an environment lookup in place of a literal credential.
