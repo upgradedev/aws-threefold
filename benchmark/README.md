@@ -68,7 +68,7 @@ From Claude Code's own debug log (`--debug-file`) and from its binary:
 - The memory loader reads the user-level `CLAUDE.md` only when the user setting source is on, so `--setting-sources project,local` keeps it out. It also walks every folder above the working directory for project memory, which is why the work root is chosen as described above.
 - The hook is registered from `.claude/settings.local.json` under `--setting-sources project,local`: with the hook installed the log finds that file and records a `hook_registered` event at start-up; in a control run without it the file is reported missing and no such event appears. Whether it then fires on each governed call, and whether it ever failed open, is checked per run.
 - Not checked with a live agent: whether the permission rules let the shell redirect the `catalog-vat-regen` prompt asks for (`python scripts/gen_vat_rates.py > ...`) run without a prompt. The per-run record of permission denials shows it if not.
-- The headless login did not work: every `claude -p` answered "Failed to authenticate: OAuth session expired" earlier in the day and "Not logged in" later (`claude auth status`: `loggedIn: false`), so the pilot measured no agent.
+- The headless login did not work: every `claude -p` with the machine's configuration folder answered "Failed to authenticate: OAuth session expired and could not be refreshed", again at 09:50 UTC with the final harness, and `claude auth status` reported `loggedIn: false`, so the pilot measured no agent. The owner logs in again (`claude auth login`) or creates a token (`claude setup-token`, exported as `CLAUDE_CODE_OAUTH_TOKEN`) and reruns the pilot.
 
 ## Files
 
