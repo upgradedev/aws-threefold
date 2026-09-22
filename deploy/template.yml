@@ -27,21 +27,28 @@ Parameters:
   # Operations. Every one of these defaults to a value both stacks run with,
   # so an update that overrides none of them deploys unattended, and neither
   # stack has to be told anything new to pick them up.
+  # A String with a pattern rather than a Number: a Number also accepts 0.0,
+  # which the condition that turns 0 into "no reservation" compares as text
+  # and would pass on to Lambda as a reservation of nothing.
   ReservedConcurrency:
-    Type: Number
-    Default: 25
-    MinValue: 0
+    Type: String
+    Default: '25'
+    AllowedPattern: '^(0|[1-9][0-9]{0,3})$'
+    ConstraintDescription: a whole number of copies, or 0 for no reservation
     Description: >-
       The most copies of the function that may run at once, reserved out of the
       account's pool. If a call without a model takes a tenth of a second, 25
       copies serve about 250 requests a second, more than the API's throttle
       lets through on any one route, so the cap is reached only by calls that
       run long, which are the ones that cost: it bounds how many Bedrock calls
-      and table writes a runaway client can have in flight. Two stacks at 25
-      reserve 50 of the default account quota of 1,000, which leaves every
-      other function in the account the rest. 0 removes the reservation instead
-      of being passed to Lambda, which reads 0 as "never run"; use it on an
-      account whose quota is too small to reserve from.
+      and table writes a runaway client can have in flight. Lambda refuses a
+      reservation that leaves fewer than 100 unreserved, and a new account's
+      quota can be as low as 10, so before the first deploy check that
+      `aws lambda get-account-settings` shows
+      AccountLimit.ConcurrentExecutions of at least 100 plus every reservation
+      in the account: 150 for the two stacks at 25. Below that, deploy with 0,
+      which removes the reservation instead of being passed to Lambda, which
+      reads 0 as "never run".
 
   ApiThrottleRateLimit:
     Type: Number
@@ -91,10 +98,12 @@ Parameters:
       personal data, and describe-stacks would otherwise print it to anyone who
       can read the stack, including a CI log.
 
+  # A String with a pattern for the reason given at ReservedConcurrency.
   MonthlyBudgetUsd:
-    Type: Number
-    Default: 0
-    MinValue: 0
+    Type: String
+    Default: '0'
+    AllowedPattern: '^(0|[1-9][0-9]{0,5})$'
+    ConstraintDescription: a whole number of US dollars, or 0 for no budget
     Description: >-
       A monthly cost budget in US dollars that notifies the alarm topic when
       actual spend passes 80% of it and when forecast spend passes all of it.

@@ -329,9 +329,6 @@ def test_the_function_is_traced_and_the_transform_grants_it_the_permission() -> 
 
 
 def test_concurrency_is_capped_by_a_parameter_that_cannot_switch_the_function_off() -> None:
-    block = PARAMETERS["ReservedConcurrency"]
-    assert re.search(r"^    Type: Number$", block, re.M)
-    assert re.search(r"^    MinValue: 0$", block, re.M)
     default = int(_default("ReservedConcurrency"))
     assert 10 <= default <= 100, (
         f"{default}: below ten a busy demo is throttled, above a hundred two stacks eat into "
@@ -343,6 +340,41 @@ def test_concurrency_is_capped_by_a_parameter_that_cannot_switch_the_function_of
         re.M,
     ), "0 must become no reservation: passed through, Lambda reads it as never run"
     assert re.search(r"^  CapConcurrency: !Not \[!Equals \[!Ref ReservedConcurrency, '0'\]\]$", _conditions(), re.M)
+
+
+def test_the_concurrency_parameter_tells_the_owner_how_to_check_the_account_first() -> None:
+    """A new account's quota can be too small to reserve 25 twice out of.
+
+    Lambda refuses a reservation that leaves fewer than 100 copies unreserved,
+    so on such an account the default fails the deploy and rolls it back. The
+    parameter's description is what the owner reads at deploy time, so it has
+    to name the check and the way out.
+    """
+    description = _tree(PARAMETERS["ReservedConcurrency"])["Description"]
+    assert "aws lambda get-account-settings" in description
+    assert "ConcurrentExecutions" in description and "150" in description and "100 unreserved" in description
+    assert "deploy with 0" in description
+    assert "quota of 1,000" not in description, "That is the default quota, not necessarily this account's"
+
+
+# Both parameters are compared with '0' as text by the condition that turns
+# 0 into "none". A Number parameter also accepts 0.0 or 2.5, and '0.0' is not
+# '0': the reservation would reach Lambda as nothing and the budget would be
+# created at zero dollars. A String with a whole-number pattern refuses both
+# before the stack is touched.
+@pytest.mark.parametrize("parameter", ["ReservedConcurrency", "MonthlyBudgetUsd"])
+@pytest.mark.parametrize(
+    "value, allowed",
+    [("0", True), ("25", True), ("150", True), ("0.0", False), ("2.5", False), ("-1", False),
+     ("025", False), ("00", False), ("", False), (" 25", False), ("1e3", False)],
+)
+def test_the_parameters_compared_with_zero_accept_only_whole_numbers(parameter: str, value: str, allowed: bool) -> None:
+    declared = _tree(PARAMETERS[parameter])
+    assert declared["Type"] == "String", f"{parameter}: a Number accepts 0.0, which the condition does not read as 0"
+    assert "MinValue" not in declared and "MaxValue" not in declared, "CloudFormation applies neither to a String"
+    assert declared["ConstraintDescription"], "A refused value should say what would be accepted"
+    assert re.fullmatch(declared["AllowedPattern"], _default(parameter)), "The default must pass its own pattern"
+    assert bool(re.fullmatch(declared["AllowedPattern"], value)) is allowed, f"{parameter}={value!r}"
 
 
 def test_the_function_log_group_keeps_its_name_and_explicit_retention() -> None:
