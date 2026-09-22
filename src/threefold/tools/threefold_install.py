@@ -942,9 +942,12 @@ def plan_install(
     if tracked(CONFIG_FILE):
         # Writing it would put this machine's key path in a committed file,
         # and an uninstall could never tell the team's version from ours.
+        # What the committed file decides is the project; the mode and the
+        # endpoint in force are on the header, next to what decides each of
+        # them, which is not always this file.
         plan.add(
-            f"{CONFIG_FILE} is tracked by git, so it was left as it is: the committed file decides the project and "
-            f"the mode here. Change it in a commit, or set THREEFOLD_PROJECT, if it should say {args.project}"
+            f"{CONFIG_FILE} is tracked by git, so it was left as it is: the committed file decides the project "
+            f"here. Change it in a commit, or set THREEFOLD_PROJECT, if it should say {args.project}"
         )
         if includes:
             # Said on its own line: an exit code of 0 and no word about the

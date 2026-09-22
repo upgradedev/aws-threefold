@@ -557,6 +557,8 @@ def test_a_committed_file_that_sets_no_mode_names_the_default_and_not_the_commit
     assert header(result.out, "mode").startswith("enforce"), result.out
     assert "nothing sets it, so the hook's own default applies" in result.out, result.out
     assert "the tracked .threefold.json decides it" not in result.out, result.out
+    assert "the committed file decides the project here" in result.out, result.out
+    assert "decides the project and the mode" not in result.out, "the file this one commits says no mode"
 
 
 def test_a_variable_in_the_environment_is_named_when_it_is_what_decides(
