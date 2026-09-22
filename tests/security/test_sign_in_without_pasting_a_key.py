@@ -97,6 +97,14 @@ def test_the_key_mints_a_link_back_to_this_stacks_dashboard() -> None:
     assert headers["Cache-Control"] == "no-store", "A response carrying a credential is never cached"
 
 
+def test_a_destination_cannot_add_parameters_to_the_link() -> None:
+    """next lands after the code in the fragment, so its & and = must stay inside it."""
+    url = _mint("/calls?project=Acme-Billing&code=acme-planted")["url"]
+    fragment = url.split("#", 1)[1]
+    assert fragment.count("&") == 1 and fragment.count("code=") == 1
+    assert fragment.endswith("&next=%2Fcalls%3Fproject%3DAcme-Billing%26code%3Dacme-planted")
+
+
 def test_a_link_with_no_destination_opens_the_overview() -> None:
     assert _mint()["url"].endswith("&next=%2Foverview")
 
