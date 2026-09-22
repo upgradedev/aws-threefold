@@ -13,11 +13,12 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import ipaddress
 import os
 import re
 import threading
 import time
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, Union
 
 from threefold.infrastructure import auth_store
 
@@ -62,6 +63,152 @@ class TokenBucketRateLimiter:
 
 
 _global_rate_limiter = TokenBucketRateLimiter(refill_rate_per_sec=2.0, max_tokens=60.0)
+
+
+# Who is calling, when the call came through the edge. Behind CloudFront the
+# function sees a CloudFront server as the source address, shared by every
+# viewer that server handles, so one busy client would empty the bucket for
+# all of them. The edge proves a request passed through it with a secret origin
+# header, and CloudFront overwrites that header whenever a viewer sends one of
+# the same name, so only the edge can present it. The API's own URL stays
+# public, so without the proof the viewer headers below are whatever a caller
+# chose to send and are ignored.
+EDGE_SECRET_ENV = "THREEFOLD_EDGE_SECRET"
+EDGE_SECRET_HEADER = "X-Threefold-Edge"
+# Set by CloudFront itself: the viewer's address and source port.
+VIEWER_ADDRESS_HEADER = "CloudFront-Viewer-Address"
+# Set by the edge's viewer-request function from the viewer's Host, because
+# the origin request replaces Host with the API's own name.
+VIEWER_HOST_HEADER = "X-Threefold-Viewer-Host"
+# The edge template refuses a shorter secret. A shorter value here is a
+# mistake rather than a secret, and trusting it would let anyone who guessed
+# it choose their own rate-limit bucket.
+MIN_EDGE_SECRET_LENGTH = 32
+# An IPv6 viewer is counted by its /64, the prefix one subscriber or one host
+# is ordinarily routed. Every address inside it is the viewer's to use, so a
+# key holding the full address would give a viewer a fresh bucket for each
+# address it rotated to, and one entry in the limiter's table for each.
+IPV6_BUCKET_PREFIX = 64
+
+
+def header_value(headers: Dict[str, Any], name: str) -> Optional[str]:
+    """One header's value, whatever case the caller or API Gateway used for its name.
+
+    None when it is absent, and None when it arrives under two spellings of
+    its name with different values: which spelling a dict yields first depends
+    on how the event was built, so taking either would let an extra copy
+    decide whether the edge's proof holds. API Gateway lower-cases names and
+    joins repeats with a comma, so through it this never happens; the local
+    server and hand-built events pass names as they came.
+    """
+    wanted = name.lower()
+    values = {
+        value for key, value in (headers or {}).items() if str(key).lower() == wanted and isinstance(value, str)
+    }
+    return values.pop() if len(values) == 1 else None
+
+
+def edge_request_is_trusted(headers: Dict[str, Any]) -> bool:
+    """True when the request carries the edge's secret and the function has one.
+
+    Read from the environment on every call, so a stack deployed without the
+    secret trusts no header at all. Compared as bytes in constant time, for
+    the reason _key_matches gives. Neither value is ever logged.
+    """
+    secret = os.environ.get(EDGE_SECRET_ENV, "").strip()
+    if len(secret) < MIN_EDGE_SECRET_LENGTH:
+        return False
+    presented = header_value(headers, EDGE_SECRET_HEADER)
+    if not presented:
+        return False
+    return hmac.compare_digest(presented.strip().encode("utf-8"), secret.encode("utf-8"))
+
+
+def _ip(text: str) -> Optional[Union[ipaddress.IPv4Address, ipaddress.IPv6Address]]:
+    try:
+        return ipaddress.ip_address(text)
+    except ValueError:
+        return None
+
+
+def _is_port(text: str) -> bool:
+    """ASCII digits only: str.isdigit() also accepts characters int() refuses."""
+    return re.fullmatch(r"[0-9]{1,5}", text) is not None and int(text) <= 65535
+
+
+def viewer_address(value: Optional[str]) -> Optional[str]:
+    """The viewer's IP address from CloudFront-Viewer-Address, without the port.
+
+    CloudFront writes "198.51.100.10:46532" for IPv4 and, for IPv6, the address
+    and the port joined by one more colon with no brackets. A bracketed
+    "[2001:db8::1]:443" and a bare address are read too. An unbracketed IPv6
+    value is read as address then port whenever that reading is valid, because
+    CloudFront always appends the port and the port changes with every
+    connection: keeping it would give each request a bucket of its own and the
+    limiter would stop nothing. Where a bare address happens to end in a group
+    of digits, that reading merges it with its neighbours in the last group,
+    which for a rate limit is harmless. A value holding more than one address
+    (two headers joined by a comma) is refused, so a viewer can never pick the
+    bucket it is counted in. The result is normalized, so two spellings of one
+    address share one bucket.
+    """
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text or "," in text or len(text) > 64:
+        return None
+    address = None
+    if text.startswith("["):
+        inner, bracket, rest = text[1:].partition("]")
+        if bracket and (rest == "" or (rest.startswith(":") and _is_port(rest[1:]))):
+            address = _ip(inner)
+    elif text.count(":") == 1:
+        host, _, port = text.partition(":")
+        address = _ip(host) if _is_port(port) else None
+    elif ":" not in text:
+        address = _ip(text)
+    else:
+        head, _, tail = text.rpartition(":")
+        if _is_port(tail):
+            address = _ip(head)
+        if address is None:
+            address = _ip(text)
+    if address is None:
+        return None
+    if address.version == 6 and address.ipv4_mapped is not None:
+        address = address.ipv4_mapped
+    return str(address)
+
+
+def rate_limit_bucket(address: str) -> str:
+    """The bucket an address is counted in: itself, or its /64 when it is IPv6.
+
+    An IPv4 address, and anything that is not an address at all, is returned
+    exactly as given. An IPv4 address written as IPv6 (::ffff:198.51.100.10)
+    counts as the IPv4 address. The prefix is written as a network
+    ("2001:db8::/64"), so it can never collide with a single address's key.
+    """
+    ip = _ip(address) if isinstance(address, str) else None
+    if ip is None or ip.version == 4:
+        return address
+    if ip.ipv4_mapped is not None:
+        return str(ip.ipv4_mapped)
+    return str(ipaddress.IPv6Network((int(ip), IPV6_BUCKET_PREFIX), strict=False))
+
+
+def rate_limit_key(headers: Dict[str, Any], source_ip: str) -> str:
+    """The bucket the rate limiter counts a request against.
+
+    The viewer's own address when the request proves it came through the edge
+    and CloudFront said who the viewer was; the connection's source address
+    otherwise, as before. Either way an IPv6 address is counted by its /64
+    (see rate_limit_bucket), and an IPv4 key is unchanged.
+    """
+    if edge_request_is_trusted(headers):
+        viewer = viewer_address(header_value(headers, VIEWER_ADDRESS_HEADER))
+        if viewer is not None:
+            return rate_limit_bucket(viewer)
+    return rate_limit_bucket(source_ip)
 
 
 def rfc7807_error(
@@ -467,8 +614,8 @@ def validate_request_security(
             error_type="urn:threefold:error:payload-too-large",
         )
 
-    # 2. Rate limiting check
-    if not limiter.is_allowed(client_ip):
+    # 2. Rate limiting check, per viewer when the edge vouches for who that is
+    if not limiter.is_allowed(rate_limit_key(headers, client_ip)):
         return False, rfc7807_error(
             status_code=429,
             title="Too Many Requests",

@@ -36,6 +36,25 @@ Parameters:
       the API unprefixed, so a URL copied from the API with only its host changed
       still works.
 
+  EdgeOriginSecret:
+    Type: String
+    NoEcho: true
+    MinLength: 32
+    MaxLength: 256
+    AllowedPattern: '^[A-Za-z0-9_-]+$'
+    ConstraintDescription: >-
+      at least 32 URL-safe characters (letters, digits, '-' and '_'), such as
+      the output of Python's secrets.token_urlsafe(48)
+    Description: >-
+      The value the edge sends to the API in the X-Threefold-Edge origin
+      header, and the same value as the API stack's EdgeOriginSecret. The
+      function believes the viewer's address and host name only on a request
+      that carries it, because the API's own URL stays public and any caller
+      can send those headers. It has no default, so an edge never deploys
+      without one. NoEcho keeps it out of describe-stacks; the distribution's
+      own configuration still holds it, readable by anyone in the account
+      allowed cloudfront:GetDistributionConfig.
+
   RateLimitPerFiveMinutes:
     Type: Number
     Default: 1000
@@ -470,6 +489,40 @@ Resources:
             CloudWatchMetricsEnabled: true
             MetricName: !Sub '${AWS::StackName}-known-bad-inputs'
 
+  # --- the viewer's host name ----------------------------------------------------------
+
+  # The origin request replaces Host with the API's own name, which API Gateway
+  # needs to route the request, so the function would otherwise never learn the
+  # name the viewer used. This copies it into X-Threefold-Viewer-Host, which the
+  # function writes into /install.py, the manifest and sign-in links in place of
+  # its own address. The function believes it only alongside the edge secret.
+  # Host is read-only in a viewer request, but readable; the new header's name
+  # is on neither the disallowed nor the read-only list of the CloudFront
+  # developer guide's "Restrictions on all edge functions", and starts with no
+  # prefix reserved there (X-Amz-Cf-, X-Edge-). A viewer who sends the header
+  # themselves has it replaced, or removed when there is no Host to copy, so
+  # only this function's value reaches the API. Plain text rather than !Sub, so
+  # nothing in the code is taken for a CloudFormation variable.
+  ViewerHostFunction:
+    Type: AWS::CloudFront::Function
+    Properties:
+      Name: !Sub '${AWS::StackName}-viewer-host'
+      AutoPublish: true
+      FunctionConfig:
+        Comment: Copies the viewer's Host into X-Threefold-Viewer-Host for the API.
+        Runtime: cloudfront-js-2.0
+      FunctionCode: |
+        function handler(event) {
+            var request = event.request;
+            var host = request.headers.host;
+            if (host && host.value) {
+                request.headers['x-threefold-viewer-host'] = { value: host.value };
+            } else {
+                delete request.headers['x-threefold-viewer-host'];
+            }
+            return request;
+        }
+
   # --- the distribution -----------------------------------------------------------------
 
   # One origin for the pages and the API twice. The default behavior serves the
@@ -500,24 +553,33 @@ Resources:
   # call, with or without THREEFOLD_FAIL_CLOSED. Point hooks at the SiteUrl
   # output or at <SiteUrl>prod/, the two forms routed here.
   #
-  # Two consequences of the function sitting behind the edge, both for the API
-  # stack to handle, not this one:
-  # - Host. The function sees the API's own host name, not the edge's, because
-  #   the Host header is replaced. Anything it builds from Host, such as the
-  #   endpoint baked into /install.py, names the API's own URL, so a hook
-  #   installed from the edge talks to the API directly, past this web ACL.
-  # - Source address. The function rate-limits per client address, read from
-  #   requestContext.http.sourceIp, 2 a second with a burst of 60 in each
-  #   container. Behind the edge that address is a CloudFront server shared by
-  #   every viewer it serves, and this web ACL lets one viewer send about 3 a
-  #   second, so one busy client can empty the bucket for everyone behind the
-  #   same edge server, whose hook calls then get 429 and go unjudged. The
-  #   viewer's own address does reach the function, in CloudFront-Viewer-Address
-  #   (AllViewerExceptHostHeader forwards the viewer location headers, that one
-  #   among them), but the API's URL is public, so any caller can send that
-  #   header too. The middleware can key on it only for a request that proves it
-  #   came through the edge, for example by a secret origin header the edge adds
-  #   and the function checks, which is a parameter both stacks would share.
+  # Who is calling. Behind the edge the function sees a CloudFront server as the
+  # caller and the API's own name as the host, which broke two things: the
+  # function's per-address rate limit (2 a second, a burst of 60 per container)
+  # put every viewer of one edge server in one bucket, so one busy client got
+  # everyone's hook calls answered 429 and left unjudged; and /install.py, the
+  # manifest and sign-in links named the API's URL, so a hook installed from the
+  # edge talked to the API directly, past this web ACL. Three things fix it:
+  # - Both API origins send X-Threefold-Edge with EdgeOriginSecret, the same
+  #   value as the API stack's parameter of that name. The CloudFront developer
+  #   guide ("Add custom headers to origin requests") says that when the viewer
+  #   request already holds a header of that name, CloudFront overwrites its
+  #   value, so a viewer cannot present a secret of their own through the edge,
+  #   and without the secret a caller of the API's public URL cannot either.
+  # - CloudFront-Viewer-Address carries the viewer's address and port. The
+  #   managed AllViewerExceptHostHeader policy forwards it: its page ("Use
+  #   managed origin request policies") says the policy adds "all device type
+  #   and viewer location headers", and "Add CloudFront request headers" lists
+  #   CloudFront-Viewer-Address under "Viewer location headers". A custom policy
+  #   could not do better: "all viewer headers" there includes Host, which API
+  #   Gateway refuses, and an include-list would have to name every header the
+  #   routes read, a miss being silent.
+  # - ViewerHostFunction, on every API behavior, copies the viewer's Host into
+  #   X-Threefold-Viewer-Host before the origin request policy applies, so the
+  #   same policy forwards it as a viewer header. The bucket's behaviors do not
+  #   run it: S3 reads no header of ours, and each run is billed.
+  # The function believes the viewer's address and host only on a request that
+  # carries the secret, so the API's own URL keeps working exactly as before.
   Distribution:
     Type: AWS::CloudFront::Distribution
     Properties:
@@ -548,6 +610,9 @@ Resources:
           - Id: api
             DomainName: !Ref ApiDomainName
             OriginPath: !Ref ApiStagePath
+            OriginCustomHeaders:
+              - HeaderName: X-Threefold-Edge
+                HeaderValue: !Ref EdgeOriginSecret
             CustomOriginConfig:
               OriginProtocolPolicy: https-only
               HTTPSPort: 443
@@ -556,9 +621,14 @@ Resources:
               OriginReadTimeout: 30
               OriginKeepaliveTimeout: 5
           # The same API with no origin path, for requests that already carry
-          # the stage: /prod/status at the edge is /prod/status at the API.
+          # the stage: /prod/status at the edge is /prod/status at the API. It
+          # sends the secret too, or a hook pointed at <SiteUrl>prod/ would be
+          # counted as the edge server rather than as itself.
           - Id: api-stage
             DomainName: !Ref ApiDomainName
+            OriginCustomHeaders:
+              - HeaderName: X-Threefold-Edge
+                HeaderValue: !Ref EdgeOriginSecret
             CustomOriginConfig:
               OriginProtocolPolicy: https-only
               HTTPSPort: 443
@@ -579,6 +649,7 @@ Resources:
         # as a GET in most clients and the call would silently not be judged.
         # 4135ea2d-... is the managed CachingDisabled cache policy and
         # b689b0a8-... the managed AllViewerExceptHostHeader origin request policy.
+        # Every API behavior runs ViewerHostFunction on the viewer request.
         # 21 behaviors and the default: the tests hold the list to 25 in all.
         CacheBehaviors:
           - PathPattern: /assets/*
@@ -598,6 +669,9 @@ Resources:
             CachedMethods: [GET, HEAD]
             CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
             OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+            FunctionAssociations:
+              - EventType: viewer-request
+                FunctionARN: !GetAtt ViewerHostFunction.FunctionMetadata.FunctionARN
             ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
           # The application's JSON: overview, decisions, projects, reviews,
           # sandbox, sign-in, sessions and insights.
@@ -608,6 +682,9 @@ Resources:
             CachedMethods: [GET, HEAD]
             CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
             OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+            FunctionAssociations:
+              - EventType: viewer-request
+                FunctionARN: !GetAtt ViewerHostFunction.FunctionMetadata.FunctionARN
             ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
           - PathPattern: /evaluate-tool-call*
             TargetOriginId: api
@@ -616,6 +693,9 @@ Resources:
             CachedMethods: [GET, HEAD]
             CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
             OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+            FunctionAssociations:
+              - EventType: viewer-request
+                FunctionARN: !GetAtt ViewerHostFunction.FunctionMetadata.FunctionARN
             ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
           # /simulate-loop and /simulate-secret, the dashboard's scenarios.
           - PathPattern: /simulate-*
@@ -625,6 +705,9 @@ Resources:
             CachedMethods: [GET, HEAD]
             CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
             OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+            FunctionAssociations:
+              - EventType: viewer-request
+                FunctionARN: !GetAtt ViewerHostFunction.FunctionMetadata.FunctionARN
             ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
           - PathPattern: /issue-certificate*
             TargetOriginId: api
@@ -633,6 +716,9 @@ Resources:
             CachedMethods: [GET, HEAD]
             CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
             OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+            FunctionAssociations:
+              - EventType: viewer-request
+                FunctionARN: !GetAtt ViewerHostFunction.FunctionMetadata.FunctionARN
             ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
           - PathPattern: /universal-eval*
             TargetOriginId: api
@@ -641,6 +727,9 @@ Resources:
             CachedMethods: [GET, HEAD]
             CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
             OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+            FunctionAssociations:
+              - EventType: viewer-request
+                FunctionARN: !GetAtt ViewerHostFunction.FunctionMetadata.FunctionARN
             ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
           - PathPattern: /adapter/*
             TargetOriginId: api
@@ -649,6 +738,9 @@ Resources:
             CachedMethods: [GET, HEAD]
             CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
             OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+            FunctionAssociations:
+              - EventType: viewer-request
+                FunctionARN: !GetAtt ViewerHostFunction.FunctionMetadata.FunctionARN
             ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
           # /sessions/<id>, /sessions/<id>/terminate and /resume. The slash keeps
           # /sessions.html, a page, on the bucket.
@@ -659,6 +751,9 @@ Resources:
             CachedMethods: [GET, HEAD]
             CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
             OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+            FunctionAssociations:
+              - EventType: viewer-request
+                FunctionARN: !GetAtt ViewerHostFunction.FunctionMetadata.FunctionARN
             ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
           # Every JSON document is the function's: /sessions.json, /insights.json,
           # /openapi.json and /docs/openapi.json. The function serves the OpenAPI
@@ -673,6 +768,9 @@ Resources:
             CachedMethods: [GET, HEAD]
             CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
             OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+            FunctionAssociations:
+              - EventType: viewer-request
+                FunctionARN: !GetAtt ViewerHostFunction.FunctionMetadata.FunctionARN
             ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
           # /rules exactly, and /rules/<anything> (/rules/ included): a /rules*
           # pattern would also take /rules.html, a page, away from the bucket.
@@ -683,6 +781,9 @@ Resources:
             CachedMethods: [GET, HEAD]
             CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
             OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+            FunctionAssociations:
+              - EventType: viewer-request
+                FunctionARN: !GetAtt ViewerHostFunction.FunctionMetadata.FunctionARN
             ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
           - PathPattern: /rules/*
             TargetOriginId: api
@@ -691,6 +792,9 @@ Resources:
             CachedMethods: [GET, HEAD]
             CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
             OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+            FunctionAssociations:
+              - EventType: viewer-request
+                FunctionARN: !GetAtt ViewerHostFunction.FunctionMetadata.FunctionARN
             ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
           - PathPattern: /policy
             TargetOriginId: api
@@ -699,6 +803,9 @@ Resources:
             CachedMethods: [GET, HEAD]
             CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
             OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+            FunctionAssociations:
+              - EventType: viewer-request
+                FunctionARN: !GetAtt ViewerHostFunction.FunctionMetadata.FunctionARN
             ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
           - PathPattern: /policy/*
             TargetOriginId: api
@@ -707,6 +814,9 @@ Resources:
             CachedMethods: [GET, HEAD]
             CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
             OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+            FunctionAssociations:
+              - EventType: viewer-request
+                FunctionARN: !GetAtt ViewerHostFunction.FunctionMetadata.FunctionARN
             ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
           - PathPattern: /status*
             TargetOriginId: api
@@ -715,6 +825,9 @@ Resources:
             CachedMethods: [GET, HEAD]
             CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
             OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+            FunctionAssociations:
+              - EventType: viewer-request
+                FunctionARN: !GetAtt ViewerHostFunction.FunctionMetadata.FunctionARN
             ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
           - PathPattern: /health*
             TargetOriginId: api
@@ -723,6 +836,9 @@ Resources:
             CachedMethods: [GET, HEAD]
             CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
             OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+            FunctionAssociations:
+              - EventType: viewer-request
+                FunctionARN: !GetAtt ViewerHostFunction.FunctionMetadata.FunctionARN
             ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
           # /ready and /readyz in one behavior.
           - PathPattern: /ready*
@@ -732,6 +848,9 @@ Resources:
             CachedMethods: [GET, HEAD]
             CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
             OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+            FunctionAssociations:
+              - EventType: viewer-request
+                FunctionARN: !GetAtt ViewerHostFunction.FunctionMetadata.FunctionARN
             ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
           # The hook, the installer and the bundle the installer fetches. The
           # function substitutes its own endpoint into /install.py, so these stay
@@ -743,6 +862,9 @@ Resources:
             CachedMethods: [GET, HEAD]
             CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
             OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+            FunctionAssociations:
+              - EventType: viewer-request
+                FunctionARN: !GetAtt ViewerHostFunction.FunctionMetadata.FunctionARN
             ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
           - PathPattern: /claude_code_hook.py
             TargetOriginId: api
@@ -751,6 +873,9 @@ Resources:
             CachedMethods: [GET, HEAD]
             CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
             OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+            FunctionAssociations:
+              - EventType: viewer-request
+                FunctionARN: !GetAtt ViewerHostFunction.FunctionMetadata.FunctionARN
             ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
           - PathPattern: /install.py
             TargetOriginId: api
@@ -759,6 +884,9 @@ Resources:
             CachedMethods: [GET, HEAD]
             CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
             OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+            FunctionAssociations:
+              - EventType: viewer-request
+                FunctionARN: !GetAtt ViewerHostFunction.FunctionMetadata.FunctionARN
             ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
           - PathPattern: /dist/*
             TargetOriginId: api
@@ -767,6 +895,9 @@ Resources:
             CachedMethods: [GET, HEAD]
             CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
             OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+            FunctionAssociations:
+              - EventType: viewer-request
+                FunctionARN: !GetAtt ViewerHostFunction.FunctionMetadata.FunctionARN
             ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
 
 Outputs:
