@@ -75,6 +75,14 @@ def review_deltas(kind: str, key: str, old: Optional[str], new: Optional[str]) -
 
 
 def _window(days: int, today: datetime.date) -> List[str]:
+    """The UTC days a window covers, oldest first.
+
+    Whole days, because a rollup is a day's counters and nothing finer can be
+    read out of one. `days=1` is therefore today's partition: at 00:05 UTC that
+    is five minutes of calls, not twenty-four hours of them. The overview says
+    which day it starts at (`window_from`) so that nobody has to infer it from
+    the count and get it wrong.
+    """
     return [str(today - datetime.timedelta(days=offset)) for offset in range(days - 1, -1, -1)]
 
 
@@ -131,6 +139,7 @@ def overview(
 ) -> Dict[str, Any]:
     """GET /api/overview: tiles, a daily series, and totals by agent, origin, rule and project."""
     today = today or datetime.datetime.now(datetime.timezone.utc).date()
+    days_covered = _window(days, today)
     rollups, configs = _as_shown(rollups, configs)
     names = _projects_in(rollups, configs, project)
     shown = [item for item in rollups if item.get("project") in set(names)]
@@ -144,6 +153,10 @@ def overview(
     stage_counts = Counter(row["stage"] for row in by_project)
     return {
         "window_days": days,
+        # The first UTC day these numbers cover. `window_days` alone reads as a
+        # rolling window, and it is not one: a day is the smallest thing a
+        # rollup holds, so `days=1` is today since 00:00 UTC and nothing more.
+        "window_from": days_covered[0],
         "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "source": "rollups",
         "totals": {
@@ -163,7 +176,7 @@ def overview(
                 "observed": _sum(by_day.get(day, []), "observed"),
                 "refused": _sum(by_day.get(day, []), "refused"),
             }
-            for day in _window(days, today)
+            for day in days_covered
         ],
         "by_agent": _ranked(agents, "agent"),
         "by_origin": _ranked(_prefixed(shown, "origin:"), "origin"),
