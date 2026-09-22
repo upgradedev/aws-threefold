@@ -157,7 +157,7 @@ PRIVATE_HOME_ENTRIES = (".threefold", ".claude", ".claude.json", ".aws", ".ssh",
 
 # Environment variables that never reach the agent, the hook or the server:
 # the host session's own plumbing, the owner's Threefold settings, AWS,
-# Anthropic and OpenAI credentials, which an agent asked to archive to S3
+# model-provider credentials, which an agent asked to archive to S3
 # might otherwise use, and pytest and Python settings from the owner's shell
 # that would change how the tests run. CLAUDE_CODE_OAUTH_TOKEN goes with every
 # other CLAUDE* name: a token exported in the owner's shell is not used, and

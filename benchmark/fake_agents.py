@@ -221,7 +221,7 @@ def fake_codex(bin_dir: Path, argv: List[str]) -> int:
         if behaviour.get("mode") == "not_logged_in":
             print("Not logged in")
             return 1
-        print("Logged in using ChatGPT")
+        print("Logged in (a stand-in login)")
         return 0
     prompt = sys.stdin.read()
     mode = _mode(bin_dir, "codex")
