@@ -479,7 +479,8 @@ burst of 200 for each of the API's seven routes on its own
 (`DefaultRouteSettings`), so page reads (`ANY /{proxy+}`) and hook verdicts
 (`POST /evaluate-tool-call`) each get that allowance; together with the edge's
 per-address limit it bounds a flood, and does not keep one kind of request
-from crowding out the other. One role carries the union of what every route needs:
+from crowding out the other. One role carries the union of what every route
+needs:
 Bedrock, the table (including `Scan` and `DeleteItem`) and the unused evidence
 bucket. And every in-memory limit (the per-address bucket, the Bedrock call
 caps) is per container, not per account: N busy containers allow N times the cap.
@@ -508,8 +509,8 @@ permission flow decides.
 What it costs. While the service is unreachable, nothing is judged by the
 service: no layering rule, no loop detection, no ledger row. What still holds
 is decided on the machine: a credential is refused, and in enforce (or managed
-at an enforcing stage) a file-tool write to the hooks' own files is refused. A team that
-prefers the other failure sets `THREEFOLD_FAIL_CLOSED=1`. The pre-commit check
+at an enforcing stage) a file-tool write to the hooks' own files is refused. A
+team that prefers the other failure sets `THREEFOLD_FAIL_CLOSED=1`. The pre-commit check
 runs offline and catches what reached a commit.
 
 ### 8.4 Why Bedrock is off the enforcement path

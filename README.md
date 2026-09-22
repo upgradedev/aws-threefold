@@ -294,8 +294,8 @@ Blind by design, as the hook's contract in `STATE.md` sets it [STATE-FILE] and
   cannot be reached the hook fails open.
 - Everything under `.git` is a data directory to the hook. Outside `enforce`
   mode (and `managed` mode while the project enforces), where the hook refuses
-  it on the machine, a `Write` or `Edit` to `.git/hooks/` or `.git/config` is
-  held back: it is not sent, so an attempt to switch the pre-commit check off
+  it on the machine, a file-tool write (`Write`, `Edit`, a patch) to
+  `.git/hooks/` or `.git/config` is held back: it is not sent, so an attempt to switch the pre-commit check off
   that way never shows up in Observe or the review queue. The same write made
   through a shell command is sent, and recorded under `PROTECTED_PATH`.
 
