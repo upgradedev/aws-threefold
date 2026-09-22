@@ -219,6 +219,9 @@ class RulesService:
     def __init__(self) -> None:
         self.status = 200
         self.body: Any = {"rules": [CUSTOM_RULE], "is_default": False}
+        # A path, without its query, answered with its own (status, body)
+        # instead of the default, for the project route managed mode reads.
+        self.routes: Dict[str, Any] = {}
         self.requests: List[Dict[str, Any]] = []
         self.port = 0
 
@@ -234,8 +237,9 @@ def service():
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:  # noqa: N802 - the name http.server calls
             state.requests.append({"path": self.path, "headers": {k.lower(): v for k, v in self.headers.items()}})
-            payload = json.dumps(state.body).encode("utf-8")
-            self.send_response(state.status)
+            status, body = state.routes.get(self.path.split("?", 1)[0], (state.status, state.body))
+            payload = json.dumps(body).encode("utf-8")
+            self.send_response(status)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(payload)))
             self.end_headers()
@@ -356,3 +360,81 @@ def test_ci_with_an_unchanged_rule_file_reports_nothing_about_it(repo) -> None:
     out = io.StringIO()
     assert cli.main(["ci", "--base", "main", "--repo", str(repo)], out) == 0
     assert cli.RULE_FILE_ID not in out.getvalue()
+
+
+# --- managed mode: the project's stage on the stack decides ----------------------------------------
+#
+# `connect` writes mode managed, so the commit check reads the stage the way the
+# hook's verdicts follow it. The stack is the local rules service, which also
+# answers the project route.
+
+PROJECT_ROUTE = "/prod/api/projects/Acme-Ledger"
+
+
+def _managed(repo, service, **project: Any) -> None:
+    service.routes[PROJECT_ROUTE] = (200, project)
+    configure(repo, project="Acme-Ledger", mode="managed", endpoint=service.endpoint)
+    write(repo, "src/core/invoice.py", "import acme_legacy\n")
+
+
+def test_managed_mode_refuses_the_commit_once_the_project_enforces(repo, service) -> None:
+    _managed(repo, service, project="Acme-Ledger", config={"stage": "enforce", "observe_rules": []})
+    result = check(repo)
+    assert result.code == 1, result.out
+    assert "REFUSED src/core/invoice.py [acme-core-no-legacy]" in result.out
+    assert "Acme-Ledger is in Enforce on the stack" in result.out
+    assert any(request["path"] == PROJECT_ROUTE for request in service.requests)
+
+
+def test_managed_mode_reports_a_rule_the_operator_left_observing(repo, service) -> None:
+    _managed(repo, service, config={"stage": "enforce", "observe_rules": ["acme-core-no-legacy"]})
+    result = check(repo)
+    assert result.code == 0, result.out
+    assert "WOULD REFUSE src/core/invoice.py [acme-core-no-legacy]" in result.out
+
+
+def test_managed_mode_refuses_nothing_while_the_project_observes(repo, service) -> None:
+    _managed(repo, service, config={"stage": "observe", "observe_rules": []})
+    result = check(repo)
+    assert result.code == 0, result.out
+    assert "WOULD REFUSE src/core/invoice.py [acme-core-no-legacy]" in result.out
+    assert "Acme-Ledger is in Observe on the stack" in result.out
+
+
+def test_managed_mode_reads_a_project_with_no_configuration_from_its_readiness(repo, service) -> None:
+    _managed(repo, service, config=None, readiness={
+        "summary": {"stage": "enforce"},
+        "rules": [{"rule_key": "acme-core-no-legacy", "mode_now": "observe"}, {"rule_key": "LOOP", "mode_now": "enforce"}],
+    })
+    result = check(repo)
+    assert result.code == 0, result.out
+    assert "WOULD REFUSE src/core/invoice.py [acme-core-no-legacy]" in result.out
+
+
+def test_managed_mode_refuses_nothing_when_the_stage_cannot_be_read(repo, service) -> None:
+    """The hook lets calls through when the stack cannot answer; the backstop does not refuse in its place."""
+    _managed(repo, service)
+    service.routes[PROJECT_ROUTE] = (503, {"title": "Unavailable"})
+    result = check(repo)
+    assert result.code == 0, result.out
+    assert "could not be read (the stack answered HTTP 503), so nothing is refused" in result.out
+
+
+def test_managed_mode_asks_for_the_stage_with_the_key_the_owner_paired(repo, service, tmp_path) -> None:
+    key = tmp_path / "acme.key"
+    key.write_text("acme-operator-key", encoding="utf-8")
+    home_config = tmp_path / "home" / ".threefold" / "config.json"
+    document = json.loads(home_config.read_text(encoding="utf-8"))
+    document["trusted_endpoints"] = [{"endpoint": service.endpoint, "api_key_file": str(key)}]
+    home_config.write_text(json.dumps(document), encoding="utf-8")
+    service.routes[PROJECT_ROUTE] = (200, {"config": {"stage": "observe"}})
+    configure(repo, project="Acme-Ledger", mode="managed", endpoint=service.endpoint, api_key_file=str(key))
+    check(repo)
+    asked = [request for request in service.requests if request["path"] == PROJECT_ROUTE]
+    assert asked and asked[0]["headers"].get("x-api-key") == "acme-operator-key"
+
+
+def test_the_mode_flag_accepts_managed(repo, service) -> None:
+    _managed(repo, service, config={"stage": "enforce"})
+    configure(repo, project="Acme-Ledger", mode="observe", endpoint=service.endpoint)
+    assert check(repo, "--mode", "managed").code == 1

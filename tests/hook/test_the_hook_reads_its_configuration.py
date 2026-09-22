@@ -160,7 +160,7 @@ def test_a_mode_nobody_meant_is_ignored_and_the_next_layer_decides(machine, payl
     _write_json(machine.threefold_home / "config.json", {"mode": "observe"})
     _, _, err = run_hook(payloads.write("claude-code"))
     assert _sent(stub)["body"]["dry_run"] is True
-    assert "must be enforce or observe" in err
+    assert "must be enforce, managed or observe" in err
 
 
 def test_the_environment_mode_overrides_a_file(machine, payloads, stub, run_hook, monkeypatch, unconfigured) -> None:
