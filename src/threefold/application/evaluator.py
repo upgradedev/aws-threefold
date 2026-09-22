@@ -115,20 +115,33 @@ FIX_REWRITE_MAX_CHARS = 1_500
 # A layering refusal past the rewrite ceiling: the proposer is asked with
 # max_content_chars=FIX_REWRITE_MAX_CHARS, so it rewrites nothing and answers
 # in words from the one read of the imports its diagnosis makes: which imports
-# to move, the rule that forbids each, and the first candidate layer where no
-# rule forbids them. Validated false and no writes. That read is a parse of the whole
-# file, as the gate's own is, so it has a ceiling too. Measured as the tests
-# measure it, the fix step against a whole verdict on the 20,000 character
-# reference beside it, interleaved, best of 15 and of 25 [PRIMARY], 2026-09-22:
-# a refused Python domain Write took 3.3 ms at 4,000 characters (0.27 of the
-# verdict), 4.6 ms at 6,000 (0.38) and 5.8 to 6.6 ms at 8,000 (0.44 to 0.50);
-# Java 0.26 and TypeScript 0.30 to 0.35 at 8,000. The reference verdict took
-# 10.4 to 16.5 ms in those runs, above the 10 ms the others were measured at,
-# so the machine was busier; the ratio is the figure that carries over. The
-# same file written by a heredoc cost 0.78 of the verdict at 4,000, 1.02 at
-# 6,000 and 1.38 at 8,000, which is why a command keeps the rewrite ceiling
+# to move (the first four by name, then how many more), the rules that forbid
+# them, and the first candidate layer where no rule forbids them. Validated
+# false and no writes. That read is a parse of the whole file, as the gate's
+# own is, and a match of every distinct import against the rules, so what it
+# costs grows with the number of imports as well as with the characters, and
+# the ceiling is set by the densest files rather than by a typical one. The
+# first version of this path put it at 8,000 and asked the rules about every
+# import four times over: a Python domain Write of 500 short imports at 7,947
+# characters then cost 4.0 times the verdict [PRIMARY], 2026-09-22. The
+# proposer now asks once per distinct import and skips the patterns that
+# cannot catch it (fix_proposer._flagged_modules and _catchable). Measured as
+# the tests measure it (the DEAREST cases in test_the_fix_reaches_the_agent),
+# the fix step against a whole verdict on the 20,000 character reference beside
+# it, interleaved, best of 31, two runs [PRIMARY], 2026-09-22, each case within
+# 120 characters of 6,000: Python function bodies 0.37 and 0.40; distinct short
+# imports with the forbidden one first 0.50 and 0.56, and last 0.52 and 0.59;
+# imports each forbidden only by the rule's last pattern 0.50 and 0.55;
+# TypeScript of the same density 0.38 and 0.40; a MultiEdit of a small
+# forbidden edit beside a large clean one 0.41 and 0.56. The same runs put the
+# rewrite at its ceiling at 0.44 and 0.52, a credential at 0.59 and a protected
+# path at 0.60, so this ceiling keeps the margin the others keep. At about
+# 7,930 characters the dense Python cases took 0.64 to 0.74, which is why it is
+# not 8,000. The reference verdict took 12 to 22 ms in those runs, above the
+# 10 ms the others were first measured at, so the machine was busier; the
+# ratio is the figure that carries over. A command keeps the rewrite ceiling
 # (see fix_max_chars).
-FIX_LAYERING_ADVICE_MAX_CHARS = 8_000
+FIX_LAYERING_ADVICE_MAX_CHARS = 6_000
 # A credential: the proposer replaces the literal with an environment lookup
 # and runs the scan and the gates again. A Python module holding one took
 # 6.1 ms at 3,000 characters, 8.5 ms at 4,000 and 12.2 ms at 6,000.
@@ -151,14 +164,18 @@ _ADVICE_KEYS = frozenset((LOOP_KEY, BUDGET_KEY, HALTED_SESSION_KEY, PROTECTED_PA
 def fix_max_chars(rule_key: str, command: bool = False) -> int:
     """The most a call may carry and still be sent a fix, for a verdict under this rule key.
 
-    A layering rule's own id (any key the contract does not fix) on a Write, an
-    Edit or any call that runs no command is rewritten up to
-    FIX_REWRITE_MAX_CHARS and answered in words above it, up to its own ceiling.
-    A command keeps the rewrite ceiling whatever refused it, and so does a
-    verdict whose key says nothing: the proposer reads a command's writes again
-    for each question it asks of them, and each read parses the content anew, so
-    a refused heredoc of 6,000 characters cost as much as the whole reference
-    verdict (see FIX_LAYERING_ADVICE_MAX_CHARS).
+    The key decides first: advice (LOOP, BUDGET, HALTED_SESSION and
+    PROTECTED_PATH, under which a destructive command is filed) gets
+    FIX_ADVICE_MAX_CHARS and a credential FIX_CREDENTIAL_MAX_CHARS, whether or
+    not the call runs a command. A layering rule's own id (any key the contract
+    does not fix) on a Write, an Edit or any call that runs no command is
+    rewritten up to FIX_REWRITE_MAX_CHARS and answered in words above it, up to
+    FIX_LAYERING_ADVICE_MAX_CHARS. A layering refusal of a command keeps the
+    rewrite ceiling, and so do an unreadable write and a verdict whose key says
+    nothing: the proposer judges a command's writes again with the gate's own
+    shell reader, which parses each write anew for each question it asks, and
+    a refused heredoc of 5,900 characters cost 1.06 times the whole reference
+    verdict, measured as the tests measure it [PRIMARY], 2026-09-22.
     """
     if rule_key in _ADVICE_KEYS:
         return FIX_ADVICE_MAX_CHARS
