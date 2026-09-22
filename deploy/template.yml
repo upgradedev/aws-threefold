@@ -24,6 +24,28 @@ Parameters:
       both the inference-profile ARN in this account and the underlying
       foundation-model ARN, which is account-less by design.
 
+  ApiThrottleRateLimit:
+    Type: Number
+    Default: 100
+    MinValue: 1
+    Description: >-
+      Steady requests per second each route of the stage accepts before API
+      Gateway answers 429 itself, without invoking the function. The public
+      stack is read by judges, an automated scorer and anyone following a
+      link, and one dashboard load is a dozen parallel reads, so this is set
+      well above anything a person or a handful of agents produce, and still a
+      hundredth of the account's regional quota, so a runaway client is stopped
+      before it is billed at the account's full rate.
+
+  ApiThrottleBurstLimit:
+    Type: Number
+    Default: 200
+    MinValue: 1
+    Description: >-
+      Requests API Gateway accepts at once above the steady rate before it
+      starts answering 429. Twice the rate, so a burst of page loads is served
+      and only a sustained flood is refused.
+
   AllowedProjectPattern:
     Type: String
     Default: '^Acme-[A-Za-z0-9-]{1,40}$'
@@ -75,6 +97,24 @@ Resources:
     Type: AWS::Serverless::HttpApi
     Properties:
       StageName: prod
+      # The stage's default route throttle, answered by API Gateway with 429
+      # before the function runs, so a flood costs neither an invocation nor a
+      # table write. For an HTTP API only the two throttling fields and
+      # DetailedMetricsEnabled apply here. Per-route metrics stay off: the
+      # alarms and the dashboard read the stage's own Count, 4xx, 5xx and
+      # Latency, which API Gateway publishes without them, and each route's
+      # metrics would be billed as custom metrics.
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: !Ref ApiThrottleBurstLimit
+        ThrottlingRateLimit: !Ref ApiThrottleRateLimit
+      # One JSON line per request, in a log group of its own. The destination is
+      # the plain log-group ARN built from the group's name, not GetAtt's form
+      # with a trailing ":*". HTTP APIs deliver access logs without the
+      # account-wide CloudWatch role a REST API needs, so nothing outside this
+      # stack is changed to turn them on.
+      AccessLogSettings:
+        DestinationArn: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${ThreefoldApiAccessLogGroup}'
+        Format: '{"requestId":"$context.requestId","ip":"$context.identity.sourceIp","requestTime":"$context.requestTime","httpMethod":"$context.httpMethod","routeKey":"$context.routeKey","path":"$context.path","status":"$context.status","protocol":"$context.protocol","responseLength":"$context.responseLength","latency":"$context.responseLatency","integrationLatency":"$context.integrationLatency","integrationStatus":"$context.integrationStatus","integrationError":"$context.integrationErrorMessage","error":"$context.error.message","userAgent":"$context.identity.userAgent"}'
       CorsConfiguration:
         AllowMethods: ['GET', 'POST', 'OPTIONS']
         # Idempotency-Key is sent by the dashboard's kill switch and by the sessions
@@ -210,6 +250,25 @@ Resources:
     Properties:
       LogGroupName: !Sub '/aws/lambda/${ThreefoldFunction}'
       RetentionInDays: 30
+
+  # ---------------------------------------------------------------------------
+  # Operations: what watches and bounds the stack rather than serves it. Every
+  # name below carries the stack's name, so threefold-prod and
+  # threefold-dogfood deploy side by side from this one template without
+  # colliding.
+  # ---------------------------------------------------------------------------
+
+  ThreefoldApiAccessLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      # Under /aws/vendedlogs/, the prefix CloudWatch Logs grants to log
+      # deliveries with one wildcard, so a new stack does not add a statement
+      # to the account's log resource policy, which has a size limit.
+      LogGroupName: !Sub '/aws/vendedlogs/apigateway/${AWS::StackName}/access'
+      # Shorter than the function's 30 days: every line holds a client's
+      # address, which is personal data, and two weeks is enough to look into
+      # an incident that an alarm has already raised.
+      RetentionInDays: 14
 
 Outputs:
   ApiEndpoint:

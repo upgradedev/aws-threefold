@@ -16,6 +16,7 @@ requires.
 """
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -93,3 +94,76 @@ def test_the_table_has_point_in_time_recovery_encryption_and_keeps_its_ttl() -> 
         "Sessions, sign-in codes and rollups all expire through the ttl attribute"
     )
     assert re.search(r"^      BillingMode: PAY_PER_REQUEST$", table, re.M)
+
+
+# ------------------------------------------------------------------ the API stage
+
+
+def test_the_stage_throttles_every_route_by_parameter() -> None:
+    api = RESOURCES["ThreefoldHttpApi"]
+    settings = re.search(r"^      DefaultRouteSettings:\n((?:        .*\n)+)", api, re.M)
+    assert settings, "The stage sets no default route throttle"
+    body = settings.group(1)
+    assert re.search(r"^        ThrottlingBurstLimit: !Ref ApiThrottleBurstLimit$", body, re.M)
+    assert re.search(r"^        ThrottlingRateLimit: !Ref ApiThrottleRateLimit$", body, re.M)
+    # CloudFormation accepts these in the shape and the deploy then fails,
+    # because an HTTP API has no execution logging.
+    assert "LoggingLevel" not in body and "DataTraceEnabled" not in body
+    assert "DetailedMetricsEnabled: true" not in body, "Per-route metrics are billed as custom metrics"
+
+
+def test_the_throttle_defaults_leave_room_for_a_judge_and_the_scorer() -> None:
+    rate = float(_default("ApiThrottleRateLimit"))
+    burst = int(_default("ApiThrottleBurstLimit"))
+    assert rate >= 50, (
+        f"{rate} a second: one dashboard load is a dozen parallel reads, and the public "
+        "stack is read by judges and an automated scorer at once"
+    )
+    assert burst >= rate, "A burst below the steady rate refuses the page loads it is there to absorb"
+    assert rate <= 1000, "Above this the throttle no longer bounds what a runaway client is billed"
+    for name in ("ApiThrottleRateLimit", "ApiThrottleBurstLimit"):
+        assert re.search(r"^    Type: Number$", PARAMETERS[name], re.M)
+        assert re.search(r"^    MinValue: 1$", PARAMETERS[name], re.M), f"{name} of 0 would refuse every request"
+
+
+HTTP_API_CONTEXT = {
+    "$context.requestId", "$context.identity.sourceIp", "$context.requestTime", "$context.httpMethod",
+    "$context.routeKey", "$context.path", "$context.status", "$context.protocol", "$context.responseLength",
+    "$context.responseLatency", "$context.integrationLatency", "$context.integrationStatus",
+    "$context.integrationErrorMessage", "$context.error.message", "$context.identity.userAgent",
+}
+
+
+def test_access_logs_are_one_json_line_with_the_fields_an_incident_needs() -> None:
+    api = RESOURCES["ThreefoldHttpApi"]
+    destination = re.search(r"^        DestinationArn: (.+)$", api, re.M)
+    assert destination, "The stage writes no access log"
+    assert destination.group(1) == (
+        "!Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${ThreefoldApiAccessLogGroup}'"
+    ), "GetAtt's ARN ends in ':*'; the destination is the plain log-group ARN"
+    fmt = re.search(r"^        Format: '(.+)'$", api, re.M)
+    assert fmt, "The access log format is not a single-quoted single line"
+    fields = json.loads(fmt.group(1))
+    required = {
+        "requestId": "$context.requestId",
+        "ip": "$context.identity.sourceIp",
+        "routeKey": "$context.routeKey",
+        "status": "$context.status",
+        "latency": "$context.responseLatency",
+        "integrationError": "$context.integrationErrorMessage",
+    }
+    for key, variable in required.items():
+        assert fields.get(key) == variable, f"{key} should log {variable}, not {fields.get(key)!r}"
+    unknown = set(fields.values()) - HTTP_API_CONTEXT
+    assert not unknown, f"{unknown}: a variable an HTTP API does not know is logged as its own literal text"
+
+
+def test_the_access_log_group_is_the_stacks_own_and_expires() -> None:
+    group = RESOURCES["ThreefoldApiAccessLogGroup"]
+    assert _type(group) == "AWS::Logs::LogGroup"
+    assert re.search(r"^      LogGroupName: !Sub '.*\$\{AWS::StackName\}.*'$", group, re.M), (
+        "Both stacks deploy from this template; a fixed name makes the second deploy fail"
+    )
+    retention = re.search(r"^      RetentionInDays: (\d+)$", group, re.M)
+    assert retention, "Without retention, client addresses are kept forever"
+    assert int(retention.group(1)) <= 30, "Every line holds a client address, which is personal data"
