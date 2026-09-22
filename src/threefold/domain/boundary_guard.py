@@ -91,19 +91,30 @@ def looks_like_path(text: str) -> bool:
     )
 
 
-def named_path(text: str) -> bool:
-    """Whether a value given under an explicit path key names a file.
+def named_path(text: str) -> str:
+    """The file a value given under an explicit path key names, or "".
 
     Nothing is guessed here. The agent said `file_path`, so the string is the
     path, whatever it contains. `looks_like_path` used to decide this too, and
     it says no to any string with a space in it, so `src/domain/order line.py`
     paired with no content and every layering and governance check below it was
-    skipped, while the same write sent as a heredoc was refused. Only the two
-    limits that make a string unusable as a path are kept: a length bound, so a
-    whole file's text under a mistyped key cannot be walked as one, and a
-    newline, which no single path carries.
+    skipped, while the same write sent as a heredoc was refused.
+
+    The value is taken without the whitespace around it. A newline is legal in
+    a POSIX file name and so is a trailing space, and both were a way round
+    everything below: the glob still covered `src/domain/order.py\\n`, but the
+    suffix it was read for did not, so the rules found no language, read no
+    imports and said nothing. Judging the trimmed name judges the file the
+    agent almost certainly meant, and judging more is the safe direction.
+
+    One limit is kept, and it is a real limit rather than a claim about what
+    a path can be: a value longer than MAX_PATHLIKE_LENGTH names nothing here,
+    so a whole file's text sent under a mistyped path key is never walked as a
+    path — and so a path that long is not judged either.
     """
-    return bool(text) and len(text) <= MAX_PATHLIKE_LENGTH and "\n" not in text and bool(text.strip())
+    if not isinstance(text, str) or len(text) > MAX_PATHLIKE_LENGTH:
+        return ""
+    return text.strip()
 
 
 # Which gate found a thing wrong with a call. The application groups rules by
@@ -490,7 +501,7 @@ def target_paths(
                     yield node
             elif lowered in PATH_KEYS:
                 if named_path(node):
-                    yield node
+                    yield named_path(node)
             elif lowered not in _NOT_A_TARGET and looks_like_path(node):
                 yield node
         elif isinstance(node, dict):
@@ -755,7 +766,7 @@ def iter_write_targets(arguments: Any) -> List[Tuple[str, str]]:
             for key, value in node.items():
                 if isinstance(value, str) and isinstance(key, str):
                     if key.lower() in PATH_KEYS and named_path(value):
-                        path_value = value
+                        path_value = named_path(value)
             owner = path_value or inherited
             if owner:
                 for key, value in node.items():
@@ -929,7 +940,7 @@ def _named_paths(value: Any) -> Iterator[str]:
     if isinstance(value, dict):
         for key, item in value.items():
             if isinstance(key, str) and key.lower() in PATH_KEYS and isinstance(item, str) and named_path(item):
-                yield item
+                yield named_path(item)
             else:
                 yield from _named_paths(item)
     elif isinstance(value, (list, tuple)):

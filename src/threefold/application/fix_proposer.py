@@ -634,7 +634,7 @@ def _tool_sites(arguments: Any) -> List[_Site]:
             path_value = ""
             for key, value in node.items():
                 if isinstance(value, str) and isinstance(key, str) and key.lower() in PATH_KEYS and named_path(value):
-                    path_value = value
+                    path_value = named_path(value)
             owner = path_value or inherited
             if owner:
                 removed = next(

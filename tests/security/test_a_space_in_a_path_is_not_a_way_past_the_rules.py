@@ -147,3 +147,40 @@ def test_the_heredoc_route_was_never_open_and_still_is_not() -> None:
         action=ToolActionType.COMMAND_EXEC,
     )
     assert allowed is False, reason
+
+
+PADDED = [
+    "src/domain/order.py\n",
+    "src/domain/order.py ",
+    " src/domain/order.py",
+    "\tsrc/domain/order.py\n",
+]
+
+
+@pytest.mark.parametrize("path", PADDED)
+def test_whitespace_around_a_path_is_not_a_way_past_the_rules(path: str) -> None:
+    """The same gap as a space in the name, with the space at the end instead.
+
+    A newline and a trailing space are both legal in a POSIX file name, and
+    both left every check below saying nothing: the glob covered
+    `src/domain/order.py\n`, but the suffix it was read for did not, so no
+    language was found, no import was read and the rule never spoke.
+    """
+    allowed, reason = _evaluate({"file_path": path, "content": FORBIDDEN})
+    assert allowed is False, f"{path!r} was approved"
+    assert "python-domain-stays-pure" in reason
+
+
+def test_a_padded_credential_store_is_named_as_itself() -> None:
+    allowed, reason = _evaluate({"file_path": ".env\n", "content": "TOKEN=1\n"})
+    assert allowed is False
+    assert "Target path '.env' is protected" in reason
+
+
+def test_a_padded_path_is_recorded_as_the_file_it_names() -> None:
+    request = ToolInvocation(
+        tool_name="Write",
+        action_type=ToolActionType.FILE_WRITE,
+        arguments={"file_path": "src/domain/order line.py\n", "content": FORBIDDEN},
+    )
+    assert describe_target(request) == "src/domain/order line.py"
