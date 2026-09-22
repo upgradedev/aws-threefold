@@ -141,6 +141,17 @@ def test_the_committed_snapshot_is_what_the_script_builds_from_the_committed_pil
     assert committed["benchmark"]["pilot"] is True
 
 
+def test_evidence_becomes_links_only_under_an_https_address_the_owner_gives(tmp_path: Path) -> None:
+    listed = build_proof.build([PILOT])
+    assert all("href" not in item for item in listed["benchmark"]["evidence"] + listed["method"])
+    linked = build_proof.build([PILOT], evidence_url="https://example.test/acme/threefold/blob/main")
+    for item in linked["benchmark"]["evidence"] + linked["method"]:
+        assert item["href"] == "https://example.test/acme/threefold/blob/main/" + item["path"]
+    for bad in ("http://example.test/acme", "https://example.test/acme?x=1", "file:///acme"):
+        with pytest.raises(build_proof.ProofError, match="plain https"):
+            build_proof.build([PILOT], evidence_url=bad)
+
+
 def test_nothing_to_build_is_a_usage_error(tmp_path: Path) -> None:
     with pytest.raises(SystemExit) as stopped:
         build_proof.main(["--out", str(tmp_path / "proof.json")])

@@ -2,7 +2,8 @@
 
     python scripts/build_proof.py --benchmark benchmark/results/<run-id>.jsonl [--benchmark <more>]
     python scripts/build_proof.py --benchmark <rows or summary> \\
-        --private-endpoint https://<host>/<stage>/ --key-file <file holding the operator key>
+        --private-endpoint https://<host>/<stage>/ --key-file <file holding the operator key> \\
+        [--evidence-base https://<where the repository's files can be read>/]
 
 Two sections, each optional, each naming where it came from and when its
 snapshot was taken. A section that was not measured is left out, and the page
@@ -351,6 +352,26 @@ def method_entries() -> List[Dict[str, str]]:
     return [{"label": label, "path": path} for label, path in METHOD if (REPO_ROOT / path).is_file()]
 
 
+def evidence_base(url: Optional[str]) -> Optional[str]:
+    """Where the repository's files can be read, for the evidence links, or None to list paths only.
+
+    Given by the owner, never guessed: a link to a repository that is not
+    there is worse than a path a reader can look up.
+    """
+    if url is None:
+        return None
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme != "https" or not parts.hostname or parts.username or parts.password or parts.query or parts.fragment:
+        raise ProofError("--evidence-base must be a plain https:// address")
+    return url.rstrip("/") + "/"
+
+
+def _linked(items: Iterable[Mapping[str, Any]], base: Optional[str]) -> List[Dict[str, Any]]:
+    if base is None:
+        return [dict(item) for item in items]
+    return [dict(item, href=base + urllib.parse.quote(str(item["path"]))) for item in items]
+
+
 # ---------------------------------------------------------------- the check before writing
 
 
@@ -387,19 +408,22 @@ def build(
     private_endpoint: Optional[str] = None,
     key_file: Optional[Path] = None,
     opener: Optional[Opener] = None,
+    evidence_url: Optional[str] = None,
 ) -> Dict[str, Any]:
     document: Dict[str, Any] = {"schema": SCHEMA, "generated_at": _now(), "generated_by": "scripts/build_proof.py"}
     names: Set[str] = set()
     secrets: List[str] = []
+    base = evidence_base(evidence_url)
     if benchmarks:
         document["benchmark"] = benchmark_section(*read_benchmark(benchmarks))
+        document["benchmark"]["evidence"] = _linked(document["benchmark"]["evidence"], base)
     if private_endpoint is not None:
         key = read_key(key_file)
         secrets.append(key)
         overview, projects = read_private(private_endpoint, key, opener)
         names = project_names(overview, projects)
         document["private"] = private_section(overview)
-    document["method"] = method_entries()
+    document["method"] = _linked(method_entries(), base)
     problems = leaks(document, names, secrets)
     if problems:
         raise ProofError("refused to write: the snapshot would carry " + " and ".join(problems))
@@ -412,6 +436,8 @@ def main(argv: Optional[Sequence[str]] = None, opener: Optional[Opener] = None) 
                         help="benchmark result rows (.jsonl) or a summary from benchmark/report.py; repeatable")
     parser.add_argument("--private-endpoint", default=None, help="the private stack's https:// address")
     parser.add_argument("--key-file", type=Path, default=None, help="a file holding the operator key, alone on one line")
+    parser.add_argument("--evidence-base", default=None,
+                        help="an https:// address the repository's files are read under; without it the evidence is listed by path")
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT, help="default: src/threefold/web/proof.json")
     args = parser.parse_args(argv)
     if (args.private_endpoint is None) != (args.key_file is None):
@@ -419,7 +445,7 @@ def main(argv: Optional[Sequence[str]] = None, opener: Optional[Opener] = None) 
     if not args.benchmark and args.private_endpoint is None:
         parser.error("nothing to build: give --benchmark, or --private-endpoint with --key-file")
     try:
-        document = build(args.benchmark, args.private_endpoint, args.key_file, opener)
+        document = build(args.benchmark, args.private_endpoint, args.key_file, opener, args.evidence_base)
     except ProofError as error:
         print(f"build_proof: {error}", file=sys.stderr)
         return 2
