@@ -923,6 +923,657 @@
           }
         }
       }
+    },
+    "/api/auth/links": {
+      "post": {
+        "summary": "Mint a single-use sign-in link",
+        "description": "Called by the CLI with the operator key, so the operator signs in to the dashboard without pasting the key into a page. Answers a code that works once, for 120 seconds, and a link to this stack's own dashboard that carries it: <base>dashboard.html#/signin?code=<code>&next=<next>, with next URL-encoded. Only the SHA-256 of the code is stored. Requires the key itself: a sign-in session is refused here with 403 (urn:threefold:error:session-not-enough), so a session can never renew itself.",
+        "security": [
+          {
+            "OperatorApiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "next": {
+                    "type": "string",
+                    "maxLength": 256,
+                    "default": "/overview",
+                    "example": "/projects/Acme-Billing",
+                    "description": "Where the dashboard goes after signing in: a path inside it, starting with / and carrying no scheme, host, //, backslash, fragment or whitespace."
+                  }
+                }
+              },
+              "example": {
+                "next": "/projects/Acme-Billing"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The code and the link, answered with Cache-Control: no-store",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "expires_in",
+                    "url"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "expires_in": {
+                      "type": "integer",
+                      "enum": [
+                        120
+                      ]
+                    },
+                    "url": {
+                      "type": "string",
+                      "format": "uri"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "next is not a path inside the dashboard (urn:threefold:error:bad-request)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No key was presented",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The key was rejected, a sign-in session was presented instead of the key (urn:threefold:error:session-not-enough), or this deployment has configured no operator key at all (urn:threefold:error:sign-in-disabled)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/sessions": {
+      "post": {
+        "summary": "Trade a sign-in code for a session",
+        "description": "Open: the code is the credential. Spends the code, which then cannot be used again, and answers a session token that counts as the operator for 43200 seconds, presented as Authorization: Bearer <token>. Only the SHA-256 of the token is stored. A session is honoured only while the key that minted its code is still configured.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "code"
+                ],
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "description": "The code from the sign-in link."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The session, answered with Cache-Control: no-store",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "token",
+                    "expires_at",
+                    "ttl_seconds"
+                  ],
+                  "properties": {
+                    "token": {
+                      "type": "string"
+                    },
+                    "expires_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "ttl_seconds": {
+                      "type": "integer",
+                      "enum": [
+                        43200
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "No code was sent (urn:threefold:error:bad-request)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The code was used, has expired or was never issued (urn:threefold:error:sign-in-code-invalid)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The rate limit every route shares",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Sign out",
+        "description": "Revokes the session presented as Authorization: Bearer <token>. The container that takes the request refuses the token at once; every other container within 60 seconds. Open, and idempotent: with no session, or one already gone, it still answers 200. The body is GET /api/auth/whoami as it stands after the sign-out.",
+        "security": [
+          {
+            "SignInSession": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Signed out; who the caller is now",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "authenticated",
+                    "via",
+                    "expires_at",
+                    "reads_public",
+                    "sandbox_writes"
+                  ],
+                  "properties": {
+                    "authenticated": {
+                      "type": "boolean",
+                      "description": "True when the request carries a configured operator key or a live sign-in session."
+                    },
+                    "via": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "enum": [
+                        "key",
+                        "session",
+                        null
+                      ]
+                    },
+                    "expires_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "format": "date-time",
+                      "description": "When the session lapses, in UTC. null for a key, which does not lapse, and for a stranger."
+                    },
+                    "reads_public": {
+                      "type": "boolean",
+                      "description": "Whether this stack answers its reads without the operator (PublicReads)."
+                    },
+                    "sandbox_writes": {
+                      "type": "boolean",
+                      "description": "Whether anyone may create a sandbox project and write to it here, which is exactly when reads_public is true."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The store did not confirm the sign-out, so other containers may honour the session until it lapses (urn:threefold:error:sign-out-incomplete)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/whoami": {
+      "get": {
+        "summary": "Who the caller is, and what this stack leaves open",
+        "description": "Open on every stack: it answers about what the request carries. The pages read it to decide whether to offer sign-in, the sandbox or the operator's controls.",
+        "security": [
+          {
+            "SignInSession": []
+          },
+          {
+            "OperatorApiKey": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Answered with Cache-Control: no-store",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "authenticated",
+                    "via",
+                    "expires_at",
+                    "reads_public",
+                    "sandbox_writes"
+                  ],
+                  "properties": {
+                    "authenticated": {
+                      "type": "boolean",
+                      "description": "True when the request carries a configured operator key or a live sign-in session."
+                    },
+                    "via": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "enum": [
+                        "key",
+                        "session",
+                        null
+                      ]
+                    },
+                    "expires_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "format": "date-time",
+                      "description": "When the session lapses, in UTC. null for a key, which does not lapse, and for a stranger."
+                    },
+                    "reads_public": {
+                      "type": "boolean",
+                      "description": "Whether this stack answers its reads without the operator (PublicReads)."
+                    },
+                    "sandbox_writes": {
+                      "type": "boolean",
+                      "description": "Whether anyone may create a sandbox project and write to it here, which is exactly when reads_public is true."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/install.py": {
+      "get": {
+        "summary": "The installer, pointed at this stack",
+        "description": "threefold_install.py with this stack's own address, https://<host>/<stage>/, written in where the source says __THREEFOLD_ENDPOINT__, so the one command a team runs installs from and reports to the stack that served it. Served as readable text, answered without a key on every stack. The X-Threefold-SHA256 header is the SHA-256 of exactly the bytes in the body, and equals installer_sha256 in /dist/manifest.json fetched from the same host.",
+        "responses": {
+          "200": {
+            "description": "The script, as text/plain",
+            "headers": {
+              "X-Threefold-SHA256": {
+                "description": "SHA-256 of the body, in hex",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              }
+            },
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request's host cannot be written into a script (urn:threefold:error:unknown-host)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The installer is missing from this deployment (urn:threefold:error:script-missing)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dist/threefold-bundle.zip": {
+      "get": {
+        "summary": "The hook, the CLI and the domain package, as one zip",
+        "description": "What the installer installs: bin/threefold_hook.py, bin/threefold_cli.py, lib/threefold/__init__.py and lib/threefold/domain/*.py, byte for byte as deployed. Built once per server with fixed timestamps, so every download from it is the same bytes and bundle_sha256 in the manifest stays true. Answered without a key on every stack.",
+        "responses": {
+          "200": {
+            "description": "The zip",
+            "headers": {
+              "X-Threefold-SHA256": {
+                "description": "SHA-256 of the zip, in hex",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              }
+            },
+            "content": {
+              "application/zip": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "A file the bundle carries is missing from this deployment (urn:threefold:error:script-missing)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dist/manifest.json": {
+      "get": {
+        "summary": "The hashes of the bundle and the installer",
+        "description": "Lets the installer, or a reader, check what was downloaded: each file in the bundle with its SHA-256 and size, the SHA-256 of the zip, and the SHA-256 of /install.py as this host serves it. Answered without a key on every stack.",
+        "responses": {
+          "200": {
+            "description": "The manifest",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "files",
+                    "bundle_sha256",
+                    "installer_sha256"
+                  ],
+                  "properties": {
+                    "files": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "path",
+                          "sha256",
+                          "bytes"
+                        ],
+                        "properties": {
+                          "path": {
+                            "type": "string",
+                            "example": "bin/threefold_hook.py"
+                          },
+                          "sha256": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{64}$"
+                          },
+                          "bytes": {
+                            "type": "integer"
+                          }
+                        }
+                      }
+                    },
+                    "bundle_sha256": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{64}$"
+                    },
+                    "installer_sha256": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{64}$"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request's host cannot be written into a script (urn:threefold:error:unknown-host)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "A file the manifest describes is missing from this deployment (urn:threefold:error:script-missing)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -932,6 +1583,11 @@
         "in": "header",
         "name": "X-API-Key",
         "description": "Operator key for writes that outlive the request. Reading needs none. A deployment that has configured no key refuses policy writes outright with 403."
+      },
+      "SignInSession": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "A sign-in session token from POST /api/auth/sessions, sent as Authorization: Bearer <token>. It counts as the operator everywhere the operator key does, except for minting sign-in links, and lapses after 43200 seconds or when it is signed out."
       }
     },
     "schemas": {
