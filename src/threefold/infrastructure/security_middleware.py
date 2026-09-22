@@ -383,6 +383,18 @@ def is_protected_write(method: str, path: str) -> bool:
     return (method.upper(), path) in PROTECTED_WRITES or is_session_resume(method, path)
 
 
+def is_session_terminate(method: str, path: str) -> bool:
+    """True for POST /sessions/{id}/terminate, the kill switch.
+
+    Open on a stack whose reads are public, as STATE.md says: freezing a
+    session can only stop work, and the demo's visitors have no key to present.
+    It is not open on a stack that keeps its reads private, where the sessions
+    it can freeze are the owner's own agent sessions and the ids to name them
+    by are exactly what those private reads hold back.
+    """
+    return method.upper() == "POST" and path.startswith("/sessions/") and path.endswith("/terminate")
+
+
 # Sign-in. Minting a link is the one thing a session may not do: a session that
 # could mint links could renew itself forever, and a stolen one would never
 # lapse. The exchange, the sign-out and whoami are open, because each of them
@@ -772,6 +784,30 @@ def validate_request_security(
                 "This deployment keeps its data private, so only the operator may create a "
                 "sandbox project here. Provide the key via 'X-API-Key' or 'Authorization: "
                 "Bearer <key>', or a sign-in session via 'Authorization: Bearer <token>'."
+            ),
+        )
+
+    # 3d. The kill switch, on a stack that keeps its reads private. It stays
+    # open where the reads are, because the demo's visitors have no key and
+    # freezing a session can only stop work. Where they are not, a stranger who
+    # learned a session id could freeze the owner's own agent session, and every
+    # later call in it comes back BLOCKED_CIRCUIT_BREAKER, so it is the
+    # operator's as the reads beside it are.
+    if is_session_terminate(verb, path) and not reads_are_public():
+        return _require_operator_key(
+            headers,
+            path,
+            closed_title="Sessions Cannot Be Frozen Here",
+            closed_detail=(
+                "This deployment keeps its sessions private and has no operator key "
+                "configured, so nobody can freeze one. Set THREEFOLD_API_KEYS on the "
+                "function to enable the kill switch."
+            ),
+            closed_type="urn:threefold:error:reads-private",
+            missing_detail=(
+                "This deployment keeps its sessions private, so freezing one requires the "
+                "operator: the key via 'X-API-Key' or 'Authorization: Bearer <key>', or a "
+                "sign-in session via 'Authorization: Bearer <token>'."
             ),
         )
 
