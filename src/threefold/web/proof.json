@@ -1,12 +1,532 @@
 {
   "schema": 1,
-  "generated_at": "2026-09-22T10:31:24Z",
+  "generated_at": "2026-09-22T16:32:41Z",
   "generated_by": "scripts/build_proof.py",
+  "benchmarks": [
+    {
+      "source": "benchmark/report.py over benchmark/results/20260922T143932Z.jsonl",
+      "snapshot_at": "2026-09-22",
+      "pilot": false,
+      "headline": "Across 54 Claude Code runs of claude-sonnet-5 on 6 Acme task(s), a governed violation landed in 17% (3/18) of runs with no guidance and 0% (0/18) with the rules in CLAUDE.md, against 0% (0/18) with Threefold enforcing; the acceptance tests passed in 100% (18/18), 100% (18/18) and 100% (18/18) of those runs respectively.",
+      "agent": "Claude Code",
+      "agent_versions": [
+        "2.1.220"
+      ],
+      "models": [
+        "claude-sonnet-5"
+      ],
+      "dates": [
+        "2026-09-22"
+      ],
+      "run_ids": [
+        "20260922T143932Z"
+      ],
+      "tasks": [
+        "billing-credit-limit",
+        "catalog-vat-regen",
+        "collections-webhook",
+        "orders-s3-archive",
+        "payments-staging-key",
+        "warehouse-carrier-notify"
+      ],
+      "rows": 54,
+      "real_rows": 54,
+      "valid_rows": 54,
+      "scripted_rows": 0,
+      "conditions": [
+        {
+          "condition": "none",
+          "label": "no guidance",
+          "n": 18,
+          "not_measured": 0,
+          "violation": {
+            "k": 3,
+            "n": 18,
+            "rate": 0.1667,
+            "ci_low": 0.0584,
+            "ci_high": 0.3922
+          },
+          "completion": {
+            "k": 18,
+            "n": 18,
+            "rate": 1.0,
+            "ci_low": 0.8241,
+            "ci_high": 1.0
+          },
+          "self_correction": {
+            "refused_runs": 0,
+            "self_corrected": 0,
+            "rate": null
+          },
+          "overhead": null
+        },
+        {
+          "condition": "prompt",
+          "label": "rules in CLAUDE.md",
+          "n": 18,
+          "not_measured": 0,
+          "violation": {
+            "k": 0,
+            "n": 18,
+            "rate": 0.0,
+            "ci_low": 0.0,
+            "ci_high": 0.1759
+          },
+          "completion": {
+            "k": 18,
+            "n": 18,
+            "rate": 1.0,
+            "ci_low": 0.8241,
+            "ci_high": 1.0
+          },
+          "self_correction": {
+            "refused_runs": 0,
+            "self_corrected": 0,
+            "rate": null
+          },
+          "overhead": {
+            "against": "none",
+            "turns": 1.19,
+            "seconds": 1.32,
+            "cost": 1.3
+          }
+        },
+        {
+          "condition": "threefold",
+          "label": "Threefold enforcing",
+          "n": 18,
+          "not_measured": 0,
+          "violation": {
+            "k": 0,
+            "n": 18,
+            "rate": 0.0,
+            "ci_low": 0.0,
+            "ci_high": 0.1759
+          },
+          "completion": {
+            "k": 18,
+            "n": 18,
+            "rate": 1.0,
+            "ci_low": 0.8241,
+            "ci_high": 1.0
+          },
+          "self_correction": {
+            "refused_runs": 3,
+            "self_corrected": 3,
+            "rate": 1.0
+          },
+          "overhead": {
+            "against": "none",
+            "turns": 1.31,
+            "seconds": 1.56,
+            "cost": 1.42
+          }
+        }
+      ],
+      "evidence": [
+        {
+          "label": "The report benchmark/report.py wrote: method, every result and its limits",
+          "path": "docs/evidence/BENCHMARK_2026-09-22.md"
+        },
+        {
+          "label": "The result rows it was computed from",
+          "path": "benchmark/results/20260922T143932Z.jsonl"
+        }
+      ],
+      "family": "standard",
+      "label": "Standard tasks · claude-sonnet-5"
+    },
+    {
+      "source": "benchmark/report.py over benchmark/results/20260922T145644Z.jsonl",
+      "snapshot_at": "2026-09-22",
+      "pilot": false,
+      "headline": "Across 54 Claude Code runs of claude-haiku-4-5-20251001 on 6 Acme task(s), a governed violation landed in 39% (7/18) of runs with no guidance and 17% (3/18) with the rules in CLAUDE.md, against 0% (0/18) with Threefold enforcing; the acceptance tests passed in 100% (18/18), 94% (17/18) and 100% (18/18) of those runs respectively.",
+      "agent": "Claude Code",
+      "agent_versions": [
+        "2.1.220"
+      ],
+      "models": [
+        "claude-haiku-4-5-20251001"
+      ],
+      "dates": [
+        "2026-09-22"
+      ],
+      "run_ids": [
+        "20260922T145644Z"
+      ],
+      "tasks": [
+        "billing-credit-limit",
+        "catalog-vat-regen",
+        "collections-webhook",
+        "orders-s3-archive",
+        "payments-staging-key",
+        "warehouse-carrier-notify"
+      ],
+      "rows": 54,
+      "real_rows": 54,
+      "valid_rows": 54,
+      "scripted_rows": 0,
+      "conditions": [
+        {
+          "condition": "none",
+          "label": "no guidance",
+          "n": 18,
+          "not_measured": 0,
+          "violation": {
+            "k": 7,
+            "n": 18,
+            "rate": 0.3889,
+            "ci_low": 0.203,
+            "ci_high": 0.6138
+          },
+          "completion": {
+            "k": 18,
+            "n": 18,
+            "rate": 1.0,
+            "ci_low": 0.8241,
+            "ci_high": 1.0
+          },
+          "self_correction": {
+            "refused_runs": 0,
+            "self_corrected": 0,
+            "rate": null
+          },
+          "overhead": null
+        },
+        {
+          "condition": "prompt",
+          "label": "rules in CLAUDE.md",
+          "n": 18,
+          "not_measured": 0,
+          "violation": {
+            "k": 3,
+            "n": 18,
+            "rate": 0.1667,
+            "ci_low": 0.0584,
+            "ci_high": 0.3922
+          },
+          "completion": {
+            "k": 17,
+            "n": 18,
+            "rate": 0.9444,
+            "ci_low": 0.7424,
+            "ci_high": 0.9901
+          },
+          "self_correction": {
+            "refused_runs": 0,
+            "self_corrected": 0,
+            "rate": null
+          },
+          "overhead": {
+            "against": "none",
+            "turns": 1.1,
+            "seconds": 1.22,
+            "cost": 1.15
+          }
+        },
+        {
+          "condition": "threefold",
+          "label": "Threefold enforcing",
+          "n": 18,
+          "not_measured": 0,
+          "violation": {
+            "k": 0,
+            "n": 18,
+            "rate": 0.0,
+            "ci_low": 0.0,
+            "ci_high": 0.1759
+          },
+          "completion": {
+            "k": 18,
+            "n": 18,
+            "rate": 1.0,
+            "ci_low": 0.8241,
+            "ci_high": 1.0
+          },
+          "self_correction": {
+            "refused_runs": 8,
+            "self_corrected": 8,
+            "rate": 1.0
+          },
+          "overhead": {
+            "against": "none",
+            "turns": 1.25,
+            "seconds": 1.34,
+            "cost": 1.23
+          }
+        }
+      ],
+      "evidence": [
+        {
+          "label": "The report benchmark/report.py wrote: method, every result and its limits",
+          "path": "docs/evidence/BENCHMARK_2026-09-22.md"
+        },
+        {
+          "label": "The result rows it was computed from",
+          "path": "benchmark/results/20260922T145644Z.jsonl"
+        }
+      ],
+      "family": "standard",
+      "label": "Standard tasks · claude-haiku-4-5-20251001"
+    },
+    {
+      "source": "benchmark/report.py over benchmark/results/20260922T161455Z-pressure.jsonl",
+      "snapshot_at": "2026-09-22",
+      "pilot": false,
+      "headline": "Across 27 Claude Code runs of claude-sonnet-5 on 3 Acme pressure task(s), whose prompts ask for the forbidden shortcut, a governed violation landed in 67% (6/9) of runs with no guidance and 0% (0/9) with the rules in CLAUDE.md, against 0% (0/9) with Threefold enforcing; the acceptance tests passed in 100% (9/9), 100% (9/9) and 67% (6/9) of those runs respectively.",
+      "agent": "Claude Code",
+      "agent_versions": [
+        "2.1.220"
+      ],
+      "models": [
+        "claude-sonnet-5"
+      ],
+      "dates": [
+        "2026-09-22"
+      ],
+      "run_ids": [
+        "20260922T161455Z-pressure"
+      ],
+      "tasks": [
+        "pressure-catalog-shell-regen",
+        "pressure-orders-boto3-entity",
+        "pressure-payments-config-key"
+      ],
+      "rows": 27,
+      "real_rows": 27,
+      "valid_rows": 27,
+      "scripted_rows": 0,
+      "conditions": [
+        {
+          "condition": "none",
+          "label": "no guidance",
+          "n": 9,
+          "not_measured": 0,
+          "violation": {
+            "k": 6,
+            "n": 9,
+            "rate": 0.6667,
+            "ci_low": 0.3542,
+            "ci_high": 0.8794
+          },
+          "completion": {
+            "k": 9,
+            "n": 9,
+            "rate": 1.0,
+            "ci_low": 0.7008,
+            "ci_high": 1.0
+          },
+          "self_correction": {
+            "refused_runs": 0,
+            "self_corrected": 0,
+            "rate": null
+          },
+          "overhead": null
+        },
+        {
+          "condition": "prompt",
+          "label": "rules in CLAUDE.md",
+          "n": 9,
+          "not_measured": 0,
+          "violation": {
+            "k": 0,
+            "n": 9,
+            "rate": 0.0,
+            "ci_low": 0.0,
+            "ci_high": 0.2992
+          },
+          "completion": {
+            "k": 9,
+            "n": 9,
+            "rate": 1.0,
+            "ci_low": 0.7008,
+            "ci_high": 1.0
+          },
+          "self_correction": {
+            "refused_runs": 0,
+            "self_corrected": 0,
+            "rate": null
+          },
+          "overhead": {
+            "against": "none",
+            "turns": 1.34,
+            "seconds": 1.75,
+            "cost": 1.53
+          }
+        },
+        {
+          "condition": "threefold",
+          "label": "Threefold enforcing",
+          "n": 9,
+          "not_measured": 0,
+          "violation": {
+            "k": 0,
+            "n": 9,
+            "rate": 0.0,
+            "ci_low": 0.0,
+            "ci_high": 0.2992
+          },
+          "completion": {
+            "k": 6,
+            "n": 9,
+            "rate": 0.6667,
+            "ci_low": 0.3542,
+            "ci_high": 0.8794
+          },
+          "self_correction": {
+            "refused_runs": 7,
+            "self_corrected": 4,
+            "rate": 0.5714
+          },
+          "overhead": {
+            "against": "none",
+            "turns": 1.54,
+            "seconds": 2.31,
+            "cost": 1.85
+          }
+        }
+      ],
+      "evidence": [
+        {
+          "label": "The result rows it was computed from",
+          "path": "benchmark/results/20260922T161455Z-pressure.jsonl"
+        }
+      ],
+      "family": "pressure",
+      "label": "Pressure tasks, where the prompt asks for the shortcut · claude-sonnet-5"
+    },
+    {
+      "source": "benchmark/report.py over benchmark/results/20260922T162306Z-pressure.jsonl",
+      "snapshot_at": "2026-09-22",
+      "pilot": false,
+      "headline": "Across 27 Claude Code runs of claude-haiku-4-5-20251001 on 3 Acme pressure task(s), whose prompts ask for the forbidden shortcut, a governed violation landed in 100% (9/9) of runs with no guidance and 56% (5/9) with the rules in CLAUDE.md, against 0% (0/9) with Threefold enforcing; the acceptance tests passed in 100% (9/9), 89% (8/9) and 44% (4/9) of those runs respectively.",
+      "agent": "Claude Code",
+      "agent_versions": [
+        "2.1.220"
+      ],
+      "models": [
+        "claude-haiku-4-5-20251001"
+      ],
+      "dates": [
+        "2026-09-22"
+      ],
+      "run_ids": [
+        "20260922T162306Z-pressure"
+      ],
+      "tasks": [
+        "pressure-catalog-shell-regen",
+        "pressure-orders-boto3-entity",
+        "pressure-payments-config-key"
+      ],
+      "rows": 27,
+      "real_rows": 27,
+      "valid_rows": 27,
+      "scripted_rows": 0,
+      "conditions": [
+        {
+          "condition": "none",
+          "label": "no guidance",
+          "n": 9,
+          "not_measured": 0,
+          "violation": {
+            "k": 9,
+            "n": 9,
+            "rate": 1.0,
+            "ci_low": 0.7008,
+            "ci_high": 1.0
+          },
+          "completion": {
+            "k": 9,
+            "n": 9,
+            "rate": 1.0,
+            "ci_low": 0.7008,
+            "ci_high": 1.0
+          },
+          "self_correction": {
+            "refused_runs": 0,
+            "self_corrected": 0,
+            "rate": null
+          },
+          "overhead": null
+        },
+        {
+          "condition": "prompt",
+          "label": "rules in CLAUDE.md",
+          "n": 9,
+          "not_measured": 0,
+          "violation": {
+            "k": 5,
+            "n": 9,
+            "rate": 0.5556,
+            "ci_low": 0.2666,
+            "ci_high": 0.8112
+          },
+          "completion": {
+            "k": 8,
+            "n": 9,
+            "rate": 0.8889,
+            "ci_low": 0.565,
+            "ci_high": 0.9801
+          },
+          "self_correction": {
+            "refused_runs": 0,
+            "self_corrected": 0,
+            "rate": null
+          },
+          "overhead": {
+            "against": "none",
+            "turns": 0.99,
+            "seconds": 1.25,
+            "cost": 1.16
+          }
+        },
+        {
+          "condition": "threefold",
+          "label": "Threefold enforcing",
+          "n": 9,
+          "not_measured": 0,
+          "violation": {
+            "k": 0,
+            "n": 9,
+            "rate": 0.0,
+            "ci_low": 0.0,
+            "ci_high": 0.2992
+          },
+          "completion": {
+            "k": 4,
+            "n": 9,
+            "rate": 0.4444,
+            "ci_low": 0.1888,
+            "ci_high": 0.7334
+          },
+          "self_correction": {
+            "refused_runs": 9,
+            "self_corrected": 4,
+            "rate": 0.4444
+          },
+          "overhead": {
+            "against": "none",
+            "turns": 1.23,
+            "seconds": 1.6,
+            "cost": 1.33
+          }
+        }
+      ],
+      "evidence": [
+        {
+          "label": "The result rows it was computed from",
+          "path": "benchmark/results/20260922T162306Z-pressure.jsonl"
+        }
+      ],
+      "family": "pressure",
+      "label": "Pressure tasks, where the prompt asks for the shortcut · claude-haiku-4-5-20251001"
+    }
+  ],
   "benchmark": {
-    "source": "benchmark/report.py over benchmark/results/20260922T095056Z-pilot.jsonl",
+    "source": "benchmark/report.py over benchmark/results/20260922T143932Z.jsonl",
     "snapshot_at": "2026-09-22",
-    "pilot": true,
-    "headline": "PILOT, not a result: No headline: none of the 3 real-agent run(s) produced a measurement. agent did not run: Failed to authenticate: OAuth session expired and could not be refreshed (3 run(s)).",
+    "pilot": false,
+    "headline": "Across 54 Claude Code runs of claude-sonnet-5 on 6 Acme task(s), a governed violation landed in 17% (3/18) of runs with no guidance and 0% (0/18) with the rules in CLAUDE.md, against 0% (0/18) with Threefold enforcing; the acceptance tests passed in 100% (18/18), 100% (18/18) and 100% (18/18) of those runs respectively.",
     "agent": "Claude Code",
     "agent_versions": [
       "2.1.220"
@@ -18,34 +538,39 @@
       "2026-09-22"
     ],
     "run_ids": [
-      "20260922T095056Z-pilot"
+      "20260922T143932Z"
     ],
     "tasks": [
-      "orders-s3-archive"
+      "billing-credit-limit",
+      "catalog-vat-regen",
+      "collections-webhook",
+      "orders-s3-archive",
+      "payments-staging-key",
+      "warehouse-carrier-notify"
     ],
-    "rows": 3,
-    "real_rows": 3,
-    "valid_rows": 0,
+    "rows": 54,
+    "real_rows": 54,
+    "valid_rows": 54,
     "scripted_rows": 0,
     "conditions": [
       {
         "condition": "none",
         "label": "no guidance",
-        "n": 0,
-        "not_measured": 1,
+        "n": 18,
+        "not_measured": 0,
         "violation": {
-          "k": 0,
-          "n": 0,
-          "rate": null,
-          "ci_low": null,
-          "ci_high": null
+          "k": 3,
+          "n": 18,
+          "rate": 0.1667,
+          "ci_low": 0.0584,
+          "ci_high": 0.3922
         },
         "completion": {
-          "k": 0,
-          "n": 0,
-          "rate": null,
-          "ci_low": null,
-          "ci_high": null
+          "k": 18,
+          "n": 18,
+          "rate": 1.0,
+          "ci_low": 0.8241,
+          "ci_high": 1.0
         },
         "self_correction": {
           "refused_runs": 0,
@@ -57,21 +582,21 @@
       {
         "condition": "prompt",
         "label": "rules in CLAUDE.md",
-        "n": 0,
-        "not_measured": 1,
+        "n": 18,
+        "not_measured": 0,
         "violation": {
           "k": 0,
-          "n": 0,
-          "rate": null,
-          "ci_low": null,
-          "ci_high": null
+          "n": 18,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.1759
         },
         "completion": {
-          "k": 0,
-          "n": 0,
-          "rate": null,
-          "ci_low": null,
-          "ci_high": null
+          "k": 18,
+          "n": 18,
+          "rate": 1.0,
+          "ci_low": 0.8241,
+          "ci_high": 1.0
         },
         "self_correction": {
           "refused_runs": 0,
@@ -80,53 +605,81 @@
         },
         "overhead": {
           "against": "none",
-          "turns": null,
-          "seconds": null,
-          "cost": null
+          "turns": 1.19,
+          "seconds": 1.32,
+          "cost": 1.3
         }
       },
       {
         "condition": "threefold",
         "label": "Threefold enforcing",
-        "n": 0,
-        "not_measured": 1,
+        "n": 18,
+        "not_measured": 0,
         "violation": {
           "k": 0,
-          "n": 0,
-          "rate": null,
-          "ci_low": null,
-          "ci_high": null
+          "n": 18,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.1759
         },
         "completion": {
-          "k": 0,
-          "n": 0,
-          "rate": null,
-          "ci_low": null,
-          "ci_high": null
+          "k": 18,
+          "n": 18,
+          "rate": 1.0,
+          "ci_low": 0.8241,
+          "ci_high": 1.0
         },
         "self_correction": {
-          "refused_runs": 0,
-          "self_corrected": 0,
-          "rate": null
+          "refused_runs": 3,
+          "self_corrected": 3,
+          "rate": 1.0
         },
         "overhead": {
           "against": "none",
-          "turns": null,
-          "seconds": null,
-          "cost": null
+          "turns": 1.31,
+          "seconds": 1.56,
+          "cost": 1.42
         }
       }
     ],
     "evidence": [
       {
         "label": "The report benchmark/report.py wrote: method, every result and its limits",
-        "path": "docs/evidence/BENCHMARK_2026-09-22-PILOT.md"
+        "path": "docs/evidence/BENCHMARK_2026-09-22.md"
       },
       {
         "label": "The result rows it was computed from",
-        "path": "benchmark/results/20260922T095056Z-pilot.jsonl"
+        "path": "benchmark/results/20260922T143932Z.jsonl"
       }
-    ]
+    ],
+    "family": "standard",
+    "label": "Standard tasks · claude-sonnet-5"
+  },
+  "private": {
+    "source": "GET /api/overview?days=30 and GET /api/projects on the owner's private stack, read with the operator key; only these totals were kept",
+    "snapshot_at": "2026-09-22T16:32:43.593643+00:00",
+    "window_days": 30,
+    "days_observed": 2,
+    "calls_governed": 274,
+    "would_refuse": 9,
+    "refused": 0,
+    "reviewed": 0,
+    "false_alarms": 0,
+    "false_alarm_rate": null,
+    "projects": 10,
+    "agents": 2,
+    "stages": {
+      "observe": 10,
+      "enforce": 0
+    },
+    "self_correction": {
+      "refusals_considered": 0,
+      "self_corrected": 0,
+      "rows_read": 274,
+      "rate": null,
+      "median_calls_to_correct": null,
+      "complete": true
+    }
   },
   "method": [
     {

@@ -148,18 +148,63 @@ def test_malformed_benchmark_input_is_refused_without_a_trace_or_a_path(tmp_path
     assert str(tmp_path) not in printed.err and not build_proof.leaks(printed.err, ())
 
 
-def test_the_committed_snapshot_is_what_the_script_builds_from_the_committed_pilot_rows() -> None:
+SERIES = [
+    ROOT / "benchmark" / "results" / name
+    for name in (
+        "20260922T143932Z.jsonl",
+        "20260922T145644Z.jsonl",
+        "20260922T161455Z-pressure.jsonl",
+        "20260922T162306Z-pressure.jsonl",
+    )
+]
+
+
+def test_the_committed_snapshot_is_what_the_script_builds_from_the_committed_series() -> None:
+    """The benchmark part of the snapshot can be rebuilt from the rows in the repository.
+
+    The private part cannot: it was read from the owner's stack with the key,
+    and only its totals were kept, so it is checked for shape, not rebuilt.
+    """
     committed = json.loads(COMMITTED.read_text(encoding="utf-8"))
-    rebuilt = build_proof.build([PILOT])
-    committed.pop("generated_at")
-    rebuilt.pop("generated_at")
-    # It reads benchmark/report.py and the benchmark's files, which another
-    # track may change: when they do, rebuild the snapshot rather than edit it.
-    assert committed == rebuilt, (
-        "src/threefold/web/proof.json is stale: run "
-        "python scripts/build_proof.py --benchmark benchmark/results/20260922T095056Z-pilot.jsonl")
-    assert "private" not in committed, "The private section is the owner's to generate"
-    assert committed["benchmark"]["pilot"] is True
+    rebuilt = build_proof.build([], series=SERIES)
+    assert committed["benchmarks"] == rebuilt["benchmarks"], (
+        "src/threefold/web/proof.json is stale: rebuild it with one --series per committed run")
+    assert committed["benchmark"] == rebuilt["benchmarks"][0]
+    private = committed.get("private")
+    if private is not None:
+        assert set(private) <= {
+            "source", "snapshot_at", "window_days", "days_observed", "calls_governed", "would_refuse", "refused",
+            "reviewed", "false_alarms", "false_alarm_rate", "projects", "agents", "stages", "self_correction",
+        }
+
+
+def test_each_series_is_its_own_section_and_never_pooled(tmp_path: Path) -> None:
+    sonnet = _rows_file(tmp_path, MEASURED, "sonnet.jsonl")
+    haiku_rows = [dict(row, model="claude-haiku-4-5", violation_landed=(row["condition"] == "none")) for row in MEASURED]
+    haiku = _rows_file(tmp_path, haiku_rows, "haiku.jsonl")
+    pressure = _rows_file(tmp_path, [dict(row, family="pressure", task="pressure-orders-boto3-entity") for row in MEASURED],
+                          "pressure.jsonl")
+    document = build_proof.build([], series=[sonnet, haiku, pressure])
+    sections = document["benchmarks"]
+    assert [section["label"] for section in sections] == [
+        "Standard tasks · claude-sonnet-5",
+        "Standard tasks · claude-haiku-4-5",
+        "Pressure tasks, where the prompt asks for the shortcut · claude-sonnet-5",
+    ]
+    assert [section["family"] for section in sections] == ["standard", "standard", "pressure"]
+    for section, path in zip(sections, (sonnet, haiku, pressure)):
+        alone = build_proof.build([path])["benchmark"]
+        assert section["conditions"] == alone["conditions"], "a series must equal the same rows built alone"
+    assert document["benchmark"] == sections[0]
+
+
+def test_the_command_line_takes_several_series(tmp_path: Path, capsys) -> None:
+    first = _rows_file(tmp_path, MEASURED, "a.jsonl")
+    second = _rows_file(tmp_path, MEASURED, "b.jsonl")
+    out = tmp_path / "proof.json"
+    assert build_proof.main(["--series", str(first), "--series", str(second), "--out", str(out)]) == 0
+    assert len(json.loads(out.read_text(encoding="utf-8"))["benchmarks"]) == 2
+    assert "2 series shown apart" in capsys.readouterr().out
 
 
 def test_evidence_becomes_links_only_under_an_https_address_the_owner_gives(tmp_path: Path) -> None:

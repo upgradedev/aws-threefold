@@ -2310,8 +2310,38 @@
       return html`<span class="font-mono">${pct(sc.rate)}</span> <span class="text-gray-500">(${num(sc.self_corrected)}/${num(sc.refused_runs)} refused runs)</span>`;
     }
 
-    function benchmarkCard(b) {
-      const title = 'The benchmark';
+    // Every series side by side: one row per run of the matrix, never pooled,
+    // because two models or two task families answer different questions.
+    function seriesComparison(list) {
+      const cell = (b, name, field) => {
+        const c = (Array.isArray(b.conditions) ? b.conditions : []).find(x => x && x.condition === name);
+        return c && c[field] ? share(c[field]) : html`<span class="text-gray-500">not measured</span>`;
+      };
+      return card('The benchmark, every series', 'Violation landed per condition, and whether the tests still passed with Threefold enforcing. Each row is one run of the matrix.', html`
+        <div class="tf-scroll-x"><table class="tf-table" data-proof="series">
+          <thead><tr>
+            <th scope="col">Series</th><th scope="col">No guidance</th><th scope="col">Rules in CLAUDE.md</th>
+            <th scope="col">Threefold enforcing</th><th scope="col">Tests passed, Threefold</th>
+          </tr></thead>
+          <tbody>${list.map(b => html`<tr data-series="${b.family || 'standard'}">
+            <th scope="row" class="font-normal text-gray-200 tf-break">${b.label || (Array.isArray(b.models) ? b.models.join(', ') : 'series')}</th>
+            <td>${cell(b, 'none', 'violation')}</td>
+            <td>${cell(b, 'prompt', 'violation')}</td>
+            <td>${cell(b, 'threefold', 'violation')}</td>
+            <td>${cell(b, 'threefold', 'completion')}</td>
+          </tr>`)}</tbody>
+        </table></div>
+        <p class="text-[11px] text-gray-500 mt-2">In the pressure series the developer's own prompt asks for the forbidden shortcut. Where Threefold's tests-passed rate is lower, the agent stopped and reported rather than land the violation.</p>`, 'min-w-0');
+    }
+
+    function benchmarkCards(proof) {
+      const list = Array.isArray(proof.benchmarks) ? proof.benchmarks.filter(b => b && typeof b === 'object') : [];
+      if (!list.length) return benchmarkCard(proof.benchmark);
+      return html`${seriesComparison(list)}${list.map(b => benchmarkCard(b, b.label))}`;
+    }
+
+    function benchmarkCard(b, label) {
+      const title = typeof label === 'string' && label ? label : 'The benchmark';
       if (!b || typeof b !== 'object') {
         return card(title, null, notMeasured('This snapshot carries no benchmark result.',
           'The benchmark gives a coding agent the same Acme tasks with no guidance, with the rules in CLAUDE.md, and with Threefold enforcing.'));
@@ -2419,7 +2449,7 @@
         ctx.render(html`${pageTitle('Proof', PROOF_SUB)}
           <p class="text-[11px] text-gray-500 -mt-3 mb-4" data-proof="generated">${written}${by}. It changes only when a new one is deployed.</p>
           <div class="space-y-4">
-            ${benchmarkCard(proof.benchmark)}
+            ${benchmarkCards(proof)}
             ${ownUseCard(proof.private)}
             ${methodCard(proof)}
           </div>`);

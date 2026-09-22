@@ -516,12 +516,33 @@ def leaks(document: Any, names: Iterable[str], secrets: Iterable[str] = ()) -> L
     return sorted(found)
 
 
+def series_label(path: Path, summary: Mapping[str, Any]) -> Tuple[str, str]:
+    """The family and the words a series is shown under: its task family and its model.
+
+    A series is one run of the matrix. Two models, or the standard and the
+    pressure tasks, are never pooled into one set of rates: each is its own
+    section, and this names it so a reader can tell them apart.
+    """
+    family = "standard"
+    if str(path).endswith(".jsonl"):
+        try:
+            families = {str(row.get("family") or "standard") for row in report.load_rows([path]) if isinstance(row, dict)}
+        except ValueError:
+            families = set()
+        if families == {"pressure"}:
+            family = "pressure"
+    models = ", ".join(summary.get("models") or []) or "model not recorded"
+    words = "Pressure tasks, where the prompt asks for the shortcut" if family == "pressure" else "Standard tasks"
+    return family, f"{words} · {models}"
+
+
 def build(
     benchmarks: Sequence[Path],
     private_endpoint: Optional[str] = None,
     key_file: Optional[Path] = None,
     opener: Optional[Opener] = None,
     evidence_url: Optional[str] = None,
+    series: Sequence[Path] = (),
 ) -> Dict[str, Any]:
     document: Dict[str, Any] = {"schema": SCHEMA, "generated_at": _now(), "generated_by": "scripts/build_proof.py"}
     names: Set[str] = set()
@@ -534,6 +555,21 @@ def build(
         except (KeyError, TypeError, AttributeError, ValueError) as error:
             raise ProofError(f"the benchmark summary is not one benchmark/report.py produced ({_why(error)})") from None
         document["benchmark"]["evidence"] = _linked(document["benchmark"]["evidence"], base)
+    if series:
+        sections = []
+        for path in series:
+            summary, sources = read_benchmark([path])
+            try:
+                section = benchmark_section(summary, sources)
+            except (KeyError, TypeError, AttributeError, ValueError) as error:
+                raise ProofError(f"the benchmark summary is not one benchmark/report.py produced ({_why(error)})") from None
+            section["family"], section["label"] = series_label(Path(path), summary)
+            section["evidence"] = _linked(section["evidence"], base)
+            sections.append(section)
+        document["benchmarks"] = sections
+        # The page's single card and older readers look here; the first series
+        # given is the one they show.
+        document.setdefault("benchmark", sections[0])
     if private_endpoint is not None:
         key = read_key(key_file)
         secrets.append(key)
@@ -551,6 +587,8 @@ def main(argv: Optional[Sequence[str]] = None, opener: Optional[Opener] = None) 
     parser = argparse.ArgumentParser(description="Build the proof page's snapshot.")
     parser.add_argument("--benchmark", action="append", type=Path, default=[],
                         help="benchmark result rows (.jsonl) or a summary from benchmark/report.py; repeatable")
+    parser.add_argument("--series", action="append", type=Path, default=[],
+                        help="one run of the matrix (.jsonl), shown as its own section and never pooled with another; repeatable")
     parser.add_argument("--private-endpoint", default=None, help="the private stack's https:// address")
     parser.add_argument("--key-file", type=Path, default=None, help="a file holding the operator key, alone on one line")
     parser.add_argument("--evidence-base", default=None,
@@ -559,10 +597,10 @@ def main(argv: Optional[Sequence[str]] = None, opener: Optional[Opener] = None) 
     args = parser.parse_args(argv)
     if (args.private_endpoint is None) != (args.key_file is None):
         parser.error("--private-endpoint and --key-file go together")
-    if not args.benchmark and args.private_endpoint is None:
-        parser.error("nothing to build: give --benchmark, or --private-endpoint with --key-file")
+    if not args.benchmark and not args.series and args.private_endpoint is None:
+        parser.error("nothing to build: give --benchmark or --series, or --private-endpoint with --key-file")
     try:
-        document = build(args.benchmark, args.private_endpoint, args.key_file, opener, args.evidence_base)
+        document = build(args.benchmark, args.private_endpoint, args.key_file, opener, args.evidence_base, args.series)
     except ProofError as error:
         print(f"build_proof: {error}", file=sys.stderr)
         return 2
@@ -574,6 +612,8 @@ def main(argv: Optional[Sequence[str]] = None, opener: Optional[Opener] = None) 
          if bench else "no benchmark section"),
         "a private section of totals" if "private" in document else "no private section",
     ]
+    if document.get("benchmarks"):
+        said.append(f"{len(document['benchmarks'])} series shown apart")
     print(f"{args.out.name} written: " + "; ".join(said))
     return 0
 

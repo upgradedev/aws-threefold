@@ -92,7 +92,8 @@ def test_the_proof_route_draws_a_screen_and_the_navigation_links_to_it(tmp_path:
     assert "https://example.test/prod/proof.json" in out["fetched"]
 
 
-def test_the_committed_pilot_snapshot_is_shown_as_it_was_written(tmp_path: Path) -> None:
+def test_the_committed_snapshot_is_shown_as_it_was_written(tmp_path: Path) -> None:
+    """Every series the snapshot carries is drawn apart, with its own headline and rows."""
     out = proof(
         r"""
   answer = proofAnswer(COMMITTED);
@@ -104,19 +105,36 @@ def test_the_committed_pilot_snapshot_is_shown_as_it_was_written(tmp_path: Path)
         tmp_path,
     )
     page = _unescaped(out["view"])
-    bench = COMMITTED["benchmark"]
-    assert 'data-proof="pilot"' in out["view"] and "PILOT: not a result" in page
-    assert bench["headline"] in page, "The headline is shown exactly as it was computed"
-    assert bench["source"] in page and bench["snapshot_at"] in page
-    for condition in bench["conditions"]:
-        assert f'data-condition="{condition["condition"]}"' in out["view"]
-    assert page.count("not measured") >= 6, "A condition nothing measured reads not measured, never 0%"
-    assert "0%" not in out["text"]
-    assert "1 run measured nothing" in out["text"]
-    for item in bench["evidence"] + COMMITTED["method"]:
+    series = COMMITTED["benchmarks"]
+    assert len(series) >= 2 and 'data-proof="series"' in out["view"]
+    for section in series:
+        assert section["label"] in page, "each series is named"
+        assert section["headline"] in page, "each headline is shown exactly as it was computed"
+        assert section["source"] in page
+    assert out["view"].count('data-series="pressure"') == sum(1 for section in series if section["family"] == "pressure")
+    assert 'data-proof="pilot"' not in out["view"], "no committed series is a pilot"
+    if "private" in COMMITTED:
+        assert out["metrics"].get("calls_governed") == f"{COMMITTED['private']['calls_governed']:,}"
+    for item in COMMITTED["method"]:
         assert item["path"] in page
-    assert "Each is a file in the Threefold repository, at the path shown." in out["text"]
-    # The snapshot carries no private section, so that section says so and shows no figure.
+
+
+def test_a_pilot_snapshot_says_it_is_not_a_result(tmp_path: Path) -> None:
+    pilot = json.loads(json.dumps(COMMITTED["benchmarks"][0]))
+    pilot["pilot"] = True
+    document = {"schema": COMMITTED["schema"], "generated_at": COMMITTED["generated_at"],
+                "generated_by": COMMITTED["generated_by"], "benchmark": pilot, "method": COMMITTED["method"]}
+    out = proof(
+        r"""
+  answer = proofAnswer(PILOT_DOC);
+  await visit('#/proof');
+  out.view = view();
+  out.metrics = metrics(view());
+""".replace("PILOT_DOC", json.dumps(document)),
+        tmp_path,
+    )
+    page = _unescaped(out["view"])
+    assert 'data-proof="pilot"' in out["view"] and "PILOT: not a result" in page
     assert "This snapshot carries no totals from the owner's own work." in page
     assert out["metrics"] == {}, "No tile is drawn for a section the snapshot does not carry"
 
