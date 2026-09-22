@@ -485,6 +485,11 @@ class GovernanceEvaluator:
         lister = getattr(self.session_repo, "list_decisions", None)
         return [with_rule_key(row) for row in lister(days=days, limit=limit)] if lister else []
 
+    def list_rollups(self, days: int = 7, project: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Each project's daily totals over a window, for the charts and tiles."""
+        lister = getattr(self.session_repo, "list_rollups", None)
+        return lister(days=days, project=project) if lister else []
+
     def terminate_session(self, session_id: str, operator_name: str, reason: str) -> AgentSession:
         """Manual enterprise kill-switch to immediately freeze an agent session."""
         session = self.get_or_create_session(session_id)

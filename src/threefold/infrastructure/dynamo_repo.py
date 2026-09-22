@@ -47,6 +47,46 @@ PROJECT_CONFIG_FIELDS = (
 # Pages of the project index a listing may read, each at most 1 MB.
 MAX_INDEX_PAGES = 20
 
+# Each project's totals for one day, added to on every decision. Kept a little
+# longer than the ledger so a thirty-day chart never loses its first day.
+STATS_PARTITION = "STATS"
+ROLLUP_TTL_SECONDS = 35 * 24 * 3600
+
+
+def rollup_counters(decision: Dict[str, Any]) -> tuple:
+    """The counters one decision adds to its day, and the stamps it sets.
+
+    `approved`, `observed` and `refused` are disjoint, so a day's calls are
+    their sum: observed is a call that ran and that a rule would have refused.
+    Besides the counters the contract fixes, `stage:` and `hook_mode:` are
+    counted so the projects listing can say which modes a project's hooks run
+    in without reading the ledger, and `last_seen` and `last:<rule_key>` are
+    stamped for the times the readiness table shows.
+    """
+    status = str(decision.get("status") or "").upper()
+    key = str(decision.get("rule_key") or "NONE")
+    if status.startswith("BLOCKED"):
+        kind = "refused"
+    elif key != "NONE":
+        kind = "observed"
+    else:
+        kind = "approved"
+    counters = {
+        "calls": 1,
+        kind: 1,
+        f"agent:{decision.get('agent') or 'unknown'}": 1,
+        f"origin:{decision.get('origin') or 'unknown'}": 1,
+        f"stage:{decision.get('stage') or 'enforce'}": 1,
+        f"hook_mode:{decision.get('hook_mode') or 'unknown'}": 1,
+    }
+    timestamp = str(decision.get("timestamp") or "")
+    stamps = {"last_seen": timestamp} if timestamp else {}
+    if kind != "approved":
+        counters[f"{kind}:{key}"] = 1
+        if timestamp:
+            stamps[f"last:{key}"] = timestamp
+    return counters, stamps
+
 # Who last resumed a halted session, why, when, and which halt they cleared.
 # Kept on the session row beside trip_reason and terminated_by, because that is
 # where the halt itself is recorded. They travel as plain attributes on the
@@ -297,6 +337,7 @@ class DynamoDBSessionRepository:
             elif value is not None:
                 item[key] = value
 
+        self._add_to_rollup(day, decision)
         if self._table is not None:
             try:
                 self._table.put_item(Item=item)
@@ -310,6 +351,120 @@ class DynamoDBSessionRepository:
         self._last_persistence_mode = "memory"
         self._memory_store[f"{item['PK']}#{item['SK']}"] = item
         return True
+
+    # ------------------------------------------------------------------ rollups
+
+    def _add_to_rollup(self, day: str, decision: Dict[str, Any]) -> None:
+        """Counts one decision into its project's daily totals, best effort.
+
+        Charts and tiles read these rather than the ledger, so they are exact
+        however busy the ledger is. A failed rollup never fails a verdict, and
+        never stops the ledger row being written: it is logged and dropped.
+        """
+        try:
+            counters, stamps = rollup_counters(decision)
+            project = str(decision.get("project_name") or "unlabelled")[:120]
+            self.adjust_rollup(day, project, counters, stamps)
+        except Exception as exc:  # pragma: no cover - the rollup must not break a verdict
+            logger.warning("Could not add a decision to the daily rollup: %s", exc)
+
+    def adjust_rollup(
+        self,
+        day: str,
+        project: str,
+        counters: Dict[str, int],
+        stamps: Optional[Dict[str, str]] = None,
+    ) -> None:
+        """ADDs to PK=STATS#<day>, SK=<project>, and sets its ttl if it has none.
+
+        One UpdateItem, so concurrent containers add rather than overwrite.
+        Counter names hold ':' ("agent:codex"), which an update expression
+        cannot spell, so every name goes through ExpressionAttributeNames.
+        `stamps` are SET, for the last time something was seen. Negative
+        counts are how a review that is changed or cleared is taken back out.
+        """
+        counters = {name: int(value) for name, value in counters.items() if int(value)}
+        stamps = dict(stamps or {})
+        if not counters and not stamps:
+            return
+        partition = f"{STATS_PARTITION}#{day}"
+        expires = int(time.time()) + ROLLUP_TTL_SECONDS
+        if self._table is not None:
+            names: Dict[str, str] = {"#ttl": "ttl"}
+            values: Dict[str, Any] = {":ttl": expires}
+            added = []
+            for index, (name, value) in enumerate(sorted(counters.items())):
+                names[f"#c{index}"] = name
+                values[f":c{index}"] = value
+                added.append(f"#c{index} :c{index}")
+            assigned = ["#ttl = if_not_exists(#ttl, :ttl)"]
+            for index, (name, value) in enumerate(sorted(stamps.items())):
+                names[f"#s{index}"] = name
+                values[f":s{index}"] = value
+                assigned.append(f"#s{index} = :s{index}")
+            expression = "SET " + ", ".join(assigned)
+            if added:
+                expression += " ADD " + ", ".join(added)
+            try:
+                self._table.update_item(
+                    Key={"PK": partition, "SK": project},
+                    UpdateExpression=expression,
+                    ExpressionAttributeNames=names,
+                    ExpressionAttributeValues=values,
+                )
+                return
+            except Exception as exc:
+                logger.warning("DynamoDB rollup update failed, counting in memory: %s", exc)
+        stored = self._memory_store.setdefault(
+            f"{partition}#{project}", {"PK": partition, "SK": project, "ttl": expires}
+        )
+        for name, value in counters.items():
+            stored[name] = int(stored.get(name, 0) or 0) + value
+        stored.update(stamps)
+
+    def list_rollups(self, days: int = 7, project: Optional[str] = None) -> List[Dict[str, Any]]:
+        """The daily totals of the last `days` days, one dict per project and day.
+
+        Each carries `day` and `project` beside its counters. One Query per day
+        for every project, or one GetItem per day for one.
+        """
+        today = datetime.now(timezone.utc).date()
+        wanted = [str(today - timedelta(days=offset)) for offset in range(max(1, days))]
+        items: List[Dict[str, Any]] = []
+        if self._table is not None:
+            for day in wanted:
+                partition = f"{STATS_PARTITION}#{day}"
+                try:
+                    if project is not None:
+                        found = self._table.get_item(Key={"PK": partition, "SK": project}).get("Item")
+                        items.extend([found] if found else [])
+                        continue
+                    kwargs: Dict[str, Any] = {
+                        "KeyConditionExpression": "PK = :pk",
+                        "ExpressionAttributeValues": {":pk": partition},
+                    }
+                    for _ in range(MAX_INDEX_PAGES):
+                        response = self._table.query(**kwargs)
+                        items.extend(response.get("Items", []))
+                        if not response.get("LastEvaluatedKey"):
+                            break
+                        kwargs["ExclusiveStartKey"] = response["LastEvaluatedKey"]
+                except Exception as exc:
+                    logger.warning("Failed to read the rollups for %s: %s", day, exc)
+        if not items:
+            prefixes = tuple(f"{STATS_PARTITION}#{day}#" for day in wanted)
+            items = [
+                item for key, item in self._memory_store.items()
+                if key.startswith(prefixes) and (project is None or item.get("SK") == project)
+            ]
+        rollups = []
+        for item in items:
+            plain = _plain(item)
+            day = str(plain.pop("PK", ""))[len(STATS_PARTITION) + 1:]
+            name = str(plain.pop("SK", ""))
+            plain.pop("ttl", None)
+            rollups.append(dict(plain, day=day, project=name))
+        return rollups
 
     def list_decisions(self, days: int = 7, limit: int = 1000) -> List[Dict[str, Any]]:
         """Returns the decisions of the last `days` days, newest first."""
