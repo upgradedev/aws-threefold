@@ -65,6 +65,32 @@ Parameters:
       starts answering 429. Twice the rate, so a burst of page loads is served
       and only a sustained flood is refused.
 
+  SlowCallAlarmMs:
+    Type: Number
+    Default: 5000
+    MinValue: 100
+    Description: >-
+      Milliseconds above which a call counts as slow for two alarms: the
+      function's p95 Duration, and the average LatencyMs the service reports
+      for the calls it evaluates. A hook's call makes no model call and only a
+      page's call waits on Bedrock, so either passing five seconds for most of
+      fifteen minutes means a dependency is struggling. The function
+      times out at 15 seconds, so this warns well before calls start failing.
+
+  AlarmEmail:
+    Type: String
+    Default: ''
+    NoEcho: true
+    AllowedPattern: '^$|^[^@\s]+@[^@\s]+\.[^@\s]+$'
+    ConstraintDescription: an email address, or empty for none
+    Description: >-
+      Where the alarm topic sends email. Empty, the default, creates the topic
+      and every alarm with no subscription, so the alarms still show their
+      state in the console. AWS sends a confirmation message first and
+      delivers nothing until it is accepted. NoEcho because an address is
+      personal data, and describe-stacks would otherwise print it to anyone who
+      can read the stack, including a CI log.
+
   AllowedProjectPattern:
     Type: String
     Default: '^Acme-[A-Za-z0-9-]{1,40}$'
@@ -298,12 +324,435 @@ Resources:
       # an incident while it is still fresh.
       RetentionInDays: 14
 
+  ThreefoldAlarmTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub '${AWS::StackName}-alarms'
+      DisplayName: Threefold
+      # Not encrypted with the AWS managed key aws/sns, because CloudWatch
+      # cannot publish to a topic under that key, and a customer managed key
+      # would cost a dollar a month to protect alarm names and states.
+
+  ThreefoldAlarmTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+        - !Ref ThreefoldAlarmTopic
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          # Only this account's alarms and budgets may publish. The condition
+          # stops another account's alarm from naming this topic as its action.
+          - Sid: AlarmsOfThisAccount
+            Effect: Allow
+            Principal:
+              Service: cloudwatch.amazonaws.com
+            Action: sns:Publish
+            Resource: !Ref ThreefoldAlarmTopic
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+          - Sid: BudgetsOfThisAccount
+            Effect: Allow
+            Principal:
+              Service: budgets.amazonaws.com
+            Action: sns:Publish
+            Resource: !Ref ThreefoldAlarmTopic
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+
+  ThreefoldAlarmEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasAlarmEmail
+    Properties:
+      TopicArn: !Ref ThreefoldAlarmTopic
+      Protocol: email
+      Endpoint: !Ref AlarmEmail
+
+  # The service's own metrics, read back per stack. The function writes one
+  # Embedded Metric Format record per evaluated call to namespace
+  # Threefold/Governance with the dimensions Project and Environment, and
+  # Environment is always "Production". Both stacks run in this account and
+  # region and write that same namespace, so an alarm on those metrics could
+  # not tell the public demo from the private stack, and the per-project
+  # dimension leaves no single series to alarm on. These filters read the same
+  # records from this stack's own log group and publish the fields the record
+  # carries, under their own names, to a namespace named after the stack.
+  # Requiring ToolCallsEvaluated keeps out the demo's /simulate-loop record,
+  # which carries CircuitBreakerTripped on every click by design.
+  ThreefoldCallsEvaluatedFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref ThreefoldLogGroup
+      FilterPattern: '{ $.ToolCallsEvaluated > 0 }'
+      MetricTransformations:
+        - MetricNamespace: !Sub 'Threefold/${AWS::StackName}'
+          MetricName: ToolCallsEvaluated
+          MetricValue: '1'
+          Unit: Count
+
+  ThreefoldVerdictApprovedFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref ThreefoldLogGroup
+      FilterPattern: '{ ($.ToolCallsEvaluated > 0) && ($.VerdictApproved > 0) }'
+      MetricTransformations:
+        - MetricNamespace: !Sub 'Threefold/${AWS::StackName}'
+          MetricName: VerdictApproved
+          MetricValue: '1'
+          Unit: Count
+
+  ThreefoldCircuitBreakerTrippedFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref ThreefoldLogGroup
+      FilterPattern: '{ ($.ToolCallsEvaluated > 0) && ($.CircuitBreakerTripped > 0) }'
+      MetricTransformations:
+        - MetricNamespace: !Sub 'Threefold/${AWS::StackName}'
+          MetricName: CircuitBreakerTripped
+          MetricValue: '1'
+          Unit: Count
+
+  ThreefoldLatencyMsFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref ThreefoldLogGroup
+      FilterPattern: '{ $.ToolCallsEvaluated > 0 }'
+      MetricTransformations:
+        - MetricNamespace: !Sub 'Threefold/${AWS::StackName}'
+          MetricName: LatencyMs
+          MetricValue: $.LatencyMs
+          Unit: Milliseconds
+
+  ThreefoldSessionCostFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref ThreefoldLogGroup
+      FilterPattern: '{ $.ToolCallsEvaluated > 0 }'
+      MetricTransformations:
+        - MetricNamespace: !Sub 'Threefold/${AWS::StackName}'
+          MetricName: CurrentSessionCostUSD
+          MetricValue: $.CurrentSessionCostUSD
+          Unit: None
+
+  # Alarms. Missing data is treated as not breaching on every one of them, and
+  # deliberately: each measures failures, throttles, slowness or volume of
+  # traffic, and a quiet stack has none of those. Treating silence as a breach
+  # would page every night the owner's agents are idle and every hour nobody
+  # opens the demo. Each alarm notifies the topic when it fires and when it
+  # clears, so an email never leaves the reader wondering whether it is over.
+
+  ThreefoldFunctionErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-function-errors'
+      AlarmDescription: >-
+        The function failed outright. The handler answers every exception it
+        catches with an RFC 7807 problem, so an Error here is a timeout, a
+        crash while the module loads or memory running out. Read the
+        function's log group for the request id.
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref ThreefoldFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref ThreefoldAlarmTopic
+      OKActions:
+        - !Ref ThreefoldAlarmTopic
+
+  ThreefoldFunctionThrottlesAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-function-throttles'
+      AlarmDescription: >-
+        Calls were refused because the function's concurrency reservation was
+        full. A caller is flooding the stack or calls have become slow. Check
+        the call volume and latency before raising ReservedConcurrency.
+      Namespace: AWS/Lambda
+      MetricName: Throttles
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref ThreefoldFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref ThreefoldAlarmTopic
+      OKActions:
+        - !Ref ThreefoldAlarmTopic
+
+  ThreefoldFunctionDurationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-function-duration-p95'
+      AlarmDescription: >-
+        One call in twenty took longer than SlowCallAlarmMs in two of the last
+        three five-minute periods. The usual cause is Bedrock or DynamoDB
+        answering slowly; the function times out at 15 seconds.
+      Namespace: AWS/Lambda
+      MetricName: Duration
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref ThreefoldFunction
+      ExtendedStatistic: p95
+      Unit: Milliseconds
+      Period: 300
+      EvaluationPeriods: 3
+      DatapointsToAlarm: 2
+      Threshold: !Ref SlowCallAlarmMs
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref ThreefoldAlarmTopic
+      OKActions:
+        - !Ref ThreefoldAlarmTopic
+
+  ThreefoldApi5xxRateAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-api-5xx-rate'
+      AlarmDescription: >-
+        At least 5% of requests in five minutes were answered with a 5xx,
+        among at least ten requests. The floor keeps one failed request on an
+        otherwise quiet demo from paging; a crash with no traffic around it is
+        caught by the function errors alarm instead.
+      Metrics:
+        - Id: failed
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: AWS/ApiGateway
+              MetricName: '5xx'
+              Dimensions:
+                - Name: ApiId
+                  Value: !Ref ThreefoldHttpApi
+                - Name: Stage
+                  Value: prod
+            Period: 300
+            Stat: Sum
+        - Id: requests
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: AWS/ApiGateway
+              MetricName: Count
+              Dimensions:
+                - Name: ApiId
+                  Value: !Ref ThreefoldHttpApi
+                - Name: Stage
+                  Value: prod
+            Period: 300
+            Stat: Sum
+        - Id: rate
+          Label: 5xx responses, percent of requests
+          Expression: 'IF(requests >= 10, 100 * FILL(failed, 0) / requests, 0)'
+          ReturnData: true
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref ThreefoldAlarmTopic
+      OKActions:
+        - !Ref ThreefoldAlarmTopic
+
+  ThreefoldApi4xxRateAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-api-4xx-rate'
+      AlarmDescription: >-
+        A quarter or more of requests were refused with a 4xx for fifteen
+        minutes running, among at least twenty requests in each five. This API
+        answers 400, 401, 403, 404 and 409 as RFC 7807 problems by design and
+        the public stack is probed by crawlers, so short spikes are normal. A
+        sustained share means a client is misconfigured, such as a hook with a
+        wrong key on a private stack, which fails open and says nothing, or
+        the throttle is answering 429.
+      Metrics:
+        - Id: refused
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: AWS/ApiGateway
+              MetricName: '4xx'
+              Dimensions:
+                - Name: ApiId
+                  Value: !Ref ThreefoldHttpApi
+                - Name: Stage
+                  Value: prod
+            Period: 300
+            Stat: Sum
+        - Id: requests
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: AWS/ApiGateway
+              MetricName: Count
+              Dimensions:
+                - Name: ApiId
+                  Value: !Ref ThreefoldHttpApi
+                - Name: Stage
+                  Value: prod
+            Period: 300
+            Stat: Sum
+        - Id: rate
+          Label: 4xx responses, percent of requests
+          Expression: 'IF(requests >= 20, 100 * FILL(refused, 0) / requests, 0)'
+          ReturnData: true
+      EvaluationPeriods: 3
+      DatapointsToAlarm: 3
+      Threshold: 25
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref ThreefoldAlarmTopic
+      OKActions:
+        - !Ref ThreefoldAlarmTopic
+
+  # DynamoDB publishes ThrottledRequests and SystemErrors per operation, with
+  # the dimensions TableName and Operation, so an alarm on TableName alone would
+  # read a series that does not exist. A Metrics Insights query sums every
+  # operation on this table, including any a later release starts to use.
+  ThreefoldTableThrottlesAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-table-throttled-requests'
+      AlarmDescription: >-
+        DynamoDB throttled requests to the table. It bills on demand, so this
+        means a hot partition or the table's on-demand maximum; a throttled
+        write can lose a ledger row or a session halt.
+      Metrics:
+        - Id: throttled
+          Expression: !Sub >-
+            SELECT SUM(ThrottledRequests)
+            FROM SCHEMA("AWS/DynamoDB", Operation, TableName)
+            WHERE TableName = '${ThreefoldTable}'
+          Period: 300
+          ReturnData: true
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref ThreefoldAlarmTopic
+      OKActions:
+        - !Ref ThreefoldAlarmTopic
+
+  ThreefoldTableSystemErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-table-system-errors'
+      AlarmDescription: >-
+        DynamoDB answered requests to the table with a server error. The
+        service falls back to what the container holds in memory, so verdicts
+        keep coming while they stop being durable.
+      Metrics:
+        - Id: failed
+          Expression: !Sub >-
+            SELECT SUM(SystemErrors)
+            FROM SCHEMA("AWS/DynamoDB", Operation, TableName)
+            WHERE TableName = '${ThreefoldTable}'
+          Period: 300
+          ReturnData: true
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref ThreefoldAlarmTopic
+      OKActions:
+        - !Ref ThreefoldAlarmTopic
+
+  ThreefoldHaltedSessionCallsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-halted-session-calls'
+      AlarmDescription: >-
+        Ten or more calls in five minutes were answered on a halted session.
+        The service reports CircuitBreakerTripped on the call that halts a
+        session and on every call after it, so this is an agent that keeps
+        calling after it was stopped, or many sessions halting at once.
+      Namespace: !Sub 'Threefold/${AWS::StackName}'
+      MetricName: CircuitBreakerTripped
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 10
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref ThreefoldAlarmTopic
+      OKActions:
+        - !Ref ThreefoldAlarmTopic
+
+  ThreefoldEvaluationLatencyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-evaluation-latency'
+      AlarmDescription: >-
+        The average LatencyMs the service reports for the calls it evaluates
+        passed SlowCallAlarmMs in two of the last three five-minute periods.
+        It is measured inside the handler, so unlike the function's Duration
+        it excludes cold starts and points at the gates, the table or Bedrock.
+      Namespace: !Sub 'Threefold/${AWS::StackName}'
+      MetricName: LatencyMs
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 3
+      DatapointsToAlarm: 2
+      Threshold: !Ref SlowCallAlarmMs
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref ThreefoldAlarmTopic
+      OKActions:
+        - !Ref ThreefoldAlarmTopic
+
+  ThreefoldCallVolumeAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-call-volume'
+      AlarmDescription: >-
+        More than 1,500 calls were evaluated in each of three five-minute
+        periods, five a second for fifteen minutes. That is beyond what a
+        person or a handful of agents make and below the API's throttle, so it
+        warns of a runaway caller while every call is still being billed and
+        before the throttle starts hiding it behind 429s.
+      Namespace: !Sub 'Threefold/${AWS::StackName}'
+      MetricName: ToolCallsEvaluated
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 3
+      DatapointsToAlarm: 3
+      Threshold: 1500
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref ThreefoldAlarmTopic
+      OKActions:
+        - !Ref ThreefoldAlarmTopic
+
 # Each turns an operations parameter's value for "none" into no property or
 # no resource at all, rather than a resource configured with nothing.
 Conditions:
   CapConcurrency: !Not [!Equals [!Ref ReservedConcurrency, '0']]
+  HasAlarmEmail: !Not [!Equals [!Ref AlarmEmail, '']]
 
 Outputs:
+  AlarmTopicArn:
+    Description: The SNS topic every alarm of this stack notifies
+    Value: !Ref ThreefoldAlarmTopic
   ApiEndpoint:
     # The trailing slash is part of the URL. API Gateway answers the bare /prod
     # with its own {"message":"Not Found"} before the function is reached, so a
