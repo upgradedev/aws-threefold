@@ -1,72 +1,157 @@
-# Threefold: AWS Zero to Shipped Hackathon Submission Dossier
+# Threefold: submission dossier
 
-**Target Category:** `#workplace-efficiency` (Developer Productivity & AI Governance)  
-**Target Lane:** `#community`  
-**Application Name:** Threefold  
-**Tagline / Elevator Pitch:** Serverless real-time governance proxy, token cost circuit breakers, and architectural invariant enforcement for autonomous AI coding agents on AWS.  
-**Public Repository URL:** `https://github.com/upgradedev/threefold-aws`  
-**Live Application URL:** <https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/>  
-**Article Published URL:** not published yet  
-**Demo Video URL:** not recorded yet  
+Field-by-field answers for the AWS Zero to Shipped submission form, written to
+match the code on `main` and the live stacks. Where a sentence rests on a live
+check it says so; where it rests on `STATE.md` it is tagged [STATE-FILE].
 
----
-
-## Submission Portal Field-by-Field Answers
-
-### 1. Project Description (Short Summary)
-Threefold is a high-performance, serverless governance proxy and architectural guardrail engine for autonomous AI coding agents (Claude Code, Cursor, Copilot, OpenAI Swarm). Operating on the philosophy that *"Deterministic code trips the circuit breaker; Amazon Bedrock explains why,"* Threefold intercepts tool invocations before execution, evaluating four critical invariants: token-cost budgets, recursive thrashing loops, Clean Architecture layer boundaries, and credential leakage. When compliant, it tracks live dollar spend and issues a SHA-256 fingerprinted Governance Certificate over the session's verdicts. The fingerprint is unkeyed: it detects corruption and casual edits, not an adversary, and nothing in CI requires one before a merge. The certificate is returned by the API rather than archived, and the session behind it is what persists, in DynamoDB.
+**Application name:** Threefold
+**Category:** `#workplace-efficiency` · **Lane:** `#community`
+**Tagline:** Threefold refuses a coding agent's edit the moment it is made, not after the commit, so your architecture does not rot while you sleep.
+**Live application:** <https://d1og72wpk4aqig.cloudfront.net/> (CloudFront edge), origin <https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/> (API Gateway). Both answered anonymously with 200 on 2026-09-22 [PRIMARY, 2026-09-22].
+**Try it in a minute, no account:** <https://d1og72wpk4aqig.cloudfront.net/dashboard.html#/try>
 
 ---
 
-### 2. Inspiration
-Autonomous coding agents are rapidly transforming enterprise software engineering. However, without guardrails, autonomous agents introduce substantial financial and security risks: recursive thrashing loops where an agent endlessly modifies the same lines of code, runaway token usage consuming thousands of dollars in cloud API bills, and catastrophic credential leakage when an agent outputs or commits secret keys into repositories. Engineering leaders were caught between two bad choices: either severely restrict agent autonomy with slow manual approvals, or accept uncontrolled financial and architectural risk. We built Threefold to provide real-time, deterministic, automated safety without slowing down developer velocity.
+## 1. Project description
 
----
+Threefold governs the tool calls coding agents make. One standard-library hook
+file sits in front of Claude Code, Codex and Antigravity and asks a service on
+AWS about each write or command before it runs. Deterministic gates decide: a
+domain file importing infrastructure under the architect's layering rules, a
+credential in the arguments, a write that switches the hooks off, the same call
+repeating, a spend ceiling. A team connects a repository with one command.
+Every project starts in Observe, where calls are judged and recorded and only a
+credential is refused, on the developer's machine. The operations dashboard
+shows what each rule would have refused; the operator labels each of those
+correct or a false alarm, and promotes the project to Enforce with the rules
+that earned it, or demotes it with one click. A refusal carries a fix that has
+itself been run through the same gates. Amazon Bedrock never decides: it
+phrases a refusal for a person reading a page and drafts rules for an
+architect, and every response says which of the two produced the sentence.
 
-### 3. What It Does
-1. **Tool interception and invariant verification:** intercepts an agent's intended tool request (file edits, shell execution, queries) and checks it against four deterministic rules before it runs.
-2. **Cost Circuit Breaker & Real-Time Spend Tracking:** Models exact token-to-dollar pricing for foundation models, enforcing hard session budget caps and blocking single-invocation spend spikes.
-3. **N-Gram Thrashing & Infinite Loop Detection:** Tracks recent invocation sequences using monomorphic and ping-pong N-gram pattern matching, tripping the circuit breaker before tokens are burned.
-4. **Architectural Boundary & Secret Scanner:** Enforces Clean Architecture dependency rules (e.g., domain entities cannot import outer infrastructure frameworks) and blocks sensitive API keys or credentials from being committed or piped to shell commands.
-5. **Amazon Bedrock Architectural Explanations:** When a safety rule trips, Amazon Bedrock (Claude Haiku 4.5) reviews the incident and generates plain-language, contextual advice for the developer.
-6. **Universal Multi-Agent Adapter:** Seamlessly parses both native OpenAI `function_call` and Anthropic `tool_use` schemas, enabling universal compatibility with any coding agent.
-7. **Fingerprinted Governance Certificates & Git Pre-Commit Hook:** Issues SHA-256 fingerprinted audit records, and ships a standalone pre-commit hook (`scripts/pre-commit-gate.py`) that scans a diff for secrets and domain-layer imports. The two are independent: nothing verifies a certificate, in that hook or anywhere else.
+## 2. Inspiration
 
----
+Coding agents write code faster than anyone reviews it, and the architecture
+checks teams already have (import linters, architecture tests) run in CI,
+after the agent has moved on to the next file. The one moment a bad edit can
+still be refused is when the agent asks to make it. And a rule switched on for
+many teams at once is a rule that gets uninstalled on its first false alarm,
+so the rollout had to show what a rule would stop before it stops anything.
 
-### 4. How We Built It
-- **Architecture:** Clean Architecture & Domain-Driven Design (DDD) with strict layer boundaries: Domain Core, Application Evaluators, Infrastructure Adapters, and Interfaces.
-- **AI Reasoning:** Amazon Bedrock Claude Haiku 4.5 (`eu.anthropic.claude-haiku-4-5-20251001-v1:0`) accessed via the Bedrock Converse API for contextual incident explanation.
-- **State & Evidence Persistence:** Amazon DynamoDB single-table design with session history and budget attributes. The certificate is returned by the API and not archived; the S3 bucket the stack provisions for evidence bundles is unused.
-- **Observability:** Real-time AWS CloudWatch Embedded Metric Format (EMF) emitting zero-overhead structured telemetry directly to stdout.
-- **Security & Resilience:** Zero-trust token-bucket rate limiting (60 req/min), API Key authentication, RFC 7807 Problem Details, and exponential backoff with full jitter retry decorators.
-- **API & UI:** Complete OpenAPI 3.1 specifications, interactive Swagger UI (`src/threefold/web/swagger.html`), a public demo page (`src/threefold/web/index.html`), and an operations dashboard (`src/threefold/web/dashboard.html`: overview charts, projects with Observe and Enforce, a review queue, drill-down to each call, one-command connect and sign-in from the command line), all vanilla JavaScript with inline SVG charts and zero external npm build dependencies.
-- **Infrastructure as Code & CI/CD:** AWS SAM (`template.yml`), multi-stage Dockerfiles, Docker Compose, and GitHub Actions CI running 65 tests.
+## 3. What it does
 
----
+1. **Intercepts tool calls on the developer's machine.** The hook refuses a
+   credential locally and never sends it, holds back what must not leave the
+   machine (targets outside the project, agent configuration, data files,
+   terms on the owner's never-send list), and sends the rest to be judged. On
+   an approval it prints nothing, so the agent's own permission flow still runs.
+2. **Judges with deterministic gates.** Layering rules per project in Python,
+   Java, C# and TypeScript, read from each file's own import statements; ten
+   credential shapes at any depth of the arguments; protected paths and every
+   shell route to a write (redirections, heredocs, `sed -i`, `cp`, `git apply`
+   and more); repeating cycles of identical calls up to period six; a spend
+   ceiling on the tokens the caller declares.
+3. **Rolls out in two stages.** Observe, review, readiness per rule (Ready,
+   Quiet, Needs review, Noisy), Promote with the chosen rules, Demote in one
+   click. Page and demo calls always enforce, so the public demo is unaffected.
+4. **Suggests a validated fix with every refusal it can.** A rewritten file,
+   a port and an adapter, or an environment lookup in place of a literal
+   credential, run back through the same gates before it is offered; the hook
+   appends its one-line summary to the deny reason.
+5. **Shows the operation.** `dashboard.html`: overview tiles and inline SVG
+   charts that open the calls behind them, projects, a project page with
+   readiness per rule, the review queue, call drill-down, a connect wizard,
+   sign-in, the `#/try` sandbox walkthrough and a `#/proof` page. Daily rollups
+   keep the charts exact however busy the ledger is.
+6. **Connects in one command and signs in without a key.** `install.py`, served
+   by the stack with its own address written in, installs the hook for the
+   agents it finds; `threefold.py open` signs the operator in through a
+   single-use link, so no key is pasted into a browser.
+7. **Drafts rules with Bedrock, and does not trust the draft.** On the rules
+   page an architect describes a boundary in a sentence; Claude Haiku 4.5
+   proposes a rule, which is validated like a save, set to observe and tried on
+   example files. Nothing is saved without the operator.
 
-### 5. Challenges We Overcame
-1. **No model on the critical path:** the whole invariant engine is standard-library Python, so a refusal never waits on an LLM. The overhead has not been benchmarked, so no figure is claimed.
-2. **Universal Multi-Agent Compatibility:** Different AI models use conflicting tool-calling representations (OpenAI's JSON-string `arguments` vs. Anthropic's structured `input` object). We developed a universal normalization adapter that maps any agent payload into unified domain entities.
-3. **A dependency-free domain:** the gates and the domain model import nothing outside the standard library, and boto3 is imported lazily in the infrastructure adapters only. The Lambda therefore ships without a build step.
+## 4. How we built it
 
----
+- **Edge:** Amazon CloudFront with the pages in a private S3 bucket behind
+  origin access control, AWS WAF (IP reputation, a per-address rate limit, two
+  managed rule groups), security headers on every response, and a secret origin
+  header so the function trusts the viewer's address and host only from the
+  edge. Its own stack in us-east-1.
+- **API and compute:** Amazon API Gateway HTTP API (stage throttle, access
+  logs) and one AWS Lambda function, Python 3.11 on arm64, X-Ray tracing,
+  reserved concurrency.
+- **State:** one Amazon DynamoDB table (sessions, the decision ledger, daily
+  rollups, rules, project stages, sign-in records), with TTLs and point-in-time
+  recovery.
+- **AI:** Amazon Bedrock, Claude Haiku 4.5 through the `eu.` cross-region
+  inference profile, Converse API, only for page explanations and rule drafts.
+- **Operations:** ten CloudWatch alarms, a dashboard, Embedded Metric Format
+  metrics read into a namespace per stack, an SNS topic.
+- **Code:** clean architecture with a standard-library domain, no build step,
+  no chart library, no npm. The hook and the installer are single
+  standard-library files.
+- **Infrastructure as code:** two CloudFormation templates, `deploy/template.yml`
+  (SAM transform) and `deploy/edge.yml`.
+- **Checking it live:** `scripts/probe_live.py`, run against the public origin
+  on 2026-09-22: 113 PASS, 0 FAIL, 3 SKIP (`docs/evidence/PROBES_2026-09-22.md`).
 
-### 6. Accomplishments That We're Proud Of
-- **Deterministic Prevention of Cost Runaways:** Created an automated circuit breaker that refuses a call whose declared cost would breach the cap. It trusts the token counts the caller declares, so a caller that declares zero is not stopped.
-- **100% Green Automated Test Pyramid:** Built a comprehensive 65-test hermetic test suite covering unit, integration, universal adapter, and security tests.
-- **Turnkey Production Readiness:** Delivered production Docker containers, OpenAPI 3.1 specs, Swagger UI, CloudWatch EMF metrics, and pre-commit hook gating.
+## 5. Challenges we ran into
 
----
+1. **Does a deny actually stop the write?** Two open bug reports said a hook's
+   deny can be ignored, so it was measured per agent on the file system rather
+   than assumed: Claude Code 2.1.220 and the Antigravity desktop app did not
+   create the refused file. Codex could not be measured (its account had hit a
+   usage limit), so nothing is claimed for it
+   (`docs/evidence/ENFORCEMENT_2026-09-21.md`).
+2. **Every write route, not only the Write tool.** An agent refused a `Write`
+   can reach for `cat > file <<'EOF'`. The service reads a shell command for
+   the writes it makes and judges readable content like a `Write`, and refuses
+   an unreadable write to a covered path with "use Write or Edit so the rule can
+   read it".
+3. **A loop gate that does not lock people out.** Halting a developer's session
+   for polling `git status` stopped real work. Repeated reads and polls are now
+   noted, never refused, and a hook's loop refuses the repeating call without
+   halting the session; the demo still halts on the third call.
+4. **The edge behind the function's back.** Behind CloudFront the function saw
+   an edge server as every caller and handed out installers pointing past the
+   firewall. A secret origin header, and a CloudFront Function copying the
+   viewer's host, fixed both; the installer fetched from the edge names the edge
+   [PRIMARY, 2026-09-22].
 
-### 7. What We Learned
-- How to decouple deterministic invariant checking from asynchronous generative explanation to achieve both high speed and deep semantic context.
-- The critical role of token-bucket rate limiting and RFC 7807 problem details in building zero-trust serverless APIs.
-- How to design zero-dependency developer tooling that integrates seamlessly into git hooks and enterprise CI/CD pipelines.
+## 6. Accomplishments we are proud of
 
----
+- The owner's own work has been governed since 2026-09-22 at nine locations,
+  under `Acme-Proj-*` aliases, in Observe, reporting to a private stack from the
+  same template [STATE-FILE].
+- The public stack passed its own live probe, 113 checks PASS, 0 FAIL, 3 SKIP.
+- Nothing on the public stack names a real project or person: names outside the
+  `Acme-*` pattern are stored as `unlabelled`, developers appear only as short
+  hashes.
+- The model is kept off every verdict: approvals and hook calls never wait on
+  it, and a test pins that.
 
-### 8. What's Next for Threefold
-- Native IDE plugins for VS Code, Cursor, and JetBrains for inline visual circuit-breaker status.
-- Team-wide shared DynamoDB budget pools with organization-level hierarchy and RBAC.
-- Semantic drift detection comparing agent diffs against high-level architectural design documents.
+## 7. What we learned
+
+- A governance rule has to earn its enforcement. Showing what it would have
+  refused, and letting a person label it, is what makes switching it on safe.
+- A refusal is worth more with a fix, and a fix is only worth giving if it
+  passes the same gate that refused the original.
+- Measure the enforcement per agent. A hook's deny is a request to the agent,
+  and whether it is honoured is an empirical question.
+
+## 8. What's next
+
+- The benchmark. The harness in `benchmark/` runs a coding agent on six
+  synthetic tasks under three conditions and grades the result independently.
+  Only a pilot exists, and its real-agent runs never reached the model, so no
+  comparative number exists yet; the headline will be computed by
+  `benchmark/report.py` from the full matrix
+  (`docs/evidence/BENCHMARK_2026-09-22-PILOT.md`).
+- Measure Codex enforcement once its account resets.
+- Price each call by the model actually in use, and let the session ceiling and
+  loop window come from the policy, as the settings page already admits they do
+  not [STATE-FILE].
+- Sign the governance certificate with a key and issue it from the session's
+  stored history instead of verdicts the caller supplies [STATE-FILE].
