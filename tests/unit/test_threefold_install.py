@@ -560,6 +560,8 @@ def test_the_hook_installed_in_a_workspace_sends_only_what_the_include_list_name
     spec = importlib.util.spec_from_file_location("threefold_hook_for_workspace", installer.HOOK_SOURCE)
     hook = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(hook)
+    # The walk from a checkout passes every .git on its way to a .threefold.json; keep it in this test's directory.
+    monkeypatch.setattr(hook, "_WALK_CEILING", str(machine.tmp))
     log = machine.threefold_home / "held_back.log"
 
     def write(name: str) -> None:
@@ -586,13 +588,62 @@ def test_include_globs_are_written_to_the_config_in_the_order_given(machine) -> 
 
 @pytest.mark.parametrize(
     "glob",
-    ["", "   ", "./", "/srv/acme/**", "\\acme\\**", "C:/acme/**", "c:\\acme\\**", "~/acme/**",
+    ["", "   ", "./", ".", "./.", ".\\", "/srv/acme/**", "\\acme\\**", "C:/acme/**", "c:\\acme\\**", "~/acme/**",
      "../acme-other/**", "repos/../../acme/**", "repos/acme-alpha/.."],
 )
 def test_an_include_glob_that_is_empty_absolute_or_climbs_out_is_refused_and_nothing_is_written(machine, workspace, glob) -> None:
+    """`.` among them: it was written, matched nothing, and held back every call."""
     for directory in (machine.repo, workspace):
         before = snapshot(directory, machine.home)
         result = run_in(machine, directory, "--include", "repos/acme-alpha/**", "--include", glob)
         assert result.code == 2, result.out
         assert "--include" in result.out and "Nothing was changed" in result.out
         assert snapshot(directory, machine.home) == before
+
+
+def test_a_dot_segment_inside_an_include_glob_is_written_without_it(machine) -> None:
+    result = run(machine, "--include", "services/./billing/**", "--include", "services//ledger/")
+    assert result.code == 0, result.out
+    config = json.loads((machine.repo / ".threefold.json").read_text(encoding="utf-8"))
+    assert config["include"] == ["services/billing/**", "services/ledger"]
+
+
+@pytest.mark.parametrize("dry_run", [False, True], ids=["install", "dry-run"])
+def test_include_is_refused_for_a_directory_below_the_top_of_a_repository(machine, dry_run) -> None:
+    """The file goes to the top of the checkout, where globs written for the
+    directory named would be read relative to another one, silently."""
+    inner = machine.repo / "acme-ws"
+    (inner / "repos" / "acme-alpha").mkdir(parents=True)
+    before = snapshot(machine.repo, machine.home)
+    result = run_in(machine, inner, "--include", "repos/acme-alpha/**", *(["--dry-run"] if dry_run else []))
+    assert result.code == 2, result.out
+    assert "relative to the directory given" in result.out and "Nothing was changed" in result.out
+    assert f"--repo {machine.repo.resolve().as_posix()}" in result.out
+    assert snapshot(machine.repo, machine.home) == before
+
+
+def test_a_directory_below_the_top_of_a_repository_still_installs_at_the_top_without_include(machine) -> None:
+    inner = machine.repo / "acme-sub"
+    inner.mkdir()
+    assert run_in(machine, inner).code == 0
+    assert (machine.repo / ".threefold.json").is_file() and not (inner / ".threefold.json").exists()
+
+
+def test_with_a_tracked_config_the_output_says_the_include_list_was_not_written(machine) -> None:
+    _commit(machine, ".threefold.json", json.dumps({"project": "Acme-Ledger", "mode": "observe"}))
+    committed = (machine.repo / ".threefold.json").read_bytes()
+    result = run(machine, "--include", "services/billing/**")
+    assert result.code == 0, result.out
+    assert "include list was not written" in result.out and '"services/billing/**"' in result.out
+    assert (machine.repo / ".threefold.json").read_bytes() == committed
+
+
+def test_an_existing_config_windows_powershell_wrote_in_utf_16_is_replaced_and_put_back_byte_for_byte(machine) -> None:
+    """It used to stop the install with a UnicodeDecodeError traceback."""
+    original = json.dumps({"project": "Acme-Old"}).encode("utf-16")
+    (machine.repo / ".threefold.json").write_bytes(original)
+    result = run(machine, "--include", "services/billing/**")
+    assert result.code == 0, result.out
+    assert json.loads((machine.repo / ".threefold.json").read_text(encoding="utf-8"))["include"] == ["services/billing/**"]
+    assert run(machine, "--uninstall", project=None).code == 0
+    assert (machine.repo / ".threefold.json").read_bytes() == original

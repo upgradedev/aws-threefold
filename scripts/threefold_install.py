@@ -45,8 +45,11 @@ may be using them. `--dry-run` prints every step and writes nothing at all.
 
 `--include GLOB`, repeatable, writes an `include` list into `.threefold.json`:
 globs relative to that directory, and the hook then sends only calls inside
-them. A glob that is empty, absolute or contains `..` is refused, because it
-could name nothing inside the directory.
+them. A glob that is empty, only `.`, absolute or contains `..` is refused,
+because it could name nothing inside the directory. So is `--include` with a
+`--repo` below the top of a repository: the file goes to the top, where the
+globs would be read relative to a directory other than the one they were
+written for.
 
 A directory git does not recognise as a repository, such as a workspace root
 that holds several repositories, is installed in workspace mode instead of
@@ -201,9 +204,12 @@ def include_globs(values: Optional[Sequence[str]]) -> List[str]:
     """The --include globs as they are written to .threefold.json, or an InstallError.
 
     Each is relative to the directory being installed, so one that is empty,
-    absolute or climbs out with `..` could only mean a mistake, and a mistake
-    in the list of what may be sent is refused rather than written. The hook
-    ignores the same three, so a list written here is read in full there.
+    names only that directory (`.`), is absolute or climbs out with `..` could
+    only mean a mistake, and a mistake in the list of what may be sent is
+    refused rather than written: `.` was accepted, matched nothing, and held
+    back every call. A `.` segment inside a glob is dropped, since no path the
+    hook compares has one. The hook reads the same way, so a list written here
+    is read in full there.
     """
     globs: List[str] = []
     for value in values or ():
@@ -214,11 +220,14 @@ def include_globs(values: Optional[Sequence[str]]) -> List[str]:
             )
         if ".." in text:
             raise InstallError(f"--include {text} contains '..'; a glob relative to the directory cannot leave it")
-        text = text.replace("\\", "/")
-        while text.startswith("./"):
-            text = text[2:]
         if not text:
             raise InstallError("--include was given an empty glob, which would match nothing")
+        text = "/".join(segment for segment in text.replace("\\", "/").split("/") if segment not in ("", "."))
+        if not text:
+            raise InstallError(
+                f"--include {value.strip()} names only the directory itself, which no glob matches; name what is "
+                "inside it, such as repos/acme-billing/**"
+            )
         if text not in globs:
             globs.append(text)
     return globs
@@ -243,6 +252,14 @@ def read_json_object(path: Path) -> Dict[str, Any]:
 
 def dump_json(document: Dict[str, Any]) -> str:
     return json.dumps(document, indent=2) + "\n"
+
+
+def _text_or_none(path: Path) -> Optional[str]:
+    """A file's text as UTF-8, or None when it is not, such as a .threefold.json Windows PowerShell wrote in UTF-16."""
+    try:
+        return path.read_text(encoding="utf-8-sig")
+    except (OSError, UnicodeDecodeError):
+        return None
 
 
 # --- the plan ---------------------------------------------------------------------------
@@ -423,7 +440,14 @@ def install(
             f"{CONFIG_FILE} is tracked by git, so it was left as it is: the committed file decides the project and "
             f"the mode here. Change it in a commit, or set THREEFOLD_PROJECT, if it should say {args.project}"
         )
-    elif config_path.is_file() and config_path.read_text(encoding="utf-8-sig") == config_text:
+        if includes:
+            # Said on its own line: an exit code of 0 and no word about the
+            # list read as though the list were in force.
+            plan.add(
+                f"the include list was not written either, so the hook sends what the committed {CONFIG_FILE} "
+                f"allows; add \"include\": {json.dumps(list(includes))} to it in a commit if only those should be sent"
+            )
+    elif config_path.is_file() and _text_or_none(config_path) == config_text:
         plan.add(f"{CONFIG_FILE} is current{scope}")
         written.append(CONFIG_FILE)
     else:
@@ -799,6 +823,17 @@ def main(argv: Optional[Sequence[str]] = None, out: Any = None) -> int:
             # would be published by the first tool call.
             raise InstallError("--project must match ^Acme-[A-Za-z0-9-]{1,40}$, an alias rather than a real name")
         includes = include_globs(args.include)
+        named = Path(args.repo).resolve()
+        if includes and os.path.normcase(str(named)) != os.path.normcase(str(root)):
+            # The globs were written relative to the directory named, and the
+            # hook reads them relative to the one holding .threefold.json.
+            # Written at the top of the checkout instead, they would name other
+            # directories, or none, and nothing would say so.
+            raise InstallError(
+                f"--include globs are relative to the directory given, but {forward(named)} is inside the repository "
+                f"{forward(root)}, and .threefold.json would be written there instead; give --repo {forward(root)} "
+                "with globs relative to it"
+            )
         return install(args, root, home, out, workspace, includes)
     except InstallError as error:
         print(f"threefold: {error}. Nothing was changed.", file=out)

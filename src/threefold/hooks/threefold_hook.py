@@ -64,10 +64,14 @@ the directory it runs in and every path its text names, falls inside one of
 them; anything else stays on the machine as `not-included`. This is how a
 workspace root holding several repositories governs only the ones the owner
 chose, and why a checkout inside such a workspace with no `.threefold.json` of
-its own is configured from the workspace root rather than stopping the walk
-at its own `.git`. Without it, or with an empty list, nothing changes. A credential is
-still refused wherever it is written, and in enforce mode a write to the
-hooks' own files is still refused, before the list is consulted.
+its own, a submodule or vendored clone included, is configured from the
+workspace root rather than stopping the walk at the first `.git` it meets.
+Without it, or with an empty list, nothing changes. A list that cannot be
+read sends less, never more: a `.threefold.json` that mentions include but
+cannot be parsed or read in full sends nothing until it can (a UTF-16 file,
+as Windows PowerShell writes it, is read). A credential is still refused
+wherever it is written, and in enforce mode a write to the hooks' own files
+is still refused, before the list is consulted.
 
     THREEFOLD_PROJECT     required, here or in a file. Unset, nothing is sent.
     THREEFOLD_ENDPOINT    the service, default the public /prod/ stack
@@ -112,6 +116,7 @@ by whatever Python the developer already has.
 """
 from __future__ import annotations
 
+import codecs
 import datetime
 import functools
 import hashlib
@@ -347,17 +352,20 @@ def glob_matches(path: str, pattern: str, fold_case: Optional[bool] = None) -> b
 def include_glob(value: Any) -> Optional[str]:
     """An include glob as the hook reads it, or None for one that can only mean a mistake.
 
-    Empty, absolute (`/x`, `C:/x`, `~/x`) or climbing out with `..`: the list
-    is relative to the directory of the file that holds it, so none of these
-    can name anything inside it. The installer refuses the same three, so a
-    list it wrote never loses an entry here.
+    Empty, only the directory itself (`.`), absolute (`/x`, `C:/x`, `~/x`) or
+    climbing out with `..`: the list is relative to the directory of the file
+    that holds it, so none of these can name anything inside it. A `.` segment
+    inside a glob is dropped, because no relative path has one and the glob
+    would otherwise match nothing without saying so. The installer refuses and
+    normalises the same way, so a list it wrote never loses an entry here.
     """
     if not isinstance(value, str):
         return None
     stripped = value.strip()
     if stripped.startswith(("/", "\\", "~")) or re.match(r"^[A-Za-z]:", stripped) or ".." in stripped:
         return None
-    return _glob_normalise(stripped) or None
+    segments = [segment for segment in _glob_normalise(stripped).split("/") if segment not in ("", ".")]
+    return "/".join(segments) or None
 
 
 # --- small helpers -----------------------------------------------------------
@@ -893,6 +901,29 @@ def project_root(payload: Dict[str, Any]) -> str:
 
 # --- configuration: environment, then the repository, then home -------------------
 
+# Where every walk up the tree stops, when set. Nothing in the hook sets it and
+# no setting reaches it: the tests set it to their own temporary directory, so
+# that a walk looking for a workspace above a checkout never reads the machine
+# above them. An environment variable would have done the same for a subprocess,
+# and would also have been a way to hide a workspace's include list from the
+# checkouts under it, which is the one thing the list must not allow.
+_WALK_CEILING: Optional[str] = None
+
+
+def _directories_up(start: str) -> Iterator[str]:
+    """`start` and each directory above it, at most MAX_WALK_UP, and none above the tests' ceiling."""
+    ceiling = _canonical(_WALK_CEILING) if _WALK_CEILING else None
+    current = start
+    for _ in range(MAX_WALK_UP):
+        if ceiling and not _is_within(_canonical(current), ceiling):
+            return
+        yield current
+        parent = os.path.dirname(current)
+        if parent == current:
+            return
+        current = parent
+
+
 def config_root(payload: Dict[str, Any]) -> Optional[str]:
     """The directory whose .threefold.json governs this call, or None.
 
@@ -903,46 +934,39 @@ def config_root(payload: Dict[str, Any]) -> Optional[str]:
     found: what may leave the machine is still decided against project_root.
 
     The one exception is a workspace: a checkout with no configuration of its
-    own, below a directory whose .threefold.json carries an include list and
-    with no other checkout in between, belongs to that directory. The list is the owner saying, not by
-    accident, which of the checkouts below it are sent, so an included one is
-    governed from the workspace root and a left-out one is held back as
-    not-included, even when THREEFOLD_PROJECT would otherwise send it under a
-    project of its own.
+    own belongs to the nearest directory above it with a .threefold.json, when
+    that file carries an include list, however many checkouts lie in between.
+    The list is the owner saying, not by accident, which of the checkouts below
+    it are sent, so an included one is governed from the workspace root and a
+    left-out one is held back as not-included, and so is a submodule or a
+    vendored clone inside a left-out one, even when THREEFOLD_PROJECT would
+    otherwise send it under a project of its own.
     """
-    current = project_root(payload)
-    for _ in range(MAX_WALK_UP):
+    for current in _directories_up(project_root(payload)):
         if os.path.isfile(os.path.join(current, CONFIG_FILE_NAME)):
             return current
         if os.path.exists(os.path.join(current, ".git")):
             return _workspace_above(current) or current
-        parent = os.path.dirname(current)
-        if parent == current:
-            return None
-        current = parent
     return None
 
 
 def _workspace_above(checkout: str) -> Optional[str]:
     """The directory above a checkout whose .threefold.json has an include list, if there is one.
 
-    The walk stops at the next `.git` without a configuration file, as the
-    first walk does: a checkout nested in another checkout is that checkout's
-    business, and the tests rely on a `.git` marker keeping every walk inside
-    their own directory.
+    Only a `.threefold.json` ends this walk, never a bare `.git`. Stopping at
+    the next checkout up, a submodule or a vendored clone inside a left-out
+    repository met that repository's `.git` first, never reached the
+    workspace's list, and sent everything in it. The first file found decides:
+    with no include list the checkout is its own, as it always was, and a file
+    that cannot be read but names one holds everything below it back.
     """
-    current = os.path.dirname(checkout)
-    for _ in range(MAX_WALK_UP):
+    parent = os.path.dirname(checkout)
+    if parent == checkout:
+        return None
+    for current in _directories_up(parent):
         path = os.path.join(current, CONFIG_FILE_NAME)
         if os.path.isfile(path):
-            include = read_config(path).get("include")
-            return current if include is not None and include != [] else None
-        if os.path.exists(os.path.join(current, ".git")):
-            return None
-        parent = os.path.dirname(current)
-        if parent == current:
-            return None
-        current = parent
+            return current if _read_include(load_config(path), []) is not None else None
     return None
 
 
@@ -968,20 +992,70 @@ def command_directory(call: "NormalisedCall", payload: Dict[str, Any]) -> str:
     return os.path.abspath(os.path.join(cwd, _as_path(call.command_base))) if call.command_base else cwd
 
 
-def read_config(path: str) -> Dict[str, Any]:
-    """A configuration file as a dictionary, or empty if it is missing, too large or not an object."""
+class ConfigFile:
+    """One configuration file as read: its object, and why it could not be used if it exists and could not.
+
+    `names_include` says whether a file that could not be read may hold an
+    include list: its bytes mention one, or it is too large or unopenable to
+    tell. An include list only ever keeps calls at home, so a list that cannot
+    be read must keep them all there rather than none.
+    """
+
+    __slots__ = ("document", "problem", "names_include")
+
+    def __init__(self, document: Optional[Dict[str, Any]] = None, problem: Optional[str] = None, names_include: bool = False):
+        self.document: Dict[str, Any] = document if document is not None else {}
+        self.problem = problem
+        self.names_include = names_include
+
+
+def _decode_config(raw: bytes) -> str:
+    """UTF-8 with or without a BOM, or UTF-16 or UTF-32 by theirs.
+
+    Windows PowerShell 5.1 writes UTF-16 with `>` and with Out-File, so a
+    .threefold.json edited there used to be read as no file at all.
+    """
+    for bom, codec in (
+        (codecs.BOM_UTF32_LE, "utf-32"),
+        (codecs.BOM_UTF32_BE, "utf-32"),
+        (codecs.BOM_UTF16_LE, "utf-16"),
+        (codecs.BOM_UTF16_BE, "utf-16"),
+    ):
+        if raw.startswith(bom):
+            return raw.decode(codec)
+    return raw.decode("utf-8-sig")
+
+
+def load_config(path: str) -> ConfigFile:
+    """A configuration file as read. A missing file has no problem; one that exists and cannot be used says why."""
     try:
         with open(path, "rb") as handle:
             raw = handle.read(MAX_CONFIG_BYTES + 1)
     except OSError:
-        return {}
+        if not os.path.exists(path):
+            return ConfigFile()
+        return ConfigFile(problem="could not be opened", names_include=True)
     if len(raw) > MAX_CONFIG_BYTES:
-        return {}
+        # Not read to the end, so whether it names a list cannot be told.
+        return ConfigFile(problem=f"is larger than {MAX_CONFIG_BYTES // 1024} KB", names_include=True)
+    # Any encoding: the key's letters survive in UTF-16 and UTF-32 once the zero bytes go.
+    names_include = b"include" in raw.replace(b"\x00", b"").lower()
     try:
-        document = json.loads(raw.decode("utf-8-sig"))
-    except (ValueError, UnicodeDecodeError, RecursionError):
-        return {}
-    return document if isinstance(document, dict) else {}
+        text = _decode_config(raw)
+    except UnicodeDecodeError:
+        return ConfigFile(problem="is not UTF-8 or UTF-16 text", names_include=names_include)
+    try:
+        document = json.loads(text)
+    except (ValueError, RecursionError):
+        return ConfigFile(problem="is not valid JSON", names_include=names_include)
+    if not isinstance(document, dict):
+        return ConfigFile(problem="is not a JSON object", names_include=names_include)
+    return ConfigFile(document)
+
+
+def read_config(path: str) -> Dict[str, Any]:
+    """A configuration file as a dictionary, or empty if it is missing, too large or not an object."""
+    return load_config(path).document
 
 
 class Settings:
@@ -1045,7 +1119,8 @@ def resolve_settings(payload: Dict[str, Any]) -> Settings:
     home = threefold_home()
     root = config_root(payload)
     repo_dir = root or ""
-    repo = read_config(os.path.join(root, CONFIG_FILE_NAME)) if root else {}
+    repo_file = load_config(os.path.join(root, CONFIG_FILE_NAME)) if root else ConfigFile()
+    repo = repo_file.document
     home_config = read_config(os.path.join(home, HOME_CONFIG_NAME))
     layers = (("repo", CONFIG_FILE_NAME, repo, repo_dir), ("home", "THREEFOLD_HOME/config.json", home_config, home))
 
@@ -1122,11 +1197,11 @@ def resolve_settings(payload: Dict[str, Any]) -> Settings:
     if key_file:
         key = _read_key_file(key_file, key_label, settings.notes)
     settings.api_key = key
-    settings.include = _read_include(repo, settings.notes)
+    settings.include = _read_include(repo_file, settings.notes)
     return settings
 
 
-def _read_include(repo: Dict[str, Any], notes: List[str]) -> Optional[List[str]]:
+def _read_include(config: ConfigFile, notes: List[str]) -> Optional[List[str]]:
     """The include globs of the repository's .threefold.json, or None when it has none.
 
     Read from that file alone, because its globs are relative to its own
@@ -1136,8 +1211,20 @@ def _read_include(repo: Dict[str, Any], notes: List[str]) -> Optional[List[str]]
     written as a single string, or a glob that is absolute or climbs out with
     `..`, matches nothing, so a typo in the list of what to send keeps calls
     at home instead of sending the repositories the owner left out.
+
+    The same holds for the file itself. One that cannot be parsed, decoded or
+    read in full used to be read as no file, which lost its list and sent every
+    repository it left out; if it mentions include, nothing is sent until it
+    can be read. One that does not is still ignored as before.
     """
-    value = repo.get("include")
+    if config.problem is not None:
+        if config.names_include:
+            notes.append(
+                f"{CONFIG_FILE_NAME} {config.problem} and may hold an include list, so nothing was sent until it can be read."
+            )
+            return []
+        return None
+    value = config.document.get("include")
     if value is None or value == []:
         return None
     if not isinstance(value, list):
@@ -1146,7 +1233,7 @@ def _read_include(repo: Dict[str, Any], notes: List[str]) -> Optional[List[str]]
     globs = [glob for glob in (include_glob(item) for item in value) if glob]
     if len(globs) != len(value):
         notes.append(
-            f"an include glob in {CONFIG_FILE_NAME} is empty, absolute or contains '..', and matches nothing."
+            f"an include glob in {CONFIG_FILE_NAME} is empty, only '.', absolute or contains '..', and matches nothing."
         )
     return globs
 
@@ -1265,12 +1352,19 @@ def _command_paths(command: str, canonical_base: str) -> Iterator[Tuple[str, str
     for token in _COMMAND_TOKEN_SPLIT.split(command):
         if not token:
             continue
-        expanded = _expand_home_token(token)
-        if expanded is None:
-            if not ("/" in token or "\\" in token or token.startswith(".")):
-                continue
-            expanded = token
-        yield token, _canonical(os.path.join(canonical_base, _as_path(expanded)))
+        candidate = _word_as_path(token, canonical_base)
+        if candidate is not None:
+            yield token, candidate
+
+
+def _word_as_path(token: str, canonical_base: str) -> Optional[str]:
+    """Where one word lands as a path from `canonical_base`, or None for a word that does not read as one."""
+    expanded = _expand_home_token(token)
+    if expanded is None:
+        if not ("/" in token or "\\" in token or token.startswith(".")):
+            return None
+        expanded = token
+    return _canonical(os.path.join(canonical_base, _as_path(expanded)))
 
 
 def _included(canonical_path: str, canonical_root: str, include: Sequence[str]) -> bool:
@@ -1288,21 +1382,205 @@ def _included(canonical_path: str, canonical_root: str, include: Sequence[str]) 
     return any(glob_matches(relative, glob) for glob in include)
 
 
+# --- a command's text against the include list -------------------------------------
+#
+# Read only where an include list applies. command_reaches, which guards the
+# agents' own directories on every call, keeps the reading it always had.
+
+# The directory a command runs in, spelled as bash, cmd and PowerShell spell it.
+# Each is read as `.`, which a relative path already starts from: `$PWD/..`
+# used to lose its `..` to the literal `$PWD` segment and land inside the list.
+_CWD_SPELLINGS = re.compile(
+    r"\$\{pwd\}|\$\(\s*pwd\s*\)|`\s*pwd\s*`|%cd%|\$env:pwd\b|\$pwd\b|(?<![^\s=:'\"])~\+(?![^\s\\/'\";&|)])",
+    re.IGNORECASE,
+)
+# A place derived from the working directory by an expansion the hook cannot
+# evaluate: ${PWD%/*}, $OLDPWD, ~-. Where it points is unknown, so is whether
+# the list covers it.
+_COMPUTED_PLACE = re.compile(r"(?:\$\{|\$env:|\$)(?:old)?pwd(?![A-Za-z0-9_])|(?<![^\s=:'\"])~-", re.IGNORECASE)
+# A `..` after a variable, a command's output or another user's home: it climbs
+# from somewhere the hook cannot see, so it may climb out of the list.
+_UNRESOLVED_CLIMB = re.compile(r"(?:[$%`]|~[^\s\\/]).*?[\\/})%]\.\.(?=$|[\\/])")
+# The command in pieces: runs of separators, redirections, and everything else.
+_SHELL_PIECES = re.compile(r"[;&|()\n]+|[<>]+|[^\s;&|()<>]+")
+_URL = re.compile(r"^[A-Za-z][A-Za-z0-9+.\-]+://")
+_DIRECTORY_CHANGES = frozenset(("cd", "chdir", "pushd", "popd", "set-location", "sl", "push-location", "pop-location"))
+_PUSHES = frozenset(("pushd", "push-location"))
+_POPS = frozenset(("popd", "pop-location"))
+_CD_OPTIONS = frozenset(("-l", "-p", "-e", "-@", "--", "/d", "-path", "-literalpath", "-passthru"))
+_KEEPS_COMMAND_POSITION = frozenset(("builtin", "command", "then", "do", "else", "if", "while", "until", "!", "{", "time"))
+# `bash -c`, `cmd /c`, `pwsh -Command`: the next word starts a command of its own.
+_STARTS_A_COMMAND = frozenset(("-c", "-lc", "-ic", "-ec", "/c", "/k", "-command"))
+MAX_COMMAND_DIRECTORIES = 16
+
+
+def _unquoted(text: str) -> str:
+    """A word with its quotes taken out and an escape before a dot dropped.
+
+    A shell joins `.''./`, `.""./` and `.\\./` into `../`, so the check has to
+    read them that way. The word as written is read too, because on Windows a
+    backslash is a separator rather than an escape.
+    """
+    return re.sub(r"[\\`](?=\.)", "", re.sub(r"['\"]", "", text))
+
+
+def _colon_parts(piece: str) -> List[str]:
+    """A :-separated list, such as PYTHONPATH or HEAD:path, as its items, keeping a Windows drive whole."""
+    parts: List[str] = []
+    for part in piece.split(":"):
+        if os.name == "nt" and parts and len(parts[-1]) == 1 and parts[-1].isalpha() and part[:1] in ("/", "\\", ""):
+            parts[-1] = f"{parts[-1]}:{part}"
+        else:
+            parts.append(part)
+    return parts
+
+
+def _path_pieces(word: str) -> Iterator[str]:
+    """Each part of one word that can name a path.
+
+    The word itself; what follows a leading `@` (`curl -d @file`) or a
+    one-letter option written against its value (`-I../x`, `-o../x`, `-C../x`);
+    and each item of a `:` list. Written as one piece, `-I..` or `src:..` was a
+    single path segment that normpath kept, and the `..` in it climbed nowhere.
+    A URL is not a path, except a file:// one.
+    """
+    if _URL.match(word):
+        if word.lower().startswith("file:"):
+            yield word
+        return
+    pending, seen = [word], set()
+    while pending:
+        piece = pending.pop()
+        if not piece or piece in seen:
+            continue
+        seen.add(piece)
+        yield piece
+        if piece.startswith("@"):
+            pending.append(piece[1:])
+        if len(piece) > 2 and piece[0] == "-" and piece[1].isalpha():
+            pending.append(piece[2:])
+        parts = _colon_parts(piece)
+        if len(parts) > 1:
+            pending.extend(parts)
+
+
+def _next_separator(pieces: Sequence[str], index: int) -> str:
+    while index < len(pieces) and pieces[index][0] not in ";&|()\n":
+        index += 1
+    return pieces[index] if index < len(pieces) else ""
+
+
 def _command_included(command: str, base: str, canonical_root: str, include: Sequence[str]) -> bool:
     """Whether a command runs inside the include globs and names no path outside them.
 
     Where it runs is not enough. `cat repos/acme-gamma/a.py > b.py` run from
     an included repository carries a file of a left-out one in its text, and
-    the text is what would be sent.
+    the text is what would be sent. So every word that reads as a path is
+    resolved, with its quotes and escapes read as a shell reads them, and
+    must land inside the list.
+
+    A path is read from where the command stands when it reaches it. A cd,
+    pushd or Set-Location to a literal path moves that place, and must itself
+    land inside the list; after `&&` the command is only there, otherwise it
+    may be in either place, since a cd that failed or ran in a pipe left it
+    where it was, and a subshell puts it back when it closes. A move the hook
+    cannot compute holds the command back: a bare cd goes home, `cd -` and `~-`
+    go wherever the shell was before, an argument built from a variable or a
+    command's output goes wherever that is, and popd is known only after a
+    pushd in the same command. Every relative path after one of those is read
+    from a place nobody can check against the list.
     """
     canonical_base = _canonical(base)
     if not _included(canonical_base, canonical_root, include):
         return False
-    for token, candidate in _command_paths(command, canonical_base):
-        if token.lower() in _DEVICE_TOKENS:
+    text = _CWD_SPELLINGS.sub(".", command)
+    if _COMPUTED_PLACE.search(text):
+        return False
+    checked = set()
+
+    def inside(word: str, directories: Sequence[str]) -> bool:
+        for directory in directories:
+            if (word, directory) in checked:
+                continue
+            checked.add((word, directory))
+            candidate = _word_as_path(word, directory)
+            if candidate is not None and not _included(candidate, canonical_root, include):
+                return False
+        return True
+
+    current = [canonical_base]
+    subshells: List[List[str]] = []
+    pushed: List[List[str]] = []
+    at_command = True
+    pieces = _SHELL_PIECES.findall(text)
+    index = 0
+    while index < len(pieces):
+        piece = pieces[index]
+        index += 1
+        if piece[0] in ";&|()\n":
+            for char in piece:
+                if char == "(":
+                    subshells.append(list(current))
+                elif char == ")" and subshells:
+                    current = subshells.pop()
+            at_command = True
             continue
-        if not _included(candidate, canonical_root, include):
-            return False
+        if piece[0] in "<>":
+            at_command = False
+            continue
+        name = _unquoted(piece).lower()
+        if at_command and name in _KEEPS_COMMAND_POSITION:
+            continue
+        words, directories = [piece], current
+        if at_command and (name in _DIRECTORY_CHANGES or name.startswith(("cd..", "cd/", "cd\\"))):
+            if name in _DIRECTORY_CHANGES:
+                operands = []
+                while index < len(pieces) and pieces[index][0] not in ";&|()\n<>":
+                    if _unquoted(pieces[index]).lower() not in _CD_OPTIONS:
+                        operands.append(pieces[index])
+                    index += 1
+            else:
+                # cmd.exe reads `cd..` and `cd\` without a space.
+                name, operands = "cd", [piece[2:]]
+            # The operands are words like any other, read from where the move starts.
+            words, directories = operands, current
+            if name in _POPS:
+                if not pushed:
+                    return False
+                targets = pushed.pop()
+            else:
+                place = _unquoted(operands[0]) if operands else ""
+                if not place or place in ("-", "~-", "~+") or place[0] in "-+" or re.search(r"[$%`]", place):
+                    return False
+                expanded = _expand_home_token(place) or place
+                targets = []
+                for directory in current:
+                    target = _canonical(os.path.join(directory, _as_path(expanded)))
+                    if not _included(target, canonical_root, include):
+                        return False
+                    if target not in targets:
+                        targets.append(target)
+                if name in _PUSHES:
+                    pushed.append(list(current))
+            if _next_separator(pieces, index).replace("\n", "").startswith("&&"):
+                current = targets
+            else:
+                current = current + [target for target in targets if target not in current]
+            if len(current) > MAX_COMMAND_DIRECTORIES:
+                return False
+            at_command = False
+        else:
+            at_command = name in _STARTS_A_COMMAND
+        for written in words:
+            for form in {written, _unquoted(written)}:
+                for word in _COMMAND_TOKEN_SPLIT.split(form):
+                    if not word or word.lower() in _DEVICE_TOKENS:
+                        continue
+                    if _UNRESOLVED_CLIMB.search(word):
+                        return False
+                    for part in _path_pieces(word):
+                        if part.lower() not in _DEVICE_TOKENS and not inside(part, directories):
+                            return False
     return True
 
 

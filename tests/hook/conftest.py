@@ -47,7 +47,7 @@ def hook():
 
 
 @pytest.fixture(autouse=True)
-def machine(monkeypatch, tmp_path):
+def machine(monkeypatch, tmp_path, hook):
     """A developer machine that exists only for this test."""
     for name in list(os.environ):
         if name.startswith("THREEFOLD_") and name != "THREEFOLD_OFFLINE":
@@ -60,6 +60,10 @@ def machine(monkeypatch, tmp_path):
     # .git. This marker stops that walk inside the test's own directory, so no
     # file above it on the real machine can configure a test.
     (tmp_path / ".git").mkdir()
+    # From a checkout the hook keeps walking, past every .git, to the first
+    # .threefold.json that might hold a workspace's include list. The marker
+    # cannot stop that walk, so the hook's ceiling does.
+    monkeypatch.setattr(hook, "_WALK_CEILING", str(tmp_path))
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.setenv("THREEFOLD_HOME", str(home / ".threefold"))
