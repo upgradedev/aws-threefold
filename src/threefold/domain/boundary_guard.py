@@ -9,13 +9,13 @@ from __future__ import annotations
 
 import posixpath
 import re
+from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 from threefold.domain.layering_rules import (
     DEFAULT_RULES,
     ENFORCE,
     OBSERVE,
-    evaluate as evaluate_layering,
     observed as observed_layering,
     rules_for_path,
     violations,
@@ -72,7 +72,10 @@ def looks_like_path(text: str) -> bool:
     """Whether a string is plausibly a filesystem path rather than prose.
 
     Deliberately conservative. Running the protected-path patterns over every
-    string would block a comment that merely mentions a dotfile.
+    string would block a comment that merely mentions a dotfile. It is a guess
+    about a loose string, so it is never asked about a value the call itself
+    filed under a path key: there `named_path` decides, and a file name with a
+    space in it is a file name.
     """
     if not text or len(text) > MAX_PATHLIKE_LENGTH or "\n" in text:
         return False
@@ -84,6 +87,54 @@ def looks_like_path(text: str) -> bool:
         or text.startswith(".")
         or bool(re.fullmatch(r"[\w.\-]+\.\w{1,6}", text))
     )
+
+
+def named_path(text: str) -> bool:
+    """Whether a value given under an explicit path key names a file.
+
+    Nothing is guessed here. The agent said `file_path`, so the string is the
+    path, whatever it contains. `looks_like_path` used to decide this too, and
+    it says no to any string with a space in it, so `src/domain/order line.py`
+    paired with no content and every layering and governance check below it was
+    skipped, while the same write sent as a heredoc was refused. Only the two
+    limits that make a string unusable as a path are kept: a length bound, so a
+    whole file's text under a mistyped key cannot be walked as one, and a
+    newline, which no single path carries.
+    """
+    return bool(text) and len(text) <= MAX_PATHLIKE_LENGTH and "\n" not in text and bool(text.strip())
+
+
+# Which gate found a thing wrong with a call. The application groups rules by
+# these: a project promotes some and keeps others watching, so which gate spoke
+# has to be a fact the guard states, not a word read back out of its sentence.
+CREDENTIAL_FOUND = "credential"
+PROTECTED_PATH_FOUND = "protected-path"
+GOVERNANCE_FOUND = "governance"
+TAMPERING_FOUND = "tampering"
+LAYERING_FOUND = "layering"
+UNREADABLE_FOUND = "unreadable"
+DESTRUCTIVE_FOUND = "destructive"
+COMMAND_PATH_FOUND = "command-path"
+
+
+@dataclass(frozen=True)
+class BoundaryFinding:
+    """One thing the guard found wrong with a call, and which gate found it.
+
+    `reason` is the sentence the call's maker is given, unchanged from the one
+    the guard has always written. Everything beside it is what the gate saw:
+    `rule_id` for a layering rule, `path` for the file, `label` for the kind of
+    credential, `detail` for the text a pattern matched, and `from_shell` for a
+    finding read out of a command rather than out of the call's own fields.
+    """
+
+    kind: str
+    reason: str
+    rule_id: str = ""
+    path: str = ""
+    label: str = ""
+    detail: str = ""
+    from_shell: bool = False
 
 
 class SecretScanner:
@@ -133,10 +184,20 @@ class ArchitecturalBoundaryGuard:
     # The earlier patterns required whitespace or a slash in front, so a shell
     # redirect like `curl -d @.env` put an at sign there and slipped past.
     PROTECTED_PATH_PATTERNS: List[re.Pattern] = [
-        re.compile(r"\.env(?![A-Za-z0-9_])", re.IGNORECASE),
+        # `.env.example` and its spellings are the committed template: a file
+        # whose whole purpose is to name the variables without their values.
+        # Refusing it refused `git diff -- .env.example` and reading the
+        # template before writing the real one.
+        re.compile(r"\.env(?!\.(?:example|sample|template|dist|defaults)(?![A-Za-z0-9_.]))(?![A-Za-z0-9_])", re.IGNORECASE),
         re.compile(r"\.git(?![A-Za-z0-9_])", re.IGNORECASE),
-        re.compile(r"(?<![A-Za-z0-9_])secrets(?![A-Za-z0-9_])", re.IGNORECASE),
-        re.compile(r"\.(pem|key|pfx|pkcs12|p12)(?![A-Za-z0-9_])", re.IGNORECASE),
+        # A credential store is a place: `secrets/`, `.secrets`,
+        # `secrets.json`, `config/secrets.yml`. The bare word on its own is a
+        # search term, and matching it refused `rg -n "secrets" docs/`.
+        re.compile(r"(?<![A-Za-z0-9_])secrets(?=[/\\.])|(?<=[/\\.])secrets(?![A-Za-z0-9_])", re.IGNORECASE),
+        # A key file has a name in front of the extension (`server.key`,
+        # `deploy.pem`). A bare `.key` is a field, and matching it refused
+        # `jq -r .key config.json`.
+        re.compile(r"(?<=[A-Za-z0-9_\-])\.(pem|key|pfx|pkcs12|p12)(?![A-Za-z0-9_])", re.IGNORECASE),
         re.compile(r"\.ssh(?![A-Za-z0-9_])", re.IGNORECASE),
         re.compile(r"\.aws(?![A-Za-z0-9_])", re.IGNORECASE),
         re.compile(r"(?<![A-Za-z0-9_])id_(rsa|ed25519|ecdsa)(?![A-Za-z0-9_])", re.IGNORECASE),
@@ -187,23 +248,56 @@ class ArchitecturalBoundaryGuard:
     ) -> Tuple[bool, str]:
         """Checks a tool invocation against safety and architectural boundaries.
 
-        Returns (is_permitted, failure_reason).
+        Returns (is_permitted, failure_reason). The first finding decides, as it
+        always has; a caller that stages rules one by one reads them all with
+        `boundary_findings`.
+        """
+        for finding in cls.boundary_findings(invocation, rules):
+            return False, finding.reason
+        return True, "Architectural boundaries respected"
+
+    @classmethod
+    def boundary_findings(
+        cls,
+        invocation: ToolInvocation,
+        rules: Optional[List[Dict[str, Any]]] = None,
+    ) -> Iterator["BoundaryFinding"]:
+        """Everything wrong with this call, in the order the gates ask.
+
+        A generator on purpose. `evaluate_tool_boundary` takes the first and
+        stops, so an ordinary verdict costs exactly what it cost before; only a
+        caller that has to look past a finding — because the project is still
+        only observing that rule — pays for the rest.
+
+        Each finding says which gate found it. Reading that back out of the
+        sentence was the defect: the sentences quote the caller's own command,
+        so a trailing comment could name any rule it liked and have the refusal
+        filed under it.
         """
         arguments = invocation.arguments
 
-        # 1. Credentials anywhere in the arguments, at any depth.
+        # 1. Credentials anywhere in the arguments, at any depth. Nothing after
+        #    this is asked: a credential is never staged, and the sentences
+        #    below quote the arguments the credential is in.
         is_clean, secret_msg = SecretScanner.scan_arguments(arguments)
         if not is_clean:
-            return False, secret_msg
+            yield BoundaryFinding(CREDENTIAL_FOUND, secret_msg, label=secret_msg.rsplit(": ", 1)[-1])
+            return
 
-        # 2. Protected paths, found by shape rather than by argument name. The
-        #    previous version read four fixed keys, so `notebook_path` was
-        #    invisible to it.
-        path_like = cls._path_like_leaves(arguments)
-        for candidate in path_like:
+        # 2. Protected paths: the file the call names, found by shape as well as
+        #    by argument name, since `notebook_path` was invisible to the four
+        #    fixed keys this replaced. What a call *writes* is not a path it
+        #    names, so an Edit whose new text is `process.env.PORT` is no longer
+        #    reported as a target path the agent cannot act on.
+        for candidate in target_paths(arguments):
             for pattern in cls.PROTECTED_PATH_PATTERNS:
                 if pattern.search(candidate):
-                    return False, f"Target path '{candidate}' is protected by architectural governance"
+                    yield BoundaryFinding(
+                        PROTECTED_PATH_FOUND,
+                        f"Target path '{candidate}' is protected by architectural governance",
+                        path=candidate,
+                    )
+                    break
 
         active_rules = rules if rules is not None else DEFAULT_RULES
 
@@ -213,17 +307,16 @@ class ArchitecturalBoundaryGuard:
         #     other check off, so it is refused whatever the rules are.
         for target in governed_write_targets(invocation):
             if is_governance_path(target):
-                return False, governance_reason(target)
+                yield BoundaryFinding(GOVERNANCE_FOUND, governance_reason(target), path=target)
 
         # 2c. What a shell command writes. A command was only ever read for the
         #     paths it named, so `cat > src/domain/user.py <<'EOF'` carried
         #     `import boto3` past a gate that would have refused the same text
         #     sent as a Write.
         command = shell_command(invocation)
-        if command is not None:
-            refusal = shell_refusal(analysed(command, command_cwd(invocation)), active_rules)
-            if refusal:
-                return False, refusal
+        analysis = analysed(command, command_cwd(invocation)) if command is not None else None
+        if analysis is not None:
+            yield from shell_findings(analysis, active_rules)
 
         # 3. The layering rules. These are declared rather than compiled in, so
         #    the rule that has no incumbent can be the architecture of whoever is
@@ -236,28 +329,52 @@ class ArchitecturalBoundaryGuard:
         for target, content in write_pairs(arguments):
             if not rules_for_path(target, active_rules):
                 continue
-            allowed, reason = evaluate_layering(target, content, active_rules)
-            if not allowed:
-                return False, f"Clean Architecture violation: {reason}"
+            found, _ = violations(target, content, active_rules)
+            for item in found:
+                if item["mode"] == ENFORCE:
+                    yield BoundaryFinding(
+                        LAYERING_FOUND,
+                        f"Clean Architecture violation: {item['reason']}",
+                        rule_id=item["rule_id"],
+                        path=target,
+                    )
 
         # 4. Destructive or exfiltrating shell commands. A call that carries a
         #    command is read as one whatever it declares, and its working
         #    directory is a path-like leaf that must not switch this off.
+        path_like = cls._path_like_leaves(arguments)
         if invocation.action_type == ToolActionType.COMMAND_EXEC or command is not None or not path_like:
             for leaf in iter_string_leaves(arguments):
                 for pattern in cls.DESTRUCTIVE_COMMANDS:
-                    if pattern.search(leaf):
-                        return False, f"Command '{leaf[:120]}' contains a destructive operation"
+                    found_text = pattern.search(leaf)
+                    if found_text:
+                        yield BoundaryFinding(
+                            DESTRUCTIVE_FOUND,
+                            f"Command '{leaf[:120]}' contains a destructive operation",
+                            detail=found_text.group(0),
+                            from_shell=command is not None,
+                        )
+                        break
+            # A word the command never treats as a file — the pattern `grep` is
+            # given, the line `echo` appends to .gitignore, the path `git` is
+            # asked about — is blanked before the credential-store patterns run
+            # over the command, exactly as `.git` was taken out of them on
+            # 2026-09-22. A command that cannot be read this way is scanned
+            # whole, as it always was.
+            spelled, skipped = _not_files(command, analysis)
             for leaf in iter_string_leaves(arguments):
-                if looks_like_path(leaf):
+                if looks_like_path(leaf) or leaf in skipped:
                     continue
                 for pattern in cls.COMMAND_PROTECTED_PATTERNS:
-                    if pattern.search(leaf):
-                        return False, (
-                            f"Command '{leaf[:120]}' reaches a protected path or credential store"
+                    found_text = pattern.search(spelled.get(leaf, leaf))
+                    if found_text:
+                        yield BoundaryFinding(
+                            COMMAND_PATH_FOUND,
+                            f"Command '{leaf[:120]}' reaches a protected path or credential store",
+                            detail=found_text.group(0),
+                            from_shell=command is not None,
                         )
-
-        return True, "Architectural boundaries respected"
+                        break
 
 
 def describe_target(request: Any) -> str:
@@ -268,6 +385,11 @@ def describe_target(request: Any) -> str:
     program name alone: the rest of a command line is exactly where a refused
     credential would be, and a ledger that stored those would recreate the leak
     it exists to record. Nothing here ever returns file content.
+
+    A path was not a safe place either. A URL carries its query string, and
+    `…?access_token=…` put the token into the one field the ledger publishes
+    word for word on a stack whose reads are public, beside a reason that was
+    redacted. Every descriptor now leaves through the same redaction.
     """
     action = str(getattr(request, "action_type", "")).upper()
     arguments = getattr(request, "arguments", None)
@@ -279,12 +401,12 @@ def describe_target(request: Any) -> str:
             value = arguments.get(key)
             if isinstance(value, str) and value.strip():
                 program = value.strip().split()[0]
-                return program[:60]
+                return redact_secrets(program)[:60]
         return ""
 
     for candidate in iter_string_leaves(arguments):
         if looks_like_path(candidate):
-            return candidate[:160]
+            return redact_secrets(candidate)[:160]
     return ""
 
 
@@ -317,6 +439,136 @@ PATH_KEYS = ("file_path", "path", "filepath", "target_file", "notebook_path", "a
 # being deleted: removing a forbidden import was refused for containing it.
 REMOVED_KEYS = ("old_string", "old_str", "old", "original", "search", "find", "before")
 
+# What a call carries that is text for a file rather than the name of one.
+_NOT_A_TARGET = frozenset(CONTENT_KEYS + REMOVED_KEYS)
+
+
+def target_paths(arguments: Any) -> Iterator[str]:
+    """Every file this call names, in the order the call names them.
+
+    A value under a path key is a path whatever it looks like; every other
+    string is one only if it has a path's shape, which is what found `.env`
+    under `AbsolutePath` and `notebook_path` when the guard read four fixed key
+    names. What the call *writes* is left out: an Edit that puts
+    `process.env.PORT` into a file was reported as "Target path
+    'process.env.PORT' is protected", a sentence about a path the agent never
+    named and cannot act on.
+    """
+    def walk(node: Any, key: Optional[str]) -> Iterator[str]:
+        lowered = key.lower() if isinstance(key, str) else None
+        if isinstance(node, str):
+            if lowered in PATH_KEYS:
+                if named_path(node):
+                    yield node
+            elif lowered not in _NOT_A_TARGET and looks_like_path(node):
+                yield node
+        elif isinstance(node, dict):
+            for name, item in node.items():
+                if isinstance(name, str) and looks_like_path(name):
+                    yield name
+                yield from walk(item, name if isinstance(name, str) else None)
+        elif isinstance(node, (list, tuple, set)):
+            for item in node:
+                yield from walk(item, key)
+
+    seen = set()
+    for candidate in walk(arguments, None):
+        if candidate not in seen:
+            seen.add(candidate)
+            yield candidate
+
+
+# --- a word a command never treats as a file ------------------------------------------
+#
+# The narrowing of `.git` on 2026-09-22 (c4a222c) took the repository's own
+# directory out of the credential-store patterns, because a read-only command
+# names it all the time to leave it out. `.env`, `secrets` and key names have
+# the same problem and cannot be taken out: reading `.env` really is reaching a
+# credential store. So the words that are demonstrably not files are taken out
+# of the command instead, and everything else is scanned exactly as before. A
+# command the shell reader cannot parse, a program not listed here, and a
+# redirection's source are all scanned whole.
+
+# Programs that print their operands rather than read them.
+_PRINTERS = frozenset(("echo", "printf"))
+# Programs whose first operand is a pattern, a filter or a script.
+_PATTERN_FIRST = frozenset(("grep", "egrep", "fgrep", "rg", "ag", "ack", "jq", "sed", "awk", "gawk", "mawk"))
+# When the pattern is given by a flag instead, which operand is a file is no
+# longer clear from the outside, so nothing is taken out.
+_PATTERN_FLAGS = ("-e", "-f", "--regexp", "--file", "--from-file", "--expression")
+_PATTERN_FLAG_PREFIXES = ("--regexp=", "--file=", "--from-file=", "--expression=")
+# git subcommands that name a path without reading what is in it.
+_GIT_ASKS = frozenset(("check-ignore", "status", "ls-files", "log"))
+_FIND_PATTERN_FLAGS = frozenset(
+    ("-name", "-iname", "-path", "-ipath", "-wholename", "-iwholename", "-regex", "-iregex", "-lname", "-ilname")
+)
+
+
+def _program(word: str) -> str:
+    return word.replace("\\", "/").rsplit("/", 1)[-1].lower()
+
+
+def _pattern_operand(rest: List[str]) -> List[str]:
+    """The one leading operand that is a pattern rather than a file, or none."""
+    for word in rest:
+        if word in _PATTERN_FLAGS or word.startswith(_PATTERN_FLAG_PREFIXES):
+            return []
+    for word in rest:
+        if word.startswith("-") and word != "-":
+            continue
+        return [word]
+    return []
+
+
+def _words_that_are_not_files(argv: List[str]) -> List[str]:
+    """The words of one simple command that name no file it opens."""
+    if not argv:
+        return []
+    name = _program(argv[0])
+    rest = list(argv[1:])
+    if name == "git":
+        subcommand = next((word for word in rest if not word.startswith("-")), "")
+        if subcommand == "grep":
+            return _pattern_operand(rest[rest.index("grep") + 1:])
+        return rest if subcommand in _GIT_ASKS else []
+    if name in _PRINTERS:
+        return rest
+    if name == "find":
+        return [rest[index + 1] for index, word in enumerate(rest[:-1]) if word.lower() in _FIND_PATTERN_FLAGS]
+    if name in _PATTERN_FIRST:
+        return _pattern_operand(rest)
+    return []
+
+
+def _not_files(command: Any, analysis: Optional[ShellAnalysis]) -> Tuple[Dict[str, str], frozenset]:
+    """How to read a command leaf in place of itself, and which words to skip.
+
+    A command sent as one string comes back with those words blanked, keeping
+    every other offset; a command sent as a list of words comes back as the set
+    of words to pass over. Only words that would otherwise be read as a
+    credential store are taken out, so nothing else about the command changes.
+    """
+    if analysis is None:
+        return {}, frozenset()
+    words: List[str] = []
+    for argv in analysis.commands:
+        words.extend(_words_that_are_not_files(list(argv)))
+    words = [
+        word
+        for word in words
+        if word and any(pattern.search(word) for pattern in ArchitecturalBoundaryGuard.COMMAND_PROTECTED_PATTERNS)
+    ]
+    if not words:
+        return {}, frozenset()
+    if not isinstance(command, str):
+        return {}, frozenset(words)
+    blanked = command
+    for word in words:
+        at = blanked.find(word)
+        if at >= 0:
+            blanked = blanked[:at] + " " * len(word) + blanked[at + len(word):]
+    return {command: blanked}, frozenset()
+
 
 def iter_write_targets(arguments: Any) -> List[Tuple[str, str]]:
     """Pairs each path in a call with the content meant for THAT path.
@@ -341,7 +593,7 @@ def iter_write_targets(arguments: Any) -> List[Tuple[str, str]]:
             path_value = ""
             for key, value in node.items():
                 if isinstance(value, str) and isinstance(key, str):
-                    if key.lower() in PATH_KEYS and looks_like_path(value):
+                    if key.lower() in PATH_KEYS and named_path(value):
                         path_value = value
             owner = path_value or inherited
             if owner:
@@ -504,7 +756,7 @@ def _named_paths(value: Any) -> Iterator[str]:
     """Every path given under a path-shaped key, however deep."""
     if isinstance(value, dict):
         for key, item in value.items():
-            if isinstance(key, str) and key.lower() in PATH_KEYS and isinstance(item, str) and looks_like_path(item):
+            if isinstance(key, str) and key.lower() in PATH_KEYS and isinstance(item, str) and named_path(item):
                 yield item
             else:
                 yield from _named_paths(item)
@@ -606,7 +858,15 @@ def _fragment_could_import(content: str, rule: Dict[str, Any], language: str) ->
     return bool(words & forbidden)
 
 
-def _finding(rule: Dict[str, Any], path: str, reason: str, module: str = "", pattern: str = "") -> Dict[str, str]:
+def _finding(
+    rule: Dict[str, Any], path: str, reason: str, module: str = "", pattern: str = "", kind: str = LAYERING_FOUND
+) -> Dict[str, str]:
+    """One rule's verdict on one write. `kind` says which gate it belongs to.
+
+    A rule's import list and the policy on a write the rules cannot read are
+    staged apart by an operator, and both name the rule in their sentence, so
+    which one decided is recorded rather than read back out of the words.
+    """
     return {
         "rule_id": rule["id"],
         "mode": rule.get("mode", ENFORCE),
@@ -614,6 +874,7 @@ def _finding(rule: Dict[str, Any], path: str, reason: str, module: str = "", pat
         "pattern": pattern,
         "reason": reason,
         "path": path,
+        "kind": kind,
     }
 
 
@@ -626,7 +887,7 @@ def _unreadable_finding(rule: Dict[str, Any], write: ShellWrite, fragment: bool 
             if fragment else f"writes it by {write.route} with content the rule cannot read"
         )
         reason = f"Clean Architecture violation: layering rule '{rule['id']}' covers '{target}', and this command {what}: {UNREADABLE_WRITE}"
-        return _finding(rule, target, reason)
+        return _finding(rule, target, reason, kind=UNREADABLE_FOUND)
     if not fragment:
         return _unreadable_observation(rule, target, write.route)
     reason = (
@@ -634,7 +895,7 @@ def _unreadable_finding(rule: Dict[str, Any], write: ShellWrite, fragment: bool 
         f"{write.route} to text that could complete an import the rule forbids, while the rest of the line cannot "
         f"be read, and would be told to {UNREADABLE_WRITE}"
     )
-    return _finding(rule, target, reason)
+    return _finding(rule, target, reason, kind=UNREADABLE_FOUND)
 
 
 def _unreadable_pattern_finding(rule: Dict[str, Any], write: ShellWrite, fragment: bool = False) -> Dict[str, str]:
@@ -658,7 +919,7 @@ def _unreadable_pattern_finding(rule: Dict[str, Any], write: ShellWrite, fragmen
             f"glob that is only resolved when it runs, the rule could cover it, and the command {what} by "
             f"{write.route}: name the file literally, or {UNREADABLE_WRITE}"
         )
-    return _finding(rule, where, reason)
+    return _finding(rule, where, reason, kind=UNREADABLE_FOUND)
 
 
 def _suffixes_within(target: str, rule: Dict[str, Any]) -> List[str]:
@@ -732,7 +993,7 @@ def _write_findings(write: ShellWrite, rules: List[Dict[str, Any]]) -> List[Dict
         reason = item["reason"]
         if item["mode"] == ENFORCE:
             reason = f"Clean Architecture violation: {reason} (written by {write.route})"
-        findings.append(dict(item, reason=reason, path=target))
+        findings.append(dict(item, reason=reason, path=target, kind=LAYERING_FOUND))
     if write.fragment and language:
         judged = {item["rule_id"] for item in found}
         findings.extend(
@@ -766,38 +1027,74 @@ def shell_refusal(analysis: ShellAnalysis, rules: List[Dict[str, Any]]) -> Optio
     Under observe rules alone each of these is recorded instead, by
     shell_observations.
     """
+    for finding in shell_findings(analysis, rules):
+        return finding.reason
+    return None
+
+
+def shell_findings(analysis: ShellAnalysis, rules: List[Dict[str, Any]]) -> Iterator[BoundaryFinding]:
+    """Everything a command's writes break, in the order shell_refusal asks.
+
+    shell_refusal is the first of these; a caller that stages rules one by one
+    reads on. The sentences are the ones shell_refusal has always returned.
+    """
     for reason in analysis.tampering:
-        return f"Command turns the repository's hooks off: {reason}. Refused as a protected-path call"
+        yield BoundaryFinding(
+            TAMPERING_FOUND,
+            f"Command turns the repository's hooks off: {reason}. Refused as a protected-path call",
+            detail=reason,
+            from_shell=True,
+        )
     for write in analysis.writes:
         if write.target is None:
             continue
         if write.pattern:
             if pattern_is_governance(write.target, write.deletes, write.tree):
-                return _pattern_governance_reason(write)
+                yield BoundaryFinding(
+                    GOVERNANCE_FOUND,
+                    _pattern_governance_reason(write),
+                    path=shell_display(write.target),
+                    from_shell=True,
+                )
         elif is_governance_path(write.target, deletes=write.deletes):
-            return governance_reason(write.target, write.route, write.deletes)
+            yield BoundaryFinding(
+                GOVERNANCE_FOUND,
+                governance_reason(write.target, write.route, write.deletes),
+                path=write.target,
+                from_shell=True,
+            )
     enforced = _enforcing(rules)
     if analysis.truncated and enforced:
-        return (
+        yield BoundaryFinding(
+            UNREADABLE_FOUND,
             "Clean Architecture violation: this command is too long to be read to the end for the "
-            f"files it writes, and an enforce rule is active: {UNREADABLE_WRITE}"
+            f"files it writes, and an enforce rule is active: {UNREADABLE_WRITE}",
+            detail="truncated",
+            from_shell=True,
         )
     for write in analysis.writes:
         if write.deletes:
             continue
         if write.target is None:
             if enforced:
-                return (
+                yield BoundaryFinding(
+                    UNREADABLE_FOUND,
                     f"Clean Architecture violation: this command writes by {write.route} to files it does not name "
                     "in a way that can be read (a patch kept in a file, or a path worked out when it runs), so neither "
                     f"the files nor what is written to them can be checked against rule '{enforced[0]['id']}': "
-                    f"{UNREADABLE_WRITE}"
+                    f"{UNREADABLE_WRITE}",
+                    from_shell=True,
                 )
             continue
         for finding in _write_findings(write, rules):
             if finding["mode"] == ENFORCE:
-                return finding["reason"]
-    return None
+                yield BoundaryFinding(
+                    UNREADABLE_FOUND if finding.get("kind") == UNREADABLE_FOUND else LAYERING_FOUND,
+                    finding["reason"],
+                    rule_id=finding["rule_id"],
+                    path=finding.get("path", ""),
+                    from_shell=True,
+                )
 
 
 def _unreadable_observation(rule: Dict[str, Any], target: str, how: str) -> Dict[str, str]:
@@ -812,6 +1109,7 @@ def _unreadable_observation(rule: Dict[str, Any], target: str, how: str) -> Dict
             f"with content the rule cannot read, and would be told to {UNREADABLE_WRITE}"
         ),
         "path": target,
+        "kind": UNREADABLE_FOUND,
     }
 
 
