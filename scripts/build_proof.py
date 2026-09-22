@@ -18,7 +18,12 @@ benchmark   What benchmark/report.py computes from the result rows given, or
 private     The owner's own use, from GET api/overview?days=30 and GET
             api/projects on a private stack, read with the operator key. Only
             aggregate numbers are kept, each checked to be a number; no text
-            read from the stack is copied at all.
+            read from the stack is copied at all, and an answer missing a
+            field the contract fixes is refused rather than defaulted. The
+            false-alarm rate is given only for a window in which nothing was
+            refused: the overview counts false alarms on refused and observed
+            calls alike but reviewed calls on observed ones only, so with a
+            refusal in the window the two would not be the same calls.
 
 The key is read from a file and sent only in the X-API-Key header, over HTTPS
 or to this machine, and only to the address given: a redirect is refused, not
@@ -327,45 +332,95 @@ def project_names(overview: Mapping[str, Any], projects: Mapping[str, Any]) -> S
     return names
 
 
+# What GET /api/overview must carry for a private section to be built. The
+# contract fixes every one of these; an answer missing one is not a stack this
+# script understands, and a section built from it would show a zero or a gap
+# nobody measured.
+OVERVIEW_TOTALS = ("calls", "approved", "refused", "would_refuse", "needs_review", "false_alarms", "projects", "agents")
+SERIES_COUNTS = ("approved", "observed", "refused")
+STAGES = ("observe", "enforce")
+
+
+def _not_the_contract(what: str) -> ProofError:
+    """A refusal that names the field, which is the contract's own word, and never the value the stack sent."""
+    return ProofError(f"the private stack's answer to GET /api/overview is not the shape the contract fixes: {what}")
+
+
+def _self_correction_totals(figure: Any) -> Optional[Dict[str, Any]]:
+    """The self-correction figure's numbers, or None for a stack that predates it."""
+    if figure is None:
+        return None
+    if not isinstance(figure, Mapping):
+        raise _not_the_contract("self_correction is not an object")
+    counts = {name: _count(figure.get(name)) for name in ("refusals_considered", "self_corrected")}
+    if None in counts.values() or not isinstance(figure.get("complete"), bool):
+        raise _not_the_contract("self_correction does not carry its counts and complete")
+    numbers = {}
+    for name in ("rate", "median_calls_to_correct"):
+        value = figure.get(name)
+        if value is not None and _number(value) is None:
+            raise _not_the_contract(f"self_correction.{name} is neither a number nor null")
+        numbers[name] = value
+    return dict(counts, **numbers, complete=figure["complete"])
+
+
 def private_section(overview: Mapping[str, Any]) -> Dict[str, Any]:
-    """The totals of the owner's own use: numbers only, each checked to be one."""
-    totals = overview.get("totals") if isinstance(overview.get("totals"), Mapping) else {}
-    series = overview.get("series") if isinstance(overview.get("series"), list) else []
-    stages = overview.get("stages") if isinstance(overview.get("stages"), Mapping) else {}
-    would_refuse = _count(totals.get("would_refuse"))
-    needs_review = _count(totals.get("needs_review"))
-    false_alarms = _count(totals.get("false_alarms"))
-    # The overview counts the would-refuse calls nobody has labelled, so the
-    # labelled ones are the difference. False alarms counts every label of
-    # that kind, which in a stack that only observes is the same calls.
-    reviewed = max(0, would_refuse - needs_review) if would_refuse is not None and needs_review is not None else None
+    """The totals of the owner's own use: numbers only, each checked to be one, or a refusal.
+
+    Nothing is defaulted. A total, a day of the series or a stage count that
+    is missing or is not a count stops the build, so the page never shows a
+    figure the stack did not give; and no text the stack sent is copied.
+    """
+    totals = overview.get("totals")
+    if not isinstance(totals, Mapping):
+        raise _not_the_contract("it has no totals")
+    counts: Dict[str, int] = {}
+    for name in OVERVIEW_TOTALS:
+        value = _count(totals.get(name))
+        if value is None:
+            raise _not_the_contract(f"totals.{name} is not a count")
+        counts[name] = value
+    series = overview.get("series")
+    if not isinstance(series, list) or not series:
+        raise _not_the_contract("it has no daily series")
+    if not all(isinstance(day, Mapping) and all(_count(day.get(kind)) is not None for kind in SERIES_COUNTS) for day in series):
+        raise _not_the_contract("a day of its series is not a count of approved, observed and refused calls")
+    stages = overview.get("stages")
+    if not isinstance(stages, Mapping) or any(_count(stages.get(stage)) is None for stage in STAGES):
+        raise _not_the_contract("stages is not a count per stage")
+    window = _count(overview.get("window_days"))
+    if not window:
+        raise _not_the_contract("window_days is not a number of days")
     generated = overview.get("generated_at")
-    figure = overview.get("self_correction") if isinstance(overview.get("self_correction"), Mapping) else None
+    if not (isinstance(generated, str) and TIMESTAMP.match(generated)):
+        raise _not_the_contract("generated_at is not a timestamp")
+
+    # needs_review counts the would-refuse calls nobody has labelled, so the
+    # labelled ones are the difference: labels on observed calls only.
+    # false_alarms counts every false-alarm label, on a refused call as well
+    # as an observed one, and the overview gives no count of labelled refused
+    # calls to add to the reviewed side. The two are the same calls only when
+    # nothing was refused in the window, as on a stack that only observes.
+    # Otherwise the rate would divide unlike counts, and could pass 100%, so
+    # both are left out rather than guessed.
+    reviewed = max(0, counts["would_refuse"] - counts["needs_review"])
+    comparable = counts["refused"] == 0 and counts["false_alarms"] <= reviewed
     return {
         "source": f"GET /api/overview?days={PRIVATE_WINDOW_DAYS} and GET /api/projects on the owner's private stack, "
                   "read with the operator key; only these totals were kept",
-        "snapshot_at": generated if isinstance(generated, str) and TIMESTAMP.match(generated) else None,
-        "window_days": _count(overview.get("window_days")),
-        "days_observed": sum(
-            1 for day in series
-            if isinstance(day, Mapping) and sum(_count(day.get(kind)) or 0 for kind in ("approved", "observed", "refused")) > 0
-        ),
-        "calls_governed": _count(totals.get("calls")),
-        "would_refuse": would_refuse,
-        "refused": _count(totals.get("refused")),
+        "snapshot_at": generated,
+        "window_days": window,
+        "days_observed": sum(1 for day in series if sum(day[kind] for kind in SERIES_COUNTS) > 0),
+        "calls_governed": counts["calls"],
+        "would_refuse": counts["would_refuse"],
+        "refused": counts["refused"],
         "reviewed": reviewed,
-        "false_alarms": false_alarms,
-        "false_alarm_rate": round(false_alarms / reviewed, 4) if reviewed and false_alarms is not None else None,
-        "projects": _count(totals.get("projects")),
-        "agents": _count(totals.get("agents")),
-        "stages": {stage: _count(stages.get(stage)) for stage in ("observe", "enforce")},
-        "self_correction": None if figure is None else {
-            "refusals_considered": _count(figure.get("refusals_considered")),
-            "self_corrected": _count(figure.get("self_corrected")),
-            "rate": _number(figure.get("rate")),
-            "median_calls_to_correct": _number(figure.get("median_calls_to_correct")),
-            "complete": figure.get("complete") is True,
-        },
+        "false_alarms": counts["false_alarms"] if comparable else None,
+        "false_alarm_rate": round(counts["false_alarms"] / reviewed, 4) if comparable and reviewed else None,
+        "projects": counts["projects"],
+        "agents": counts["agents"],
+        "stages": {stage: stages[stage] for stage in STAGES},
+        "self_correction": _self_correction_totals(overview.get("self_correction")),
     }
 
 

@@ -334,15 +334,61 @@ def test_a_key_file_saved_with_a_byte_order_mark_reads_as_the_key_alone(tmp_path
         build_proof.read_key(path)
 
 
-def test_text_from_the_stack_is_never_copied_even_where_a_number_was_expected() -> None:
+@pytest.mark.parametrize("spoil", [
+    lambda o: o["totals"].__setitem__("calls", "Acme-Proj-Lighthouse"),
+    lambda o: o.__setitem__("generated_at", "C:\\Users\\someone\\ledger"),
+    lambda o: o["self_correction"].__setitem__("rate", "Acme-Proj-Harbour"),
+    lambda o: o["stages"].__setitem__("observe", "Acme-Proj-Harbour"),
+    lambda o: o["series"][0].__setitem__("observed", "Acme-Proj-Harbour"),
+])
+def test_text_where_a_number_was_expected_is_refused_and_never_repeated(spoil) -> None:
     hostile = _overview(SECRET_PROJECTS)
-    hostile["totals"]["calls"] = "Acme-Proj-Lighthouse"
-    hostile["generated_at"] = "C:\\Users\\someone\\ledger"
-    hostile["self_correction"]["rate"] = "Acme-Proj-Harbour"
-    section = build_proof.private_section(hostile)
-    assert section["calls_governed"] is None and section["snapshot_at"] is None
-    assert section["self_correction"]["rate"] is None
-    assert not build_proof.leaks(section, SECRET_PROJECTS)
+    spoil(hostile)
+    with pytest.raises(build_proof.ProofError, match="not the shape the contract fixes") as refused:
+        build_proof.private_section(hostile)
+    assert not build_proof.leaks(str(refused.value), SECRET_PROJECTS) and "Users" not in str(refused.value)
+
+
+@pytest.mark.parametrize("answer", [
+    {},
+    {"totals": {}},
+    {key: value for key, value in _overview(SECRET_PROJECTS).items() if key != "series"},
+    dict(_overview(SECRET_PROJECTS), series=[]),
+    {key: value for key, value in _overview(SECRET_PROJECTS).items() if key != "stages"},
+])
+def test_an_answer_missing_what_the_contract_fixes_is_refused_not_defaulted(answer) -> None:
+    # A missing series used to become "0 days observed": a zero nobody measured.
+    with pytest.raises(build_proof.ProofError, match="not the shape the contract fixes"):
+        build_proof.private_section(answer)
+
+
+def test_a_stack_answering_only_part_of_the_contract_writes_nothing(tmp_path, key_file, capsys) -> None:
+    out = tmp_path / "proof.json"
+    with _Stack({"totals": {}}, _projects(SECRET_PROJECTS)) as stack:
+        code = build_proof.main(["--private-endpoint", stack.url, "--key-file", str(key_file), "--out", str(out)])
+    printed = capsys.readouterr()
+    assert code == 2 and not out.exists() and "totals.calls is not a count" in printed.err
+
+
+def test_a_stack_that_predates_self_correction_still_gives_its_totals() -> None:
+    older = _overview(SECRET_PROJECTS)
+    del older["self_correction"]
+    assert build_proof.private_section(older)["self_correction"] is None
+
+
+def test_the_false_alarm_rate_is_given_only_when_both_counts_are_of_the_same_calls() -> None:
+    # Nothing refused: every label is on a would-refuse call, as reviewed is.
+    observing = build_proof.private_section(_overview(SECRET_PROJECTS))
+    assert (observing["reviewed"], observing["false_alarms"], observing["false_alarm_rate"]) == (150, 12, 0.08)
+    # Refused calls in the window may carry labels too: false_alarms counts
+    # them and reviewed cannot, so the rate is left out rather than let past 100%.
+    enforcing = _overview(SECRET_PROJECTS)
+    enforcing["totals"].update(calls=100, would_refuse=10, needs_review=8, false_alarms=5, refused=6)
+    section = build_proof.private_section(enforcing)
+    assert (section["reviewed"], section["false_alarms"], section["false_alarm_rate"]) == (2, None, None)
+    nobody_reviewed = _overview(SECRET_PROJECTS)
+    nobody_reviewed["totals"].update(needs_review=210, false_alarms=0)
+    assert build_proof.private_section(nobody_reviewed)["false_alarm_rate"] is None, "None of none is not a rate"
 
 
 def test_the_check_catches_a_name_in_any_case_the_key_and_an_absolute_path() -> None:
