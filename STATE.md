@@ -89,8 +89,8 @@ it, treat the later date as the one that governs teardown.
 | A visitor can run the demo | **PASS** | Walked in a browser: Scenario 1 sent one `POST /simulate-loop`, the function evaluated the same call three times inside that request, the response was `BLOCKED_LOOP_DETECTED`, and the panel showed a genuine Haiku 4.5 sentence under the heading "Amazon Bedrock (Claude Haiku 4.5)" |
 | Reachable by the AI scorer | **PASS** | `STAGE` is unset on the function, so the middleware defaults to `dev` and enforces no key. Verified by unauthenticated request. Do not read this off `/status`, which prints `"stage": "prod"`: that field has its own default and says nothing about whether a key is required |
 | Proof of coding agent connected to AWS | **PASS** | `docs/PROOF_OF_AWS_AGENT.md` rewritten around the real session: the commands run, the two defects AWS surfaced, and the CloudTrail principal. Raw output in `docs/evidence/DEPLOYMENT_2026-09-20.md` |
-| Public repository | **BLOCKED, owner action** | `main` is local only, with no remote configured, so none of the work is published. Publishing is one command, in `docs/RUNBOOK.md` step 2. The count of commits is deliberately not recorded here: `git log` holds it, and any line stating it is wrong again the moment it is committed |
-| Continuous delivery | **WRITTEN, role missing** | `.github/workflows/{ci,deploy,keepalive}.yml`. Deploy assumes `threefold-github-deploy`, which does not exist yet. Policy documents are committed at `deploy/iam/`, creation is `docs/RUNBOOK.md` step 1 |
+| Public repository | **BLOCKED, owner action** | `main` is local only, with no remote configured, so none of the work is published. Publishing is an owner action. The count of commits is deliberately not recorded here: `git log` holds it, and any line stating it is wrong again the moment it is committed |
+| Continuous delivery | **WRITTEN, role missing** | `.github/workflows/{ci,deploy,keepalive}.yml`. Deploy assumes `threefold-github-deploy`, which does not exist yet. Policy documents are committed at `deploy/iam/`, creation is `docs/RUNBOOK.md` section 8 |
 | Builder Center project, two tags | **NOT DONE** | Owner-gated. Requires Builder Center profile, Join, then the Create Project form |
 
 ## What is real, measured today
@@ -184,14 +184,22 @@ hidden in a document that a judge would read as finished work.
    no comparative number exists. The full matrix needs the owner's token file.
 10. Codex enforcement is unmeasured until its account resets on 2026-09-27; the
     benchmark's Codex support is built and has not run.
-11. Behind the edge, a page that does not exist answers 403 from S3 rather than
-    404 (the bucket grants CloudFront `s3:GetObject` only). Being fixed.
-12. A refused write longer than 1,500 characters gets no suggested fix, because
-    the rewrite would cost more than the gate budget; advice in words above that
-    size is being added.
+11. Behind the edge, a page that does not exist answered 403 from S3 rather than
+    404. The template now grants the distribution `s3:ListBucket` as well, so
+    the answer becomes 404 once the edge is redeployed.
+12. A refused write gets a rewritten, checked fix up to 1,500 characters of
+    content, and advice in words (no rewrite, not claimed as checked) up to
+    6,000 characters for a layering refusal of a call that runs no command.
+    Beyond that it gets no suggested fix, because producing one would cost more
+    than a whole verdict.
 13. `POST /rules/draft` is open on the public stack like `/rules/explain`; its
     Bedrock spend is bounded per container (60 calls) and by the function's
     reserved concurrency, not by an account-wide counter.
+
+14. The gate itself goes past the 10 ms budget TRAPS.md sets on import-dense
+    files: a verdict on a Python domain file of 500 distinct imports, the
+    forbidden one last (7,935 characters), took 13.3 ms on the development
+    machine. Ordinary files stay well inside it.
 
 ## Audit and what was done about it, 2026-09-20
 
@@ -239,8 +247,8 @@ traffic.
 ### Still open
 
 1. There is no Builder Center project and no public repository. Until both
-   exist there is no submission, whatever the code does. The repository is one
-   command, in `docs/RUNBOOK.md` step 2. The Builder Center project is not: it is
+   exist there is no submission, whatever the code does. Publishing the repository is
+   an owner action. The Builder Center project is: it is
    a profile, a Join, and a web form, and no command for it exists anywhere in
    this repository.
 2. No measured number yet. The hook is installed-ready but has not been run

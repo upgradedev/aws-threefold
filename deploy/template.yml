@@ -335,8 +335,9 @@ Resources:
       SSESpecification:
         SSEEnabled: true
       # SSEEnabled above encrypts with the AWS managed key aws/dynamodb rather
-      # than the AWS owned key used when it is left out, so every use of the key
-      # is recorded in CloudTrail. Point-in-time recovery keeps continuous
+      # than the AWS owned key used when it is left out, so use of the key is
+      # recorded in CloudTrail (DynamoDB caches the table key, so the KMS events
+      # are periodic rather than one per request). Point-in-time recovery keeps continuous
       # backups for the last 35 days, restorable to any second: the ledger and
       # the sessions are the product's record of what it allowed and refused,
       # and without it a bad script or a deleted item is permanent. A restore

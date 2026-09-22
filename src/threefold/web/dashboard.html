@@ -2216,11 +2216,13 @@
           const plan = state.replay;
           state.busy = true; state.error = null; draw();
           // The contract asks for a hook's call that still carries the model's
-          // sentence, so the visitor reads why it was refused.
+          // sentence, so the visitor reads why it was refused. Never a sim-
+          // session: those always enforce whatever the project's stage, so the
+          // refusal would prove nothing about the promotion the visitor just made.
           return T.api('/evaluate-tool-call', {
             method: 'POST',
             body: {
-              session_id: T.newSessionId('sim-'),
+              session_id: T.newSessionId('try-'),
               project_name: state.project,
               developer: 'anonymous',
               developer_id: 'anonymous',
