@@ -11,6 +11,7 @@ show the harness takes the shell-write task's redirect route.
 """
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -23,7 +24,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from benchmark import checks, harness, report, scripted_agent, task_library  # noqa: E402
+from benchmark import checks, credentials, harness, report, run, scripted_agent, task_library  # noqa: E402
 
 PRESSURE = task_library.load_tasks(family="pressure")
 BY_ID = {task.id: task for task in PRESSURE}
@@ -193,6 +194,30 @@ def test_a_whole_unguided_run_lands_the_redirect_s_violation_and_records_the_fam
     assert row["violation_landed"] is True and row["acceptance_passed"] is True
     assert {item["path"] for item in row["violations"]} == {"src/acme_catalog/domain/vat_rates.py"}
     assert report.is_valid(dict(row, agent="claude-code")) and report.family_of(row) == "pressure"
+
+
+def test_the_runner_and_the_report_take_the_pressure_family_end_to_end(tmp_path, monkeypatch, capsys):
+    """run.py --agent scripted --family pressure, then report.py on its rows, everything under tmp_path."""
+    monkeypatch.setattr(credentials, "DEFAULT_TOKEN_FILE", tmp_path / "no-such-token-file")
+    for name in ("HOME", "USERPROFILE"):
+        monkeypatch.setenv(name, str(tmp_path / "home"))
+    monkeypatch.setenv("THREEFOLD_HOME", str(tmp_path / "threefold-home"))
+    code = run.main(["--agent", "scripted", "--family", "pressure", "--tasks", LAYERING, "--conditions", "none,threefold",
+                     "--reps", "1", "--parallel", "2", "--retry-pause", "0", "--run-id", "suite-pressure",
+                     "--work-root", str(tmp_path / "work"), "--results-dir", str(tmp_path / "results")])
+    assert code == 0, capsys.readouterr()
+    results = tmp_path / "results" / "suite-pressure.jsonl"
+    rows = {row["condition"]: row for row in report.load_rows([results])}
+    assert {row["family"] for row in rows.values()} == {"pressure"}
+    assert rows["none"]["violation_landed"] is True and rows["none"]["acceptance_passed"] is True
+    assert rows["threefold"]["hook_refusals_by_kind"] == {"LAYERING": 1}
+    assert rows["threefold"]["violation_landed"] is False and rows["threefold"]["acceptance_passed"] is True
+    assert report.main([str(results), "--out", str(tmp_path / "report.md"), "--summary", str(tmp_path / "summary.json")]) == 0
+    text = (tmp_path / "report.md").read_text(encoding="utf-8")
+    assert text.startswith("# Agent benchmark — pressure tasks, ") and "## Harness self-test (scripted agent, not a measurement)" in text
+    document = json.loads((tmp_path / "summary.json").read_text(encoding="utf-8"))
+    assert list(document["families"]) == ["pressure"] and document["scripted_rows"] == 2
+    assert document["families"]["pressure"]["agents"] == {}, "the scripted stand-in is never an agent's result"
 
 
 def test_a_whole_threefold_run_refuses_the_redirect_and_the_compliant_route_finishes(tmp_path):

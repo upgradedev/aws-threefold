@@ -680,6 +680,72 @@ def test_unknown_conditions_are_refused():
         run.parse_args(["--conditions", "none,threefold-lite"])
 
 
+# --- the task families ------------------------------------------------------------------------
+
+PRESSURE_IDS = ["pressure-catalog-shell-regen", "pressure-orders-boto3-entity", "pressure-payments-config-key"]
+
+
+def test_the_family_filter_picks_the_tasks_and_the_default_stays_the_standard_matrix():
+    assert [task.family for task in run.select_tasks(None, None)] == ["standard"] * 6
+    assert [task.id for task in run.select_tasks(None, "pressure")] == PRESSURE_IDS
+    assert len(run.select_tasks(None, "all")) == 9 and len(run.select_tasks(None, "standard")) == 6
+    assert [task.id for task in run.select_tasks(["pressure-orders-boto3-entity"], None)] == ["pressure-orders-boto3-entity"]
+    assert len(run.select_tasks(["orders-s3-archive", "pressure-orders-boto3-entity"], "all")) == 2
+    with pytest.raises(ValueError, match="not in the pressure family"):
+        run.select_tasks(["orders-s3-archive"], "pressure")
+    assert run.parse_args(["--family", "pressure"]).family == "pressure"
+    with pytest.raises(SystemExit):
+        run.parse_args(["--family", "hurried"])
+
+
+def test_a_run_of_the_pressure_tasks_alone_is_named_for_them():
+    import datetime
+
+    moment = datetime.datetime(2026, 9, 22, 14, 5, 9, tzinfo=datetime.timezone.utc)
+    assert run.default_run_id(False, "claude", moment, families=["pressure"]) == "20260922T140509Z-pressure"
+    assert run.default_run_id(True, "scripted", moment, families=["pressure"]) == "20260922T140509Z-pressure-pilot-scripted"
+    assert run.default_run_id(False, "claude", moment, families=["pressure", "standard"]) == "20260922T140509Z"
+
+
+def _dry_run(tmp_path, monkeypatch, capsys, *extra):
+    monkeypatch.setattr(harness, "claude_memory_above", lambda path: [])
+    monkeypatch.setattr(harness, "run_one", lambda *args, **kwargs: pytest.fail("a dry run started a run"))
+    code = run.main(["--reps", "1", "--dry-run", "--claude", "claude-not-called", "--work-root", str(tmp_path / "work"),
+                     "--results-dir", str(tmp_path / "results"), "--isolation", "user-config", *extra])
+    captured = capsys.readouterr()
+    return code, captured.out, captured.err
+
+
+def test_the_runner_takes_the_pressure_task_ids(tmp_path, monkeypatch, capsys):
+    code, out, _ = _dry_run(tmp_path, monkeypatch, capsys, "--tasks", ",".join(PRESSURE_IDS))
+    assert code == 0 and "9 run(s), 3 task(s)" in out and "task family: pressure" in out
+    for task_id in PRESSURE_IDS:
+        assert f"would run {task_id} / threefold / r1" in out
+    assert re.search(r"results: .*-pressure\.jsonl", out)
+
+
+def test_the_runner_filters_by_family(tmp_path, monkeypatch, capsys):
+    code, out, _ = _dry_run(tmp_path, monkeypatch, capsys, "--family", "pressure")
+    assert code == 0 and "9 run(s), 3 task(s)" in out and "orders-s3-archive /" not in out
+    code, out, _ = _dry_run(tmp_path, monkeypatch, capsys)
+    assert code == 0 and "18 run(s), 6 task(s)" in out and "task family: standard" in out and "pressure-" not in out
+    code, out, _ = _dry_run(tmp_path, monkeypatch, capsys, "--family", "all")
+    assert code == 0 and "27 run(s), 9 task(s)" in out and "task family: pressure, standard" in out
+    code, _, err = _dry_run(tmp_path, monkeypatch, capsys, "--family", "pressure", "--tasks", "orders-s3-archive")
+    assert code == 2 and "refused: task(s) orders-s3-archive are not in the pressure family" in err
+    code, _, err = _dry_run(tmp_path, monkeypatch, capsys, "--tasks", "pressure-no-such-task")
+    assert code == 2 and "refused: unknown task(s) pressure-no-such-task" in err
+
+
+def test_a_pressure_matrix_resumed_without_its_family_is_refused():
+    rows = [{"agent": "claude-code", "task": "pressure-orders-boto3-entity", "family": "pressure", "condition": "none",
+             "rep": 1, "model": "claude-sonnet-5", "pilot": False}]
+    problem = run.resume_problem(rows, "claude-code", "claude-sonnet-5", False, families=["standard"])
+    assert "the recorded rows are of the pressure task family" in problem and "--family pressure" in problem
+    assert run.resume_problem(rows, "claude-code", "claude-sonnet-5", False, families=["pressure"]) is None
+    assert run.resume_problem(rows, "claude-code", "claude-sonnet-5", False, families=["pressure", "standard"]) is None
+
+
 def test_every_row_is_appended_as_it_finishes(tmp_path):
     results = run.ResultsFile(tmp_path / "r.jsonl")
     results.append({"task": "a", "rep": 1})

@@ -3,8 +3,14 @@
     python benchmark/run.py --check-auth                                # does the login work? (one tiny call)
     python benchmark/run.py --tasks orders-s3-archive --reps 1 --pilot
     python benchmark/run.py --reps 3 --parallel 3                       # the full matrix, 54 runs
+    python benchmark/run.py --family pressure --reps 3 --parallel 3     # the pressure tasks, 27 runs
     python benchmark/run.py --reps 3 --parallel 3 --resume <run-id>     # carry on where it stopped
     python benchmark/run.py --agent codex --reps 3 --parallel 3         # the same matrix with Codex
+
+Without --tasks the matrix is the standard family's six tasks, whose prompts
+tempt a violation. The pressure family's three tasks, whose prompts ask for the
+forbidden shortcut, run only with --family pressure (or all, or their ids in
+--tasks); a run of them alone is named <time>-pressure.
 
 Each run gets a fresh copy of the task repository under the system temp folder
 (%TEMP%\\threefold-bench\\<run-id> on Windows), never inside the workspace, or
@@ -70,7 +76,12 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--agent", choices=("claude-code", "claude", "codex", "scripted"), default="claude-code",
                         help="claude-code (default; `claude` is the older spelling), codex, or scripted, which tests the "
                              "harness with a fixed script instead of a model and whose rows measure nothing")
-    parser.add_argument("--tasks", type=_csv, default=None, help="comma-separated task ids (default: all six)")
+    parser.add_argument("--tasks", type=_csv, default=None,
+                        help="comma-separated task ids, of either family (default: every task of --family)")
+    parser.add_argument("--family", choices=task_library.FAMILIES + ("all",), default=None,
+                        help="standard (the default without --tasks: the six tasks whose prompts tempt), pressure (the "
+                             "three whose prompts ask for the forbidden shortcut), or all; with --tasks, every task named "
+                             "must be in it")
     parser.add_argument("--conditions", type=_csv, default=list(harness.DEFAULT_CONDITIONS),
                         help="comma-separated: none, prompt, threefold, prompt+threefold")
     parser.add_argument("--reps", type=int, default=3, help="repetitions of each task and condition (default 3)")
@@ -126,11 +137,24 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     return args
 
 
-def default_run_id(pilot: bool, agent: str, now: Optional[datetime.datetime] = None) -> str:
+def default_run_id(pilot: bool, agent: str, now: Optional[datetime.datetime] = None,
+                   families: Iterable[str] = ()) -> str:
+    """The run's id, which names its results file: a matrix of the pressure tasks alone says so."""
     now = now or datetime.datetime.now(datetime.timezone.utc)
     agent = harness.normalise_agent(agent)
-    suffix = ("-pilot" if pilot else "") + ("-scripted" if agent == "scripted" else "") + ("-codex" if agent == "codex" else "")
+    suffix = ("-pressure" if set(families) == {"pressure"} else "") + ("-pilot" if pilot else "")
+    suffix += ("-scripted" if agent == "scripted" else "") + ("-codex" if agent == "codex" else "")
     return now.strftime("%Y%m%dT%H%M%SZ") + suffix
+
+
+def select_tasks(names: Optional[Sequence[str]], family: Optional[str]) -> List[task_library.Task]:
+    """The tasks a matrix runs. Named tasks run whatever their family, unless --family names another; without names,
+    every task of --family, and the standard family when it is not given, so the documented full matrix stays the
+    standard tasks' and the pressure tasks run only when asked for."""
+    wanted = None if family == "all" else family
+    if names:
+        return task_library.load_tasks(names, family=wanted)
+    return task_library.load_tasks(family="standard" if family is None else wanted)
 
 
 def plan_runs(tasks: Sequence[task_library.Task], conditions: Sequence[str], reps: int) -> List[tuple]:
@@ -284,7 +308,8 @@ def _recorded(row: Mapping[str, Any], field: str) -> Optional[str]:
 
 
 def resume_problem(rows: Sequence[Mapping[str, Any]], agent: str, model: Optional[str], pilot: bool,
-                   auth: Optional[str] = None, isolation: Optional[str] = None) -> Optional[str]:
+                   auth: Optional[str] = None, isolation: Optional[str] = None,
+                   families: Optional[Iterable[str]] = None) -> Optional[str]:
     """Why these arguments must not add to these rows, or None.
 
     One run id holds one agent's rows, with one model, one login (`auth`),
@@ -293,6 +318,8 @@ def resume_problem(rows: Sequence[Mapping[str, Any]], agent: str, model: Optiona
     `--agent codex` a Codex run id would silently gain a Claude Code matrix,
     and a resume without the token file would mix machine-login rows into a
     token-file run. `isolation` is the mode a row records (isolation_facts).
+    `families` are the task families the resume would run: a pressure matrix
+    resumed without `--family pressure` would otherwise gain the standard one.
     """
     if not rows:
         return None
@@ -300,6 +327,13 @@ def resume_problem(rows: Sequence[Mapping[str, Any]], agent: str, model: Optiona
     if agent not in agents:
         return (f"the recorded rows are {', '.join(agents)} rows, and this resume would add {agent} rows; "
                 f"pass --agent {agents[0]}")
+    recorded_families = {report.family_of(row) for row in rows}
+    planned_families = set(families or ())
+    if planned_families and not planned_families & recorded_families:
+        recorded = ", ".join(name for name in task_library.FAMILIES if name in recorded_families)
+        planned = ", ".join(name for name in task_library.FAMILIES if name in planned_families)
+        return (f"the recorded rows are of the {recorded} task family, and this resume would run the {planned} family; "
+                f"pass --family {recorded} or the same --tasks as before")
     same_agent = [row for row in rows if run_key(row)[0] == agent]
     for field, wanted_value, advice in (("auth", auth, "use the same token file, or none, as before"),
                                         ("isolation", isolation, "pass the same --isolation as before")):
@@ -395,7 +429,7 @@ def one_line(row: Dict[str, Any]) -> str:
     if not problem and row.get("measured") and not measured_row(row):
         problem = f"not counted: {report.invalid_reason(row)}"
     retried = f" (attempt {row.get('attempt')}, retried)" if int(row.get("attempts") or 1) > 1 else ""
-    return (f"{row['task']:<26} {row['condition']:<17} r{row['rep']}  {verdict:<9} {tests}{extra}"
+    return (f"{row['task']:<28} {row['condition']:<17} r{row['rep']}  {verdict:<9} {tests}{extra}"
             f"  turns={row.get('num_turns')} cost={row.get('cost_usd')}{retried}" + (f"  [{problem}]" if problem else ""))
 
 
@@ -455,8 +489,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     args = parse_args(argv)
     if args.check_auth:
         return check_auth_main(args)
-    tasks = task_library.load_tasks(args.tasks)
-    run_id = args.resume or args.run_id or default_run_id(args.pilot, args.agent)
+    try:
+        tasks = select_tasks(args.tasks, args.family)
+    except ValueError as error:
+        print(f"refused: {error}.", file=sys.stderr)
+        return 2
+    task_families = sorted({task.family for task in tasks})
+    run_id = args.resume or args.run_id or default_run_id(args.pilot, args.agent, families=task_families)
     results = ResultsFile(Path(args.results_dir) / f"{run_id}.jsonl")
     previous: List[Dict[str, Any]] = []
     if args.resume:
@@ -464,7 +503,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             print(f"refused: there is no results file for run {run_id} at {results.path}", file=sys.stderr)
             return 2
         previous = results.rows()
-        problem = resume_problem(previous, args.agent, args.model, args.pilot)
+        problem = resume_problem(previous, args.agent, args.model, args.pilot, families=task_families)
         if problem:
             print(f"refused: {problem}.", file=sys.stderr)
             return 2
@@ -518,7 +557,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         # Checked again now the login and the isolation are known, before anything runs.
         auth = "none" if args.agent == "scripted" else ("token-file" if credential is not None else "machine-login")
         mode = harness.isolation_facts(isolation, (), args.agent)["mode"]
-        problem = resume_problem(previous, args.agent, args.model, args.pilot, auth=auth, isolation=mode)
+        problem = resume_problem(previous, args.agent, args.model, args.pilot, auth=auth, isolation=mode,
+                                 families=task_families)
         if problem:
             print(f"refused: {problem}.", file=sys.stderr)
             return 2
@@ -541,7 +581,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             if (args.agent, task.id, condition, rep) not in done]
     prior = attempts_so_far(previous)
 
-    print(f"run {run_id}: {len(planned)} run(s), {len(tasks)} task(s) x {len(args.conditions)} condition(s) x {args.reps} rep(s)")
+    print(f"run {run_id}: {len(planned)} run(s), {len(tasks)} task(s) x {len(args.conditions)} condition(s) x {args.reps} rep(s)"
+          f"; task family: {', '.join(task_families)}")
     if args.resume:
         print(f"resuming: {len(planned) - len(runs)} already measured, {len(runs)} to run")
     agent_line = f"agent: {args.agent}"
