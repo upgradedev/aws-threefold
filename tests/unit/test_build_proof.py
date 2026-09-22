@@ -184,13 +184,20 @@ def _overview(names):
 class _Stack:
     """A private stack on this machine: it answers the two reads and records what it was sent."""
 
-    def __init__(self, overview, projects, status=200):
+    def __init__(self, overview, projects, status=200, redirect=None):
         self.seen = []
         stack = self
 
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self):  # noqa: N802 - the stdlib's name
                 stack.seen.append({"path": self.path, "key": self.headers.get("X-API-Key")})
+                if redirect is not None and self.path.startswith("/prod/"):
+                    # Sends the client on, as a hostile or misconfigured stack might.
+                    self.send_response(redirect)
+                    self.send_header("Location", "/stolen" + self.path)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
                 body = overview if self.path.startswith("/prod/api/overview") else projects
                 data = json.dumps(body).encode("utf-8")
                 self.send_response(status)
@@ -286,11 +293,44 @@ def test_the_key_is_sent_only_over_https_or_to_this_machine(tmp_path, key_file, 
     assert KEY not in capsys.readouterr().err
 
 
+@pytest.mark.parametrize("status", [301, 302, 307, 308])
+def test_a_redirect_is_refused_so_the_key_goes_nowhere_else(tmp_path, key_file, capsys, status) -> None:
+    # urllib copies every header into the request it redirects to, whatever
+    # host and scheme the answer names, so a followed redirect would carry
+    # the key to an address the owner never gave.
+    out = tmp_path / "proof.json"
+    with _Stack(_overview(SECRET_PROJECTS), _projects(SECRET_PROJECTS), redirect=status) as stack:
+        code = build_proof.main(["--private-endpoint", stack.url, "--key-file", str(key_file), "--out", str(out)])
+    printed = capsys.readouterr()
+    assert code == 2 and not out.exists()
+    assert [hit["path"] for hit in stack.seen] == ["/prod/api/overview?days=30"], "The redirect was not followed"
+    assert f"redirect (HTTP {status})" in printed.err and "GET /api/overview" in printed.err
+    assert KEY not in printed.out + printed.err and "127.0.0.1" not in printed.err and "stolen" not in printed.err
+
+
+def test_a_plain_http_address_on_this_machine_is_never_sent_through_a_proxy(monkeypatch) -> None:
+    monkeypatch.setenv("HTTP_PROXY", "http://proxy.acme.example:3128")
+    local = build_proof.default_opener("http://127.0.0.1:8001/prod/").__self__.handlers
+    assert not any(getattr(handler, "proxies", None) for handler in local)
+    assert any(isinstance(handler, build_proof._RefuseRedirects) for handler in local)
+    secure = build_proof.default_opener("https://acme-private.example/prod/").__self__.handlers
+    assert any(isinstance(handler, build_proof._RefuseRedirects) for handler in secure)
+
+
 @pytest.mark.parametrize("content", ["", "   \n", "two words\n"])
 def test_a_key_file_that_does_not_hold_one_key_is_refused(tmp_path, content) -> None:
     path = tmp_path / "operator.key"
     path.write_text(content, encoding="utf-8")
     with pytest.raises(build_proof.ProofError, match="alone, on one line"):
+        build_proof.read_key(path)
+
+
+def test_a_key_file_saved_with_a_byte_order_mark_reads_as_the_key_alone(tmp_path) -> None:
+    path = tmp_path / "operator.key"
+    path.write_text(KEY + "\r\n", encoding="utf-8-sig")
+    assert build_proof.read_key(path) == KEY
+    path.write_bytes(b"\xff\xfe not text")
+    with pytest.raises(build_proof.ProofError, match="could not be read"):
         build_proof.read_key(path)
 
 

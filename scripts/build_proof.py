@@ -21,11 +21,13 @@ private     The owner's own use, from GET api/overview?days=30 and GET
             read from the stack is copied at all.
 
 The key is read from a file and sent only in the X-API-Key header, over HTTPS
-or to this machine. It is never printed, written or put in a URL, and neither
-is the endpoint, a project name, a path or a developer. Before anything is
-written, every string in the output is checked against every project name the
-private stack returned, against the key, and against the shapes of an absolute
-path; if any matches, nothing is written.
+or to this machine, and only to the address given: a redirect is refused, not
+followed, because urllib would copy the header to wherever it pointed. It is
+never printed, written or put in a URL, and neither is the endpoint, a project
+name, a path or a developer. Before anything is written, every string in the
+output is checked against every project name the private stack returned,
+against the key, and against the shapes of an absolute path; if any matches,
+nothing is written.
 
 Sections are not carried over from an earlier snapshot: give every source each
 time, so a section never outlives the data it was built from unnoticed.
@@ -238,9 +240,11 @@ def benchmark_section(summary: Mapping[str, Any], sources: Sequence[str]) -> Dic
 
 def read_key(path: Path) -> str:
     try:
-        key = Path(path).read_text(encoding="utf-8").strip()
-    except OSError:
-        raise ProofError("the key file could not be read") from None
+        # utf-8-sig, because a key saved by Windows Notepad starts with a byte
+        # order mark that strip() keeps and an HTTP header cannot carry.
+        key = Path(path).read_text(encoding="utf-8-sig").strip()
+    except (OSError, UnicodeDecodeError):
+        raise ProofError("the key file could not be read as text") from None
     if not key or any(character.isspace() for character in key):
         raise ProofError("the key file must hold the operator key alone, on one line")
     return key
@@ -258,14 +262,44 @@ def endpoint_base(url: str) -> str:
     return url if url.endswith("/") else url + "/"
 
 
+class _RefuseRedirects(urllib.request.HTTPRedirectHandler):
+    """Follows no redirect, so the key goes only to the address the owner gave.
+
+    urllib's own handler copies every header of a request, X-API-Key with the
+    rest, into the request it redirects to, whatever host and scheme the
+    answer names: a stack, or anything posing as one, could send the key on
+    to any address, over plain http. Declining here makes urllib raise the
+    3xx as an HTTPError, which fetch_json reports without the address.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def default_opener(base: str) -> Opener:
+    """The opener the key is sent with: no redirect followed, and no proxy for a plain http address.
+
+    A proxy the environment names would read an http request's headers, and
+    plain http is allowed only because the address is this machine; over
+    https the proxy sees only a tunnel, so the environment's is kept.
+    """
+    handlers: List[Any] = [_RefuseRedirects()]
+    if urllib.parse.urlsplit(base).scheme == "http":
+        handlers.append(urllib.request.ProxyHandler({}))
+    return urllib.request.build_opener(*handlers).open
+
+
 def fetch_json(base: str, route: str, key: str, opener: Optional[Opener] = None) -> Mapping[str, Any]:
     """GET one route with the key in its header. Errors name the route, never the address or the key."""
     request = urllib.request.Request(base + route, headers={"X-API-Key": key, "Accept": "application/json"})
     shown = "GET /" + route.split("?", 1)[0]
     try:
-        with (opener or urllib.request.urlopen)(request, timeout=TIMEOUT_SECONDS) as response:
+        with (opener or default_opener(base))(request, timeout=TIMEOUT_SECONDS) as response:
             body = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as error:
+        if 300 <= error.code < 400:
+            raise ProofError(f"the private stack answered {shown} with a redirect (HTTP {error.code}), which is not "
+                             "followed: the key is sent to the address given and nowhere else") from None
         raise ProofError(f"the private stack answered HTTP {error.code} to {shown}") from None
     except (urllib.error.URLError, OSError, ValueError, UnicodeError):
         raise ProofError(f"the private stack could not be read at {shown}") from None
