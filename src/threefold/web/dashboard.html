@@ -1207,6 +1207,32 @@
           .sort((a, b) => String(b.timestamp).localeCompare(String(a.timestamp)));
       }
 
+      // POST /api/projects/<name>/reviews takes at most this many items a call
+      // (the contract's limit, enforced by read_review_items), and rejects the
+      // whole request beyond it. The queue reads 200 at a time and "Load more"
+      // adds to that, so a busy rule's group is routinely larger.
+      const REVIEW_ITEMS_PER_CALL = 100;
+
+      // Sends the rows in the chunks the route accepts, one after another, and
+      // merges the answers. `saved` collects the rows already written, so a
+      // failure part way through puts back only what did not land.
+      function sendReviews(projectName, rows, item) {
+        const url = '/api/projects/' + encodeURIComponent(projectName) + '/reviews';
+        const merged = { updated: 0, skipped: [], saved: [] };
+        let chain = Promise.resolve(merged);
+        for (let at = 0; at < rows.length; at += REVIEW_ITEMS_PER_CALL) {
+          const chunk = rows.slice(at, at + REVIEW_ITEMS_PER_CALL);
+          chain = chain.then(() => T.api(url, { method: 'POST', body: { items: chunk.map(item) } }).then(answer => {
+            const skipped = (answer && Array.isArray(answer.skipped)) ? answer.skipped : [];
+            merged.updated += (answer && typeof answer.updated === 'number') ? answer.updated : 0;
+            merged.skipped = merged.skipped.concat(skipped);
+            merged.saved = merged.saved.concat(chunk.filter(r => !skipped.some(s => s.verdict_id === r.verdict_id)));
+            return merged;
+          }));
+        }
+        return chain.then(() => merged, err => { err.saved = merged.saved.slice(); throw err; });
+      }
+
       function label(rows, value, note) {
         if (!rows.length) return Promise.resolve();
         const projectName = rows[0].project_name;
@@ -1214,8 +1240,8 @@
         rows.forEach(r => { ids[rowKey(r)] = true; });
         state.items = state.items.filter(r => !ids[rowKey(r)]);
         draw();
-        const items = rows.map(r => Object.assign({ timestamp: r.timestamp, verdict_id: r.verdict_id, label: value }, note ? { note } : {}));
-        return T.api('/api/projects/' + encodeURIComponent(projectName) + '/reviews', { method: 'POST', body: { items } }).then(answer => {
+        const item = r => Object.assign({ timestamp: r.timestamp, verdict_id: r.verdict_id, label: value }, note ? { note } : {});
+        return sendReviews(projectName, rows, item).then(answer => {
           if (!ctx.alive()) return;
           const skipped = (answer && Array.isArray(answer.skipped)) ? answer.skipped : [];
           if (skipped.length) {
@@ -1234,19 +1260,24 @@
           }
         }, err => {
           if (!ctx.alive()) return;
-          restore(rows);
+          const kept = {};
+          (Array.isArray(err.saved) ? err.saved : []).forEach(r => { kept[rowKey(r)] = true; });
+          const back = rows.filter(r => !kept[rowKey(r)]);
+          restore(back);
           draw();
           const el = document.getElementById('review-error');
           if (el) el.textContent = (T.isAuthError(err)
             ? 'Labelling needs the operator. Sign in with python threefold.py open, then try again.'
-            : 'The labels were not saved: ' + err.message + '.') + ' The calls are back in the queue.';
+            : 'The labels were not saved: ' + err.message + '.') + ' ' + (back.length === rows.length
+              ? 'The calls are back in the queue.'
+              : plural(back.length, 'call') + ' back in the queue; ' + plural(rows.length - back.length, 'call') + ' had already been saved.');
         });
       }
 
       function undo(rows) {
         if (!rows.length) return Promise.resolve();
-        const items = rows.map(r => ({ timestamp: r.timestamp, verdict_id: r.verdict_id, label: 'clear' }));
-        return T.api('/api/projects/' + encodeURIComponent(rows[0].project_name) + '/reviews', { method: 'POST', body: { items } }).then(() => {
+        const item = r => ({ timestamp: r.timestamp, verdict_id: r.verdict_id, label: 'clear' });
+        return sendReviews(rows[0].project_name, rows, item).then(() => {
           if (!ctx.alive()) return;
           restore(rows);
           draw();
@@ -1383,11 +1414,20 @@
           <p id="calls-error" class="text-xs text-rose-300 mb-2" role="alert"></p>
           ${state.items.length
             ? card(html`<span data-metric="rows">${num(state.items.length)}</span> ${state.items.length === 1 ? 'call' : 'calls'} shown${state.cursor ? ', more beyond' : ''}`, f.day ? 'Filtered to ' + shortDay(f.day) + ' in this page.' : 'Newest first. Open a call for everything the ledger holds about it.', callsList(state.items, { project: !f.project }))
-            : html`<div class="tf-card p-6 space-y-2" data-state="empty">
-                <h2 class="text-sm font-semibold text-white">No call matches</h2>
-                <p class="text-xs text-gray-400">${describeFilters(f)}: none in the ledger. ${f.days < 30 ? 'Widen the window, or ' : ''}remove a filter above.</p>
-                <div class="flex flex-wrap gap-2">${f.days < 30 ? html`<a class="tf-btn tf-btn-sm" href="${callsHref(Object.assign({}, cleanFilters(f), { days: 30, day: '' }))}">Show 30 days</a>` : ''}<a class="tf-btn tf-btn-sm" href="#/calls">Clear every filter</a></div>
-              </div>`}
+            : state.cursor
+              // Nothing matched, and the ledger still holds older rows: the read
+              // stopped on its page budget before it got that far. Saying "none
+              // in the ledger" here would deny rows a bar on the overview counts.
+              ? html`<div class="tf-card p-6 space-y-2" data-state="not-reached">
+                  <h2 class="text-sm font-semibold text-white">Not reached yet</h2>
+                  <p class="text-xs text-gray-400">${describeFilters(f)}: none among the <span data-metric="scanned">${num(state.scanned)}</span> newest ${state.scanned === 1 ? 'row' : 'rows'} read so far, and the ledger holds older ones. Load more below to keep reading back.</p>
+                  <div class="flex flex-wrap gap-2"><a class="tf-btn tf-btn-sm" href="${callsHref(Object.assign({}, cleanFilters(f), { day: '' }))}">Drop the day filter</a><a class="tf-btn tf-btn-sm" href="#/calls">Clear every filter</a></div>
+                </div>`
+              : html`<div class="tf-card p-6 space-y-2" data-state="empty">
+                  <h2 class="text-sm font-semibold text-white">No call matches</h2>
+                  <p class="text-xs text-gray-400">${describeFilters(f)}: none in the ledger. ${f.days < 30 ? 'Widen the window, or ' : ''}remove a filter above.</p>
+                  <div class="flex flex-wrap gap-2">${f.days < 30 ? html`<a class="tf-btn tf-btn-sm" href="${callsHref(Object.assign({}, cleanFilters(f), { days: 30, day: '' }))}">Show 30 days</a>` : ''}<a class="tf-btn tf-btn-sm" href="#/calls">Clear every filter</a></div>
+                </div>`}
           ${state.cursor ? html`<div class="mt-4"><button type="button" class="tf-btn" data-action="more" ${state.loadingMore ? raw('disabled') : ''}>${state.loadingMore ? 'Loading…' : 'Load more'}</button></div>` : ''}`);
       }
 

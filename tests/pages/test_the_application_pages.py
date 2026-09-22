@@ -719,6 +719,77 @@ def test_a_group_is_labelled_in_one_request_with_its_note_and_can_be_undone(tmp_
     assert out["restored"] == 4, "Undo puts both calls back, each with its two buttons"
 
 
+def test_a_group_larger_than_the_route_accepts_is_sent_in_the_chunks_it_takes(tmp_path: Path) -> None:
+    """The queue reads 200 at a time, but POST .../reviews takes 100 an item.
+
+    A noisy rule, which is exactly what bulk labelling exists for, therefore
+    makes a group the route rejects whole. The page sends it in chunks instead.
+    """
+    out = dash(
+        r"""
+  const many = [];
+  for (let i = 1; i <= 120; i++) many.push(row(i));
+  const sent = [];
+  answer = contract({
+    '/api/decisions': { status: 200, body: { items: many, next_cursor: null } },
+    'POST /api/projects/Acme-Billing/reviews': (u, i, body) => {
+      sent.push(body.items.length);
+      // The contract's own limit, as read_review_items enforces it.
+      if (body.items.length > 100) return { status: 400, body: { detail: 'items holds ' + body.items.length + ' reviews; the limit is 100.' } };
+      return { status: 200, body: { updated: body.items.length, skipped: [] } };
+    }
+  });
+  await visit('#/review');
+  out.button = /All 120 correct/.test(view());
+  await click('label-group', { 'data-group': JSON.stringify(['Acme-Billing', 'java-domain-stays-pure']), 'data-label': 'correct' });
+  await tick();
+  out.emptied = /data-state="empty"/.test(view());
+  out.error = el('review-error').textContent;
+  out.labelled = sent.slice();
+  const toastId = (el('toast-root').innerHTML.match(/data-toast="(toast-\d+)"/) || [])[1];
+  await click('toast', { 'data-toast': toastId });
+  await tick();
+  out.undone = sent.slice(out.labelled.length);
+  out.restored = (view().match(/data-action="label-one"/g) || []).length;
+""",
+        tmp_path,
+    )
+    assert out["button"], "The bulk button offers the whole group"
+    assert out["labelled"] == [100, 20], "The group goes out in the chunks the route accepts"
+    assert out["emptied"], "Every call in the group was labelled"
+    assert out["error"] == "", f"Nothing was refused, but the page said: {out['error']}"
+    assert out["undone"] == [100, 20], "Undo is chunked the same way"
+    assert out["restored"] == 240, "Undo puts all 120 calls back, each with its two buttons"
+
+
+def test_a_chunk_that_fails_puts_back_only_the_labels_that_did_not_land(tmp_path: Path) -> None:
+    out = dash(
+        r"""
+  const many = [];
+  for (let i = 1; i <= 120; i++) many.push(row(i));
+  let seen = 0;
+  answer = contract({
+    '/api/decisions': { status: 200, body: { items: many, next_cursor: null } },
+    'POST /api/projects/Acme-Billing/reviews': (u, i, body) => {
+      seen += 1;
+      return seen === 1
+        ? { status: 200, body: { updated: body.items.length, skipped: [] } }
+        : { status: 500, body: { detail: 'The table is unavailable.' } };
+    }
+  });
+  await visit('#/review');
+  await click('label-group', { 'data-group': JSON.stringify(['Acme-Billing', 'java-domain-stays-pure']), 'data-label': 'correct' });
+  await tick();
+  out.error = el('review-error').textContent;
+  out.back = (view().match(/data-action="label-one"/g) || []).length / 2;
+""",
+        tmp_path,
+    )
+    assert out["back"] == 20, "Only the chunk that failed comes back into the queue"
+    assert "were not saved" in out["error"]
+    assert "20 calls back in the queue" in out["error"] and "100 calls had already been saved" in out["error"]
+
+
 # ------------------------------------------------------------ calls and call
 
 
@@ -765,6 +836,42 @@ def test_a_day_filter_reads_on_until_that_days_rows(tmp_path: Path) -> None:
     assert len(out["reads"]) == 2 and "cursor=p2" in out["reads"][1]
     assert "VERDICT-7" in out["view"] and "VERDICT-5" not in out["view"] and "VERDICT-8" not in out["view"]
     assert 'data-action="more"' not in out["view"], "Past that day there is nothing more to read"
+
+
+def test_a_day_the_read_has_not_got_back_to_says_so_rather_than_none_in_the_ledger(tmp_path: Path) -> None:
+    """A bar on the overview links to that day, so the rows behind it exist.
+
+    /api/decisions takes a window, not a date, so the day is filtered here and
+    the read follows the cursor only so far. When one busy day fills every page
+    of that budget, the screen must not claim the ledger holds nothing.
+    """
+    out = dash(
+        r"""
+  const target = DAY(4);
+  let page = 0;
+  // Every page is full of rows newer than the day asked for, as one busy day makes it.
+  answer = contract({ '/api/decisions': () => {
+    page += 1;
+    return { status: 200, body: {
+      items: [row(100 + page, { timestamp: DAY(0) + 'T09:00:00Z' }), row(200 + page, { timestamp: DAY(0) + 'T10:00:00Z' })],
+      next_cursor: 'page-' + page } };
+  } });
+  await visit('#/calls?kind=approved&day=' + target + '&days=7');
+  out.reads = calls.filter(c => c.url.indexOf('/api/decisions') !== -1).length;
+  out.view = view();
+  out.text = text(view());
+  await click('more');
+  await tick();
+  out.after = calls.filter(c => c.url.indexOf('/api/decisions') !== -1).length;
+""",
+        tmp_path,
+    )
+    assert out["reads"] == 5, "The first read follows the cursor to the end of its page budget"
+    assert 'data-state="not-reached"' in out["view"] and 'data-state="empty"' not in out["view"]
+    assert "none in the ledger" not in out["text"], "The rows behind that bar have not been read, not proved absent"
+    assert "none among the 10 newest rows read so far" in out["text"]
+    assert 'data-action="more"' in out["view"], "The reader can keep reading back towards that day"
+    assert out["after"] == 10, "Load more reads on from the cursor the budget stopped at"
 
 
 def test_the_call_screen_shows_the_row_the_rule_and_the_session_with_their_links(tmp_path: Path) -> None:
