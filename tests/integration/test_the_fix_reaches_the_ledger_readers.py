@@ -101,6 +101,31 @@ def test_the_demo_scenarios_carry_the_fix_the_refusal_needs(path, status, kind, 
     assert "AKIA" + "IOSFODNN7EXAMPLE" not in response["body"]
 
 
+def test_the_contract_documents_the_fix_as_the_proposer_writes_it() -> None:
+    """The served document, read against the module that writes the field, so the two cannot drift."""
+    from threefold.application import fix_proposer
+
+    response = lambda_handler({"rawPath": "/prod/openapi.json", "headers": {}, "requestContext": {"http": {"method": "GET"}, "stage": "prod"}})
+    spec = json.loads(response["body"])
+    result = spec["paths"]["/evaluate-tool-call"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
+    fix = result["properties"]["suggested_fix"]
+    assert "null" in fix["type"] and "object" in fix["type"], "Most verdicts carry no fix"
+    kinds = {value for name, value in vars(fix_proposer).items() if name.startswith("KIND_")}
+    gates = {value for name, value in vars(fix_proposer).items() if name.startswith("GATE_")}
+    assert set(fix["properties"]["kind"]["enum"]) == kinds
+    assert fix["properties"]["summary"]["maxLength"] == fix_proposer.MAX_SUMMARY_CHARS
+    write = fix["properties"]["writes"]["items"]
+    assert {"path", "content", "old_string", "partial"} <= set(write["properties"]) and write["required"] == ["path", "content"]
+    check = fix["properties"]["checks"]["items"]["properties"]
+    assert set(check) == {"gate", "path", "passed"} and set(check["gate"]["enum"]) == gates
+    assert fix["properties"]["validated"]["type"] == "boolean"
+    assert "never applied automatically" in fix["description"] and "Never stored" in fix["description"]
+
+    row = spec["components"]["schemas"]["DecisionRow"]["properties"]
+    assert set(row["suggested_fix_kind"]["enum"]) == kinds and row["suggested_fix_validated"]["type"] == "boolean"
+    assert "suggested_fix" not in row, "A ledger row never carries the fix itself"
+
+
 def test_public_row_passes_the_two_fields_and_never_a_fix() -> None:
     row = {
         "verdict_id": "V-1",

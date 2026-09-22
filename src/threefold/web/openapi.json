@@ -306,6 +306,108 @@
                         "enforce"
                       ],
                       "description": "The calling project's stage on this stack: its own when configured, otherwise the stack's DEFAULT_HOOK_STAGE (default observe). The stage decides only calls with origin hook or ci that are not dry runs: observe judges them exactly as a dry run is judged, recorded and never refused; enforce runs the gates, except that a refusal under one of the project's observe_rules is recorded as an observation. Page and scenario calls always enforce. Reported on every verdict, whether or not it applied."
+                    },
+                    "suggested_fix": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "description": "What to send instead of the refused call, worked out by deterministic code, never by a model. Set on every refusal, and on an observation only when the request sent explain true, since a hook in Observe prints nothing; null otherwise. Also null for a call whose arguments carry more than 1,500 characters: rewriting and checking it would cost several times the gate's own 10 ms budget, so the refusal goes out without one. A starting point, never applied automatically. Never stored: the ledger row keeps only suggested_fix_kind and suggested_fix_validated. A hook appends the summary, and nothing else, to its deny reason.",
+                      "required": [
+                        "kind",
+                        "summary",
+                        "steps",
+                        "validated",
+                        "checks"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "layering",
+                            "credential",
+                            "protected_path",
+                            "unreadable_write",
+                            "loop",
+                            "budget",
+                            "halted_session",
+                            "destructive_command"
+                          ],
+                          "description": "Which gate's refusal this fixes."
+                        },
+                        "summary": {
+                          "type": "string",
+                          "maxLength": 200,
+                          "description": "One line, safe to append to a hook's deny reason: no newline, no control character, no credential."
+                        },
+                        "steps": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "description": "What to do, in order, in words."
+                        },
+                        "writes": {
+                          "type": "array",
+                          "description": "What to send instead of what the call sent: a Write's whole content, an Edit's new text beside the same old_string, or text a shell command added, marked partial. Left out when the files come to more than 8 KB; they were still checked in full. Empty for advice in words.",
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "path",
+                              "content"
+                            ],
+                            "properties": {
+                              "path": {
+                                "type": "string"
+                              },
+                              "content": {
+                                "type": "string"
+                              },
+                              "old_string": {
+                                "type": "string",
+                                "description": "Present for an Edit retry: replace this with content."
+                              },
+                              "partial": {
+                                "type": "boolean",
+                                "description": "Text a shell command added to a file whose other lines were never seen; apply it with an Edit."
+                              },
+                              "new_file": {
+                                "type": "boolean",
+                                "description": "A port or an adapter proposed as a new file; if it already exists, add to it rather than overwrite it."
+                              }
+                            }
+                          }
+                        },
+                        "validated": {
+                          "type": "boolean",
+                          "description": "True only when every proposed write was run through the same gates, with the rules that judged the call, and passed. Never true for advice in words or for a loop. It does not claim the rewrite behaves as the original did."
+                        },
+                        "checks": {
+                          "type": "array",
+                          "description": "Every check that was run on a proposed write.",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "gate": {
+                                "type": "string",
+                                "enum": [
+                                  "layering",
+                                  "credential",
+                                  "boundary",
+                                  "syntax",
+                                  "route"
+                                ]
+                              },
+                              "path": {
+                                "type": "string"
+                              },
+                              "passed": {
+                                "type": "boolean"
+                              }
+                            }
+                          }
+                        }
+                      }
                     }
                   }
                 }
@@ -2742,6 +2844,24 @@
           },
           "category_label": {
             "type": "string"
+          },
+          "suggested_fix_kind": {
+            "type": "string",
+            "enum": [
+              "layering",
+              "credential",
+              "protected_path",
+              "unreadable_write",
+              "loop",
+              "budget",
+              "halted_session",
+              "destructive_command"
+            ],
+            "description": "The kind of suggested fix the call's response carried. Present only on a row whose call was sent one; the fix itself is never stored."
+          },
+          "suggested_fix_validated": {
+            "type": "boolean",
+            "description": "Whether every proposed write of that fix passed the same gates. Present only beside suggested_fix_kind."
           }
         }
       },
