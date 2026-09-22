@@ -173,11 +173,15 @@ Resources:
       DefaultRouteSettings:
         ThrottlingBurstLimit: !Ref ApiThrottleBurstLimit
         ThrottlingRateLimit: !Ref ApiThrottleRateLimit
-      # One JSON line per request, in a log group of its own. The destination is
+      # One line per request, in a log group of its own. The destination is
       # the plain log-group ARN built from the group's name, not GetAtt's form
       # with a trailing ":*". HTTP APIs deliver access logs without the
       # account-wide CloudWatch role a REST API needs, so nothing outside this
-      # stack is changed to turn them on.
+      # stack is changed to turn them on. The line is JSON only as far as its
+      # values allow: the format has no way to escape a value, and two of
+      # them, the path and the User-Agent, are the client's to choose, so a
+      # request that puts a double quote or a backslash in either can write a
+      # line that does not parse. It is still kept, and still readable as text.
       AccessLogSettings:
         DestinationArn: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${ThreefoldApiAccessLogGroup}'
         Format: '{"requestId":"$context.requestId","ip":"$context.identity.sourceIp","requestTime":"$context.requestTime","httpMethod":"$context.httpMethod","routeKey":"$context.routeKey","path":"$context.path","status":"$context.status","protocol":"$context.protocol","responseLength":"$context.responseLength","latency":"$context.responseLatency","integrationLatency":"$context.integrationLatency","integrationStatus":"$context.integrationStatus","integrationError":"$context.integrationErrorMessage","error":"$context.error.message","userAgent":"$context.identity.userAgent"}'
