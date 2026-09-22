@@ -1,0 +1,707 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Threefold edge - one CloudFront distribution in front of the existing stack:
+  the pages from a private S3 bucket behind origin access control, every API
+  path to the existing HTTP API, security headers on every response, and an
+  AWS WAF web ACL. Deployed in us-east-1, the only region a CloudFront web ACL
+  can live in.
+
+# Why a second template rather than more resources in template.yml: the API
+# stack lives in eu-west-1, and a web ACL with CLOUDFRONT scope can only be
+# created in us-east-1. A stack cannot create resources in another region, so
+# the edge is its own stack, in us-east-1, pointed at the API by its domain
+# name. Deleting it leaves the API and its public URL exactly as they were.
+
+Parameters:
+  ApiDomainName:
+    Type: String
+    AllowedPattern: '^[a-z0-9]+\.execute-api\.[a-z0-9-]+\.amazonaws\.com$'
+    ConstraintDescription: >-
+      The host name of an API Gateway endpoint, for example
+      abc123def4.execute-api.eu-west-1.amazonaws.com, with no scheme and no path.
+    Description: >-
+      The existing HTTP API's own host name, from the ApiEndpoint output of the
+      API stack with the scheme and the stage removed. It has no default so an
+      edge can never be deployed in front of the wrong API by omission.
+
+  ApiStagePath:
+    Type: String
+    Default: /prod
+    AllowedPattern: '^/[A-Za-z0-9_-]+$'
+    Description: >-
+      The API Gateway stage, as the origin path CloudFront prefixes to every API
+      request. The function strips the stage before routing, so /api/overview at
+      the edge reaches the same route as /prod/api/overview on the API's own URL.
+
+  RateLimitPerFiveMinutes:
+    Type: Number
+    Default: 1000
+    MinValue: 100
+    MaxValue: 2000000000
+    Description: >-
+      Requests one IP address may send in any five minutes before the web ACL
+      answers 429. One developer's hook sends one request per tool call, so the
+      default leaves a busy agent loop far below it while stopping a script
+      that hammers the open routes.
+
+  PriceClass:
+    Type: String
+    Default: PriceClass_100
+    AllowedValues: [PriceClass_100, PriceClass_200, PriceClass_All]
+    Description: >-
+      Which edge locations serve the site. PriceClass_100 (North America and
+      Europe) is the cheapest and covers where the API itself runs.
+
+  AccessLogs:
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+    Description: >-
+      Whether CloudFront writes standard access logs to a separate bucket, kept
+      for 30 days. They cost only their storage and are the record of who
+      reached the site, which the WAF metrics alone do not give.
+
+Rules:
+  # A web ACL for CloudFront is refused in any other region, but only after
+  # the bucket and the policies have been created. Asserting the region first
+  # fails the deploy before anything exists.
+  CloudFrontScopeLivesInUsEast1:
+    Assertions:
+      - Assert: !Equals [!Ref 'AWS::Region', us-east-1]
+        AssertDescription: >-
+          Deploy this template in us-east-1: a WAF web ACL with CLOUDFRONT scope
+          cannot be created anywhere else.
+
+Conditions:
+  LogsOn: !Equals [!Ref AccessLogs, 'true']
+
+Resources:
+  # --- the pages ------------------------------------------------------------------
+
+  # Private: nothing in this bucket is reachable except through the distribution.
+  # There is no website configuration, no public ACL and no public policy; the
+  # only reader the policy names is this one distribution, signed with origin
+  # access control. It is retained on stack deletion because a versioned bucket
+  # with objects cannot be deleted by CloudFormation, and a failed delete would
+  # leave the whole edge half torn down.
+  WebBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      # Every publish overwrites the pages in place. Versioning keeps the page a
+      # visitor saw yesterday, so a bad publish is undone by restoring a version
+      # rather than by rebuilding it, and the lifecycle rule stops the old
+      # versions from accumulating forever.
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireReplacedPages
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 30
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 7
+
+  WebBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref WebBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          # GetObject only, for this distribution only. Without s3:ListBucket a
+          # missing page answers 403 rather than 404, which is deliberate: the
+          # alternative, a distribution-wide custom error page, would also replace
+          # the API's own RFC 7807 problem documents, which are 403s and 404s too.
+          - Sid: CloudFrontReadsThroughOriginAccessControl
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub '${WebBucket.Arn}/*'
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${Distribution}'
+          - Sid: DenyAnythingButTls
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource:
+              - !GetAtt WebBucket.Arn
+              - !Sub '${WebBucket.Arn}/*'
+            Condition:
+              Bool:
+                aws:SecureTransport: 'false'
+
+  # Origin access control, not the legacy origin access identity: it signs every
+  # request with SigV4, works with SSE-KMS should the bucket ever move to it, and
+  # the bucket policy can name the one distribution allowed to read rather than a
+  # principal any distribution in the account could be given.
+  WebOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub '${AWS::StackName}-web'
+        Description: Signs the distribution's reads from the pages bucket.
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  # --- access logs (optional) -------------------------------------------------------
+
+  # Standard logging writes through an ACL grant to the log delivery account, so
+  # this bucket, unlike the pages bucket, keeps ACLs enabled with the bucket owner
+  # preferred as the owner of what is written. That is why the logs have a bucket
+  # of their own: the pages bucket stays ACL-free.
+  LogBucket:
+    Type: AWS::S3::Bucket
+    Condition: LogsOn
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerPreferred
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireAccessLogs
+            Status: Enabled
+            ExpirationInDays: 30
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 7
+
+  LogBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Condition: LogsOn
+    Properties:
+      Bucket: !Ref LogBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyAnythingButTls
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource:
+              - !GetAtt LogBucket.Arn
+              - !Sub '${LogBucket.Arn}/*'
+            Condition:
+              Bool:
+                aws:SecureTransport: 'false'
+
+  # --- caching ----------------------------------------------------------------------
+
+  # Pages change with every publish and name no content hash, so the edge keeps
+  # them briefly. publish_web.py also invalidates on every publish; the short TTL
+  # is what bounds staleness if an invalidation is ever skipped.
+  PageCachePolicy:
+    Type: AWS::CloudFront::CachePolicy
+    Properties:
+      CachePolicyConfig:
+        Name: !Sub '${AWS::StackName}-pages'
+        Comment: Pages, a minute at the edge, invalidated on every publish.
+        MinTTL: 0
+        DefaultTTL: 60
+        MaxTTL: 300
+        ParametersInCacheKeyAndForwardedToOrigin:
+          EnableAcceptEncodingGzip: true
+          EnableAcceptEncodingBrotli: true
+          CookiesConfig:
+            CookieBehavior: none
+          HeadersConfig:
+            HeaderBehavior: none
+          QueryStringsConfig:
+            QueryStringBehavior: none
+
+  # Scripts, styles and images are kept for up to a year at the edge. Every
+  # publish invalidates them, and the Cache-Control publish_web.py sets keeps the
+  # browser's own copy short, because the file names carry no content hash.
+  AssetCachePolicy:
+    Type: AWS::CloudFront::CachePolicy
+    Properties:
+      CachePolicyConfig:
+        Name: !Sub '${AWS::StackName}-assets'
+        Comment: Assets, up to a year at the edge, invalidated on every publish.
+        MinTTL: 0
+        DefaultTTL: 86400
+        MaxTTL: 31536000
+        ParametersInCacheKeyAndForwardedToOrigin:
+          EnableAcceptEncodingGzip: true
+          EnableAcceptEncodingBrotli: true
+          CookiesConfig:
+            CookieBehavior: none
+          HeadersConfig:
+            HeaderBehavior: none
+          QueryStringsConfig:
+            QueryStringBehavior: none
+
+  # --- response headers ---------------------------------------------------------------
+
+  SecurityHeadersPolicy:
+    Type: AWS::CloudFront::ResponseHeadersPolicy
+    Properties:
+      ResponseHeadersPolicyConfig:
+        Name: !Sub '${AWS::StackName}-security-headers'
+        Comment: HSTS, nosniff, no framing, no referrer, and a CSP the pages satisfy.
+        SecurityHeadersConfig:
+          StrictTransportSecurity:
+            AccessControlMaxAgeSec: 63072000
+            IncludeSubdomains: true
+            Preload: false
+            Override: true
+          ContentTypeOptions:
+            Override: true
+          FrameOptions:
+            FrameOption: DENY
+            Override: true
+          # Nothing this service answers reads the Referer, so none is sent: a
+          # page URL can carry a session id or a project name in its query.
+          ReferrerPolicy:
+            ReferrerPolicy: no-referrer
+            Override: true
+          # The narrowest policy the current pages run under, read off the pages:
+          # - script-src: the pages' own inline scripts and inline onclick
+          #   handlers ('unsafe-inline'; hashes cannot cover handlers without
+          #   'unsafe-hashes' and would break on every edit of a page), the
+          #   Tailwind Play CDN at the exact version the pages pin, and Swagger UI
+          #   at the exact version swagger.html pins. No 'unsafe-eval'.
+          # - style-src: inline style blocks and the style elements the Tailwind
+          #   Play CDN writes at runtime ('unsafe-inline'), the Google Fonts
+          #   stylesheet the pages @import, and Swagger UI's stylesheet.
+          # - font-src: the font files that stylesheet points at.
+          # - img-src: data: URIs, which Swagger UI's stylesheet uses for icons.
+          # - connect-src: this origin, where every page's fetch goes once the
+          #   base path is empty, and the API's own URL, which is the server
+          #   swagger.html's "Try it out" sends to. A sidecar URL typed into a
+          #   page's API field that is neither is refused by the browser, on
+          #   purpose: that page may hold the operator key.
+          # - everything else, including framing, plugins, <base> and form
+          #   submission, is refused.
+          ContentSecurityPolicy:
+            ContentSecurityPolicy: !Sub >-
+              default-src 'none';
+              script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com/3.4.17 https://unpkg.com/swagger-ui-dist@5.33.0/;
+              style-src 'self' 'unsafe-inline' https://fonts.googleapis.com/css2 https://unpkg.com/swagger-ui-dist@5.33.0/;
+              font-src https://fonts.gstatic.com/s/;
+              img-src 'self' data:;
+              connect-src 'self' https://${ApiDomainName};
+              base-uri 'none';
+              form-action 'none';
+              frame-ancestors 'none';
+              object-src 'none'
+            Override: true
+
+  # --- the firewall -------------------------------------------------------------------
+
+  WebAcl:
+    Type: AWS::WAFv2::WebACL
+    Properties:
+      Name: !Sub '${AWS::StackName}-web-acl'
+      Description: Threefold edge - reputation, rate, and managed rule groups.
+      Scope: CLOUDFRONT
+      DefaultAction:
+        Allow: {}
+      VisibilityConfig:
+        SampledRequestsEnabled: true
+        CloudWatchMetricsEnabled: true
+        MetricName: threefold-edge-web-acl
+      Rules:
+        - Name: AmazonIpReputationList
+          Priority: 0
+          OverrideAction:
+            None: {}
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesAmazonIpReputationList
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: threefold-edge-ip-reputation
+
+        # 429, not the default 403. The hook reads a 4xx as the service refusing
+        # the call and reports it to the developer as a key problem, while it reads
+        # 429 as "could not be judged": the call then goes to the agent's own
+        # permissions, or is refused where THREEFOLD_FAIL_CLOSED=1. A limit is a
+        # capacity signal, and should read as one.
+        - Name: RateLimitPerIp
+          Priority: 1
+          Action:
+            Block:
+              CustomResponse:
+                ResponseCode: 429
+                ResponseHeaders:
+                  - Name: retry-after
+                    Value: '300'
+          Statement:
+            RateBasedStatement:
+              Limit: !Ref RateLimitPerFiveMinutes
+              EvaluationWindowSec: 300
+              AggregateKeyType: IP
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: threefold-edge-rate-limit
+
+        # The body rules count rather than block. Every POST body this service
+        # receives is an agent's tool call or a rule under test, and carrying
+        # source code is its job: a Write of an HTML page holds <script>, a Java
+        # class can name java.lang.Runtime, a command can hold ../ or a URL with an
+        # IP address, and a file over 8 KB is ordinary. A block answers 403, which
+        # the hook reads as the service refusing the call, so these rules would
+        # refuse legitimate writes with a reason about the API key. The function
+        # parses the body as JSON and never renders or runs it, caps it at 1 MB
+        # itself, and judging its content is the gate's work, not the firewall's.
+        # The rules still count, so their metrics and samples show what they saw,
+        # and every rule on headers, the URI and the query string still blocks.
+        - Name: CommonRuleSet
+          Priority: 2
+          OverrideAction:
+            None: {}
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesCommonRuleSet
+              RuleActionOverrides:
+                - Name: SizeRestrictions_BODY
+                  ActionToUse:
+                    Count: {}
+                - Name: CrossSiteScripting_BODY
+                  ActionToUse:
+                    Count: {}
+                - Name: GenericLFI_BODY
+                  ActionToUse:
+                    Count: {}
+                - Name: GenericRFI_BODY
+                  ActionToUse:
+                    Count: {}
+                - Name: EC2MetaDataSSRF_BODY
+                  ActionToUse:
+                    Count: {}
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: threefold-edge-common
+
+        - Name: KnownBadInputsRuleSet
+          Priority: 3
+          OverrideAction:
+            None: {}
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesKnownBadInputsRuleSet
+              RuleActionOverrides:
+                - Name: JavaDeserializationRCE_BODY
+                  ActionToUse:
+                    Count: {}
+                - Name: Log4JRCE_BODY
+                  ActionToUse:
+                    Count: {}
+                - Name: ReactJSRCE_BODY
+                  ActionToUse:
+                    Count: {}
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: threefold-edge-known-bad-inputs
+
+  # --- the distribution -----------------------------------------------------------------
+
+  # One origin for the pages, one for the API. The default behavior serves the
+  # bucket, so a path nobody listed can never reach the function; every path the
+  # function answers is listed below, each under CachingDisabled with every
+  # viewer header except Host (API Gateway answers only to its own Host, and the
+  # function reads Authorization, X-API-Key and the query string). No custom
+  # error responses: they apply to every origin, and would replace the API's
+  # problem documents with a page.
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Comment: Threefold - pages from S3, API paths to the HTTP API
+        Enabled: true
+        HttpVersion: http2and3
+        IPV6Enabled: true
+        PriceClass: !Ref PriceClass
+        DefaultRootObject: index.html
+        WebACLId: !GetAtt WebAcl.Arn
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true
+        Logging: !If
+          - LogsOn
+          - Bucket: !GetAtt LogBucket.DomainName
+            Prefix: cloudfront/
+            IncludeCookies: false
+          - !Ref AWS::NoValue
+        Origins:
+          - Id: web
+            DomainName: !GetAtt WebBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt WebOriginAccessControl.Id
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+          - Id: api
+            DomainName: !Ref ApiDomainName
+            OriginPath: !Ref ApiStagePath
+            CustomOriginConfig:
+              OriginProtocolPolicy: https-only
+              HTTPSPort: 443
+              OriginSSLProtocols:
+                - TLSv1.2
+              OriginReadTimeout: 30
+              OriginKeepaliveTimeout: 5
+        DefaultCacheBehavior:
+          TargetOriginId: web
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD]
+          CachedMethods: [GET, HEAD]
+          Compress: true
+          CachePolicyId: !Ref PageCachePolicy
+          ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
+        # CloudFront matches these in order and takes the first. The API paths
+        # use https-only rather than a redirect, because a redirected POST arrives
+        # as a GET in most clients and the call would silently not be judged.
+        # 4135ea2d-... is the managed CachingDisabled cache policy and
+        # b689b0a8-... the managed AllViewerExceptHostHeader origin request policy.
+        CacheBehaviors:
+          - PathPattern: /assets/*
+            TargetOriginId: web
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD]
+            CachedMethods: [GET, HEAD]
+            Compress: true
+            CachePolicyId: !Ref AssetCachePolicy
+            ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
+          # The application's JSON: overview, decisions, projects, reviews,
+          # sandbox, sign-in, sessions and insights.
+          - PathPattern: /api/*
+            TargetOriginId: api
+            ViewerProtocolPolicy: https-only
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+            CachedMethods: [GET, HEAD]
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+            ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
+          - PathPattern: /evaluate-tool-call
+            TargetOriginId: api
+            ViewerProtocolPolicy: https-only
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+            CachedMethods: [GET, HEAD]
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+            ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
+          # /simulate-loop and /simulate-secret, the dashboard's scenarios.
+          - PathPattern: /simulate-*
+            TargetOriginId: api
+            ViewerProtocolPolicy: https-only
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+            CachedMethods: [GET, HEAD]
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+            ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
+          - PathPattern: /issue-certificate
+            TargetOriginId: api
+            ViewerProtocolPolicy: https-only
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+            CachedMethods: [GET, HEAD]
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+            ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
+          - PathPattern: /universal-eval
+            TargetOriginId: api
+            ViewerProtocolPolicy: https-only
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+            CachedMethods: [GET, HEAD]
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+            ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
+          - PathPattern: /adapter/*
+            TargetOriginId: api
+            ViewerProtocolPolicy: https-only
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+            CachedMethods: [GET, HEAD]
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+            ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
+          # /sessions/<id>, /sessions/<id>/terminate and /resume. The slash keeps
+          # /sessions.html, a page, on the bucket.
+          - PathPattern: /sessions/*
+            TargetOriginId: api
+            ViewerProtocolPolicy: https-only
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+            CachedMethods: [GET, HEAD]
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+            ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
+          - PathPattern: /sessions.json
+            TargetOriginId: api
+            ViewerProtocolPolicy: https-only
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+            CachedMethods: [GET, HEAD]
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+            ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
+          - PathPattern: /insights.json
+            TargetOriginId: api
+            ViewerProtocolPolicy: https-only
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+            CachedMethods: [GET, HEAD]
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+            ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
+          # /rules exactly, and /rules/<anything>: a /rules* pattern would also
+          # take /rules.html, a page, away from the bucket.
+          - PathPattern: /rules
+            TargetOriginId: api
+            ViewerProtocolPolicy: https-only
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+            CachedMethods: [GET, HEAD]
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+            ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
+          - PathPattern: /rules/*
+            TargetOriginId: api
+            ViewerProtocolPolicy: https-only
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+            CachedMethods: [GET, HEAD]
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+            ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
+          - PathPattern: /policy
+            TargetOriginId: api
+            ViewerProtocolPolicy: https-only
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+            CachedMethods: [GET, HEAD]
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+            ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
+          - PathPattern: /policy/*
+            TargetOriginId: api
+            ViewerProtocolPolicy: https-only
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+            CachedMethods: [GET, HEAD]
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+            ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
+          - PathPattern: /status
+            TargetOriginId: api
+            ViewerProtocolPolicy: https-only
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+            CachedMethods: [GET, HEAD]
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+            ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
+          - PathPattern: /health
+            TargetOriginId: api
+            ViewerProtocolPolicy: https-only
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+            CachedMethods: [GET, HEAD]
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+            ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
+          # /ready and /readyz in one behavior, to stay well inside the quota.
+          - PathPattern: /ready*
+            TargetOriginId: api
+            ViewerProtocolPolicy: https-only
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+            CachedMethods: [GET, HEAD]
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+            ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
+          # The function serves the OpenAPI document, so swagger.html reads the
+          # one deployed with the code rather than a copy published beside it.
+          - PathPattern: /openapi.json
+            TargetOriginId: api
+            ViewerProtocolPolicy: https-only
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+            CachedMethods: [GET, HEAD]
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+            ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
+          - PathPattern: /docs/openapi.json
+            TargetOriginId: api
+            ViewerProtocolPolicy: https-only
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+            CachedMethods: [GET, HEAD]
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+            ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
+          # The hook, the installer and the bundle the installer fetches. The
+          # function substitutes its own endpoint into /install.py, so these stay
+          # with the function rather than being copied into the bucket.
+          - PathPattern: /hooks/*
+            TargetOriginId: api
+            ViewerProtocolPolicy: https-only
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+            CachedMethods: [GET, HEAD]
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+            ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
+          - PathPattern: /claude_code_hook.py
+            TargetOriginId: api
+            ViewerProtocolPolicy: https-only
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+            CachedMethods: [GET, HEAD]
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+            ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
+          - PathPattern: /install.py
+            TargetOriginId: api
+            ViewerProtocolPolicy: https-only
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+            CachedMethods: [GET, HEAD]
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+            ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
+          - PathPattern: /dist/*
+            TargetOriginId: api
+            ViewerProtocolPolicy: https-only
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+            CachedMethods: [GET, HEAD]
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+            ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
+
+Outputs:
+  DistributionDomainName:
+    Description: The distribution's host name. The site is https://<this>/.
+    Value: !GetAtt Distribution.DomainName
+  DistributionId:
+    Description: The distribution publish_web.py invalidates after every upload.
+    Value: !Ref Distribution
+  WebBucketName:
+    Description: The private bucket publish_web.py uploads the pages to.
+    Value: !Ref WebBucket
+  WebAclArn:
+    Description: The web ACL attached to the distribution.
+    Value: !GetAtt WebAcl.Arn
+  SiteUrl:
+    Description: The public URL of the site, with the trailing slash.
+    Value: !Sub 'https://${Distribution.DomainName}/'
+  LogBucketName:
+    Condition: LogsOn
+    Description: Where CloudFront writes its standard access logs.
+    Value: !Ref LogBucket
