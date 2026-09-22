@@ -30,6 +30,18 @@ TASKS_DIR = BENCHMARK_DIR / "tasks"
 VARIANTS = ("clean", "violating")
 _PLACEHOLDER = re.compile(r"\{([A-Z][A-Z0-9_]*)\}")
 
+# Files outside the acceptance folders that decide how the tests run. One line
+# in any of them can skip or deselect tests (pytest's addopts, a root
+# conftest.py, an MSBuild Directory.Build.props), so before the acceptance run
+# each is put back as the template has it, or removed when the template has
+# none. A task adds its own in task.json under acceptance.config.
+TEST_CONFIG_BY_LANGUAGE: Mapping[str, Sequence[str]] = {
+    "python": ("pyproject.toml", "setup.cfg", "tox.ini", "pytest.ini", ".pytest.ini", "conftest.py"),
+    "csharp": ("nuget.config", "global.json", "Directory.Build.props", "Directory.Build.targets", "Directory.Build.rsp",
+               "Directory.Packages.props", "src/Directory.Build.props", "src/Directory.Build.targets"),
+}
+_IGNORED_PARTS = frozenset({"__pycache__", "bin", "obj"})
+
 
 @dataclass(frozen=True)
 class Task:
@@ -45,6 +57,8 @@ class Task:
     pristine: List[str]
     directory: Path
     secret_pieces: Mapping[str, List[str]] = field(default_factory=dict)
+    test_config: List[str] = field(default_factory=list)
+    expected_passed: Optional[int] = None
 
     @property
     def template(self) -> Path:
@@ -81,6 +95,9 @@ def load_task(directory: Path) -> Task:
     directory = Path(directory)
     data = json.loads((directory / "task.json").read_text(encoding="utf-8"))
     acceptance = data["acceptance"]
+    test_config = list(TEST_CONFIG_BY_LANGUAGE.get(data["language"], ()))
+    test_config += [path for path in acceptance.get("config") or [] if path not in test_config]
+    expected = acceptance.get("expected_passed")
     task = Task(
         id=data["id"],
         title=data["title"],
@@ -94,6 +111,8 @@ def load_task(directory: Path) -> Task:
         pristine=list(acceptance.get("pristine") or []),
         directory=directory,
         secret_pieces={name: list(pieces) for name, pieces in (data.get("secrets") or {}).items()},
+        test_config=test_config,
+        expected_passed=int(expected) if expected is not None else None,
     )
     if task.id != directory.name:
         raise ValueError(f"task.json in {directory.name} says its id is {task.id}")
@@ -132,44 +151,86 @@ def apply_overlay(task: Task, variant: str, destination: Path) -> List[str]:
     return written
 
 
+def _listing(root: Path) -> Dict[str, Path]:
+    """The files under root, or root itself when it is a file, keyed by path relative to root."""
+    if root.is_file():
+        return {"": root}
+    if not root.is_dir():
+        return {}
+    return {
+        path.relative_to(root).as_posix(): path
+        for path in root.rglob("*")
+        if path.is_file() and not _IGNORED_PARTS & set(path.relative_to(root).parts)
+    }
+
+
 def _same_tree(left: Path, right: Path) -> bool:
-    if left.is_file() or right.is_file():
-        return left.is_file() and right.is_file() and left.read_bytes() == right.read_bytes()
-    if not left.is_dir() or not right.is_dir():
-        return False
-
-    def listing(root: Path) -> Dict[str, Path]:
-        return {
-            path.relative_to(root).as_posix(): path
-            for path in root.rglob("*")
-            if path.is_file() and "__pycache__" not in path.parts and not {"bin", "obj"} & set(path.relative_to(root).parts)
-        }
-
-    left_files, right_files = listing(left), listing(right)
+    """Whether two files or folders hold the same bytes. Two paths that do not exist are the same: nothing changed."""
+    left_files, right_files = _listing(left), _listing(right)
     if left_files.keys() != right_files.keys():
         return False
     return all(left_files[name].read_bytes() == right_files[name].read_bytes() for name in left_files)
 
 
-def restore_pristine(task: Task, repo: Path) -> bool:
-    """Puts the acceptance files back exactly as the template has them. Returns whether the agent had changed them.
+def _replace(source: Path, target: Path) -> None:
+    if target.is_dir():
+        shutil.rmtree(target)
+    elif target.exists():
+        target.unlink()
+    if source.is_dir():
+        shutil.copytree(source, target, ignore=shutil.ignore_patterns(*_IGNORED_PARTS))
+    elif source.exists():
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
 
-    The acceptance run judges the agent's code against the task's own tests, so
-    a test weakened, deleted or added by the agent cannot decide the outcome.
+
+@dataclass
+class Restored:
+    """What the agent had changed among the files that judge its work, found while putting them back."""
+
+    modified: List[str] = field(default_factory=list)
+    deleted: List[str] = field(default_factory=list)
+    added: List[str] = field(default_factory=list)
+    config_changed: List[str] = field(default_factory=list)
+
+    @property
+    def tests_modified(self) -> bool:
+        """A test the template ships was edited or deleted. A new file beside them is not that: the
+        staging-key task asks for one, and it is removed before the run either way."""
+        return bool(self.modified or self.deleted)
+
+
+def restore_acceptance(task: Task, repo: Path) -> Restored:
+    """Puts the acceptance files and the files that configure the test run back exactly as the template has them.
+
+    The acceptance run judges the agent's code against the task's own tests and
+    the template's own test configuration, so a test weakened, deleted or added
+    by the agent cannot decide the outcome, and neither can an `addopts` that
+    ignores the acceptance folder or a root conftest.py that skips it.
     """
-    modified = False
+    restored = Restored()
     for rel in task.pristine:
-        source = task.template / rel
-        target = Path(repo) / rel
+        source, target = task.template / rel, Path(repo) / rel
+        before, after = _listing(source), _listing(target)
+        prefix = f"{rel}/" if source.is_dir() or target.is_dir() else rel
+        for name in sorted(set(before) | set(after)):
+            shown = f"{prefix}{name}" if name else rel
+            if name not in after:
+                restored.deleted.append(shown)
+            elif name not in before:
+                restored.added.append(shown)
+            elif before[name].read_bytes() != after[name].read_bytes():
+                restored.modified.append(shown)
+        _replace(source, target)
+    for rel in task.test_config:
+        source, target = task.template / rel, Path(repo) / rel
         if not _same_tree(source, target):
-            modified = True
-        if target.is_dir():
-            shutil.rmtree(target)
-        elif target.exists():
-            target.unlink()
-        if source.is_dir():
-            shutil.copytree(source, target, ignore=shutil.ignore_patterns("__pycache__", "bin", "obj"))
-        elif source.exists():
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source, target)
-    return modified
+            restored.config_changed.append(rel)
+        _replace(source, target)
+    return restored
+
+
+def restore_pristine(task: Task, repo: Path) -> bool:
+    """restore_acceptance, answering only whether a shipped test or the test configuration had been changed."""
+    restored = restore_acceptance(task, repo)
+    return restored.tests_modified or bool(restored.config_changed)

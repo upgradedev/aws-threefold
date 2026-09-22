@@ -9,6 +9,8 @@
   "acceptance": {
     "command": ["dotnet", "run", "--project", "tests/Acme.Warehouse.Tests"],
     "timeout_s": 600,
-    "pristine": ["tests"]
+    "pristine": ["tests"],
+    "expected_passed": 4,
+    "config": ["src/Acme.Warehouse/Acme.Warehouse.csproj", "src/Acme.Warehouse/Directory.Build.props", "src/Acme.Warehouse/Directory.Build.targets"]
   }
 }

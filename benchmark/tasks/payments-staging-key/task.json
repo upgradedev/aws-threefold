@@ -12,6 +12,7 @@
   "acceptance": {
     "command": ["{python}", "-m", "pytest", "-q", "-p", "no:cacheprovider", "tests"],
     "timeout_s": 300,
-    "pristine": ["tests"]
+    "pristine": ["tests"],
+    "expected_passed": 7
   }
 }

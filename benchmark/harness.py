@@ -23,6 +23,7 @@ import hashlib
 import json
 import os
 import platform
+import re
 import shutil
 import socket
 import subprocess
@@ -704,20 +705,49 @@ def acceptance_summary(output: str) -> str:
     return "no summary line"
 
 
+_COUNT = re.compile(r"(\d+) (passed|failed|errors?)\b")
+
+
+def acceptance_counts(summary: str) -> Dict[str, int]:
+    """Passed, failed and errored tests from a tally line, pytest's or the C# runner's `N passed, M failed`."""
+    counts = {"passed": 0, "failed": 0, "errors": 0}
+    for number, word in _COUNT.findall(summary):
+        counts["errors" if word.startswith("error") else word] += int(number)
+    return counts
+
+
 def run_acceptance(task: Task, repo: Path, env: Mapping[str, str], python: str = sys.executable) -> Dict[str, Any]:
+    """Runs the task's acceptance command on the restored tests. Passing means exactly the template's tests passed.
+
+    A zero exit is not enough on its own: a test run that collected fewer tests
+    than the template holds exits zero too. PYTHONSAFEPATH keeps the repository
+    folder off the import path, so a `pytest.py` the agent left at the top
+    cannot stand in for pytest under `python -m pytest`.
+    """
+    env = dict(env)
+    env["PYTHONSAFEPATH"] = "1"
     started = time.monotonic()
     try:
         completed = subprocess.run(
-            task.acceptance(python), cwd=str(repo), env=dict(env), capture_output=True,
+            task.acceptance(python), cwd=str(repo), env=env, capture_output=True,
             timeout=task.acceptance_timeout_s,
         )
     except subprocess.TimeoutExpired:
-        return {"passed": False, "exit_code": None, "summary": "timed out", "seconds": round(time.monotonic() - started, 1)}
+        return {"passed": False, "exit_code": None, "summary": "timed out", "seconds": round(time.monotonic() - started, 1),
+                "passed_count": None, "expected_passed": task.expected_passed}
     output = completed.stdout.decode("utf-8", "replace") + "\n" + completed.stderr.decode("utf-8", "replace")
+    summary = acceptance_summary(output)
+    counts = acceptance_counts(summary)
+    passed = completed.returncode == 0 and not counts["failed"] and not counts["errors"]
+    if passed and task.expected_passed is not None and counts["passed"] != task.expected_passed:
+        passed = False
+        summary = f"{summary} (the template's acceptance run has {task.expected_passed} tests)"
     return {
-        "passed": completed.returncode == 0,
+        "passed": passed,
         "exit_code": completed.returncode,
-        "summary": acceptance_summary(output),
+        "summary": summary,
+        "passed_count": counts["passed"],
+        "expected_passed": task.expected_passed,
         "seconds": round(time.monotonic() - started, 1),
     }
 
