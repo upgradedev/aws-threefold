@@ -512,11 +512,13 @@
       chips.push(html`<button type="button" class="tf-chip tf-chip-button" data-tf-signout>Sign out</button>`);
     } else if (via === 'key') {
       chips.push(html`<a href="${PAGE_BASE}settings.html#operator-key" class="tf-chip tf-chip-amber" title="Using the operator key pasted on the settings page; signing in with python threefold.py open replaces it">Operator key</a>`);
-    } else if (!who || who.reads_public === false) {
+    } else if (who && who.reads_public === false) {
       chips.push(html`<a href="${PAGE_BASE}dashboard.html#/signin" class="tf-chip tf-chip-amber" title="How to sign in">Signed out</a>`);
-    } else {
+    } else if (who) {
       chips.push(html`<a href="${PAGE_BASE}dashboard.html#/signin" class="tf-chip tf-chip-gray" title="The operator signs in with python threefold.py open">Sign in</a>`);
     }
+    // A stack that does not answer whoami says nothing about itself, so no chip
+    // guesses whether it is the public demo or a private stack.
     return chips;
   }
 
