@@ -1410,9 +1410,10 @@ _HOME_PREFIXES = (
 )
 _COMMAND_TOKEN_SPLIT = re.compile(r"[\s'\"`;|&<>(),=]+")
 
-# Git Bash, Cygwin and WSL spell C:\Users\me as /c/Users/me, /cygdrive/c/Users/me
-# and /mnt/c/Users/me. Claude Code runs Bash through Git Bash on Windows, so
-# that is the spelling its commands arrive in.
+# Git Bash, Cygwin and WSL each spell a Windows drive as a first path segment:
+# `C:\work\a` becomes `/c/work/a`, `/cygdrive/c/work/a` or `/mnt/c/work/a`.
+# Claude Code runs Bash through Git Bash on Windows, so that is the spelling
+# its commands arrive in.
 _DRIVE_PATH = re.compile(r"^(?:/cygdrive|/mnt)?/([A-Za-z])(?=/|$)")
 # Read only on Windows: on a POSIX machine /c and /mnt/c name real directories,
 # and rewriting them would take a command out of the project it runs in. A
@@ -1422,10 +1423,10 @@ WINDOWS_DRIVE_PATHS = os.name == "nt"
 
 
 def _drive_path(token: str, translate: Optional[bool] = None) -> str:
-    """`/c/Users/me`, `/cygdrive/c/...` and `/mnt/c/...` as `C:/Users/me`, on Windows.
+    """`/c/work/a`, `/cygdrive/c/work/a` and `/mnt/c/work/a` as `C:/work/a`, on Windows.
 
-    Resolved as written against the directory a command runs in, `/c/Users/me`
-    lands at the current drive's `\\c\\Users\\me`, which lies inside nothing:
+    Resolved as written against the directory a command runs in, `/c/work/a`
+    lands at the current drive's `\\c\\work\\a`, which lies inside nothing:
     not the agents' own folders, not the include list, not the project whose
     path is taken out before sending. So the one spelling Claude Code actually
     uses on Windows slipped past all three.

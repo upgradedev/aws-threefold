@@ -262,7 +262,7 @@ def sh_quoted(path: Any) -> str:
 
     The registered hook command and the pre-commit script are both read by a
     shell -- Git Bash on Windows, /bin/sh elsewhere. Quoted only where a space
-    forced it, a home folder such as C:/Users/o'neil left an apostrophe open:
+    forced it, a home folder whose name holds an apostrophe left that quote open:
     the agent's hook exited 2, which Claude Code reads as a refusal, so every
     governed call was blocked, and the pre-commit script was a syntax error,
     so every commit in the repository failed even in observe mode. A `$`, a
