@@ -2135,8 +2135,16 @@ def handle(raw_text: Optional[str], forced_agent: Optional[str] = None) -> Tuple
         ]
 
     if isinstance(call, UnknownShape):
+        # A governed call nobody could read is a call the service never judged,
+        # so it goes through _unjudged like an unreachable service: silent by
+        # default, refused when the owner asked for fail-closed. Agents change
+        # their argument layouts between versions, and an owner who set
+        # THREEFOLD_FAIL_CLOSED=1 asked for exactly this case not to slip by.
         record_unknown_shape(home, agent, call.keys)
-        return None, notes + [f"this {agent} tool call has a shape the hook cannot read; its key names were logged and nothing was sent."]
+        output, lines = _unjudged(agent, f"a {agent} tool call shape it cannot read")
+        return output, notes + [
+            f"this {agent} tool call has a shape the hook cannot read; its key names were logged and nothing was sent."
+        ] + lines
 
     credential = find_credential(call)
     if credential:
