@@ -459,11 +459,14 @@ def test_a_hook_that_failed_open_or_crashed_is_read_from_its_events(tmp_path):
          "stderr": "Threefold: could not check this call (connection refused); the agent's own permissions decide."},
         {"type": "system", "subtype": "hook_response", "hook_event": "PreToolUse", "exit_code": 1, "stdout": "",
          "stderr": "Traceback (most recent call last):\n  ..."},
-        {"type": "system", "subtype": "hook_response", "hook_event": "PreToolUse", "exit_code": 0, "stdout": "", "stderr": ""},
+        {"type": "system", "subtype": "hook_response", "hook_event": "PreToolUse", "exit_code": 0, "stdout": "", "stderr": "",
+         "outcome": "success"},
+        {"type": "system", "subtype": "hook_response", "hook_event": "PreToolUse", "stdout": "", "stderr": "",
+         "outcome": "cancelled"},
         {"type": "system", "subtype": "hook_response", "hook_event": "SessionStart", "exit_code": 1, "stderr": "x"},
     ])
     summary = harness.parse_transcript(path)
-    assert (summary["hook_unjudged"], summary["hook_errors"]) == (1, 1)
+    assert (summary["hook_unjudged"], summary["hook_errors"]) == (1, 2)
 
 
 def _threefold_row(**extra):

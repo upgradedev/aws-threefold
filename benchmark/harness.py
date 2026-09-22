@@ -136,6 +136,9 @@ CLAUDE_MEMORY_ENTRIES = ("CLAUDE.md", "CLAUDE.local.md", ".claude/CLAUDE.md", ".
 REFUSAL_MARKER = "Threefold refused"
 # What the hook writes to stderr when it could not judge a call and let it through.
 HOOK_UNJUDGED_MARKER = "could not check this call"
+# Hook outcomes Claude Code 2.1.220 reports for a hook that did not finish cleanly
+# (the others are "success" and "blocking").
+HOOK_FAILED_OUTCOMES = frozenset({"non_blocking_error", "error", "cancelled"})
 
 
 # --- small helpers ---------------------------------------------------------------
@@ -722,7 +725,10 @@ def parse_transcript(path: Path) -> Dict[str, Any]:
                     stderr = str(message.get("stderr") or "")
                     if HOOK_UNJUDGED_MARKER in stderr:
                         summary["hook_unjudged"] += 1
-                    if message.get("exit_code") not in (None, 0, 2) or "Traceback (most recent call last)" in stderr:
+                    # A crash, a non-zero exit or a hook Claude Code gave up on (its timeout) all let the call
+                    # through unjudged. Exit 2 is a deliberate block, not a failure.
+                    if (message.get("exit_code") not in (None, 0, 2) or "Traceback (most recent call last)" in stderr
+                            or message.get("outcome") in HOOK_FAILED_OUTCOMES):
                         summary["hook_errors"] += 1
         elif kind == "assistant":
             # An API failure arrives as an assistant message too ("Not logged in"); it is not the model working.
