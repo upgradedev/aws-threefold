@@ -857,7 +857,9 @@ def test_a_day_the_read_has_not_got_back_to_says_so_rather_than_none_in_the_ledg
       next_cursor: 'page-' + page } };
   } });
   await visit('#/calls?kind=approved&day=' + target + '&days=7');
-  out.reads = calls.filter(c => c.url.indexOf('/api/decisions') !== -1).length;
+  const decisions = calls.filter(c => c.url.indexOf('/api/decisions') !== -1);
+  out.reads = decisions.length;
+  out.limits = decisions.map(c => new URL(c.url).searchParams.get('limit'));
   out.view = view();
   out.text = text(view());
   await click('more');
@@ -867,6 +869,7 @@ def test_a_day_the_read_has_not_got_back_to_says_so_rather_than_none_in_the_ledg
         tmp_path,
     )
     assert out["reads"] == 5, "The first read follows the cursor to the end of its page budget"
+    assert out["limits"] == ["200"] * 5, "A day filtered here asks for the largest page the contract allows"
     assert 'data-state="not-reached"' in out["view"] and 'data-state="empty"' not in out["view"]
     assert "none in the ledger" not in out["text"], "The rows behind that bar have not been read, not proved absent"
     assert "none among the 10 newest rows read so far" in out["text"]

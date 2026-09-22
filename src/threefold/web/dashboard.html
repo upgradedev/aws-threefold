@@ -1367,11 +1367,16 @@
       const sub = describeFilters(f) + '.';
       ctx.render(html`${crumbs([{ label: 'Overview', href: '#/overview' }, { label: 'Calls' }])}${loadingView('Calls', sub, ['table'])}`);
 
+      // A day is filtered here, over rows the route returns newest first, so a
+      // day-filtered read asks for the largest page the contract allows (200)
+      // and gets four times as far back for the same five requests.
+      const PAGE = f.day ? 200 : 50;
+
       function apiQuery(cursor) {
         return '/api/decisions' + query({
           days: f.days, project: f.project, rule: f.rule,
           kind: f.kind === 'all' ? '' : f.kind, review: f.review === 'any' ? '' : f.review,
-          agent: f.agent, session: f.session, limit: 50, cursor
+          agent: f.agent, session: f.session, limit: PAGE, cursor
         });
       }
 
