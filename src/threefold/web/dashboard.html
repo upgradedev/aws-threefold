@@ -1485,7 +1485,7 @@
     function fieldValue(key, value) {
       if (value === null || value === undefined || value === '') return html`<span class="text-gray-600">—</span>`;
       if (key === 'suggested_fix_kind') return html`${value} <span class="text-gray-500">(${fixKindLabel(value, 'a fix')})</span>`;
-      if (key === 'suggested_fix_validated') return value === true ? 'yes: every proposed write passed the same gates' : 'no: advice, not checked by the gates';
+      if (key === 'suggested_fix_validated') return value === true ? 'yes: every proposed write passed the same gates' : 'no: not validated by the gates';
       if (key === 'timestamp' || key === 'reviewed_at') return html`${dateTime(value)} <span class="text-gray-500">(${timeAgo(value)})</span>`;
       if (key === 'cost_usd') return T.usd(Number(value));
       if (key === 'agent') return agentLabel(value);
@@ -1578,8 +1578,8 @@
 
         const fixBody = hasFix
           ? html`<div class="space-y-2 text-xs">
-              <p class="flex flex-wrap items-center gap-2"><span class="tf-chip tf-chip-gray">${fixKindLabel(row.suggested_fix_kind, row.suggested_fix_kind)}</span>${row.suggested_fix_validated === true ? html`<span class="tf-chip tf-chip-emerald">Checked by Threefold: passes the same gates</span>` : html`<span class="tf-chip tf-chip-gray">Not checked: advice in words</span>`}</p>
-              <p class="text-[11px] text-gray-500">The fix went back with the verdict, to the agent or the page that sent the call. The ledger keeps its kind and whether it was checked, never its files or its steps: those were the caller's own source.</p>
+              <p class="flex flex-wrap items-center gap-2"><span class="tf-chip tf-chip-gray">${fixKindLabel(row.suggested_fix_kind, row.suggested_fix_kind)}</span>${row.suggested_fix_validated === true ? html`<span class="tf-chip tf-chip-emerald">Checked by Threefold: passes the same gates</span>` : html`<span class="tf-chip tf-chip-gray">Not validated</span>`}</p>
+              <p class="text-[11px] text-gray-500">The fix went back with the verdict, to the agent or the page that sent the call. The ledger keeps its kind and whether the gates validated it, never its files or its steps: those were the caller's own source.</p>
             </div>`
           : '';
 

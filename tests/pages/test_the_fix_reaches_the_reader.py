@@ -267,7 +267,11 @@ def test_the_call_detail_shows_what_the_ledger_keeps_of_a_fix_only_when_it_has_i
     assert "suggested_fix_kind" not in validated, "The fields are labelled, not listed raw"
 
     words = out["words"]
-    assert "no: advice, not checked by the gates" in words and "Not checked" in words
+    # The row keeps only the boolean, and the proposer also says false for a
+    # rewrite that was checked and failed, so the page says "not validated"
+    # rather than guessing that it was advice nobody checked.
+    assert "no: not validated by the gates" in words and "Not validated" in words
+    assert "Not checked: advice in words" not in words and "no: advice" not in words
     assert "Checked by Threefold: passes the same gates" not in words
 
     none = out["none"]
