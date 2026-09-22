@@ -390,15 +390,19 @@ Resources:
   # region and write that same namespace, so an alarm on those metrics could
   # not tell the public demo from the private stack, and the per-project
   # dimension leaves no single series to alarm on. These filters read the same
-  # records from this stack's own log group and publish the fields the record
-  # carries, under their own names, to a namespace named after the stack.
-  # Requiring ToolCallsEvaluated keeps out the demo's /simulate-loop record,
-  # which carries CircuitBreakerTripped on every click by design.
+  # records from this stack's own log group into a namespace named after the
+  # stack. Two routes evaluate a call: /evaluate-tool-call's record counts it
+  # as ToolCallsEvaluated and the universal adapter's as UniversalToolEvaluated,
+  # so each filter starts from either, and ToolCallsEvaluated here counts both.
+  # That start keeps out the demo's /simulate-loop record, which carries
+  # CircuitBreakerTripped on every click by design. Only the first route's
+  # record carries a trip, the latency and the spend, so those three count
+  # that route alone until the adapter's record carries them too.
   ThreefoldCallsEvaluatedFilter:
     Type: AWS::Logs::MetricFilter
     Properties:
       LogGroupName: !Ref ThreefoldLogGroup
-      FilterPattern: '{ $.ToolCallsEvaluated > 0 }'
+      FilterPattern: '{ $.ToolCallsEvaluated > 0 || $.UniversalToolEvaluated > 0 }'
       MetricTransformations:
         - MetricNamespace: !Sub 'Threefold/${AWS::StackName}'
           MetricName: ToolCallsEvaluated
@@ -409,7 +413,7 @@ Resources:
     Type: AWS::Logs::MetricFilter
     Properties:
       LogGroupName: !Ref ThreefoldLogGroup
-      FilterPattern: '{ ($.ToolCallsEvaluated > 0) && ($.VerdictApproved > 0) }'
+      FilterPattern: '{ ($.ToolCallsEvaluated > 0 || $.UniversalToolEvaluated > 0) && $.VerdictApproved > 0 }'
       MetricTransformations:
         - MetricNamespace: !Sub 'Threefold/${AWS::StackName}'
           MetricName: VerdictApproved
@@ -420,18 +424,21 @@ Resources:
     Type: AWS::Logs::MetricFilter
     Properties:
       LogGroupName: !Ref ThreefoldLogGroup
-      FilterPattern: '{ ($.ToolCallsEvaluated > 0) && ($.CircuitBreakerTripped > 0) }'
+      FilterPattern: '{ ($.ToolCallsEvaluated > 0 || $.UniversalToolEvaluated > 0) && $.CircuitBreakerTripped > 0 }'
       MetricTransformations:
         - MetricNamespace: !Sub 'Threefold/${AWS::StackName}'
           MetricName: CircuitBreakerTripped
           MetricValue: '1'
           Unit: Count
 
+  # The value filters also require their field, so a record without one is
+  # left out by the pattern rather than by however CloudWatch treats a value
+  # it cannot find.
   ThreefoldLatencyMsFilter:
     Type: AWS::Logs::MetricFilter
     Properties:
       LogGroupName: !Ref ThreefoldLogGroup
-      FilterPattern: '{ $.ToolCallsEvaluated > 0 }'
+      FilterPattern: '{ ($.ToolCallsEvaluated > 0 || $.UniversalToolEvaluated > 0) && $.LatencyMs >= 0 }'
       MetricTransformations:
         - MetricNamespace: !Sub 'Threefold/${AWS::StackName}'
           MetricName: LatencyMs
@@ -442,7 +449,7 @@ Resources:
     Type: AWS::Logs::MetricFilter
     Properties:
       LogGroupName: !Ref ThreefoldLogGroup
-      FilterPattern: '{ $.ToolCallsEvaluated > 0 }'
+      FilterPattern: '{ ($.ToolCallsEvaluated > 0 || $.UniversalToolEvaluated > 0) && $.CurrentSessionCostUSD >= 0 }'
       MetricTransformations:
         - MetricNamespace: !Sub 'Threefold/${AWS::StackName}'
           MetricName: CurrentSessionCostUSD
@@ -695,7 +702,9 @@ Resources:
         Ten or more calls in five minutes were answered on a halted session.
         The service reports CircuitBreakerTripped on the call that halts a
         session and on every call after it, so this is an agent that keeps
-        calling after it was stopped, or many sessions halting at once.
+        calling after it was stopped, or many sessions halting at once. Only
+        /evaluate-tool-call reports it; the universal adapter does not, so its
+        halted sessions are not counted here.
       Namespace: !Sub 'Threefold/${AWS::StackName}'
       MetricName: CircuitBreakerTripped
       Statistic: Sum
@@ -720,7 +729,7 @@ Resources:
         request to the verdict, so it points at that route's gates, table
         reads and Bedrock call, where the function's Duration covers every
         route. Neither counts a cold start, which Lambda reports separately as
-        Init Duration.
+        Init Duration. The universal adapter reports no latency.
       Namespace: !Sub 'Threefold/${AWS::StackName}'
       MetricName: LatencyMs
       Statistic: Average
@@ -741,10 +750,11 @@ Resources:
       AlarmName: !Sub '${AWS::StackName}-call-volume'
       AlarmDescription: >-
         More than 1,500 calls were evaluated in each of three five-minute
-        periods, five a second for fifteen minutes. That is beyond what a
-        person or a handful of agents make and below the API's throttle, so it
-        warns of a runaway caller while every call is still being billed and
-        before the throttle starts hiding it behind 429s.
+        periods, five a second for fifteen minutes, on /evaluate-tool-call and
+        the universal adapter together. That is beyond what a person or a
+        handful of agents make and below the API's throttle, so it warns of a
+        runaway caller while every call is still being billed and before the
+        throttle starts hiding it behind 429s.
       Namespace: !Sub 'Threefold/${AWS::StackName}'
       MetricName: ToolCallsEvaluated
       Statistic: Sum

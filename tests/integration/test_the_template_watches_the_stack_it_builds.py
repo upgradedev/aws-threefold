@@ -705,32 +705,87 @@ def _records(captured: str) -> list[dict]:
     return records
 
 
+_PATTERN_TOKEN = re.compile(r"\s*(\(|\)|&&|\|\||\$\.\w+\s*(?:>=|<=|!=|>|<|=)\s*-?\d+(?:\.\d+)?)")
+
+
 def _pattern_matches(pattern: str, record: dict) -> bool:
     """CloudWatch Logs JSON filter semantics for the subset this template uses.
 
-    Only `$.Field op number` terms joined by `&&` are understood, and anything
-    else fails the test, so a pattern this model cannot read cannot pass by
-    being misread. A field that is absent or not a number does not match, as
-    in CloudWatch.
+    Only `$.Field op number` terms are understood, joined by `&&` or `||` and
+    grouped with parentheses, and anything else fails the test, so a pattern
+    this model cannot read cannot pass by being misread. A field that is absent
+    or not a number does not match, as in CloudWatch. `&&` and `||` may not be
+    mixed at one level without parentheses: the template never leaves the
+    reader to know which binds tighter.
     """
     inner = pattern.strip()
     assert inner.startswith("{") and inner.endswith("}"), pattern
-    matched = True
-    for term in inner[1:-1].split("&&"):
-        term = term.strip()
-        if term.startswith("(") and term.endswith(")"):
-            term = term[1:-1].strip()
+    body = inner[1:-1]
+    tokens, position = [], 0
+    while body[position:].strip():
+        match = _PATTERN_TOKEN.match(body, position)
+        assert match, f"{body[position:]!r} is outside the subset this test can evaluate"
+        tokens.append(match.group(1))
+        position = match.end()
+
+    def comparison(term: str) -> bool:
         parsed = re.fullmatch(r"\$\.(\w+)\s*(>=|<=|!=|>|<|=)\s*(-?\d+(?:\.\d+)?)", term)
-        assert parsed, f"{term!r} is outside the subset this test can evaluate"
         field, operator, number = parsed.group(1), parsed.group(2), float(parsed.group(3))
         value = record.get(field)
         if not isinstance(value, (int, float)) or isinstance(value, bool):
             return False
-        matched &= {
+        return {
             ">": value > number, "<": value < number, "=": value == number,
             ">=": value >= number, "<=": value <= number, "!=": value != number,
         }[operator]
+
+    def expression(index: int) -> tuple[bool, int]:
+        results, joiners = [], set()
+        while True:
+            token = tokens[index]
+            if token == "(":
+                value, index = expression(index + 1)
+                assert tokens[index] == ")", pattern
+                index += 1
+            else:
+                assert token.startswith("$."), f"{token!r} where a term belongs in {pattern}"
+                value, index = comparison(token), index + 1
+            results.append(value)
+            if index >= len(tokens) or tokens[index] == ")":
+                break
+            joiners.add(tokens[index])
+            index += 1
+        assert len(joiners) <= 1, f"{pattern} mixes && and || at one level without parentheses"
+        return (any(results) if joiners == {"||"} else all(results)), index
+
+    matched, end = expression(0)
+    assert end == len(tokens), f"Unbalanced parentheses in {pattern}"
     return matched
+
+
+@pytest.mark.parametrize(
+    "pattern, record, expected",
+    [
+        ("{ $.A > 0 }", {"A": 1.0}, True),
+        ("{ $.A > 0 }", {"A": 0.0}, False),
+        ("{ $.A > 0 }", {}, False),
+        ("{ $.A > 0 }", {"A": "1"}, False),
+        ("{ $.A > 0 || $.B > 0 }", {"B": 1.0}, True),
+        ("{ $.A > 0 || $.B > 0 }", {"C": 1.0}, False),
+        ("{ ($.A > 0 || $.B > 0) && $.C >= 0 }", {"B": 1.0, "C": 0.0}, True),
+        ("{ ($.A > 0 || $.B > 0) && $.C >= 0 }", {"B": 1.0}, False),
+        ("{ ($.A > 0 || $.B > 0) && $.C > 0 }", {"C": 1.0}, False),
+        ("{ ($.A > 0) && ($.C > 0) }", {"A": 1.0, "C": 1.0}, True),
+    ],
+)
+def test_the_filter_model_reads_patterns_as_cloudwatch_does(pattern: str, record: dict, expected: bool) -> None:
+    assert _pattern_matches(pattern, record) is expected
+
+
+def test_the_filter_model_refuses_what_it_cannot_read() -> None:
+    for pattern in ("{ $.A > 0 && $.B > 0 || $.C > 0 }", '{ $.A = "x" }', "{ ($.A > 0 }"):
+        with pytest.raises((AssertionError, IndexError)):
+            _pattern_matches(pattern, {"A": 1.0, "B": 1.0, "C": 1.0})
 
 
 def _filters() -> dict[str, dict[str, str]]:
@@ -744,6 +799,37 @@ def _filters() -> dict[str, dict[str, str]]:
     return filters
 
 
+# A call is evaluated on either of two routes, and each route's record names
+# the count differently. Every filter starts from this, which is also what
+# keeps the demo's /simulate-loop record out.
+EVALUATED = "($.ToolCallsEvaluated > 0 || $.UniversalToolEvaluated > 0)"
+
+EXPECTED_FILTERS: dict[str, tuple[str, str, str, str]] = {
+    "ThreefoldCallsEvaluatedFilter": ("{ $.ToolCallsEvaluated > 0 || $.UniversalToolEvaluated > 0 }", "ToolCallsEvaluated", "1", "Count"),
+    "ThreefoldVerdictApprovedFilter": (f"{{ {EVALUATED} && $.VerdictApproved > 0 }}", "VerdictApproved", "1", "Count"),
+    "ThreefoldCircuitBreakerTrippedFilter": (f"{{ {EVALUATED} && $.CircuitBreakerTripped > 0 }}", "CircuitBreakerTripped", "1", "Count"),
+    "ThreefoldLatencyMsFilter": (f"{{ {EVALUATED} && $.LatencyMs >= 0 }}", "LatencyMs", "$.LatencyMs", "Milliseconds"),
+    "ThreefoldSessionCostFilter": (f"{{ {EVALUATED} && $.CurrentSessionCostUSD >= 0 }}", "CurrentSessionCostUSD", "$.CurrentSessionCostUSD", "None"),
+}
+
+
+@pytest.mark.parametrize("logical_id", sorted(EXPECTED_FILTERS))
+def test_each_governance_filter_is_exactly_the_filter_it_is_meant_to_be(logical_id: str) -> None:
+    pattern, metric, value, unit = EXPECTED_FILTERS[logical_id]
+    assert _properties(logical_id) == {
+        # This stack's own function log, or both stacks count each other's calls.
+        "LogGroupName": "!Ref ThreefoldLogGroup",
+        "FilterPattern": pattern,
+        "MetricTransformations": [
+            {"MetricNamespace": f"!Sub '{STACK_NAMESPACE}'", "MetricName": metric, "MetricValue": value, "Unit": unit}
+        ],
+    }
+
+
+def test_the_template_has_exactly_these_filters() -> None:
+    assert set(_of_type("AWS::Logs::MetricFilter")) == set(EXPECTED_FILTERS)
+
+
 def test_the_governance_filters_read_this_stacks_log_into_this_stacks_namespace() -> None:
     filters = _filters()
     assert set(filters) >= {"ToolCallsEvaluated", "VerdictApproved", "CircuitBreakerTripped", "LatencyMs", "CurrentSessionCostUSD"}
@@ -753,12 +839,16 @@ def test_the_governance_filters_read_this_stacks_log_into_this_stacks_namespace(
             f"{metric} must read this stack's own function log, or both stacks count each other's calls"
         )
         assert f"MetricNamespace: !Sub '{STACK_NAMESPACE}'" in block
-        assert "$.ToolCallsEvaluated > 0" in found["pattern"], (
-            f"{metric} would also count the demo's /simulate-loop record, which is not an evaluated call"
+        assert "$.ToolCallsEvaluated > 0" in found["pattern"] and "$.UniversalToolEvaluated > 0" in found["pattern"], (
+            f"{metric} must start from a call either route evaluated, and from nothing else"
         )
+        if found["value"].startswith("$."):
+            assert f"{found['value']} >= 0" in found["pattern"], (
+                f"{metric} must require the field it publishes, so a record without it is left out"
+            )
 
 
-def test_the_filters_read_only_metrics_the_evaluate_route_emits() -> None:
+def test_the_filters_read_only_fields_the_evaluating_routes_emit() -> None:
     emitted = {metric for (namespace, metric) in _emitted() if namespace == "Threefold/Governance"}
     for metric, found in _filters().items():
         assert metric in emitted, f"{metric} is not a metric the handler emits"
@@ -810,6 +900,52 @@ def test_the_filters_match_the_record_an_evaluated_call_actually_writes(capsys) 
     assert _pattern_matches(filters["ToolCallsEvaluated"]["pattern"], third)
     assert not _pattern_matches(filters["VerdictApproved"]["pattern"], third)
     assert _pattern_matches(filters["CircuitBreakerTripped"]["pattern"], third)
+
+
+def test_the_universal_adapter_counts_as_an_evaluated_call(capsys) -> None:
+    """The adapter runs the same evaluator and is billed the same.
+
+    Its record names the count UniversalToolEvaluated and carries neither a
+    trip, a latency nor a spend, so it is counted in the call volume and the
+    approvals, and the alarms on the fields it lacks say it is not in them.
+    """
+    from threefold.interfaces.api_handlers import lambda_handler
+
+    body = {
+        "session_id": f"acme-template-{uuid.uuid4().hex[:12]}",
+        "project_name": "Acme-Template",
+        "tool_call": {
+            "type": "tool_use",
+            "name": "Edit",
+            "input": {"file_path": "src/acme/service.py", "old_string": "a = 1", "new_string": "a = 2"},
+        },
+    }
+    capsys.readouterr()
+    response = lambda_handler({"httpMethod": "POST", "path": "/adapter/universal-tool-call", "body": json.dumps(body)})
+    assert response["statusCode"] == 200, response["body"]
+    assert json.loads(response["body"])["evaluation"]["status"] == "APPROVED"
+    records = [r for r in _records(capsys.readouterr().out) if "UniversalToolEvaluated" in r]
+    assert len(records) == 1
+    record = records[0]
+
+    filters = _filters()
+    assert _pattern_matches(filters["ToolCallsEvaluated"]["pattern"], record)
+    assert _pattern_matches(filters["VerdictApproved"]["pattern"], record)
+    descriptions = {
+        properties["MetricName"]: properties["AlarmDescription"]
+        for properties in (_properties(logical_id) for logical_id in _alarms())
+        if properties.get("Namespace") == _OWN_NAMESPACE
+    }
+    assert "universal adapter" in descriptions["ToolCallsEvaluated"], "The volume alarm should say it counts both routes"
+    for metric in ("CircuitBreakerTripped", "LatencyMs", "CurrentSessionCostUSD"):
+        if metric in record:
+            assert _pattern_matches(filters[metric]["pattern"], record), f"{metric} is on the record and not counted"
+        else:
+            assert not _pattern_matches(filters[metric]["pattern"], record), f"{metric} would publish a missing value"
+            if metric in descriptions:
+                assert "universal adapter" in descriptions[metric], (
+                    f"The alarm on {metric} should say the adapter's calls are not in it"
+                )
 
 
 def test_a_call_let_through_by_a_dry_run_counts_as_approved(capsys) -> None:
