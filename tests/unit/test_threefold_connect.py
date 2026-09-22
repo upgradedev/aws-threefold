@@ -483,6 +483,70 @@ def test_disconnecting_the_last_checkout_takes_the_shared_hook_out(machine, stac
     assert _git(machine.repo, "status", "--porcelain").stdout.strip() == ""
 
 
+# --- a .threefold.json the repository committed ------------------------------------------------
+
+@pytest.fixture
+def committed_config(machine):
+    """A cloned repository whose .threefold.json is tracked, so it, not this command, decides."""
+
+    def commit(**fields):
+        document = {"project": "Acme-Cloned", "mode": "observe"}
+        document.update(fields)
+        (machine.repo / ".threefold.json").write_text(json.dumps(document), encoding="utf-8")
+        assert _git(machine.repo, "add", ".threefold.json").returncode == 0
+        assert _git(machine.repo, "commit", "-qm", "configure threefold").returncode == 0
+        return document
+
+    return commit
+
+
+def header(out: str, label: str) -> str:
+    """The value on connect's header line for `label`."""
+    for line in out.splitlines():
+        stripped = line.strip()
+        if stripped.startswith(label + " "):
+            return stripped[len(label):].strip()
+    return ""
+
+
+def test_connect_reports_the_endpoint_and_mode_the_committed_file_decides(machine, stack, committed_config) -> None:
+    """The header used to print the endpoint and the mode that were asked for.
+
+    The hook reads the committed file, so the developer's calls went to the
+    repository's server, in the repository's mode, while the output said
+    otherwise and the key file was paired with a stack nothing would use.
+    """
+    other = _closed_endpoint()
+    committed_config(endpoint=other)
+    result = run(installer, "connect", str(machine.repo), "--agents", "claude-code",
+                 "--endpoint", stack.endpoint, "--api-key-file", str(key_file(machine)),
+                 "--project", "Acme-Mine", "--mode", "enforce", "--no-open")
+    assert result.code == 0, result.out
+    assert header(result.out, "endpoint") == other, result.out
+    assert header(result.out, "mode").startswith("observe"), result.out
+    assert header(result.out, "committed"), "the header says the committed file decided these"
+    paired = json.loads((machine.threefold_home / "config.json").read_text(encoding="utf-8"))
+    assert stack.endpoint not in json.dumps(paired.get("trusted_endpoints", [])), \
+        "an endpoint the hook will not use is not paired with the key file"
+    assert stack.sent("POST", "evaluate-tool-call") == [], "the first call went where the committed file says"
+
+
+def test_a_committed_file_that_agrees_says_nothing_extra(machine, stack, committed_config) -> None:
+    committed_config(endpoint=stack.endpoint, mode="managed")
+    result = run(installer, "connect", str(machine.repo), "--agents", "claude-code",
+                 "--endpoint", stack.endpoint, "--mode", "managed", "--no-open")
+    assert result.code == 0, result.out
+    assert header(result.out, "endpoint") == stack.endpoint
+    assert header(result.out, "committed") == ""
+
+
+def test_an_untracked_configuration_still_pairs_the_endpoint_with_its_key_file(machine, stack) -> None:
+    result = connect(machine, stack, "--api-key-file", str(key_file(machine)), "--no-open")
+    assert result.code == 0, result.out
+    paired = json.loads((machine.threefold_home / "config.json").read_text(encoding="utf-8"))
+    assert [entry["endpoint"] for entry in paired["trusted_endpoints"]] == [stack.endpoint]
+
+
 def test_a_project_that_is_not_an_alias_is_refused(machine, stack) -> None:
     result = connect(machine, stack, "--project", "Acme Ledger")
     assert result.code == 2 and "must match" in result.out

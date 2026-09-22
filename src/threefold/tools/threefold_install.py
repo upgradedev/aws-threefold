@@ -955,7 +955,15 @@ def plan_install(
         written.append(CONFIG_FILE)
 
     if endpoint and key_file is not None:
-        trusted_endpoint_step(plan, home, endpoint, key_file)
+        if tracked(CONFIG_FILE):
+            # Pairing an endpoint the hook will never read the key for would
+            # say the owner had trusted a stack their calls do not go to.
+            plan.add(
+                f"{endpoint} was not paired with its key file: the committed {CONFIG_FILE} decides where calls go, "
+                "and that is not it"
+            )
+        else:
+            trusted_endpoint_step(plan, home, endpoint, key_file)
 
     # One entry per agent, merged into whatever the file already holds.
     registered: List[str] = []
@@ -1640,13 +1648,34 @@ def connect(args: argparse.Namespace, out: Any) -> int:
     hook = load_hook_module(home)
     before = resolved_settings(hook, root)
     shown_endpoint = endpoint or (before.endpoint if before is not None else "")
+    shown_mode = mode
+    # A .threefold.json the repository committed is left as it is, and the
+    # hook reads it, so it decides where the calls go and in what mode. The
+    # header used to print what the command line asked for instead, which
+    # named a stack the developer's calls never reached.
+    committed = before is not None and not workspace and is_tracked(root, CONFIG_FILE)
+    differs: List[str] = []
+    if committed:
+        if before.endpoint and shown_endpoint and before.endpoint != shown_endpoint:
+            differs.append("endpoint")
+        shown_endpoint = before.endpoint or shown_endpoint
+        if before.mode in MODES and before.mode != mode:
+            differs.append("mode")
+        shown_mode = before.mode if before.mode in MODES else mode
 
     print(f"Threefold connect: {forward(root)}", file=out)
     print(f"  {'folder':<10}  {'a workspace, not a git repository' if workspace else 'a git repository'}", file=out)
     print(f"  {'project':<10}  {project} {project_note}".rstrip(), file=out)
-    print(f"  {'mode':<10}  {mode}: {mode_line(mode)}", file=out)
+    print(f"  {'mode':<10}  {shown_mode}: {mode_line(shown_mode)}", file=out)
     print(f"  {'agents':<10}  {agent_line}", file=out)
     print(f"  {'endpoint':<10}  {shown_endpoint or 'the hook default'}", file=out)
+    if differs:
+        named = " and ".join(differs)
+        print(
+            f"  {'committed':<10}  the tracked {CONFIG_FILE} decides the {named} here, so the {named} above is its; "
+            f"what the command line asked for differs from it and is not what the hook will use",
+            file=out,
+        )
     if kept:
         print(f"  {'kept':<10}  the {', '.join(kept)} already in .threefold.json; pass them to change them", file=out)
     print("", file=out)
