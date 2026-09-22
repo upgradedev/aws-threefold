@@ -20,8 +20,9 @@ import pytest
 
 from threefold.application.dtos import ToolCallRequestDTO
 from threefold.application.evaluator import GovernanceEvaluator
-from threefold.application.rule_keys import PROTECTED_PATH, refusal_key
-from threefold.infrastructure.dynamo_repo import DynamoDBSessionRepository
+from threefold.application.rollups import review_deltas
+from threefold.application.rule_keys import PROTECTED_PATH, kind_of, refusal_key, stored_rule_keys
+from threefold.infrastructure.dynamo_repo import DynamoDBSessionRepository, rollup_counters
 
 PYTHON_RULE = "python-domain-stays-pure"
 PYTHON_DOMAIN = "src/acme/domain/order.py"
@@ -165,3 +166,90 @@ def test_the_fix_names_the_rule_that_actually_refused(evaluator) -> None:
     rendered = repr(fix)
     assert JAVA_DOMAIN in rendered, rendered
     assert PYTHON_DOMAIN not in rendered, rendered
+
+
+JAVA_RULE = "java-domain-stays-pure"
+BOTH_FILES = {
+    "edits": [
+        {"file_path": PYTHON_DOMAIN, "content": BOTO},
+        {"file_path": JAVA_DOMAIN, "content": JPA},
+    ]
+}
+
+
+def _observing_both():
+    repo = DynamoDBSessionRepository(table_name="observed-counting-test")
+    made = GovernanceEvaluator(session_repo=repo)
+    made.save_project_config("Acme-Staged", {"stage": "observe", "observe_rules": []})
+    return made
+
+
+def test_every_rule_a_call_would_have_broken_is_recorded() -> None:
+    """The verdict and the row name both, not just the first the guard reached."""
+    evaluator = _observing_both()
+    verdict = _call(evaluator, "count-rules", "MultiEdit", "FILE_WRITE", BOTH_FILES)
+    assert verdict.status == "APPROVED"
+    assert verdict.observed_rules == [PYTHON_RULE, JAVA_RULE], verdict.observed_rules
+    rows = [
+        row
+        for row in evaluator.session_repo.list_decisions(days=1)
+        if row.get("session_id") == "count-rules"
+    ]
+    assert rows and rows[0]["observed_rules"] == [PYTHON_RULE, JAVA_RULE]
+
+
+def test_the_second_rule_a_call_broke_is_counted_too() -> None:
+    """Readiness is read out of the rollups, and a rule is promoted on what it flagged.
+
+    Counting the call against the first rule alone left the second reading
+    quiet, so it could be promoted on evidence that was never collected.
+    """
+    evaluator = _observing_both()
+    _call(evaluator, "count-rollup", "MultiEdit", "FILE_WRITE", BOTH_FILES)
+    rows = [
+        row
+        for row in evaluator.session_repo.list_decisions(days=1)
+        if row.get("session_id") == "count-rollup"
+    ]
+    counters, stamps = rollup_counters(rows[0])
+    assert counters.get(f"observed:{PYTHON_RULE}") == 1
+    assert counters.get(f"observed:{JAVA_RULE}") == 1
+    # One call, counted once. The by-rule counters answer a different question
+    # and do not add up to it.
+    assert counters["observed"] == 1
+    assert counters["calls"] == 1
+    assert stamps.get(f"last:{JAVA_RULE}")
+
+
+def test_a_review_of_the_call_reviews_every_rule_that_flagged_it() -> None:
+    """Or the rules past the first would read unreviewed for ever and never promote."""
+    evaluator = _observing_both()
+    _call(evaluator, "count-review", "MultiEdit", "FILE_WRITE", BOTH_FILES)
+    row = next(
+        row
+        for row in evaluator.session_repo.list_decisions(days=1)
+        if row.get("session_id") == "count-review"
+    )
+    counters, _ = rollup_counters(row)
+    deltas = review_deltas(kind_of(row), stored_rule_keys(row), None, "false_alarm")
+    for rule in (PYTHON_RULE, JAVA_RULE):
+        assert counters[f"observed:{rule}"] - deltas[f"reviewed:{rule}"] == 0, rule
+        assert deltas[f"false_alarm:{rule}"] == 1
+    # The call itself was labelled once, however many rules flagged it.
+    assert deltas["review:false_alarm"] == 1
+    assert deltas["reviewed:observed"] == 1
+
+
+def test_a_refusal_is_still_counted_under_the_gate_that_decided() -> None:
+    """Only an observation carries several rules; a refusal has one deciding gate."""
+    repo = DynamoDBSessionRepository(table_name="observed-counting-refusal")
+    made = GovernanceEvaluator(session_repo=repo)
+    made.save_project_config("Acme-Staged", {"stage": "enforce", "observe_rules": [PYTHON_RULE]})
+    _call(made, "count-refusal", "MultiEdit", "FILE_WRITE", BOTH_FILES)
+    row = next(
+        row for row in made.session_repo.list_decisions(days=1) if row.get("session_id") == "count-refusal"
+    )
+    counters, _ = rollup_counters(row)
+    assert counters[f"refused:{JAVA_RULE}"] == 1
+    assert stored_rule_keys(row) == [JAVA_RULE]
+    assert not [name for name in counters if name.startswith("observed:")]

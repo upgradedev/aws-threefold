@@ -233,6 +233,27 @@ def stored_rule_key(row: Mapping[str, Any]) -> str:
     return rule_key(row)
 
 
+def stored_rule_keys(row: Mapping[str, Any]) -> list:
+    """Every key a stored row is counted under, the way its rollup counted it.
+
+    One for a refusal: the gate that decided. For an observation, every rule
+    that would have refused it, because the rollup counted it once for each.
+    A review of the row is therefore a review for each of them — the reviewer
+    labels the call, and each of those rules flagged that same call — and
+    without that the rules past the first would read unreviewed for ever and
+    never become promotable.
+
+    The same agreement the store asks for: the keys are used only when the
+    row's `rule_key` is among them, so a row written by an older writer is
+    counted and reviewed under its one key exactly as it was.
+    """
+    key = stored_rule_key(row)
+    if is_refusal(row):
+        return [key]
+    observed = [str(name) for name in _observed_rules(row) if name]
+    return list(dict.fromkeys([key] + observed)) if key in observed else [key]
+
+
 def is_refusal(row: Mapping[str, Any]) -> bool:
     return str(row.get("status") or "").upper().startswith("BLOCKED")
 

@@ -55,22 +55,30 @@ def needs_review(rollups: Iterable[Mapping[str, Any]]) -> int:
     return max(0, _sum(items, "observed") - _sum(items, "reviewed:observed"))
 
 
-def review_deltas(kind: str, key: str, old: Optional[str], new: Optional[str]) -> Dict[str, int]:
+def review_deltas(kind: str, key: Any, old: Optional[str], new: Optional[str]) -> Dict[str, int]:
     """What a label moving from `old` to `new` changes in its day's counters.
 
     `review:<label>` counts labels of any flagged call; `<label>:<key>` counts
     them per rule; `reviewed:observed` and `reviewed:<key>` count only calls
     that were observed rather than refused, because those are the queue.
+
+    `key` is one key, or every key the call was counted under: a rollup counts
+    an observation once for each rule that would have refused it, so a label
+    on it has to move once for each too. The per-call counters move once
+    whatever the row's key is, because the reviewer labelled one call.
     """
+    names = [key] if isinstance(key, str) else [str(name) for name in key]
     deltas: Counter = Counter()
     for label, sign in ((old, -1), (new, 1)):
         if label not in LABELS:
             continue
         deltas[f"review:{label}"] += sign
-        deltas[f"{label}:{key}"] += sign
         if kind == "observed":
             deltas["reviewed:observed"] += sign
-            deltas[f"reviewed:{key}"] += sign
+        for name in dict.fromkeys(names):
+            deltas[f"{label}:{name}"] += sign
+            if kind == "observed":
+                deltas[f"reviewed:{name}"] += sign
     return {name: value for name, value in deltas.items() if value}
 
 
