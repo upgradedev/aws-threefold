@@ -12,11 +12,13 @@ Names are synthetic, as the clean-room rule requires.
 """
 from __future__ import annotations
 
+import codecs
 import importlib.util
 import io
 import json
 import os
 import re
+import shlex
 import socket
 import subprocess
 import sys
@@ -647,3 +649,120 @@ def test_an_existing_config_windows_powershell_wrote_in_utf_16_is_replaced_and_p
     assert json.loads((machine.repo / ".threefold.json").read_text(encoding="utf-8"))["include"] == ["services/billing/**"]
     assert run(machine, "--uninstall", project=None).code == 0
     assert (machine.repo / ".threefold.json").read_bytes() == original
+
+
+# --- what the installer copies from the hook ---------------------------------------------------
+#
+# The stack serves this file alone at /install.py, so it cannot import the
+# hook and keeps its own copy of two of its readings. These are what keep the
+# copies honest: if they ever disagree, connect would keep a configuration the
+# hook reads differently, or refuse a name the hook would send.
+
+HOOK_SOURCE = Path(__file__).resolve().parents[2] / "src" / "threefold" / "hooks" / "threefold_hook.py"
+
+
+def _hook():
+    spec = importlib.util.spec_from_file_location("threefold_hook_for_install", HOOK_SOURCE)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+SAMPLE = '{"project": "Acme-Ledger"}'
+ENCODED = [
+    SAMPLE.encode("utf-8"),
+    codecs.BOM_UTF8 + SAMPLE.encode("utf-8"),
+    SAMPLE.encode("utf-16"),
+    codecs.BOM_UTF16_BE + SAMPLE.encode("utf-16-be"),
+    SAMPLE.encode("utf-32"),
+    codecs.BOM_UTF32_BE + SAMPLE.encode("utf-32-be"),
+    SAMPLE.encode("utf-16-le"),
+    b"",
+    b"\xe9\xff",
+]
+
+
+@pytest.mark.parametrize("raw", ENCODED)
+def test_the_installer_decodes_a_file_exactly_as_the_hook_does(raw) -> None:
+    hook = _hook()
+    try:
+        theirs: object = hook._decode_config(raw)
+    except UnicodeDecodeError as error:
+        theirs = type(error)
+    try:
+        ours: object = installer.decode_text(raw)
+    except UnicodeDecodeError as error:
+        ours = type(error)
+    assert ours == theirs, raw
+
+
+TERMS_AND_TEXTS = [
+    ("globex", "Acme-Globex-Portal"), ("globex", "Acme-Payments"), ("xyz", "isspace"), ("xyz", "XYZ"),
+    ("xyz", "acme_xyz"), ("xyz", "xyzbilling"), ("xyz", "classpath-xyz"), ("orion", "Acme-ORION-1"),
+    ("acme", "Acme-Ledger"), ("zeta", "projekt-zeta"), ("ab", "Acme-Ab-One"),
+]
+
+
+@pytest.mark.parametrize(("term", "text"), TERMS_AND_TEXTS)
+def test_the_installer_reads_a_never_send_term_exactly_as_the_hook_does(term, text) -> None:
+    hook = _hook()
+    assert installer.term_occurs(text, term) == hook.term_occurs(text, term), (term, text)
+
+
+# --- a home folder with a character a shell reads -----------------------------------------------
+#
+# The registered command and the pre-commit script are both read by a shell:
+# Git Bash on Windows, /bin/sh everywhere. Quoted only when they held a space,
+# a path such as C:/Users/o'neil left an apostrophe open. The agent's hook
+# then exited 2, which Claude Code reads as a refusal, so every governed call
+# was blocked; and the pre-commit script was a syntax error, so every commit
+# in the repository failed, even in observe mode.
+
+AWKWARD_FOLDERS = ["o'neil", "Acme Dev", "acme$home", "acme`tick", "acme&co", "acme(1)", "acme;rm", "acme!bang"]
+
+
+def _home_under(tmp_path: Path, folder: str, monkeypatch) -> Path:
+    monkeypatch.setenv("THREEFOLD_HOME", str(tmp_path / folder / ".threefold"))
+    return installer.threefold_home()
+
+
+@pytest.mark.parametrize("folder", AWKWARD_FOLDERS)
+def test_a_registered_hook_command_parses_back_to_the_paths_it_names(folder, tmp_path, monkeypatch) -> None:
+    home = _home_under(tmp_path, folder, monkeypatch)
+    command = installer.hook_command(home, "claude-code")
+    hook_path = installer.forward(home / "bin" / "threefold_hook.py")
+    # Quoted the way a shell needs, not only where a space forced it: `$`, a
+    # backtick and `&` all survive shlex.split unharmed and would not survive sh.
+    assert shlex.quote(hook_path) in command, command
+    words = shlex.split(command)
+    assert words[0] == installer.forward(sys.executable)
+    assert words[1] == hook_path
+    assert words[2:] == ["--agent", "claude-code"]
+
+
+@pytest.mark.parametrize("folder", AWKWARD_FOLDERS)
+def test_the_pre_commit_script_parses_back_to_the_paths_it_names(folder, tmp_path, monkeypatch) -> None:
+    home = _home_under(tmp_path, folder, monkeypatch)
+    cli = installer.forward(home / "bin" / "threefold_cli.py")
+    script = installer.pre_commit_script(home)
+    assert script.count(shlex.quote(cli)) == 2, script
+    for line in script.splitlines():
+        shlex.split(line)  # a stray quote is a ValueError here and a syntax error in sh
+        if "threefold_cli.py" in line:
+            assert cli in shlex.split(line), line
+    runs = next(line for line in script.splitlines() if "check --repo" in line)
+    assert shlex.split(runs)[:3] == [installer.forward(sys.executable), cli, "check"]
+
+
+@pytest.mark.parametrize("folder", ["o'neil", "Acme Dev"])
+def test_an_install_from_a_home_folder_with_an_apostrophe_writes_a_script_a_shell_can_read(
+    folder, machine, monkeypatch, tmp_path
+) -> None:
+    home = _home_under(tmp_path, folder, monkeypatch)
+    assert run(machine).code == 0
+    script = (machine.repo / ".git" / "hooks" / "pre-commit").read_text(encoding="utf-8")
+    for line in script.splitlines():
+        shlex.split(line)  # a stray quote is a ValueError here and a syntax error in sh
+    registered = json.loads((machine.repo / ".claude" / "settings.local.json").read_text(encoding="utf-8"))
+    command = registered["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+    assert shlex.split(command)[1] == installer.forward(home / "bin" / "threefold_hook.py")

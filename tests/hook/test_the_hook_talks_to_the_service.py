@@ -210,6 +210,44 @@ def test_fail_closed_does_not_refuse_a_call_the_hook_holds_back(stub, payloads, 
     assert run_hook(payloads.write("claude-code", "data/x.py")) == (0, "", "")
 
 
+def _unreadable_shell(project, tool, keys):
+    """A governed shell call written the way the hook does not know how to read."""
+    return {"session_id": "acme-codex-1", "cwd": str(project), "hook_event_name": "PreToolUse",
+            "tool_name": tool, "tool_input": dict(keys)}
+
+
+@pytest.mark.parametrize(
+    "agent, tool, payload_keys",
+    [
+        ("codex", "shell", {"argv": ["bash", "-lc", "rm -rf src"]}),
+        ("claude-code", "Bash", {"cmd": "rm -rf src"}),
+    ],
+)
+def test_fail_closed_refuses_a_call_whose_shape_the_hook_cannot_read(
+    agent, tool, payload_keys, machine, stub, run_hook, verdict, monkeypatch
+) -> None:
+    """A governed call nobody could judge is exactly what fail-closed is for.
+
+    An argument layout the hook does not know is not an approval: it is a call
+    the service never saw. Letting it through silently is the one thing an
+    owner who set THREEFOLD_FAIL_CLOSED=1 asked not to happen.
+    """
+    monkeypatch.setenv("THREEFOLD_FAIL_CLOSED", "1")
+    payload = _unreadable_shell(machine.project, tool, payload_keys)
+    code, out, err = run_hook(payload, ["--agent", agent])
+    assert (code, stub.requests) == (0, [])
+    assert verdict.decision(out) == "deny"
+    assert "THREEFOLD_FAIL_CLOSED" in verdict.reason(out)
+    assert "shape the hook cannot read" in err
+    assert (machine.threefold_home / "unknown_shapes.jsonl").exists()
+
+
+def test_a_shape_the_hook_cannot_read_still_fails_open_by_default(machine, stub, run_hook) -> None:
+    code, out, err = run_hook(_unreadable_shell(machine.project, "shell", {"argv": ["bash", "-lc", "rm -rf src"]}), ["--agent", "codex"])
+    assert (code, out, stub.requests) == (0, "", [])
+    assert "shape the hook cannot read" in err
+
+
 # --- a single file that runs alone ----------------------------------------------------
 
 def test_the_hook_imports_nothing_outside_the_standard_library() -> None:

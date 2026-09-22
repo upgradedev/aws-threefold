@@ -138,3 +138,23 @@ def test_without_a_never_send_list_there_is_no_recommendation(machine) -> None:
     assert result.code == 2
     assert "no never-send list" in result.out
     assert "Recommendation" not in result.out
+
+
+def test_a_never_send_list_that_cannot_be_read_is_not_reported_as_a_missing_one(machine) -> None:
+    """The hook holds every call back in that state, so the advice is to fix the file, not to write one."""
+    (machine.home / ".threefold" / "never_send.txt").write_bytes(b"Orion-\xe9\xffInternal\n")
+    result = scan("--repo", str(machine.repo))
+    assert result.code == 2
+    assert "no never-send list" not in result.out
+    assert "holds every call back" in result.out
+    assert "Recommendation" not in result.out
+    _assert_no_term(result.out)
+
+
+def test_a_never_send_list_windows_powershell_wrote_is_scanned_like_any_other(machine) -> None:
+    (machine.home / ".threefold" / "never_send.txt").write_bytes("\n".join(TERMS).encode("utf-16"))
+    put(machine.repo, "a.py", f"CLIENT = '{TERMS[0]}'\n")
+    result = scan("--repo", str(machine.repo))
+    assert result.code == 0
+    assert "1 of 1 text files mention a never-send term" in result.out
+    _assert_no_term(result.out)

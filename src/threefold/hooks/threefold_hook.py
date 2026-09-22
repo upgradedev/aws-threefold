@@ -86,12 +86,16 @@ refused (below), it is refused before the list is consulted.
     THREEFOLD_DRY_RUN     1 is the older spelling of THREEFOLD_MODE=observe
     THREEFOLD_API_KEY     sent as X-API-Key when set
     THREEFOLD_API_KEY_FILE a file holding the key, read at call time
-    THREEFOLD_DEVELOPER   hashed locally to 12 hex characters; never sent as typed
+    THREEFOLD_DEVELOPER   hashed locally to 12 hex characters, with a random
+                          salt kept in THREEFOLD_HOME so the public value
+                          cannot be recomputed from a guessed name; never sent
+                          as typed
     THREEFOLD_TIMEOUT     seconds, default 4
     THREEFOLD_FAIL_CLOSED 1 refuses a call the service could not judge
     THREEFOLD_HOME        local state, default ~/.threefold: never_send.txt and
                           config.json are read from it, held_back.log,
-                          unknown_shapes.jsonl and stage/ are written to it
+                          unknown_shapes.jsonl, developer_salt and stage/ are
+                          written to it
 
 Every request says which of the three modes sent it, as `hook_mode`, so the
 ledger can tell a machine capped at observe from one the stage decides for.
@@ -481,17 +485,105 @@ def timeout_seconds() -> float:
     return value if value > 0 else DEFAULT_TIMEOUT_SECONDS
 
 
+DEVELOPER_SALT_NAME = "developer_salt"
+MAX_SALT_BYTES = 128
+MIN_SALT_BYTES = 16
+
+
+def developer_salt(home: str) -> str:
+    """A random value kept in THREEFOLD_HOME and mixed into the developer hash.
+
+    Without it the hash was sha256 of a name with no secret anywhere, and the
+    ledger is open wherever the stack allows public reads. connect.html tells
+    people to use "any stable name for you", so in practice they use a login:
+    anyone could hash a dictionary of logins, hash each result the way the
+    service does, and read off which person worked on which project and when.
+    The contract says a developer appears in public only as a short hash so
+    that the ledger does not name a person, and an unsalted hash of a guessable
+    name names them.
+
+    Written once with O_EXCL and never overwritten, so two hooks starting at
+    the same moment cannot give one developer two identities. A file that is
+    there and cannot be used is the one exception: a crash or a full disk
+    during that single write leaves it empty or truncated, O_EXCL cannot
+    replace it, and every later call from the machine would be anonymous for
+    good with nothing said. One is replaced and read back, so hooks that
+    repair it at the same moment still end on the salt that is on disk.
+    """
+    path = os.path.join(home, DEVELOPER_SALT_NAME)
+
+    def existing() -> str:
+        try:
+            with open(path, "rb") as handle:
+                salt = handle.read(MAX_SALT_BYTES + 1).strip()
+        except OSError:
+            return ""
+        return salt.decode("ascii", "replace") if MIN_SALT_BYTES <= len(salt) <= MAX_SALT_BYTES else ""
+
+    found = existing()
+    if found:
+        return found
+    salt = hashlib.sha256(os.urandom(32)).hexdigest()
+    try:
+        os.makedirs(home, exist_ok=True)
+        handle = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        try:
+            os.write(handle, salt.encode("ascii"))
+        finally:
+            os.close(handle)
+        return salt
+    except FileExistsError:
+        found = existing()
+        if found:
+            # Another hook wrote it between the two reads, and it is theirs.
+            return found
+        _replace_unusable_salt(path, salt)
+        return existing()
+    except OSError:
+        # Nothing here can be written.
+        return existing()
+
+
+def _replace_unusable_salt(path: str, salt: str) -> None:
+    """Puts a usable salt where one that cannot be used is, in one rename.
+
+    Written beside the file and renamed over it, so no reader ever sees a
+    half-written salt, and a machine that cannot be written to is left as it
+    was: anonymous, as it is when the home folder cannot be written at all.
+    """
+    temporary = f"{path}.{os.getpid():x}.{os.urandom(4).hex()}"
+    try:
+        handle = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        try:
+            os.write(handle, salt.encode("ascii"))
+        finally:
+            os.close(handle)
+        os.replace(temporary, path)
+    except OSError:
+        try:
+            os.unlink(temporary)
+        except OSError:
+            pass
+
+
 def developer_id() -> str:
-    """Who is working, as the service may know it: a hash, never a name.
+    """Who is working, as the service may know it: a keyed hash, never a name.
 
     The previous hook sent $USER, so the public ledger learned the login of
     everyone who installed it. Hashing locally means the name never leaves the
-    machine, and the same developer still groups together across sessions.
+    machine, and the same developer still groups together across sessions on
+    this machine. The salt is what makes the public value impossible to
+    recompute from a guessed name; on a machine where none can be kept there
+    is no secret to hash with, so nothing is attributed at all rather than
+    attributed reversibly.
     """
     developer = _env("THREEFOLD_DEVELOPER")
     if not developer:
         return "anonymous"
-    return hashlib.sha256(developer.encode("utf-8")).hexdigest()[:12]
+    salt = developer_salt(threefold_home())
+    if not salt:
+        return "anonymous"
+    return hashlib.sha256(f"{salt}\x00{developer}".encode("utf-8")).hexdigest()[:12]
 
 
 # --- which agent, and what it asked for ----------------------------------------
@@ -1084,13 +1176,17 @@ def read_config(path: str) -> Dict[str, Any]:
 class Settings:
     """What one call is sent under, and where each part came from. Never holds a key in its repr."""
 
-    __slots__ = ("project", "endpoint", "endpoint_source", "mode", "api_key", "include", "notes")
+    __slots__ = ("project", "endpoint", "endpoint_source", "mode", "mode_source", "api_key", "include", "notes")
 
     def __init__(self) -> None:
         self.project = ""
         self.endpoint = DEFAULT_ENDPOINT
         self.endpoint_source = "default"
         self.mode = "enforce"
+        # Which layer decided the mode: "env", "repo", "home", or "default"
+        # for the fallback below. connect prints it, so that a mode nobody
+        # asked for is explained by what set it rather than by a guess.
+        self.mode_source = "default"
         self.api_key: Optional[str] = None
         # None: every call inside the root may be sent, as before include
         # existed. A list, even an empty one: only calls inside its globs.
@@ -1172,22 +1268,24 @@ def resolve_settings(payload: Dict[str, Any]) -> Settings:
             settings.notes.append(f"the endpoint in {label} is not an http(s) URL and was ignored.")
 
     mode = _env("THREEFOLD_MODE").lower()
+    mode_source = "env" if mode else ""
     if mode and mode not in MODES:
         settings.notes.append(f"THREEFOLD_MODE must be enforce, managed or observe; {mode[:20]!r} was ignored.")
-        mode = ""
+        mode, mode_source = "", ""
     if not mode and _flag("THREEFOLD_DRY_RUN"):
-        mode = "observe"
-    for _, label, document, _ in layers:
+        mode, mode_source = "observe", "env"
+    for source, label, document, _ in layers:
         if mode:
             break
         value = document.get("mode")
         if value is None:
             continue
         if isinstance(value, str) and value.strip().lower() in MODES:
-            mode = value.strip().lower()
+            mode, mode_source = value.strip().lower(), source
         else:
             settings.notes.append(f"the mode in {label} must be enforce, managed or observe, and was ignored.")
     settings.mode = mode or "enforce"
+    settings.mode_source = mode_source or "default"
 
     key: Optional[str] = None
     key_file: Optional[str] = None
@@ -1324,8 +1422,82 @@ def _is_data_file(target: str, root: str) -> bool:
     return any(part.lower() in DATA_DIRECTORIES for part in parts[:-1])
 
 
-_HOME_PREFIXES = ("${home}", "$home", "%userprofile%", "$env:userprofile", "%home%", "~")
+def _is_written_data(target: str, root: str) -> bool:
+    """A place a command writes to that the contract keeps on the machine.
+
+    The same reading as _is_data_file, except that `.git` is not a data
+    directory here. A command that redirects into `.git/hooks` is exactly what
+    the service's protected-path rule exists to refuse, and such a command has
+    always been sent to be refused: holding it back instead would let turning
+    the agent's hooks off run unjudged, which is the opposite of the point.
+    A Write of the same path carries the file's content and stays held back.
+    """
+    parts = [part for part in re.split(r"[\\/]+", os.path.relpath(target, root)) if part]
+    if not parts or any(part.lower() == ".git" for part in parts):
+        return False
+    return _is_data_file(target, root)
+
+
+# Every spelling of the developer's home folder a shell on Windows accepts.
+# `$HOME` and `${HOME}` are Git Bash's, `%USERPROFILE%` cmd's, `$env:USERPROFILE`
+# PowerShell's; `$USERPROFILE` is what Git Bash makes of the same variable, and
+# missing it put the login on the public ledger. Longest first, so
+# `$homedrive$homepath` is not read as `$home` with a stray tail.
+_HOME_PREFIXES = (
+    "$homedrive$homepath", "${homedrive}${homepath}", "%homedrive%%homepath%",
+    "${env:userprofile}", "$env:userprofile", "${userprofile}", "$userprofile", "%userprofile%",
+    "${home}", "$home", "%home%", "~",
+)
 _COMMAND_TOKEN_SPLIT = re.compile(r"[\s'\"`;|&<>(),=]+")
+
+# Git Bash, Cygwin and WSL each spell a Windows drive as a first path segment:
+# `C:\work\a` becomes `/c/work/a`, `/cygdrive/c/work/a` or `/mnt/c/work/a`.
+# Claude Code runs Bash through Git Bash on Windows, so that is the spelling
+# its commands arrive in.
+_DRIVE_PATH = re.compile(r"^(?:/cygdrive|/mnt)?/([A-Za-z])(?=/|$)")
+# Read only where the hook itself runs on Windows: on a POSIX machine /c and
+# /mnt/c name real directories, and rewriting them would take a command out of
+# the project it runs in. A module-level flag rather than a call to os.name at
+# each site, so a test can drive both readings on one machine, as
+# FOLD_GLOB_CASE already does.
+#
+# A hook running inside WSL is POSIX, and there /mnt/c/Users/<login> really is
+# the Windows home. That spelling is out of scope and stays as written: the
+# home the hook protects is the WSL one that HOME names, the Windows home is
+# not a directory it can resolve or shorten against, and a translation would
+# read a path outside anything it governs.
+WINDOWS_DRIVE_PATHS = os.name == "nt"
+
+
+def _drive_path(token: str, translate: Optional[bool] = None) -> str:
+    """`/c/work/a`, `/cygdrive/c/work/a` and `/mnt/c/work/a` as `C:/work/a`, on Windows.
+
+    Resolved as written against the directory a command runs in, `/c/work/a`
+    lands at the current drive's `\\c\\work\\a`, which lies inside nothing:
+    not the agents' own folders, not the include list, not the project whose
+    path is taken out before sending. So the one spelling Claude Code actually
+    uses on Windows slipped past all three.
+
+    Windows means this hook's own machine. Under WSL, where os.name is posix,
+    the token is left as written; see WINDOWS_DRIVE_PATHS for why.
+    """
+    if WINDOWS_DRIVE_PATHS if translate is None else translate:
+        found = _DRIVE_PATH.match(token)
+        if found:
+            return f"{found.group(1).upper()}:/" + token[found.end():].lstrip("/")
+    return token
+
+
+def _drive_spellings(path: str) -> Iterator[str]:
+    """An absolute Windows path written the way Git Bash, Cygwin and WSL write it."""
+    if not WINDOWS_DRIVE_PATHS:
+        return
+    found = re.match(r"^([A-Za-z]):[\\/]", path)
+    if not found:
+        return
+    tail = path[3:].replace("\\", "/")
+    for prefix in ("", "/cygdrive", "/mnt"):
+        yield f"{prefix}/{found.group(1).lower()}/{tail}"
 
 
 def _expand_home_token(token: str) -> Optional[str]:
@@ -1348,6 +1520,9 @@ def command_reaches(command: str, base: str, protected: Sequence[str]) -> bool:
     and each word of the command resolved as a path, with `~`, `$HOME` and
     `%USERPROFILE%` expanded, against where the command runs. A command run
     from inside a protected directory reaches it whatever it names.
+
+    On Windows the text is searched for the Git Bash spelling of each
+    directory as well, since that is how a shell there writes a drive.
     """
     canonical = [_canonical(directory) for directory in protected]
     canonical_base = _canonical(base)
@@ -1355,6 +1530,8 @@ def command_reaches(command: str, base: str, protected: Sequence[str]) -> bool:
         return True
     text = os.path.normcase(command)
     forms = set(canonical) | {os.path.normcase(directory) for directory in protected}
+    for directory in list(canonical) + list(protected):
+        forms.update(os.path.normcase(spelling) for spelling in _drive_spellings(directory))
     for form in forms:
         if re.search(re.escape(form) + r"(?=$|[\\/\s'\"`;|&<>),])", text):
             return True
@@ -1386,7 +1563,7 @@ def _word_as_path(token: str, canonical_base: str) -> Optional[str]:
     if expanded is None:
         if not ("/" in token or "\\" in token or token.startswith(".")):
             return None
-        expanded = token
+        expanded = _drive_path(token)
     return _canonical(os.path.join(canonical_base, _as_path(expanded)))
 
 
@@ -1424,8 +1601,12 @@ _COMPUTED_PLACE = re.compile(r"(?:\$\{|\$env:|\$)(?:old)?pwd(?![A-Za-z0-9_])|(?<
 # A `..` after a variable, a command's output or another user's home: it climbs
 # from somewhere the hook cannot see, so it may climb out of the list.
 _UNRESOLVED_CLIMB = re.compile(r"(?:[$%`]|~[^\s\\/]).*?[\\/})%]\.\.(?=$|[\\/])")
-# The command in pieces: runs of separators, redirections, and everything else.
-_SHELL_PIECES = re.compile(r"[;&|()\n]+|[<>]+|[^\s;&|()<>]+")
+# The command in pieces: redirections, runs of separators, and everything else.
+# A redirection is read before a separator so that bash's `>|`, which overrides
+# noclobber, is one redirection and not a `>` followed by a pipe. Read the
+# other way round the word after it was taken for a command's name and the
+# file it writes was never seen.
+_SHELL_PIECES = re.compile(r"[<>]+\|?|[;&|()\n]+|[^\s;&|()<>]+")
 _URL = re.compile(r"^[A-Za-z][A-Za-z0-9+.\-]+://")
 _DIRECTORY_CHANGES = frozenset(("cd", "chdir", "pushd", "popd", "set-location", "sl", "push-location", "pop-location"))
 _PUSHES = frozenset(("pushd", "push-location"))
@@ -1491,6 +1672,86 @@ def _next_separator(pieces: Sequence[str], index: int) -> str:
     while index < len(pieces) and pieces[index][0] not in ";&|()\n":
         index += 1
     return pieces[index] if index < len(pieces) else ""
+
+
+# Where a command puts bytes it is carrying itself. Not the service's full
+# reading of every write route, which is a module of its own and cannot be
+# imported into a file that is downloaded alone: enough to know that rows are
+# being written into a data file, so that they are kept here whichever tool
+# wrote them.
+#
+# Only a write whose bytes are in the command's own text counts, because those
+# bytes are the whole of what a command can leak: a command is sent as its
+# text, and nothing reads the files it names. `cp src/a.py data/a.py` names a
+# data file and carries none of it; `rm -rf src > out.csv` carries nothing at
+# all. Holding either back would take the call away from the service
+# altogether, so appending `> x.csv` to any command would hide it — unjudged
+# in enforce mode, and missing from the ledger in observe. That is the
+# reasoning the `.git` carve-out in _is_written_data already follows, read for
+# every destination instead of one directory.
+_TEE_LIKE = frozenset(("tee", "sponge", "tee-object", "out-file", "set-content", "add-content"))
+_COPY_LIKE = frozenset(("cp", "mv", "install", "rsync", "copy-item", "move-item"))
+# Commands whose operands are the bytes they write, so the rows are in the
+# command's text. A heredoc or a here-string is the other way to carry them.
+_WRITES_ITS_OPERANDS = frozenset(
+    ("echo", "echo.", "printf", "print", "write-output", "write-host", "set-content", "add-content")
+)
+
+
+def _carried_write_targets(command: str) -> Iterator[str]:
+    """Each word a command writes bytes of its own text to.
+
+    A destination is a redirection, a tee, a copy's destination or a `dd of=`,
+    as before; it is only reported when the command that writes it carries
+    what it writes. Each simple command is read on its own, so `echo hi && rm
+    -rf src > out.csv` reports nothing: the `echo` carries a word and writes
+    nowhere, and the `rm` writes but carries nothing.
+    """
+    pieces = _SHELL_PIECES.findall(command)
+    at_command = True
+    targets: List[str] = []
+    carries = False
+    index = 0
+    while index <= len(pieces):
+        if index == len(pieces) or pieces[index][0] in ";&|()\n":
+            if carries:
+                for target in targets:
+                    yield target
+            targets, carries, at_command = [], False, True
+            index += 1
+            continue
+        piece = pieces[index]
+        index += 1
+        if piece[0] in "<>":
+            if piece.startswith("<<"):
+                # `<<EOF` and `<<<word`: the body is part of the command text.
+                carries = True
+            # `2>&1` puts a separator next, not a word, and names no file.
+            if ">" in piece and index < len(pieces) and pieces[index][0] not in ";&|()\n<>":
+                targets.append(_unquoted(pieces[index]))
+                index += 1
+            at_command = False
+            continue
+        name = _unquoted(piece).lower()
+        if not at_command or name in _KEEPS_COMMAND_POSITION:
+            # A word that is not the command, or one that only introduces it.
+            continue
+        operands = []
+        while index < len(pieces) and pieces[index][0] not in ";&|()\n<>":
+            operands.append(_unquoted(pieces[index]))
+            index += 1
+        at_command = False
+        named = [operand for operand in operands if not operand.startswith("-")]
+        if name in _WRITES_ITS_OPERANDS and named:
+            carries = True
+        if name in _TEE_LIKE:
+            targets.extend(named)
+        elif name in _COPY_LIKE and named:
+            targets.append(named[-1])
+        elif name == "dd":
+            for operand in operands:
+                if operand.lower().startswith("of="):
+                    targets.append(operand[3:])
 
 
 def _command_included(command: str, base: str, canonical_root: str, include: Sequence[str]) -> bool:
@@ -1575,7 +1836,7 @@ def _command_included(command: str, base: str, canonical_root: str, include: Seq
                 place = _unquoted(operands[0]) if operands else ""
                 if not place or place in ("-", "~-", "~+") or place[0] in "-+" or re.search(r"[$%`]", place):
                     return False
-                expanded = _expand_home_token(place) or place
+                expanded = _expand_home_token(place) or _drive_path(place)
                 targets = []
                 for directory in current:
                     target = _canonical(os.path.join(directory, _as_path(expanded)))
@@ -1607,19 +1868,59 @@ def _command_included(command: str, base: str, canonical_root: str, include: Seq
     return True
 
 
-def read_never_send(home: str) -> List[str]:
-    """The owner's never-send terms: one per line, blank lines and # comments ignored."""
+NEVER_SEND_NAME = "never_send.txt"
+MAX_NEVER_SEND_BYTES = 262_144
+
+
+class NeverSendList:
+    """The owner's never-send terms, or why the file that holds them could not be read.
+
+    A missing file is an empty list and changes nothing. A file that exists
+    and cannot be read is not an empty list: read as UTF-8 a UTF-16 file
+    became NULs and replacement characters, every term stopped matching, and
+    the calls naming them were sent without a word. This is the one file that
+    keeps a name at home, so when it cannot be read every call stays here
+    until it can, the way an include list that cannot be read sends nothing.
+    """
+
+    __slots__ = ("terms", "problem")
+
+    def __init__(self, terms: Optional[List[str]] = None, problem: Optional[str] = None):
+        self.terms: List[str] = terms if terms is not None else []
+        self.problem = problem
+
+
+def load_never_send(home: str) -> NeverSendList:
+    """The never-send list as read, in any encoding Windows writes, or why it could not be."""
+    path = os.path.join(home, NEVER_SEND_NAME)
     try:
-        with open(os.path.join(home, "never_send.txt"), "r", encoding="utf-8-sig", errors="replace") as handle:
-            lines = handle.read().splitlines()
+        with open(path, "rb") as handle:
+            raw = handle.read(MAX_NEVER_SEND_BYTES + 1)
     except OSError:
-        return []
+        if not os.path.exists(path):
+            return NeverSendList()
+        return NeverSendList(problem="could not be opened")
+    if len(raw) > MAX_NEVER_SEND_BYTES:
+        return NeverSendList(problem=f"is larger than {MAX_NEVER_SEND_BYTES // 1024} KB")
+    try:
+        text = _decode_config(raw)
+    except UnicodeDecodeError:
+        return NeverSendList(problem="is not UTF-8, UTF-16 or UTF-32 text")
+    if "\x00" in text:
+        # UTF-16 without a byte order mark decodes as UTF-8 into NULs instead
+        # of raising, and every term in it would be a term that never matches.
+        return NeverSendList(problem="is not the text it looks like: it holds NUL characters")
     terms = []
-    for line in lines:
+    for line in text.splitlines():
         term = line.strip()
         if term and not term.startswith("#"):
             terms.append(term.casefold())
-    return terms
+    return NeverSendList(terms)
+
+
+def read_never_send(home: str) -> List[str]:
+    """The owner's never-send terms: one per line, blank lines and # comments ignored."""
+    return load_never_send(home).terms
 
 
 SHORT_TERM = 4
@@ -1670,6 +1971,8 @@ def held_back_category(
     raw_text: str,
     home: str,
     include: Optional[Sequence[str]] = None,
+    notes: Optional[List[str]] = None,
+    project: str = "",
 ) -> Optional[str]:
     """Why this call must not leave the machine, or None if it may.
 
@@ -1681,6 +1984,15 @@ def held_back_category(
     fall inside one of its globs, read relative to the governed root. That
     root is the directory of the .threefold.json the list came from, so a glob
     reads like the paths the ledger shows.
+
+    `notes` is where the one thing worth saying out loud goes: that the
+    never-send list itself could not be read, which is why everything is
+    staying here. It names the file and what is wrong with it, never a line
+    of it.
+
+    `project` is the alias the hook adds to the request from the environment
+    or a configuration file. It goes on every call and the dashboard shows it,
+    so it is read against the never-send list like anything the agent sent.
     """
     cwd = project_root(payload)
     canonical_root = _canonical(governed_root(payload))
@@ -1715,8 +2027,47 @@ def held_back_category(
             return "outside-root"
         if include is not None and not _command_included(call.command, base, canonical_root, include):
             return "not-included"
+        # A data file is a data file whichever tool wrote it. A Write of
+        # data/train.csv is held back and its rows stay here; `cat >
+        # data/train.csv <<EOF` used to carry the same rows to the service
+        # inside the command text, because this check only ever looked at a
+        # call's targets and a command has none.
+        #
+        # Only the rows the command carries are kept, never a call that merely
+        # names a data file: a command is judged by its text, and a command
+        # held back is a command nothing judged.
+        canonical_base = _canonical(base)
+        for destination in _carried_write_targets(call.command):
+            if not destination or destination.lower() in _DEVICE_TOKENS:
+                continue
+            resolved = _word_as_path(destination, canonical_base)
+            if resolved is None:
+                resolved = _canonical(os.path.join(canonical_base, _as_path(destination)))
+            if _is_within(resolved, canonical_root) and _is_written_data(resolved, canonical_root):
+                return "data-file"
 
-    if mentions_never_send(raw_text, payload, read_never_send(home)):
+    never_send = load_never_send(home)
+    if never_send.problem is not None:
+        if notes is not None:
+            notes.append(
+                f"the never-send list in THREEFOLD_HOME ({NEVER_SEND_NAME}) could not be read: it "
+                f"{never_send.problem}. Nothing is sent until it can be; save it as UTF-8 and try again."
+            )
+        return "never-send"
+    # The alias before the payload, because the two are put right differently.
+    # A term in what the agent sent is the agent's line to change; an alias
+    # that names one is a setting, and without a word about it every call from
+    # that folder stopped with an empty stderr and only a line in the log. The
+    # note names the fact and not the term, as the note about the list itself
+    # names the file and not a line of it.
+    if project and mentions_never_send("", [project], never_send.terms):
+        if notes is not None:
+            notes.append(
+                "the project alias names a term on your never-send list, so nothing is being sent. Set "
+                f"THREEFOLD_PROJECT, or `project` in {CONFIG_FILE_NAME}, to an alias that does not name it."
+            )
+        return "never-send"
+    if mentions_never_send(raw_text, [payload], never_send.terms):
         return "never-send"
     return None
 
@@ -1764,6 +2115,10 @@ def _shorten(text: str, root: str, shorthand: str = ".") -> str:
     begins with the developer's login name. A `cat` of the credentials file
     spelled out in full reaches the service as `cat ~/.aws/credentials`, which
     its protected-path rule refuses exactly as it did before.
+
+    On Windows the Git Bash spelling of the same place goes too. Left in,
+    `/c/Users/<login>/...` reached the ledger verbatim, and the ledger is
+    public wherever the stack allows public reads.
     """
     replacements = []
     for base, short in ((root, shorthand), (os.path.expanduser("~"), "~")):
@@ -1771,6 +2126,8 @@ def _shorten(text: str, root: str, shorthand: str = ".") -> str:
             if candidate and candidate not in (os.sep, "/"):
                 replacements.append((candidate.replace("\\", "/"), short))
                 replacements.append((candidate.replace("/", "\\"), short))
+                for spelling in _drive_spellings(candidate):
+                    replacements.append((spelling, short))
     flags = re.IGNORECASE if os.name == "nt" else 0
     for absolute, shorthand in sorted(set(replacements), key=lambda pair: len(pair[0]), reverse=True):
         text = re.sub(re.escape(absolute), shorthand, text, flags=flags)
@@ -2006,6 +2363,17 @@ MAX_FIX_SUMMARY_CHARS = 200
 # characters, cleaning looks at one character at a time, and a response may be
 # a megabyte, so what lies past this is not looked at.
 MAX_FIX_SUMMARY_READ = 1_000
+# Every other word a refusal borrows from the network: the reason, the status,
+# the explanation, a problem's title and detail. The fix summary was cleaned
+# and cut because the hook trusts nothing the network sends; these were handed
+# to the agent raw, as far as the megabyte the hook will read. A repository's
+# committed .threefold.json can name the endpoint, so the server that chose
+# those words is not always the owner's.
+MAX_REASON_CHARS = 500
+MAX_REASON_READ = 4_000
+MAX_STATUS_CHARS = 60
+# What the agent reads in the end, whatever the parts add up to.
+MAX_DENY_REASON_CHARS = 2_000
 
 
 def _printable(text: str) -> str:
@@ -2014,6 +2382,24 @@ def _printable(text: str) -> str:
         " " if unicodedata.category(character) in _UNPRINTABLE_CATEGORIES or ord(character) in _TAG_BLOCK else character
         for character in text
     )
+
+
+def _one_line(value: Any, limit: int = MAX_REASON_CHARS, read: int = MAX_REASON_READ) -> str:
+    """Anything the network sent as one readable line: visible characters only, whitespace collapsed, cut.
+
+    Cleaning looks at one character at a time and a response may be a
+    megabyte, so what lies past `read` is never looked at.
+    """
+    if not isinstance(value, str):
+        return ""
+    return " ".join(_printable(value[:read]).split())[:limit].rstrip()
+
+
+def _bounded(reason: str) -> str:
+    """The whole deny reason, cut to what an agent's context can be asked to carry."""
+    if len(reason) <= MAX_DENY_REASON_CHARS:
+        return reason
+    return reason[:MAX_DENY_REASON_CHARS - 1].rstrip() + "…"
 
 
 def fix_line(verdict: Dict[str, Any]) -> Optional[str]:
@@ -2028,7 +2414,7 @@ def fix_line(verdict: Dict[str, Any]) -> Optional[str]:
     fix = verdict.get("suggested_fix")
     if not isinstance(fix, dict) or not isinstance(fix.get("summary"), str):
         return None
-    summary = " ".join(_printable(fix["summary"][:MAX_FIX_SUMMARY_READ]).split())[:MAX_FIX_SUMMARY_CHARS].rstrip()
+    summary = _one_line(fix["summary"], MAX_FIX_SUMMARY_CHARS, MAX_FIX_SUMMARY_READ)
     if not summary:
         return None
     label = "Suggested fix, checked by Threefold" if fix.get("validated") is True else "Suggested fix"
@@ -2039,31 +2425,40 @@ def refusal_reason(verdict: Dict[str, Any]) -> str:
     """The service's refusal in words, with its explanation attributed to its source.
 
     A suggested fix, when the service sends one, follows as a line of its own.
+
+    Every word here came over the network, so every word is cleaned and cut
+    the way the fix summary is: a status, a reason and an explanation are the
+    service's sentences, not a place for a few hundred kilobytes, invisible
+    tag characters or a direction override the person never sees.
     """
-    status = str(verdict.get("status") or "BLOCKED")
-    reason = verdict.get("reason") or status
+    status = _one_line(verdict.get("status"), MAX_STATUS_CHARS, MAX_STATUS_CHARS * 4) or "BLOCKED"
+    reason = _one_line(verdict.get("reason")) or status
     detail = f"Threefold refused this call ({status}). {reason}"
-    explanation = verdict.get("bedrock_explanation")
+    explanation = _one_line(verdict.get("bedrock_explanation"))
     if explanation:
         label = "Bedrock" if verdict.get("explanation_source") == "bedrock" else "Deterministic explanation"
         detail = f"{detail}\n{label}: {explanation}"
     suggestion = fix_line(verdict)
     if suggestion:
         detail = f"{detail}\n{suggestion}"
-    return detail
+    return _bounded(detail)
 
 
 def client_error_reason(code: int, problem: Any, phrase: str) -> str:
-    """A 4xx in words: the status and the problem's title, which the service always sets."""
+    """A 4xx in words: the status and the problem's title, which the service always sets.
+
+    The title, the detail and the reason phrase are the server's words too,
+    and are cleaned and cut like everything else it sends.
+    """
     problem = problem if isinstance(problem, dict) else {}
-    title = problem.get("title") or problem.get("message") or phrase or "Client Error"
-    detail = problem.get("detail")
+    title = _one_line(problem.get("title")) or _one_line(problem.get("message")) or _one_line(phrase) or "Client Error"
+    detail = _one_line(problem.get("detail"))
     text = f"Threefold refused this call: the service answered HTTP {code} {title}."
     if detail and detail != title:
         text = f"{text} {detail}"
     if code in (401, 403):
         text = f"{text} Check THREEFOLD_API_KEY, or api_key_file in .threefold.json."
-    return text
+    return _bounded(text)
 
 
 # --- the decision ----------------------------------------------------------------
@@ -2135,8 +2530,16 @@ def handle(raw_text: Optional[str], forced_agent: Optional[str] = None) -> Tuple
         ]
 
     if isinstance(call, UnknownShape):
+        # A governed call nobody could read is a call the service never judged,
+        # so it goes through _unjudged like an unreachable service: silent by
+        # default, refused when the owner asked for fail-closed. Agents change
+        # their argument layouts between versions, and an owner who set
+        # THREEFOLD_FAIL_CLOSED=1 asked for exactly this case not to slip by.
         record_unknown_shape(home, agent, call.keys)
-        return None, notes + [f"this {agent} tool call has a shape the hook cannot read; its key names were logged and nothing was sent."]
+        output, lines = _unjudged(agent, f"a {agent} tool call shape it cannot read")
+        return output, notes + [
+            f"this {agent} tool call has a shape the hook cannot read; its key names were logged and nothing was sent."
+        ] + lines
 
     credential = find_credential(call)
     if credential:
@@ -2163,7 +2566,7 @@ def handle(raw_text: Optional[str], forced_agent: Optional[str] = None) -> Tuple
                 "whether the agent's hooks run. Nothing was sent. A person changes that file, not the agent.",
             ), notes
 
-    category = held_back_category(call, payload, raw_text or "", home, settings.include)
+    category = held_back_category(call, payload, raw_text or "", home, settings.include, notes, project)
     if category:
         record_held_back(home, category)
         return None, notes

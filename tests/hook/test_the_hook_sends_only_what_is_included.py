@@ -288,6 +288,46 @@ def test_on_windows_a_path_spelled_in_another_case_is_still_included(workspace, 
     assert len(stub.requests) == 1
 
 
+# --- the way Git Bash writes a drive --------------------------------------------------------
+#
+# Claude Code runs Bash through Git Bash on Windows, so /c/... is the spelling
+# the owner's own workspace sees. Read as written it resolved to the current
+# drive's \c\, which is inside no glob, so the one spelling that actually
+# arrives was held back as not-included and ran unjudged, while the relative
+# and C:/ spellings of the same file were judged and refused.
+
+def bash_spelling(path, prefix: str = "") -> str:
+    drive, rest = os.path.splitdrive(str(path))
+    return prefix + "/" + drive[0].lower() + rest.replace("\\", "/")
+
+
+@pytest.mark.skipif(os.name != "nt", reason="/c/repos names a real directory on a POSIX machine")
+@pytest.mark.parametrize("prefix", ["", "/cygdrive", "/mnt"])
+def test_a_command_naming_an_included_file_the_git_bash_way_is_sent(prefix, workspace, payloads, stub, run_hook) -> None:
+    where = bash_spelling(workspace / "repos" / "acme-alpha" / "src" / "order.py", prefix)
+    run_hook(command_in(payloads, "claude-code", f"cat {where}", workspace / "repos" / "acme-alpha"))
+    assert sent(stub)["arguments"]["command"] == "cat ../../repos/acme-alpha/src/order.py"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="/c/repos names a real directory on a POSIX machine")
+@pytest.mark.parametrize("prefix", ["", "/cygdrive", "/mnt"])
+def test_a_command_naming_a_left_out_file_the_git_bash_way_is_still_held_back(
+    prefix, workspace, payloads, stub, run_hook, held_back_lines
+) -> None:
+    where = bash_spelling(workspace / "repos" / "acme-gamma" / "y.py", prefix)
+    payload = command_in(payloads, "claude-code", f"cat {where} > b.py", workspace / "repos" / "acme-alpha")
+    assert_not_included(run_hook, payload, stub, held_back_lines)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="/c/repos names a real directory on a POSIX machine")
+def test_a_cd_written_the_git_bash_way_moves_where_the_list_is_read_from(
+    workspace, payloads, stub, run_hook, held_back_lines
+) -> None:
+    where = bash_spelling(workspace / "repos" / "acme-gamma")
+    payload = command_in(payloads, "claude-code", f"cd {where} && cat y.py", workspace / "repos" / "acme-alpha")
+    assert_not_included(run_hook, payload, stub, held_back_lines)
+
+
 # --- repositories that are checkouts of their own ------------------------------------------
 
 @pytest.fixture

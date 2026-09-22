@@ -109,6 +109,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import codecs
 import hashlib
 import http.client
 import importlib.util
@@ -117,6 +118,7 @@ import json
 import os
 import re
 import secrets
+import shlex
 import shutil
 import subprocess
 import sys
@@ -246,9 +248,27 @@ def forward(path: Any) -> str:
 
 
 def quoted(path: Any) -> str:
-    """A path for a command line: forward slashes, and quotes only when a space needs them."""
+    """A path for a person to read and paste: forward slashes, and quotes only when a space needs them.
+
+    For a line a shell will run, use sh_quoted. This one is for the advice the
+    command prints.
+    """
     text = forward(path)
     return f'"{text}"' if " " in text else text
+
+
+def sh_quoted(path: Any) -> str:
+    """A path for a line a shell reads: forward slashes, quoted for sh.
+
+    The registered hook command and the pre-commit script are both read by a
+    shell -- Git Bash on Windows, /bin/sh elsewhere. Quoted only where a space
+    forced it, a home folder whose name holds an apostrophe left that quote open:
+    the agent's hook exited 2, which Claude Code reads as a refusal, so every
+    governed call was blocked, and the pre-commit script was a syntax error,
+    so every commit in the repository failed even in observe mode. A `$`, a
+    backtick or an `&` in the path would have run something else.
+    """
+    return shlex.quote(forward(path))
 
 
 def with_slash(url: str) -> str:
@@ -256,7 +276,7 @@ def with_slash(url: str) -> str:
 
 
 def hook_command(home: Path, agent: str) -> str:
-    return f"{quoted(sys.executable)} {quoted(home / 'bin' / 'threefold_hook.py')} --agent {agent}"
+    return f"{sh_quoted(sys.executable)} {sh_quoted(home / 'bin' / 'threefold_hook.py')} --agent {agent}"
 
 
 def git(repo: Path, *args: str, check: bool = True) -> Tuple[int, str]:
@@ -271,6 +291,55 @@ def git_path(root: Path, name: str) -> Path:
     _, value = git(root, "rev-parse", "--git-path", name)
     path = Path(value)
     return path if path.is_absolute() else (root / path)
+
+
+def git_common_dir(root: Path) -> Optional[Path]:
+    """The git directory every checkout of this repository shares, or None when git does not say."""
+    try:
+        code, value = git(root, "rev-parse", "--git-common-dir", check=False)
+    except OSError:
+        return None
+    if code != 0 or not value:
+        return None
+    path = Path(value)
+    return path if path.is_absolute() else (root / path).resolve()
+
+
+def other_connected_checkouts(root: Path, mine: Path) -> List[Path]:
+    """Every other checkout sharing this git directory that still has an install record.
+
+    A linked worktree keeps its own record, under .git/worktrees/<id>/, but
+    `git rev-parse --git-path hooks` and `info/exclude` both answer with the
+    common directory, which every checkout shares. So disconnecting one
+    checkout used to take the pre-commit hook and the exclude lines away from
+    the others: they lost their commit-time check, and their .threefold.json
+    and .claude/ came back as untracked files, one `git add .` away from
+    putting this machine's Python and home folder into a commit.
+
+    Read from git's own layout rather than from a count kept somewhere, so a
+    record deleted by hand or a worktree pruned is simply one that is no
+    longer there.
+    """
+    common = git_common_dir(root)
+    if common is None:
+        return []
+    candidates = [common / MANIFEST_NAME]
+    worktrees = common / "worktrees"
+    if worktrees.is_dir():
+        candidates.extend(sorted(worktrees.glob("*/" + MANIFEST_NAME)))
+    # Both sides resolved: git answers this checkout's record relative to the
+    # root and the common directory absolutely, and on a machine where the
+    # temporary or home folder is a link the two spellings of one file differ.
+    # Read as two files, the last checkout would never take the hook out.
+    ours = _same_file_key(mine)
+    return [path for path in candidates if path.is_file() and _same_file_key(path) != ours]
+
+
+def _same_file_key(path: Path) -> str:
+    try:
+        return os.path.normcase(str(path.resolve()))
+    except OSError:
+        return os.path.normcase(str(path))
 
 
 def locate(repo: Path) -> Tuple[Path, bool]:
@@ -369,12 +438,42 @@ def include_globs(values: Optional[Sequence[str]]) -> List[str]:
     return globs
 
 
+def decode_text(raw: bytes) -> str:
+    """UTF-8 with or without a byte order mark, or UTF-16 or UTF-32 by theirs.
+
+    Copied from the hook's _decode_config, because this file is served alone
+    at /install.py and cannot import it. A test compares the two over the same
+    bytes, so the installer and the hook cannot disagree about what a file
+    says. Windows PowerShell 5.1 writes UTF-16 with `>` and with Out-File, so
+    read as UTF-8 a settings file edited there was not a file at all: the
+    command died with a decoding traceback where it promised to leave the file
+    alone, and a .threefold.json read that way lost its include list.
+    """
+    for bom, codec in (
+        (codecs.BOM_UTF32_LE, "utf-32"),
+        (codecs.BOM_UTF32_BE, "utf-32"),
+        (codecs.BOM_UTF16_LE, "utf-16"),
+        (codecs.BOM_UTF16_BE, "utf-16"),
+    ):
+        if raw.startswith(bom):
+            return raw.decode(codec)
+    return raw.decode("utf-8-sig")
+
+
 def read_json_object(path: Path) -> Dict[str, Any]:
     """A settings file as an object, or an InstallError: a file that cannot be read is never overwritten."""
     try:
-        text = path.read_text(encoding="utf-8-sig")
+        raw = path.read_bytes()
     except OSError as error:
         raise InstallError(f"{path} could not be read ({type(error).__name__}), so it was left alone") from None
+    try:
+        text = decode_text(raw)
+    except UnicodeDecodeError:
+        raise InstallError(f"{path} is not UTF-8 or UTF-16 text, so it was left alone") from None
+    if "\x00" in text:
+        # UTF-16 without a byte order mark decodes as UTF-8 into NULs instead
+        # of raising, and json.loads would read it as no object at all.
+        raise InstallError(f"{path} is not the text it looks like: it holds NUL characters, so it was left alone")
     if not text.strip():
         return {}
     try:
@@ -392,6 +491,22 @@ def read_json_quietly(path: Path) -> Dict[str, Any]:
         return read_json_object(path) if path.is_file() else {}
     except (InstallError, UnicodeDecodeError):
         return {}
+
+
+def read_config_file(path: Path) -> Dict[str, Any]:
+    """The .threefold.json already there, or an InstallError when it exists and cannot be read.
+
+    What connect keeps on a second run it keeps from this file: the project,
+    the mode, the endpoint, the key file and, above all, the include list.
+    read_json_quietly turned a file it could not decode into no file at all,
+    so a workspace whose .threefold.json had been saved by Windows PowerShell
+    was rewritten under the folder-derived name with no `include` at all, and
+    every repository the owner had left out began to be sent. A file that
+    cannot be read now stops the command instead of being written over.
+    """
+    if not path.is_file():
+        return {}
+    return read_json_object(path)
 
 
 def dump_json(document: Dict[str, Any]) -> str:
@@ -827,9 +942,12 @@ def plan_install(
     if tracked(CONFIG_FILE):
         # Writing it would put this machine's key path in a committed file,
         # and an uninstall could never tell the team's version from ours.
+        # What the committed file decides is the project; the mode and the
+        # endpoint in force are on the header, next to what decides each of
+        # them, which is not always this file.
         plan.add(
-            f"{CONFIG_FILE} is tracked by git, so it was left as it is: the committed file decides the project and "
-            f"the mode here. Change it in a commit, or set THREEFOLD_PROJECT, if it should say {args.project}"
+            f"{CONFIG_FILE} is tracked by git, so it was left as it is: the committed file decides the project "
+            f"here. Change it in a commit, or set THREEFOLD_PROJECT, if it should say {args.project}"
         )
         if includes:
             # Said on its own line: an exit code of 0 and no word about the
@@ -851,7 +969,15 @@ def plan_install(
         written.append(CONFIG_FILE)
 
     if endpoint and key_file is not None:
-        trusted_endpoint_step(plan, home, endpoint, key_file)
+        if tracked(CONFIG_FILE):
+            # Pairing an endpoint the hook will never read the key for would
+            # say the owner had trusted a stack their calls do not go to.
+            plan.add(
+                f"{endpoint} was not paired with its key file: the committed {CONFIG_FILE} decides where calls go, "
+                "and that is not it"
+            )
+        else:
+            trusted_endpoint_step(plan, home, endpoint, key_file)
 
     # One entry per agent, merged into whatever the file already holds.
     registered: List[str] = []
@@ -960,7 +1086,7 @@ def trusted_endpoint_step(plan: Plan, home: Path, endpoint: str, key_file: Path)
 
 
 def pre_commit_script(home: Path) -> str:
-    cli = quoted(home / "bin" / "threefold_cli.py")
+    cli = sh_quoted(home / "bin" / "threefold_cli.py")
     return (
         "#!/bin/sh\n"
         f"{PRE_COMMIT_MARKER}; --uninstall removes it.\n"
@@ -968,7 +1094,7 @@ def pre_commit_script(home: Path) -> str:
         f'chained="$(dirname "$0")/{CHAINED_NAME}"\n'
         'if [ -f "$chained" ]; then "$chained" "$@" || exit $?; fi\n'
         f'if [ -f {cli} ]; then\n'
-        f'  {quoted(sys.executable)} {cli} check --repo "$(git rev-parse --show-toplevel)" || exit $?\n'
+        f'  {sh_quoted(sys.executable)} {cli} check --repo "$(git rev-parse --show-toplevel)" || exit $?\n'
         "else\n"
         '  echo "threefold: the pre-commit check is missing from THREEFOLD_HOME, so this commit was not checked." >&2\n'
         "fi\n"
@@ -1010,12 +1136,25 @@ def pre_commit_step(plan: Plan, root: Path, home: Path, manifest: Dict[str, Any]
     plan.add("install a pre-commit hook that runs the check", write_hook(False))
 
 
+def exclude_lines(path: Path) -> List[bytes]:
+    """.git/info/exclude as lines of bytes.
+
+    Never decoded. The file is git's, its lines are paths, and one of them may
+    hold a name in whatever encoding the checkout's owner writes: read as
+    UTF-8, a comment line with an accent in it killed the command with a
+    decoding traceback before anything was written. The lines this install
+    adds are ASCII, so comparing and writing bytes loses nothing and leaves
+    every other line exactly as it was.
+    """
+    try:
+        return path.read_bytes().splitlines()
+    except OSError:
+        return []
+
+
 def exclude_step(plan: Plan, root: Path, written: Sequence[str], manifest: Dict[str, Any]) -> None:
     exclude = git_path(root, "info/exclude")
-    try:
-        existing = exclude.read_text(encoding="utf-8").splitlines()
-    except OSError:
-        existing = []
+    existing = [line.decode("utf-8", errors="replace") for line in exclude_lines(exclude)]
     wanted = [f"/{relative}" for relative in written]
     missing = [line for line in wanted if line not in existing]
     if not missing:
@@ -1127,7 +1266,7 @@ def uninstall(
     if not workspace:
         # A workspace install wrote nothing under .git, so there is nothing
         # there to take out, and nothing git does not recognise is read.
-        git_side_uninstall(plan, root, manifest, exact)
+        git_side_uninstall(plan, root, manifest, exact, manifest_path)
 
     for directory in reversed(manifest["created_dirs"]):
         path = root / directory
@@ -1157,8 +1296,22 @@ def uninstall(
     return 0
 
 
-def git_side_uninstall(plan: Plan, root: Path, manifest: Dict[str, Any], exact: bool) -> None:
-    """The pre-commit hook and the .git/info/exclude lines, which only a repository install adds."""
+def git_side_uninstall(
+    plan: Plan, root: Path, manifest: Dict[str, Any], exact: bool, record: Optional[Path] = None
+) -> None:
+    """The pre-commit hook and the .git/info/exclude lines, which only a repository install adds.
+
+    Both live in the git directory every checkout of the repository shares, so
+    they go only when no other connected checkout is left to need them.
+    """
+    if record is not None:
+        others = other_connected_checkouts(root, record)
+        if others:
+            plan.add(
+                f"keep the pre-commit hook and the .git/info/exclude lines: {len(others)} other checkout(s) of this "
+                "repository are still connected and share them; disconnect those too to take them out"
+            )
+            return
     created = set(manifest["created_files"])
     hook_path = git_path(root, "hooks") / "pre-commit"
     chained = hook_path.with_name(CHAINED_NAME)
@@ -1175,16 +1328,18 @@ def git_side_uninstall(plan: Plan, root: Path, manifest: Dict[str, Any], exact: 
     elif EXCLUDE_KEY in created and _unchanged_since_install(manifest, EXCLUDE_KEY, exclude):
         plan.add("delete .git/info/exclude, which the install created", exclude.unlink)
     elif exclude.is_file():
-        lines = exclude.read_text(encoding="utf-8").splitlines()
+        lines = exclude_lines(exclude)
         if exact:
             ours = set(manifest["exclude_lines"])
-        elif EXCLUDE_MARKER in lines:
+        elif EXCLUDE_MARKER.encode("utf-8") in lines:
             ours = {EXCLUDE_MARKER, f"/{CONFIG_FILE}"} | {f"/{relative}" for relative, _ in AGENT_SETTINGS.values()}
         else:
             ours = set()
-        kept = [line for line in lines if line not in ours]
+        removing = {text.encode("utf-8") for text in ours}
+        kept = [line for line in lines if line not in removing]
         if len(kept) != len(lines):
-            plan.add("take the install's lines out of .git/info/exclude", _write_text(exclude, "\n".join(kept) + ("\n" if kept else "")))
+            data = b"\n".join(kept) + (b"\n" if kept else b"")
+            plan.add("take the install's lines out of .git/info/exclude", _write_bytes(exclude, data))
 
 
 def _unchanged_since_install(manifest: Dict[str, Any], key: str, path: Path) -> bool:
@@ -1204,6 +1359,70 @@ def _restorable(manifest: Dict[str, Any], key: str, path: Path) -> Optional[byte
         return base64.b64decode(original)
     except ValueError:
         return None
+
+
+# --- the owner's never-send list ----------------------------------------------------------------
+#
+# Copied from the hook's read_never_send and term_occurs, because this file is
+# served alone at /install.py and cannot import them. A test compares the two
+# predicates over the same terms and texts, so the installer and the hook
+# cannot disagree about what counts as a mention.
+
+NEVER_SEND_NAME = "never_send.txt"
+SHORT_TERM = 4
+
+
+def term_occurs(text: str, term: str) -> bool:
+    """Whether a never-send term occurs in text, ignoring case; a short term only where it starts a word."""
+    folded = text.casefold()
+    if len(term) > SHORT_TERM or len(folded) != len(text):
+        return term in folded
+    start = folded.find(term)
+    while start != -1:
+        if not (start and text[start - 1].isalpha()):
+            return True
+        start = folded.find(term, start + 1)
+    return False
+
+
+def never_send_terms(home: Path) -> List[str]:
+    """The owner's never-send terms, or none when there is no list; an InstallError when there is one nobody can read."""
+    path = home / NEVER_SEND_NAME
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        if not path.exists():
+            return []
+        raise InstallError(f"{forward(path)} could not be opened, so nothing was checked against it") from None
+    try:
+        text = decode_text(raw)
+    except UnicodeDecodeError:
+        text = "\x00"
+    if "\x00" in text:
+        raise InstallError(
+            f"{forward(path)} is not UTF-8 or UTF-16 text, so your never-send terms could not be read and the "
+            "project name was not checked against them; save it as UTF-8 and connect again"
+        )
+    return [line.strip().casefold() for line in text.splitlines() if line.strip() and not line.strip().startswith("#")]
+
+
+def refuse_a_name_on_the_never_send_list(project: str, home: Path) -> None:
+    """A project name carrying a never-send term is refused before anything is written or sent.
+
+    The name goes on every call, the dashboard shows it, and connect's own
+    first call publishes it once on the stack before the hook ever runs. The
+    default name comes from the folder, which on the owner's machine may be a
+    client's. Neither the term nor the name is printed: this runs in a
+    terminal that may be shared or recorded, and the list exists to keep that
+    word off screens as much as off the wire.
+    """
+    for term in never_send_terms(home):
+        if term_occurs(project, term):
+            raise InstallError(
+                f"the project name contains a term from your never-send list in {forward(home / NEVER_SEND_NAME)}. "
+                "The name goes on every call and the dashboard shows it, so nothing was written or sent; "
+                "pass --project with an alias that does not name it"
+            )
 
 
 # --- connect: the defaults ---------------------------------------------------------------------
@@ -1264,6 +1483,31 @@ def resolved_settings(hook: Optional[Any], directory: Path) -> Optional[Any]:
         return hook.resolve_settings({"cwd": str(directory)})
     except Exception:  # noqa: BLE001 - reading configuration must not take the command down
         return None
+
+
+def decided_by(source: str, setting: str) -> str:
+    """Why the hook will use a value the command line did not ask for.
+
+    The hook resolves each setting in one order - the environment, then the
+    repository's .threefold.json, then THREEFOLD_HOME/config.json, then its
+    own default - and reports which layer answered. Naming the layer matters:
+    a committed file is changed with a commit, a variable by unsetting it, and
+    a default by writing the setting down somewhere. A line that named the
+    commit for all three sent people to change the wrong one.
+    """
+    if source == "env":
+        named = "THREEFOLD_ENDPOINT" if setting == "endpoint" else "THREEFOLD_MODE or THREEFOLD_DRY_RUN"
+        return f"{named} in the environment decides it, before any file"
+    if source == "repo":
+        return f"the tracked {CONFIG_FILE} decides it, and a file git tracks is left as it is"
+    if source == "home":
+        return "THREEFOLD_HOME/config.json decides it, because nothing nearer sets it"
+    if source == "default":
+        return (
+            f"nothing sets it, so the hook's own default applies; connect cannot write it into a {CONFIG_FILE} "
+            "git tracks"
+        )
+    return "the hook decides it, not the command line"
 
 
 def installer_command(home: Path) -> str:
@@ -1372,7 +1616,7 @@ def connect(args: argparse.Namespace, out: Any) -> int:
     named = Path(args.path).expanduser()
     root, workspace = locate(named)
     refuse_home_folder(root)
-    existing = read_json_quietly(root / CONFIG_FILE)
+    existing = read_config_file(root / CONFIG_FILE)
     kept: List[str] = []
 
     project = args.project
@@ -1388,6 +1632,7 @@ def connect(args: argparse.Namespace, out: Any) -> int:
         # The alias is what the dashboard shows. A real name typed here would
         # be published by the first tool call.
         raise InstallError("--project must match ^Acme-[A-Za-z0-9-]{1,40}$, an alias rather than a real name")
+    refuse_a_name_on_the_never_send_list(project, home)
 
     mode = args.mode
     if not mode:
@@ -1442,13 +1687,38 @@ def connect(args: argparse.Namespace, out: Any) -> int:
     hook = load_hook_module(home)
     before = resolved_settings(hook, root)
     shown_endpoint = endpoint or (before.endpoint if before is not None else "")
+    shown_mode = mode
+    # A .threefold.json the repository committed is left as it is, so what
+    # the hook will send under is not always what the command line asked for.
+    # The header used to print the request, which named a stack the
+    # developer's calls never reached. Printing the hook's own answer is only
+    # half of it: the environment is read before that file and the hook's
+    # fallback after it, so a line that named the commit for either sent the
+    # reader to change a file that had nothing to do with it.
+    committed = before is not None and not workspace and is_tracked(root, CONFIG_FILE)
+    in_force: List[str] = []
+    if committed:
+        if before.endpoint and shown_endpoint and before.endpoint != shown_endpoint:
+            in_force.append(f"endpoint: {decided_by(getattr(before, 'endpoint_source', ''), 'endpoint')}")
+        shown_endpoint = before.endpoint or shown_endpoint
+        if before.mode != mode:
+            in_force.append(f"mode: {decided_by(getattr(before, 'mode_source', ''), 'mode')}")
+        shown_mode = before.mode
+        if before.include:
+            in_force.append(
+                f"include: the tracked {CONFIG_FILE} sends only what matches {', '.join(before.include)}"
+            )
 
     print(f"Threefold connect: {forward(root)}", file=out)
     print(f"  {'folder':<10}  {'a workspace, not a git repository' if workspace else 'a git repository'}", file=out)
     print(f"  {'project':<10}  {project} {project_note}".rstrip(), file=out)
-    print(f"  {'mode':<10}  {mode}: {mode_line(mode)}", file=out)
+    print(f"  {'mode':<10}  {shown_mode}: {mode_line(shown_mode)}", file=out)
     print(f"  {'agents':<10}  {agent_line}", file=out)
     print(f"  {'endpoint':<10}  {shown_endpoint or 'the hook default'}", file=out)
+    label = "in force"
+    for line in in_force:
+        print(f"  {label:<10}  {line}", file=out)
+        label = ""
     if kept:
         print(f"  {'kept':<10}  the {', '.join(kept)} already in .threefold.json; pass them to change them", file=out)
     print("", file=out)
@@ -1535,6 +1805,12 @@ def next_steps(agents: Sequence[str], mode: str, home: Path, root: Path) -> List
 def disconnect(args: argparse.Namespace, out: Any) -> int:
     home = threefold_home()
     root, workspace = locate(Path(args.path).expanduser())
+    # connect refuses the home folder because the .claude and .codex there are
+    # the agents' configuration for every project on the machine. Disconnect
+    # went in anyway, and with no install record to work from it removes any
+    # entry whose command names the hook: a user-level entry registered by
+    # hand would have gone, and governance for every project with it.
+    refuse_home_folder(root)
     print(f"Threefold disconnect: {forward(root)}", file=out)
     code = uninstall(args, root, home, out, workspace, prefix="  ")
     if not args.dry_run:
@@ -1704,11 +1980,13 @@ def legacy(argv: Sequence[str], out: Any) -> int:
     root, workspace = locate(Path(args.repo))
     home = threefold_home()
     if args.uninstall:
+        refuse_home_folder(root)
         return uninstall(args, root, home, out, workspace)
     if not args.project or not PROJECT_PATTERN.match(args.project):
         # The alias is what the public ledger shows. A real name typed here
         # would be published by the first tool call.
         raise InstallError("--project must match ^Acme-[A-Za-z0-9-]{1,40}$, an alias rather than a real name")
+    refuse_a_name_on_the_never_send_list(args.project, home)
     refuse_home_folder(root)
     includes = include_globs(args.include)
     named = Path(args.repo).resolve()

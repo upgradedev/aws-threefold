@@ -10,6 +10,7 @@ guard uninstalled.
 from __future__ import annotations
 
 import hashlib
+import re
 import json
 
 import pytest
@@ -439,8 +440,90 @@ def test_a_configured_developer_is_sent_as_a_short_hash_and_never_as_typed(paylo
     monkeypatch.setenv("THREEFOLD_DEVELOPER", "acme.dev@example.invalid")
     run_hook(payloads.write("claude-code"))
     body = _sent(stub)
-    assert body["developer"] == hashlib.sha256(b"acme.dev@example.invalid").hexdigest()[:12]
+    assert re.fullmatch(r"[0-9a-f]{12}", body["developer"])
     assert "acme.dev" not in json.dumps(body)
+
+
+def test_the_developer_hash_cannot_be_recomputed_from_the_name_alone(machine, payloads, stub, run_hook, monkeypatch) -> None:
+    """The ledger is open wherever the stack allows public reads.
+
+    connect.html asks for "any stable name for you", which in practice is a
+    login. An unsalted hash of a guessable name is the name: a dictionary of
+    logins, hashed twice, matches the public value and says who worked on
+    which project and when. A salt kept on the machine leaves nothing to try
+    the dictionary against.
+    """
+    monkeypatch.setenv("THREEFOLD_DEVELOPER", "acme.dev@example.invalid")
+    run_hook(payloads.write("claude-code"))
+    sent = _sent(stub)["developer"]
+    assert sent != hashlib.sha256(b"acme.dev@example.invalid").hexdigest()[:12]
+    assert (machine.threefold_home / "developer_salt").is_file()
+
+
+def test_the_same_developer_is_the_same_hash_from_one_call_to_the_next(machine, payloads, stub, run_hook, monkeypatch) -> None:
+    monkeypatch.setenv("THREEFOLD_DEVELOPER", "acme.dev@example.invalid")
+    run_hook(payloads.write("claude-code"))
+    salt = (machine.threefold_home / "developer_salt").read_bytes()
+    run_hook(payloads.write("claude-code"))
+    assert stub.requests[0]["body"]["developer"] == stub.requests[1]["body"]["developer"]
+    assert (machine.threefold_home / "developer_salt").read_bytes() == salt, "the salt is written once"
+
+
+@pytest.mark.parametrize("left", [b"", b"short", b"x" * 200], ids=["empty", "truncated", "too-long"])
+def test_a_salt_file_that_cannot_be_used_is_repaired_rather_than_left(
+    left, machine, payloads, stub, run_hook, monkeypatch
+) -> None:
+    """A crash or a full disk during the one write it ever does leaves this.
+
+    O_EXCL cannot replace a file that is there, so the salt stayed unusable
+    and every later call from the machine went out as anonymous, silently and
+    for good: the machine's own work stopped being attributed to anyone.
+    """
+    monkeypatch.setenv("THREEFOLD_DEVELOPER", "acme.dev@example.invalid")
+    run_hook(payloads.write("claude-code"))
+    first = _sent(stub)["developer"]
+    assert re.fullmatch(r"[0-9a-f]{12}", first)
+    (machine.threefold_home / "developer_salt").write_bytes(left)
+
+    code, out, err = run_hook(payloads.write("claude-code"))
+    assert (code, out, err) == (0, "", "")
+    repaired = stub.requests[-1]["body"]["developer"]
+    assert re.fullmatch(r"[0-9a-f]{12}", repaired), "the developer is attributed again"
+    assert repaired != first, "a new salt means a new identity, not the old one recovered"
+    assert len((machine.threefold_home / "developer_salt").read_bytes()) == 64
+
+    run_hook(payloads.write("claude-code"))
+    assert stub.requests[-1]["body"]["developer"] == repaired, "the repaired salt is then kept"
+    assert list(machine.threefold_home.glob("developer_salt.*")) == [], "nothing is left beside it"
+
+
+def test_a_usable_salt_written_by_another_hook_first_is_never_replaced(machine, hook, monkeypatch) -> None:
+    """The repair must not undo the O_EXCL guarantee it sits next to.
+
+    Two hooks starting together both read no salt; one writes, the other
+    finds the file there. What it finds is usable, so it is that hook's salt
+    and both send the same developer.
+    """
+    machine.threefold_home.mkdir(parents=True, exist_ok=True)
+    (machine.threefold_home / "developer_salt").write_text("a" * 64, encoding="ascii")
+    assert hook.developer_salt(str(machine.threefold_home)) == "a" * 64
+    assert (machine.threefold_home / "developer_salt").read_text(encoding="ascii") == "a" * 64
+
+
+def test_another_machine_hashes_the_same_name_differently(machine, payloads, stub, run_hook, monkeypatch) -> None:
+    monkeypatch.setenv("THREEFOLD_DEVELOPER", "acme.dev@example.invalid")
+    run_hook(payloads.write("claude-code"))
+    monkeypatch.setenv("THREEFOLD_HOME", str(machine.tmp / "other-machine" / ".threefold"))
+    run_hook(payloads.write("claude-code"))
+    assert stub.requests[0]["body"]["developer"] != stub.requests[1]["body"]["developer"]
+
+
+def test_without_a_salt_the_developer_is_anonymous_rather_than_reversible(machine, payloads, stub, run_hook, monkeypatch, hook) -> None:
+    """Nothing attributed beats something attributed a dictionary can undo."""
+    monkeypatch.setenv("THREEFOLD_DEVELOPER", "acme.dev@example.invalid")
+    monkeypatch.setattr(hook, "developer_salt", lambda home: "")
+    run_hook(payloads.write("claude-code"))
+    assert _sent(stub)["developer"] == "anonymous"
 
 
 def test_dry_run_is_asked_for_with_the_environment(payloads, stub, run_hook, monkeypatch) -> None:
