@@ -323,8 +323,6 @@ class ArchitecturalBoundaryGuard:
         #     paths it named, so `cat > src/domain/user.py <<'EOF'` carried
         #     `import boto3` past a gate that would have refused the same text
         #     sent as a Write.
-        command = shell_command(invocation)
-        analysis = analysed(command, command_cwd(invocation)) if command is not None else None
         if analysis is not None:
             yield from shell_findings(analysis, active_rules)
 
@@ -367,13 +365,12 @@ class ArchitecturalBoundaryGuard:
                         break
             # A word the command never treats as a file — the pattern `grep` is
             # given, the line `echo` appends to .gitignore, the path `git` is
-            # asked about — is blanked before the credential-store patterns run
-            # over the command, exactly as `.git` was taken out of them on
-            # 2026-09-22. A command that cannot be read this way is scanned
-            # whole, as it always was.
-            spelled, skipped = not_file_words(command, analysis)
+            # asked about — is blanked (`spelled`, read at the top of this
+            # walk) before the credential-store patterns run over the command,
+            # exactly as `.git` was taken out of them on 2026-09-22. A command
+            # that cannot be read this way is scanned whole, as it always was.
             for leaf in iter_string_leaves(arguments):
-                if looks_like_path(leaf) or leaf in skipped:
+                if looks_like_path(leaf) or leaf in not_a_file:
                     continue
                 for pattern in cls.COMMAND_PROTECTED_PATTERNS:
                     found_text = pattern.search(spelled.get(leaf, leaf))
