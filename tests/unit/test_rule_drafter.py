@@ -541,6 +541,17 @@ def test_on_a_stack_with_private_reads_the_rules_in_force_are_not_consulted(fake
     assert any("not checked against the rules in force" in note for note in body["notes"])
 
 
+def test_where_keys_are_enforced_an_anonymous_draft_is_refused_before_the_model(
+    fake, monkeypatch
+) -> None:
+    """The route takes the default for an unlisted POST; it is not listed as an open read."""
+    monkeypatch.setenv("ENFORCE_API_KEY", "true")
+    client = fake(answer(GOOD))
+    status, body, _ = _post({"description": DESCRIPTION})
+    assert status == 401, body
+    assert client.runtime.calls == []
+
+
 def test_a_project_outside_the_pattern_is_drafted_with_a_warning(fake) -> None:
     fake(answer(GOOD))
     status, body, _ = _post({"description": DESCRIPTION, "project": "not-an-acme-name"})

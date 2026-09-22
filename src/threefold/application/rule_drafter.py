@@ -385,11 +385,11 @@ def _converse(client: Any, messages: List[Dict[str, Any]]) -> Tuple[str, str]:
 
     The client that owns the model call, `infrastructure/bedrock_client.py`, has
     only the verdict explanation as a method and belongs to no track in this
-    split, so the drafter borrows its runtime and keeps its books: the call cap
-    and the last error it reports to the readiness probe. Its timeouts come with
-    it. A call is counted when it is made, not when it succeeds, because a model
-    that timed out on the reader's side may still have generated, and billed for,
-    the whole answer.
+    split, so the drafter borrows its runtime and keeps its books as the client
+    itself would: the call cap and the last error. Its timeouts come with it. A
+    call is counted when it is made, not when it succeeds, because a model that
+    timed out on the reader's side may still have generated, and billed for, the
+    whole answer.
     """
     runtime = getattr(client, "_client", None) if client is not None else None
     if runtime is None:
