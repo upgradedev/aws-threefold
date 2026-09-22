@@ -43,9 +43,10 @@ Parameters:
     MaxValue: 2000000000
     Description: >-
       Requests one IP address may send in any five minutes before the web ACL
-      answers 429. One developer's hook sends one request per tool call, so the
-      default leaves a busy agent loop far below it while stopping a script
-      that hammers the open routes.
+      answers 429. The hook sends one request per tool call; the default was
+      chosen, not measured, as about three requests a second sustained. It is
+      counted per address, so a team behind one NAT shares it, and an IPv6
+      client can spread its calls over the addresses of its prefix.
 
   PriceClass:
     Type: String
@@ -327,6 +328,23 @@ Resources:
       Scope: CLOUDFRONT
       DefaultAction:
         Allow: {}
+      # The rate limit answers with a problem document, as the function does, so
+      # a page's error handler has a title and a detail to show rather than an
+      # empty body. WAF sets the Content-Type from ContentType (application/json;
+      # it refuses a content-type among the custom headers), and it cannot fill
+      # in the request's path, so the document has no "instance". The managed
+      # groups' blocks keep WAF's own bare 403: a group takes a custom response
+      # only through an override of each of its rules by name, which a rule AWS
+      # adds to the group later would silently miss.
+      CustomResponseBodies:
+        RateLimited:
+          ContentType: APPLICATION_JSON
+          Content: >-
+            {"type": "urn:threefold:error:edge-rate-limit-exceeded",
+            "title": "Too Many Requests",
+            "status": 429,
+            "detail": "This address sent more requests in five minutes than the edge accepts from one address. Retry after the number of seconds in Retry-After.",
+            "error": "This address sent more requests in five minutes than the edge accepts from one address. Retry after the number of seconds in Retry-After."}
       # Metric names carry the stack name, so a second edge in the account (one in
       # front of the private stack, say) reports under its own names instead of
       # adding into this one's.
@@ -348,17 +366,19 @@ Resources:
             CloudWatchMetricsEnabled: true
             MetricName: !Sub '${AWS::StackName}-ip-reputation'
 
-        # 429, not the default 403. The hook reads a 4xx as the service refusing
-        # the call and reports it to the developer as a key problem, while it reads
-        # 429 as "could not be judged": the call then goes to the agent's own
-        # permissions, or is refused where THREEFOLD_FAIL_CLOSED=1. A limit is a
-        # capacity signal, and should read as one.
+        # 429, not the default 403. The hook reads every other 4xx as the service
+        # refusing the call, and for a 401 or 403 adds that the developer should
+        # check THREEFOLD_API_KEY, while it reads 429 as "could not be judged": the
+        # call then goes to the agent's own permissions, or is refused where
+        # THREEFOLD_FAIL_CLOSED=1. A limit is a capacity signal, and should read as
+        # one, not as a refusal with a hint about the key.
         - Name: RateLimitPerIp
           Priority: 1
           Action:
             Block:
               CustomResponse:
                 ResponseCode: 429
+                CustomResponseBodyKey: RateLimited
                 ResponseHeaders:
                   - Name: retry-after
                     Value: '300'

@@ -12,6 +12,7 @@ AWS.
 from __future__ import annotations
 
 import importlib.util
+import json
 import re
 import sys
 from pathlib import Path
@@ -408,6 +409,23 @@ def test_the_three_managed_groups_are_enforced_not_merely_counted() -> None:
         assert _managed(rule)["VendorName"] == "AWS"
         # OverrideAction Count would turn the whole group into a report.
         assert rule["OverrideAction"] == {"None": {}}, name
+
+
+def test_the_rate_limit_answers_with_a_problem_document() -> None:
+    """RFC 7807, like every other error this service returns, with the fields a page reads."""
+    response = ACL_RULES["RateLimitPerIp"]["Action"]["Block"]["CustomResponse"]
+    body = WEB_ACL["CustomResponseBodies"][response["CustomResponseBodyKey"]]
+    assert re.fullmatch(r"[\w\-]+", response["CustomResponseBodyKey"]), "WAF's pattern for a body key"
+    assert body["ContentType"] == "APPLICATION_JSON"
+    problem = json.loads(body["Content"])
+    assert problem["status"] == response["ResponseCode"] == 429
+    assert problem["title"] == "Too Many Requests"
+    assert problem["type"].startswith("urn:threefold:error:")
+    assert problem["detail"] and problem["error"] == problem["detail"], "the function's problems carry both"
+    assert len(body["Content"].encode("utf-8")) <= 4096
+    headers = {h["Name"].lower(): h["Value"] for h in response["ResponseHeaders"]}
+    assert headers["retry-after"] == "300", "one evaluation window"
+    assert "content-type" not in headers, "WAF refuses it; ContentType sets it"
 
 
 def test_the_rate_limit_is_per_ip_parameterised_and_answers_429() -> None:
