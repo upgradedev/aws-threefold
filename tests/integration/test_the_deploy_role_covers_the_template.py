@@ -15,7 +15,12 @@ trusted:
   handler permissions in the open-source resource provider schemas
   (aws-cloudformation-resource-providers-sns and -logs on GitHub), plus the
   current tagging actions, because the workflow tags the stack with the commit
-  and CloudFormation re-tags every taggable resource on each deploy.
+  and CloudFormation re-tags every taggable resource on each deploy. The
+  subscription's own calls (GetSubscriptionAttributes, SetSubscriptionAttributes,
+  Unsubscribe) take the topic as their resource in the Service Authorization
+  Reference for Amazon SNS, so they are granted on this stack's topic and
+  checked against both the topic's ARN and a subscription's, which is the
+  topic's with an id appended.
 - The HTTP API stage's access log: the API Gateway developer guide, "Configure
   logging for HTTP APIs", which lists the log-delivery actions and gives them
   Resource "*".
@@ -268,7 +273,7 @@ def _required() -> Dict[str, List[tuple]]:
         "AWS::SNS::Subscription": each(["sns:Subscribe", "sns:GetTopicAttributes"], [topic])
         + each(
             ["sns:GetSubscriptionAttributes", "sns:SetSubscriptionAttributes", "sns:Unsubscribe"],
-            [f"{topic}:acme-0000-subscription"],
+            [topic, f"{topic}:acme-0000-subscription"],
         ),
         "AWS::CloudWatch::Alarm": each(
             ["cloudwatch:PutMetricAlarm", "cloudwatch:DescribeAlarms", "cloudwatch:DeleteAlarms",
@@ -361,9 +366,6 @@ RESOURCELESS = {
     "logs:ListLogDeliveries": "as above",
     "logs:PutResourcePolicy": "account-level: the log resource policy that lets API Gateway write",
     "logs:DescribeResourcePolicies": "as above",
-    "sns:GetSubscriptionAttributes": "a subscription is not a resource type IAM can name",
-    "sns:SetSubscriptionAttributes": "as above",
-    "sns:Unsubscribe": "as above",
 }
 
 
@@ -410,6 +412,12 @@ def test_every_named_resource_belongs_to_this_stack_or_its_deployment() -> None:
         ("logs:DeleteLogGroup", f"arn:aws:logs:{REGION}:{ACCOUNT}:log-group:/aws/lambda/threefold-dogfood-F"),
         ("logs:DeleteLogGroup", f"arn:aws:logs:{REGION}:{ACCOUNT}:log-group:/aws/vendedlogs/apigateway/threefold-dogfood/access"),
         ("sns:DeleteTopic", f"arn:aws:sns:{REGION}:{ACCOUNT}:threefold-dogfood-alarms"),
+        # Another workload's alerting: the role may neither drop nor redirect
+        # a subscription it did not create, by the topic or by the subscription.
+        ("sns:Unsubscribe", f"arn:aws:sns:{REGION}:{ACCOUNT}:threefold-dogfood-alarms:acme-0000-subscription"),
+        ("sns:Unsubscribe", f"arn:aws:sns:{REGION}:{ACCOUNT}:acme-billing-alerts"),
+        ("sns:SetSubscriptionAttributes", f"arn:aws:sns:{REGION}:{ACCOUNT}:acme-billing-alerts:acme-0000-subscription"),
+        ("sns:GetSubscriptionAttributes", f"arn:aws:sns:us-east-1:{ACCOUNT}:{STACK}-alarms:acme-0000-subscription"),
         ("cloudwatch:DeleteAlarms", f"arn:aws:cloudwatch:{REGION}:{ACCOUNT}:alarm:threefold-dogfood-function-errors"),
         ("cloudwatch:DeleteDashboards", f"arn:aws:cloudwatch::{ACCOUNT}:dashboard/threefold-dogfood-operations"),
         ("budgets:ModifyBudget", f"arn:aws:budgets::{ACCOUNT}:budget/acme-team-budget"),

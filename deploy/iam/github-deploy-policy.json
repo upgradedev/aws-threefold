@@ -89,16 +89,6 @@
       "Resource": "*"
     },
     {
-      "Sid": "SubscriptionCallsNameNoTopic",
-      "Effect": "Allow",
-      "Action": [
-        "sns:GetSubscriptionAttributes",
-        "sns:SetSubscriptionAttributes",
-        "sns:Unsubscribe"
-      ],
-      "Resource": "*"
-    },
-    {
       "Sid": "TablesThisStackOwns",
       "Effect": "Allow",
       "Action": [
@@ -203,6 +193,9 @@
         "sns:GetTopicAttributes",
         "sns:SetTopicAttributes",
         "sns:Subscribe",
+        "sns:GetSubscriptionAttributes",
+        "sns:SetSubscriptionAttributes",
+        "sns:Unsubscribe",
         "sns:ListSubscriptionsByTopic",
         "sns:TagResource",
         "sns:UntagResource",
