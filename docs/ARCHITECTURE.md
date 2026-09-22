@@ -86,7 +86,9 @@ Threefold strictly implements **Clean Architecture** (Robert C. Martin) and **Do
 - **Delivery:**
   - `api_handlers.py`: AWS Lambda proxy handler supporting REST operations (`/status`, `/evaluate-tool-call`, `/simulate-loop`, `/simulate-secret`, `/issue-certificate`).
   - `deploy/template.yml`: AWS SAM serverless definition specifying Graviton ARM64 Lambdas, HTTP API Gateway, DynamoDB, and S3.
-  - `src/threefold/web/index.html`: Zero-dependency browser dashboard running Tailwind CSS from a pinned CDN build, with `connect.html`, `console.html`, `rules.html`, `sessions.html`, `settings.html` and `swagger.html` beside it.
+  - `src/threefold/web/dashboard.html`: the operations application, one page with hash routes: `#/overview` (tiles and inline SVG charts, every mark opening the calls behind it), `#/projects` and `#/projects/<name>` (the stage, readiness per rule, Promote and Demote), `#/review`, `#/calls` and `#/call`, `#/connect`, `#/signin` and the public `#/try` walkthrough. Every figure is read from the API as the page is looked at.
+  - `src/threefold/web/assets/threefold.js` and `threefold.css`: the layer every page loads, with the API base, the sign-in session sent as a bearer token, a fetch that turns a refusal into a signed-out state, the shared navigation and the chart helpers, with no library and no build.
+  - `src/threefold/web/index.html`: the public landing page and 60-second demo, with `rules.html`, `sessions.html`, `settings.html`, `connect.html` and `swagger.html` beside it; `console.html` forwards to the overview. Tailwind CSS comes from a pinned CDN build.
 
 ---
 

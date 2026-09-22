@@ -804,6 +804,13 @@ def test_connect_writes_the_one_command_for_this_stack_and_watches_for_the_first
   out.every = Array.from(intervals.values()).map(i => i.ms);
   out.poll = calls.filter(c => c.url.indexOf('/api/decisions') !== -1).pop().url;
   out.waiting = text(el('connect-wait').innerHTML);
+  const polls = () => calls.filter(c => c.url.indexOf('/api/decisions') !== -1).length;
+  const beforeHidden = polls();
+  document.visibilityState = 'hidden';
+  await runIntervals();
+  await runIntervals();
+  out.hiddenPolls = polls() - beforeHidden;
+  document.visibilityState = 'visible';
   decisions = { items: [row(1, { agent: 'codex', timestamp: new Date(Date.now() + 1000).toISOString() })], next_cursor: null };
   await runIntervals();
   out.connected = text(view());
@@ -819,6 +826,7 @@ def test_connect_writes_the_one_command_for_this_stack_and_watches_for_the_first
     assert 3000 in out["every"]
     assert out["poll"] == "https://example.test/prod/api/decisions?project=Acme-Billing&limit=1"
     assert "Watching for a call from Acme-Billing" in out["waiting"]
+    assert out["hiddenPolls"] == 0, "A hidden tab must not spend the address's rate limit on the watch"
     assert "Connected" in out["connected"] and "Codex reached the stack from Acme-Billing" in out["connected"]
     assert "You are in Observe" in out["connected"]
     assert out["stopped"], "Once the first call arrived, the watch stops"
