@@ -357,7 +357,7 @@ the tracks' own notes and AWS list prices, not from measurement.
 | AWS WAF web ACL with four rules | about 9 USD a month, plus a per-request charge |
 | CloudWatch alarms (10 per stack) and the dashboard | a few USD a month |
 | Lambda, API Gateway, DynamoDB on demand, CloudFront, S3 | per request and per GB; not estimated |
-| Bedrock | per token, only for page explanations and rule drafts, capped per container at 200 and 60 calls |
+| Bedrock | per token, only for page explanations and rule drafts, capped per container at 200 successful explanation calls (failed calls are not counted) and 60 drafting calls (every call counted) |
 | The benchmark | see section 6 |
 
 `MonthlyBudgetUsd` puts an account-wide budget on the alarm topic when a

@@ -176,7 +176,9 @@ answer as untrusted: it is parsed as JSON, checked by the same
 functions `POST /rules/explain` uses. Nothing is stored. A draft becomes a rule
 only through `POST /rules`, which needs the operator on every stack. The route
 is capped at 400 answer tokens and one repair (two model calls at most per
-draft) and 60 drafting calls per container. When the model cannot be reached
+draft) and 60 drafting calls per container, each counted when it is made,
+answered or not (`rule_drafter.py`), where the explanations' 200 count only
+successful calls. When the model cannot be reached
 the caller gets no draft rather than a canned one.
 
 ---
