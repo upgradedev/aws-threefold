@@ -327,8 +327,19 @@ def other_connected_checkouts(root: Path, mine: Path) -> List[Path]:
     worktrees = common / "worktrees"
     if worktrees.is_dir():
         candidates.extend(sorted(worktrees.glob("*/" + MANIFEST_NAME)))
-    ours = os.path.normcase(str(mine))
-    return [path for path in candidates if path.is_file() and os.path.normcase(str(path)) != ours]
+    # Both sides resolved: git answers this checkout's record relative to the
+    # root and the common directory absolutely, and on a machine where the
+    # temporary or home folder is a link the two spellings of one file differ.
+    # Read as two files, the last checkout would never take the hook out.
+    ours = _same_file_key(mine)
+    return [path for path in candidates if path.is_file() and _same_file_key(path) != ours]
+
+
+def _same_file_key(path: Path) -> str:
+    try:
+        return os.path.normcase(str(path.resolve()))
+    except OSError:
+        return os.path.normcase(str(path))
 
 
 def locate(repo: Path) -> Tuple[Path, bool]:
