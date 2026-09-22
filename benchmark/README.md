@@ -96,12 +96,16 @@ finish, the runner prints the command that resumes the matrix and exits with
 
 **Resuming.** `--resume <run-id>` appends to the same
 `results/<run-id>.jsonl`, in the same work root, and runs only the planned
-runs whose latest row did not measure the agent: a run that measured is
-skipped, and one that was cut short, never reached the model or hit a harness
-error is run again. It refuses a different `--model` or a different `--pilot`
-label from the rows already there, so a run id never mixes them. The report
-counts only the latest row of each planned run (run id, agent, task,
-condition, repetition) and says how many earlier rows it replaced.
+runs whose latest row the report would not count, by the report's own test: a
+run it counts is skipped, and one that was cut short, never reached the model,
+hit a harness error, or was a Threefold run without a working Threefold in
+front of it (the local server stopped answering, its ledger could not be
+read, the hook failed open, crashed or never fired) is run again. It refuses a
+different `--agent`, `--model`, login (token file or machine login),
+`--isolation` or `--pilot` label from the rows already there, so a run id
+never mixes them. The report counts only the latest row of each planned run
+(run id, agent, task, condition, repetition) and says how many earlier rows it
+replaced.
 
 **Codex, from 2026-09-27**, when the owner's Codex usage limit resets:
 

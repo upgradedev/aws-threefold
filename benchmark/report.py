@@ -659,11 +659,11 @@ def render(summary: Mapping[str, Any], tasks: Sequence[task_library.Task], sourc
             "folder and a home folder of its own. Without it, runs use the machine's login. Codex uses its own login "
             "(`codex login`). `--check-auth` says whether the login works before anything runs.", "",
             "```",
-            "python benchmark/run.py --check-auth                              # one tiny call: ok, expired, missing or limited",
+            "python benchmark/run.py --check-auth                              # one tiny call: ok, expired, missing, limited or error",
             "python benchmark/run.py --agent scripted --reps 1 --parallel 3   # the harness alone, no model, free",
             "python benchmark/run.py --tasks orders-s3-archive --reps 1 --parallel 3 --pilot",
             "python benchmark/run.py --reps 3 --parallel 3        # the full matrix: 6 tasks x 3 conditions x 3 reps",
-            "python benchmark/run.py --reps 3 --parallel 3 --resume <run-id>   # after a stop: runs only what has no measured row",
+            "python benchmark/run.py --reps 3 --parallel 3 --resume <run-id>   # after a stop: runs only what the report does not count yet",
             "python benchmark/run.py --agent codex --reps 3 --parallel 3      # the same matrix with Codex",
             "python benchmark/report.py benchmark/results/<run-id>.jsonl",
             "```", "",

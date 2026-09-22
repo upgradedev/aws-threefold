@@ -43,7 +43,7 @@ def _row(task="orders-s3-archive", condition="none", rep=1, attempt=1, **extra):
            "task": task, "condition": condition, "rep": rep, "attempt": attempt, "model": "claude-sonnet-5",
            "agent_ran": True, "measured": True, "run_end": "completed", "harness_error": None, "agent_error": "",
            "service_failure": None, "violation_landed": False, "acceptance_passed": True, "num_turns": 5,
-           "started_at": "2026-09-23T10:00:00Z", "isolation": {"mode": "fresh-config"}, "harness": {"platform": "Windows"}}
+           "started_at": "2026-09-23T10:00:00Z", "isolation": {"mode": "user-config"}, "harness": {"platform": "Windows"}}
     row.update(extra)
     return row
 
@@ -215,6 +215,35 @@ def test_only_runs_whose_latest_row_measured_the_agent_are_done():
     assert counts[("claude-code", "orders-s3-archive", "prompt", 1)] == 3
 
 
+def test_a_threefold_run_the_report_rejects_is_not_done():
+    """The resume and the report agree: a run whose local server stopped answering measured nothing either would use."""
+    down = _row(condition="threefold", server_healthy_after=False,
+                governance_problem="the local Threefold server was not answering when the agent stopped")
+    missing = _row(condition="threefold", rep=2, hook_missing=True, governed_calls=4)
+    open_hook = _row(condition="threefold", rep=3, hook_unjudged=2,
+                     governance_problem="the hook could not reach the local server for 2 call(s) and let them through")
+    governed = _row(condition="threefold", rep=4, ledger={"reachable": True, "decisions": 3, "refused": 1})
+    rows = [down, missing, open_hook, governed]
+    assert [report.is_valid(row) for row in rows] == [False, False, False, True]
+    assert run.done_keys(rows) == {("claude-code", "orders-s3-archive", "threefold", 4)}
+    assert "not counted: the local Threefold server was not answering" in run.one_line(dict(down, attempts=1))
+
+
+def test_a_resume_runs_again_a_threefold_run_the_report_rejected(tmp_path, monkeypatch, capsys):
+    results = tmp_path / "results" / "fixture.jsonl"
+    results.parent.mkdir()
+    before = [_row(condition="none"), _row(condition="threefold", server_healthy_after=False,
+                                           governance_problem="the local Threefold server was not answering")]
+    results.write_text("".join(json.dumps(row) + "\n" for row in before), encoding="utf-8")
+    fake = _Scripted([{}])
+    monkeypatch.setattr(harness, "run_one", fake)
+    code = run.main(["--tasks", "orders-s3-archive", "--conditions", "none,threefold", "--reps", "1", "--resume", "fixture",
+                     "--retry-pause", "0", "--claude", "claude-not-called", "--isolation", "user-config",
+                     "--work-root", str(tmp_path / "work"), "--results-dir", str(tmp_path / "results")])
+    assert code == 0 and "resuming: 1 already measured, 1 to run" in capsys.readouterr().out
+    assert fake.calls == [("orders-s3-archive", "threefold", 1, 2)]
+
+
 def test_resume_runs_what_is_missing_and_appends_to_the_same_file(tmp_path, monkeypatch, capsys):
     results = tmp_path / "results" / "fixture.jsonl"
     results.parent.mkdir()
@@ -254,6 +283,11 @@ def test_a_resume_with_nothing_left_runs_nothing(tmp_path, monkeypatch, capsys):
     (["--model", "claude-opus-5"], [_row()], "used model claude-sonnet-5"),
     (["--pilot"], [_row()], "not a pilot"),
     ([], [_row(pilot=True)], "a pilot"),
+    # A Codex run id resumed without --agent codex would otherwise gain a whole Claude Code matrix.
+    ([], [_row(agent="codex", model="codex-default", isolation={"mode": "codex-user-login"})], "pass --agent codex"),
+    # This resume has no token file, so it would log in with the machine's login.
+    ([], [_row(auth="token-file")], "used auth token-file, and this resume would use machine-login"),
+    ([], [_row(isolation={"mode": "fresh-config"})], "used isolation fresh-config, and this resume would use user-config"),
 ])
 def test_a_resume_that_would_mix_models_or_pilot_labels_is_refused(tmp_path, monkeypatch, capsys, extra, recorded, problem):
     if recorded is not None:

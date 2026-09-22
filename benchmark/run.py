@@ -20,16 +20,19 @@ The runner reads it and hands it to the agent process alone, with a
 configuration folder and a home folder of the run's own, so nothing from the
 owner's settings, hooks, skills or memory reaches the agent. Without a token
 file it uses the machine's login. `--check-auth` makes one trivial call the
-way a run would and says ok, expired, missing or limited, with the next step.
+way a run would and says ok, expired, missing, limited or error, with the next
+step.
 
 A run the service stops (a usage limit or an overload) is recorded as cut
 short, and after a pause (--retry-pause, 180 s) it is tried once more in a
 fresh folder; the row records both attempts. If the second attempt is stopped
 too, or the login stops working, no further run is started: the runner prints
 the command that resumes the matrix and exits with 3. `--resume <run-id>`
-appends to the same results file and runs only what has no measured row yet:
-a planned run whose latest row measured the agent is skipped, and one that was
-cut short, never reached the model or hit a harness error is run again. The
+appends to the same results file and runs only what the report would not yet
+count: a planned run whose latest row the report counts is skipped, and one
+that was cut short, never reached the model, hit a harness error, or was a
+Threefold run without a working Threefold in front of it (the local server
+stopped answering, the hook failed open or never fired) is run again. The
 report counts only the latest row of each run.
 """
 from __future__ import annotations
@@ -51,7 +54,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, 
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from benchmark import codex_agent, credentials, harness, task_library  # noqa: E402
+from benchmark import codex_agent, credentials, harness, report, task_library  # noqa: E402
 
 RESULTS_DIR = harness.BENCHMARK_DIR / "results"
 DEFAULT_RETRY_PAUSE_S = 180.0
@@ -87,15 +90,16 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
                              f"{credentials.DEFAULT_TOKEN_FILE} when that file exists)")
     parser.add_argument("--check-auth", action="store_true",
                         help="make one trivial headless call with the login a run would use, report ok, expired, "
-                             "missing or limited with the next step, and exit")
+                             "missing, limited or error with the next step, and exit")
     parser.add_argument("--claude", default=None, help="path to the claude executable (default: found on PATH)")
     parser.add_argument("--codex", default=None, help="path to the codex executable (default: found on PATH)")
     parser.add_argument("--codex-sandbox", choices=codex_agent.SANDBOXES, default=codex_agent.DEFAULT_SANDBOX,
                         help="Codex's sandbox for shell commands (default workspace-write)")
     parser.add_argument("--run-id", default=None)
     parser.add_argument("--resume", metavar="RUN_ID", default=None,
-                        help="append to results/<RUN_ID>.jsonl and run only the planned runs with no measured row yet "
-                             "(cut short, not run and harness errors are run again)")
+                        help="append to results/<RUN_ID>.jsonl and run only the planned runs the report does not count "
+                             "yet (cut short, not run, harness errors and Threefold runs without a working Threefold are "
+                             "run again)")
     parser.add_argument("--retry-pause", type=float, default=DEFAULT_RETRY_PAUSE_S,
                         help="seconds to wait before trying once more a run the service cut short (default 180)")
     parser.add_argument("--pilot", action="store_true", help="label every row as a pilot, not a result")
@@ -246,12 +250,19 @@ def run_key(row: Mapping[str, Any]) -> RunKey:
 
 
 def measured_row(row: Mapping[str, Any]) -> bool:
-    """A row that measured the agent: its run ended on its own course and the harness did its part."""
-    return bool(row.get("measured")) and not row.get("harness_error")
+    """A row the report counts: its run ended on its own course, the harness did its part, and a Threefold run had
+    a working Threefold in front of it.
+
+    This is the report's own judgement (report.is_valid), so a resume and the
+    report agree on what is done: a Threefold run whose local server stopped
+    answering, or whose hook failed open, measured nothing the report can
+    use, and a resume runs it again instead of leaving the matrix short.
+    """
+    return report.is_valid(row)
 
 
 def done_keys(rows: Iterable[Mapping[str, Any]]) -> Set[RunKey]:
-    """The planned runs a resume skips: those whose latest row measured the agent."""
+    """The planned runs a resume skips: those whose latest row the report counts."""
     latest: Dict[RunKey, Mapping[str, Any]] = {}
     for row in rows:
         latest[run_key(row)] = row
@@ -266,11 +277,36 @@ def attempts_so_far(rows: Iterable[Mapping[str, Any]]) -> Counter:
     return counts
 
 
-def resume_problem(rows: Sequence[Mapping[str, Any]], agent: str, model: Optional[str], pilot: bool) -> Optional[str]:
-    """Why these arguments must not add to these rows, or None: one run id holds one model per agent and one pilot label."""
+def _recorded(row: Mapping[str, Any], field: str) -> Optional[str]:
+    """What a row recorded about its login (`auth`) or its isolation mode, or None when it predates the field."""
+    value = row.get("auth") if field == "auth" else (row.get("isolation") or {}).get("mode")
+    return str(value) if value else None
+
+
+def resume_problem(rows: Sequence[Mapping[str, Any]], agent: str, model: Optional[str], pilot: bool,
+                   auth: Optional[str] = None, isolation: Optional[str] = None) -> Optional[str]:
+    """Why these arguments must not add to these rows, or None.
+
+    One run id holds one agent's rows, with one model, one login (`auth`),
+    one isolation mode and one pilot label. The printed resume command keeps
+    every argument, so this catches the command typed again by hand: without
+    `--agent codex` a Codex run id would silently gain a Claude Code matrix,
+    and a resume without the token file would mix machine-login rows into a
+    token-file run. `isolation` is the mode a row records (isolation_facts).
+    """
     if not rows:
         return None
+    agents = sorted({run_key(row)[0] for row in rows})
+    if agent not in agents:
+        return (f"the recorded rows are {', '.join(agents)} rows, and this resume would add {agent} rows; "
+                f"pass --agent {agents[0]}")
     same_agent = [row for row in rows if run_key(row)[0] == agent]
+    for field, wanted_value, advice in (("auth", auth, "use the same token file, or none, as before"),
+                                        ("isolation", isolation, "pass the same --isolation as before")):
+        recorded = {value for value in (_recorded(row, field) for row in same_agent) if value}
+        if wanted_value is not None and recorded and recorded != {wanted_value}:
+            return (f"the recorded {agent} rows used {field} {', '.join(sorted(recorded))}, and this resume would use "
+                    f"{wanted_value}; {advice}")
     models = {str(row.get("model")) for row in same_agent}
     wanted = harness.recorded_model(harness.AgentOptions(agent=agent, model=model))
     if same_agent and models != {wanted}:
@@ -356,6 +392,8 @@ def one_line(row: Dict[str, Any]) -> str:
     problem = row.get("harness_error") or ("" if row.get("agent_ran") else f"agent did not run: {row.get('agent_error')}")
     if not problem and str(row.get("run_end") or "").startswith("cut_short"):
         problem = f"{row['run_end']}: {row.get('agent_error')}"
+    if not problem and row.get("measured") and not measured_row(row):
+        problem = f"not counted: {report.invalid_reason(row)}"
     retried = f" (attempt {row.get('attempt')}, retried)" if int(row.get("attempts") or 1) > 1 else ""
     return (f"{row['task']:<26} {row['condition']:<17} r{row['rep']}  {verdict:<9} {tests}{extra}"
             f"  turns={row.get('num_turns')} cost={row.get('cost_usd')}{retried}" + (f"  [{problem}]" if problem else ""))
@@ -466,6 +504,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if problem:
             print(f"refused: {problem}. Check `codex exec --help` and adjust codex_agent.build_command before measuring.",
                   file=sys.stderr)
+            return 2
+
+    if previous:
+        # Checked again now the login and the isolation are known, before anything runs.
+        auth = "none" if args.agent == "scripted" else ("token-file" if credential is not None else "machine-login")
+        mode = harness.isolation_facts(isolation, (), args.agent)["mode"]
+        problem = resume_problem(previous, args.agent, args.model, args.pilot, auth=auth, isolation=mode)
+        if problem:
+            print(f"refused: {problem}.", file=sys.stderr)
             return 2
 
     version = None
