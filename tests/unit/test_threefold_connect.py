@@ -431,6 +431,58 @@ def test_the_legacy_uninstall_refuses_the_home_folder_too(machine, stack) -> Non
     assert snapshot(machine.home) == before
 
 
+# --- two checkouts of one repository ---------------------------------------------------------
+
+@pytest.fixture
+def linked_worktree(machine) -> Path:
+    """A second checkout of the same repository, as `git worktree add` makes one.
+
+    Its install record is its own, under .git/worktrees/<id>/, but
+    `git rev-parse --git-path hooks` and `info/exclude` both answer with the
+    common directory, which the two checkouts share.
+    """
+    assert _git(machine.repo, "add", "README.md").returncode == 0
+    assert _git(machine.repo, "commit", "-qm", "first").returncode == 0
+    feature = machine.tmp / "acme-feature"
+    result = _git(machine.repo, "worktree", "add", "-q", str(feature), "-b", "feature")
+    assert result.returncode == 0, result.stderr
+    return feature
+
+
+def test_disconnecting_one_checkout_keeps_what_the_other_still_needs(machine, stack, linked_worktree) -> None:
+    """The pre-commit hook and the exclude lines live in the shared git directory.
+
+    Removed for the checkout being disconnected, the other one lost its
+    commit-time check and its .threefold.json and .claude/ came back as
+    untracked files, one `git add .` away from being committed.
+    """
+    assert connect(machine, stack, "--no-open").code == 0
+    assert connect(machine, stack, "--no-open", path=linked_worktree).code == 0
+    pre_commit = machine.repo / ".git" / "hooks" / "pre-commit"
+    assert pre_commit.is_file()
+    assert _git(linked_worktree, "status", "--porcelain").stdout.strip() == ""
+
+    result = run(installer, "disconnect", str(machine.repo))
+    assert result.code == 0, result.out
+    assert pre_commit.is_file(), "the other checkout still runs this on every commit"
+    assert (linked_worktree / ".threefold.json").is_file()
+    assert _git(linked_worktree, "status", "--porcelain").stdout.strip() == ""
+    assert "still connected" in result.out
+    assert not (machine.repo / ".threefold.json").exists()
+    assert not (machine.repo / ".claude").exists()
+
+
+def test_disconnecting_the_last_checkout_takes_the_shared_hook_out(machine, stack, linked_worktree) -> None:
+    assert connect(machine, stack, "--no-open").code == 0
+    assert connect(machine, stack, "--no-open", path=linked_worktree).code == 0
+    assert run(installer, "disconnect", str(linked_worktree)).code == 0
+    result = run(installer, "disconnect", str(machine.repo))
+    assert result.code == 0, result.out
+    assert "still connected" not in result.out
+    assert not (machine.repo / ".git" / "hooks" / "pre-commit").exists()
+    assert _git(machine.repo, "status", "--porcelain").stdout.strip() == ""
+
+
 def test_a_project_that_is_not_an_alias_is_refused(machine, stack) -> None:
     result = connect(machine, stack, "--project", "Acme Ledger")
     assert result.code == 2 and "must match" in result.out

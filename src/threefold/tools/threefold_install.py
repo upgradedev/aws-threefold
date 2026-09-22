@@ -293,6 +293,44 @@ def git_path(root: Path, name: str) -> Path:
     return path if path.is_absolute() else (root / path)
 
 
+def git_common_dir(root: Path) -> Optional[Path]:
+    """The git directory every checkout of this repository shares, or None when git does not say."""
+    try:
+        code, value = git(root, "rev-parse", "--git-common-dir", check=False)
+    except OSError:
+        return None
+    if code != 0 or not value:
+        return None
+    path = Path(value)
+    return path if path.is_absolute() else (root / path).resolve()
+
+
+def other_connected_checkouts(root: Path, mine: Path) -> List[Path]:
+    """Every other checkout sharing this git directory that still has an install record.
+
+    A linked worktree keeps its own record, under .git/worktrees/<id>/, but
+    `git rev-parse --git-path hooks` and `info/exclude` both answer with the
+    common directory, which every checkout shares. So disconnecting one
+    checkout used to take the pre-commit hook and the exclude lines away from
+    the others: they lost their commit-time check, and their .threefold.json
+    and .claude/ came back as untracked files, one `git add .` away from
+    putting this machine's Python and home folder into a commit.
+
+    Read from git's own layout rather than from a count kept somewhere, so a
+    record deleted by hand or a worktree pruned is simply one that is no
+    longer there.
+    """
+    common = git_common_dir(root)
+    if common is None:
+        return []
+    candidates = [common / MANIFEST_NAME]
+    worktrees = common / "worktrees"
+    if worktrees.is_dir():
+        candidates.extend(sorted(worktrees.glob("*/" + MANIFEST_NAME)))
+    ours = os.path.normcase(str(mine))
+    return [path for path in candidates if path.is_file() and os.path.normcase(str(path)) != ours]
+
+
 def locate(repo: Path) -> Tuple[Path, bool]:
     """The directory to install in, and whether it is a workspace rather than a repository.
 
@@ -1206,7 +1244,7 @@ def uninstall(
     if not workspace:
         # A workspace install wrote nothing under .git, so there is nothing
         # there to take out, and nothing git does not recognise is read.
-        git_side_uninstall(plan, root, manifest, exact)
+        git_side_uninstall(plan, root, manifest, exact, manifest_path)
 
     for directory in reversed(manifest["created_dirs"]):
         path = root / directory
@@ -1236,8 +1274,22 @@ def uninstall(
     return 0
 
 
-def git_side_uninstall(plan: Plan, root: Path, manifest: Dict[str, Any], exact: bool) -> None:
-    """The pre-commit hook and the .git/info/exclude lines, which only a repository install adds."""
+def git_side_uninstall(
+    plan: Plan, root: Path, manifest: Dict[str, Any], exact: bool, record: Optional[Path] = None
+) -> None:
+    """The pre-commit hook and the .git/info/exclude lines, which only a repository install adds.
+
+    Both live in the git directory every checkout of the repository shares, so
+    they go only when no other connected checkout is left to need them.
+    """
+    if record is not None:
+        others = other_connected_checkouts(root, record)
+        if others:
+            plan.add(
+                f"keep the pre-commit hook and the .git/info/exclude lines: {len(others)} other checkout(s) of this "
+                "repository are still connected and share them; disconnect those too to take them out"
+            )
+            return
     created = set(manifest["created_files"])
     hook_path = git_path(root, "hooks") / "pre-commit"
     chained = hook_path.with_name(CHAINED_NAME)
