@@ -8,6 +8,8 @@ was redacted; the target was not.
 """
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from threefold.application.dtos import ToolCallRequestDTO
 from threefold.application.evaluator import GovernanceEvaluator
 from threefold.domain.boundary_guard import describe_target
@@ -59,3 +61,71 @@ def test_the_recorded_row_carries_no_credential() -> None:
     for row in rows:
         for field in ("target", "reason", "observed_reason", "observed_target"):
             assert TOKEN not in str(row.get(field) or ""), field
+
+
+def test_a_path_carrying_a_token_is_recorded_redacted() -> None:
+    """The descriptor is a path here rather than a URL, and it is published the same way."""
+    repo = DynamoDBSessionRepository(table_name="path-target-test")
+    evaluator = GovernanceEvaluator(session_repo=repo)
+    request = ToolCallRequestDTO(
+        session_id="target-redaction-2",
+        developer_id="anonymous",
+        project_name="Acme-Ledger",
+        tool_name="Write",
+        action_type="FILE_WRITE",
+        arguments={"file_path": f"build/{TOKEN}/notes.txt", "content": "x\n"},
+        agent="claude-code",
+        origin="hook",
+        dry_run=True,
+    )
+    evaluator.evaluate_tool_call(request)
+
+    rows = [row for row in repo.list_decisions(days=1) if row.get("session_id") == "target-redaction-2"]
+    assert rows, "the call should have been recorded"
+    assert rows[0]["target"], "what the call was aimed at is still said"
+    for field in ("target", "reason", "observed_reason", "observed_target"):
+        assert TOKEN not in str(rows[0].get(field) or ""), field
+
+
+def test_the_file_a_rule_watched_is_redacted_too() -> None:
+    """A path can carry a token as readily as a reason can, and it is shown as widely.
+
+    The scanner reaches a path before any rule does, so nothing the gates
+    produce should ever put one here; this holds the ledger writer to it all
+    the same, because it is the writer that decides what is kept.
+    """
+    written: list = []
+
+    class _Recorder:
+        def record_decision(self, decision: dict) -> None:
+            written.append(decision)
+
+    evaluator = GovernanceEvaluator(session_repo=DynamoDBSessionRepository(table_name="unused"))
+    evaluator.session_repo = _Recorder()  # type: ignore[assignment]
+    result = SimpleNamespace(
+        verdict_id="v1",
+        timestamp="2026-09-22T00:00:00+00:00",
+        status="APPROVED",
+        reason="All deterministic governance invariants satisfied",
+        rule_evaluations={},
+        current_session_cost_usd=0.0,
+        observations=[f"watched src/acme/domain/{TOKEN}/order.py"],
+        observed_rules=["python-domain-stays-pure"],
+        observed_target=f"src/acme/domain/{TOKEN}/order.py",
+        suggested_fix=None,
+    )
+    request = ToolCallRequestDTO(
+        session_id="target-redaction-3",
+        developer_id="anonymous",
+        project_name="Acme-Ledger",
+        tool_name="Write",
+        action_type="FILE_WRITE",
+        arguments={"file_path": "src/acme/domain/order.py", "content": "x\n"},
+        agent="claude-code",
+        origin="hook",
+    )
+    evaluator._record_decision(request, result, [], rule_key="python-domain-stays-pure")
+
+    assert written and written[0]["observed_target"]
+    for field in ("target", "reason", "observed_reason", "observed_target"):
+        assert TOKEN not in str(written[0].get(field) or ""), field

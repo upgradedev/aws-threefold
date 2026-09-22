@@ -993,7 +993,9 @@ class GovernanceEvaluator:
                     # The file the observation is about. The row's target is the
                     # first path in the call, which in a multi-file edit can be a
                     # different file from the one the rule would have refused.
-                    "observed_target": (getattr(result, "observed_target", "") or "")[:160],
+                    # Redacted like every other field a public page shows: a
+                    # path can carry a token as readily as a reason can.
+                    "observed_target": redact_secrets(getattr(result, "observed_target", "") or "")[:160],
                     "target": describe_target(request),
                     "cost_usd": result.current_session_cost_usd,
                     # Of a suggested fix, what kind it was and whether the gates
