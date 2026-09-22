@@ -10,6 +10,16 @@ edit was reported as a protected target path, which an agent cannot act on.
 
 Every approval below is work with nothing wrong in it. Every refusal below is a
 command that really reaches a credential store, and must survive the narrowing.
+
+The narrowing itself has to be narrow. Three ways the first attempt was not,
+each pinned below: a word was taken out of the whole line rather than out of
+the command it came from, so `find -name .env -exec cat` and `echo .env |
+xargs cat` reached the store with the name blanked; the blanking erased the
+first literal occurrence, which is the *dangerous* one when the benign one is
+quote-split (`cat .env; echo ".e"nv`); and the exemption reached out of the
+command into the call's own `file_path`. The patterns themselves are not
+narrowed at all, because they judge named paths as well as command lines: a
+store named exactly `secrets`, and a bare `.key`, stay protected everywhere.
 """
 from __future__ import annotations
 
@@ -52,6 +62,49 @@ ORDINARY = [
     "sed -n '/process.env/p' src/app.js",
     "awk '/secrets/ {print}' docs/notes.md",
     "cat >> .gitignore <<'EOF'\n.env\n.env.local\nEOF",
+    # Printing the name is not reading the file, and nothing here reads what
+    # is printed. The piped forms below are the other half of this.
+    "echo .env",
+    'grep -rn "process.env" src/ | head -20',
+]
+
+# The same names, in commands that do open the file after all. Each of these
+# was approved while the words a command "does not open" were taken out of the
+# whole line rather than out of the command that wrote them.
+REACHES_ANYWAY = [
+    # find's -name operand is the name of the files -exec and -delete open.
+    r"find . -name .env -exec cat {} \;",
+    "find . -name .env -delete",
+    'find . -name "secrets.json" -exec cat {} +',
+    r"find . -name .env -execdir cat {} \;",
+    # A pipe hands what was printed to something that opens it.
+    "echo .env | xargs cat",
+    "printf .env | xargs cat",
+    "echo secrets/aws.json | xargs cat",
+    "echo ~/.ssh/id_rsa | xargs cat",
+    "git ls-files .env | xargs cat",
+    "find . -name .env | xargs cat",
+    "echo .env | sh",
+    # The benign word is quote-split and has no literal occurrence of its own,
+    # so blanking "the first occurrence" erased the read instead.
+    'cat .env; echo ".e"nv',
+    "cat .env; echo '.e''nv'",
+    'cat .env && echo .en"v"',
+    'cat secrets/aws.json; echo secrets"/"aws.json',
+    'cat .env; rg -n ".e"nv docs/',
+    # Written twice, printed once: the other occurrence is a read.
+    "echo .env > out; cat < .env",
+]
+
+# Stores whose name has nothing around it. These are the freed side of the two
+# patterns: narrowing `secrets` to need an adjacent separator, or `.key` to
+# need a name in front of the dot, would let each of these through on every
+# route, command line and named path alike.
+BARE_NAMES = [
+    "cat secrets",
+    "cat .key",
+    "cat /etc/ssl/.pem",
+    "cp secrets /tmp/stash",
 ]
 
 STILL_REFUSED = [
@@ -91,6 +144,54 @@ def test_a_real_reach_for_a_credential_store_is_refused(command: str) -> None:
     assert allowed is False, command
 
 
+@pytest.mark.parametrize("command", REACHES_ANYWAY)
+def test_a_name_the_command_does_open_after_all_is_refused(command: str) -> None:
+    """The word is only left out of the command that never opens or prints it."""
+    allowed, _ = _command(command)
+    assert allowed is False, command
+
+
+@pytest.mark.parametrize("command", BARE_NAMES)
+def test_a_store_whose_name_stands_alone_is_still_protected(command: str) -> None:
+    allowed, _ = _command(command)
+    assert allowed is False, command
+
+
+@pytest.mark.parametrize("path", ["secrets", ".key", "deploy.pem", ".env"])
+def test_a_bare_store_named_under_a_path_key_is_refused(path: str) -> None:
+    """A pattern narrowed for a command line would have freed the named path too."""
+    invocation = ToolInvocation(
+        tool_name="Read", action_type=ToolActionType.FILE_READ, arguments={"file_path": path}
+    )
+    allowed, reason = ArchitecturalBoundaryGuard.evaluate_tool_boundary(invocation, rules=DEFAULT_RULES)
+    assert allowed is False, path
+    assert f"Target path '{path}' is protected" in reason
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"file_path": ".env", "content": "TOKEN=1\n", "command": ["echo", ".env"]},
+        {"file_path": "~/.ssh/id_rsa", "command": ["echo", "~/.ssh/id_rsa"]},
+        {"file_path": "secrets/aws.json", "command": ["grep", "-rn", "secrets/aws.json", "docs/"]},
+    ],
+)
+def test_a_command_field_does_not_excuse_the_path_the_call_names(arguments: dict) -> None:
+    """The exemption belongs to the command and stays inside it.
+
+    `/evaluate-tool-call` takes whatever arguments a caller sends, and
+    `shell_command` reads `command` under any tool name, so an extra field
+    spelling the path was all it took to switch the protected-path check off
+    for the call's own `file_path`.
+    """
+    invocation = ToolInvocation(
+        tool_name="Write", action_type=ToolActionType.FILE_WRITE, arguments=arguments
+    )
+    allowed, reason = ArchitecturalBoundaryGuard.evaluate_tool_boundary(invocation, rules=DEFAULT_RULES)
+    assert allowed is False, arguments
+    assert f"Target path '{arguments['file_path']}' is protected" in reason
+
+
 def test_a_command_sent_word_by_word_is_read_the_same_way() -> None:
     """Codex and Antigravity send argv, not a line, and a word is not a target path."""
     searching = ToolInvocation(
@@ -110,8 +211,13 @@ def test_a_command_sent_word_by_word_is_read_the_same_way() -> None:
 
 
 def test_file_content_is_not_judged_as_a_target_path() -> None:
-    """The hook sends an Edit as a path plus its new text; the text is not a path."""
-    allowed, reason = _write({"file_path": "src/server.js", "content": "const port = process.env.PORT;\n"})
+    """The hook sends an Edit as a path plus its new text; the text is not a path.
+
+    The content here is the bare lookup, with nothing around it: a line with a
+    space in it was never path-shaped, so a test written that way passes
+    whether content is judged as a path or not.
+    """
+    allowed, reason = _write({"file_path": "src/server.js", "content": "process.env.PORT"})
     assert allowed is True, reason
 
 

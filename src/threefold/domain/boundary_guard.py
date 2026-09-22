@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import posixpath
 import re
+from collections import Counter
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, Dict, Iterator, List, Optional, Tuple
@@ -23,6 +24,7 @@ from threefold.domain.layering_rules import (
 from threefold.domain.imports import LANGUAGE_BY_SUFFIX, language_for
 from threefold.domain.models import ToolActionType, ToolInvocation
 from threefold.domain.shell_writes import (
+    PLACEHOLDER,
     ShellAnalysis,
     ShellWrite,
     analyse as analyse_shell,
@@ -190,14 +192,15 @@ class ArchitecturalBoundaryGuard:
         # template before writing the real one.
         re.compile(r"\.env(?!\.(?:example|sample|template|dist|defaults)(?![A-Za-z0-9_.]))(?![A-Za-z0-9_])", re.IGNORECASE),
         re.compile(r"\.git(?![A-Za-z0-9_])", re.IGNORECASE),
-        # A credential store is a place: `secrets/`, `.secrets`,
-        # `secrets.json`, `config/secrets.yml`. The bare word on its own is a
-        # search term, and matching it refused `rg -n "secrets" docs/`.
-        re.compile(r"(?<![A-Za-z0-9_])secrets(?=[/\\.])|(?<=[/\\.])secrets(?![A-Za-z0-9_])", re.IGNORECASE),
-        # A key file has a name in front of the extension (`server.key`,
-        # `deploy.pem`). A bare `.key` is a field, and matching it refused
-        # `jq -r .key config.json`.
-        re.compile(r"(?<=[A-Za-z0-9_\-])\.(pem|key|pfx|pkcs12|p12)(?![A-Za-z0-9_])", re.IGNORECASE),
+        # A store named exactly `secrets`, and a bare `.key` or `.pem`, are
+        # credential stores like any other. `rg -n "secrets" docs/` and
+        # `jq -r .key config.json` are freed where the freeing belongs, by
+        # leaving out the words the command never opens (`not_file_words`);
+        # narrowing the pattern instead would have freed `cat secrets` and
+        # `Read {file_path: ".key"}` with them, on every route, since these
+        # patterns judge the paths a call names as well as its command lines.
+        re.compile(r"(?<![A-Za-z0-9_])secrets(?![A-Za-z0-9_])", re.IGNORECASE),
+        re.compile(r"\.(pem|key|pfx|pkcs12|p12)(?![A-Za-z0-9_])", re.IGNORECASE),
         re.compile(r"\.ssh(?![A-Za-z0-9_])", re.IGNORECASE),
         re.compile(r"\.aws(?![A-Za-z0-9_])", re.IGNORECASE),
         re.compile(r"(?<![A-Za-z0-9_])id_(rsa|ed25519|ecdsa)(?![A-Za-z0-9_])", re.IGNORECASE),
@@ -287,7 +290,7 @@ class ArchitecturalBoundaryGuard:
         # What the call runs, read once: the writes it makes are judged in 2c,
         # and the words it never opens are left out of the checks below, which
         # would otherwise read a command's own search pattern as a file.
-        command = shell_command(invocation)
+        command_key, command = shell_command_at(invocation)
         analysis = analysed(command, command_cwd(invocation)) if command is not None else None
         spelled, not_a_file = not_file_words(command, analysis)
 
@@ -297,9 +300,10 @@ class ArchitecturalBoundaryGuard:
         #    names, so an Edit whose new text is `process.env.PORT` is no longer
         #    reported as a target path the agent cannot act on, and neither is
         #    the `process.env` a command sent word by word is searching for.
-        for candidate in target_paths(arguments):
-            if candidate in not_a_file:
-                continue
+        #    That last exemption belongs to the command and stays inside it: a
+        #    `file_path` is judged as the path the agent said it was, whatever
+        #    else the call carries.
+        for candidate in target_paths(arguments, command_key, not_a_file):
             for pattern in cls.PROTECTED_PATH_PATTERNS:
                 if pattern.search(candidate):
                     yield BoundaryFinding(
@@ -450,7 +454,9 @@ REMOVED_KEYS = ("old_string", "old_str", "old", "original", "search", "find", "b
 _NOT_A_TARGET = frozenset(CONTENT_KEYS + REMOVED_KEYS)
 
 
-def target_paths(arguments: Any) -> Iterator[str]:
+def target_paths(
+    arguments: Any, command_key: str = "", command_words: frozenset = frozenset()
+) -> Iterator[str]:
     """Every file this call names, in the order the call names them.
 
     A value under a path key is a path whatever it looks like; every other
@@ -460,11 +466,23 @@ def target_paths(arguments: Any) -> Iterator[str]:
     `process.env.PORT` into a file was reported as "Target path
     'process.env.PORT' is protected", a sentence about a path the agent never
     named and cannot act on.
+
+    `command_key` is the argument the call's command was actually read from,
+    and `command_words` the words of that command it never opens. Both are
+    resolved by the caller from `shell_command_at`, so what counts as "the
+    command" here is the same thing the gates ran, not a second guess from the
+    key's name: a call that carries a real `file_path` beside a `command` used
+    to have that path waved through because a word of the command happened to
+    spell it. A word of the command the command does open is still a path the
+    call names, which is how `local_shell ["cat", ".env"]` is refused.
     """
-    def walk(node: Any, key: Optional[str]) -> Iterator[str]:
+    def walk(node: Any, key: Optional[str], in_command: bool, top: bool = False) -> Iterator[str]:
         lowered = key.lower() if isinstance(key, str) else None
         if isinstance(node, str):
-            if lowered in PATH_KEYS:
+            if in_command:
+                if node not in command_words and looks_like_path(node):
+                    yield node
+            elif lowered in PATH_KEYS:
                 if named_path(node):
                     yield node
             elif lowered not in _NOT_A_TARGET and looks_like_path(node):
@@ -473,13 +491,17 @@ def target_paths(arguments: Any) -> Iterator[str]:
             for name, item in node.items():
                 if isinstance(name, str) and looks_like_path(name):
                     yield name
-                yield from walk(item, name if isinstance(name, str) else None)
+                yield from walk(
+                    item,
+                    name if isinstance(name, str) else None,
+                    in_command or bool(top and command_key and name == command_key),
+                )
         elif isinstance(node, (list, tuple, set)):
             for item in node:
-                yield from walk(item, key)
+                yield from walk(item, key, in_command)
 
     seen = set()
-    for candidate in walk(arguments, None):
+    for candidate in walk(arguments, None, False, top=True):
         if candidate not in seen:
             seen.add(candidate)
             yield candidate
@@ -495,10 +517,28 @@ def target_paths(arguments: Any) -> Iterator[str]:
 # of the command instead, and everything else is scanned exactly as before. A
 # command the shell reader cannot parse, a program not listed here, and a
 # redirection's source are all scanned whole.
+#
+# "Demonstrably" is the whole of it, and the first attempt was not:
+#
+# - A word is only taken out of the command it was read from, at the place it
+#   was written. Searching the line for it blanked the first occurrence that
+#   matched literally, so `cat .env; echo ".e"nv` — where the benign word is
+#   quote-split and has no literal occurrence of its own — erased the `.env`
+#   that `cat` opens.
+# - A word the command *prints* is a word anything reading its output can
+#   open: `echo .env | xargs cat` reads the store as surely as `cat .env`.
+#   Those are left out only when nothing in the call can read that output.
+# - `find`'s `-name` operand is the name of the files `-exec`, `-delete` and a
+#   pipe into `xargs` then open. The repository's own shell reader says so
+#   (tests/unit/test_shell_writes.py, "find -exec runs its command on files
+#   nobody names"), and with an action like those nothing is taken out.
+# - A word any command in the call does open is never taken out, whichever
+#   other command printed or matched it.
 
 # Programs that print their operands rather than read them.
 _PRINTERS = frozenset(("echo", "printf"))
-# Programs whose first operand is a pattern, a filter or a script.
+# Programs whose first operand is a pattern, a filter or a script. A pattern is
+# neither opened nor printed, so a pipe after it changes nothing.
 _PATTERN_FIRST = frozenset(("grep", "egrep", "fgrep", "rg", "ag", "ack", "jq", "sed", "awk", "gawk", "mawk"))
 # When the pattern is given by a flag instead, which operand is a file is no
 # longer clear from the outside, so nothing is taken out.
@@ -507,9 +547,15 @@ _PATTERN_FLAG_PREFIXES = ("--regexp=", "--file=", "--from-file=", "--expression=
 # git subcommands that name a path without ever printing what is in it.
 # `diff` and `log -p` are deliberately not among them: both print the file, so
 # `git log -p -- .env` reaches the credential store as surely as `cat` does.
+# These do print the path itself, so they are read as printers are.
 _GIT_ASKS = frozenset(("check-ignore", "status", "ls-files"))
 _FIND_PATTERN_FLAGS = frozenset(
     ("-name", "-iname", "-path", "-ipath", "-wholename", "-iwholename", "-regex", "-iregex", "-lname", "-ilname")
+)
+# What `find` does to the files its pattern matched, rather than listing them.
+# With any of these the pattern names files the command itself opens or removes.
+_FIND_ACTIONS = frozenset(
+    ("-exec", "-execdir", "-ok", "-okdir", "-delete", "-fprint", "-fprint0", "-fprintf", "-fls")
 )
 
 
@@ -517,70 +563,166 @@ def _program(word: str) -> str:
     return word.replace("\\", "/").rsplit("/", 1)[-1].lower()
 
 
-def _pattern_operand(rest: List[str]) -> List[str]:
-    """The one leading operand that is a pattern rather than a file, or none."""
+def _pattern_operand(rest: List[str]) -> List[int]:
+    """Where the one leading operand that is a pattern rather than a file sits, or nowhere."""
     for word in rest:
         if word in _PATTERN_FLAGS or word.startswith(_PATTERN_FLAG_PREFIXES):
             return []
-    for word in rest:
+    for index, word in enumerate(rest):
         if word.startswith("-") and word != "-":
             continue
-        return [word]
+        return [index]
     return []
 
 
-def _words_that_are_not_files(argv: List[str]) -> List[str]:
-    """The words of one simple command that name no file it opens."""
+def _not_file_indices(argv: List[str]) -> Tuple[List[int], List[int]]:
+    """Which words of one simple command it never opens, as positions in `argv`.
+
+    Two lists, because they are not equally safe to leave out: the first holds
+    words the command neither opens nor puts anywhere (a search pattern, a
+    filter), the second words it does not open but does print, which anything
+    reading its output can open.
+    """
     if not argv:
-        return []
+        return [], []
     name = _program(argv[0])
-    rest = list(argv[1:])
+    rest = argv[1:]
     if name == "git":
         subcommand = next((word for word in rest if not word.startswith("-")), "")
         if subcommand == "grep":
-            return _pattern_operand(rest[rest.index("grep") + 1:])
-        return rest if subcommand in _GIT_ASKS else []
+            after = rest.index("grep") + 1
+            return [1 + after + index for index in _pattern_operand(rest[after:])], []
+        return ([], list(range(1, len(argv)))) if subcommand in _GIT_ASKS else ([], [])
     if name in _PRINTERS:
-        return rest
+        return [], list(range(1, len(argv)))
     if name == "find":
-        return [rest[index + 1] for index, word in enumerate(rest[:-1]) if word.lower() in _FIND_PATTERN_FLAGS]
+        if any(word.lower() in _FIND_ACTIONS for word in rest):
+            return [], []
+        return [], [
+            index + 2 for index, word in enumerate(rest[:-1]) if word.lower() in _FIND_PATTERN_FLAGS
+        ]
     if name in _PATTERN_FIRST:
-        return _pattern_operand(rest)
-    return []
+        return [1 + index for index in _pattern_operand(rest)], []
+    return [], []
+
+
+def read_words(text: str) -> Tuple[List[Tuple[int, int, str]], bool]:
+    """Each word of a command line as (start, end, value), and whether a pipe joins two.
+
+    A second, deliberately small reader beside the one in `shell_writes`: that
+    one says what a command does, this one says *where in the line* each word
+    was written, which is what a word has to be taken out by without moving the
+    rest of the line. Quotes are resolved the way a POSIX shell resolves them,
+    so `.e"nv"` is the word `.env` and blanking it blanks those six characters
+    and no others.
+
+    The two readers are checked against each other in `not_file_words`: a line
+    this one reads differently takes every word out of the exemption, so a
+    quoting form neither models is refused rather than approved.
+    """
+    spans: List[Tuple[int, int, str]] = []
+    piped = False
+    index, size = 0, len(text)
+    while index < size:
+        while index < size and text[index].isspace():
+            index += 1
+        if index >= size:
+            break
+        start, quote, value = index, "", []
+        while index < size and (quote or not text[index].isspace()):
+            char = text[index]
+            if quote:
+                if char == quote:
+                    quote = ""
+                elif char == "\\" and quote == '"' and index + 1 < size:
+                    index += 1
+                    value.append(text[index])
+                else:
+                    value.append(char)
+            elif char in "'\"":
+                quote = char
+            elif char == "\\" and index + 1 < size:
+                index += 1
+                value.append(text[index])
+            else:
+                piped = piped or char == "|"
+                value.append(char)
+            index += 1
+        spans.append((start, index, "".join(value)))
+    return spans, piped
 
 
 def not_file_words(command: Any, analysis: Optional[ShellAnalysis]) -> Tuple[Dict[str, str], frozenset]:
     """How to read a command leaf in place of itself, and which words to skip.
 
-    A command sent as one string comes back with those words blanked, keeping
-    every other offset; a command sent as a list of words comes back as the set
-    of words to pass over. Only words that would otherwise be read as a
-    credential store are taken out, so nothing else about the command changes.
+    A command sent as one string comes back with those words blanked where they
+    were written, keeping every other offset; a command sent as a list of words
+    comes back as the set of words to pass over. Only words that would
+    otherwise be read as a credential store are taken out, so nothing else
+    about the command changes.
+
+    Nothing at all is taken out of a command the readers cannot agree on, one
+    too long to be read to the end, or one that leaves an operand for the shell
+    to work out when it runs (`xargs`, `find -exec`, a substitution): there the
+    file that is opened is exactly the one no word names.
     """
-    if analysis is None:
+    if analysis is None or analysis.truncated:
         return {}, frozenset()
-    words: List[str] = []
+    never: List[str] = []
+    printed: List[str] = []
+    opens: List[str] = []
     for argv in analysis.commands:
-        words.extend(_words_that_are_not_files(list(argv)))
-    # What the command writes is text for a file, not a file it opens, exactly
-    # as an Edit's new text is. Without this a heredoc adding `.env` to
-    # .gitignore was refused while `echo ".env" >> .gitignore` was not.
-    words.extend(write.content for write in analysis.writes if write.content)
-    words = [
+        words = list(argv)
+        if any(PLACEHOLDER in word for word in words):
+            return {}, frozenset()
+        unopened, shown = _not_file_indices(words)
+        for index, word in enumerate(words):
+            if index in unopened:
+                never.append(word)
+            elif index in shown:
+                printed.append(word)
+            else:
+                opens.append(word)
+    opens.extend(write.target for write in analysis.writes if write.target)
+
+    if isinstance(command, str):
+        spans, piped = read_words(command)
+        # A word the small reader never produced is a word it cannot place, so
+        # the exemption is dropped rather than guessed at.
+        if not {value for _, _, value in spans} >= {word for word in never + printed + opens if word}:
+            return {}, frozenset()
+    else:
+        spans, piped = [], any(isinstance(word, str) and "|" in word for word in command or ())
+
+    exempt = list(never)
+    if not piped:
+        # Its output reaches nothing that could open what it names, so a word
+        # it only prints is a word nobody opens. The text it writes into a file
+        # is the same thing said the other way round, and is why a heredoc
+        # adding `.env` to .gitignore is not a read of `.env`.
+        exempt.extend(printed)
+        exempt.extend(word for write in analysis.writes for word in (write.content or "").split())
+    opened = set(opens)
+    counted = Counter(word for word in exempt if word)
+    exempt_set = {
         word
-        for word in words
-        if word and any(pattern.search(word) for pattern in ArchitecturalBoundaryGuard.COMMAND_PROTECTED_PATTERNS)
-    ]
-    if not words:
+        for word in counted
+        if word not in opened
+        and any(pattern.search(word) for pattern in ArchitecturalBoundaryGuard.COMMAND_PROTECTED_PATTERNS)
+    }
+    if not exempt_set:
         return {}, frozenset()
     if not isinstance(command, str):
-        return {}, frozenset(words)
-    blanked = command
-    for word in words:
-        at = blanked.find(word)
-        if at >= 0:
-            blanked = blanked[:at] + " " * len(word) + blanked[at + len(word):]
-    return {command: blanked}, frozenset()
+        return {}, frozenset(exempt_set)
+    # Every occurrence in the line has to be one of the occurrences that earned
+    # the exemption. `cat .env > out` beside `echo .env` writes the word twice
+    # and only one of them is printed, so neither is blanked.
+    written = Counter(value for _, _, value in spans)
+    blanked = list(command)
+    for start, end, value in spans:
+        if value in exempt_set and counted[value] >= written[value]:
+            blanked[start:end] = " " * (end - start)
+    return {command: "".join(blanked)}, frozenset()
 
 
 def iter_write_targets(arguments: Any) -> List[Tuple[str, str]]:
@@ -691,17 +833,23 @@ READ_TOOLS = frozenset(
 MAX_CACHED_COMMAND = 65_536
 
 
-def shell_command(invocation: ToolInvocation) -> Any:
-    """The command a call runs, as text or as a list of words, or None if it runs none.
+def shell_command_at(invocation: ToolInvocation) -> Tuple[str, Any]:
+    """Which argument holds the command a call runs, and the command, or ("", None).
 
     The declared action type is a hint, as it is for the layering rules: a call
     that carries `command` is read as the command it is whatever it says it is.
     The other keys (`cmd`, `script`, `shell`) are read only when the call does
     say it runs a command, because a write's `script` can be a file's content.
+
+    The key travels with the command because a reader that has to know which
+    strings are "the command" must not work it out a second time: two answers
+    to that question, in the gate and in the walk over the call's paths, is how
+    an extra `command` field switched the protected-path check off for a
+    `file_path` beside it.
     """
     arguments = invocation.arguments
     if not isinstance(arguments, dict):
-        return None
+        return "", None
     declared = (
         invocation.action_type == ToolActionType.COMMAND_EXEC
         or str(invocation.tool_name or "").lower() in SHELL_TOOLS
@@ -711,10 +859,15 @@ def shell_command(invocation: ToolInvocation) -> Any:
             continue
         value = arguments.get(key)
         if isinstance(value, str) and value.strip():
-            return value
+            return key, value
         if isinstance(value, (list, tuple)) and value and all(isinstance(word, str) for word in value):
-            return list(value)
-    return None
+            return key, list(value)
+    return "", None
+
+
+def shell_command(invocation: ToolInvocation) -> Any:
+    """The command a call runs, as text or as a list of words, or None if it runs none."""
+    return shell_command_at(invocation)[1]
 
 
 def command_cwd(invocation: ToolInvocation) -> str:

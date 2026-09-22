@@ -168,6 +168,7 @@ from threefold.domain.boundary_guard import (
     observe_layering,
     redact_secrets,
     shell_command,
+    shell_command_at,
     shell_findings,
     shell_observations,
     shell_refusal,
@@ -541,7 +542,15 @@ def _diagnose(
         return _Diagnosis(KIND_CREDENTIAL, label=message.rsplit(": ", 1)[-1])
 
     unstaged = PROTECTED_PATH_KEY not in watched
-    for candidate in target_paths(arguments):
+    # The guard's own order, and the guard's own reading of the call: which
+    # argument is the command, and which of its words it never opens, are
+    # resolved once here as they are there, so the two cannot disagree about
+    # what the call named.
+    command_key, command = shell_command_at(invocation)
+    analysis = analysed(command, command_cwd(invocation)) if command is not None else None
+    spelled, skipped_words = not_file_words(command, analysis)
+
+    for candidate in target_paths(arguments, command_key, skipped_words):
         if ArchitecturalBoundaryGuard.is_forbidden_file_access(candidate) and unstaged:
             return _Diagnosis(KIND_PROTECTED_PATH, why="protected", path=candidate)
 
@@ -549,8 +558,6 @@ def _diagnose(
         if is_governance_path(target) and unstaged:
             return _Diagnosis(KIND_PROTECTED_PATH, why="hooks", path=target)
 
-    command = shell_command(invocation)
-    analysis = analysed(command, command_cwd(invocation)) if command is not None else None
     if analysis is not None:
         found = _shell_diagnosis(analysis, rules, watched)
         if found is not None:
@@ -575,7 +582,6 @@ def _diagnose(
                 found_text = pattern.search(leaf)
                 if found_text and unstaged:
                     return _Diagnosis(KIND_DESTRUCTIVE, detail=found_text.group(0))
-        spelled, skipped_words = not_file_words(command, analysis)
         for leaf in iter_string_leaves(arguments):
             if looks_like_path(leaf) or leaf in skipped_words:
                 continue

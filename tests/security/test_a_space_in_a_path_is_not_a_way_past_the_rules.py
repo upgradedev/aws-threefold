@@ -58,9 +58,16 @@ def test_a_spaced_directory_does_not_hide_the_hooks_own_settings() -> None:
 
 
 def test_a_spaced_directory_does_not_hide_a_credential_store() -> None:
+    """And the refusal names the path, not the command it was mistaken for.
+
+    Before the path key was trusted, this was refused — but by the command scan
+    below it, which called the write "Command 'my project/.env'". A test that
+    only looked for the word "protected" in the sentence passed either way and
+    pinned nothing.
+    """
     allowed, reason = _evaluate({"file_path": "my project/.env", "content": "TOKEN=1\n"})
     assert allowed is False
-    assert "protected" in reason
+    assert "Target path 'my project/.env' is protected" in reason
 
 
 def test_a_clean_write_to_a_spaced_path_is_still_approved() -> None:
