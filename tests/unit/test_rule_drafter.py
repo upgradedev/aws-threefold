@@ -553,10 +553,13 @@ def test_an_injected_rule_that_breaks_the_format_is_refused_like_any_other() -> 
 # --- the route ------------------------------------------------------------
 
 
-def _post(body: Any, method: str = "POST") -> tuple:
+def _post(body: Any, method: str = "POST", path: str = "/prod/rules/draft", key: str = "") -> tuple:
+    headers = {"Content-Type": "application/json"}
+    if key:
+        headers["X-API-Key"] = key
     event = {
-        "rawPath": "/prod/rules/draft",
-        "headers": {"Content-Type": "application/json"},
+        "rawPath": path,
+        "headers": headers,
         "requestContext": {"http": {"method": method, "sourceIp": "198.51.100.7"}, "stage": "prod"},
         "body": json.dumps(body) if not isinstance(body, str) else body,
     }
@@ -653,13 +656,50 @@ def test_the_route_is_post_only(fake) -> None:
     assert client.runtime.calls == []
 
 
-def test_on_a_stack_with_private_reads_the_rules_in_force_are_not_consulted(fake, monkeypatch) -> None:
+SAMPLE = {"path": ORDER, "content": "import javax.persistence.Entity;"}
+
+
+def test_on_a_stack_with_private_reads_an_anonymous_draft_is_refused_as_explain_is(
+    fake, monkeypatch
+) -> None:
+    """The private stack has no public audience, and every draft is billed to the account."""
     monkeypatch.setenv("PUBLIC_READS", "false")
-    client = fake(answer(dict(GOOD, id="java-domain-stays-pure")))
+    monkeypatch.delenv("THREEFOLD_API_KEYS", raising=False)
+    client = fake(answer(GOOD))
+    status, body, response = _post({"description": DESCRIPTION})
+    explained, _, _ = _post(SAMPLE, path="/prod/rules/explain")
+    assert status == explained == 403, body
+    assert response["headers"]["Content-Type"] == "application/problem+json"
+    assert body["type"] == "urn:threefold:error:reads-private"
+    assert client.runtime.calls == []
+
+
+def test_on_a_stack_with_private_reads_a_missing_or_wrong_key_is_refused_before_the_model(
+    fake, monkeypatch
+) -> None:
+    monkeypatch.setenv("PUBLIC_READS", "false")
+    monkeypatch.setenv("THREEFOLD_API_KEYS", "acme-operator-key")
+    client = fake(answer(GOOD))
     status, body, _ = _post({"description": DESCRIPTION})
+    explained, _, _ = _post(SAMPLE, path="/prod/rules/explain")
+    assert status == explained == 401, body
+    status, body, _ = _post({"description": DESCRIPTION}, key="acme-wrong-key")
+    explained, _, _ = _post(SAMPLE, path="/prod/rules/explain", key="acme-wrong-key")
+    assert status == explained == 403, body
+    assert client.runtime.calls == []
+
+
+def test_on_a_stack_with_private_reads_the_operator_drafts_against_the_rules_in_force(
+    fake, monkeypatch
+) -> None:
+    monkeypatch.setenv("PUBLIC_READS", "false")
+    monkeypatch.setenv("THREEFOLD_API_KEYS", "acme-operator-key")
+    client = fake(answer(dict(GOOD, id="java-domain-stays-pure")), answer(GOOD))
+    status, body, _ = _post({"description": DESCRIPTION}, key="acme-operator-key")
     assert status == 200, body
-    assert "java-domain-stays-pure" not in client.prompt()
-    assert any("not checked against the rules in force" in note for note in body["notes"])
+    assert "java-domain-stays-pure" in client.prompt(), "Only the operator gets this far"
+    assert "is used by an earlier rule" in client.prompt(call=1, message=2)
+    assert body["rule"]["id"] == GOOD["id"]
 
 
 def test_where_keys_are_enforced_an_anonymous_draft_is_refused_before_the_model(
@@ -678,3 +718,22 @@ def test_a_project_outside_the_pattern_is_drafted_with_a_warning(fake) -> None:
     status, body, _ = _post({"description": DESCRIPTION, "project": "not-an-acme-name"})
     assert status == 200
     assert body["warnings"] and "AllowedProjectPattern" in body["warnings"][0]
+
+
+def test_an_empty_project_is_answered_as_explain_answers_it(fake) -> None:
+    """Both routes read "" as a name outside the pattern: a warning, not a refusal."""
+    fake(answer(GOOD))
+    status, body, _ = _post({"description": DESCRIPTION, "project": ""})
+    explained_status, explained, _ = _post(dict(SAMPLE, project=""), path="/prod/rules/explain")
+    assert status == explained_status == 200, body
+    assert body["warnings"] == explained["warnings"] != []
+
+
+@pytest.mark.parametrize("project", [None, 7, ["Acme-Billing"]])
+def test_a_project_that_is_present_but_not_text_is_refused_as_explain_refuses_it(fake, project) -> None:
+    client = fake(answer(GOOD))
+    status, body, _ = _post({"description": DESCRIPTION, "project": project})
+    explained, _, _ = _post(dict(SAMPLE, project=project), path="/prod/rules/explain")
+    assert status == explained == 400, body
+    assert body["invalid_params"][0]["name"] == "project"
+    assert client.runtime.calls == []

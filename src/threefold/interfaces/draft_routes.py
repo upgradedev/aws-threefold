@@ -4,38 +4,48 @@ The body is `{description, project?, examples?}`. The answer is one rule in the
 format `POST /rules` accepts, set to observe, with the verdict it gives on each
 example; see `threefold.application.rule_drafter` for how it is made and checked.
 
-Who may call it. The route is open on the public stack, as `POST /rules/explain`
-is, and it is decided rather than inherited: it is not listed among the reads in
-the security middleware, so it takes the default for an unlisted POST, open
-where no key is enforced. It may stay open because it changes nothing. No rule
-is saved, no verdict is issued and no ledger row is written, and the draft goes
-back only to the caller who asked for it; putting it in force is a separate
-`POST /rules`, which needs the operator on every stack. The public stack has no
-operator key at all, so a closed route could never be tried there by the people
-the demonstration is for.
+Who may call it. The route follows PublicReads, as `POST /rules/explain` does:
+open to anyone on a stack whose reads are public, and operator-only on a stack
+deployed with PublicReads=false. It may be open on the public stack because it
+changes nothing. No rule is saved, no verdict is issued and no ledger row is
+written, and the draft goes back only to the caller who asked for it; putting it
+in force is a separate `POST /rules`, which needs the operator on every stack.
+The public stack has no operator key at all, so a closed route could never be
+tried there by the people the demonstration is for. A private stack has no such
+audience, and every draft is paid for by the account, so there it is closed.
+
+The gate is applied here, in the handler, because the security middleware
+decides explain by name in `is_page_read`, and that function belongs to another
+track. The handler asks the middleware's own operator check, so a private
+stack answers a draft exactly as it answers a private read: 403 when no key is
+configured, 401 without a key, 403 with a wrong one. Should the middleware
+later list `POST /rules/draft` beside explain, this check becomes redundant and
+stays harmless.
 
 What sets it apart from explain is the bill: explain costs CPU, and every draft
-is one or two model calls on the account. The brakes are, in order, the per-IP
-token bucket every request passes (sixty in a burst, then two a second), the
-caps on what a request may carry (a 600 character description, five examples of
-at most 4,000 characters, and only their paths and imports reach the model), a
-400 token answer, at most one repair, and a cap on drafting calls per container
-kept apart from the explanations' cap, so a flood of drafts can never leave a
-refusal without its sentence. The worst a container can be made to spend is that
-cap times two short prompts and two short answers.
-
-On a stack that keeps its reads private the route is still reachable, as every
-unlisted POST there is, so it reads nothing private there: the draft is not
-checked against the rules in force, whose ids a clash would disclose, and
-`POST /rules` checks it when the operator saves it. Closing the route is one
-entry in the security middleware: listed among the protected writes it needs the
-operator on every stack, and listed among the page reads it follows PublicReads.
+is one or two model calls. The brakes, and how far each one reaches:
+- The caps on what a request may carry: a 600 character description, five
+  examples of at most 4,000 characters, and only their paths and imports reach
+  the model. These hold for every request.
+- A 400 token answer and at most one repair, so a draft is at most two calls.
+- A cap of 60 drafting calls per container, kept apart from the explanations'
+  cap, so a flood of drafts can never leave a refusal without its sentence.
+  The worst one container can be made to spend is those 60 calls.
+- The per-IP token bucket every request passes, sixty in a burst and then two
+  a second.
+The last two live in the memory of one container. Lambda runs as many
+containers as there are concurrent requests, the template reserves no
+concurrency, and a caller's next request can land on a container whose bucket
+has never seen them. So they bound one container, not the account: N busy
+containers can make N times 60 calls. An account-wide bound needs reserved
+concurrency or throttling in the template, which this track does not own.
 """
 from __future__ import annotations
 
 import logging
 from typing import Any, Dict, Optional
 
+from threefold.application.dtos import InvalidRequestError
 from threefold.application.rule_drafter import (
     SOURCE_BEDROCK,
     SOURCE_UNAVAILABLE,
@@ -47,15 +57,19 @@ from threefold.application.rule_drafter import (
 from threefold.domain.layering_rules import UNSUPPORTED
 from threefold.infrastructure.bedrock_client import BedrockGovernanceClient
 from threefold.infrastructure.metrics_emf import emit_threefold_emf_metrics
-from threefold.infrastructure.security_middleware import reads_are_public, rfc7807_error
+from threefold.infrastructure.security_middleware import (
+    _require_operator_key,
+    reads_are_public,
+    rfc7807_error,
+)
 
 logger = logging.getLogger("threefold.api.drafts")
 
 DRAFT_PATH = "/rules/draft"
 
 # Drafting calls one container may make before it answers 503 until recycled.
-# Two per draft at most, so about thirty drafts, and a separate budget from the
-# 200 the verdict explanations share.
+# Two per draft at most, so at least thirty drafts, and a separate budget from
+# the 200 the verdict explanations share.
 DRAFT_CALLS_PER_CONTAINER = 60
 
 _client: Optional[BedrockGovernanceClient] = None
@@ -74,6 +88,29 @@ def _drafting_client() -> BedrockGovernanceClient:
     return _client
 
 
+def _private_draft_refused(event: Dict[str, Any], path: str) -> Optional[Dict[str, Any]]:
+    """The problem a private stack answers an unauthorised draft with, or None to go on."""
+    if reads_are_public():
+        return None
+    headers = event.get("headers") or {}
+    allowed, problem = _require_operator_key(
+        headers if isinstance(headers, dict) else {},
+        path,
+        closed_title="Drafting Is Private Here",
+        closed_detail=(
+            "This deployment keeps its rules private and has no operator key configured, so "
+            "rules cannot be drafted here. Set THREEFOLD_API_KEYS on the function to draft."
+        ),
+        closed_type="urn:threefold:error:reads-private",
+        missing_detail=(
+            "This deployment keeps its rules private, and every draft is a model call the "
+            "account pays for, so drafting requires the operator key. Provide it via "
+            "'X-API-Key' or 'Authorization: Bearer <key>'."
+        ),
+    )
+    return None if allowed else problem
+
+
 def handle(path: str, method: str, event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Answers `POST /rules/draft`, or returns None for any other request.
 
@@ -87,13 +124,24 @@ def handle(path: str, method: str, event: Dict[str, Any]) -> Optional[Dict[str, 
     # that module than its imports. By the time a request arrives it is whole.
     from threefold.interfaces import api_handlers as router
 
+    refused = _private_draft_refused(event, path)
+    if refused is not None:
+        return router.build_response(refused["status"], refused)
+
     body = router._parse_body(event)
+    # Present means a project was named, as explain reads it: a null, a number
+    # or a list is refused rather than read as "no project".
+    if "project" in body and not isinstance(body["project"], str):
+        raise InvalidRequestError(
+            "project must be a string. Leave it out to draft for the shared rules.", "project"
+        )
     client = _drafting_client()
     model = getattr(client, "model_id", None)
 
     def rules_in_force(project: Optional[str]):
-        if not reads_are_public():
-            return None
+        # Only a caller who may read the rules reaches this: anyone on a stack
+        # whose reads are public, and the operator on one whose reads are not.
+        # So the draft is checked against the ids in force on every stack.
         rules, _source = router._evaluator.rules_in_force(project)
         return rules
 
