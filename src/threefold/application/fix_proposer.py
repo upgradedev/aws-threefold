@@ -1,4 +1,4 @@
-"""A concrete fix for a refusal, checked against the same gates before it is offered.
+r"""A concrete fix for a refusal, checked against the same gates before it is offered.
 
 A refusal that says only "no" sends an agent back to guess, and its next guess is
 often the same call spelled differently. A fix that would itself be refused is
@@ -98,9 +98,12 @@ Wiring (for the owner, after B1 merges; this track changes none of these files):
        fix = verdict.get("suggested_fix")
        if isinstance(fix, dict) and isinstance(fix.get("summary"), str):
            label = "Suggested fix, checked by Threefold" if fix.get("validated") is True else "Suggested fix"
-           detail += f"\n{label}: {_clean(fix['summary'])[:200]}"
-   where `_clean` strips control characters, because the hook trusts nothing
-   the network sends. Only the summary goes into the deny reason, never the
+           summary = re.sub(r"[\x00-\x1f\x7f]+", " ", fix["summary"])[:200]
+           detail += f"\n{label}: {summary}"
+   The hook strips control characters itself (it has no helper for that
+   today; `re` is already imported there) because it trusts nothing the
+   network sends, although this module sends one clean line. Only the summary
+   goes into the deny reason, never the
    writes; `deny()` then carries it as permissionDecisionReason (Claude Code,
    Codex) or reason (Antigravity). A stack without the field changes nothing.
 5. Budget: the hook gives up after DEFAULT_TIMEOUT_SECONDS = 4.0 and fails open,
@@ -172,7 +175,10 @@ logger = logging.getLogger(__name__)
 MAX_WRITE_BYTES = 8 * 1024
 MAX_SUMMARY_CHARS = 200
 MAX_STEP_CHARS = 600
-MAX_STEPS = 14
+MAX_STEPS = 16
+# The closing steps (rotate the credential, the gates were run) come last and
+# matter most, so a list too long for MAX_STEPS loses its middle, not its end.
+KEPT_TAIL_STEPS = 3
 # Content larger than this is not rewritten, only described. A rewrite costs
 # five to seven times the gate's own read of the file, and at 64 KB that was
 # 350 to 470 ms on the development machine [PRIMARY], before a 256 MB Lambda's
@@ -3053,7 +3059,11 @@ def _scrub(text: Any, withheld: Sequence[str]) -> str:
 
 def _finish(fix: _Fix, max_write_bytes: int, phrase: Optional[Callable[[Dict[str, Any]], Optional[str]]]) -> Dict[str, Any]:
     withheld = sorted((text for text in fix.withheld if len(text) >= 8), key=len, reverse=True)
-    steps = [_one_line(_scrub(step, withheld), MAX_STEP_CHARS) for step in fix.steps if step][:MAX_STEPS]
+    steps = [_one_line(_scrub(step, withheld), MAX_STEP_CHARS) for step in fix.steps if step]
+    if len(steps) > MAX_STEPS:
+        head = MAX_STEPS - KEPT_TAIL_STEPS - 1
+        omitted = len(steps) - head - KEPT_TAIL_STEPS
+        steps = steps[:head] + [f"{omitted} further step(s) are left out here to keep this short."] + steps[-KEPT_TAIL_STEPS:]
     writes = [dict(write) for write in fix.writes]
     validated = bool(fix.validated) and bool(fix.checks) and all(check.get("passed") for check in fix.checks if check.get("gate") != GATE_ROUTE)
     # Belt and braces: a write that still carries a credential is never handed
