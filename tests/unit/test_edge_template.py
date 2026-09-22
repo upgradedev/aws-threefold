@@ -55,6 +55,10 @@ COMMON_BODY_RULES = {
     "SizeRestrictions_BODY", "CrossSiteScripting_BODY", "GenericLFI_BODY", "GenericRFI_BODY", "EC2MetaDataSSRF_BODY",
 }
 KNOWN_BAD_INPUTS_BODY_RULES = {"JavaDeserializationRCE_BODY", "Log4JRCE_BODY", "ReactJSRCE_BODY"}
+# The one rule outside the body that is relaxed, and why: it refuses paths by an
+# extension list AWS does not publish, and the install path serves .py files and a
+# zip on purpose.
+URI_RULES_THAT_COUNT = {"RestrictedExtensions_URIPATH"}
 # Web ACL capacity units of each managed group. Above 1,500 in one web ACL every
 # request is billed extra, so the sum is checked.
 MANAGED_GROUP_WCU = {
@@ -412,17 +416,25 @@ def _counted(group: str) -> set:
 
 def test_a_large_or_code_bearing_body_is_counted_not_blocked() -> None:
     """A hook's Write of a 20 KB HTML page, or a Java class naming java.lang.Runtime, must reach the gate."""
-    assert _counted("AWSManagedRulesCommonRuleSet") == COMMON_BODY_RULES
+    assert _counted("AWSManagedRulesCommonRuleSet") == COMMON_BODY_RULES | URI_RULES_THAT_COUNT
     assert "SizeRestrictions_BODY" in COMMON_BODY_RULES
     assert _counted("AWSManagedRulesKnownBadInputsRuleSet") == KNOWN_BAD_INPUTS_BODY_RULES
 
 
-def test_only_body_rules_are_relaxed() -> None:
-    """Rules on headers, the URI and the query string keep blocking."""
+def test_only_body_rules_and_the_named_extension_rule_are_relaxed() -> None:
+    """Rules on headers, the query string and the rest of the URI keep blocking."""
     for group in ("AWSManagedRulesCommonRuleSet", "AWSManagedRulesKnownBadInputsRuleSet"):
-        for name in _counted(group):
+        for name in _counted(group) - URI_RULES_THAT_COUNT:
             assert name.endswith("_BODY"), f"{name} is not a body rule and must keep blocking"
+    assert URI_RULES_THAT_COUNT <= _counted("AWSManagedRulesCommonRuleSet")
     assert not _managed(ACL_RULES["AmazonIpReputationList"]).get("RuleActionOverrides")
+
+
+def test_the_install_path_is_not_refused_for_its_file_extension() -> None:
+    """/install.py, the hook and the bundle are served on purpose; see the comment in edge.yml."""
+    assert "RestrictedExtensions_URIPATH" in _counted("AWSManagedRulesCommonRuleSet")
+    served = [b["PathPattern"] for b in BEHAVIORS if b["TargetOriginId"] == "api"]
+    assert {"/install.py", "/claude_code_hook.py", "/hooks/*", "/dist/*"} <= set(served)
 
 
 def test_the_web_acl_stays_inside_the_capacity_billed_at_the_base_price() -> None:

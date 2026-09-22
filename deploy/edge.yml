@@ -379,7 +379,19 @@ Resources:
         # parses the body as JSON and never renders or runs it, caps it at 1 MB
         # itself, and judging its content is the gate's work, not the firewall's.
         # The rules still count, so their metrics and samples show what they saw,
-        # and every rule on headers, the URI and the query string still blocks.
+        # and every other rule on headers, the URI and the query string still
+        # blocks, with one exception below.
+        #
+        # RestrictedExtensions_URIPATH also counts. It refuses paths ending in
+        # extensions "unsafe to read or run", a list AWS does not publish, and it
+        # exists for configuration files a server exposes by accident. This service
+        # hands out Python files and a zip on purpose: /install.py, the hook at
+        # /hooks/threefold_hook.py and /claude_code_hook.py, and the bundle under
+        # /dist/. Were .py or .zip on that list, the one-command install would
+        # answer 403 at the edge with no error anywhere in either stack. Counting
+        # it everywhere gives up little: any other path reaches either the bucket,
+        # which holds only the published pages, or a function that answers only
+        # its own routes.
         - Name: CommonRuleSet
           Priority: 2
           OverrideAction:
@@ -402,6 +414,9 @@ Resources:
                   ActionToUse:
                     Count: {}
                 - Name: EC2MetaDataSSRF_BODY
+                  ActionToUse:
+                    Count: {}
+                - Name: RestrictedExtensions_URIPATH
                   ActionToUse:
                     Count: {}
           VisibilityConfig:
