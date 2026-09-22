@@ -17,6 +17,7 @@ from threefold.application.rule_drafter import (
     DRAFT_MAX_TOKENS,
     MAX_ATTEMPTS,
     RULE_KEYS,
+    SYSTEM_PROMPT,
     ModelUnavailableError,
     NotALayeringRuleError,
     UndraftableRuleError,
@@ -205,6 +206,42 @@ def test_an_answer_that_parses_but_nests_deeper_than_a_rule_is_refused_and_not_e
         draft(deep, deep)
     assert "levels deep" in refused.value.problems[0]
     assert refused.value.rejected is None, "Something that deep is not serialised into the problem"
+
+
+# --- glob syntax Threefold does not have ----------------------------------
+
+
+def test_a_brace_alternation_is_repaired_because_the_matcher_reads_it_literally() -> None:
+    braces = dict(GOOD, when_path_matches=["**/{domain,model}/**/*.java"])
+    result, client = draft(answer(braces), answer(GOOD))
+    assert result["attempts"] == 2
+    repair = client.prompt(call=1, message=2)
+    assert "{domain,model}" in repair and "literal characters" in repair
+    assert result["rule"]["when_path_matches"] == GOOD["when_path_matches"]
+
+
+def test_a_character_class_twice_is_refused_not_drafted_as_a_rule_that_never_fires() -> None:
+    brackets = dict(GOOD, when_path_matches=["src/[dm]omain/**/*.java"])
+    with pytest.raises(UndraftableRuleError) as refused:
+        draft(answer(brackets), answer(brackets))
+    assert "literal characters" in refused.value.problems[0]
+
+
+def test_braces_in_a_module_pattern_are_repaired_too() -> None:
+    braces = dict(GOOD, forbid_imports=["javax.{persistence,sql}"])
+    result, client = draft(answer(braces), answer(GOOD))
+    assert "forbid_imports" in client.prompt(call=1, message=2)
+    assert result["rule"]["forbid_imports"] == GOOD["forbid_imports"]
+
+
+def test_the_prompt_tells_the_model_braces_and_brackets_are_literal() -> None:
+    assert "braces and brackets" in SYSTEM_PROMPT and "literal" in SYSTEM_PROMPT
+
+
+def test_the_worked_example_in_the_prompt_is_not_a_shipped_rule() -> None:
+    """A model that copies the example must not propose an id already in force."""
+    for shipped in DEFAULT_RULES:
+        assert shipped["id"] not in SYSTEM_PROMPT
 
 
 # --- observe, whatever the model says --------------------------------------
