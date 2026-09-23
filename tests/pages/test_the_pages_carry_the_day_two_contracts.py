@@ -653,7 +653,8 @@ def _measured_rows_per_agent() -> dict[str, set[str]]:
 
 
 def _verdict(rows: set[str]) -> str:
-    return next(verdict for verdict in VERDICT_ORDER if verdict in rows)
+    """An agent with no row this reader understands has measured nothing, and the page may claim nothing."""
+    return next((verdict for verdict in VERDICT_ORDER if verdict in rows), "not-measured")
 
 
 def test_each_agents_enforcement_claim_is_what_the_evidence_measured() -> None:
@@ -680,6 +681,13 @@ def test_each_agents_enforcement_claim_is_what_the_evidence_measured() -> None:
             assert "not measured" in cells, (
                 f"connect.html does not say which route is not measured for {agent}")
     assert "being verified" not in body
+
+    # The phrase alone is cheap: every cell here ends with one "not measured"
+    # about the tools nobody ran. Codex is the agent whose evidence has a route
+    # measured and a route not, so its cell has to name the one that was not.
+    codex = re.search(r'<tr[^>]*data-agent="codex".*?</tr>', body, re.S)
+    assert codex and "shell" in codex.group(0), (
+        "The Codex cell says a route is not measured without saying it is the shell")
 
 
 def test_the_evidence_reader_takes_the_worst_row_and_the_newest_file() -> None:
