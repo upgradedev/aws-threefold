@@ -193,8 +193,10 @@
   var memoryNames = null;
   var memoryHidden = null;
   // JSON.parse only when the stored text changed, so a table of a hundred rows
-  // parses the map once rather than once a row.
-  var namesText = null;
+  // parses the map once rather than once a row. `undefined` means "not read
+  // yet", which `getItem` never returns, so clearing the names does not leave
+  // the cache looking current when storage says null.
+  var namesText;
   var namesCache = {};
 
   // A map of alias to label, with anything that is not one dropped: a label is
@@ -250,7 +252,7 @@
     } catch (err) {
       stored = false;
     }
-    namesText = null;
+    namesText = undefined;
     announceLocalNames();
     return stored;
   }

@@ -42,6 +42,10 @@ function makeEl(id) {
     setAttribute(n, v) { attrs[n] = String(v); },
     getAttribute(n) { return Object.prototype.hasOwnProperty.call(attrs, n) ? attrs[n] : null; },
     hasAttribute(n) { return Object.prototype.hasOwnProperty.call(attrs, n); },
+    // Nothing here parses the markup an element was given, so a search inside
+    // one finds nothing. It answers rather than throwing, because a page that
+    // binds handlers to the rows it just wrote should still be drivable here.
+    querySelectorAll: () => [],
     focus() { document.activeElement = this; },
     addEventListener(type, fn) { (this.listeners = this.listeners || {})[type] = fn; },
     removeChild() {}
