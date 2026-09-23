@@ -348,11 +348,15 @@
   function localNamesToggle() {
     if (!Object.keys(readLocalNames()).length) return '';
     var hidden = localNamesHidden();
-    var says = hidden
+    var reads = 'Your names: ' + (hidden ? 'off' : 'on');
+    // The words on the button start the name a screen reader and a voice
+    // control announce, so someone who says what they can see reaches it
+    // (WCAG 2.5.3, Label in Name). What pressing it does follows.
+    var says = reads + '. ' + (hidden
       ? 'Your own names for projects are hidden. Press to show them beside each alias.'
-      : 'Your own names for projects are shown beside each alias. Press to hide them, for a screenshot or a demo.';
+      : 'Your own names for projects are shown beside each alias. Press to hide them, for a screenshot or a demo.');
     return html`<button type="button" class="tf-chip tf-chip-button" data-tf-names
-      aria-pressed="${hidden ? 'false' : 'true'}" aria-label="${says}" title="${says}">${raw(ICONS.eye)}<span>Your names: ${hidden ? 'off' : 'on'}</span></button>`;
+      aria-pressed="${hidden ? 'false' : 'true'}" aria-label="${says}" title="${says}">${raw(ICONS.eye)}<span>${reads}</span></button>`;
   }
 
   // ----------------------------------------------------------------- fetch
