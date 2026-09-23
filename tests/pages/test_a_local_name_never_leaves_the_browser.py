@@ -106,6 +106,8 @@ function contract(over) {
     '/api/decisions': { status: 200, body: REVIEWABLE },
     '/api/decision': { status: 200, body: DECISION },
     'POST /api/projects/Acme-Billing/reviews': { status: 200, body: { updated: 2, skipped: [] } },
+    'POST /api/projects/Acme-Billing/promote': { status: 200, body: { project: 'Acme-Billing', stage: 'enforce' } },
+    'POST /api/projects/Acme-Billing/demote': { status: 200, body: { project: 'Acme-Billing', stage: 'observe' } },
     '/dist/manifest.json': { status: 200, body: { files: [], bundle_sha256: 'cd'.repeat(32), installer_sha256: 'ab'.repeat(32) } }
   }, over || {}));
 }
@@ -122,6 +124,23 @@ function attr(markup, name) {
   return found;
 }
 """ % {"private": json.dumps(PRIVATE), "other": json.dumps(OTHER)}
+
+# A stack rules.html can be driven against: the rules in force, one drafted
+# rule, and a save that is accepted. Signed in, because saving a draft needs the
+# operator. Nothing here is a real rule or a real project.
+RULES_STACK = r"""
+const RULE = { id: 'billing-domain-stays-pure', description: 'Billing domain classes may not reach persistence',
+  mode: 'observe', when_path_matches: ['**/billing/domain/**/*.java'], forbid_imports: ['javax.persistence'] };
+answer = api({
+  'GET /rules': { status: 200, body: { rules: [RULE], count: 1, is_default: false, refresh_seconds: 30 } },
+  'POST /rules/draft': { status: 200, body: { rule: RULE, validation: { ok: true, errors: [] }, tried: [],
+    source: 'bedrock', model: 'eu.anthropic.claude-haiku-4-5-20251001-v1:0', attempts: 1, project: 'Acme-Billing',
+    saved: false, notes: [], warnings: [] } },
+  'POST /rules': { status: 200, body: { count: 2, refresh_seconds: 30 } }
+});
+location.search = '?project=Acme-Billing';
+store['threefold-session'] = JSON.stringify({ token: 'tok-1', expires_at: new Date(Date.now() + 3600e3).toISOString() });
+"""
 
 # Every screen of the dashboard that names a project.
 NAMING_ROUTES = [
@@ -225,6 +244,50 @@ def test_the_switch_is_absent_until_a_name_is_set_and_then_says_what_it_does(tmp
     assert "Press to show them" in out["afterPress"]
     assert out["hiddenStored"] == "1", "remembered in this browser"
     assert 'aria-pressed="true"' in out["afterSecondPress"] and out["hiddenGone"]
+    # The words on the button start the name it is announced and spoken to by,
+    # so someone using voice control can say what they can see (WCAG 2.5.3).
+    for markup, reads in ((out["withName"], "Your names: on"), (out["afterPress"], "Your names: off")):
+        labels = [value for value in re.findall(r'aria-label="([^"]*)"', markup) if "names for projects" in value]
+        assert labels, "the switch has no accessible name"
+        for label in labels:
+            assert label.startswith(reads), f"{label!r} does not start with the words on the button, {reads!r}"
+
+
+def test_a_browser_that_answers_a_read_and_refuses_a_write_still_keeps_the_names(tmp_path: Path) -> None:
+    """The harder half of blocked storage: storage answers, with what it held before.
+
+    An old private mode and a full quota both look like this. Reading again
+    would hand back the map from before and lose what this tab was just told,
+    so the panel's promise — kept for this tab, at least — would be false.
+    """
+    out = dash(
+        r"""
+  answer = contract();
+  storageWriteBlocked = true;
+  out.written = Threefold.writeLocalNames(NAMES);
+  out.kept = Threefold.readLocalNames();
+  out.shown = Threefold.projectNameText('Acme-Billing');
+  out.hiddenWritten = Threefold.setLocalNamesHidden(true);
+  out.hidden = Threefold.localNamesHidden();
+  out.shownWhileHidden = Threefold.projectNameText('Acme-Billing');
+  Threefold.setLocalNamesHidden(false);
+  out.shownAgain = Threefold.projectNameText('Acme-Billing');
+  await visit('#/projects');
+  out.drew = view();
+  out.storage = Object.keys(store);
+  out.sent = sentText();
+""",
+        tmp_path,
+    )
+    assert out["written"] is False, "a refused write says so rather than appearing to have saved"
+    assert out["kept"] == {"Acme-Billing": PRIVATE, "Acme-Catalog": OTHER}, "kept for this tab"
+    assert out["shown"] == "Acme-Billing · " + PRIVATE
+    assert out["hiddenWritten"] is False and out["hidden"] is True
+    assert out["shownWhileHidden"] == "Acme-Billing", "the switch works even where nothing can be remembered"
+    assert out["shownAgain"] == "Acme-Billing · " + PRIVATE
+    assert PRIVATE in out["drew"] and "Acme-Billing" in out["drew"], "the screen still labels"
+    assert "threefold-local-names" not in out["storage"], "nothing reached storage, which is what the browser refused"
+    assert PRIVATE not in out["sent"] and "aeroplane" not in out["sent"]
 
 
 def test_a_browser_that_blocks_storage_keeps_the_names_for_the_tab_and_draws_the_pages(tmp_path: Path) -> None:
@@ -312,6 +375,133 @@ def test_the_switch_hides_every_name_and_the_screens_read_as_they_did_before(tmp
         assert PRIVATE in markup, f"{route} lost its name when the switch went back on"
     for route, markup in out["hidden"].items():
         assert PRIVATE not in markup and OTHER not in markup, f"{route} still shows a name while they are hidden"
+
+
+def test_a_dialog_and_a_toast_name_a_project_and_the_switch_reaches_both(tmp_path: Path) -> None:
+    """Both outlive the screen under them, so redrawing the screen misses both.
+
+    A dialog is drawn from the state of the screen that opened it and closes
+    with that screen; a toast is written again where it stands. Either way the
+    switch leaves no name of the reader's own on the page.
+    """
+    out = dash(
+        r"""
+  answer = contract();
+  await visit('#/projects/Acme-Billing');
+  await click('promote-open');
+  await tick();
+  out.promote = el('modal-root').innerHTML;
+  await click('demote-open');
+  await tick();
+  out.dialog = el('modal-root').innerHTML;
+  Threefold.setLocalNamesHidden(true);
+  await tick();
+  out.dialogAfter = el('modal-root').innerHTML;
+  Threefold.setLocalNamesHidden(false);
+  await tick();
+
+  await click('demote-open');
+  await click('demote-confirm');
+  await tick();
+  out.toast = el('toast-root').innerHTML;
+  Threefold.setLocalNamesHidden(true);
+  await tick();
+  out.toastHidden = el('toast-root').innerHTML;
+  Threefold.setLocalNamesHidden(false);
+  await tick();
+  out.toastAgain = el('toast-root').innerHTML;
+  out.sent = sentText();
+""",
+        tmp_path,
+        before=stored({"Acme-Billing": PRIVATE}),
+    )
+    assert "Acme-Billing" in out["promote"] and PRIVATE in out["promote"], "the promote dialog names no project"
+    assert "Acme-Billing" in out["dialog"] and PRIVATE in out["dialog"]
+    assert PRIVATE not in out["dialogAfter"], "the dialog kept a name of the reader's own after the switch was pressed"
+    assert out["dialogAfter"] == "", "the dialog belongs to the screen it was opened from, so it goes with it"
+    assert "Acme-Billing" in out["toast"] and PRIVATE in out["toast"]
+    assert "Acme-Billing" in out["toastHidden"] and PRIVATE not in out["toastHidden"], \
+        "the toast kept a name of the reader's own for the rest of its nine seconds"
+    assert PRIVATE in out["toastAgain"], "the toast lost its name when the switch went back on"
+    assert PRIVATE not in out["sent"] and "aeroplane" not in out["sent"]
+    assert any("/demote" in line for line in out["sent"].split("\n")), \
+        "the demotion never reached the service, so the sweep above is passing on nothing"
+
+
+def test_the_switch_reaches_every_panel_the_rules_page_is_already_holding(tmp_path: Path) -> None:
+    """The panels on rules.html keep what they were given until something replaces it.
+
+    A drafted rule, the answer to saving it and the editor's own result all name
+    the project and all stay on screen, so the switch that makes a screenshot
+    safe has to write them again from what the page already read.
+    """
+    out = run(
+        "rules.html",
+        r"""
+  el('draft-description').value = 'Billing domain classes may not reach persistence.';
+  updateDraftCounters();
+  await draftRule();
+  await tick();
+  await save();
+  await tick();
+  await saveDraftedRule();
+  await tick();
+  const panels = () => ({
+    draft: el('draft-result').innerHTML,
+    validation: el('draft-validation').innerHTML,
+    draftSaved: el('draft-save-result').innerHTML,
+    editorSaved: el('save-result').innerHTML,
+    origin: el('rules-origin').innerText || el('rules-origin').textContent,
+    target: el('save-target').innerText || el('save-target').textContent
+  });
+  out.shown = panels();
+  Threefold.setLocalNamesHidden(true);
+  await tick();
+  out.hidden = panels();
+  Threefold.setLocalNamesHidden(false);
+  await tick();
+  out.again = panels();
+  out.sent = calls.map(c => c.method + ' ' + c.url + ' ' + JSON.stringify(c.headers || {}) + ' ' + JSON.stringify(c.body || null)).join('\n');
+""",
+        tmp_path,
+        pathname="/prod/rules.html",
+        before=stored({"Acme-Billing": PRIVATE}) + RULES_STACK,
+    )
+    for where, markup in out["shown"].items():
+        assert "Acme-Billing" in markup, f"{where} names no project, so this test would prove nothing there"
+        assert PRIVATE in markup, f"{where} shows no name of the reader's own"
+    for where, markup in out["hidden"].items():
+        assert PRIVATE not in markup, f"{where} still shows a name of the reader's own after the switch was pressed"
+        assert "Acme-Billing" in markup, f"{where} lost the alias the API knows"
+    for where, markup in out["again"].items():
+        assert PRIVATE in markup, f"{where} lost its name when the switch went back on"
+    assert PRIVATE not in out["sent"] and "aeroplane" not in out["sent"], "neither drafting, saving nor the switch sent a name"
+    assert any("POST" in line and "/rules" in line for line in out["sent"].split("\n")), \
+        "nothing was saved, so the panels above are not the ones a save writes"
+
+
+def test_a_panel_the_page_has_moved_on_from_is_not_written_again(tmp_path: Path) -> None:
+    """The switch writes a panel again only while it still holds what it wrote."""
+    out = run(
+        "rules.html",
+        r"""
+  el('draft-description').value = 'Billing domain classes may not reach persistence.';
+  updateDraftCounters();
+  await draftRule();
+  await tick();
+  out.drafted = el('draft-result').innerHTML;
+  el('draft-result').innerHTML = '<p>Something else entirely.</p>';
+  Threefold.setLocalNamesHidden(true);
+  await tick();
+  out.afterSwitch = el('draft-result').innerHTML;
+""",
+        tmp_path,
+        pathname="/prod/rules.html",
+        before=stored({"Acme-Billing": PRIVATE}) + RULES_STACK,
+    )
+    assert PRIVATE in out["drafted"]
+    assert out["afterSwitch"] == "<p>Something else entirely.</p>", \
+        "the switch put back words the page had already replaced"
 
 
 def test_a_name_carrying_markup_is_escaped_like_every_other_untrusted_string(tmp_path: Path) -> None:
@@ -474,25 +664,44 @@ def test_no_request_no_address_and_no_copied_command_carries_a_name(tmp_path: Pa
 
 
 def test_the_pages_never_put_a_name_where_a_handler_would_read_it_back() -> None:
-    """The fields and commands a handler reads are built from the alias, in the source."""
+    """The same promise, read off the source, so a new sink is caught before a scenario is.
+
+    The tests above are what hold it: they drive the handlers and search every
+    recorded request. This one reads the files, and is written to fail on a
+    sink rather than on how a field is styled on the day.
+    """
+
+    def declaration(source: str, field: str) -> str:
+        lines = [line for line in source.split("\n") if field in line]
+        assert len(lines) == 1, f"{field} is written on {len(lines)} lines, so this check does not know which to read"
+        return lines[0].strip()
+
     dashboard = page_source("dashboard.html")
-    assert 'id="f-project" class="tf-input w-full font-mono" value="${f.project}"' in dashboard
-    assert 'id="connect-name" type="text" class="tf-input w-full font-mono" value="${state.name}"' in dashboard
+    # Each field a handler reads back is given the alias, whatever else is on it.
+    for field, alias in (('id="f-project"', "${f.project}"), ('id="connect-name"', "${state.name}")):
+        line = declaration(dashboard, field)
+        assert f'value="{alias}"' in line, f"{field} is not given the alias to hold:\n{line}"
     assert "'irm ' + base + 'install.py -OutFile threefold.py; py threefold.py connect --project ' + name" in dashboard
     rules = page_source("rules.html")
     assert "const typed = document.getElementById('project-input').value.trim();" in rules
     assert "if (currentProject) url.searchParams.set('project', currentProject); else url.searchParams.delete('project');" in rules
     # The helpers that add a label return markup or plain text for display. None
-    # of them is used to build a path, a query or a body anywhere.
+    # of them builds a path, a query, a body, a command or the value of a field.
+    # Only a line that is a comment is passed over: a sink written as part of a
+    # longer expression, or inside a function of its own, is still a sink.
+    helper = re.compile(r"projectName\(|projectNameText\(|projectShownText\(|projectLabel\(")
+    sinks = ("encodeURIComponent(", "searchParams.set", "fetch(", "T.api(", "Threefold.api(",
+             'data-tf-copy="${', ".value =", "JSON.stringify(")
     for page in ("dashboard.html", "sessions.html", "rules.html", "settings.html", "assets/threefold.js"):
         body = page_source(page)
         for line in body.split("\n"):
-            if not re.search(r"projectName\(|projectNameText\(|projectShown\(|projectShownText\(|projectLabel\(", line):
+            code = line.strip()
+            if code.startswith("//") or code.startswith("*") or code.startswith("/*"):
                 continue
-            if "function " in line or "//" in line.split("project")[0]:
+            if not helper.search(code):
                 continue
-            for sink in ("encodeURIComponent(", "searchParams.set", "fetch(", "T.api(", "data-tf-copy=\"${"):
-                assert sink not in line, f"{page}: a name is built into {sink} here:\n{line.strip()}"
+            for sink in sinks:
+                assert sink not in code, f"{page}: a name is built into {sink} here:\n{code}"
 
 
 # ------------------------------------------------------------ the panel
@@ -596,6 +805,36 @@ def test_clear_all_and_copy_as_json_do_what_they_say(tmp_path: Path) -> None:
     assert PRIVATE not in out["sent"] and "aeroplane" not in out["sent"]
 
 
+def test_clear_all_takes_the_switch_with_it(tmp_path: Path) -> None:
+    """Otherwise the next name saved is invisible, with nothing on screen to say why."""
+    out = settings(
+        r"""
+  el('ln-0').value = 'the paper aeroplane one';
+  saveLocalNames();
+  await tick();
+  Threefold.setLocalNamesHidden(true);
+  await tick();
+  out.hiddenStored = store['threefold-local-names-hidden'];
+  clearLocalNames();
+  await tick();
+  out.flagLeft = 'threefold-local-names-hidden' in store;
+  out.hiddenNow = Threefold.localNamesHidden();
+  el('ln-0').value = 'second breakfast service';
+  saveLocalNames();
+  await tick();
+  out.shown = Threefold.projectNameText('Acme-Billing');
+  out.nav = el('page-nav').innerHTML;
+  out.sent = calls.map(c => c.url).join(' ');
+""",
+        tmp_path,
+    )
+    assert out["hiddenStored"] == "1"
+    assert out["flagLeft"] is False and out["hiddenNow"] is False, "Clear all left every later name hidden"
+    assert out["shown"] == "Acme-Billing · " + OTHER, "the name saved after Clear all is shown"
+    assert "Your names: on" in out["nav"], "and the switch says so"
+    assert OTHER not in out["sent"] and "breakfast" not in out["sent"]
+
+
 def test_the_panel_says_plainly_that_nothing_is_sent_and_that_storage_is_one_browser() -> None:
     body = page_source("settings.html")
     panel = body.split('id="local-names"', 1)[1].split("<!-- WHAT EACH THRESHOLD GATES", 1)[0]
@@ -623,6 +862,27 @@ def test_a_blocked_browser_is_told_the_names_live_only_as_long_as_the_tab(tmp_pa
     assert "blocks site storage" in out["state"] and "go when it closes" in out["state"]
     assert "Nothing was sent to the service" in out["state"]
     assert PRIVATE in out["rows"], "the name still works for as long as the tab is open"
+
+
+def test_a_browser_that_refuses_only_the_write_is_told_the_same_and_keeps_the_name(tmp_path: Path) -> None:
+    """The panel said a name was left out for not being text, and emptied the field."""
+    out = settings(
+        r"""
+  storageWriteBlocked = true;
+  el('ln-0').value = 'the paper aeroplane one';
+  saveLocalNames();
+  await tick();
+  out.state = el('local-names-state').innerHTML;
+  out.rows = el('local-names-rows').innerHTML;
+  out.shown = Threefold.projectNameText('Acme-Billing');
+""",
+        tmp_path,
+    )
+    assert "blocks site storage" in out["state"] and "go when it closes" in out["state"]
+    assert "Nothing was sent to the service" in out["state"]
+    assert "left out" not in out["state"], "nothing was rejected, so nothing is reported as rejected"
+    assert PRIVATE in out["rows"], "the field keeps the name for as long as the tab is open"
+    assert out["shown"] == "Acme-Billing · " + PRIVATE, "and so does every page in the tab"
 
 
 def test_the_panel_lists_the_names_already_stored_when_the_project_list_cannot_be_read(tmp_path: Path) -> None:
