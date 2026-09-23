@@ -23,9 +23,9 @@ such, because the two are not the same evidence.
 - **Statuses seen:** `in_progress` on every `item.started`, then `completed`
   and `failed` - 10, 9 and 1 across the seven runs. `in_progress` was missing
   from the list this file was written with; `parse_events` reads `status` on
-  `item.completed` only, which is why nothing was wrong. `declined` did not appear once, so the branch that reads
-  it as a permission denial is a guard against a status this version never
-  printed, not a measured behaviour.
+  `item.completed` only, which is why nothing was wrong. `declined` did not
+  appear once, so the branch that reads it as a permission denial is a guard
+  against a status this version never printed, not a measured behaviour.
 - **A refused call leaves no item.** The `apply_patch` the hook refused in the
   decisive run produced no `item` of any kind: it is in the hook's own log and
   in `stderr` and nowhere in the JSON. So counting governed calls from the JSON
