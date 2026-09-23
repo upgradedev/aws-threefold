@@ -19,9 +19,12 @@ such, because the two are not the same evidence.
   `--dangerously-bypass-hook-trust` notice and the skills-budget notice arrive
   as one - and carries no `status` at all. `reasoning`, `mcp_tool_call`,
   `web_search` and `todo_list` are still string table only.
-- **Statuses seen:** `completed` and `failed`. `declined` did not appear once,
-  so the branch that reads it as a permission denial is a guard against a
-  status this version never printed, not a measured behaviour.
+- **Statuses seen:** `in_progress` on every `item.started`, then `completed`
+  and `failed`. `in_progress` was missing from the list this file was written
+  with; `parse_events` reads `status` on `item.completed` only, which is why
+  nothing was wrong. `declined` did not appear once, so the branch that reads
+  it as a permission denial is a guard against a status this version never
+  printed, not a measured behaviour.
 - **A refused call leaves no item.** The `apply_patch` the hook refused in the
   decisive run produced no `item` of any kind: it is in the hook's own log and
   in `stderr` and nowhere in the JSON. So counting governed calls from the JSON
@@ -42,11 +45,12 @@ How a Codex run is set up, and why:
 - `--ephemeral`: no session files are written into CODEX_HOME.
 - `--sandbox workspace-write` and `approval_policy='never'`: shell commands
   may write inside the repository and nowhere else, and a command that would
-  need a person's approval fails back to the model instead of waiting. On the
-  Windows host of the 2026-09-23 runs `workspace-write` could not create a
-  process at all (`CreateProcess ... rejected: blocked by policy`), so a matrix
-  on such a host has to pass `--codex-sandbox danger-full-access` and say so in
-  its limits. The default is left as it is: it is the safer of the two, and the
+  need a person's approval fails back to the model instead of waiting. One run
+  on the Windows host of 2026-09-23 got as far as starting a process under
+  `workspace-write` and it was rejected (`CreateProcess ... rejected: blocked
+  by policy`); no other run there reached that point. A matrix that hits the
+  same thing has `--codex-sandbox danger-full-access` and says so in its
+  limits. The default is left as it is: it is the safer of the two, and the
   rows already committed were scored under it.
 - `--dangerously-bypass-hook-trust`: Codex 0.155.0 runs a project hook only
   once someone has trusted that hook (its binary keeps a `trusted_hash` per
