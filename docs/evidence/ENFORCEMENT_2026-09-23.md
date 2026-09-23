@@ -379,9 +379,8 @@ it fixes, and each item below is now what that file says of itself:
 - **Events seen:** `thread.started`, `turn.started`, `item.started`,
   `item.completed`, `turn.completed`. `turn.started` was missing from the list
   that file was written with. No `turn.failed` and no top-level `error` event
-  appeared in any run;
-  the `error`s below are items inside an `item.completed`, which is a different
-  thing and is read by a different branch.
+  appeared in any run; the `error`s below are items inside an `item.completed`,
+  which is a different thing and is read by a different branch.
 - **Items seen:** `agent_message`, `command_execution`, `file_change`, `error`.
   A `file_change` item's shape is `[{"path": "<absolute>", "kind": "add"}]`.
   `error` items also carry warnings, not only failures - the
