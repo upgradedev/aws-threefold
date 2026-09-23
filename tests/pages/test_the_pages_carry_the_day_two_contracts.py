@@ -662,9 +662,11 @@ def test_each_agents_enforcement_claim_is_what_the_evidence_measured() -> None:
 
     Worse would be the reverse: a page saying a deny stops the write for an
     agent nobody ran. Each row is held to the evidence files' result tables.
-    Codex is the case that needs both halves: 2026-09-23 measured one route of
-    four and says the other three were not measured, so the page may say the
-    write was stopped only while it also says what was not.
+    Codex is the case that needs both halves: of the four cells 2026-09-23
+    could have measured - two routes, each under the real hook and under a
+    deny-only one - it measured two and says the other two were not measured,
+    so the page may say the write was stopped only while it also says what was
+    not.
     """
     body = _page("/connect.html")
     for agent, rows in _measured_rows_per_agent().items():
