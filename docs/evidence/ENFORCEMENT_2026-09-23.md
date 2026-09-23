@@ -33,9 +33,11 @@ Read the rows exactly as they are written:
 - **Row 2 is not the governed write.** In runs 4, 5 and 7 the deny-only hook
   refused a shell command that bundled the ungoverned control write with an
   inspection naming the governed file; what those runs show is that the
-  refused command did not run, including the write inside it. Codex never
-  attempted the governed write over the shell in any run, so a deny stopping
-  *that* write over the shell is not measured here.
+  refused command did not run, including the write inside it - from the hook
+  log and from Codex's own `stderr`, since a run takes its sha256 manifest
+  before and after rather than between calls. Codex never attempted the
+  governed write over the shell in any run, so a deny stopping *that* write
+  over the shell is not measured here.
 - **Rows 3 and 4 measure nothing.** The shell was called four times under the
   real hook and every call was allowed; the only `apply_patch` under the
   deny-only hook was for the ungoverned control file and was allowed. A route
@@ -255,9 +257,13 @@ next section instead.
   ungoverned control file seconds earlier, through the same shell and the same
   hook, so the unchanged entity is the refusal's doing.
 - **A deny over the shell stopped the command it refused, in runs 4, 5 and 7**,
-  under the deny-only hook: the refused command carried the control write, that
-  write did not appear, and the control file arrived only when Codex re-issued
-  it by itself afterwards. This is not the governed write; see the Result rows.
+  under the deny-only hook: the refused command carried the control write, and
+  the control file arrived only when Codex re-issued it by itself afterwards -
+  over the shell in runs 4 and 5, over `apply_patch` in run 7, each allowed by
+  the hook. This one is read from the hook log and from Codex's `stderr`, which
+  names the blocked command, and not from a snapshot between calls; what the
+  disk shows is the end state. It is also not the governed write; see the
+  Result rows.
 - **The installer's matcher `apply_patch|Edit|Write|Bash` does reach Codex.**
   Its shell arrives as `tool_name: "Bash"` (every run with a hook call) and its
   patch tool as `tool_name: "apply_patch"` (runs 6 and 7), both inside the
@@ -286,8 +292,10 @@ Marked as inference, and kept out of the section above.
   had arrived at the hook as `Bash`. That the two are the same call is the
   inference; the string in the artifact is the fact. It is the only one of the
   other names the hook knows (`shell`, `local_shell`, `exec_command`,
-  `unified_exec`, `container.exec`) that appears anywhere in these runs, and it
-  never appeared as a `tool_name` at the hook.
+  `unified_exec`, `container.exec`) that appears in any of the seven runs, and
+  it never appeared as a `tool_name` at the hook. `shell` appears once more in
+  the artifacts, in the pre-run wire check, in a payload the script itself
+  composed rather than one Codex sent.
 - **What the agent says about its own reasons.** The last messages quoted here
   are what Codex reported, not what it did; what it did is the file system.
 
