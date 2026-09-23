@@ -281,7 +281,7 @@ def test_the_refused_call_is_in_no_item_so_the_json_alone_undercounts_it(tmp_pat
 
 
 def test_the_isolation_facts_carry_what_ignore_user_config_did_not_keep_out():
-    """Skills and plugins reached every run under the flag, and no check looks for them."""
+    """Five of the seven runs printed their own notice that skills were loaded under the flag, and no check looks for them."""
     facts = codex_agent.isolation_facts()
     assert set(codex_agent.USER_LEVEL_FILES) == {"AGENTS.md", "AGENTS.override.md", "hooks.json"}
     for name in codex_agent.USER_LEVEL_FILES:
