@@ -288,6 +288,75 @@
       </div>
     </div>
 
+    <!-- THE READER'S OWN NAMES FOR THE ALIASES.
+         The ledger knows a project only by its alias, because no real
+         repository name may leave the machine it is on. That is what makes the
+         dashboard unreadable to the person who owns the repositories. These
+         labels are the answer, and the whole point of them is that they never
+         leave this browser: they are written to localStorage by the Save button
+         below and by nothing else, and no request this page makes carries one. -->
+    <div id="local-names" class="rounded-2xl bg-gray-900 border border-gray-800 p-5 space-y-4">
+      <div class="flex flex-wrap items-center justify-between gap-2 border-b border-gray-800 pb-3">
+        <div>
+          <h2 class="text-sm font-semibold text-white">Your own names for these projects</h2>
+          <p class="text-xs text-gray-400 mt-1">
+            The service knows each project only by its alias, so that is what every page, every link and every request uses.
+            Give an alias a name of your own here and every page shows it beside the alias, quieter.
+          </p>
+        </div>
+        <span class="text-xs px-2.5 py-1 rounded-full font-semibold bg-emerald-950 text-emerald-400 border border-emerald-800">THIS BROWSER ONLY</span>
+      </div>
+
+      <div class="p-3 rounded-xl bg-emerald-950/20 border border-emerald-900/40 space-y-1">
+        <p class="text-xs font-semibold text-emerald-300">Nothing here is sent anywhere.</p>
+        <p class="text-[11px] text-gray-400">
+          Save writes to this browser's localStorage under <span class="font-mono text-purple-300">threefold-local-names</span> and does
+          nothing else. No request this page or any other makes carries one of these names: not in a URL, not in a query string, not in a
+          body and not in a header. The service is never told them, so they cannot reach the ledger, a screenshot of a public page, or
+          anyone else.
+        </p>
+        <p class="text-[11px] text-amber-300/90">
+          A browser's storage belongs to that browser on that machine. These names do not follow you to another browser, another machine
+          or a private window, and clearing this site's data deletes them. Keep the copy that matters in a file of your own:
+          <span class="font-mono">Copy as JSON</span> hands you exactly that.
+        </p>
+        <p class="text-[11px] text-gray-400">
+          Any script this page loads can read what is stored here, as it can the operator key. That includes the Tailwind bundle from
+          <span class="font-mono">cdn.tailwindcss.com</span>. Name what you would not mind a script on this page reading.
+        </p>
+      </div>
+
+      <div id="local-names-rows" class="space-y-2">
+        <p class="text-xs text-gray-500">Loading the projects this stack knows…</p>
+      </div>
+
+      <div class="space-y-1">
+        <label for="local-names-json" class="text-xs font-medium text-gray-400 uppercase tracking-wider">Or paste the mapping</label>
+        <p class="text-[11px] text-gray-500">
+          A JSON object of alias to name, for a mapping you keep in a file. It is applied over the fields above when you press Save,
+          so it can name an alias that has no field yet. A name is one line of at most <span id="local-names-max" class="font-mono">60</span>
+          characters; anything that is not text is left out and the count below says how many were.
+        </p>
+        <textarea id="local-names-json" rows="4" spellcheck="false" autocomplete="off"
+                  placeholder='{"Acme-Proj-FB": "the front desk portal"}'
+                  class="w-full bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-xs text-gray-200 font-mono focus:outline-none focus:border-purple-500"></textarea>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-2">
+        <button type="button" onclick="saveLocalNames()" class="px-4 py-2 bg-purple-600 hover:bg-purple-500 font-semibold text-xs rounded-lg text-white shadow-lg shadow-purple-600/20 transition">Save</button>
+        <button type="button" onclick="clearLocalNames()" class="px-3 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs border border-gray-700">Clear all</button>
+        <button type="button" id="local-names-copy" onclick="copyLocalNames(this)" class="px-3 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs border border-gray-700">Copy as JSON</button>
+        <span id="local-names-state" class="text-xs text-gray-500"></span>
+      </div>
+
+      <p class="text-[11px] text-gray-500 border-t border-gray-800 pt-3">
+        The switch in the navigation above turns every name off at once, for a screenshot or a demo, and remembers that in this browser
+        too. It appears as soon as one name is saved. Building the mapping from the checkouts on your own machine:
+        <span class="font-mono text-gray-300">python threefold.py status --names-json</span> prints a JSON object of alias to folder name,
+        ready to paste above.
+      </p>
+    </div>
+
     <!-- WHAT EACH THRESHOLD GATES -->
     <div class="rounded-2xl bg-gray-900 border border-gray-800 p-5 space-y-3">
       <h2 class="text-sm font-semibold text-white">What these numbers change, and what they do not</h2>
@@ -653,10 +722,166 @@
       }
     }
 
+    // ------------------------------- your own names for these projects
+    //
+    // The service knows a project only by its alias; the reader knows their own
+    // repositories. These labels join the two in this browser and nowhere else.
+    // Every line below writes to localStorage through the shared layer and to
+    // nothing else: no value read from these fields is ever put into a URL, a
+    // query string, a request body or a header, here or on any other page.
+
+    // The aliases on screen, in the order they are drawn. The field for
+    // aliases[i] is 'ln-i', so a field is read back by id rather than by a
+    // selector built from an alias the service chose.
+    let localNameAliases = [];
+    // The stack's project list, and why it is missing when it is.
+    let knownProjects = [];
+    let localNamesProblem = '';
+
+    function localNamesMax() {
+      return (window.Threefold && Threefold.LOCAL_NAME_MAX) || 60;
+    }
+
+    function storedLocalNames() {
+      return window.Threefold ? Threefold.readLocalNames() : {};
+    }
+
+    function setLocalNamesState(text, tone) {
+      const el = document.getElementById('local-names-state');
+      if (el) el.innerHTML = '<span class="' + (tone || 'text-gray-400') + '">' + escapeHtml(text) + '</span>';
+    }
+
+    function renderLocalNames() {
+      const rows = document.getElementById('local-names-rows');
+      if (!rows) return;
+      const stored = storedLocalNames();
+      const aliases = [];
+      knownProjects.forEach(name => { if (aliases.indexOf(name) === -1) aliases.push(name); });
+      Object.keys(stored).sort().forEach(name => { if (aliases.indexOf(name) === -1) aliases.push(name); });
+      localNameAliases = aliases;
+      const max = localNamesMax();
+      const note = localNamesProblem
+        ? '<p class="text-[11px] text-amber-300">The project list could not be read (' + escapeHtml(localNamesProblem) +
+          '), so only the aliases this browser already has a name for are listed. Paste a mapping below to add others.</p>'
+        : '';
+      if (!aliases.length) {
+        rows.innerHTML = note +
+          '<p class="text-xs text-gray-500">No project to name yet: this stack listed none and this browser holds none. ' +
+          'Connect a repository, or paste a mapping below.</p>';
+        return;
+      }
+      rows.innerHTML = note + aliases.map((alias, i) =>
+        '<label class="flex flex-wrap items-center gap-2">' +
+          '<span class="font-mono text-xs text-gray-300 w-full sm:w-56 shrink-0 break-all">' + escapeHtml(alias) + '</span>' +
+          '<input id="ln-' + i + '" type="text" maxlength="' + max + '" autocomplete="off" spellcheck="false" ' +
+            'placeholder="your own name for it" value="' + escapeHtml(stored[alias] || '') + '" ' +
+            'class="flex-1 min-w-[12rem] bg-gray-950 border border-gray-800 rounded px-2 py-1 text-xs text-gray-200 focus:outline-none focus:border-purple-500" />' +
+        '</label>'
+      ).join('');
+    }
+
+    function saveLocalNames() {
+      if (!window.Threefold) return;
+      const map = {};
+      localNameAliases.forEach((alias, i) => {
+        // `__proto__` is skipped rather than assigned: a key of that name would
+        // otherwise reach this object's prototype instead of the map.
+        if (alias === '__proto__') return;
+        const field = document.getElementById('ln-' + i);
+        const value = field ? String(field.value == null ? '' : field.value).trim() : '';
+        if (value) map[alias] = value;
+      });
+
+      const box = document.getElementById('local-names-json');
+      const pasted = String((box && box.value) || '').trim();
+      if (pasted) {
+        let parsed;
+        try {
+          parsed = JSON.parse(pasted);
+        } catch (err) {
+          setLocalNamesState('That is not JSON, so nothing was saved and nothing changed: ' + String((err && err.message) || err), 'text-red-400');
+          return;
+        }
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          setLocalNamesState('The pasted text has to be a JSON object of alias to name, such as {"Acme-Proj-FB": "the front desk portal"}. Nothing was saved.', 'text-red-400');
+          return;
+        }
+        Object.keys(parsed).forEach(alias => { if (alias !== '__proto__') map[alias] = parsed[alias]; });
+      }
+
+      const asked = Object.keys(map).length;
+      const stored = Threefold.writeLocalNames(map);
+      const kept = Object.keys(storedLocalNames()).length;
+      if (box) box.value = '';
+      const dropped = asked - kept;
+      const left = dropped > 0
+        ? ' ' + dropped + (dropped === 1 ? ' entry was left out: a name has to be text' : ' entries were left out: a name has to be text') +
+          ', at most ' + localNamesMax() + ' characters, and at most ' + ((window.Threefold && Threefold.LOCAL_NAMES_MAX) || 200) + ' are kept.'
+        : '';
+      setLocalNamesState(
+        stored
+          ? 'Saved in this browser: ' + kept + (kept === 1 ? ' name' : ' names') + '. Nothing was sent to the service.' + left
+          : 'This browser blocks site storage, so the names are kept for this tab only and go when it closes. Nothing was sent to the service.' + left,
+        stored ? 'text-emerald-400' : 'text-amber-400'
+      );
+    }
+
+    function clearLocalNames() {
+      if (!window.Threefold) return;
+      const stored = Threefold.clearLocalNames();
+      const box = document.getElementById('local-names-json');
+      if (box) box.value = '';
+      setLocalNamesState(
+        stored
+          ? 'Cleared from this browser. The pages show the aliases alone again.'
+          : 'This browser blocks site storage, so there was nothing stored here to clear.',
+        stored ? 'text-emerald-400' : 'text-amber-400'
+      );
+    }
+
+    function copyLocalNames(button) {
+      if (!window.Threefold) return;
+      const map = storedLocalNames();
+      const count = Object.keys(map).length;
+      Threefold.copyText(JSON.stringify(map, null, 2), button);
+      setLocalNamesState(
+        count
+          ? 'Copied ' + count + (count === 1 ? ' name' : ' names') + ' as JSON. Keep it in a file of your own: this browser is not a backup.'
+          : 'Nothing is stored yet, so an empty object was copied.',
+        'text-gray-400'
+      );
+    }
+
+    // The aliases to offer a field for. A stack that will not answer is not an
+    // error here: the names already stored are still listed and still editable.
+    async function loadLocalNameProjects() {
+      renderLocalNames();
+      if (!window.Threefold) return;
+      try {
+        const res = await fetch(getApiBase() + '/api/projects', { method: 'GET', headers: authHeaders() });
+        const data = await res.json();
+        if (res.ok && data && Array.isArray(data.projects)) {
+          knownProjects = data.projects
+            .map(p => (p && typeof p.project === 'string' ? p.project : ''))
+            .filter(Boolean);
+          localNamesProblem = '';
+        } else {
+          localNamesProblem = 'HTTP ' + res.status;
+        }
+      } catch (err) {
+        localNamesProblem = 'the service could not be reached';
+      }
+      renderLocalNames();
+    }
+
     renderNav();
     linkToSpec();
     renderSignInState();
     renderOperatorKeyState();
+    const maxNote = document.getElementById('local-names-max');
+    if (maxNote) maxNote.textContent = String(localNamesMax());
+    if (window.Threefold) Threefold.onLocalNamesChange(renderLocalNames);
+    loadLocalNameProjects();
     document.getElementById('apiBaseInput').value = DEFAULT_API_BASE;
     loadPolicy();
   </script>
