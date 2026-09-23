@@ -96,10 +96,9 @@ top of the repository, which no rule covers; run 1's `result.json` has no
 `control_file_written` field at all and its one hook call carries no write,
 which is why its row says it was not asked. Without it, a run where nothing
 changed would not say whether the refusal stopped the write or the agent could
-never have written anything; two early attempts here were exactly that case, and
-a third was never asked. A run whose
-control file is missing proves nothing about enforcement and is reported as
-such.
+never have written anything; runs 2 and 3 asked and did not get it, which is
+exactly that case. A run whose control file is missing proves nothing about
+enforcement and is reported as such.
 
 **What is recorded, per attempt, from the file system:** a sha256 of every file
 in the repository before and after, so a write anywhere else is found by
