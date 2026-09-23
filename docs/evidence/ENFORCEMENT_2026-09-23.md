@@ -371,10 +371,11 @@ On this platform Codex runs its commands through PowerShell
 in a Codex call are `Set-Content`, `Add-Content`, `Out-File` and `Move-Item`
 as much as `>`, `>>` and `tee`.
 
-## What the benchmark's Codex support should be corrected on
+## What the benchmark's Codex support was corrected on
 
 `benchmark/codex_agent.py` was written against 0.155.0 without running it, from
-the binary's string table. Against these runs:
+the binary's string table. These runs are the first that ran it, and each item
+below is now what that file says of itself:
 
 - **Events seen:** `thread.started`, `turn.started`, `item.started`,
   `item.completed`, `turn.completed`. `turn.started` is not in its event list
@@ -393,11 +394,12 @@ the binary's string table. Against these runs:
   log and in `stderr`. Counting governed calls from the JSON alone undercounts
   exactly the calls that matter, which is why the harness reads the hook's own
   log beside the JSON for a Threefold run.
-- **Isolation is narrower than it reads.** `USER_LEVEL_FILES` names `AGENTS.md`,
+- **Isolation is narrower than it read.** `USER_LEVEL_FILES` names `AGENTS.md`,
   `AGENTS.override.md` and `hooks.json`, and those are all the runner looks
   for - but the runs show skills and plugins from `CODEX_HOME` reaching a run
-  despite `--ignore-user-config`, so the isolation facts recorded with every
-  row understate what was in the context.
+  despite `--ignore-user-config`, so a row's isolation facts understated what
+  was in the context. `isolation_facts` now records `skills_and_plugins`, so
+  every row carries what the check does not cover.
 
 ## Repeating this
 
