@@ -270,7 +270,14 @@
     return stored;
   }
 
-  function clearLocalNames() { return writeLocalNames({}); }
+  // Clear all takes the switch with the names: a name saved after this would
+  // otherwise be invisible, with the switch gone from the navigation — it is
+  // drawn only once a name is set — and nothing on screen to explain it.
+  function clearLocalNames() {
+    var namesGone = writeLocalNames({});
+    var switchGone = setLocalNamesHidden(false);
+    return namesGone && switchGone;
+  }
 
   function localNamesHidden() {
     if (hiddenMemoryOnly) return memoryHidden === true;
