@@ -159,10 +159,14 @@ depend on the network.
 
 **Does a deny stop the write?** Measured per agent, on the file system, on
 2026-09-21: in Claude Code 2.1.220 and in the Antigravity desktop app the
-refused file was not created. Codex was not measured, because its account had
-reached its usage limit, so no claim is made for it and its edits count as
-governed at commit time only. Method and results:
-[`docs/evidence/ENFORCEMENT_2026-09-21.md`](docs/evidence/ENFORCEMENT_2026-09-21.md).
+refused file was not created. Codex CLI 0.155.0 was measured on 2026-09-23, in
+one run: the hook refused an `apply_patch` that added `boto3` to a governed
+file, and the file's sha256 was unchanged afterwards. For Codex that is one
+route, one run; the shell route and a refusal from a hook that makes no network
+call are not measured. Method and results:
+[`docs/evidence/ENFORCEMENT_2026-09-21.md`](docs/evidence/ENFORCEMENT_2026-09-21.md)
+and
+[`docs/evidence/ENFORCEMENT_2026-09-23.md`](docs/evidence/ENFORCEMENT_2026-09-23.md).
 
 **Does Threefold change what an agent does?** Measured on 2026-09-22. Claude
 Code ran headless on six synthetic Acme tasks, each tempting a governed

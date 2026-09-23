@@ -87,7 +87,7 @@
   > write a domain class that imports a persistence framework, and is refused
   > before the write, told which rule and what to do instead. We checked on
   > the file system that a refused file is not created, for Claude Code and for
-  > Antigravity. Codex has not been measured yet, so we make no claim for it."
+  > Antigravity, and for Codex once, over its patch tool."
 
 ## Scene 5: running it, and what the benchmark says (2:15 to 2:45)
 
@@ -121,7 +121,7 @@
 | A promoted sandbox refuses a real hook's call, and a demoted one records it | [PRIMARY, 2026-09-22] `docs/evidence/PROBES_2026-09-22.md`, group "application": a hook `Write` of `import boto3` into `src/domain/` answered `APPROVED` with the would-refuse recorded before promotion, `BLOCKED_BOUNDARY_VIOLATION` with `project_stage` `enforce` after it, and `APPROVED` again after demotion. The probe's sessions are named `probe-<run id>-*`, not `sim-` |
 | The walkthrough's last call is decided by the promotion | `dashboard.html` sends it with `session_id` from `T.newSessionId('try-')`, so `application/projects.py`, `stage_applies`, applies the project's stage to it as to any hook's call. `tests/pages/test_the_walkthrough_proves_the_promotion.py` sends that call to a fresh sandbox before and after promoting it: `APPROVED` with `project_stage` `observe`, then `BLOCKED_BOUNDARY_VIOLATION` with `enforce` |
 | Visitors can promote only sandbox projects on the public stack | `infrastructure/security_middleware.py`: a project write is open without a key only where reads are public and the name is `Acme-Sandbox-<8 hex>`; the public stack has no operator key [STATE-FILE] |
-| A refused file is not created, for Claude Code and Antigravity; Codex not measured | [STATE-FILE], `docs/evidence/ENFORCEMENT_2026-09-21.md` |
+| A refused file is not created: Claude Code and Antigravity, and Codex over its patch tool | [STATE-FILE], `docs/evidence/ENFORCEMENT_2026-09-21.md` and `docs/evidence/ENFORCEMENT_2026-09-23.md`. Codex is one run, over `apply_patch`; its shell route is not measured |
 | Behind CloudFront and AWS WAF | [PRIMARY, 2026-09-22] `aws cloudfront list-distributions`: the distribution behind `d1og72wpk4aqig.cloudfront.net` is `Deployed` with the web ACL `threefold-prod-edge-web-acl` attached |
 | Ten CloudWatch alarms | [PRIMARY, 2026-09-22] `aws cloudwatch describe-alarms --alarm-name-prefix threefold-prod-`: 10 alarms, all `OK` |
 | Point-in-time recovery | [PRIMARY, 2026-09-22] `aws dynamodb describe-continuous-backups`: `ENABLED` |

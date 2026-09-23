@@ -1249,6 +1249,15 @@ def hook_check(condition: str, metrics: Mapping[str, Any], ledger: Optional[Mapp
     with Claude Code's list every Codex run would look as though it made no
     governed call and could never be caught without its hook. Codex's hook
     events are the per-run wrapper's log (codex_agent.read_hook_log).
+
+    For Codex that count is a floor, not a total. The 2026-09-23 runs showed
+    that a call the hook refused leaves no item in `codex exec --json` at all,
+    so `governed_calls` is short by exactly the refused calls - the ones this
+    check is about. It is safe in the direction that matters: `hook_missing`
+    asks whether a run with governed calls left no trace of the hook, and the
+    hook's own log is read beside the JSON (read_agent_transcript), so a run
+    whose only governed call was refused still counts as one where the hook
+    fired. A reader who wants the number of governed calls wants the log.
     """
     if not uses_threefold(condition):
         return {"hook_fired": None, "hook_missing": False, "governed_calls": None, "governance_observed": None}

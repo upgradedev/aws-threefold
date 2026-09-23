@@ -614,33 +614,63 @@ def test_observe_mode_is_described_as_the_hook_runs_it(tmp_path: Path) -> None:
         assert claim not in _plain(page) and claim not in _plain(readme), f"Still claimed: {claim!r}"
 
 
-def _measured_per_agent() -> dict[str, str]:
-    """Reads the result table of the enforcement evidence, one verdict per agent."""
-    evidence = (ROOT / "docs" / "evidence" / "ENFORCEMENT_2026-09-21.md").read_text(encoding="utf-8")
+# The enforcement evidence, oldest first. Each file's result table is read the
+# same way; a later file supersedes an earlier one for the agents it names, so
+# 2026-09-23, which measured Codex, is what the Codex row is held to and
+# 2026-09-21's "not measured" row for Codex stops voting. An agent no later
+# file names keeps the verdict of the file that did name it.
+EVIDENCE_FILES = ("ENFORCEMENT_2026-09-21.md", "ENFORCEMENT_2026-09-23.md")
+
+# The worst row an agent has is the verdict a page may claim: a single row
+# showing a write that happened anyway outranks any number that were stopped,
+# and a stopped row outranks a route nobody ran.
+VERDICT_ORDER = ("wrote-anyway", "stopped", "not-measured")
+
+
+def _rows_in(evidence: str) -> dict[str, set[str]]:
+    """Every result row of one evidence file, as a verdict per agent."""
     names = {"Claude Code": "claude-code", "Codex CLI": "codex", "Codex": "codex", "Antigravity": "antigravity"}
-    verdicts: dict[str, set[str]] = {}
+    rows: dict[str, set[str]] = {}
     for line in evidence.splitlines():
         cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
         if len(cells) != 5 or cells[0] not in names:
             continue
         happened = cells[4].strip("*").lower()
-        verdicts.setdefault(names[cells[0]], set()).add(
+        rows.setdefault(names[cells[0]], set()).add(
             "stopped" if happened == "no" else "not-measured" if happened == "not measured" else "wrote-anyway"
         )
-    assert verdicts, "No result rows were read from the evidence file, so this test proves nothing"
-    return {agent: (found.pop() if len(found) == 1 else "mixed") for agent, found in verdicts.items()}
+    return rows
+
+
+def _measured_rows_per_agent() -> dict[str, set[str]]:
+    """The rows that govern each agent, from the newest evidence file that names it."""
+    governing: dict[str, set[str]] = {}
+    for name in EVIDENCE_FILES:
+        for agent, rows in _rows_in((ROOT / "docs" / "evidence" / name).read_text(encoding="utf-8")).items():
+            governing[agent] = rows
+    assert governing, "No result rows were read from the evidence files, so this test proves nothing"
+    return governing
+
+
+def _verdict(rows: set[str]) -> str:
+    """An agent with no row this reader understands has measured nothing, and the page may claim nothing."""
+    return next((verdict for verdict in VERDICT_ORDER if verdict in rows), "not-measured")
 
 
 def test_each_agents_enforcement_claim_is_what_the_evidence_measured() -> None:
     """The table said "being verified" for all three after two had been measured.
 
     Worse would be the reverse: a page saying a deny stops the write for an
-    agent nobody ran. Each row is held to the evidence file's result table.
+    agent nobody ran. Each row is held to the evidence files' result tables.
+    Codex is the case that needs both halves: of the four cells 2026-09-23
+    could have measured - two routes, each under the real hook and under a
+    deny-only one - it measured two and says the other two were not measured,
+    so the page may say the write was stopped only while it also says what was
+    not.
     """
     body = _page("/connect.html")
-    measured = _measured_per_agent()
-    assert measured.get("codex") == "not-measured"
-    for agent, verdict in measured.items():
+    for agent, rows in _measured_rows_per_agent().items():
+        verdict = _verdict(rows)
         row = re.search(rf'<tr[^>]*data-agent="{agent}"[^>]*data-enforcement="([a-z-]+)"[^>]*>(.*?)</tr>', body, re.S)
         assert row, f"connect.html has no enforcement row for {agent}"
         claimed, cells = row.groups()
@@ -648,8 +678,33 @@ def test_each_agents_enforcement_claim_is_what_the_evidence_measured() -> None:
         if verdict == "stopped":
             assert "stops the write" in cells
         else:
-            assert "stops the write" not in cells and "not measured" in cells
+            assert "stops the write" not in cells
+        if verdict != "stopped" or "not-measured" in rows:
+            assert "not measured" in cells, (
+                f"connect.html does not say which route is not measured for {agent}")
     assert "being verified" not in body
+
+    # The phrase alone is cheap: every cell here ends with one "not measured"
+    # about the tools nobody ran. Codex is the agent whose evidence has a route
+    # measured and a route not, so its cell has to name the one that was not.
+    codex = re.search(r'<tr[^>]*data-agent="codex".*?</tr>', body, re.S)
+    assert codex and "shell" in codex.group(0), (
+        "The Codex cell says a route is not measured without saying it is the shell")
+
+
+def test_the_evidence_reader_takes_the_worst_row_and_the_newest_file() -> None:
+    """The two rules the reader above runs on, on rows rather than on the files."""
+    assert _verdict({"stopped", "not-measured"}) == "stopped"
+    assert _verdict({"wrote-anyway", "stopped"}) == "wrote-anyway"
+    assert _verdict({"not-measured"}) == "not-measured"
+    table = ("| Agent | Version | Route | Hook called | Write happened anyway |\n"
+             "|---|---|---|---|---|\n"
+             "| Codex CLI | 0.155.0 | `apply_patch` | yes | **no** |\n"
+             "| Codex CLI | 0.155.0 | shell (`Bash`) | yes | not measured |\n")
+    assert _rows_in(table) == {"codex": {"stopped", "not-measured"}}
+    governing = _measured_rows_per_agent()
+    assert _verdict(governing["codex"]) == "stopped", "2026-09-23 measured Codex; 2026-09-21 no longer decides it"
+    assert "not-measured" in governing["codex"], "The unmeasured Codex routes have to stay in the table"
 
 
 # ------------------------------------------------------------- openapi.json
@@ -731,7 +786,13 @@ def test_the_readme_prints_no_test_count() -> None:
     assert not re.search(r"\b\d+\s+(tests|passed)\b", readme)
 
 
-def test_the_readme_claims_no_enforcement_for_codex() -> None:
+def test_the_readme_says_for_codex_what_was_measured_and_what_was_not() -> None:
+    """One route, one run. The README said Codex was not measured at all until 2026-09-23."""
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    assert "Codex was not measured" in readme
+    claim = " ".join(readme.split("**Does a deny stop the write?**", 1)[1].split("\n\n", 1)[0].split())
+    assert _verdict(_measured_rows_per_agent()["codex"]) == "stopped", "The evidence no longer says stopped for Codex"
+    assert "Codex was not measured" not in readme
+    assert "one run" in claim, "The README does not say the Codex claim rests on one run"
+    assert "not measured" in claim, "The README does not say which Codex routes were not measured"
+    assert "docs/evidence/ENFORCEMENT_2026-09-23.md" in claim
     assert "being verified" not in readme

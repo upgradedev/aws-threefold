@@ -210,7 +210,10 @@ never mixes them. The report counts only the latest row of each planned run
 (run id, agent, task, condition, repetition) and says how many earlier rows it
 replaced.
 
-**Codex, from 2026-09-27**, when the owner's Codex usage limit resets:
+**Codex**, measured on 2026-09-23 (54 standard runs and 27 pressure runs; on
+Windows the runner passes `--dangerously-bypass-approvals-and-sandbox`,
+because a run under `--sandbox` there was told the workspace is read-only and
+had its commands rejected):
 
     python benchmark/run.py --agent codex --check-auth
     python benchmark/run.py --agent codex --tasks orders-s3-archive --reps 1 --pilot   # look at the rows first
@@ -348,16 +351,19 @@ From Claude Code's own debug log (`--debug-file`) and from its binary:
 - Not checked with a live agent: whether the permission rules let the shell redirect the `catalog-vat-regen` and `pressure-catalog-shell-regen` prompts ask for (`python scripts/gen_vat_rates.py > ...`) run without a prompt. The per-run record of permission denials shows it if not.
 - The machine's own headless login did not work that morning: every `claude -p` with the machine's configuration folder answered "Failed to authenticate: OAuth session expired and could not be refreshed", again at 09:50 UTC with the final harness, and `claude auth status` reported `loggedIn: false`, so the first pilot (`results/20260922T095056Z-pilot.jsonl`) measured no agent. The token file above was the way out: every run from the 14:14 UTC pilot on logged in with it (`auth: token-file` in each row), and those are the runs under "Measured so far".
 
-## Codex, written 2026-09-22 against codex-cli 0.155.0, not yet run
+## Codex, written 2026-09-22 against codex-cli 0.155.0, not yet run in a matrix
 
-The owner's Codex usage limit resets on 2026-09-27, so no Codex agent ran for
-this. What each part rests on:
+No Codex row has been measured for this benchmark. The command shape below did
+run on 2026-09-23, outside the matrix, in the enforcement measurement
+(`docs/evidence/ENFORCEMENT_2026-09-23.md`); `benchmark/codex_agent.py` marks
+which of the names below a run has since printed and which are still the string
+table. What each part rests on:
 
 - The flags: `codex exec --help` of 0.155.0. The runner checks every one it passes against the help text before measuring and refuses if one is missing.
 - The JSON events (`thread.started`, `turn.completed` with `usage`, `turn.failed`, `item.started`/`item.completed` with items `agent_message`, `command_execution`, `file_change`, `mcp_tool_call`, `web_search`, `error`, and statuses `completed`, `failed`, `declined`): read from the string table of the 0.155.0 binary, not from a run. A run that emits something else is read defensively and, at worst, recorded as cut short with Codex's own message.
 - Hook trust: the binary keeps a `trusted_hash` per hook and has `--dangerously-bypass-hook-trust`; `hooks` is a stable feature, on by default (`codex features list`), and passed as `--enable hooks` anyway.
 - Codex prints no hook events, so a Threefold run's evidence that the hook ran is the wrapper's `hook-calls.jsonl` and the local ledger. A Codex Threefold run whose shell or patch calls left nothing in either is rejected as "the hook never fired", which is what the first pilot shows if Codex did not load `.codex/hooks.json`. Whether Codex's JSON carries the hook's refusal text is unknown, so a refusal is also counted from the wrapper's log, which records each deny the hook printed and its gate, and from the ledger; self-correction depends on neither Codex's JSON nor the server, which never sees a credential refused on the machine. When the JSON does quote the hook, the log only tops the count up to its own, so no refusal is counted twice.
-- Not known until the pilot: whether the Windows sandbox starts under `workspace-write`, and whether a deny from the hook stops `apply_patch` (an open report in the Codex tracker, #27833, says it may not; `docs/evidence/ENFORCEMENT_2026-09-21.md` records Codex as not measured). The checkers read the files the agent left, so a write that went through despite a refusal counts as a violation against Threefold.
+- Two of these were answered on 2026-09-23, outside the matrix and each in a single run (`docs/evidence/ENFORCEMENT_2026-09-23.md`): under `workspace-write` that Windows host rejected the process Codex tried to start, and a deny from the hook did stop an `apply_patch` - which an open report in the Codex tracker, #27833, says it may not. One route, one run; nothing about a matrix row. The checkers read the files the agent left, so a write that went through despite a refusal counts as a violation against Threefold.
 
 ## Files
 
