@@ -166,7 +166,10 @@ so the rollout had to show what a rule would stop before it stops anything.
   (`docs/evidence/BENCHMARK_2026-09-22*.md`). What is still missing is another
   agent (Codex and Antigravity are unmeasured), a task set someone else wrote,
   and more than 18 or 9 runs a cell.
-- Measure Codex enforcement once its account resets.
+- Measure the three Codex enforcement cells 2026-09-23 did not reach: a
+  refusal on the governed write over the shell, under the real hook and under a
+  deny-only one, and one over `apply_patch` from a hook that makes no network
+  call.
 - Price each call by the model actually in use, and let the session ceiling and
   loop window come from the policy, as the settings page already admits they do
   not [STATE-FILE].

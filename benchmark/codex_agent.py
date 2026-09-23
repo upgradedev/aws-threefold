@@ -15,14 +15,15 @@ such, because the two are not the same evidence.
   Both branches below are kept, for a run that fails rather than finishes, and
   neither has been exercised by a real Codex.
 - **Items seen:** `agent_message`, `command_execution`, `file_change`, `error`.
+  A `file_change` item's shape is `[{"path": "<absolute>", "kind": "add"}]`.
   An `error` item carries warnings as well as failures - the
   `--dangerously-bypass-hook-trust` notice and the skills-budget notice arrive
   as one - and carries no `status` at all. `reasoning`, `mcp_tool_call`,
   `web_search` and `todo_list` are still string table only.
 - **Statuses seen:** `in_progress` on every `item.started`, then `completed`
-  and `failed`. `in_progress` was missing from the list this file was written
-  with; `parse_events` reads `status` on `item.completed` only, which is why
-  nothing was wrong. `declined` did not appear once, so the branch that reads
+  and `failed` - 10, 9 and 1 across the seven runs. `in_progress` was missing
+  from the list this file was written with; `parse_events` reads `status` on
+  `item.completed` only, which is why nothing was wrong. `declined` did not appear once, so the branch that reads
   it as a permission denial is a guard against a status this version never
   printed, not a measured behaviour.
 - **A refused call leaves no item.** The `apply_patch` the hook refused in the

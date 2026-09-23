@@ -92,8 +92,9 @@ here-string, and writing to an ungoverned path and moving the file into place -
 so each is measured rather than waited for.
 
 **The control write.** Both committed prompts first ask for `NOTES.md` at the
-top of the repository, which no rule covers; run 1 predates that and was never
-asked for one, which is why its row says so. Without it, a run where nothing
+top of the repository, which no rule covers; run 1's `result.json` has no
+`control_file_written` field at all and its one hook call carries no write,
+which is why its row says it was not asked. Without it, a run where nothing
 changed would not say whether the refusal stopped the write or the agent could
 never have written anything; two early attempts here were exactly that case, and
 a third was never asked. A run whose
@@ -367,39 +368,17 @@ above and run 7's relative `*** Add File: NOTES.md`.
 
 On this platform Codex runs its commands through PowerShell
 (`pwsh.exe -Command …`, run 2's `stderr`), so a Codex shell write can be a
-cmdlet rather than a redirect: every write that reached the hook in these runs
-was a `Set-Content`, and none was `>`, `>>` or `tee`.
+cmdlet rather than a redirect: the only write cmdlet that reached the hook in
+these runs was `Set-Content`, and no shell call used `>`, `>>` or `tee`.
 
 ## What the benchmark's Codex support was corrected on
 
 `benchmark/codex_agent.py` was written against 0.155.0 without running it, from
 the binary's string table. These runs are the first that ran the command shape
-it fixes, and each item below is now what that file says of itself:
-
-- **Events seen:** `thread.started`, `turn.started`, `item.started`,
-  `item.completed`, `turn.completed`. `turn.started` was missing from the list
-  that file was written with. No `turn.failed` and no top-level `error` event
-  appeared in any run; the `error`s below are items inside an `item.completed`,
-  which is a different thing and is read by a different branch.
-- **Items seen:** `agent_message`, `command_execution`, `file_change`, `error`.
-  A `file_change` item's shape is `[{"path": "<absolute>", "kind": "add"}]`.
-  `error` items also carry warnings, not only failures - the
-  `--dangerously-bypass-hook-trust` notice and the skills-budget notice both
-  arrive as one - and they carry no `status`.
-- **Statuses seen:** `in_progress` on every `item.started`, then `completed`
-  and `failed` - 10, 9 and 1 across the seven `events.jsonl`. `declined`, which
-  `parse_events` reads as a permission denial, did not appear once.
-- **A refused call leaves no item.** The `apply_patch` the hook refused in run
-  6 produced no `item` of any kind in the JSON: it is visible only in the hook's
-  log and in `stderr`. Counting governed calls from the JSON alone undercounts
-  exactly the calls that matter, which is why the harness reads the hook's own
-  log beside the JSON for a Threefold run.
-- **Isolation is narrower than it read.** `USER_LEVEL_FILES` names `AGENTS.md`,
-  `AGENTS.override.md` and `hooks.json`, and those are all the runner looks
-  for - but five runs printed their own notice that skills were in context
-  despite `--ignore-user-config`, so a row's isolation facts understated what
-  was in the context. `isolation_facts` now records `skills_and_plugins`, so
-  every row carries what the check does not cover.
+it fixes. What they corrected - the events, the items and their shapes, the
+statuses, the refused call that leaves no item, and how narrow the isolation
+check is - is recorded in that file's own docstring, beside the code that reads
+them, rather than copied here.
 
 ## Repeating this
 
