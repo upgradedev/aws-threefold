@@ -13,10 +13,17 @@ Nothing it does touches this repository, the owner's `~/.threefold`, or any
 real project. Every run gets a throwaway git repository under `--root`, with
 `THREEFOLD_HOME`, `HOME` and `USERPROFILE` pointed inside it. `CODEX_HOME` is
 the only path left pointing at the owner's folder, because `codex exec
---ignore-user-config` reads the login from it and nothing else; the run also
-refuses to start if that folder holds a file that would reach every run
-(`AGENTS.md`, `AGENTS.override.md`, `hooks.json`), because such a file could
-be the reason for whatever the run does.
+--ignore-user-config` reads the login from it; the run also refuses to start
+if that folder holds a non-empty file that would reach every run (`AGENTS.md`,
+`AGENTS.override.md`, `hooks.json`), because such a file could be the reason
+for whatever the run does.
+
+The login is not all `CODEX_HOME` gives a run, and this script does not close
+that gap. Five of the 2026-09-23 runs printed a notice of their own that
+skills were loaded and their descriptions shortened, under
+`--ignore-user-config`, so `CODEX_HOME/skills` and `CODEX_HOME/plugins` are in
+a run's context whatever the flags say. None of them is a hook; they are
+named in the evidence file's limits rather than checked for here.
 
 Two conditions, so a refusal that is not obeyed cannot hide behind a server:
 
