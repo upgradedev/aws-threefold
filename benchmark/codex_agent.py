@@ -1,17 +1,36 @@
 """Codex CLI in the benchmark: the headless command, the checks before a run, and reading what it printed.
 
-Written on 2026-09-22 against codex-cli 0.155.0 without running an agent: the
-owner's Codex usage limit resets on 2026-09-27, and the benchmark is run from
-then. So nothing here was observed in a Codex run. The flags come from `codex
-exec --help` of 0.155.0. The event and item names (`thread.started`,
-`turn.completed`, `turn.failed`, `item.started`, `item.completed`, `error`;
-items `agent_message`, `reasoning`, `command_execution`, `file_change`,
-`mcp_tool_call`, `web_search`, `todo_list`, `error`; statuses `completed`,
-`failed`, `declined`; usage `input_tokens`, `cached_input_tokens`,
-`output_tokens`, `reasoning_output_tokens`) were read from the string table of
-its binary, next to `exec/src/lib.rs`, not from a run. The first Codex pilot is
-what confirms them, and the runner checks every flag it passes against `codex
-exec --help` before it measures anything.
+Written on 2026-09-22 against codex-cli 0.155.0 without running an agent, from
+the string table of its binary next to `exec/src/lib.rs`. The runs of
+2026-09-23, recorded in `docs/evidence/ENFORCEMENT_2026-09-23.md`, are the
+first that ran it, and the names below are corrected against them: what a run
+printed is marked as seen, and what is still only the string table is marked as
+such, because the two are not the same evidence.
+
+- **Events seen in a run:** `thread.started`, `turn.started`, `item.started`,
+  `item.completed`, `turn.completed`. `turn.started` was missing from the list
+  this file was written with; `parse_events` ignores it, which is why nothing
+  was wrong, not because it was known.
+- **Events not seen in any run:** `turn.failed` and a top-level `error` event.
+  Both branches below are kept, for a run that fails rather than finishes, and
+  neither has been exercised by a real Codex.
+- **Items seen:** `agent_message`, `command_execution`, `file_change`, `error`.
+  An `error` item carries warnings as well as failures - the
+  `--dangerously-bypass-hook-trust` notice and the skills-budget notice arrive
+  as one - and carries no `status` at all. `reasoning`, `mcp_tool_call`,
+  `web_search` and `todo_list` are still string table only.
+- **Statuses seen:** `completed` and `failed`. `declined` did not appear once,
+  so the branch that reads it as a permission denial is a guard against a
+  status this version never printed, not a measured behaviour.
+- **A refused call leaves no item.** The `apply_patch` the hook refused in the
+  decisive run produced no `item` of any kind: it is in the hook's own log and
+  in `stderr` and nowhere in the JSON. So counting governed calls from the JSON
+  alone undercounts exactly the calls that matter, and for a Threefold run
+  `harness.read_agent_transcript` reads the per-run hook log beside the JSON
+  (`read_hook_log`, `merge_hook_log`) rather than trusting the events.
+
+The flags come from `codex exec --help` of 0.155.0, and the runner checks every
+flag it passes against that help before it measures anything.
 
 How a Codex run is set up, and why:
 
@@ -23,7 +42,12 @@ How a Codex run is set up, and why:
 - `--ephemeral`: no session files are written into CODEX_HOME.
 - `--sandbox workspace-write` and `approval_policy='never'`: shell commands
   may write inside the repository and nowhere else, and a command that would
-  need a person's approval fails back to the model instead of waiting.
+  need a person's approval fails back to the model instead of waiting. On the
+  Windows host of the 2026-09-23 runs `workspace-write` could not create a
+  process at all (`CreateProcess ... rejected: blocked by policy`), so a matrix
+  on such a host has to pass `--codex-sandbox danger-full-access` and say so in
+  its limits. The default is left as it is: it is the safer of the two, and the
+  rows already committed were scored under it.
 - `--dangerously-bypass-hook-trust`: Codex 0.155.0 runs a project hook only
   once someone has trusted that hook (its binary keeps a `trusted_hash` per
   hook), and a repository made a minute ago for one run has no such record.
@@ -55,16 +79,33 @@ REQUIRED_EXEC_FLAGS = (
 SANDBOXES = ("workspace-write", "danger-full-access")
 DEFAULT_SANDBOX = "workspace-write"
 
-# Files in CODEX_HOME that would reach every run whatever the flags say, as far
-# as can be told without running Codex: the user-level instructions Codex adds
-# to every prompt, and a user-level hooks file, which could send a run's calls
-# to the owner's own Threefold stack. `--ignore-user-config` names config.toml
-# only, so the runner refuses to measure while any of these is present.
+# Files in CODEX_HOME that reach every run whatever the flags say: the
+# user-level instructions Codex adds to every prompt, and a user-level hooks
+# file, which could send a run's calls to the owner's own Threefold stack.
+# `--ignore-user-config` names config.toml only, so the runner refuses to
+# measure while any of these is present.
+#
+# This list is not everything that reaches a run, and `isolation_facts` says so
+# with every row. Five of the 2026-09-23 runs printed a notice of their own
+# that skills were loaded and their descriptions shortened, under
+# `--ignore-user-config`, so `CODEX_HOME/skills` and `CODEX_HOME/plugins`
+# survive the flag. None of them is a hook and none changed an outcome there,
+# but they are context this runner does not control and does not look for.
 USER_LEVEL_FILES = ("AGENTS.md", "AGENTS.override.md", "hooks.json")
 
 # The items that are tool calls, and which of them the Threefold hook governs:
 # `file_change` is apply_patch and `command_execution` the shell, the two the
-# installer's matcher `apply_patch|Edit|Write|Bash` reaches.
+# installer's matcher `apply_patch|Edit|Write|Bash` reaches. Both names were
+# seen arriving at the hook, as `apply_patch` and `Bash`, in the 2026-09-23
+# runs.
+#
+# These count what Codex printed, and Codex prints no item for a call the hook
+# refused, so a count taken from the JSON alone is short by exactly the refused
+# calls. Nothing here can fix that - the item is not in the file - so the hook
+# log is read beside the JSON: `read_hook_log` and `merge_hook_log`, called by
+# `harness.read_agent_transcript` for every Threefold run, put the hook's own
+# calls and refusals back. A reader of `tool_uses` alone is reading Codex's
+# account of itself.
 TOOL_ITEMS = ("command_execution", "file_change", "mcp_tool_call", "web_search")
 GOVERNED_ITEMS = frozenset({"command_execution", "file_change"})
 
@@ -133,6 +174,18 @@ def parse_events(path: Path, classify: Callable[[str], str] = lambda text: "OTHE
     messages. Cost is not reported by Codex and stays None. A refusal is any
     item whose text carries the hook's refusal marker; a command Codex itself
     declined without it is recorded as a permission denial.
+
+    What the 2026-09-23 runs change about that. `turn.started` arrives and is
+    ignored, which is right. `turn.failed` and a top-level `error` event never
+    arrived, so the error branch is unexercised; the `error`s that did arrive
+    are items inside an `item.completed`, and they are warnings as often as
+    failures, which is why an error item is read for the refusal marker and
+    never on its own taken for a failed run. `status: "declined"` never arrived
+    either, so `permission_denials` was empty in every real run: the calls
+    Codex did not make after a refusal it simply did not make, and said so in
+    its message. And the call the hook refused left no item at all, so
+    `tool_uses` here is short by it; `merge_hook_log` is what puts the hook's
+    own count back.
     """
     summary: Dict[str, Any] = {
         "init": {}, "result": None, "tool_uses": Counter(), "refusals": [], "hook_events": Counter(), "lines": 0,
@@ -226,9 +279,10 @@ def read_hook_log(path: Path) -> Dict[str, Any]:
 
     Codex prints no hook events in its JSON, so this log, written by the
     wrapper Codex runs as its hook, is the evidence that the hook started. It
-    is also the evidence of a refusal: whether Codex's JSON quotes the hook's
-    reason is not known, and a credential refused on the machine never
-    reaches the server's ledger either.
+    is also the evidence of a refusal, and the 2026-09-23 runs say why it has
+    to be: Codex's JSON does not quote the hook's reason and prints no item at
+    all for the refused call, which appears only here and in `stderr`. A
+    credential refused on the machine never reaches the server's ledger either.
     """
     counts: Dict[str, Any] = {"calls": 0, "unjudged": 0, "crashed": 0, "refused": 0, "refused_by_kind": Counter()}
     try:
@@ -294,13 +348,21 @@ def exec_help(codex: str, runner: Callable[..., Any]) -> str:
 
 
 def isolation_facts() -> Dict[str, Any]:
-    """What a Codex run's set-up does and does not keep out, recorded with every row."""
+    """What a Codex run's set-up does and does not keep out, recorded with every row.
+
+    `skills_and_plugins` is the fact the first real runs added: the checks
+    above are by file name, and the names they know are not all that reaches a
+    run. A row that claims isolation has to carry what the isolation missed.
+    """
     return {
         "mode": "codex-user-login",
         "config_dir": "the owner's CODEX_HOME, for the login only (--ignore-user-config, --ignore-rules, --ephemeral)",
         "home": "the owner's",
         "user_settings_and_hooks": "config.toml and execpolicy rules skipped; the runner refuses to start while "
                                    "CODEX_HOME holds AGENTS.md, AGENTS.override.md or hooks.json",
+        "skills_and_plugins": "not kept out: runs on 2026-09-23 printed their own notice that skills were loaded "
+                              "under --ignore-user-config, so CODEX_HOME/skills and CODEX_HOME/plugins reach a run "
+                              "and the runner does not look for them",
         "hook_trust": "--dangerously-bypass-hook-trust, and the repository trusted for this invocation only",
         "sandbox": "--sandbox as recorded in harness.codex_sandbox, approval_policy='never'",
         "reads": "whatever the Codex sandbox allows; the owner's private folders are not denied by name",

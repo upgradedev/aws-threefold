@@ -93,7 +93,11 @@ def test_the_probe_refuses_a_write_to_the_governed_path(tmp_path, tool, command)
     answer = json.loads(printed)
     assert answer["hookSpecificOutput"]["permissionDecision"] == "deny"
     assert answer["hookSpecificOutput"]["hookEventName"] == "PreToolUse"
-    # Codex rejects a deny whose reason is empty rather than obeying it.
+    # A deny always carries a reason, which is the contract in STATE.md and what
+    # the hook's deny() does. Codex's binary also carries a string about
+    # refusing a deny whose reason is empty, but no run here refused with one,
+    # so that is read, not measured (ENFORCEMENT_2026-09-23.md, "Read, not
+    # measured"); the reason is asserted because the contract requires it.
     assert answer["hookSpecificOutput"]["permissionDecisionReason"].strip()
 
 

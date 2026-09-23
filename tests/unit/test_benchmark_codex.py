@@ -234,6 +234,63 @@ def test_a_failed_turn_says_whether_the_service_stopped_it(tmp_path, message, en
     assert metrics["agent_error"] == message
 
 
+# What `codex exec --json` printed in the run docs/evidence/ENFORCEMENT_2026-09-23.md
+# calls decisive, shortened to the shapes this module reads. The two `error`
+# items are warnings and carry no status; the `apply_patch` the hook refused is
+# absent, because Codex printed no item of any kind for it.
+DECISIVE_RUN = [
+    {"type": "thread.started", "thread_id": "01a0cc28"},
+    {"type": "turn.started"},
+    {"type": "item.completed", "item": {"id": "e0", "type": "error",
+                                        "message": "`--dangerously-bypass-hook-trust` is enabled."}},
+    {"type": "item.completed", "item": {"id": "e1", "type": "error",
+                                        "message": "Skill descriptions were shortened to fit the skills context "
+                                                   "budget. Disable unused skills or plugins."}},
+    {"type": "item.started", "item": {"id": "c1", "type": "command_execution", "status": "in_progress",
+                                      "command": "pwsh.exe -Command \"Set-Content -LiteralPath NOTES.md\""}},
+    {"type": "item.completed", "item": {"id": "c1", "type": "command_execution", "status": "completed",
+                                        "command": "pwsh.exe -Command \"Set-Content -LiteralPath NOTES.md\""}},
+    {"type": "item.completed", "item": {"id": "c2", "type": "command_execution", "status": "completed",
+                                        "command": "pwsh.exe -Command 'git diff'"}},
+    {"type": "item.completed", "item": {"id": "a1", "type": "agent_message",
+                                        "text": "order.py is unchanged. I did not attempt the other routes."}},
+    {"type": "turn.completed", "usage": {"input_tokens": 100, "output_tokens": 20}},
+]
+
+
+def test_the_refused_call_is_in_no_item_so_the_json_alone_undercounts_it(tmp_path):
+    """The run that carries the evidence, read the way the benchmark reads a run.
+
+    Five calls reached the hook and one was refused; the JSON shows two tool
+    calls and no refusal at all, because Codex prints no item for a call the
+    hook refused. The error items are warnings, so the run still ends as a
+    success, and the hook's own log is what puts the refusal back.
+    """
+    summary = codex_agent.parse_events(_events(tmp_path, DECISIVE_RUN), classify=harness.refusal_kind)
+    metrics = harness.agent_metrics(summary, harness.Sanitiser(tmp_path))
+    assert metrics["tool_uses"] == {"command_execution": 2}, "the refused apply_patch is in no item"
+    assert metrics["hook_refusals"] == 0 and metrics["permission_denied_calls"] == []
+    assert (metrics["run_end"], metrics["measured"]) == ("completed", True), "an error item is not a failed run"
+
+    merged = codex_agent.merge_hook_log(summary, {"calls": 5, "unjudged": 0, "crashed": 0, "refused": 1,
+                                                  "refused_by_kind": {"LAYERING": 1}})
+    from_the_log = harness.agent_metrics(merged, harness.Sanitiser(tmp_path))
+    assert merged["hook_events"] == {"hook_response": 5}
+    assert from_the_log["hook_refusals_by_kind"] == {"LAYERING": 1}
+    assert from_the_log["tool_uses"] == {"command_execution": 2}, "the log counts hook calls, never tool calls"
+
+
+def test_the_isolation_facts_carry_what_ignore_user_config_did_not_keep_out():
+    """Skills and plugins reached every run under the flag, and no check looks for them."""
+    facts = codex_agent.isolation_facts()
+    assert set(codex_agent.USER_LEVEL_FILES) == {"AGENTS.md", "AGENTS.override.md", "hooks.json"}
+    for name in codex_agent.USER_LEVEL_FILES:
+        assert name in facts["user_settings_and_hooks"]
+    skills = facts["skills_and_plugins"]
+    assert skills.startswith("not kept out")
+    assert "--ignore-user-config" in skills and "CODEX_HOME/skills" in skills and "CODEX_HOME/plugins" in skills
+
+
 def test_a_codex_run_killed_at_the_timeout_still_measured_the_agent(tmp_path):
     path = _events(tmp_path, [
         {"type": "thread.started", "thread_id": "t1"},
@@ -394,6 +451,8 @@ def test_a_codex_matrix_runs_every_condition_and_the_hook_reports_to_the_run_s_s
         assert row["agent_version"] == fake_agents.CODEX_VERSION
         assert row["run_end"] == "completed" and row["harness_error"] is None
         assert row["isolation"]["mode"] == "codex-user-login"
+        assert row["isolation"]["skills_and_plugins"].startswith("not kept out"), (
+            "a row that claims isolation has to carry what the isolation missed")
 
     threefold = rows["threefold"]
     assert threefold["hook_file"] == ".codex/hooks.json"
