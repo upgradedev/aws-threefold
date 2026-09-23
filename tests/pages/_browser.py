@@ -92,10 +92,14 @@ globalThis.history = {
 };
 const store = {};
 let storageBlocked = false;
+// A browser that answers a read and refuses a write: an old private mode, or a
+// quota already full. It is its own flag because it is the harder case — the
+// page reads back what storage held before, not what it was just told.
+let storageWriteBlocked = false;
 globalThis.localStorage = {
   getItem: k => { if (storageBlocked) throw new Error('blocked'); return Object.prototype.hasOwnProperty.call(store, k) ? store[k] : null; },
-  setItem: (k, v) => { if (storageBlocked) throw new Error('blocked'); store[k] = String(v); },
-  removeItem: k => { if (storageBlocked) throw new Error('blocked'); delete store[k]; }
+  setItem: (k, v) => { if (storageBlocked || storageWriteBlocked) throw new Error('blocked'); store[k] = String(v); },
+  removeItem: k => { if (storageBlocked || storageWriteBlocked) throw new Error('blocked'); delete store[k]; }
 };
 const copied = [];
 Object.defineProperty(globalThis, 'navigator', {

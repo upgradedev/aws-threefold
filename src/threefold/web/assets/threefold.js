@@ -192,6 +192,14 @@
 
   var memoryNames = null;
   var memoryHidden = null;
+  // A browser can let a read through and refuse a write: an old private mode,
+  // or a full quota. Storage then still answers with whatever it held before,
+  // which is not what this tab was told, so once a write has been refused this
+  // tab answers from memory until one succeeds. Without this the panel's
+  // promise — kept for this tab, at least — was false on that browser: the
+  // name went nowhere and every page drew the bare alias again.
+  var namesMemoryOnly = false;
+  var hiddenMemoryOnly = false;
   // JSON.parse only when the stored text changed, so a table of a hundred rows
   // parses the map once rather than once a row. `undefined` means "not read
   // yet", which `getItem` never returns, so clearing the names does not leave
@@ -224,6 +232,7 @@
   // What this browser has stored, as a clean map. Storage can be blocked or
   // throw, so the fallback is whatever this tab set while it was.
   function readLocalNames() {
+    if (namesMemoryOnly) return memoryNames || {};
     var text = null;
     try {
       text = root.localStorage.getItem(LOCAL_NAMES_STORAGE);
@@ -252,6 +261,10 @@
     } catch (err) {
       stored = false;
     }
+    // A refused write leaves storage holding the map from before, so reading it
+    // again would hand back names this tab no longer has and drop the ones it
+    // was just given. This tab reads from memory until a write goes through.
+    namesMemoryOnly = !stored;
     namesText = undefined;
     announceLocalNames();
     return stored;
@@ -260,6 +273,7 @@
   function clearLocalNames() { return writeLocalNames({}); }
 
   function localNamesHidden() {
+    if (hiddenMemoryOnly) return memoryHidden === true;
     try {
       var text = root.localStorage.getItem(LOCAL_NAMES_HIDDEN_STORAGE);
       if (text === null || text === undefined) return memoryHidden === true;
@@ -278,6 +292,7 @@
     } catch (err) {
       stored = false;
     }
+    hiddenMemoryOnly = !stored;
     announceLocalNames();
     return stored;
   }
