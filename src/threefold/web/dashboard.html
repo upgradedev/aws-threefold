@@ -419,8 +419,18 @@
     // follows at once. Three screens are left out: /signin and /try show no
     // alias a reader would name, and /connect redraws from its own state
     // below, so a half-typed name survives the switch.
+    // A dialog and a toast outlive the screen under them, so a redraw of the
+    // route alone would leave a name of the reader's own on either. A dialog is
+    // drawn from the state of the screen that opened it, so it is closed rather
+    // than carried across: route() closes it, and a screen that keeps its own
+    // state closes it here. A toast is written again from the words that raised
+    // it, with nothing asked of the service.
     const KEEPS_ITS_OWN_STATE = { '/signin': true, '/try': true, '/connect': true };
-    T.onLocalNamesChange(() => { if (current.route && !KEEPS_ITS_OWN_STATE[current.route.path]) route(); });
+    T.onLocalNamesChange(() => {
+      if (current.route && !KEEPS_ITS_OWN_STATE[current.route.path]) route();
+      else closeDialog();
+      if (toastUp) toastUp.draw();
+    });
 
     // ------------------------------------------------------ dialog, toast
 
@@ -454,35 +464,43 @@
 
     let toastSeq = 0;
     const toastActions = {};
+    // The toast on screen, and how to write it again. A toast whose words name
+    // a project is given a function rather than a string, so the switch in the
+    // navigation reaches it rather than leaving a name up for nine seconds.
+    let toastUp = null;
     function toast(message, actionLabel, action) {
       toastSeq += 1;
       const id = 'toast-' + toastSeq;
       if (action) toastActions[id] = action;
+      const words = typeof message === 'function' ? message : () => message;
       const root = document.getElementById('toast-root');
-      const item = html`<div class="tf-toast" id="${id}" role="status">
-        <span class="flex-1 tf-break">${message}</span>
+      const draw = () => setHtml(root, html`<div class="tf-toast" id="${id}" role="status">
+        <span class="flex-1 tf-break">${words()}</span>
         ${action ? html`<button type="button" class="tf-btn tf-btn-sm" data-action="toast" data-toast="${id}">${actionLabel}</button>` : ''}
         <button type="button" class="tf-btn tf-btn-quiet tf-btn-sm" data-action="toast-close" data-toast="${id}" aria-label="Dismiss">✕</button>
-      </div>`;
-      setHtml(root, item);
-      announce(message);
+      </div>`);
+      draw();
+      toastUp = { id: id, draw: draw };
+      announce(words());
       setTimeout(() => {
         const el = document.getElementById(id);
         if (el && el.parentNode && typeof el.parentNode.removeChild === 'function') el.parentNode.removeChild(el);
         delete toastActions[id];
+        if (toastUp && toastUp.id === id) toastUp = null;
       }, 9000);
+    }
+    function dismissToast(id) {
+      delete toastActions[id];
+      if (toastUp && toastUp.id === id) toastUp = null;
+      setHtml(document.getElementById('toast-root'), html``);
     }
     GLOBAL_ACTIONS.toast = el => {
       const id = el.getAttribute('data-toast');
       const fn = toastActions[id];
-      delete toastActions[id];
-      setHtml(document.getElementById('toast-root'), html``);
+      dismissToast(id);
       if (fn) fn();
     };
-    GLOBAL_ACTIONS['toast-close'] = el => {
-      delete toastActions[el.getAttribute('data-toast')];
-      setHtml(document.getElementById('toast-root'), html``);
-    };
+    GLOBAL_ACTIONS['toast-close'] = el => dismissToast(el.getAttribute('data-toast'));
 
     // ---------------------------------------------------------- overview
 
@@ -1012,7 +1030,7 @@
             ? enforcing
             : rules.filter(r => r.state === 'ready' || r.state === 'quiet').map(r => r.rule_key);
           state.selected = new Set(preset);
-          openDialog('Promote ' + name + ' to Enforce', promoteBody(), promoteFooter(false));
+          openDialog(html`Promote ${T.projectName(name)} to Enforce`, promoteBody(), promoteFooter(false));
         },
         'promote-toggle': el => {
           const key = el.getAttribute('data-rule');
@@ -1036,7 +1054,7 @@
           return T.api('/api/projects/' + encodeURIComponent(name) + '/promote', { method: 'POST', body: { enforce } }).then(() => {
             if (!ctx.alive()) return;
             closeDialog();
-            toast(name + ' is in Enforce: ' + plural(enforce.length, 'rule') + ' now refuse' + (enforce.length === 1 ? 's' : '') + '.');
+            toast(() => T.projectNameText(name) + ' is in Enforce: ' + plural(enforce.length, 'rule') + ' now refuse' + (enforce.length === 1 ? 's' : '') + '.');
             load();
           }, err => {
             if (!ctx.alive()) return;
@@ -1046,7 +1064,7 @@
           });
         },
         'demote-open': () => {
-          openDialog('Back to Observe?', html`<p class="text-sm text-gray-300">Every rule of <span class="font-mono">${name}</span> stops refusing from the next call. Everything is still judged and recorded, and the readiness you built up is kept.</p>
+          openDialog('Back to Observe?', html`<p class="text-sm text-gray-300">Every rule of <span class="font-mono">${T.projectName(name)}</span> stops refusing from the next call. Everything is still judged and recorded, and the readiness you built up is kept.</p>
             <p id="demote-error" class="text-xs text-rose-300" role="alert"></p>`,
             html`<button type="button" class="tf-btn" data-action="close-dialog">Cancel</button><button type="button" id="dialog-first" class="tf-btn tf-btn-warn" data-action="demote-confirm">Back to Observe</button>`);
         },
@@ -1054,7 +1072,7 @@
           return T.api('/api/projects/' + encodeURIComponent(name) + '/demote', { method: 'POST', body: {} }).then(() => {
             if (!ctx.alive()) return;
             closeDialog();
-            toast(name + ' is back in Observe. Nothing is refused from the next call.');
+            toast(() => T.projectNameText(name) + ' is back in Observe. Nothing is refused from the next call.');
             load();
           }, err => {
             if (!ctx.alive()) return;
