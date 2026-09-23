@@ -104,9 +104,11 @@ so the rollout had to show what a rule would stop before it stops anything.
 1. **Does a deny actually stop the write?** Two open bug reports said a hook's
    deny can be ignored, so it was measured per agent on the file system rather
    than assumed: Claude Code 2.1.220 and the Antigravity desktop app did not
-   create the refused file. Codex could not be measured (its account had hit a
-   usage limit), so nothing is claimed for it
-   (`docs/evidence/ENFORCEMENT_2026-09-21.md`).
+   create the refused file (`docs/evidence/ENFORCEMENT_2026-09-21.md`). Codex
+   CLI 0.155.0 was measured on 2026-09-23, in one run and on one route: the
+   hook refused an `apply_patch` adding `boto3` to a governed file, and the
+   file's sha256 was unchanged afterwards. Its other routes are not measured
+   (`docs/evidence/ENFORCEMENT_2026-09-23.md`).
 2. **Every write route, not only the Write tool.** An agent refused a `Write`
    can reach for `cat > file <<'EOF'`. The service reads a shell command for
    the writes it makes and judges readable content like a `Write`, and refuses
