@@ -410,6 +410,14 @@ def test_a_dialog_and_a_toast_name_a_project_and_the_switch_reaches_both(tmp_pat
   Threefold.setLocalNamesHidden(false);
   await tick();
   out.toastAgain = el('toast-root').innerHTML;
+
+  await click('promote-open');
+  await click('promote-confirm');
+  await tick();
+  out.promoteToast = el('toast-root').innerHTML;
+  Threefold.setLocalNamesHidden(true);
+  await tick();
+  out.promoteToastHidden = el('toast-root').innerHTML;
   out.sent = sentText();
 """,
         tmp_path,
@@ -423,9 +431,12 @@ def test_a_dialog_and_a_toast_name_a_project_and_the_switch_reaches_both(tmp_pat
     assert "Acme-Billing" in out["toastHidden"] and PRIVATE not in out["toastHidden"], \
         "the toast kept a name of the reader's own for the rest of its nine seconds"
     assert PRIVATE in out["toastAgain"], "the toast lost its name when the switch went back on"
+    assert "Acme-Billing" in out["promoteToast"] and PRIVATE in out["promoteToast"]
+    assert PRIVATE not in out["promoteToastHidden"] and "Acme-Billing" in out["promoteToastHidden"]
     assert PRIVATE not in out["sent"] and "aeroplane" not in out["sent"]
-    assert any("/demote" in line for line in out["sent"].split("\n")), \
-        "the demotion never reached the service, so the sweep above is passing on nothing"
+    sent = out["sent"].split("\n")
+    assert any("/demote" in line for line in sent) and any("/promote" in line for line in sent), \
+        "neither write reached the service, so the sweep above is passing on nothing"
 
 
 def test_the_switch_reaches_every_panel_the_rules_page_is_already_holding(tmp_path: Path) -> None:
