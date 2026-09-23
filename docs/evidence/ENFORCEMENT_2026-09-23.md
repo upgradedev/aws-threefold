@@ -341,8 +341,10 @@ Marked as inference, and kept out of the section above.
 - **One machine, one platform, one version**, one model (`gpt-6-astra`) - and,
   for the claim that matters, one run. Another version may behave differently,
   which is why the method is a committed script rather than a description.
-- **Skills and plugins were in the context of every run** and were not
-  controlled for, as the Isolation section says.
+- **Skills were in the context of the runs** and were not controlled for, as
+  the Isolation section says. Five of the seven printed the notice that says
+  so; the other two printed no such notice, which is not the same as not
+  having had them.
 
 ## Argument shapes observed
 
