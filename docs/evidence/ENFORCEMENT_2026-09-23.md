@@ -324,7 +324,8 @@ Marked as inference, and kept out of the section above.
   never reaches the hook cannot be refused by it, and this is the honest edge
   of the claim.
 - **The measured runs had no sandbox.** `danger-full-access` was used because
-  `workspace-write` cannot create a process on this host. So this shows the
+  the one run that got that far could not create a process under
+  `workspace-write` on this host. So this shows the
   hook stopping the write where nothing else would have, which is the claim -
   but it does not show the two guards together, and it does not show what
   `workspace-write` would do on a host whose elevated Windows sandbox backend
@@ -360,9 +361,9 @@ whole patch as `tool_input.command`:
 
 Two things follow for the hook's Codex adapter, and both already hold: the
 command arrives as a string, not a list of words; and several statements share
-one call, so a call is not one write. A patch path's shape does not: Codex
-composed two patch paths in the seven runs, run 6's absolute `*** Update File:`
-line above and run 7's relative `*** Add File: NOTES.md`.
+one call, so a call is not one write. A third does not follow: Codex composed
+two patch paths in the seven runs, run 6's absolute `*** Update File:` line
+above and run 7's relative `*** Add File: NOTES.md`.
 
 On this platform Codex runs its commands through PowerShell
 (`pwsh.exe -Command …`, run 2's `stderr`), so a Codex shell write can be a
@@ -372,12 +373,13 @@ was a `Set-Content`, and none was `>`, `>>` or `tee`.
 ## What the benchmark's Codex support was corrected on
 
 `benchmark/codex_agent.py` was written against 0.155.0 without running it, from
-the binary's string table. These runs are the first that ran it, and each item
-below is now what that file says of itself:
+the binary's string table. These runs are the first that ran the command shape
+it fixes, and each item below is now what that file says of itself:
 
 - **Events seen:** `thread.started`, `turn.started`, `item.started`,
-  `item.completed`, `turn.completed`. `turn.started` is not in its event list
-  at all. No `turn.failed` and no top-level `error` event appeared in any run;
+  `item.completed`, `turn.completed`. `turn.started` was missing from the list
+  that file was written with. No `turn.failed` and no top-level `error` event
+  appeared in any run;
   the `error`s below are items inside an `item.completed`, which is a different
   thing and is read by a different branch.
 - **Items seen:** `agent_message`, `command_execution`, `file_change`, `error`.
