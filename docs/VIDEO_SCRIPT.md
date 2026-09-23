@@ -87,7 +87,7 @@
   > write a domain class that imports a persistence framework, and is refused
   > before the write, told which rule and what to do instead. We checked on
   > the file system that a refused file is not created, for Claude Code and for
-  > Antigravity. Codex has not been measured yet, so we make no claim for it."
+  > Antigravity, and for Codex once, over its patch tool."
 
 ## Scene 5: running it, and what the benchmark says (2:15 to 2:45)
 
