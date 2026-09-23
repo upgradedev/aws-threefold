@@ -94,9 +94,9 @@ DEFAULT_SANDBOX = "workspace-write"
 # with every row. Five of the 2026-09-23 runs printed a notice of their own
 # that skills were loaded and their descriptions shortened, under
 # `--ignore-user-config`, so `CODEX_HOME/skills` and `CODEX_HOME/plugins`
-# survive the flag. None of them is a hook, and nothing in those runs suggests
-# one changed an outcome, but they are context this runner does not control and
-# does not look for.
+# survive the flag. What they hold was not examined, so whether one of them
+# could change an outcome is not known: they are context this runner does not
+# control and does not look for.
 USER_LEVEL_FILES = ("AGENTS.md", "AGENTS.override.md", "hooks.json")
 
 # The items that are tool calls, and which of them the Threefold hook governs:

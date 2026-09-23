@@ -389,4 +389,6 @@ command passes are not in `codex exec --help`, when the run's probe hook does
 not print a deny for a governed payload on this platform, or when `CODEX_HOME`
 holds a non-empty file of the three it knows to look for. Each run leaves its
 `result.json`, `events.jsonl`, `hook-calls.jsonl` and `last-message.txt` under
-`--root`.
+`--root`, beside the `repo/`, `bin/` and `home/` the run was given; a deny-only
+run has no server log, and a run that made no tool call has no
+`hook-calls.jsonl`.

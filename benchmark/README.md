@@ -210,7 +210,10 @@ never mixes them. The report counts only the latest row of each planned run
 (run id, agent, task, condition, repetition) and says how many earlier rows it
 replaced.
 
-**Codex, from 2026-09-27**, when the owner's Codex usage limit resets:
+**Codex**, measured on 2026-09-23 (54 standard runs and 27 pressure runs; on
+Windows the runner passes `--dangerously-bypass-approvals-and-sandbox`,
+because a run under `--sandbox` there was told the workspace is read-only and
+had its commands rejected):
 
     python benchmark/run.py --agent codex --check-auth
     python benchmark/run.py --agent codex --tasks orders-s3-archive --reps 1 --pilot   # look at the rows first

@@ -22,8 +22,8 @@ The login is not all `CODEX_HOME` gives a run, and this script does not close
 that gap. Five of the 2026-09-23 runs printed a notice of their own that
 skills were loaded and their descriptions shortened, under
 `--ignore-user-config`, so `CODEX_HOME/skills` and `CODEX_HOME/plugins` are in
-a run's context whatever the flags say. None of them is a hook; they are
-named in the evidence file's limits rather than checked for here.
+a run's context whatever the flags say. What they hold was not examined; they
+are named in the evidence file's limits rather than checked for here.
 
 Two conditions, so a refusal that is not obeyed cannot hide behind a server:
 
