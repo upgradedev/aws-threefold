@@ -119,3 +119,18 @@ def test_the_enforcement_evidence_promises_no_script_that_is_not_committed() -> 
     # one it names as missing is named in the sentence that says it is missing.
     for name in missing:
         assert f"a committed `{name}` would make this table" in evidence, f"{name} is promised but not committed"
+
+
+def test_the_codex_evidence_names_a_committed_harness_and_does_not_claim_it_made_the_runs() -> None:
+    """The 2026-09-21 file promised a script that was not there; this one ships the script.
+
+    What it must not do is let the command it prints stand for the runs it
+    reports. Those were driven one condition at a time while the script was
+    still being corrected, so the file says the command cannot reproduce them.
+    """
+    evidence = _text("docs/evidence/ENFORCEMENT_2026-09-23.md")
+    named = set(re.findall(SCRIPT, evidence))
+    assert "scripts/measure_codex_enforcement.py" in named, "The evidence no longer names the harness it ships"
+    for name in sorted(named):
+        assert (ROOT / name).exists(), f"{name} is named by the evidence and not committed"
+    assert "cannot reproduce them as they happened" in evidence

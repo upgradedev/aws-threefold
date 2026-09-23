@@ -181,7 +181,7 @@
         </div>
         <div class="p-3 rounded-xl bg-gray-950 border border-gray-800">
           <p class="text-xs font-semibold text-purple-300">3 · A refusal is handed back as a deny</p>
-          <p class="text-[11px] text-gray-400 mt-1">Measured on 2026-09-21: Claude Code and the Antigravity desktop app stopped the refused write. Codex was not measured, so for Codex read a deny as a verdict it was shown, not as proof the write did not happen. The table further down has the detail.</p>
+          <p class="text-[11px] text-gray-400 mt-1">Measured on 2026-09-21: Claude Code and the Antigravity desktop app stopped the refused write. Measured on 2026-09-23, in one run: Codex stopped it over <span class="font-mono">apply_patch</span>. The table further down has the detail, and says which Codex routes are still not measured.</p>
         </div>
       </div>
     </div>
@@ -288,9 +288,11 @@
               On 2026-09-21 a local hook answered deny and the file system was checked afterwards. Claude Code 2.1.220 refused a
               <span class="font-mono">Write</span> and a <span class="font-mono">Bash</span> redirection, and the Antigravity
               desktop app refused <span class="font-mono">write_to_file</span>; in each case the refused file was not created.
-              Codex CLI 0.155.0 was not measured, because the account had reached its usage limit, so no claim is made for it
-              and its edits count as governed at commit time only. One machine, Windows, those versions: method and results are
-              in <span class="font-mono">docs/evidence/ENFORCEMENT_2026-09-21.md</span> in the repository.
+              Codex CLI 0.155.0 was measured on 2026-09-23, once: the hook refused an <span class="font-mono">apply_patch</span>
+              that added <span class="font-mono">boto3</span> to a governed file, and the file's sha256 was unchanged afterwards.
+              One machine, Windows, those versions: method, results and the Codex routes that are not measured are in
+              <span class="font-mono">docs/evidence/ENFORCEMENT_2026-09-21.md</span> and
+              <span class="font-mono">docs/evidence/ENFORCEMENT_2026-09-23.md</span> in the repository.
             </p>
           </div>
         </div>
@@ -499,7 +501,7 @@
     <section class="rounded-2xl bg-gray-900 border border-gray-800 p-5 space-y-3">
       <div class="border-b border-gray-800 pb-3">
         <h2 class="text-sm font-semibold text-white">What each agent does with a deny, as far as it has been shown</h2>
-        <p class="text-[11px] text-gray-500">The hook's side is fixed. The agent's side was measured on 2026-09-21, on one Windows machine, for the versions named, by checking whether the refused file existed afterwards.</p>
+        <p class="text-[11px] text-gray-500">The hook's side is fixed. The agent's side was measured on 2026-09-21, and for Codex on 2026-09-23, on one Windows machine, for the versions named, by checking whether the refused file existed afterwards.</p>
       </div>
       <div class="overflow-x-auto">
         <table class="w-full text-xs">
@@ -512,9 +514,11 @@
             </tr>
           </thead>
           <tbody class="text-gray-300">
-            <!-- data-enforcement is what the evidence file measured for the agent, and a
-                 test holds each row to it: "stopped" only where the refused file was
-                 not created, "not-measured" where the agent was never run. -->
+            <!-- data-enforcement is what the evidence files measured for the agent, and a
+                 test holds each row to them: "stopped" only where the refused file was
+                 not created, "not-measured" where the agent was never run. Where an
+                 evidence row says a route was not measured, the cell has to say so too,
+                 so a measured route cannot stand in for the ones that were not. -->
             <tr class="border-b border-gray-800/60" data-agent="claude-code" data-enforcement="stopped">
               <td class="py-2 pr-3 font-semibold">Claude Code</td>
               <td class="py-2 pr-3 font-mono text-[11px] text-gray-400">Write, Edit, MultiEdit, NotebookEdit, Bash</td>
@@ -524,13 +528,13 @@
                 <p class="text-[11px] text-gray-500 mt-1">2.1.220: a <span class="font-mono">Write</span> and a <span class="font-mono">Bash</span> redirection were refused and neither file was created. The other tools were not measured.</p>
               </td>
             </tr>
-            <tr class="border-b border-gray-800/60" data-agent="codex" data-enforcement="not-measured">
+            <tr class="border-b border-gray-800/60" data-agent="codex" data-enforcement="stopped">
               <td class="py-2 pr-3 font-semibold">Codex</td>
               <td class="py-2 pr-3 font-mono text-[11px] text-gray-400">apply_patch, Edit, Write, Bash</td>
               <td class="py-2 pr-3 font-mono text-[11px] text-gray-400">hookSpecificOutput.permissionDecision "deny", with a reason</td>
               <td class="py-2">
-                <span class="px-2 py-0.5 rounded text-[11px] font-semibold bg-gray-800 text-gray-300 border border-gray-700">not measured</span>
-                <p class="text-[11px] text-gray-500 mt-1">0.155.0 could not be run: the account had reached its usage limit. No claim is made, and its edits count as governed at commit time only.</p>
+                <span class="px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-950 text-emerald-300 border border-emerald-800">stops the write · measured</span>
+                <p class="text-[11px] text-gray-500 mt-1">0.155.0, one run: the hook refused an <span class="font-mono">apply_patch</span> that added <span class="font-mono">boto3</span> to a governed file, and the file's sha256 was unchanged afterwards. Over the shell the hook was called four times in that run and refused none, so that route is not measured, and neither is a refusal over <span class="font-mono">apply_patch</span> from a hook that makes no network call.</p>
               </td>
             </tr>
             <tr data-agent="antigravity" data-enforcement="stopped">
