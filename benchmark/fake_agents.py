@@ -61,6 +61,9 @@ Options:
       --enable <FEATURE>
   -m, --model <MODEL>
   -s, --sandbox <SANDBOX_MODE>
+      --dangerously-bypass-approvals-and-sandbox
+          Skip all confirmation prompts and execute commands without sandboxing
+
       --dangerously-bypass-hook-trust
   -C, --cd <DIR>
       --skip-git-repo-check

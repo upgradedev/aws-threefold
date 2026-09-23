@@ -511,10 +511,11 @@ def choose_isolation(requested: str, has_token: bool) -> str:
     return "fresh-config" if has_token else "user-config"
 
 
-def isolation_facts(isolation: str, memory_above: Sequence[str] = (), agent: str = "claude-code") -> Dict[str, Any]:
+def isolation_facts(isolation: str, memory_above: Sequence[str] = (), agent: str = "claude-code",
+                    codex_sandbox: str = codex_agent.DEFAULT_SANDBOX) -> Dict[str, Any]:
     """What a run's isolation does and does not keep out, recorded with every row."""
     if agent == "codex":
-        return codex_agent.isolation_facts()
+        return codex_agent.isolation_facts(codex_sandbox)
     shared = {
         "setting_sources": "project,local",
         # Claude Code 2.1.220 loads the user CLAUDE.md only when the user
@@ -1718,7 +1719,7 @@ def run_one(task: Task, condition: str, rep: int, plan: RunPlan, base_env: Optio
         "prompt_sha256": sha256_text(task.prompt()),
         "rules_sha256": sha256_text(rules_text) if rules_text else None,
         "rules_file": RULES_FILE_NAME.get(options.agent, "CLAUDE.md") if rules_text else None,
-        "isolation": isolation_facts(options.isolation, memory_above, options.agent),
+        "isolation": isolation_facts(options.isolation, memory_above, options.agent, options.codex_sandbox),
         "harness": {"python": platform.python_version(), "platform": platform.system(), "max_turns": options.max_turns,
                     "timeout_s": options.timeout_s, "budget_usd": options.budget_usd},
         "harness_error": None,

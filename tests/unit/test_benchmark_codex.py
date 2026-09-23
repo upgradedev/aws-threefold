@@ -167,7 +167,12 @@ def test_every_flag_the_command_passes_is_checked_against_the_help():
     older = HELP_0_155_0.replace("      --dangerously-bypass-hook-trust\n", "").replace("      --ignore-rules\n", "")
     problem = codex_agent.exec_flags_problem(older)
     assert "--dangerously-bypass-hook-trust" in problem and "--ignore-rules" in problem
-    assert "--dangerously-bypass-approvals-and-sandbox" not in codex_agent.REQUIRED_EXEC_FLAGS
+    # Passed only where Codex cannot sandbox at all, and checked like the rest.
+    assert "--dangerously-bypass-approvals-and-sandbox" in codex_agent.REQUIRED_EXEC_FLAGS
+    assert "--dangerously-bypass-approvals-and-sandbox" not in codex_agent.build_command("codex", Path("C:/acme/repo"), None)
+    unsandboxed = codex_agent.build_command("codex", Path("C:/acme/repo"), None, codex_agent.UNSANDBOXED)
+    assert "--dangerously-bypass-approvals-and-sandbox" in unsandboxed and "--sandbox" not in unsandboxed
+    assert "NONE" in codex_agent.isolation_facts(codex_agent.UNSANDBOXED)["sandbox"]
     assert codex_agent.exec_flags_problem(fake_agents.CODEX_EXEC_HELP) is None
     # --model is passed only when a model is pinned, and is checked all the same.
     assert "--model" in codex_agent.exec_flags_problem(HELP_0_155_0.replace("  -m, --model <MODEL>\n", ""))

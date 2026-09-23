@@ -104,7 +104,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
                              "missing, limited or error with the next step, and exit")
     parser.add_argument("--claude", default=None, help="path to the claude executable (default: found on PATH)")
     parser.add_argument("--codex", default=None, help="path to the codex executable (default: found on PATH)")
-    parser.add_argument("--codex-sandbox", choices=codex_agent.SANDBOXES, default=codex_agent.DEFAULT_SANDBOX,
+    parser.add_argument("--codex-sandbox", choices=codex_agent.SANDBOXES, default=None,
                         help="Codex's sandbox for shell commands (default workspace-write)")
     parser.add_argument("--run-id", default=None)
     parser.add_argument("--resume", metavar="RUN_ID", default=None,
@@ -563,6 +563,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             print(f"refused: {problem}.", file=sys.stderr)
             return 2
 
+    # Codex does not sandbox on Windows: under --sandbox it tells the model the
+    # workspace is read-only and rejects every command, so a run measures
+    # nothing. There the default is no sandbox at all, and the run says so
+    # before it starts rather than leaving it in a field nobody reads.
+    if args.codex_sandbox is None:
+        args.codex_sandbox = (codex_agent.UNSANDBOXED if (args.agent == "codex" and os.name == "nt")
+                              else codex_agent.DEFAULT_SANDBOX)
     version = None
     if args.agent == "claude-code":
         version = claude_version(claude)
@@ -590,6 +597,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         agent_line += f" ({version}, model {harness.recorded_model(options)}, login {plan.auth}"
         agent_line += f", isolation {isolation})" if args.agent == "claude-code" else f", sandbox {args.codex_sandbox})"
     print(agent_line)
+    if args.agent == "codex" and args.codex_sandbox == codex_agent.UNSANDBOXED:
+        print("sandbox: NONE. Codex has no sandbox on this platform, so each run may read and write anything this "
+              "account can. Only the task repository is measured, and every row records it.")
     if credential is not None:
         print(f"token file: {credential.path} (the token goes to the agent process only)")
     print(f"work root: {work_root}")

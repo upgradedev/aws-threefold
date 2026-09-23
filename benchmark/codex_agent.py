@@ -51,9 +51,20 @@ HOOK_UNJUDGED_MARKER = "could not check this call"
 REQUIRED_EXEC_FLAGS = (
     "--json", "--ephemeral", "--ignore-user-config", "--ignore-rules", "--dangerously-bypass-hook-trust",
     "--cd", "--sandbox", "--config", "--enable", "--color", "--model",
+    "--dangerously-bypass-approvals-and-sandbox",
 )
-SANDBOXES = ("workspace-write", "danger-full-access")
+SANDBOXES = ("workspace-write", "danger-full-access", "none")
 DEFAULT_SANDBOX = "workspace-write"
+
+# Codex sandboxes with Seatbelt on macOS and Landlock on Linux; on Windows it
+# has neither, and the first Windows pilot showed what that costs: under
+# `--sandbox workspace-write` the model was told the workspace is read-only and
+# every shell command came back "rejected: blocked by policy", so two runs did
+# nothing at all. The only way to measure the agent on Windows is
+# `--dangerously-bypass-approvals-and-sandbox`, which is what `none` means
+# here. It is never chosen silently: run.py picks it only on Windows, says so
+# before the first run, and every row records it in isolation facts.
+UNSANDBOXED = "none"
 
 # Files in CODEX_HOME that would reach every run whatever the flags say, as far
 # as can be told without running Codex: the user-level instructions Codex adds
@@ -95,7 +106,15 @@ def build_command(codex: str, repo: Path, model: Optional[str], sandbox: str = D
     command = [
         codex, "exec", "--json", "--color", "never",
         "--ephemeral", "--ignore-user-config", "--ignore-rules",
-        "--sandbox", sandbox, "--config", "approval_policy='never'",
+    ]
+    if sandbox == UNSANDBOXED:
+        # Approvals go with the sandbox in this flag: there is nothing left to
+        # approve against. The run is confined by the work root and the task
+        # repository alone, which the isolation facts say out loud.
+        command += ["--dangerously-bypass-approvals-and-sandbox"]
+    else:
+        command += ["--sandbox", sandbox, "--config", "approval_policy='never'"]
+    command += [
         "--enable", "hooks", "--dangerously-bypass-hook-trust", "--config", trusted,
         "--cd", str(repo),
     ]
@@ -293,8 +312,24 @@ def exec_help(codex: str, runner: Callable[..., Any]) -> str:
         return ""
 
 
-def isolation_facts() -> Dict[str, Any]:
+def isolation_facts(sandbox: str = DEFAULT_SANDBOX) -> Dict[str, Any]:
     """What a Codex run's set-up does and does not keep out, recorded with every row."""
+    if sandbox == UNSANDBOXED:
+        return {
+            "mode": "codex-user-login",
+            "config_dir": "the owner's CODEX_HOME, for the login only (--ignore-user-config, --ignore-rules, --ephemeral)",
+            "home": "the owner's",
+            "user_settings_and_hooks": "config.toml and execpolicy rules skipped; the runner refuses to start while "
+                                       "CODEX_HOME holds AGENTS.md, AGENTS.override.md or hooks.json",
+            "hook_trust": "--dangerously-bypass-hook-trust, and the repository trusted for this invocation only",
+            "sandbox": "NONE: --dangerously-bypass-approvals-and-sandbox, because Codex does not sandbox on Windows "
+                       "and refuses every command under --sandbox there. The run is confined by the work root and "
+                       "the task repository only, and nothing stops it reaching the rest of the machine",
+            "reads": "anything the owner's account can read",
+            "edits": "anything the owner's account can write; only the task repository is measured",
+            "shell": "unsandboxed, with no approval prompt",
+            "installs": "no package index for pip, uv or npm, and pip requires a virtual environment",
+        }
     return {
         "mode": "codex-user-login",
         "config_dir": "the owner's CODEX_HOME, for the login only (--ignore-user-config, --ignore-rules, --ephemeral)",
