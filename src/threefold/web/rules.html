@@ -451,12 +451,17 @@ public class Order { }</textarea>
     // already read, never a second request — and only while the panel still
     // holds what it wrote. Anything else on screen means the page has moved
     // on, and the memo is dropped rather than put back over newer words.
+    // What is kept is what the panel reports after the write, not the string it
+    // was handed: a browser writes the markup back its own way — an escaped
+    // apostrophe in a name of the reader's own comes back as an apostrophe —
+    // and comparing against the string we built would call an untouched panel
+    // changed, drop the memo, and leave the name on screen.
     const namingPanels = {};
 
     function writeNaming(id, build) {
-      const markup = build();
-      document.getElementById(id).innerHTML = markup;
-      namingPanels[id] = { build: build, markup: markup };
+      const panel = document.getElementById(id);
+      panel.innerHTML = build();
+      namingPanels[id] = { build: build, markup: panel.innerHTML };
     }
 
     function redrawNaming() {
@@ -464,8 +469,8 @@ public class Order { }</textarea>
         const memo = namingPanels[id];
         const panel = document.getElementById(id);
         if (!panel || panel.innerHTML !== memo.markup) { delete namingPanels[id]; return; }
-        memo.markup = memo.build();
-        panel.innerHTML = memo.markup;
+        panel.innerHTML = memo.build();
+        memo.markup = panel.innerHTML;
       });
     }
 

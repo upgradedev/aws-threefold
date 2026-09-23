@@ -32,6 +32,9 @@ from _browser import page_source, run
 # recorded request.
 PRIVATE = "the paper aeroplane one"
 OTHER = "second breakfast service"
+# A name a browser writes back differently from the way a page hands it over:
+# the apostrophe is escaped into the markup and comes back as an apostrophe.
+APOSTROPHE = "the fox's den, round the back"
 # A label that would run if a page wrote it into markup unescaped.
 HOSTILE = 'x"><img src=x onerror=alert(1)><svg onload=alert(2)>'
 
@@ -489,6 +492,33 @@ def test_the_switch_reaches_every_panel_the_rules_page_is_already_holding(tmp_pa
     assert PRIVATE not in out["sent"] and "aeroplane" not in out["sent"], "neither drafting, saving nor the switch sent a name"
     assert any("POST" in line and "/rules" in line for line in out["sent"].split("\n")), \
         "nothing was saved, so the panels above are not the ones a save writes"
+
+
+def test_a_name_with_an_apostrophe_in_it_is_hidden_like_any_other(tmp_path: Path) -> None:
+    """A browser writes markup back its own way, and an escaped apostrophe comes back as one.
+
+    A panel that compared what it wrote with what the element then held would
+    call itself changed and leave the name on screen — on a real browser only,
+    which is why the stub browser writes an apostrophe back the same way.
+    """
+    out = run(
+        "rules.html",
+        r"""
+  el('draft-description').value = 'Billing domain classes may not reach persistence.';
+  updateDraftCounters();
+  await draftRule();
+  await tick();
+  out.drafted = el('draft-result').innerHTML;
+  Threefold.setLocalNamesHidden(true);
+  await tick();
+  out.hidden = el('draft-result').innerHTML;
+""",
+        tmp_path,
+        pathname="/prod/rules.html",
+        before=stored({"Acme-Billing": APOSTROPHE}) + RULES_STACK,
+    )
+    assert "the fox's den" in out["drafted"], "the name is not on screen, so this test would prove nothing"
+    assert "fox" not in out["hidden"] and "Acme-Billing" in out["hidden"]
 
 
 def test_a_panel_the_page_has_moved_on_from_is_not_written_again(tmp_path: Path) -> None:

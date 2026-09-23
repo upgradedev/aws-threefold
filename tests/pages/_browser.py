@@ -32,7 +32,11 @@ function makeEl(id) {
   const node = {
     id, value: '', checked: false, disabled: false, textContent: '', clientWidth: 640, parentNode: null, _html: '',
     get innerHTML() { return this._html; },
-    set innerHTML(v) { this._html = String(v); },
+    // A browser does not keep the markup it is given: it parses it and writes
+    // it back its own way, and an escaped apostrophe comes back as one. Only
+    // that much is imitated here, because code that compares what it wrote
+    // with what the element now holds is wrong in a browser without it.
+    set innerHTML(v) { this._html = String(v).replace(/&#039;/g, "'"); },
     get className() { return Array.from(classes).join(' '); },
     set className(v) { classes.clear(); String(v).split(/\s+/).filter(Boolean).forEach(c => classes.add(c)); },
     classList: {
