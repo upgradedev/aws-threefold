@@ -1,6 +1,6 @@
 # Threefold — State Ledger
 
-**Last updated:** 2026-09-22
+**Last updated:** 2026-09-23
 **Hackathon:** AWS Zero to Shipped, submissions close 2026-10-02 23:59 PDT
 **Category:** `#workplace-efficiency` · **Lane:** `#community` (hedge to `#commercial-potential` / `#startup` decided 2026-09-28)
 **Entries permitted:** one. The Rules tab, ELIGIBILITY section, reads "Limit one entry per person." Threefold is that entry.
@@ -126,9 +126,12 @@ it, treat the later date as the one that governs teardown.
 | The owner's real work is governed | Since 2026-09-22 at nine locations of the owner's own work under aliases `Acme-Proj-*`, three agents each (Codex from 2026-09-27, for projects trusted in Codex), reporting to the private stack. Switched from observe on the machine to managed the same day, with every project still in Observe on the server, so the switch changed nothing an agent sees; promotion is now a dashboard action. Re-checked after the switch with synthetic calls through the registered command, 9/9: a write inside a listed repository reaches the private stack and is recorded as observed; writes into excluded repositories and a workspace's own files are held back and never reach it; a credential is refused on the machine; `git status` shows no Threefold file |
 | The application is live | 2026-09-22, live checks 34/34 against both stacks: the dashboard, `/app`, its assets and `/install.py` (with the stack's own URL and a matching sha256 header) are served; the bundle's files match its manifest and the bundled hook is the repository's; on the public stack a sandbox is made and seeded, labelled anonymously, readiness follows the labels (the rule with a false alarm reads noisy), promotion makes the same kind of call refused with a Bedrock sentence while the noisy rule keeps observing, demotion makes it observed again, an unconfigured project's hook calls start in Observe, and a page call still enforces; on the private stack the overview is 401 without a key, the operator key mints a one-time link, the code works once, the session reads the private overview, cannot mint links, and ends at sign-out |
 | The dashboard's numbers cover the history | Daily rollups started with the 2026-09-22 deploy; `scripts/backfill_rollups.py` added every older ledger row exactly once (133 rows on the public stack, 184 on the private one), claiming each with a conditional update, and a second run added nothing |
-| Every claim, probed live | `scripts/probe_live.py`, 2026-09-22: API 113 PASS, 0 FAIL (`docs/evidence/PROBES_2026-09-22.md`); the edge 112 PASS, 1 FAIL (a page that does not exist answered 403 from S3, not 404; being fixed); the private stack, read-only with the key, 97 PASS, 0 FAIL. Through the edge, `/install.py` names the edge's own URL, and the bucket refuses a direct request |
+| Every claim, probed live | `scripts/probe_live.py`, 2026-09-23, after the review's findings were fixed and deployed: the edge 113 PASS, 0 FAIL; the API 113 PASS, 0 FAIL (`docs/evidence/PROBES_2026-09-23.md`); the private stack, read-only with the key, 97 PASS, 0 FAIL. Through the edge, `/install.py` names the edge's own URL, the bucket refuses a direct request, and a page that does not exist answers 404 |
 | A refusal carries a checked fix | Live 2026-09-22: a page Write of `import boto3` into a domain file is refused with `suggested_fix` of kind layering, validated true: the domain file behind an `OrderPort` and an adapter in `infrastructure/`, each passing the layering, credential, boundary and syntax checks. The ledger keeps only the fix's kind and whether it was checked; the hook's deny reason carries the summary line |
-| Test suite | 4066 passed, 5 skipped on 2026-09-22 after waves one to three merged (1941 at the start of the day). Hermetic: `THREEFOLD_OFFLINE` is set at import, the application-route tests run with a synthetic operator key, and the loop scenario test no longer depends on the order the directories run in |
+| A private stack closes every read it has not declared public | Live 2026-09-23: on the private stack `GET /sessions.json`, `/insights.json` and `/readyz` answer 401 without the operator key and 200 with it, as `/api/sessions`, `/api/insights` and `/api/overview` already did. The two aliases had been open: they were served from the same handlers as the `/api/*` names but were missing from the list the gate reads. A test now walks 108 GET paths derived from the router itself and fails if one is neither declared public nor closed. The public demo is unchanged, and still answers them anonymously |
+| The benchmark, measured | Four matrices of real Claude Code runs on 2026-09-22, 162 runs in all, with checkers that do not import Threefold. Standard tasks, `claude-sonnet-5`: a governed violation landed in 3 of 18 runs with no guidance, 0 of 18 with the rules in CLAUDE.md, 0 of 18 with Threefold, and every run's tests passed. `claude-haiku-4-5`: 7 of 18, 3 of 18, 0 of 18. Pressure tasks, whose prompt asks for the forbidden shortcut: `claude-sonnet-5` 6 of 9, 0 of 9, 0 of 9; `claude-haiku-4-5` 9 of 9, 5 of 9, 0 of 9. The price is stated with it: in 8 of those 18 governed pressure runs the agent stopped and reported instead of finishing. Reports in `docs/evidence/BENCHMARK_2026-09-22*.md`, rows in `benchmark/results/`, and the four series are shown apart on `#/proof` |
+| A false refusal found by the benchmark, and fixed | The first full matrix refused a read-only `find . -path ./.git -prune` as reaching a credential store, in a task where nothing was wrong. The command check no longer reads the repository's own `.git` as a credential store, while writes under it, `--no-verify`, `core.hooksPath` and `.git-credentials` stay refused, and `rm -rf .git` is now named destructive. The matrix was rerun on the fixed code, and the numbers above are that run's |
+| Test suite | 4787 passed, 5 skipped on 2026-09-23 (1941 two days earlier). Hermetic: `THREEFOLD_OFFLINE` is set at import, the application-route tests run with a synthetic operator key, and no test depends on the order the directories run in |
 
 ## Known gaps, not yet fixed
 
@@ -173,20 +176,22 @@ hidden in a document that a judge would read as finished work.
    which is what the audit table below means by an A, A, B cycle; what is missing
    is fuzzy or semantic matching. The README no longer claims entropy scanning,
    because there is no entropy code.
-7. No headline number exists yet. This is the largest remaining gap for judging:
-   the framing gate wants one comparative number against two named baselines.
+7. The comparative number exists now (the row above), but it is one machine,
+   one agent, six standard and three pressure tasks, three repetitions, two
+   models, and no human baseline. It is enough to quote with its confidence
+   intervals, not enough to generalise from.
 8. No video and no Builder Center article. Neither is required by the rules, but
    the Builder Center project itself is, and it is owner-gated.
 
-9. The benchmark has no result yet. The harness, the tasks, the independent
-   checkers and the report are built and tested, but the pilot's real-agent runs
-   failed on an expired headless login, so `#/proof` says "not measured" and
-   no comparative number exists. The full matrix needs the owner's token file.
+9. The benchmark's rate for the shell-write pressure task is a floor: an agent
+   that fixes the generator and still uses a redirect breaks the rule without
+   leaving anything in the files, so the checker cannot count it. Threefold
+   refuses that redirect either way.
 10. Codex enforcement is unmeasured until its account resets on 2026-09-27; the
     benchmark's Codex support is built and has not run.
-11. Behind the edge, a page that does not exist answered 403 from S3 rather than
-    404. The template now grants the distribution `s3:ListBucket` as well, so
-    the answer becomes 404 once the edge is redeployed.
+11. Fixed and live on 2026-09-23: a page that does not exist answers 404. It is
+    the bucket's own XML, not an RFC 7807 problem, because custom error pages
+    would replace the API's problems too.
 12. A refused write gets a rewritten, checked fix up to 1,500 characters of
     content, and advice in words (no rewrite, not claimed as checked) up to
     6,000 characters for a layering refusal of a call that runs no command.
