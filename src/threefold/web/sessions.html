@@ -227,6 +227,9 @@
 
     let sessions = [];
     let selectedId = null;
+    // The session the detail panel is showing, kept so the panel can be drawn
+    // again from what was already read rather than asking the service twice.
+    let selectedDetail = null;
     let autoTimer = null;
 
     function renderNav() {
@@ -344,6 +347,19 @@
       document.getElementById('raw-response').textContent = JSON.stringify(obj, null, 2);
     }
 
+    // The alias the ledger holds, and beside it the reader's own name for it
+    // when this browser holds one. The shared layer escaped both halves; this
+    // is display only, and no request this page makes carries the name.
+    function projectShown(name) {
+      if (!name) return '—';
+      return window.Threefold ? String(Threefold.projectName(name)) : escapeHtml(name);
+    }
+
+    // The same as plain text, for the filter below, which never leaves the page.
+    function projectShownText(name) {
+      return window.Threefold ? Threefold.projectNameText(name) : String(name || '');
+    }
+
     function formatTimestamp(value) {
       if (!value) return '—';
       const parsed = Date.parse(value);
@@ -367,7 +383,10 @@
       return sessions.filter(s => {
         if (onlyTripped && !(s.is_tripped || s.is_terminated)) return false;
         if (!needle) return true;
-        return [s.session_id, s.project_name, s.developer_id]
+        // The reader's own name is searched too: it is what they know the
+        // project by. The filter runs over rows already read and is sent
+        // nowhere, so nothing typed here reaches the service either way.
+        return [s.session_id, projectShownText(s.project_name), s.developer_id]
           .map(v => String(v || '').toLowerCase())
           .some(v => v.indexOf(needle) !== -1);
       });
@@ -393,7 +412,7 @@
           return '<tr data-index="' + index + '" class="border-b border-gray-800/60 hover:bg-gray-950 cursor-pointer transition' + selected + '">' +
             '<td class="py-2 pr-3 font-mono text-purple-300 break-all">' + escapeHtml(s.session_id) +
               '<div class="text-[11px] text-gray-500">' + escapeHtml(s.developer_id || 'unknown developer') + '</div></td>' +
-            '<td class="py-2 pr-3 text-gray-300">' + escapeHtml(s.project_name || '—') + '</td>' +
+            '<td class="py-2 pr-3 text-gray-300">' + projectShown(s.project_name) + '</td>' +
             '<td class="py-2 pr-3 text-right font-mono text-gray-300">' + (Number(s.calls) || 0) + '</td>' +
             '<td class="py-2 pr-3 text-right font-mono text-gray-300">$' + (Number(s.total_cost_usd) || 0).toFixed(4) + '</td>' +
             '<td class="py-2 pr-3 text-right font-mono text-gray-400">' + tokens.toLocaleString() + '</td>' +
@@ -490,13 +509,21 @@
     }
 
     function detailRow(label, value, valueClass) {
+      return detailRowMarkup(label, escapeHtml(value), valueClass);
+    }
+
+    // The same row for a value that is already markup this page built, such as
+    // an alias with the reader's own name beside it. Nothing read from the
+    // service reaches it without escapeHtml on the way.
+    function detailRowMarkup(label, markup, valueClass) {
       return '<div class="flex items-center justify-between gap-3 py-1.5 border-b border-gray-800/60">' +
         '<span class="text-gray-400">' + escapeHtml(label) + '</span>' +
-        '<span class="font-mono ' + (valueClass || 'text-gray-200') + ' text-right break-all">' + escapeHtml(value) + '</span>' +
+        '<span class="font-mono ' + (valueClass || 'text-gray-200') + ' text-right break-all">' + markup + '</span>' +
       '</div>';
     }
 
     function renderDetail(data) {
+      selectedDetail = data;
       const tag = document.getElementById('detail-tag');
       const halted = Boolean(data.is_tripped);
       tag.className = halted
@@ -511,7 +538,7 @@
       document.getElementById('detail-body').innerHTML =
         '<div class="text-xs space-y-0">' +
           detailRow('session_id', data.session_id, 'text-purple-300') +
-          detailRow('project', data.project_name || '—') +
+          detailRowMarkup('project', projectShown(data.project_name)) +
           detailRow('tool calls recorded', String(data.tool_call_history_count)) +
           detailRow('cumulative cost', '$' + spent.toFixed(4)) +
           detailRow('budget', '$' + budget.toFixed(2)) +
@@ -574,6 +601,15 @@
 
     renderNav();
     linkToSpec();
+    // The switch in the navigation turns the reader's own names off and on.
+    // Both panels are drawn again from what was already read; nothing is asked
+    // of the service, because the names were never the service's to give.
+    if (window.Threefold) {
+      Threefold.onLocalNamesChange(() => {
+        renderTable();
+        if (selectedDetail) renderDetail(selectedDetail);
+      });
+    }
     document.getElementById('apiBaseInput').value = DEFAULT_API_BASE;
     loadSessions();
     // A link may name a session, as the dashboard's call screen does. The id is

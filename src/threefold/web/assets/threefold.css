@@ -192,3 +192,11 @@ a:hover > .tf-mark, g:hover > .tf-mark { opacity: 0.78; }
 .tf-toast { display: flex; align-items: center; gap: 0.75rem; padding: 0.6rem 0.8rem; border-radius: 0.75rem; background: #111827; border: 1px solid #374151; font-size: 0.75rem; color: #e5e7eb; box-shadow: 0 10px 30px -10px rgba(0,0,0,.6); }
 
 .tf-break { overflow-wrap: anywhere; word-break: break-word; }
+
+/* A reader's own name for a project, shown beside the alias the API knows. It
+   is kept in this browser alone and is never sent anywhere, so it is drawn
+   quieter than the alias and never in the alias's monospace. */
+.tf-local-name {
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif; font-weight: 400;
+  color: #9ca3af; overflow-wrap: anywhere; word-break: break-word;
+}

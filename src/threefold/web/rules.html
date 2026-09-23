@@ -426,11 +426,60 @@ public class Order { }</textarea>
       badge.innerText = words;
     }
 
+    // The alias the service knows, and the reader's own name for it beside
+    // it when this browser holds one. Plain text, because every place on this
+    // page that names a project writes it with innerText or through
+    // escapeHtml. It is display only: currentProject, draftProject, the
+    // address and everything this page sends stay the alias alone.
+    // The last answer describeOrigin drew, so the sentence beside the list
+    // can be written again without reading the rules a second time.
+    let lastOrigin = null;
+
+    function projectShownText(name) {
+      return window.Threefold ? Threefold.projectNameText(name) : String(name || '');
+    }
+
+    // A panel here keeps what it was given until something replaces it: a
+    // drafted rule, a save's answer and the editor's own result all stay on
+    // screen. When one of those sentences names a project, the switch in the
+    // navigation has to reach it too, or the one control that makes a
+    // screenshot safe would leave a name of the reader's own on the page.
+    //
+    // So a write whose words name a project goes through writeNaming, which
+    // keeps the function that built them and exactly what it produced. On the
+    // switch, redrawNaming runs that function again — from what this page has
+    // already read, never a second request — and only while the panel still
+    // holds what it wrote. Anything else on screen means the page has moved
+    // on, and the memo is dropped rather than put back over newer words.
+    // What is kept is what the panel reports after the write, not the string it
+    // was handed: a browser writes the markup back its own way — an escaped
+    // apostrophe in a name of the reader's own comes back as an apostrophe —
+    // and comparing against the string we built would call an untouched panel
+    // changed, drop the memo, and leave the name on screen.
+    const namingPanels = {};
+
+    function writeNaming(id, build) {
+      const panel = document.getElementById(id);
+      panel.innerHTML = build();
+      namingPanels[id] = { build: build, markup: panel.innerHTML };
+    }
+
+    function redrawNaming() {
+      Object.keys(namingPanels).forEach(id => {
+        const memo = namingPanels[id];
+        const panel = document.getElementById(id);
+        if (!panel || panel.innerHTML !== memo.markup) { delete namingPanels[id]; return; }
+        panel.innerHTML = memo.build();
+        memo.markup = panel.innerHTML;
+      });
+    }
+
     // Says whose rules are on screen, from is_default alone: asked for a project,
     // true means it has saved none and the list is the shared default its calls
     // are judged against, false means the list is its own. A service that sends
     // no is_default gets the count and nothing claimed beyond it.
     function describeOrigin(data) {
+      lastOrigin = data;
       const count = Array.isArray(data.rules) ? data.rules.length : (data.count || 0);
       const counted = count + ' rule' + (count === 1 ? '' : 's');
       const origin = document.getElementById('rules-origin');
@@ -442,20 +491,20 @@ public class Order { }</textarea>
         return;
       }
       if (data.is_default === true) {
-        setScope('bg-amber-950 text-amber-300 border-amber-800', currentProject + ' · SHARED DEFAULT');
-        origin.innerText = currentProject + ' has no rules of its own, so these are the shared default its calls are judged against. ' +
+        setScope('bg-amber-950 text-amber-300 border-amber-800', projectShownText(currentProject) + ' · SHARED DEFAULT');
+        origin.innerText = projectShownText(currentProject) + ' has no rules of its own, so these are the shared default its calls are judged against. ' +
           'Save below to give it its own.';
       } else if (data.is_default === false) {
-        setScope('bg-purple-950 text-purple-300 border-purple-800', currentProject + ' · ITS OWN RULES');
-        origin.innerText = counted + ' saved for ' + currentProject + ' alone. Other projects are not affected by them.';
+        setScope('bg-purple-950 text-purple-300 border-purple-800', projectShownText(currentProject) + ' · ITS OWN RULES');
+        origin.innerText = counted + ' saved for ' + projectShownText(currentProject) + ' alone. Other projects are not affected by them.';
       } else {
-        setScope('bg-gray-950 text-gray-300 border-gray-700', currentProject);
-        origin.innerText = counted + ' read for ' + currentProject + '.';
+        setScope('bg-gray-950 text-gray-300 border-gray-700', projectShownText(currentProject));
+        origin.innerText = counted + ' read for ' + projectShownText(currentProject) + '.';
       }
     }
 
     function describeTarget() {
-      document.getElementById('save-target').innerText = currentProject ? currentProject + '’s own rules' : 'the shared set';
+      document.getElementById('save-target').innerText = currentProject ? projectShownText(currentProject) + '’s own rules' : 'the shared set';
       document.getElementById('save-button').innerText = currentProject ? 'Save for ' + currentProject : 'Save as the shared set';
     }
 
@@ -552,7 +601,7 @@ public class Order { }</textarea>
     }
 
     function whose(project) {
-      return project ? project + '’s' : 'the shared set’s';
+      return project ? projectShownText(project) + '’s' : 'the shared set’s';
     }
 
     // Only the shape is checked here: that the text is JSON and holds a list of
@@ -652,19 +701,28 @@ public class Order { }</textarea>
       // Checked before the draft itself: a draft that is valid but was read for
       // another project is the dangerous one, not a draft with problems.
       if (draftProject !== currentProject) {
-        const held = draftProject === null
-          ? 'The editor holds no rules that were read for anything yet'
-          : 'The editor still holds ' + whose(draftProject) + ' rules';
-        out.innerHTML = '<p class="text-red-400">' + escapeHtml(held + '; ' + whose(currentProject) +
-          ' have not been read yet. Nothing was sent. Wait for them to be read, or start from an example, which is then a draft for ' +
-          (currentProject || 'the shared set') + '.') + '</p>';
+        // The two projects are read here and not in the sentence below: the
+        // switch writes it again later, and it must still be about the same
+        // two, whatever the page has been asked for since.
+        const inEditor = draftProject;
+        const asked = currentProject;
+        writeNaming('save-result', () => {
+          const held = inEditor === null
+            ? 'The editor holds no rules that were read for anything yet'
+            : 'The editor still holds ' + whose(inEditor) + ' rules';
+          return '<p class="text-red-400">' + escapeHtml(held + '; ' + whose(asked) +
+            ' have not been read yet. Nothing was sent. Wait for them to be read, or start from an example, which is then a draft for ' +
+            (projectShownText(asked) || 'the shared set') + '.') + '</p>';
+        });
         return;
       }
       // The editor was read before a drafted rule was saved to this project, so
       // saving it would replace the set with one that lacks that rule.
       if (rulesStale && draftProject === rulesStale.project) {
-        out.innerHTML = '<p class="text-red-400">' + escapeHtml('Nothing was sent. ' + staleRuleName() + ' was saved to ' + rulesStale.project +
-          ' after the rules in this editor were read, and saving them as they stand would take it away again. Read the rules again first; see the note above.') + '</p>';
+        const staleProject = rulesStale.project;
+        const staleRule = staleRuleName();
+        writeNaming('save-result', () => '<p class="text-red-400">' + escapeHtml('Nothing was sent. ' + staleRule + ' was saved to ' + projectShownText(staleProject) +
+          ' after the rules in this editor were read, and saving them as they stand would take it away again. Read the rules again first; see the note above.') + '</p>');
         return;
       }
       const rules = validate();
@@ -698,10 +756,12 @@ public class Order { }</textarea>
         // Lambda runs several containers, each holding the rules it read. The one
         // that took the save uses them at once; the others read them again within
         // the refresh interval the service reports.
-        out.innerHTML = '<p class="text-emerald-400">Saved ' + escapeHtml(d.count) + ' rule' + (d.count === 1 ? '' : 's') +
-          (target ? ' for ' + escapeHtml(target) + ' alone' : ' as the shared set') + '. ' +
-          (d.count === 1 ? 'It applies' : 'They apply') + ' from the next call on the server that took the save, and on every other server within ' +
-          escapeHtml(Number(d.refresh_seconds) || refreshSeconds) + ' seconds.</p>';
+        const seconds = Number(d.refresh_seconds) || refreshSeconds;
+        const count = d.count;
+        writeNaming('save-result', () => '<p class="text-emerald-400">Saved ' + escapeHtml(count) + ' rule' + (count === 1 ? '' : 's') +
+          (target ? ' for ' + escapeHtml(projectShownText(target)) + ' alone' : ' as the shared set') + '. ' +
+          (count === 1 ? 'It applies' : 'They apply') + ' from the next call on the server that took the save, and on every other server within ' +
+          escapeHtml(seconds) + ' seconds.</p>');
         await load();
       } catch (err) {
         out.innerHTML = '<p class="text-red-400">' + escapeHtml(String(err)) + '</p>';
@@ -725,9 +785,9 @@ public class Order { }</textarea>
       if (!rulesStale) { box.hidden = true; box.innerHTML = ''; return; }
       box.hidden = false;
       box.innerHTML =
-        '<p class="text-amber-300">' + escapeHtml(staleRuleName() + ' was saved to ' + rulesStale.project + ' from the draft panel after the rules on this page were read, ' +
-          'so the list and this editor do not show it. Saving the editor as it stands would replace ' + rulesStale.project + '’s set without it, so Save sends nothing for ' +
-          rulesStale.project + ' until the rules are read again.') + '</p>' +
+        '<p class="text-amber-300">' + escapeHtml(staleRuleName() + ' was saved to ' + projectShownText(rulesStale.project) + ' from the draft panel after the rules on this page were read, ' +
+          'so the list and this editor do not show it. Saving the editor as it stands would replace ' + projectShownText(rulesStale.project) + '’s set without it, so Save sends nothing for ' +
+          projectShownText(rulesStale.project) + ' until the rules are read again.') + '</p>' +
         '<button type="button" onclick="load()" class="text-[11px] px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700">Read the rules again</button>' +
         '<p class="text-[11px] text-gray-500">Reading them again replaces what is in the editor, so copy any edits you want to keep first.</p>';
     }
@@ -1008,20 +1068,20 @@ public class Order { }</textarea>
 
     function renderDraft(d, project, examples) {
       lastDraft = { project: project, examples: examples, rule: d.rule, tried: Array.isArray(d.tried) ? d.tried : [] };
-      document.getElementById('draft-result').innerHTML =
+      writeNaming('draft-result', () =>
         '<div class="p-3 rounded-xl bg-gray-950 border border-gray-800 space-y-1">' +
           '<p class="text-gray-200">Drafted by Amazon Bedrock' + (d.model ? ' <span class="font-mono text-[10px] text-gray-500">' + escapeHtml(d.model) + '</span>' : '') +
             (typeof d.attempts === 'number' ? ' in ' + escapeHtml(d.attempts) + ' model call' + (d.attempts === 1 ? '' : 's') : '') +
-            ', for ' + escapeHtml(project || 'the shared set') + '. <span class="text-emerald-300">Not saved.</span></p>' +
+            ', for ' + escapeHtml(projectShownText(project) || 'the shared set') + '. <span class="text-emerald-300">Not saved.</span></p>' +
           listOf(d.warnings, 'text-[11px] text-amber-300') +
           listOf(d.notes, 'text-[11px] text-gray-400') +
-        '</div>';
+        '</div>');
       document.getElementById('draft-rule').value = JSON.stringify(d.rule || {}, null, 2);
       renderDraftMode(d.rule);
       const validation = d.validation || {};
-      document.getElementById('draft-validation').innerHTML = validation.ok === true
-        ? '<p class="text-emerald-300">Checked as POST /rules would check it' + (project ? ', beside ' + escapeHtml(project) + '’s rules in force' : '') + ': it can be saved as written.</p>'
-        : '<p class="text-red-400 font-semibold">The service did not accept the draft as written.</p>' + listOf(validation.errors, 'text-red-300');
+      writeNaming('draft-validation', () => validation.ok === true
+        ? '<p class="text-emerald-300">Checked as POST /rules would check it' + (project ? ', beside ' + escapeHtml(projectShownText(project)) + '’s rules in force' : '') + ': it can be saved as written.</p>'
+        : '<p class="text-red-400 font-semibold">The service did not accept the draft as written.</p>' + listOf(validation.errors, 'text-red-300'));
       renderTried(lastDraft.tried, 'Tried on ' + lastDraft.tried.length + ' example' + (lastDraft.tried.length === 1 ? '' : 's'));
       document.getElementById('draft-save-result').innerHTML = '';
       showDraftBox(true);
@@ -1281,12 +1341,17 @@ public class Order { }</textarea>
           out.innerHTML = '<p class="text-red-400">' + escapeHtml(words) + ' Nothing changed.</p>';
           return;
         }
-        const copied = current.is_default === true && current.rules.length
-          ? ' ' + escapeHtml(project) + ' had no rules of its own, so it now keeps the ' + escapeHtml(current.rules.length) + ' shared rule' + (current.rules.length === 1 ? '' : 's') + ' it was judged against, and this one after them.'
-          : '';
-        out.innerHTML = '<p class="text-emerald-400">Saved to ' + escapeHtml(project) + ', in observe: it records what it would refuse and refuses nothing yet.' + copied +
-          ' Other servers pick it up within ' + escapeHtml(Number(d.refresh_seconds) || refreshSeconds) + ' seconds. ' +
-          'When it has flagged only what it should, promote it on <a href="' + escapeHtml(dashboardProjectHref(project)) + '" class="text-purple-300 hover:text-purple-200 underline">the project page ↗</a>.</p>';
+        const shared = current.is_default === true ? current.rules.length : 0;
+        const seconds = Number(d.refresh_seconds) || refreshSeconds;
+        // The note below is added to this same panel a moment later, so both
+        // are built here: the switch writes the panel again whole, rather than
+        // leaving the half of it that was appended.
+        let alsoStale = '';
+        const saved = () => '<p class="text-emerald-400">Saved to ' + escapeHtml(projectShownText(project)) + ', in observe: it records what it would refuse and refuses nothing yet.' +
+          (shared ? ' ' + escapeHtml(projectShownText(project)) + ' had no rules of its own, so it now keeps the ' + escapeHtml(shared) + ' shared rule' + (shared === 1 ? '' : 's') + ' it was judged against, and this one after them.' : '') +
+          ' Other servers pick it up within ' + escapeHtml(seconds) + ' seconds. ' +
+          'When it has flagged only what it should, promote it on <a href="' + escapeHtml(dashboardProjectHref(project)) + '" class="text-purple-300 hover:text-purple-200 underline">the project page ↗</a>.</p>' + alsoStale;
+        writeNaming('draft-save-result', saved);
         // Whatever this page read of the project before the save lacks the rule.
         // It is marked stale first, so the editor's Save refuses to put back the
         // set without it; a read that succeeds after this moment clears the mark.
@@ -1301,8 +1366,9 @@ public class Order { }</textarea>
         const editorUntouched = document.getElementById('editor').value === JSON.stringify({ rules: inForce }, null, 2);
         if (currentProject === project && editorUntouched) await load();
         else if (shownHere) {
-          out.innerHTML += '<p class="text-amber-300 mt-1">' + escapeHtml('The rules further down were read before this save and do not show the rule. ' +
+          alsoStale = '<p class="text-amber-300 mt-1">' + escapeHtml('The rules further down were read before this save and do not show the rule. ' +
             'They are not read again here, so nothing in the editor is replaced, and its Save sends nothing until they are.') + '</p>';
+          writeNaming('draft-save-result', saved);
         }
       } catch (err) {
         out.innerHTML = '<p class="text-red-400">' + escapeHtml(String(err)) + ' Nothing is known to have changed.</p>';
@@ -1342,6 +1408,19 @@ public class Order { }</textarea>
     // A sign-in or sign-out in another part of the page changes whether a draft
     // can be saved, so the button is told.
     if (window.Threefold) Threefold.onAuthChange(updateDraftSaveState);
+    // The switch in the navigation turns the reader's own names off and on.
+    // Everything that names a project is written again from what is already
+    // here — the badge and the sentence beside the list, the stale note, and
+    // every panel that is still holding the words it was given, which is what
+    // redrawNaming is for. The rules themselves are not read a second time.
+    if (window.Threefold) {
+      Threefold.onLocalNamesChange(() => {
+        describeTarget();
+        renderRulesStale();
+        if (lastOrigin) describeOrigin(lastOrigin);
+        redrawNaming();
+      });
+    }
     // The project page links here with #draft, to write a rule for that project.
     try {
       if (location.hash === '#draft') {

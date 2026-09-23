@@ -32,7 +32,11 @@ function makeEl(id) {
   const node = {
     id, value: '', checked: false, disabled: false, textContent: '', clientWidth: 640, parentNode: null, _html: '',
     get innerHTML() { return this._html; },
-    set innerHTML(v) { this._html = String(v); },
+    // A browser does not keep the markup it is given: it parses it and writes
+    // it back its own way, and an escaped apostrophe comes back as one. Only
+    // that much is imitated here, because code that compares what it wrote
+    // with what the element now holds is wrong in a browser without it.
+    set innerHTML(v) { this._html = String(v).replace(/&#039;/g, "'"); },
     get className() { return Array.from(classes).join(' '); },
     set className(v) { classes.clear(); String(v).split(/\s+/).filter(Boolean).forEach(c => classes.add(c)); },
     classList: {
@@ -42,6 +46,10 @@ function makeEl(id) {
     setAttribute(n, v) { attrs[n] = String(v); },
     getAttribute(n) { return Object.prototype.hasOwnProperty.call(attrs, n) ? attrs[n] : null; },
     hasAttribute(n) { return Object.prototype.hasOwnProperty.call(attrs, n); },
+    // Nothing here parses the markup an element was given, so a search inside
+    // one finds nothing. It answers rather than throwing, because a page that
+    // binds handlers to the rows it just wrote should still be drivable here.
+    querySelectorAll: () => [],
     focus() { document.activeElement = this; },
     addEventListener(type, fn) { (this.listeners = this.listeners || {})[type] = fn; },
     removeChild() {}
@@ -88,10 +96,14 @@ globalThis.history = {
 };
 const store = {};
 let storageBlocked = false;
+// A browser that answers a read and refuses a write: an old private mode, or a
+// quota already full. It is its own flag because it is the harder case — the
+// page reads back what storage held before, not what it was just told.
+let storageWriteBlocked = false;
 globalThis.localStorage = {
   getItem: k => { if (storageBlocked) throw new Error('blocked'); return Object.prototype.hasOwnProperty.call(store, k) ? store[k] : null; },
-  setItem: (k, v) => { if (storageBlocked) throw new Error('blocked'); store[k] = String(v); },
-  removeItem: k => { if (storageBlocked) throw new Error('blocked'); delete store[k]; }
+  setItem: (k, v) => { if (storageBlocked || storageWriteBlocked) throw new Error('blocked'); store[k] = String(v); },
+  removeItem: k => { if (storageBlocked || storageWriteBlocked) throw new Error('blocked'); delete store[k]; }
 };
 const copied = [];
 Object.defineProperty(globalThis, 'navigator', {
