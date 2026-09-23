@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "generated_at": "2026-09-22T16:32:41Z",
+  "generated_at": "2026-09-23T00:53:34Z",
   "generated_by": "scripts/build_proof.py",
   "benchmarks": [
     {
@@ -657,10 +657,10 @@
   },
   "private": {
     "source": "GET /api/overview?days=30 and GET /api/projects on the owner's private stack, read with the operator key; only these totals were kept",
-    "snapshot_at": "2026-09-22T16:32:43.593643+00:00",
+    "snapshot_at": "2026-09-23T00:53:35.991062+00:00",
     "window_days": 30,
     "days_observed": 2,
-    "calls_governed": 274,
+    "calls_governed": 290,
     "would_refuse": 9,
     "refused": 0,
     "reviewed": 0,
@@ -675,7 +675,7 @@
     "self_correction": {
       "refusals_considered": 0,
       "self_corrected": 0,
-      "rows_read": 274,
+      "rows_read": 290,
       "rate": null,
       "median_calls_to_correct": null,
       "complete": true

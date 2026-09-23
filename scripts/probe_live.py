@@ -2229,9 +2229,19 @@ class Probe:
 
     def _problem_types(self) -> Tuple[str, str]:
         problems = []
-        missing = self.request("GET", f"probe-{self.runid}-no-such-route")
+        # Asked under /api/, so the function answers it. A bare path is a page
+        # behind the edge, where the pages bucket answers a missing key with its
+        # own 404 in XML, which says nothing about the service's problems.
+        # With the key, because a stack that keeps its reads private refuses an
+        # undeclared route before routing it, and this check is about the shape
+        # of the service's own problems, not about the door.
+        missing = self.request("GET", f"api/probe-{self.runid}-no-such-route", auth=True)
         bad_body = self.request("POST", "evaluate-tool-call", raw=MALFORMED, auth=True)
-        for resp, want in ((missing, 404), (bad_body, 400)):
+        # A stack that keeps its reads private closes every route it has not
+        # declared public, so an unknown one is refused before it is routed.
+        want_missing = 401 if (self.expected_mode() == "private" and not self.has_key) else 404
+
+        for resp, want in ((missing, want_missing), (bad_body, 400)):
             data = resp.obj()
             lacking = [k for k in ("type", "title", "status", "detail") if k not in data]
             if resp.status != want:
