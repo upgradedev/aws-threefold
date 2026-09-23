@@ -35,6 +35,12 @@
 
   var SESSION_STORAGE = 'threefold-session';
   var OPERATOR_KEY_STORAGE = 'threefold-operator-key';
+  // The reader's own names for the aliases the API knows. Kept in this browser
+  // and nowhere else: see the local names section below.
+  var LOCAL_NAMES_STORAGE = 'threefold-local-names';
+  var LOCAL_NAMES_HIDDEN_STORAGE = 'threefold-local-names-hidden';
+  var LOCAL_NAME_MAX = 60;
+  var LOCAL_NAMES_MAX = 200;
 
   // ------------------------------------------------------------- escaping
 
@@ -165,6 +171,159 @@
     if (readSession()) return 'session';
     if (storedOperatorKey()) return 'key';
     return null;
+  }
+
+  // ----------------------------------------------------------- local names
+  //
+  // The ledger knows a project only by its alias, because no real repository
+  // name may leave the owner's machine. The owner, though, cannot tell one
+  // alias from another. So a reader may keep their own name for each alias in
+  // this browser, and every page shows it beside the alias, quieter.
+  //
+  // Three rules hold this together, and the rest of the file depends on them:
+  //   1. A label is display text and nothing else. It is never put in a URL, a
+  //      query string, a request body, a header, a copied command or the value
+  //      of a field a handler reads back. Only projectName() and
+  //      projectNameText() render one, and neither is a data source.
+  //   2. It is escaped like every other untrusted string: projectName() goes
+  //      through html``, projectNameText() returns a plain string that its
+  //      caller interpolates through html`` in turn.
+  //   3. It lives in localStorage alone. Nothing here ever calls the API.
+
+  var memoryNames = null;
+  var memoryHidden = null;
+  // JSON.parse only when the stored text changed, so a table of a hundred rows
+  // parses the map once rather than once a row.
+  var namesText = null;
+  var namesCache = {};
+
+  // A map of alias to label, with anything that is not one dropped: a label is
+  // a single line of at most LOCAL_NAME_MAX characters, and at most
+  // LOCAL_NAMES_MAX of them are kept. `__proto__` is skipped rather than
+  // assigned, so a pasted document cannot reach an object's prototype.
+  function cleanNames(value) {
+    var clean = {};
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return clean;
+    var aliases = Object.keys(value);
+    var kept = 0;
+    for (var i = 0; i < aliases.length && kept < LOCAL_NAMES_MAX; i++) {
+      var alias = aliases[i];
+      if (!alias || alias === '__proto__') continue;
+      var label = value[alias];
+      if (typeof label !== 'string') continue;
+      label = label.replace(/\s+/g, ' ').trim().slice(0, LOCAL_NAME_MAX);
+      if (!label) continue;
+      clean[alias] = label;
+      kept += 1;
+    }
+    return clean;
+  }
+
+  // What this browser has stored, as a clean map. Storage can be blocked or
+  // throw, so the fallback is whatever this tab set while it was.
+  function readLocalNames() {
+    var text = null;
+    try {
+      text = root.localStorage.getItem(LOCAL_NAMES_STORAGE);
+    } catch (err) {
+      return memoryNames || {};
+    }
+    if (text === namesText) return namesCache;
+    var parsed = null;
+    if (text) {
+      try { parsed = JSON.parse(text); } catch (err) { parsed = null; }
+    }
+    namesText = text;
+    namesCache = cleanNames(parsed);
+    return namesCache;
+  }
+
+  // True when the map was written to storage, false when it lives in this tab
+  // only, so a panel can say which happened rather than appear to have saved.
+  function writeLocalNames(map) {
+    var clean = cleanNames(map);
+    memoryNames = clean;
+    var stored = true;
+    try {
+      if (Object.keys(clean).length) root.localStorage.setItem(LOCAL_NAMES_STORAGE, JSON.stringify(clean));
+      else root.localStorage.removeItem(LOCAL_NAMES_STORAGE);
+    } catch (err) {
+      stored = false;
+    }
+    namesText = null;
+    announceLocalNames();
+    return stored;
+  }
+
+  function clearLocalNames() { return writeLocalNames({}); }
+
+  function localNamesHidden() {
+    try {
+      var text = root.localStorage.getItem(LOCAL_NAMES_HIDDEN_STORAGE);
+      if (text === null || text === undefined) return memoryHidden === true;
+      return text === '1';
+    } catch (err) {
+      return memoryHidden === true;
+    }
+  }
+
+  function setLocalNamesHidden(hidden) {
+    memoryHidden = !!hidden;
+    var stored = true;
+    try {
+      if (hidden) root.localStorage.setItem(LOCAL_NAMES_HIDDEN_STORAGE, '1');
+      else root.localStorage.removeItem(LOCAL_NAMES_HIDDEN_STORAGE);
+    } catch (err) {
+      stored = false;
+    }
+    announceLocalNames();
+    return stored;
+  }
+
+  var nameListeners = [];
+  function onLocalNamesChange(fn) { nameListeners.push(fn); }
+  function announceLocalNames() {
+    nameListeners.slice().forEach(function (fn) { try { fn(); } catch (err) { /* a listener's own problem */ } });
+  }
+
+  // The reader's name for this alias, or '' when there is none and whenever the
+  // switch in the navigation is off. Every render site goes through here, so
+  // one switch turns the lot off for a screenshot.
+  function projectLabel(alias) {
+    if (typeof alias !== 'string' || !alias) return '';
+    if (localNamesHidden()) return '';
+    var names = readLocalNames();
+    return Object.prototype.hasOwnProperty.call(names, alias) ? names[alias] : '';
+  }
+
+  // The alias as the API knows it, and the reader's own name beside it. The
+  // alias is always there: it is what every link, filter and request is built
+  // from, and the label is never any of those.
+  function projectName(alias) {
+    var label = projectLabel(alias);
+    if (!label) return html`${alias}`;
+    return html`${alias}<span class="tf-local-name"> · ${label}</span>`;
+  }
+
+  // The same for a title or an aria-label, where markup cannot go. The caller
+  // interpolates it through html``, which escapes it.
+  function projectNameText(alias) {
+    var label = projectLabel(alias);
+    return label ? String(alias) + ' · ' + label : String(alias == null ? '' : alias);
+  }
+
+  // The switch. It is a button, so it is reachable and operable from the
+  // keyboard, and it says what it does rather than only showing a state. It is
+  // drawn only once this browser holds a label: with none, every page reads
+  // exactly as it did before any of this existed.
+  function localNamesToggle() {
+    if (!Object.keys(readLocalNames()).length) return '';
+    var hidden = localNamesHidden();
+    var says = hidden
+      ? 'Your own names for projects are hidden. Press to show them beside each alias.'
+      : 'Your own names for projects are shown beside each alias. Press to hide them, for a screenshot or a demo.';
+    return html`<button type="button" class="tf-chip tf-chip-button" data-tf-names
+      aria-pressed="${hidden ? 'false' : 'true'}" aria-label="${says}" title="${says}">${raw(ICONS.eye)}<span>Your names: ${hidden ? 'off' : 'on'}</span></button>`;
   }
 
   // ----------------------------------------------------------------- fetch
@@ -478,7 +637,7 @@
         })}
         <a href="${PAGE_BASE}swagger.html" class="tf-nav-link text-gray-500" title="The published OpenAPI document">API</a>
       </nav>
-      <div class="flex items-center gap-1.5">${authChips(who, false)}</div>
+      <div class="flex items-center gap-1.5">${localNamesToggle()}${authChips(who, false)}</div>
       <button type="button" class="lg:hidden tf-icon-btn" data-tf-menu aria-expanded="false" aria-controls="tf-menu" aria-label="Open the menu">${raw(ICONS.menu)}</button>
       <div id="tf-menu" class="hidden lg:hidden tf-menu">
         <nav aria-label="Threefold, menu" class="grid grid-cols-2 gap-1">
@@ -536,6 +695,9 @@
     });
   }
   onAuthChange(redrawNavs);
+  // The switch itself lives in the navigation, so flipping it redraws the bar
+  // as well as the page that listened.
+  onLocalNamesChange(redrawNavs);
 
   function closestAttr(target, name) {
     var node = target;
@@ -562,6 +724,7 @@
       if (copy) { copyText(copy.getAttribute('data-tf-copy'), copy); return; }
       var menu = closestAttr(target, 'data-tf-menu');
       if (menu) { toggleMenu(menu); return; }
+      if (closestAttr(target, 'data-tf-names')) { setLocalNamesHidden(!localNamesHidden()); return; }
       if (closestAttr(target, 'data-tf-signout')) { signOut(); return; }
       // Following a link in the folded menu closes it.
       if (target.closest && target.closest('#tf-menu a')) toggleMenu(null, false);
@@ -803,6 +966,10 @@
     PROJECT_PATTERN: PROJECT_PATTERN,
     SESSION_STORAGE: SESSION_STORAGE,
     OPERATOR_KEY_STORAGE: OPERATOR_KEY_STORAGE,
+    LOCAL_NAMES_STORAGE: LOCAL_NAMES_STORAGE,
+    LOCAL_NAMES_HIDDEN_STORAGE: LOCAL_NAMES_HIDDEN_STORAGE,
+    LOCAL_NAME_MAX: LOCAL_NAME_MAX,
+    LOCAL_NAMES_MAX: LOCAL_NAMES_MAX,
     COLORS: COLORS,
     ICONS: ICONS,
     escapeHtml: escapeHtml,
@@ -817,6 +984,15 @@
     forgetOperatorKey: forgetOperatorKey,
     authHeaders: authHeaders,
     credentialInUse: credentialInUse,
+    readLocalNames: readLocalNames,
+    writeLocalNames: writeLocalNames,
+    clearLocalNames: clearLocalNames,
+    localNamesHidden: localNamesHidden,
+    setLocalNamesHidden: setLocalNamesHidden,
+    onLocalNamesChange: onLocalNamesChange,
+    projectLabel: projectLabel,
+    projectName: projectName,
+    projectNameText: projectNameText,
     api: api,
     ApiError: ApiError,
     isAuthError: isAuthError,
