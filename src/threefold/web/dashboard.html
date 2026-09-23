@@ -414,6 +414,13 @@
     // sign-in the stack stopped accepting does not: the screen that met the
     // refusal already says so, and says what to run.
     T.onAuthChange(reason => { if (reason !== 'expired' && current.route && current.route.path !== '/signin') route(); });
+    // The switch in the navigation turns the reader's own names for the
+    // aliases off and on, so the screen is drawn again and every label on it
+    // follows at once. Three screens are left out: /signin and /try show no
+    // alias a reader would name, and /connect redraws from its own state
+    // below, so a half-typed name survives the switch.
+    const KEEPS_ITS_OWN_STATE = { '/signin': true, '/try': true, '/connect': true };
+    T.onLocalNamesChange(() => { if (current.route && !KEEPS_ITS_OWN_STATE[current.route.path]) route(); });
 
     // ------------------------------------------------------ dialog, toast
 
@@ -717,7 +724,7 @@
             <th scope="col">Last seen</th>
           </tr></thead>
           <tbody>${sorted.map(p => html`<tr>
-            <th scope="row" class="font-normal"><a href="${projectHref(p.project)}" class="tf-link-quiet font-mono tf-break">${p.project}</a></th>
+            <th scope="row" class="font-normal"><a href="${projectHref(p.project)}" class="tf-link-quiet font-mono tf-break">${T.projectName(p.project)}</a></th>
             <td>${stageChip(p.stage, p.configured)}</td>
             <td class="num">${numLink(p.calls, { project: p.project }, 'text-gray-200')}</td>
             <td class="num">${numLink(p.refused, { project: p.project, kind: 'refused' }, 'text-rose-300')}</td>
@@ -730,7 +737,7 @@
       </div>`;
       const mobile = html`<ul class="md:hidden space-y-2">${sorted.map(p => html`<li class="tf-card-quiet p-3 space-y-2">
         <div class="flex items-start justify-between gap-2">
-          <a href="${projectHref(p.project)}" class="tf-link-quiet font-mono text-sm tf-break">${p.project}</a>
+          <a href="${projectHref(p.project)}" class="tf-link-quiet font-mono text-sm tf-break">${T.projectName(p.project)}</a>
           ${stageChip(p.stage, p.configured)}
         </div>
         <div class="grid grid-cols-4 gap-1 text-center">
@@ -821,8 +828,11 @@
       const name = ctx.args[0] || '';
       const days = pickDays(ctx.params.days, 14, true);
       const state = { detail: null, recent: null, recentError: null, selected: null };
-      const crumb = crumbs([{ label: 'Projects', href: '#/projects' }, { label: name }]);
-      ctx.render(html`${crumb}${loadingView(name, 'Reading its stage and readiness…', ['tiles', 'table'])}`);
+      // The alias is what this screen is addressed by and what every request
+      // below sends; T.projectName adds the reader's own name for display only.
+      const shown = T.projectName(name);
+      const crumb = crumbs([{ label: 'Projects', href: '#/projects' }, { label: shown }]);
+      ctx.render(html`${crumb}${loadingView(shown, 'Reading its stage and readiness…', ['tiles', 'table'])}`);
 
       function load() {
         const detail = T.api('/api/projects/' + encodeURIComponent(name) + query({ days }));
@@ -835,10 +845,10 @@
         }, err => {
           if (!ctx.alive()) return;
           if (err && err.kind === 'not_found') {
-            ctx.render(html`${crumb}${pageTitle(name, null)}${emptyNote('This stack has no record of a project by this name: no configuration, and no call in the window.', html`If it was just connected, its first call may still be on its way. <a class="tf-link" href="#/connect">Connect it</a>, or go back to <a class="tf-link" href="#/projects">the projects</a>.`)}`);
+            ctx.render(html`${crumb}${pageTitle(shown, null)}${emptyNote('This stack has no record of a project by this name: no configuration, and no call in the window.', html`If it was just connected, its first call may still be on its way. <a class="tf-link" href="#/connect">Connect it</a>, or go back to <a class="tf-link" href="#/projects">the projects</a>.`)}`);
             return;
           }
-          ctx.render(html`${crumb}${pageTitle(name, null)}${failure(err, 'this project')}`);
+          ctx.render(html`${crumb}${pageTitle(shown, null)}${failure(err, 'this project')}`);
         });
       }
 
@@ -908,14 +918,14 @@
           : recent.length ? callsList(recent.slice(0, 12), { project: false }) : emptyNote('No call from this project in ' + windowWords(days) + '.', 'Run the connect command below, then use your agent as usual.');
 
         ctx.render(html`${crumb}
-          ${pageTitle(html`<span class="font-mono">${name}</span>`, null, html`${stageChip(stage, config ? true : false)}${sandbox ? html`<span class="tf-chip tf-chip-sky" title="A sandbox made by the walkthrough; it expires on its own">Sandbox · expires within a day</span>` : ''}`)}
+          ${pageTitle(html`<span class="font-mono">${shown}</span>`, null, html`${stageChip(stage, config ? true : false)}${sandbox ? html`<span class="tf-chip tf-chip-sky" title="A sandbox made by the walkthrough; it expires on its own">Sandbox · expires within a day</span>` : ''}`)}
           <div class="space-y-4">
             ${stageBanner(name, stage, config, readiness)}
             ${statTiles}
             ${card('Readiness, rule by rule', 'Noisy if anything it flagged was a false alarm; else Needs review while anything is unlabelled; else Ready if it flagged anything; else Quiet.', readinessTable)}
             ${T.PROJECT_PATTERN.test(name) ? html`<p class="text-xs"><a class="tf-link" data-link="draft-rule" href="${T.pageHref('rules.html' + query({ project: name }) + '#draft')}">Draft a rule for this project</a> <span class="text-gray-500">from a sentence, with Amazon Bedrock; it starts in Observe beside the rules above.</span></p>` : ''}
             <div class="grid grid-cols-1 lg:grid-cols-5 gap-4">
-              ${card('Recent calls', recent && recent.length ? 'The newest first. Open one for everything the ledger holds.' : null, html`${recentBody}${recent && recent.length ? html`<p class="mt-3"><a class="tf-link text-xs" href="${callsHref({ project: name, days })}">All calls from ${name}</a></p>` : ''}`, 'lg:col-span-3 min-w-0')}
+              ${card('Recent calls', recent && recent.length ? 'The newest first. Open one for everything the ledger holds.' : null, html`${recentBody}${recent && recent.length ? html`<p class="mt-3"><a class="tf-link text-xs" href="${callsHref({ project: name, days })}">All calls from ${shown}</a></p>` : ''}`, 'lg:col-span-3 min-w-0')}
               <div class="lg:col-span-2 space-y-4 min-w-0">
                 ${card('Agents and their hook mode', recent && recent.length ? 'From the latest ' + recent.length + ' calls.' : null, agentsPanel(recent, stage))}
                 ${card('Setup', 'Connect another checkout or machine to this project.', setupPanel(name))}
@@ -1080,7 +1090,7 @@
           <tbody>${rows.map(row => html`<tr class="cursor-pointer" data-row-href="${callHref(row)}">
             <td class="whitespace-nowrap"><a href="${callHref(row)}" class="tf-link-quiet" title="${dateTime(row.timestamp)}">${timeAgo(row.timestamp)}</a></td>
             <td>${outcomeChip(row)}</td>
-            ${showProject ? html`<td class="font-mono text-gray-300 tf-break">${row.project_name}</td>` : ''}
+            ${showProject ? html`<td class="font-mono text-gray-300 tf-break">${T.projectName(row.project_name)}</td>` : ''}
             <td class="text-gray-300 whitespace-nowrap">${agentLabel(row.agent)}</td>
             <td class="min-w-[12rem]"><span class="font-mono text-gray-200">${row.tool_name}</span> <span class="font-mono text-gray-500 tf-break">${targetOf(row)}</span></td>
             <td class="font-mono text-gray-400 tf-break">${outcomeOf(row) === 'approved' ? '' : ruleKeyOf(row)}</td>
@@ -1092,7 +1102,7 @@
         <a href="${callHref(row)}" class="block tf-card-quiet p-3 space-y-1.5">
           <span class="flex flex-wrap items-center justify-between gap-2">${outcomeChip(row)}<span class="text-[11px] text-gray-500">${timeAgo(row.timestamp)}</span></span>
           <span class="block text-xs"><span class="font-mono text-gray-200">${row.tool_name}</span> <span class="font-mono text-gray-500 tf-break">${targetOf(row)}</span></span>
-          <span class="block text-[11px] text-gray-500">${showProject ? html`<span class="font-mono">${row.project_name}</span> · ` : ''}${agentLabel(row.agent)}${outcomeOf(row) !== 'approved' ? html` · <span class="font-mono">${ruleKeyOf(row)}</span>` : ''}</span>
+          <span class="block text-[11px] text-gray-500">${showProject ? html`<span class="font-mono">${T.projectName(row.project_name)}</span> · ` : ''}${agentLabel(row.agent)}${outcomeOf(row) !== 'approved' ? html` · <span class="font-mono">${ruleKeyOf(row)}</span>` : ''}</span>
           ${outcomeOf(row) === 'observed' ? html`<span class="block">${reviewChip(row.review)}</span>` : ''}
         </a>
       </li>`)}</ul>`;
@@ -1147,14 +1157,14 @@
 
       function draw() {
         const list = groups();
-        const scope = [project && html`<span class="font-mono">${project}</span>`, rule && html`rule <span class="font-mono">${rule}</span>`].filter(Boolean);
+        const scope = [project && html`<span class="font-mono">${T.projectName(project)}</span>`, rule && html`rule <span class="font-mono">${rule}</span>`].filter(Boolean);
         const head = pageTitle('Review', sub, filters());
         if (!list.length) {
           ctx.render(html`${head}
             <div class="tf-card p-6 space-y-3" data-state="empty">
               <h2 class="text-base font-semibold text-white">Nothing waits for a label${scope.length ? html` in ${scope}` : ''}</h2>
               <p class="text-sm text-gray-400">Every call a rule would have refused in ${windowWords(days)} has a label, or no rule in Observe flagged one. Rules whose flags were all correct now read Ready on their project's page.</p>
-              <div class="flex flex-wrap gap-2"><a class="tf-btn tf-btn-primary" href="${project ? projectHref(project) : '#/projects'}">${project ? 'Open ' + project : 'Open the projects'}</a><a class="tf-btn" href="${callsHref({ kind: 'observed', days, project })}">See the labelled calls</a></div>
+              <div class="flex flex-wrap gap-2"><a class="tf-btn tf-btn-primary" href="${project ? projectHref(project) : '#/projects'}">${project ? html`Open ${T.projectName(project)}` : 'Open the projects'}</a><a class="tf-btn" href="${callsHref({ kind: 'observed', days, project })}">See the labelled calls</a></div>
             </div>`);
           return;
         }
@@ -1165,7 +1175,7 @@
             <div class="flex flex-wrap items-start justify-between gap-3">
               <div class="min-w-0">
                 <h2 id="group-${gi}" class="text-sm font-semibold text-white flex flex-wrap items-center gap-2">
-                  <a href="${projectHref(g.project)}" class="tf-link-quiet font-mono tf-break">${g.project}</a>
+                  <a href="${projectHref(g.project)}" class="tf-link-quiet font-mono tf-break">${T.projectName(g.project)}</a>
                   <span class="tf-chip tf-chip-amber font-mono">${g.rule}</span>
                   <span class="text-xs font-normal text-gray-500">${plural(g.items.length, 'call')}</span>
                 </h2>
@@ -1372,7 +1382,7 @@
       if (f.review === 'unreviewed') parts.push('with no label yet');
       if (f.review === 'correct') parts.push('marked correct');
       if (f.review === 'false_alarm') parts.push('marked false alarm');
-      if (f.project) parts.push('in ' + f.project);
+      if (f.project) parts.push('in ' + T.projectNameText(f.project));
       if (f.rule) parts.push('under ' + f.rule);
       if (f.agent) parts.push('from ' + agentLabel(f.agent));
       if (f.session) parts.push('in session ' + f.session);
@@ -1540,12 +1550,15 @@
       const labels = {
         kind: v => ({ refused: 'Refused', observed: 'Would refuse', approved: 'Approved' }[v]),
         review: v => ({ unreviewed: 'Unreviewed', correct: 'Correct', false_alarm: 'False alarm' }[v]),
-        project: v => v, rule: v => 'rule ' + v, agent: v => agentLabel(v), session: v => 'session ' + v, day: v => shortDay(v)
+        project: v => T.projectNameText(v), rule: v => 'rule ' + v, agent: v => agentLabel(v), session: v => 'session ' + v, day: v => shortDay(v)
       };
+      // A chip's own text may carry the reader's own name as markup; an
+      // aria-label is an attribute and cannot, so it takes the plain form above.
+      const shown = { project: v => T.projectName(v) };
       const chips = Object.keys(labels).filter(k => all[k]).map(k => {
         const without = Object.assign({}, all);
         without[k] = '';
-        return html`<a href="${callsHref(without)}" class="tf-chip tf-chip-purple" aria-label="Remove the filter ${labels[k](all[k])}"><span class="tf-break">${labels[k](all[k])}</span><span aria-hidden="true">✕</span></a>`;
+        return html`<a href="${callsHref(without)}" class="tf-chip tf-chip-purple" aria-label="Remove the filter ${labels[k](all[k])}"><span class="tf-break">${(shown[k] || labels[k])(all[k])}</span><span aria-hidden="true">✕</span></a>`;
       });
       return chips.length ? html`<div class="flex flex-wrap gap-1.5 mb-3">${chips}</div>` : '';
     }
@@ -1611,6 +1624,9 @@
       if (key === 'suggested_fix_validated') return value === true ? 'yes: every proposed write passed the same gates' : 'no: not validated by the gates';
       if (key === 'timestamp' || key === 'reviewed_at') return html`${dateTime(value)} <span class="text-gray-500">(${timeAgo(value)})</span>`;
       if (key === 'cost_usd') return T.usd(Number(value));
+      // The alias the ledger holds, and the reader's own name for it beside it.
+      // The field is a record of what was stored, so the alias stays first.
+      if (key === 'project_name') return T.projectName(value);
       if (key === 'agent') return agentLabel(value);
       if (key === 'dry_run') return value ? 'yes' : 'no';
       if (Array.isArray(value)) return value.length ? value.join(', ') : html`<span class="text-gray-600">—</span>`;
@@ -1717,7 +1733,7 @@
               ${card('The rule', outcome === 'approved' ? 'Nothing flagged this call.' : 'What decided.', ruleBody)}
               ${fixBody ? card('Suggested fix', 'Sent with the verdict.', fixBody) : ''}
               ${card('The session', null, sessionBody)}
-              ${row.project_name && T.PROJECT_PATTERN.test(row.project_name) ? html`<a class="tf-card tf-card-link block p-4 text-xs text-gray-300" href="${projectHref(row.project_name)}">Open <span class="font-mono text-white">${row.project_name}</span>: its stage and readiness ${raw(T.ICONS.arrow)}</a>` : ''}
+              ${row.project_name && T.PROJECT_PATTERN.test(row.project_name) ? html`<a class="tf-card tf-card-link block p-4 text-xs text-gray-300" href="${projectHref(row.project_name)}">Open <span class="font-mono text-white">${T.projectName(row.project_name)}</span>: its stage and readiness ${raw(T.ICONS.arrow)}</a>` : ''}
             </div>
           </div>`);
       }
@@ -1817,7 +1833,7 @@
           const row = state.found;
           return html`<h2 class="text-sm font-semibold text-white">Connected</h2>
             <div class="tf-card-quiet p-4 space-y-1 border-emerald-900/60" role="status">
-              <p class="text-sm text-emerald-300"><strong>${agentLabel(row.agent)}</strong> reached the stack from <span class="font-mono">${state.name}</span> ${timeAgo(row.timestamp)}.</p>
+              <p class="text-sm text-emerald-300"><strong>${agentLabel(row.agent)}</strong> reached the stack from <span class="font-mono">${T.projectName(state.name)}</span> ${timeAgo(row.timestamp)}.</p>
               <p class="text-[11px] text-gray-400"><span class="font-mono">${row.tool_name}</span> ${targetOf(row)} · ${OUTCOMES[outcomeOf(row)].label.toLowerCase()} · hook mode ${row.hook_mode || 'unknown'}${row.stage ? ' · stage ' + row.stage : ''}</p>
             </div>
             <div class="space-y-2">
@@ -1825,7 +1841,7 @@
               <p class="text-xs text-gray-400">What the hooks in this repository send is judged and recorded, and not refused. A call carrying a credential is still refused on the machine and never sent, and a call the hook holds back is neither sent nor recorded. Keep working as usual. What the rules would have refused shows up for review; when a rule's record reads right, promote the project and that rule starts refusing.</p>
             </div>
             <div class="flex flex-wrap gap-2">
-              <a class="tf-btn tf-btn-primary" href="${projectHref(state.name)}">Open ${state.name}</a>
+              <a class="tf-btn tf-btn-primary" href="${projectHref(state.name)}">Open ${T.projectName(state.name)}</a>
               <a class="tf-btn" href="#/review">The review queue</a>
               <a class="tf-btn tf-btn-quiet" href="#/overview">Overview</a>
             </div>`;
@@ -1835,8 +1851,8 @@
         }
         return html`<h2 class="text-sm font-semibold text-white">Wait for the first call</h2>
           <p class="text-xs text-gray-400 flex items-center gap-2" role="status"><span class="tf-dot bg-amber-400 animate-pulse" aria-hidden="true"></span>
-            ${state.waiting ? html`Watching for a call from <span class="font-mono text-gray-200">${state.name}</span>, every 3 seconds while this tab is open.` : 'Paused while this tab is hidden.'}</p>
-          ${state.before ? html`<p class="text-[11px] text-gray-500">${state.name} has sent calls before (the last ${timeAgo(state.before.timestamp)}), so this waits for a new one.</p>` : ''}
+            ${state.waiting ? html`Watching for a call from <span class="font-mono text-gray-200">${T.projectName(state.name)}</span>, every 3 seconds while this tab is open.` : 'Paused while this tab is hidden.'}</p>
+          ${state.before ? html`<p class="text-[11px] text-gray-500">${T.projectName(state.name)} has sent calls before (the last ${timeAgo(state.before.timestamp)}), so this waits for a new one.</p>` : ''}
           ${state.pollError ? html`<p class="text-[11px] text-rose-300">The last check failed: ${state.pollError.message}. Still trying.</p>` : ''}
           <p class="text-[11px] text-gray-500">Nothing arriving? The command prints whether its test call was recorded. <a class="tf-link" href="${T.pageHref('connect.html')}">The connect page</a> covers each agent's details.</p>`;
       }
@@ -1940,6 +1956,9 @@
       };
       document.addEventListener('input', onInput);
       ctx.onLeave(() => { if (typeof document.removeEventListener === 'function') document.removeEventListener('input', onInput); });
+      // The switch in the navigation redraws this screen from its own state,
+      // rather than routing to it again, so a half-typed name is not lost.
+      ctx.onLeave(T.onLocalNamesChange(() => { if (ctx.alive()) draw(); }));
       draw();
       if (nameOk()) start();
       Dash.connect = { state, poll, setName: value => onInput({ target: { id: 'connect-name', value } }) };

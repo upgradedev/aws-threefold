@@ -281,7 +281,12 @@
   }
 
   var nameListeners = [];
-  function onLocalNamesChange(fn) { nameListeners.push(fn); }
+  // Returns the way to stop listening, so a screen that subscribes on every
+  // visit does not leave one behind each time.
+  function onLocalNamesChange(fn) {
+    nameListeners.push(fn);
+    return function () { nameListeners = nameListeners.filter(function (other) { return other !== fn; }); };
+  }
   function announceLocalNames() {
     nameListeners.slice().forEach(function (fn) { try { fn(); } catch (err) { /* a listener's own problem */ } });
   }
