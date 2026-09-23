@@ -230,7 +230,9 @@ the binary's string table. Against these runs:
 
 - **Events seen:** `thread.started`, `turn.started`, `item.started`,
   `item.completed`, `turn.completed`. `turn.started` is not in its event list
-  at all, and no `turn.failed` or `error` event appeared.
+  at all. No `turn.failed` and no top-level `error` event appeared in any run;
+  the `error`s below are items inside an `item.completed`, which is a different
+  thing and is read by a different branch.
 - **Items seen:** `agent_message`, `command_execution`, `file_change`, `error`.
   A `file_change` item's shape is `[{"path": "<absolute>", "kind": "add"}]`.
   `error` items also carry warnings, not only failures - the
