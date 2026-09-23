@@ -111,18 +111,23 @@ def test_the_demo_scenarios_follow_the_hero_unchanged() -> None:
 
 
 def test_the_hero_says_which_agents_a_refusal_is_measured_to_stop() -> None:
-    """The sentence says "before they are written" for three agents; STATE.md has that measured for two.
+    """The sentence says "before they are written" for three agents; the evidence measured all three, unevenly.
 
-    Claude Code and Antigravity refused a Write and no file was created; Codex could not be measured, so its edits
-    count as governed at commit time only. The sentence is the one the first screen was specified with, so the
-    scope sits in the paragraph right under the actions, where the same glance reaches it.
+    Claude Code and Antigravity refused a Write and no file was created
+    (`docs/evidence/ENFORCEMENT_2026-09-21.md`). Codex was measured on
+    2026-09-23, on one route in one run: the hook refused an `apply_patch` and
+    the file was unchanged, while the shell route was never refused in any run
+    (`docs/evidence/ENFORCEMENT_2026-09-23.md`). The hero may not round that up
+    to Codex, so it says how far it goes. The sentence is the one the first
+    screen was specified with, so the scope sits in the paragraph right under
+    the actions, where the same glance reaches it.
     """
     hero = _hero()
     scope = re.search(r'<span id="hero-scope">(.*?)</span>', hero, re.S)
     assert scope, "The hero says what has been measured"
     assert _text(scope.group(1)) == (
-        "That a refusal stops the write has been measured for Claude Code and Antigravity; for Codex it has not been "
-        "measured yet, so its edits count as governed at commit time only."
+        "That a refusal stops the write has been measured for Claude Code and Antigravity, and for Codex once, over "
+        "its patch tool; the other routes Codex could write through are not measured."
     )
     assert hero.index('id="hero-actions"') < hero.index('id="hero-scope"')
 
