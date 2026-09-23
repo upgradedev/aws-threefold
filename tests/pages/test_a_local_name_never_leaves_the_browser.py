@@ -641,6 +641,13 @@ def test_the_panel_lists_the_names_already_stored_when_the_project_list_cannot_b
 def test_no_page_ships_a_name_of_its_own(page: str) -> None:
     """Nothing in the files carries a label: they only ever come from the browser."""
     body = page_source(page)
-    assert "threefold-local-names" not in body or page == "settings.html", \
-        "only the settings panel names the key, and only to say where it writes"
     assert PRIVATE not in body and OTHER not in body
+
+
+def test_only_the_settings_panel_names_the_key_the_names_are_kept_under() -> None:
+    """One page writes the key in prose; every other reaches it through the shared layer."""
+    assert "threefold-local-names" in page_source("settings.html"), \
+        "the panel says where it writes, because that is the promise it is making"
+    for page in ("dashboard.html", "sessions.html", "rules.html"):
+        assert "threefold-local-names" not in page_source(page), \
+            f"{page} reaches the names through the shared layer, so the key is written in one place"
