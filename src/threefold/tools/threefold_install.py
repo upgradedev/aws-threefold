@@ -5,7 +5,7 @@
         [--mode managed|observe|enforce] [--endpoint URL] [--api-key-file F]
         [--include GLOB ...] [--dry-run] [--no-open]
     threefold_install.py disconnect [PATH] [--dry-run]
-    threefold_install.py status
+    threefold_install.py status [--names-json]
     threefold_install.py open [--next /projects/NAME] [--endpoint URL]
 
 and the older form, which keeps working exactly as it did:
@@ -29,6 +29,14 @@ sign-in link when an operator key is configured for the endpoint, so nobody
 pastes a key into a browser. `status` lists every install on this machine and
 asks the stack for each project's stage; `open` signs in to the dashboard on
 its own; `disconnect` is the uninstall below.
+
+`status --names-json` is the one command here that prints the owner's own
+folder names. The dashboard may only ever show aliases, so the owner cannot
+tell their projects apart on it; this prints a JSON object of alias to folder
+name for them to paste into the dashboard's settings, where the browser keeps
+it and no request carries it. Only the object goes to stdout, so it can be
+pasted or redirected whole; what it is goes to stderr first. Nothing is
+written to a file, put in a repository or sent to a stack.
 
 What an install does, in order:
 
@@ -1837,9 +1845,58 @@ def project_stage(endpoint: str, project: str, key: Optional[str]) -> str:
     return "unknown"
 
 
-def status(args: argparse.Namespace, out: Any) -> int:
+def local_names(entries: List[Dict[str, Any]]) -> Dict[str, str]:
+    """Each install's alias, against the name of the folder it governs.
+
+    The folder name is the owner's own and is the whole point of this: it is
+    what tells one alias from another on a dashboard that may only ever show
+    aliases. It is read from this machine, handed to the person who ran the
+    command, and nothing else: no file is written, nothing is put in the
+    repository, and no stack is called. Where two installs share an alias the
+    first folder wins, so the mapping is one line per alias.
+    """
+    names: Dict[str, str] = {}
+    for entry in entries:
+        path = Path(entry["path"])
+        config = read_json_quietly(path / CONFIG_FILE)
+        project = config.get("project") if isinstance(config.get("project"), str) else entry.get("project")
+        if not isinstance(project, str) or not project:
+            continue
+        folder = path.name or forward(path)
+        if folder and project not in names:
+            names[project] = folder
+    return dict(sorted(names.items()))
+
+
+def print_local_names(entries: List[Dict[str, Any]], out: Any, err: Any) -> int:
+    """The mapping alone on stdout, and what it is on stderr, ahead of it.
+
+    Stdout is what a person pastes into the browser, so nothing but the JSON
+    object goes there. The warning cannot go there with it and cannot be left
+    out either: the values are real folder names, which is exactly what this
+    project keeps off every other surface.
+    """
+    names = local_names(entries)
+    print(
+        "threefold: what follows are the real folder names on this machine, not aliases. "
+        f"{len(names)} of them. They are printed here and nowhere else: nothing writes them to a file, "
+        "puts them in a repository or sends them to a stack. Paste them into Settings on the dashboard, "
+        '"Your own names for these projects", where the browser keeps them and no request carries them.',
+        file=err,
+    )
+    if hasattr(err, "flush"):
+        err.flush()
+    out.write(dump_json(names))
+    return 0
+
+
+def status(args: argparse.Namespace, out: Any, err: Any = None) -> int:
     home = threefold_home()
     entries = load_index(home)
+    if getattr(args, "names_json", False):
+        # Nothing below this line runs: no stack is asked for a stage, and the
+        # only thing printed is the mapping itself.
+        return print_local_names(entries, out, err if err is not None else sys.stderr)
     if not entries:
         print("Threefold is not connected to anything on this machine yet.", file=out)
         print(f"Connect a repository with: {installer_command(home)} connect PATH", file=out)
@@ -1924,6 +1981,10 @@ USAGE = """usage: threefold_install.py <command> [options]
   status              every connected folder on this machine, and its stage
   open                sign in to the dashboard from this machine
 
+  threefold_install.py status --names-json   only a JSON object of alias to
+                      folder name, your real ones, to paste into the dashboard's
+                      settings, where the browser keeps them and never sends them
+
   threefold_install.py <command> --help   says more about each
   threefold_install.py --repo PATH ...    the older form, unchanged
 """
@@ -1948,7 +2009,12 @@ def command_parser() -> argparse.ArgumentParser:
     disconnect_parser.add_argument("path", nargs="?", default=".", help="the repository or workspace, default here")
     disconnect_parser.add_argument("--dry-run", action="store_true", help="print every step and write nothing")
 
-    commands.add_parser("status", help="every connected folder on this machine, and its stage")
+    status_parser = commands.add_parser("status", help="every connected folder on this machine, and its stage")
+    status_parser.add_argument(
+        "--names-json", action="store_true",
+        help="print only a JSON object of alias to this machine's folder name, to paste into the dashboard's settings; "
+             "those are your real folder names, and they are printed and nothing else",
+    )
 
     open_parser = commands.add_parser("open", help="sign in to the dashboard from this machine")
     open_parser.add_argument("--next", help="the dashboard route to land on, such as /projects/Acme-Ledger")
@@ -2003,8 +2069,13 @@ def legacy(argv: Sequence[str], out: Any) -> int:
     return install(args, root, home, out, workspace, includes)
 
 
-def main(argv: Optional[Sequence[str]] = None, out: Any = None) -> int:
+def main(argv: Optional[Sequence[str]] = None, out: Any = None, err: Any = None) -> int:
+    # `err` is where a command says something that must not land in what the
+    # reader is capturing: `status --names-json` writes the mapping to `out`
+    # and says what it is on `err`, so a redirected stdout holds the JSON
+    # alone and the warning still reaches the terminal.
     out = out or sys.stdout
+    err = err if err is not None else sys.stderr
     argv = list(sys.argv[1:] if argv is None else argv)
     if not argv or argv[0] in ("-h", "--help", "help"):
         print(USAGE, file=out, end="")
@@ -2018,7 +2089,7 @@ def main(argv: Optional[Sequence[str]] = None, out: Any = None) -> int:
         if args.command == "disconnect":
             return disconnect(args, out)
         if args.command == "status":
-            return status(args, out)
+            return status(args, out, err)
         return open_dashboard(args, out)
     except InstallError as error:
         print(f"threefold: {error}. Nothing was changed.", file=out)
