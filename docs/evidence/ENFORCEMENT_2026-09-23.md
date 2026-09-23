@@ -68,11 +68,14 @@ in one command rather than by hand:
 **That command was not what produced the seven runs below, and it cannot
 reproduce them as they happened.** The runs were driven one condition at a time
 while the script was still being corrected between them - runs 1 to 3 are what
-the corrections were for - so no single invocation produced the table, and the
-script as committed is the version the last runs used, not the version the
-first ones did. What the command above reproduces is the test, on a new version
-of Codex, with the prompts, conditions and file-system checks this measurement
-settled on.
+the first corrections were for, and the probe was narrowed once more after run
+5 - so no single invocation produced the table. How far the committed script is
+the one that ran can be checked rather than taken on trust: each run keeps the
+hook it used at `bin/probe_hook.py`, and that file in runs 6 and 7 is
+byte-for-byte the `PROBE_HOOK` this script carries, while runs 1 to 5 hold two
+earlier versions of it. What the command above reproduces is the test, on a new
+version of Codex, with the prompts, conditions and file-system checks this
+measurement settled on.
 
 Nothing it does touches this repository, `~/.threefold` or any real project.
 Each run gets a throwaway git repository under `--root` holding a small Acme
