@@ -153,8 +153,10 @@ SERIES = [
     for name in (
         "20260922T143932Z.jsonl",
         "20260922T145644Z.jsonl",
+        "20260923T025154Z-codex.jsonl",
         "20260922T161455Z-pressure.jsonl",
         "20260922T162306Z-pressure.jsonl",
+        "20260923T031215Z-pressure-codex.jsonl",
     )
 ]
 
@@ -187,9 +189,9 @@ def test_each_series_is_its_own_section_and_never_pooled(tmp_path: Path) -> None
     document = build_proof.build([], series=[sonnet, haiku, pressure])
     sections = document["benchmarks"]
     assert [section["label"] for section in sections] == [
-        "Standard tasks · claude-sonnet-5",
-        "Standard tasks · claude-haiku-4-5",
-        "Pressure tasks, where the prompt asks for the shortcut · claude-sonnet-5",
+        "Standard tasks · Claude Code · claude-sonnet-5",
+        "Standard tasks · Claude Code · claude-haiku-4-5",
+        "Pressure tasks, where the prompt asks for the shortcut · Claude Code · claude-sonnet-5",
     ]
     assert [section["family"] for section in sections] == ["standard", "standard", "pressure"]
     for section, path in zip(sections, (sonnet, haiku, pressure)):

@@ -189,6 +189,11 @@ def _why(error: Exception) -> str:
     return f"{type(error).__name__}, a value is not the shape report.py expects"
 
 
+# What each agent is called on the page. A row's own field is short and lower
+# case, because it is also a command-line value.
+AGENT_NAMES = {"claude-code": "Claude Code", "claude": "Claude Code", "codex": "Codex", "scripted": "a scripted stand-in"}
+
+
 def _rate(stat: Mapping[str, Any]) -> Dict[str, Any]:
     return {
         "k": stat["k"],
@@ -247,7 +252,9 @@ def benchmark_section(summary: Mapping[str, Any], sources: Sequence[str]) -> Dic
         "snapshot_at": dates[-1] if dates else None,
         "pilot": bool(summary["pilot"]),
         "headline": report.headline(summary),
-        "agent": "Claude Code",
+        # The agent the rows were measured with, not an assumption: a Codex
+        # matrix reads "Codex" here and a Claude Code one "Claude Code".
+        "agent": AGENT_NAMES.get(str(summary.get("agent") or ""), str(summary.get("agent") or "unknown")),
         "agent_versions": list(summary.get("claude_versions") or []),
         "models": list(summary.get("models") or []),
         "dates": dates,
@@ -532,8 +539,11 @@ def series_label(path: Path, summary: Mapping[str, Any]) -> Tuple[str, str]:
         if families == {"pressure"}:
             family = "pressure"
     models = ", ".join(summary.get("models") or []) or "model not recorded"
+    agent = AGENT_NAMES.get(str(summary.get("agent") or ""), str(summary.get("agent") or "unknown"))
     words = "Pressure tasks, where the prompt asks for the shortcut" if family == "pressure" else "Standard tasks"
-    return family, f"{words} · {models}"
+    # The agent is named too: a Codex matrix and a Claude Code one answer
+    # different questions and must never read as one series.
+    return family, f"{words} · {agent} · {models}"
 
 
 def build(
