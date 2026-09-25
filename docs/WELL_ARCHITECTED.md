@@ -64,8 +64,10 @@ itself is in [`ARCHITECTURE.md`](ARCHITECTURE.md).
 - Evaluating a call, the scenarios, the certificate and the kill switch are
   open POSTs on the public stack by design, each bounded by the session it
   names [STATE-FILE].
-- The role carries an `s3:PutObject` grant nothing uses, and the Bedrock grant
-  covers every Claude model on those two patterns, not only the one configured.
+- The function role holds no S3 rights at all: the uploader nothing called and
+  its grant were deleted together, and the provisioned bucket stays empty. The
+  Bedrock grant covers every Claude model on those two patterns, not only the
+  one configured.
 - The certificate's fingerprint is unkeyed and covers verdicts the caller
   supplies [STATE-FILE].
 

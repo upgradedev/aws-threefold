@@ -256,11 +256,10 @@ Resources:
                 # rows on a warm container and nothing on a cold one.
                 - dynamodb:Scan
               Resource: !GetAtt ThreefoldTable.Arn
-            - Effect: Allow
-              Action:
-                - s3:PutObject
-                - s3:GetObject
-              Resource: !Sub '${EvidenceBucket.Arn}/*'
+            # No S3 grant: nothing in src/ writes to the evidence bucket (the
+            # uploader was deleted with the grant), so the function holds no
+            # object rights on it. The bucket stays provisioned for the day
+            # archival lands; until then it stays empty.
       Events:
         StatusRoute:
           Type: HttpApi

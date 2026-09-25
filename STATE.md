@@ -157,11 +157,11 @@ hidden in a document that a judge would read as finished work.
 2. The `calls` count in the sessions listing saturates at 50, because the store
    keeps `history[-50:]`. Cost and tokens are cumulative and are not capped. The
    page says so rather than presenting 50 as a total.
-3. Nothing writes to the S3 bucket the stack provisions. `S3CertificateUploader`
-   exists and is called by nothing, `EvidenceStore.create_sealed_bundle` only by
-   a test, so the bucket stays empty and the function carries an `s3:PutObject`
-   grant it never uses. Every document that claimed archival has been corrected;
-   the dead class and the unused grant are still there.
+3. Fixed on 2026-09-25: the uploader nothing called (`s3_store.py`) was deleted
+   together with the function role's S3 statement, so the role holds no object
+   rights at all. `EvidenceStore.create_sealed_bundle` stays: it seals locally
+   and is covered by a test. The bucket stays provisioned and empty until
+   archival lands.
 4. The certificate still covers verdicts the caller supplies. An empty list and
    a session this service never governed are now both refused with 400, and the
    invariant sits in `AuditIssuer` so no caller can go around it, but the
