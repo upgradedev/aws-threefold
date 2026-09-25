@@ -3141,7 +3141,7 @@
                     },
                     "private": {
                       "type": "object",
-                      "description": "source, snapshot_at, window_days, days_observed, calls_governed, would_refuse, refused, reviewed, false_alarms, false_alarm_rate, projects, agents, stages and self_correction: numbers only. false_alarms and false_alarm_rate are null when calls were refused in the window, because the overview counts false alarms on refused calls as well and reviewed calls on would-refuse calls only."
+                      "description": "source, snapshot_at, window_days, days_observed, calls_governed, would_refuse, refused, reviewed, false_alarms, false_alarm_rate, projects, agents, coding_agents, stages and self_correction: numbers only. false_alarms and false_alarm_rate are null when calls were refused in the window, because the overview counts false alarms on refused calls as well and reviewed calls on would-refuse calls only. agents counts every value of a call's agent field, page and unknown included; coding_agents counts Claude Code, Codex and Antigravity alone, and is null from a stack that predates it. self_correction carries refusals_with_later_call and refusals_without_later_call, the rate's denominator and the refusals left out of it, or null for both from a stack that predates them, whose rate was over every refusal considered."
                     },
                     "method": {
                       "type": "array",

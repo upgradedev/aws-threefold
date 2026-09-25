@@ -176,7 +176,8 @@ def test_the_committed_snapshot_is_what_the_script_builds_from_the_committed_ser
     if private is not None:
         assert set(private) <= {
             "source", "snapshot_at", "window_days", "days_observed", "calls_governed", "would_refuse", "refused",
-            "reviewed", "false_alarms", "false_alarm_rate", "projects", "agents", "stages", "self_correction",
+            "reviewed", "false_alarms", "false_alarm_rate", "projects", "agents", "coding_agents", "stages",
+            "self_correction",
         }
 
 
@@ -235,7 +236,7 @@ def _overview(names):
     return {
         "window_days": 30, "generated_at": "2026-09-29T08:00:00+00:00", "source": "rollups",
         "totals": {"calls": 4210, "approved": 4000, "refused": 0, "would_refuse": 210, "needs_review": 60,
-                   "false_alarms": 12, "projects": len(names), "agents": 2},
+                   "false_alarms": 12, "projects": len(names), "agents": 2, "coding_agents": 1},
         "series": [{"day": "2026-09-27", "approved": 900, "observed": 40, "refused": 0},
                    {"day": "2026-09-28", "approved": 0, "observed": 0, "refused": 0},
                    {"day": "2026-09-29", "approved": 3100, "observed": 170, "refused": 0}],
@@ -315,6 +316,7 @@ def test_the_private_section_keeps_totals_and_nothing_that_names_anything(tmp_pa
     assert (private["calls_governed"], private["would_refuse"], private["reviewed"], private["false_alarms"]) == (4210, 210, 150, 12)
     assert private["false_alarm_rate"] == 0.08 and private["days_observed"] == 2 and private["window_days"] == 30
     assert (private["projects"], private["agents"], private["stages"]) == (2, 2, {"observe": 2, "enforce": 0})
+    assert private["coding_agents"] == 1, "agents counts every caller; coding_agents the coding agents alone"
     assert private["self_correction"]["refusals_considered"] == 0 and private["snapshot_at"] == "2026-09-29T08:00:00+00:00"
     for name in SECRET_PROJECTS + ("Acme-Proj-Quiet", "Lighthouse", "claude-code", "python-domain-stays-pure"):
         assert name not in written, f"{name} reached the snapshot"
@@ -408,6 +410,7 @@ def test_a_key_file_saved_with_a_byte_order_mark_reads_as_the_key_alone(tmp_path
     lambda o: o.__setitem__("generated_at", "C:\\Users\\someone\\ledger"),
     lambda o: o["self_correction"].__setitem__("rate", "Acme-Proj-Harbour"),
     lambda o: o["self_correction"].__setitem__("refusals_with_later_call", "Acme-Proj-Harbour"),
+    lambda o: o["totals"].__setitem__("coding_agents", "Acme-Proj-Harbour"),
     lambda o: o["stages"].__setitem__("observe", "Acme-Proj-Harbour"),
     lambda o: o["series"][0].__setitem__("observed", "Acme-Proj-Harbour"),
 ])
@@ -444,6 +447,13 @@ def test_a_stack_that_predates_self_correction_still_gives_its_totals() -> None:
     older = _overview(SECRET_PROJECTS)
     del older["self_correction"]
     assert build_proof.private_section(older)["self_correction"] is None
+
+
+def test_a_stack_that_predates_the_coding_agent_count_gives_it_as_null() -> None:
+    older = _overview(SECRET_PROJECTS)
+    del older["totals"]["coding_agents"]
+    section = build_proof.private_section(older)
+    assert section["coding_agents"] is None and section["agents"] == 2
 
 
 def _figure(**counts):

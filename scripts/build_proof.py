@@ -420,6 +420,21 @@ def _self_correction_chances(figure: Mapping[str, Any], considered: int) -> Dict
     return chances
 
 
+def _coding_agents(totals: Mapping[str, Any]) -> Optional[int]:
+    """How many of the agents are coding agents, or None from a stack that predates the count.
+
+    `agents` counts every value of a call's agent field, so the demo's page
+    buttons and rows older than the field count there too; this is the number
+    of Claude Code, Codex and Antigravity alone.
+    """
+    value = totals.get("coding_agents")
+    if value is None:
+        return None
+    if _count(value) is None:
+        raise _not_the_contract("totals.coding_agents is not a count")
+    return value
+
+
 def private_section(overview: Mapping[str, Any]) -> Dict[str, Any]:
     """The totals of the owner's own use: numbers only, each checked to be one, or a refusal.
 
@@ -475,6 +490,7 @@ def private_section(overview: Mapping[str, Any]) -> Dict[str, Any]:
         "false_alarm_rate": round(counts["false_alarms"] / reviewed, 4) if comparable and reviewed else None,
         "projects": counts["projects"],
         "agents": counts["agents"],
+        "coding_agents": _coding_agents(totals),
         "stages": {stage: stages[stage] for stage in STAGES},
         "self_correction": _self_correction_totals(overview.get("self_correction")),
     }
