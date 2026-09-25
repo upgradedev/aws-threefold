@@ -952,3 +952,71 @@ def test_only_the_settings_panel_names_the_key_the_names_are_kept_under() -> Non
     for page in ("dashboard.html", "sessions.html", "rules.html"):
         assert "threefold-local-names" not in page_source(page), \
             f"{page} reaches the names through the shared layer, so the key is written in one place"
+
+
+# ------------------------------------------------------- the command palette
+
+
+def test_the_command_palette_finds_a_project_by_the_readers_name_and_sends_none_of_it(tmp_path: Path) -> None:
+    """The palette matches what the reader types against their own names, in this browser.
+
+    That is the one new place a label is read rather than only drawn, so it is
+    driven here the way a reader drives it: Ctrl+K, a few letters of the
+    label, Enter. The request it makes, the links it draws and the address it
+    leaves must carry the alias alone, and the switch must reach it while it
+    is open.
+    """
+    out = dash(
+        r"""
+  answer = contract();
+  await visit('#/overview');
+  calls.length = 0;
+  const press = (key, extra) => (docListeners.keydown || []).forEach(fn => fn(Object.assign(
+    { key, target: el('view'), preventDefault() {}, stopImmediatePropagation() {} }, extra || {})));
+  const type = text => {
+    const input = el('tf-palette-input');
+    input.setAttribute('data-tf-palette-input', '');
+    input.value = text;
+    (docListeners.input || []).forEach(fn => fn({ target: input }));
+  };
+  press('k', { ctrlKey: true });
+  await tick();
+  type('aeroplane');
+  out.list = el('tf-palette-list').innerHTML;
+  out.found = Threefold.palette.results();
+  out.requests = calls.map(c => c.method + ' ' + c.url);
+  Threefold.setLocalNamesHidden(true);
+  await tick();
+  out.hiddenList = el('tf-palette-list').innerHTML;
+  out.hiddenFound = Threefold.palette.results();
+  Threefold.setLocalNamesHidden(false);
+  await tick();
+  type('aeroplane');
+  press('Enter');
+  await tick();
+  out.hash = location.hash;
+  out.replaced = replaced;
+  out.sent = sentText();
+""",
+        tmp_path,
+        before=stored({"Acme-Billing": PRIVATE, "Acme-Catalog": OTHER}),
+    )
+    assert out["requests"] == ["GET https://example.test/prod/api/projects"], \
+        "Opening the palette asks for the project list and nothing else, with no query"
+    assert [r["text"] for r in out["found"]][:1] == ["Acme-Billing"], "a few letters of the reader's own name find the project"
+    assert out["found"][0]["href"] == "#/projects/Acme-Billing"
+    hrefs = re.findall(r'href="([^"]*)"', out["list"])
+    assert hrefs, "the palette drew no link, so the check below proves nothing"
+    for href in hrefs:
+        assert PRIVATE not in href and "aeroplane" not in href, "a link carried a name"
+    # The label is drawn only in the quieter style, beside the alias.
+    assert PRIVATE in out["list"]
+    assert out["list"].count(PRIVATE) == out["list"].count('<span class="tf-local-name"> · ' + PRIVATE + "</span>")
+    assert PRIVATE not in out["hiddenList"], "the switch reaches the palette while it is open"
+    assert not any(r["text"] == "Acme-Billing" for r in out["hiddenFound"]), \
+        "with the names hidden, a name of the reader's own finds nothing"
+    assert out["hash"] == "#/projects/Acme-Billing"
+    for label in (PRIVATE, OTHER):
+        assert label not in out["sent"], f"a request carried {label!r}"
+        assert label not in out["hash"] and not any(label in url for url in out["replaced"])
+    assert "aeroplane" not in out["sent"] and "breakfast" not in out["sent"]

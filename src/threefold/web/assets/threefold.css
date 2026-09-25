@@ -36,13 +36,13 @@
   --tf-glow: rgba(124, 58, 237, 0.11);
 
   /* Text, measured against --tf-surface-1 (WCAG): primary 16.8:1, secondary
-     8.5:1, muted 6.0:1 (5.0:1 on --tf-surface-3), quiet 4.8:1. Every text
+     8.5:1, muted 6.0:1 (5.0:1 on --tf-surface-3), quiet 5.4:1 (4.5:1 on --tf-hairline). Every text
      token clears AA on every surface above; --tf-text-decor is for rules and
      glyphs only, never words. */
   --tf-text: #f2f4fa;
   --tf-text-2: #a7b0c6;
   --tf-text-3: #8a93ab;
-  --tf-text-4: #78829c;
+  --tf-text-4: #818ba5;
   --tf-text-decor: #4b5470;
 
   /* The one accent: action and focus. White on --tf-accent-strong is 5.7:1. */

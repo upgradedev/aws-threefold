@@ -760,7 +760,7 @@
 
   var INK_GRAY = {
     50: '#f6f7fb', 100: '#eceef5', 200: '#dde1ea', 300: '#c9cfdd', 400: '#a7b0c6', 500: '#8a93ab',
-    600: '#78829c', 700: '#2a3450', 800: '#1c2438', 900: '#0e1322', 950: '#080b15'
+    600: '#818ba5', 700: '#2a3450', 800: '#1c2438', 900: '#0e1322', 950: '#080b15'
   };
 
   function applyTailwindTheme() {
@@ -807,29 +807,40 @@
   var countedKeys = {};
 
   // Counts a number up to `to` once, on first paint. The element already
-  // holds the final value, written by the page; this only replays the climb.
-  // options: {format, duration, key} — a key is counted once per page load,
-  // so a view drawn again every thirty seconds does not count up again.
+  // holds the final value, written by the page, and the last frame writes
+  // exactly that text back: the climb is a replay, never a number of its own.
+  // If the page writes the element again mid-climb, the climb stops and the
+  // page's words stand. A tab in the background, where frames do not run,
+  // is left alone. options: {format, duration, key}; a key is counted once
+  // per page load, so a view drawn again every thirty seconds does not climb.
   function countUp(el, to, options) {
     options = options || {};
     if (!el || !isNumber(to)) return false;
     var key = options.key ? String(options.key) : '';
     if (key && countedKeys[key]) return false;
     if (key) countedKeys[key] = true;
-    if (!canAnimate() || to === 0) return false;
-    var format = typeof options.format === 'function' ? options.format : num;
-    var duration = Math.max(200, Number(options.duration) || 700);
+    if (!canAnimate() || to <= 0) return false;
+    if (doc && doc.visibilityState === 'hidden') return false;
+    var finalText = String(el.textContent == null ? '' : el.textContent);
     var whole = Math.round(to) === to;
+    var format = typeof options.format === 'function'
+      ? options.format
+      : (finalText === num(to) ? num : function (v) { return whole ? Math.round(v).toLocaleString('en-US') : String(v); });
+    var duration = Math.max(200, Number(options.duration) || 700);
     var start = null;
+    var wrote = format(0);
     function step(now) {
+      // Someone else wrote here since the last frame: theirs is the truth.
+      if (el.textContent !== wrote) return;
       if (start === null) start = now;
       var t = Math.min(1, (now - start) / duration);
-      var eased = 1 - Math.pow(1 - t, 3);
-      var value = to * eased;
-      el.textContent = format(t < 1 ? (whole ? Math.round(value) : value) : to);
-      if (t < 1) root.requestAnimationFrame(step);
+      if (t >= 1) { el.textContent = finalText; return; }
+      var value = to * (1 - Math.pow(1 - t, 3));
+      wrote = format(whole ? Math.round(value) : value);
+      el.textContent = wrote;
+      root.requestAnimationFrame(step);
     }
-    el.textContent = format(0);
+    el.textContent = wrote;
     root.requestAnimationFrame(step);
     return true;
   }
@@ -1090,7 +1101,12 @@
     if (el && el.classList) el.classList.toggle('tf-lock', !!on);
   }
 
-  var FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+  // What Tab can reach. An element taken out of the order with tabindex="-1"
+  // (the palette's rows, reached by the arrow keys) is not one of them.
+  var FOCUSABLE = [
+    'a[href]', 'button:not([disabled])', 'input:not([disabled]):not([type="hidden"])',
+    'select:not([disabled])', 'textarea:not([disabled])', '[tabindex]'
+  ].map(function (s) { return s + ':not([tabindex="-1"])'; }).join(', ');
 
   function focusables(container) {
     return all(container, FOCUSABLE).filter(function (n) {
@@ -1730,7 +1746,8 @@
         if (key === 'PageDown') { stop(); movePalette('last'); return; }
         if (key === 'PageUp') { stop(); movePalette('first'); return; }
         if (key === 'Enter') { stop(); choosePalette(); return; }
-        if (key === 'Tab') { trapFocus(event); return; }
+        // The rows are reached with the arrow keys; Tab stays in the field.
+        if (key === 'Tab') { stop(); focusNode(doc.getElementById('tf-palette-input')); return; }
         return;
       }
       if (key === '/' && !event.ctrlKey && !event.metaKey && !event.altKey && !isEditable(event.target)) { stop(); openPalette(); return; }
