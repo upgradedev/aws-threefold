@@ -20,6 +20,7 @@ import os
 import re
 import shlex
 import socket
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -766,3 +767,15 @@ def test_an_install_from_a_home_folder_with_an_apostrophe_writes_a_script_a_shel
     registered = json.loads((machine.repo / ".claude" / "settings.local.json").read_text(encoding="utf-8"))
     command = registered["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
     assert shlex.split(command)[1] == installer.forward(home / "bin" / "threefold_hook.py")
+
+
+def test_http_request_refuses_a_non_http_url() -> None:
+    with pytest.raises(installer.Unreachable, match="non-http"):
+        installer.http_request("GET", "file:///etc/passwd")
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows has no POSIX mode bits to assert on")
+def test_the_installed_pre_commit_hook_is_executable_by_its_owner_only(machine) -> None:
+    run(machine)
+    mode = stat.S_IMODE((_hooks(machine) / "pre-commit").stat().st_mode)
+    assert mode == 0o700

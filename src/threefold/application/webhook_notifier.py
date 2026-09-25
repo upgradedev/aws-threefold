@@ -10,11 +10,21 @@ from dataclasses import dataclass
 import json
 import logging
 from typing import Any, Dict, List, Optional
+import urllib.parse
 import urllib.request
 
 from threefold.domain.events import DomainEvent, DomainEventPublisher
 
 logger = logging.getLogger("threefold.webhooks")
+
+
+def _http_url_or_none(url: str) -> Optional[str]:
+    """The URL when it names http(s), else None: urlopen must never see file:// or a custom scheme."""
+    try:
+        scheme = urllib.parse.urlsplit(url).scheme.lower()
+    except ValueError:
+        return None
+    return url if scheme in ("http", "https") else None
 
 
 @dataclass
@@ -61,15 +71,20 @@ class WebhookNotifier:
 
         if not self.config.enabled or not self.config.webhook_url:
             return True
+        url = _http_url_or_none(self.config.webhook_url)
+        if url is None:
+            logger.warning("Refusing to deliver webhook alert to a non-http(s) URL")
+            return False
 
         try:
             req = urllib.request.Request(
-                self.config.webhook_url,
+                url,
                 data=json.dumps(payload).encode("utf-8"),
                 headers={"Content-Type": "application/json"},
                 method="POST",
             )
-            with urllib.request.urlopen(req, timeout=3.0) as resp:
+            # The scheme is validated to http(s) above; bandit cannot see the guard.
+            with urllib.request.urlopen(req, timeout=3.0) as resp:  # nosec B310
                 return resp.status in (200, 201, 204)
         except Exception as exc:
             logger.warning("Failed to deliver webhook alert: %s", exc)

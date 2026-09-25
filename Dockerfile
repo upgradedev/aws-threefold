@@ -26,4 +26,4 @@ EXPOSE 8001
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8001/status')"
 
-CMD ["python", "src/threefold/interfaces/server.py", "--port", "8001"]
+CMD ["python", "src/threefold/interfaces/server.py", "--port", "8001", "--host", "0.0.0.0"]

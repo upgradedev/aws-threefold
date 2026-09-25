@@ -2327,14 +2327,22 @@ def post_evaluation(body: Dict[str, Any], base: Optional[str] = None, api_key: A
     if api_key:
         headers["X-API-Key"] = api_key
     timeout = timeout_seconds()
+    target = (base or endpoint()) + "evaluate-tool-call"
+    try:
+        scheme = urllib.parse.urlsplit(target).scheme.lower()
+    except ValueError:
+        scheme = ""
+    if scheme not in ("http", "https"):
+        raise ServiceUnavailable("refusing a non-http(s) service URL") from None
     request = urllib.request.Request(
-        (base or endpoint()) + "evaluate-tool-call",
+        target,
         data=json.dumps(body).encode("utf-8"),
         headers=headers,
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        # The scheme is validated to http(s) above; bandit cannot see the guard.
+        with urllib.request.urlopen(request, timeout=timeout) as response:  # nosec B310
             return response.status, _json_or_none(response.read(MAX_RESPONSE_BYTES)), str(response.reason or "")
     except urllib.error.HTTPError as error:
         try:

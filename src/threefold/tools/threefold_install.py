@@ -561,6 +561,12 @@ def http_request(
     HTTPError is caught before URLError on purpose: it is a subclass, and the
     other order files every 401 under "could not be reached".
     """
+    try:
+        scheme = urllib.parse.urlsplit(url).scheme.lower()
+    except ValueError:
+        scheme = ""
+    if scheme not in ("http", "https"):
+        raise Unreachable("refusing a non-http(s) service URL")
     headers = {"Accept": "application/json", "User-Agent": "threefold-install"}
     data = None
     if body is not None:
@@ -570,7 +576,8 @@ def http_request(
         headers["X-API-Key"] = key
     request = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
-        with urllib.request.urlopen(request, timeout=timeout or api_timeout()) as response:
+        # The scheme is validated to http(s) above; bandit cannot see the guard.
+        with urllib.request.urlopen(request, timeout=timeout or api_timeout()) as response:  # nosec B310
             raw = response.read(limit + 1)
             status = response.status
     except urllib.error.HTTPError as error:
@@ -1126,7 +1133,9 @@ def pre_commit_step(plan: Plan, root: Path, home: Path, manifest: Dict[str, Any]
             if chain:
                 os.replace(hook_path, hook_path.with_name(CHAINED_NAME))
             _write_text(hook_path, script)()
-            os.chmod(hook_path, 0o755)
+            # Owner-executable only: git runs the hook as its owner, and nobody
+            # else needs to read or execute what this installer wrote.
+            os.chmod(hook_path, 0o700)
         return action
 
     if hook_path.is_file():

@@ -125,14 +125,26 @@ def _content(repo: Path, spec: str) -> str:
     return raw[:MAX_FILE_BYTES].decode("utf-8", "replace")
 
 
+def _http_url_or_none(url: str) -> Optional[str]:
+    """The URL when it names http(s), else None: urlopen must never see file:// or a custom scheme."""
+    try:
+        scheme = urllib.parse.urlsplit(url).scheme.lower()
+    except ValueError:
+        return None
+    return url if scheme in ("http", "https") else None
+
+
 def fetch_rules(endpoint: str, project: str, api_key: Optional[str], timeout: float) -> Tuple[Optional[List[Dict[str, Any]]], str]:
     """The project's rules from the service, or (None, why not)."""
     url = endpoint + "rules?" + urllib.parse.urlencode({"project": project})
+    if _http_url_or_none(url) is None:
+        return None, "refusing a non-http(s) service URL"
     headers = {"Accept": "application/json"}
     if api_key:
         headers["X-API-Key"] = api_key
     try:
-        with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=timeout) as response:
+        # The scheme is validated to http(s) above; bandit cannot see the guard.
+        with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=timeout) as response:  # nosec B310
             document = json.loads(response.read(MAX_RULES_BYTES).decode("utf-8"))
     except urllib.error.HTTPError as error:
         return None, f"the service answered HTTP {error.code}"
@@ -156,13 +168,19 @@ def managed_mode(settings: Any, timeout: float) -> Tuple[str, FrozenSet[str], st
     if not project:
         return "observe", frozenset(), "managed mode with no project names no stage, so nothing is refused."
     url = settings.endpoint + "api/projects/" + urllib.parse.quote(project, safe="")
+    if _http_url_or_none(url) is None:
+        return "observe", frozenset(), (
+            f"managed mode: the stage of {project} could not be read "
+            "(refusing a non-http(s) service URL), so nothing is refused."
+        )
     headers = {"Accept": "application/json"}
     if settings.api_key:
         headers["X-API-Key"] = settings.api_key
     document: Any = None
     why = "the stack named no stage"
     try:
-        with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=timeout) as response:
+        # The scheme is validated to http(s) above; bandit cannot see the guard.
+        with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=timeout) as response:  # nosec B310
             document = json.loads(response.read(MAX_PROJECT_BYTES).decode("utf-8"))
     except urllib.error.HTTPError as error:
         why = f"the stack answered HTTP {error.code}"

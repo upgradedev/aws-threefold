@@ -130,7 +130,7 @@ class ThreefoldHTTPRequestHandler(BaseHTTPRequestHandler):
         logger.info("%s - - [%s] %s", self.address_string(), self.log_date_time_string(), format % args)
 
 
-def run_server(port: int = 8001, host: str = "0.0.0.0") -> None:
+def run_server(port: int = 8001, host: str = "127.0.0.1") -> None:
     server_address = (host, port)
     # Threading, not the single-connection server: a browser holds this open with
     # keep-alive, and every curl issued against the same port while a page is open
@@ -145,9 +145,14 @@ def run_server(port: int = 8001, host: str = "0.0.0.0") -> None:
         httpd.server_close()
 
 
-if __name__ == "__main__":
+def parse_args(argv: Any = None) -> Any:
+    """Command-line arguments. The server binds to loopback unless told otherwise."""
     parser = argparse.ArgumentParser(description="Threefold Local REST Server")
     parser.add_argument("--port", type=int, default=8001, help="Port to listen on (default: 8001)")
-    parser.add_argument("--host", type=str, default="0.0.0.0", help="Host interface (default: 0.0.0.0)")
-    args = parser.parse_args()
-    run_server(port=args.port, host=args.host)
+    parser.add_argument("--host", type=str, default="127.0.0.1", help="Host interface (default: 127.0.0.1)")
+    return parser.parse_args(argv)
+
+
+if __name__ == "__main__":
+    _args = parse_args()
+    run_server(port=_args.port, host=_args.host)
