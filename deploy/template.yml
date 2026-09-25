@@ -353,7 +353,9 @@ Resources:
     Type: AWS::KMS::Key
     Properties:
       Description: Signs Threefold governance certificates (RSASSA_PKCS1_V1_5_SHA_256 over the canonical bytes)
-      EnableKeyRotation: true
+      # No EnableKeyRotation: KMS refuses automatic rotation on asymmetric
+      # keys, and CloudFormation fails the whole update on it. Rotation here
+      # is replacing the key and re-issuing, not a property.
       KeyUsage: SIGN_VERIFY
       KeySpec: RSA_2048
       # The key policy names the account root only, which is what lets the
