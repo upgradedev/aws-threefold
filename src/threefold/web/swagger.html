@@ -1,33 +1,109 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="dark">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Threefold API — OpenAPI 3.1 Documentation</title>
+  <meta name="description" content="The published OpenAPI 3.1 document for the Threefold service: every route the hook, the pages and the dashboard call." />
   <!-- Swagger UI pinned to an exact version with a hash taken from the bytes this
        CDN served on 2026-09-21. unpkg sends Access-Control-Allow-Origin, so the
        browser can check it; an unpinned major could not be checked at all. -->
   <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5.33.0/swagger-ui.css"
         integrity="sha384-Ov4/wv3j2bmct8cDc5X4ngJZohVPzEmc6uDPH8WeljUxO5vtoykvMEfbu9Vh6RaW"
         crossorigin="anonymous" referrerpolicy="no-referrer" />
+  <!-- The layer every page shares: the design system and the shell. This page
+       loads no Tailwind, and the shell needs none. -->
+  <link rel="stylesheet" href="assets/threefold.css" />
+  <script src="assets/threefold.js"></script>
   <style>
-    body { margin: 0; padding: 0; background: #0b0f19; color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-    .header-bar { background: #111827; padding: 1rem 2rem; border-bottom: 1px solid #1f2937; display: flex; justify-content: space-between; align-items: center; }
-    .header-title { font-size: 1.25rem; font-weight: 700; color: #a855f7; }
-    .back-link { color: #94a3b8; text-decoration: none; font-size: 0.875rem; padding: 0.5rem 1rem; border: 1px solid #374151; border-radius: 0.375rem; }
-    .back-link:hover { color: #fff; background: #1f2937; }
+    .api-intro { display: grid; gap: 12px; grid-template-columns: 1fr; }
+    @media (min-width: 768px) { .api-intro { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+    .api-intro .tf-card-quiet { padding: 16px; }
+    .api-intro p { margin: 0; }
+    .api-intro .tf-label { margin-bottom: 6px; }
+    .api-doc { padding: 8px 4px 16px; overflow: hidden; }
+    @media (min-width: 640px) { .api-doc { padding: 12px 16px 24px; } }
+
+    /* Swagger UI draws a light page. Inverted and turned half way round the
+       colour wheel it reads as a dark one without restyling each of its parts;
+       the code samples are turned back so their highlighting stays true. */
+    .swagger-ui { filter: invert(90%) hue-rotate(180deg); }
+    .swagger-ui .highlight-code, .swagger-ui .microlight { filter: invert(100%) hue-rotate(180deg); }
     .swagger-ui .topbar { display: none; }
-    .swagger-ui { filter: invert(88%) hue-rotate(180deg); }
-    .swagger-ui .highlight-code { filter: invert(100%) hue-rotate(180deg); }
+    .swagger-ui .information-container.wrapper, .swagger-ui .scheme-container { box-shadow: none; }
+    .swagger-ui .scheme-container { background: transparent; padding: 12px 0; }
+    .swagger-ui .info { margin: 24px 0 12px; }
+    .swagger-ui .info .title { font-family: var(--tf-font-sans); letter-spacing: -0.02em; }
+    .swagger-ui, .swagger-ui .opblock-tag, .swagger-ui .opblock .opblock-summary-description, .swagger-ui .info p, .swagger-ui .info li { font-family: var(--tf-font-sans); }
+    .swagger-ui .opblock .opblock-summary-path, .swagger-ui code, .swagger-ui pre { font-family: var(--tf-font-mono); }
+    .swagger-ui .wrapper { padding: 0 8px; max-width: none; }
+    .swagger-ui .opblock { border-radius: 10px; box-shadow: none; }
+    .swagger-ui .opblock .opblock-summary { border-radius: 10px; }
+    #swagger-ui:empty::before {
+      content: 'Reading the document…'; display: block; padding: 32px 16px; text-align: center;
+      font-size: var(--tf-fs-small); color: var(--tf-text-3);
+    }
   </style>
 </head>
 <body>
-  <div class="header-bar">
-    <div class="header-title">🔍 Threefold Governance Sidecar API — OpenAPI 3.1</div>
-    <div>
-      <a href="index.html" class="back-link">← Back to Dashboard</a>
+  <a class="tf-skip" href="#main">Skip to content</a>
+
+  <header class="tf-header">
+    <div class="tf-container tf-header-inner">
+      <a class="tf-brand" href="dashboard.html#/overview" data-tf-page="dashboard.html#/overview" aria-label="Threefold, the overview">
+        <span class="tf-brand-mark" aria-hidden="true" data-tf-icon="shield" data-tf-size="18"></span>
+        <span class="tf-brand-text"><span class="tf-brand-name">Threefold</span><span class="tf-brand-sub">Agent governance</span></span>
+      </a>
+      <div id="page-nav" class="tf-nav-mount">
+        <!-- Without script, the pages this one links to are still reachable. -->
+        <nav aria-label="Threefold" class="tf-nav-fallback">
+          <a href="dashboard.html#/overview">Overview</a>
+          <a href="index.html">Demo</a>
+          <a href="connect.html">Connect</a>
+        </nav>
+      </div>
     </div>
-  </div>
-  <div id="swagger-ui"></div>
+  </header>
+
+  <main id="main" class="tf-main" tabindex="-1">
+    <div class="tf-page-head">
+      <div>
+        <p class="tf-eyebrow"><span data-tf-icon="book"></span>API</p>
+        <h1 class="tf-h1">The Threefold API</h1>
+        <p class="tf-lede">The published OpenAPI 3.1 document: every route the hook, the pages and the dashboard call, read from the file this stack serves. "Try it out" sends a real request to the server the document names.</p>
+      </div>
+      <div class="tf-actions">
+        <a id="spec-raw" href="openapi.json" class="tf-btn" data-tf-page="openapi.json"><span data-tf-icon="code" data-tf-size="16"></span>openapi.json</a>
+      </div>
+    </div>
+
+    <div class="api-intro">
+      <div class="tf-card-quiet">
+        <p class="tf-label">Judge a tool call</p>
+        <p class="tf-small"><span class="tf-mono">POST /evaluate-tool-call</span> is the one route an agent's hook calls, before every write and command.</p>
+      </div>
+      <div class="tf-card-quiet">
+        <p class="tf-label">Read what was judged</p>
+        <p class="tf-small"><span class="tf-mono">/api/overview</span>, <span class="tf-mono">/api/decisions</span> and <span class="tf-mono">/api/projects</span> are what the dashboard draws from.</p>
+      </div>
+      <div class="tf-card-quiet">
+        <p class="tf-label">And everything else</p>
+        <p class="tf-small">Rules, the policy, sessions, sign-in and the sandbox: each route is below, with the fields it takes and the answers it gives.</p>
+      </div>
+    </div>
+
+    <section class="tf-card api-doc" aria-label="The OpenAPI document">
+      <div id="swagger-ui"></div>
+    </section>
+  </main>
+
+  <footer class="tf-footer">
+    <div class="tf-container">
+      <span>Threefold · AWS Zero to Shipped Hackathon 2026 · Built with Amazon Bedrock &amp; AWS Serverless</span>
+      <span>The document is the file this stack serves, not a copy</span>
+    </div>
+  </footer>
+
   <script src="https://unpkg.com/swagger-ui-dist@5.33.0/swagger-ui-bundle.js"
           integrity="sha384-YDALVcy8kj8yltLBVi1vBiBAUqdxvus673gM8XKwiy6aDUJFXivF/KCufekjYbVf"
           crossorigin="anonymous" referrerpolicy="no-referrer"></script>
@@ -40,6 +116,9 @@
     const SPEC_URL = SERVED_BASE_PATH.indexOf("THREEFOLD_BASE_PATH") !== -1
       ? "openapi.json"
       : location.origin + SERVED_BASE_PATH + "/openapi.json";
+
+    // The shared navigation, as every page draws it.
+    if (window.Threefold) Threefold.mountNav(document.getElementById('page-nav'), { active: 'api' });
 
     window.onload = function() {
       const specUrl = SPEC_URL;

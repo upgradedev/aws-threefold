@@ -370,9 +370,9 @@ svg a:focus-visible .tf-mark, svg g:focus-visible .tf-mark { stroke: #ffffff; st
 /* The menu sheet on a narrow screen: the same items as the bar, larger. */
 .tf-sheet, .tf-menu {
   position: fixed; left: 0; right: 0; top: var(--tf-header-h); z-index: var(--tf-z-menu);
-  max-height: calc(100vh - var(--tf-header-h)); max-height: calc(100dvh - var(--tf-header-h)); overflow-y: auto;
+  height: calc(100vh - var(--tf-header-h)); height: calc(100dvh - var(--tf-header-h)); overflow-y: auto; overscroll-behavior: contain;
   padding: var(--tf-space-2) var(--tf-gutter) var(--tf-space-3); box-sizing: border-box;
-  background: rgba(8, 11, 21, 0.98); border-bottom: 1px solid var(--tf-hairline-strong); box-shadow: 0 30px 60px -20px rgba(0, 0, 0, 0.9);
+  background: var(--tf-bg); border-bottom: 1px solid var(--tf-hairline-strong); box-shadow: 0 30px 60px -20px rgba(0, 0, 0, 0.9);
   animation: tf-sheet var(--tf-dur-3) var(--tf-ease-out);
 }
 .tf-sheet.hidden, .tf-menu.hidden { display: none; }
@@ -643,6 +643,7 @@ a.tf-chip:hover { filter: brightness(1.15); }
 .tf-disclosure[open] > summary { border-bottom: 1px solid var(--tf-hairline); border-radius: var(--tf-radius-md) var(--tf-radius-md) 0 0; }
 .tf-disclosure-body { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
 .tf-summary-note { margin-left: 4px; font-weight: 400; color: var(--tf-text-3); }
+@media (max-width: 639px) { .tf-summary-note { display: none; } }
 
 /* A toolbar: the controls that scope what is below them, in one row. */
 .tf-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; }

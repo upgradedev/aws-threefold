@@ -4,15 +4,13 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Threefold — Connect a Coding Agent</title>
+  <meta name="description" content="Connect Claude Code, Codex or Antigravity to Threefold in one command. Every project starts in Observe; a rule refuses only once you promote it." />
   <!-- Tailwind CSS via CDN, pinned to an exact version: an unpinned major is a
        script that can change under a page that did not change, and it runs on the
        same origin as the operator key this browser may hold. No integrity hash: the
        Play CDN answers with no Access-Control-Allow-Origin header, so a browser
        would refuse a script carrying one and the page would lose every style. -->
   <script src="https://cdn.tailwindcss.com/3.4.17"></script>
-  <!-- The layer every page shares: the navigation, the sign-in and the API base. -->
-  <link rel="stylesheet" href="assets/threefold.css" />
-  <script src="assets/threefold.js"></script>
   <script>
       // The server rewrites __THREEFOLD_BASE_PATH__ to the API Gateway stage prefix
       // when it serves this page, so the base is exact rather than guessed from the
@@ -29,128 +27,143 @@
         ? ""
         : location.origin + SERVED_BASE_PATH + "/";
 
-    tailwind.config = {
-      darkMode: 'class',
-      theme: {
-        extend: {
-          colors: {
-            brand: {
-              50: '#f5f3ff',
-              500: '#8b5cf6',
-              900: '#4c1d95',
-              dark: '#0a0d18',
-              card: '#111528',
-              border: '#1e243d'
-            }
-          }
-        }
-      }
-    }
+    tailwind.config = { darkMode: 'class' }
   </script>
+  <!-- The layer every page shares: the design system, the shell, the sign-in
+       and the API base. It loads after the page's Tailwind config, which it
+       extends with the product's ink. -->
+  <link rel="stylesheet" href="assets/threefold.css" />
+  <script src="assets/threefold.js"></script>
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
-    body { font-family: 'Inter', sans-serif; background-color: #0a0d18; color: #f3f4f6; }
-    .font-mono { font-family: 'JetBrains Mono', monospace; }
-    .glow-purple { box-shadow: 0 0 25px -5px rgba(139, 92, 246, 0.35); }
-    pre.code { white-space: pre; overflow-x: auto; }
+    pre.code { white-space: pre; overflow-x: auto; overflow-wrap: normal; }
+    .tf-probe { display: block; width: 100%; cursor: pointer; transition: border-color var(--tf-dur-2), background-color var(--tf-dur-2), transform var(--tf-dur-2) var(--tf-ease-out); }
+    .tf-probe:hover { border-color: var(--tf-accent-line); background: var(--tf-surface-2); transform: translateY(-1px); }
+    .tf-probe .tf-probe-go { color: var(--tf-text-3); }
+    .tf-probe:hover .tf-icon { color: var(--tf-accent-text); }
   </style>
 </head>
 <body class="min-h-screen flex flex-col">
+  <a class="tf-skip" href="#main">Skip to content</a>
 
-  <!-- TOP HEADER -->
-  <header class="border-b border-gray-800 bg-gray-950/80 backdrop-blur sticky top-0 z-50">
-    <div class="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-4">
-      <div class="flex items-center gap-3">
-        <div class="w-10 h-10 rounded-lg bg-gradient-to-br from-indigo-500 via-purple-600 to-pink-600 flex items-center justify-center font-bold text-white text-xl shadow-lg shadow-purple-500/20">
-          🔌
-        </div>
-        <div>
-          <div class="flex items-center gap-2">
-            <h1 class="text-lg font-bold tracking-tight text-white">Connect a Coding Agent</h1>
-            <a id="hook-badge" href="hooks/threefold_hook.py" target="_blank" rel="noopener"
-               title="Read the script this deployment serves"
-               class="px-2 py-0.5 rounded text-xs font-semibold bg-purple-950 hover:bg-purple-900 text-purple-400 border border-purple-800 font-mono transition">
-              threefold_hook.py ↗
-            </a>
-          </div>
-          <p class="text-xs text-gray-400">One script in front of Claude Code, Codex or Antigravity, asking this service about each write and command before it runs</p>
-        </div>
-      </div>
-      <div id="page-nav" class="flex items-center gap-2 text-xs"></div>
-    </div>
-
-    <div class="bg-gray-950/90 border-b border-gray-800 px-4 py-2 text-xs flex flex-wrap items-center justify-between gap-3">
-      <div class="flex items-center gap-2 flex-wrap">
-        <span class="text-gray-400 font-medium">Endpoint the hook will call:</span>
-        <input id="apiBaseInput" type="text" value="" oninput="renderSnippets()" class="bg-gray-900 border border-gray-700 rounded px-2 py-0.5 text-xs text-purple-300 font-mono w-80 focus:outline-none focus:border-purple-500" />
-        <span class="text-gray-400 font-medium ml-1">API Key:</span>
-        <input id="apiKeyInput" type="password" value="" placeholder="only if the stack enforces one" class="bg-gray-900 border border-gray-700 rounded px-2 py-0.5 text-xs text-sky-300 font-mono w-40 focus:outline-none focus:border-sky-500" />
-        <span id="apiConnectionStatus" class="px-2 py-0.5 rounded text-[11px] font-mono bg-amber-950 text-amber-400 border border-amber-800 flex items-center gap-1.5">
-          <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span> NOT CHECKED
-        </span>
-      </div>
-      <div class="text-gray-400 text-[11px] hidden md:block">
-        🛡️ The snippets below rewrite themselves from this field, so what you copy is what this page can reach
+  <header class="tf-header">
+    <div class="tf-container tf-header-inner">
+      <a class="tf-brand" href="dashboard.html#/overview" data-tf-page="dashboard.html#/overview" aria-label="Threefold, the overview">
+        <span class="tf-brand-mark" aria-hidden="true" data-tf-icon="shield" data-tf-size="18"></span>
+        <span class="tf-brand-text"><span class="tf-brand-name">Threefold</span><span class="tf-brand-sub">Agent governance</span></span>
+      </a>
+      <div id="page-nav" class="tf-nav-mount">
+        <!-- Without script, the pages this one links to are still reachable. -->
+        <nav aria-label="Threefold" class="tf-nav-fallback">
+          <a href="dashboard.html#/overview">Overview</a>
+          <a href="index.html">Demo</a>
+          <a href="rules.html">Rules</a>
+          <a href="sessions.html">Sessions</a>
+          <a href="settings.html">Settings</a>
+          <a href="swagger.html">API</a>
+        </nav>
       </div>
     </div>
   </header>
 
-  <main class="flex-1 max-w-7xl mx-auto px-4 py-6 w-full space-y-6">
+  <main id="main" class="tf-main" tabindex="-1">
+
+    <div class="tf-page-head">
+      <div>
+        <p class="tf-eyebrow"><span data-tf-icon="plug"></span>Connect</p>
+        <h1 class="tf-h1">Connect a coding agent</h1>
+        <p class="tf-lede">One script sits in front of Claude Code, Codex or Antigravity and asks this service about each write and command before it runs. Every project starts in Observe: what a rule would stop is recorded for you to review, and nothing is stopped but a call carrying a credential until you promote the project.</p>
+      </div>
+      <div class="tf-actions">
+        <a id="hook-badge" href="hooks/threefold_hook.py" target="_blank" rel="noopener" title="Read the script this deployment serves" class="tf-spec-link">threefold_hook.py <span data-tf-icon="external" data-tf-size="12"></span></a>
+      </div>
+    </div>
+
+    <!-- WHERE THE SNIPPETS POINT. Every command on this page is written from this
+         field, so what a reader copies is what this page can reach. -->
+    <details class="tf-disclosure" id="endpoint">
+      <summary><span data-tf-icon="settings"></span>Endpoint <span class="tf-summary-note tf-mono tf-break" id="endpoint-summary"></span>
+        <span id="apiConnectionStatus" class="tf-chip tf-chip-gray ml-2" role="status">Not checked</span>
+      </summary>
+      <div class="tf-disclosure-body">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <label class="tf-field">
+            <span class="tf-label">Endpoint the hook will call</span>
+            <input id="apiBaseInput" type="text" value="" oninput="renderSnippets()" class="tf-input tf-mono" spellcheck="false" />
+          </label>
+          <label class="tf-field">
+            <span class="tf-label">API key, only if the stack enforces one</span>
+            <input id="apiKeyInput" type="password" value="" placeholder="only if the stack enforces one" class="tf-input tf-mono" autocomplete="off" />
+          </label>
+        </div>
+        <p class="tf-help">The snippets below rewrite themselves from this field, so what you copy is what this page can reach.</p>
+      </div>
+    </details>
 
     <!-- ONE COMMAND, TWO STAGES. The installer this stack serves at /install.py,
          run at the root of a repository. It is the short way to what the sections
          below describe, and the dashboard's guided version waits for the first
          call with the reader. The stages are the 2026-09-22 contract in STATE.md. -->
-    <section id="connect-in-one-command" class="rounded-2xl bg-gradient-to-br from-gray-900 via-gray-900 to-purple-950/30 border border-gray-800 p-5 md:p-6 space-y-4">
-      <div class="flex flex-wrap items-start justify-between gap-3">
-        <div class="max-w-3xl space-y-1">
-          <h2 class="text-lg md:text-xl font-semibold text-white">Connect a repository in one command</h2>
-          <p class="text-xs text-gray-400">
+    <section id="connect-in-one-command" class="tf-card tf-panel" aria-labelledby="one-command-title" style="background:radial-gradient(900px 260px at 100% 0%, rgba(124,58,237,0.16), transparent 70%), var(--tf-surface-1)">
+      <div class="tf-panel-head" style="border-bottom:0;margin-bottom:8px;padding-bottom:0">
+        <div>
+          <h2 id="one-command-title" class="tf-h2">Connect a repository in one command</h2>
+          <p class="tf-lede" style="font-size:0.9375rem">
             Run it at the root of the repository. It installs the hook for Claude Code, Codex and Antigravity where they are
             installed, keeps its files out of git, starts the project in Observe, sends one harmless call to prove the path,
             and opens the project on the dashboard.
           </p>
         </div>
-        <a id="wizard-link" href="dashboard.html#/connect"
-           class="text-xs font-semibold px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white transition">
-          Guided, with a watch for the first call ↗
+        <a id="wizard-link" href="dashboard.html#/connect" class="tf-btn tf-btn-primary">
+          <span data-tf-icon="sparkles" data-tf-size="16"></span>Guided, with a watch for the first call
         </a>
       </div>
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div>
-          <p class="text-[11px] font-semibold text-purple-300 mb-1">Windows · PowerShell</p>
-          <div class="relative">
-            <pre class="p-3 pr-16 rounded-xl bg-gray-950 border border-gray-800 text-[11px] font-mono text-gray-200 whitespace-pre-wrap break-all" id="oneline-powershell"></pre>
-            <button onclick="copyText('oneline-powershell', this)" class="absolute top-2 right-2 text-[11px] px-2 py-0.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700">Copy</button>
-          </div>
-        </div>
-        <div>
-          <p class="text-[11px] font-semibold text-purple-300 mb-1">macOS / Linux</p>
-          <div class="relative">
-            <pre class="p-3 pr-16 rounded-xl bg-gray-950 border border-gray-800 text-[11px] font-mono text-gray-200 whitespace-pre-wrap break-all" id="oneline-posix"></pre>
-            <button onclick="copyText('oneline-posix', this)" class="absolute top-2 right-2 text-[11px] px-2 py-0.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700">Copy</button>
-          </div>
+
+      <div class="tf-tabs" role="tablist" data-tf-tabs aria-label="Your shell">
+        <button type="button" class="tf-tab" role="tab" id="tab-posix" aria-controls="panel-posix" aria-selected="true" tabindex="0"><span data-tf-icon="terminal" data-tf-size="15"></span>macOS / Linux</button>
+        <button type="button" class="tf-tab" role="tab" id="tab-powershell" aria-controls="panel-powershell" aria-selected="false" tabindex="-1"><span data-tf-icon="terminal" data-tf-size="15"></span>Windows · PowerShell</button>
+      </div>
+      <div id="panel-posix" class="tf-tabpanel" role="tabpanel" aria-labelledby="tab-posix" tabindex="0">
+        <div class="tf-command">
+          <pre class="tf-pre" id="oneline-posix"></pre>
+          <button type="button" onclick="copyText('oneline-posix', this)" class="tf-copy" aria-label="Copy the macOS and Linux command"><span data-tf-icon="copy" data-tf-size="14" data-tf-class="tf-icon-idle"></span><span data-tf-icon="check" data-tf-size="14" data-tf-class="tf-icon-done"></span><span data-tf-copy-label>Copy</span></button>
         </div>
       </div>
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <div class="p-3 rounded-xl bg-amber-950/20 border border-amber-900/40 space-y-1">
-          <p class="text-xs font-semibold text-amber-300">Stage 1 · Observe, so nothing breaks</p>
-          <p class="text-[11px] text-gray-400">
-            Every project starts here. What the hook sends is judged and recorded, and the agent is not stopped; a call
-            carrying a credential is still refused on the machine, and a call the hook holds back is not sent. The dashboard
-            lists what each rule would have refused, and you mark each one correct or false alarm.
-          </p>
-        </div>
-        <div class="p-3 rounded-xl bg-purple-950/20 border border-purple-900/40 space-y-1">
-          <p class="text-xs font-semibold text-purple-300">Stage 2 · Enforce, when you are confident</p>
-          <p class="text-[11px] text-gray-400">
-            A rule whose flags were all correct reads Ready. Promote the project from its page on the dashboard with the rules
-            you choose: those refuse from the next call, and the others keep observing. Back to Observe is one click.
-          </p>
+      <div id="panel-powershell" class="tf-tabpanel" role="tabpanel" aria-labelledby="tab-powershell" tabindex="0" hidden>
+        <div class="tf-command">
+          <pre class="tf-pre" id="oneline-powershell"></pre>
+          <button type="button" onclick="copyText('oneline-powershell', this)" class="tf-copy" aria-label="Copy the PowerShell command"><span data-tf-icon="copy" data-tf-size="14" data-tf-class="tf-icon-idle"></span><span data-tf-icon="check" data-tf-size="14" data-tf-class="tf-icon-done"></span><span data-tf-copy-label>Copy</span></button>
         </div>
       </div>
-      <p class="text-[11px] text-gray-500">
-        The command runs the file this stack serves as <a id="install-link" href="install.py" target="_blank" rel="noopener" class="font-mono text-purple-300 hover:text-purple-200 underline">install.py</a>,
+
+      <ol class="tf-stepper mt-6">
+        <li class="tf-stepper-item" data-state="current">
+          <span class="tf-step-num">1</span>
+          <div class="tf-callout tf-callout-warn" style="flex:1">
+            <div class="tf-callout-body">
+              <p class="tf-callout-title">Stage 1 · Observe, so nothing breaks</p>
+              <p>
+                Every project starts here. What the hook sends is judged and recorded, and the agent is not stopped; a call
+                carrying a credential is still refused on the machine, and a call the hook holds back is not sent. The dashboard
+                lists what each rule would have refused, and you mark each one correct or false alarm.
+              </p>
+            </div>
+          </div>
+        </li>
+        <li class="tf-stepper-item" data-state="todo">
+          <span class="tf-step-num">2</span>
+          <div class="tf-callout tf-callout-accent" style="flex:1">
+            <div class="tf-callout-body">
+              <p class="tf-callout-title">Stage 2 · Enforce, when you are confident</p>
+              <p>
+                A rule whose flags were all correct reads Ready. Promote the project from its page on the dashboard with the rules
+                you choose: those refuse from the next call, and the others keep observing. Back to Observe is one click.
+              </p>
+            </div>
+          </div>
+        </li>
+      </ol>
+      <p class="tf-micro mt-5">
+        The command runs the file this stack serves as <a id="install-link" href="install.py" target="_blank" rel="noopener" class="tf-link font-mono">install.py</a>,
         as readable text, so it can be read before it is run. On a private stack, <span class="font-mono">python threefold.py open</span>
         signs this browser in to the dashboard. The installer and the manual steps below remain for a checkout of the repository.
       </p>
@@ -160,70 +173,83 @@
          a refusal "never executes". Neither had been shown for every agent, so the
          claim now stops at what the hook does, and what each agent does with a
          refusal is stated per agent further down. -->
-    <div class="p-5 rounded-2xl bg-gray-900 border border-gray-800 space-y-2">
-      <h2 class="text-base font-semibold text-white">What the hook changes</h2>
-      <p class="text-xs text-gray-400">
-        The scenarios on the dashboard build their own payloads and then refuse them. That proves the gates run; it intercepts
-        nobody. This hook is the difference: the agent runs it <span class="text-purple-300">before</span> every matched tool
-        call and hands it the call it is about to make. The hook asks this service and, on a refusal, answers in the format that
-        agent reads as a deny. On an approval it prints nothing, so the agent's own permission prompts run exactly as before.
-      </p>
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2">
-        <div class="p-3 rounded-xl bg-gray-950 border border-gray-800">
-          <p class="text-xs font-semibold text-purple-300">1 · The agent proposes a tool call</p>
-          <p class="text-[11px] text-gray-400 mt-1">A write, an edit or a shell command, picked out by the matcher in that agent's hook file.</p>
-        </div>
-        <div class="p-3 rounded-xl bg-gray-950 border border-gray-800">
-          <p class="text-xs font-semibold text-purple-300">2 · The hook asks this service</p>
-          <p class="text-[11px] text-gray-400 mt-1">One
-            <a id="spec-link-evaluate" href="swagger.html" class="font-mono text-purple-300 hover:text-purple-200 underline">POST /evaluate-tool-call ↗</a>,
-            standard library only, no dependencies to install. Some calls are never sent; the list is below.</p>
-        </div>
-        <div class="p-3 rounded-xl bg-gray-950 border border-gray-800">
-          <p class="text-xs font-semibold text-purple-300">3 · A refusal is handed back as a deny</p>
-          <p class="text-[11px] text-gray-400 mt-1">Measured on 2026-09-21: Claude Code and the Antigravity desktop app stopped the refused write. Measured on 2026-09-23, in one run: Codex stopped it over <span class="font-mono">apply_patch</span>. The table further down has the detail, and says which Codex routes are still not measured.</p>
+    <div class="tf-card tf-panel">
+      <div class="tf-panel-head">
+        <div>
+          <h2 class="tf-panel-title"><span data-tf-icon="shield" data-tf-size="18"></span>What the hook changes</h2>
+          <p class="tf-panel-sub">
+            The scenarios on the demo build their own payloads and then refuse them. That proves the gates run; it intercepts
+            nobody. This hook is the difference: the agent runs it <span class="tf-accent-text">before</span> every matched tool
+            call and hands it the call it is about to make. The hook asks this service and, on a refusal, answers in the format that
+            agent reads as a deny. On an approval it prints nothing, so the agent's own permission prompts run exactly as before.
+          </p>
         </div>
       </div>
+      <ol class="tf-stepper">
+        <li class="tf-stepper-item" data-state="done">
+          <span class="tf-step-num">1</span>
+          <div>
+            <p class="tf-stepper-title">The agent proposes a tool call</p>
+            <p class="tf-stepper-text">A write, an edit or a shell command, picked out by the matcher in that agent's hook file.</p>
+          </div>
+        </li>
+        <li class="tf-stepper-item" data-state="done">
+          <span class="tf-step-num">2</span>
+          <div>
+            <p class="tf-stepper-title">The hook asks this service</p>
+            <p class="tf-stepper-text">One
+              <a id="spec-link-evaluate" href="swagger.html" class="tf-link font-mono">POST /evaluate-tool-call</a>,
+              standard library only, no dependencies to install. Some calls are never sent; the list is below.</p>
+          </div>
+        </li>
+        <li class="tf-stepper-item" data-state="done">
+          <span class="tf-step-num">3</span>
+          <div>
+            <p class="tf-stepper-title">A refusal is handed back as a deny</p>
+            <p class="tf-stepper-text">Measured on 2026-09-21: Claude Code and the Antigravity desktop app stopped the refused write. Measured on 2026-09-23, in one run: Codex stopped it over <span class="font-mono">apply_patch</span>. The table further down has the detail, and says which Codex routes are still not measured.</p>
+          </div>
+        </li>
+      </ol>
     </div>
 
     <!-- GOVERN YOUR OWN REPOSITORIES. The installer writes, per repository, what the
          three steps below do by hand. What it writes is the per-repository
          configuration contract in STATE.md, and the enforcement claims are only
          the ones docs/evidence/ENFORCEMENT_2026-09-21.md measured. -->
-    <section id="govern-your-repositories" class="rounded-2xl bg-gray-900 border border-gray-800 p-5 space-y-4">
-      <div class="flex items-center justify-between gap-3 flex-wrap border-b border-gray-800 pb-3">
+    <section id="govern-your-repositories" class="tf-card tf-panel" aria-labelledby="govern-title">
+      <div class="tf-panel-head">
         <div>
-          <h2 class="text-sm font-semibold text-white">Govern your own repositories</h2>
-          <p class="text-[11px] text-gray-500">One command per repository, for all three agents and the commit, starting in observe mode.</p>
+          <h2 id="govern-title" class="tf-panel-title"><span data-tf-icon="git" data-tf-size="18"></span>Govern your own repositories</h2>
+          <p class="tf-panel-sub">One command per repository, for all three agents and the commit, starting in observe mode.</p>
         </div>
-        <span class="text-xs px-2.5 py-1 rounded-full font-semibold bg-amber-950 text-amber-300 border border-amber-800">observe, then enforce</span>
+        <span class="tf-chip tf-chip-amber"><span data-tf-icon="eye" data-tf-size="13"></span>observe, then enforce</span>
       </div>
 
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div class="space-y-4">
+        <div class="space-y-5">
           <div>
-            <p class="text-xs font-semibold text-gray-200">The installer · <span class="font-mono text-purple-300">scripts/threefold_install.py</span></p>
-            <p class="text-xs text-gray-400 mt-1">
+            <p class="text-sm font-semibold text-gray-100">The installer · <span class="font-mono tf-accent-text">scripts/threefold_install.py</span></p>
+            <p class="tf-small mt-1">
               It is a file in the Threefold repository, standard library only, run once for each repository you want governed.
               <span class="font-mono">--api-key-file</span> is needed only where the stack enforces a key, and it names a file
               holding the key, so the key itself never appears in a command line or in the repository.
             </p>
-            <div class="relative">
-              <pre class="code mt-2 p-3 rounded-xl bg-gray-950 border border-gray-800 text-[11px] font-mono text-gray-300" id="install-snippet"></pre>
-              <button onclick="copyText('install-snippet', this)" class="absolute top-3 right-2 text-[11px] px-2 py-0.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700">Copy</button>
+            <div class="tf-command mt-2">
+              <pre class="tf-pre code" id="install-snippet"></pre>
+              <button type="button" onclick="copyText('install-snippet', this)" class="tf-copy" aria-label="Copy the installer command"><span data-tf-icon="copy" data-tf-size="14" data-tf-class="tf-icon-idle"></span><span data-tf-icon="check" data-tf-size="14" data-tf-class="tf-icon-done"></span><span data-tf-copy-label>Copy</span></button>
             </div>
           </div>
 
           <div>
-            <p class="text-xs font-semibold text-gray-200">What it writes</p>
-            <ul class="text-[11px] text-gray-400 space-y-1.5 list-disc pl-4 mt-1">
+            <p class="text-sm font-semibold text-gray-100">What it writes</p>
+            <ul class="tf-small space-y-1.5 list-disc pl-4 mt-1">
               <li><span class="font-mono text-gray-200">.threefold.json</span> at the repository root, holding <span class="font-mono">project</span>, <span class="font-mono">endpoint</span>, <span class="font-mono">mode</span> and, when given, <span class="font-mono">api_key_file</span>: the path to the key, never the key.</li>
               <li>The three agents' hook settings: <span class="font-mono text-gray-200">.claude/settings.local.json</span> for Claude Code, <span class="font-mono text-gray-200">.codex/hooks.json</span> for Codex and <span class="font-mono text-gray-200">.agents/hooks.json</span> for Antigravity, the same blocks as Step 2 below.</li>
               <li>The pre-commit hook, so an edit that got past an agent is still judged when it is committed, and recorded with agent <span class="font-mono">pre-commit</span>.</li>
               <li>Every one of them listed in <span class="font-mono text-gray-200">.git/info/exclude</span>, which is local to your clone. None of it is ever committed, and the governed repository shows no change.</li>
             </ul>
-            <pre class="code mt-2 p-3 rounded-xl bg-gray-950 border border-gray-800 text-[11px] font-mono text-gray-300" id="threefold-json-snippet"></pre>
-            <p class="text-[11px] text-gray-500 mt-1">
+            <pre class="tf-pre tf-pre-plain code mt-3" id="threefold-json-snippet"></pre>
+            <p class="tf-micro mt-2">
               The hook reads each setting from the environment first, then from <span class="font-mono">.threefold.json</span>,
               then from <span class="font-mono">~/.threefold/config.json</span>, so a variable set where the agent starts wins
               over the file.
@@ -232,59 +258,62 @@
         </div>
 
         <div class="space-y-4">
-          <div class="p-3 rounded-xl bg-gray-950 border border-gray-800 space-y-1">
-            <p class="text-xs font-semibold text-amber-300">From observe to enforce</p>
-            <p class="text-[11px] text-gray-400">
+          <div class="tf-card-quiet p-4 space-y-2 tf-small">
+            <p class="font-semibold tf-warn-text">From observe to enforce</p>
+            <p>
               In <span class="font-mono">observe</span> every call the hook sends goes as <span class="font-mono">dry_run</span>:
               the service judges and records it, never refuses it and never halts the session, so the enforcement console shows
               what would have been stopped while nobody is. Two things are decided on your machine before anything is sent, so
               they hold in either mode: a call carrying a credential is still refused on your machine and never sent, and a call
               the hook holds back (outside the project, a data file, a term on your never-send list) is neither sent nor
-              recorded. When that record reads right, enforcement takes <span class="text-gray-200">two steps</span>, because
+              recorded. When that record reads right, enforcement takes <span class="text-gray-100">two steps</span>, because
               the stage is the project's on the service and not your machine's.
             </p>
-            <ol class="text-[11px] text-gray-400 list-decimal pl-4 space-y-1">
+            <ol class="list-decimal pl-4 space-y-1">
               <li>Run the installer again with <span class="font-mono text-gray-200">--mode managed</span>, or set
                 <span class="font-mono text-gray-200">"mode": "managed"</span> in <span class="font-mono">.threefold.json</span>,
                 so the calls stop going as dry runs and the project's stage decides.
                 <span class="font-mono text-gray-200">--mode enforce</span> sends them exactly the same way; what it adds is on
                 the machine, where a file-tool write to the hooks' own files is refused whatever stage was last seen.</li>
               <li>Promote the project on
-                <a class="underline decoration-dotted" id="projects-link" href="dashboard.html#/projects">the dashboard</a>,
+                <a class="tf-link" id="projects-link" href="dashboard.html#/projects">the dashboard</a>,
                 choosing the rules that enforce. That is the step that moves it from Observe to Enforce.</li>
             </ol>
-            <p class="text-[11px] text-gray-400">
+            <p>
               Until it is promoted the project stays in Observe whatever mode your machine is in, so a forbidden write is still
               recorded and the agent is told nothing. A stack deployed with
               <span class="font-mono text-gray-200">DefaultHookStage=enforce</span> puts projects that have no stage of their
               own straight into Enforce; the public demo deploys with the default, <span class="font-mono">observe</span>.
             </p>
-            <pre class="code mt-2 p-2 rounded-lg bg-gray-900 border border-gray-800 text-[11px] font-mono text-gray-300" id="enforce-snippet"></pre>
+            <pre class="tf-pre tf-pre-plain code mt-2" id="enforce-snippet"></pre>
           </div>
 
-          <div class="p-3 rounded-xl bg-gray-950 border border-gray-800 space-y-1">
-            <p class="text-xs font-semibold text-gray-200">Uninstall</p>
-            <p class="text-[11px] text-gray-400">
+          <div class="tf-card-quiet p-4 space-y-2 tf-small">
+            <p class="font-semibold text-gray-100">Uninstall</p>
+            <p>
               Run the installer with <span class="font-mono text-gray-200">--uninstall</span> for the same repository. By hand it
               is the same list in reverse: delete <span class="font-mono">.threefold.json</span>, take the Threefold block out of
               each of the three hook settings files, remove the pre-commit hook, and delete the lines it added to
               <span class="font-mono">.git/info/exclude</span>.
             </p>
-            <pre class="code mt-2 p-2 rounded-lg bg-gray-900 border border-gray-800 text-[11px] font-mono text-gray-300" id="uninstall-snippet"></pre>
+            <pre class="tf-pre tf-pre-plain code mt-2" id="uninstall-snippet"></pre>
           </div>
 
-          <div class="p-3 rounded-xl bg-sky-950/20 border border-sky-900/40 space-y-1">
-            <p class="text-xs font-semibold text-sky-300">Codex reads project hooks only in a trusted project</p>
-            <p class="text-[11px] text-gray-400">
-              Codex loads a project's hooks only when that project is trusted in Codex. Until you trust the repository there,
-              <span class="font-mono">.codex/hooks.json</span> is not read and Codex's edits meet Threefold at commit time only,
-              through the pre-commit hook.
-            </p>
+          <div class="tf-callout tf-callout-info">
+            <span data-tf-icon="info" data-tf-size="18"></span>
+            <div class="tf-callout-body">
+              <p class="tf-callout-title">Codex reads project hooks only in a trusted project</p>
+              <p>
+                Codex loads a project's hooks only when that project is trusted in Codex. Until you trust the repository there,
+                <span class="font-mono">.codex/hooks.json</span> is not read and Codex's edits meet Threefold at commit time only,
+                through the pre-commit hook.
+              </p>
+            </div>
           </div>
 
-          <div class="p-3 rounded-xl bg-gray-950 border border-gray-800 space-y-1">
-            <p class="text-xs font-semibold text-gray-200">Which agents stop the write, as measured</p>
-            <p class="text-[11px] text-gray-400">
+          <div class="tf-card-quiet p-4 space-y-2 tf-small">
+            <p class="font-semibold text-gray-100">Which agents stop the write, as measured</p>
+            <p>
               On 2026-09-21 a local hook answered deny and the file system was checked afterwards. Claude Code 2.1.220 refused a
               <span class="font-mono">Write</span> and a <span class="font-mono">Bash</span> redirection, and the Antigravity
               desktop app refused <span class="font-mono">write_to_file</span>; in each case the refused file was not created.
@@ -299,175 +328,183 @@
       </div>
     </section>
 
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
 
       <!-- INSTALLATION -->
-      <div class="rounded-2xl bg-gray-900 border border-gray-800 p-5 space-y-4">
-        <div class="flex items-center justify-between border-b border-gray-800 pb-3">
-          <h2 class="text-sm font-semibold text-white">Install: one file, three agents</h2>
-          <span class="text-xs px-2.5 py-1 rounded-full font-semibold bg-purple-950 text-purple-400 border border-purple-800">three steps</span>
-        </div>
-        <p class="text-[11px] text-gray-500">
-          By hand, one agent at a time. For a repository you mean to keep governed, the installer above writes all of this
-          for the three agents at once and keeps it out of the repository's history.
-        </p>
-
-        <div>
-          <p class="text-xs font-semibold text-gray-200">Step 1 · Take the script</p>
-          <p class="text-xs text-gray-400 mt-1">
-            This deployment serves it. No repository, no account, no package manager: the same stack you just watched refuse a
-            call hands you the file that asks it. The same file serves every agent; <span class="font-mono">--agent</span> tells it
-            which one is calling.
-          </p>
-          <div class="flex flex-wrap items-center gap-2 mt-2">
-            <a id="hook-download" href="hooks/threefold_hook.py" download="threefold_hook.py"
-               class="px-3 py-1.5 rounded-lg bg-emerald-950 hover:bg-emerald-900 text-emerald-300 text-xs border border-emerald-800 font-semibold transition">
-              ⬇ Download threefold_hook.py
-            </a>
-            <a id="hook-view" href="hooks/threefold_hook.py" target="_blank" rel="noopener"
-               class="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-200 text-xs border border-gray-700 transition">
-              Read it first ↗
-            </a>
-            <a id="spec-link-hook" href="swagger.html" title="Open this route in the published OpenAPI document"
-               class="text-[11px] font-mono text-purple-300 hover:text-purple-200 underline">GET /hooks/threefold_hook.py ↗</a>
+      <div class="tf-card tf-panel">
+        <div class="tf-panel-head">
+          <div>
+            <h2 class="tf-panel-title"><span data-tf-icon="download" data-tf-size="18"></span>Install by hand: one file, three agents</h2>
+            <p class="tf-panel-sub">
+              One agent at a time. For a repository you mean to keep governed, the installer above writes all of this
+              for the three agents at once and keeps it out of the repository's history.
+            </p>
           </div>
-          <div class="relative">
-            <pre class="code mt-2 p-3 rounded-xl bg-gray-950 border border-gray-800 text-[11px] font-mono text-gray-300" id="fetch-snippet"></pre>
-            <button onclick="copyText('fetch-snippet', this)" class="absolute top-3 right-2 text-[11px] px-2 py-0.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700">Copy</button>
-          </div>
-          <p class="text-[11px] text-gray-500 mt-1">
-            It reads one tool call as JSON on stdin and writes at most one decision on stdout, which is the whole of its
-            interface, so the second command above is also exactly what the agent does to it. It is served as readable text
-            rather than as a download you cannot inspect, because a file that sits in front of an agent's tool calls is one you
-            should read before you run.
-          </p>
+          <span class="tf-chip tf-chip-purple">three steps</span>
         </div>
 
-        <div>
-          <p class="text-xs font-semibold text-gray-200">Step 2 · Register it with your agent</p>
-          <p class="text-xs text-gray-400 mt-1">
-            In the project you want governed, add the block for your agent, with the absolute path to the script on your
-            machine. The matcher decides which tool calls reach the hook: the ones below are writes, edits and shell commands,
-            so reads are never sent.
-          </p>
-
-          <p class="text-[11px] font-semibold text-purple-300 mt-3">Claude Code · <span class="font-mono">.claude/settings.local.json</span></p>
-          <div class="relative">
-            <pre class="code mt-1 p-3 rounded-xl bg-gray-950 border border-gray-800 text-[11px] font-mono text-gray-300" id="settings-claude-code"></pre>
-            <button onclick="copyText('settings-claude-code', this)" class="absolute top-3 right-2 text-[11px] px-2 py-0.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700">Copy</button>
+        <div class="space-y-6">
+          <div>
+            <p class="text-sm font-semibold text-gray-100">Step 1 · Take the script</p>
+            <p class="tf-small mt-1">
+              This deployment serves it. No repository, no account, no package manager: the same stack you just watched refuse a
+              call hands you the file that asks it. The same file serves every agent; <span class="font-mono">--agent</span> tells it
+              which one is calling.
+            </p>
+            <div class="flex flex-wrap items-center gap-2 mt-3">
+              <a id="hook-download" href="hooks/threefold_hook.py" download="threefold_hook.py" class="tf-btn tf-btn-good tf-btn-sm">
+                <span data-tf-icon="download" data-tf-size="14"></span>Download threefold_hook.py
+              </a>
+              <a id="hook-view" href="hooks/threefold_hook.py" target="_blank" rel="noopener" class="tf-btn tf-btn-sm">
+                Read it first <span data-tf-icon="external" data-tf-size="14"></span>
+              </a>
+              <a id="spec-link-hook" href="swagger.html" title="Open this route in the published OpenAPI document"
+                 class="tf-spec-link">GET /hooks/threefold_hook.py</a>
+            </div>
+            <div class="tf-command mt-3">
+              <pre class="tf-pre code" id="fetch-snippet"></pre>
+              <button type="button" onclick="copyText('fetch-snippet', this)" class="tf-copy" aria-label="Copy the commands that fetch and run the script"><span data-tf-icon="copy" data-tf-size="14" data-tf-class="tf-icon-idle"></span><span data-tf-icon="check" data-tf-size="14" data-tf-class="tf-icon-done"></span><span data-tf-copy-label>Copy</span></button>
+            </div>
+            <p class="tf-micro mt-2">
+              It reads one tool call as JSON on stdin and writes at most one decision on stdout, which is the whole of its
+              interface, so the second command above is also exactly what the agent does to it. It is served as readable text
+              rather than as a download you cannot inspect, because a file that sits in front of an agent's tool calls is one you
+              should read before you run.
+            </p>
           </div>
 
-          <p class="text-[11px] font-semibold text-purple-300 mt-3">Codex · <span class="font-mono">.codex/hooks.json</span></p>
-          <div class="relative">
-            <pre class="code mt-1 p-3 rounded-xl bg-gray-950 border border-gray-800 text-[11px] font-mono text-gray-300" id="settings-codex"></pre>
-            <button onclick="copyText('settings-codex', this)" class="absolute top-3 right-2 text-[11px] px-2 py-0.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700">Copy</button>
+          <div>
+            <p class="text-sm font-semibold text-gray-100">Step 2 · Register it with your agent</p>
+            <p class="tf-small mt-1">
+              In the project you want governed, add the block for your agent, with the absolute path to the script on your
+              machine. The matcher decides which tool calls reach the hook: the ones below are writes, edits and shell commands,
+              so reads are never sent.
+            </p>
+
+            <p class="tf-label mt-4">Claude Code · <span class="font-mono normal-case tracking-normal">.claude/settings.local.json</span></p>
+            <div class="tf-command">
+              <pre class="tf-pre code" id="settings-claude-code"></pre>
+              <button type="button" onclick="copyText('settings-claude-code', this)" class="tf-copy" aria-label="Copy the Claude Code block"><span data-tf-icon="copy" data-tf-size="14" data-tf-class="tf-icon-idle"></span><span data-tf-icon="check" data-tf-size="14" data-tf-class="tf-icon-done"></span><span data-tf-copy-label>Copy</span></button>
+            </div>
+
+            <p class="tf-label mt-4">Codex · <span class="font-mono normal-case tracking-normal">.codex/hooks.json</span></p>
+            <div class="tf-command">
+              <pre class="tf-pre code" id="settings-codex"></pre>
+              <button type="button" onclick="copyText('settings-codex', this)" class="tf-copy" aria-label="Copy the Codex block"><span data-tf-icon="copy" data-tf-size="14" data-tf-class="tf-icon-idle"></span><span data-tf-icon="check" data-tf-size="14" data-tf-class="tf-icon-done"></span><span data-tf-copy-label>Copy</span></button>
+            </div>
+
+            <p class="tf-label mt-4">Antigravity · <span class="font-mono normal-case tracking-normal">.agents/hooks.json</span></p>
+            <div class="tf-command">
+              <pre class="tf-pre code" id="settings-antigravity"></pre>
+              <button type="button" onclick="copyText('settings-antigravity', this)" class="tf-copy" aria-label="Copy the Antigravity block"><span data-tf-icon="copy" data-tf-size="14" data-tf-class="tf-icon-idle"></span><span data-tf-icon="check" data-tf-size="14" data-tf-class="tf-icon-done"></span><span data-tf-copy-label>Copy</span></button>
+            </div>
+            <p class="tf-micro mt-2">
+              The three blocks share one layout. The file each agent reads, its matcher and the <span class="font-mono">--agent</span>
+              name are what this project fixed for it; check the layout against your agent's own hook documentation, above all for
+              Antigravity, before you rely on it.
+            </p>
           </div>
 
-          <p class="text-[11px] font-semibold text-purple-300 mt-3">Antigravity · <span class="font-mono">.agents/hooks.json</span></p>
-          <div class="relative">
-            <pre class="code mt-1 p-3 rounded-xl bg-gray-950 border border-gray-800 text-[11px] font-mono text-gray-300" id="settings-antigravity"></pre>
-            <button onclick="copyText('settings-antigravity', this)" class="absolute top-3 right-2 text-[11px] px-2 py-0.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700">Copy</button>
-          </div>
-          <p class="text-[11px] text-gray-500 mt-1">
-            The three blocks share one layout. The file each agent reads, its matcher and the <span class="font-mono">--agent</span>
-            name are what this project fixed for it; check the layout against your agent's own hook documentation, above all for
-            Antigravity, before you rely on it.
-          </p>
-        </div>
-
-        <div>
-          <p class="text-xs font-semibold text-gray-200">Step 3 · Tell the hook which project this is</p>
-          <p class="text-xs text-gray-400 mt-1">
-            Set these in the environment the agent is started from. Only <span class="font-mono text-purple-300">THREEFOLD_PROJECT</span>
-            is required. Each one is described in the table below.
-          </p>
-          <div class="relative">
-            <pre class="code mt-2 p-3 rounded-xl bg-gray-950 border border-gray-800 text-[11px] font-mono text-gray-300" id="env-snippet"></pre>
-            <button onclick="copyText('env-snippet', this)" class="absolute top-3 right-2 text-[11px] px-2 py-0.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700">Copy</button>
+          <div>
+            <p class="text-sm font-semibold text-gray-100">Step 3 · Tell the hook which project this is</p>
+            <p class="tf-small mt-1">
+              Set these in the environment the agent is started from. Only <span class="font-mono tf-accent-text">THREEFOLD_PROJECT</span>
+              is required. Each one is described in the table below.
+            </p>
+            <div class="tf-command mt-2">
+              <pre class="tf-pre code" id="env-snippet"></pre>
+              <button type="button" onclick="copyText('env-snippet', this)" class="tf-copy" aria-label="Copy the environment"><span data-tf-icon="copy" data-tf-size="14" data-tf-class="tf-icon-idle"></span><span data-tf-icon="check" data-tf-size="14" data-tf-class="tf-icon-done"></span><span data-tf-copy-label>Copy</span></button>
+            </div>
           </div>
         </div>
       </div>
 
       <!-- TRY IT AGAINST THE LIVE SERVICE -->
-      <div class="rounded-2xl bg-gray-900 border border-gray-800 p-5 space-y-4">
-        <div class="flex items-center justify-between border-b border-gray-800 pb-3">
-          <h2 class="text-sm font-semibold text-white">See the decision the agent would get</h2>
-          <span id="probe-tag" class="text-xs px-2.5 py-1 rounded-full font-semibold bg-gray-800 text-gray-400">Idle</span>
+      <div class="tf-card tf-panel lg:sticky" style="top:calc(var(--tf-header-h) + 16px)">
+        <div class="tf-panel-head">
+          <div>
+            <h2 class="tf-panel-title"><span data-tf-icon="play" data-tf-size="18"></span>See the decision the agent would get</h2>
+          </div>
+          <span id="probe-tag" class="tf-chip tf-chip-gray" role="status">Idle</span>
         </div>
 
-        <p class="text-xs text-gray-400">
-          Each button sends the call to the endpoint in the bar above, under a new session id, and then writes the answer the
+        <p class="tf-small">
+          Each button sends the call to the endpoint set above, under a new session id, and then writes the answer the
           way the hook writes it for the agent you pick. Nothing here is canned: if the service is unreachable the panel says so
           instead of showing a verdict. The body is marked as coming from this page and asks for the model's sentence, which the
           hook does not, so the service's own answer below can carry a sentence the agent would not be shown.
         </p>
 
-        <label class="flex items-center gap-2 text-xs text-gray-400">
+        <label class="tf-check mt-4">
           Write the answer as
-          <select id="agentSelect" onchange="renderDecision()" class="bg-gray-950 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 font-mono focus:outline-none focus:border-purple-500">
+          <select id="agentSelect" onchange="renderDecision()" class="tf-select tf-input-sm">
             <option value="claude-code" selected>Claude Code</option>
             <option value="codex">Codex</option>
             <option value="antigravity">Antigravity</option>
           </select>
         </label>
 
-        <div class="grid grid-cols-1 gap-2">
-          <button onclick="probe('domain_write')" class="p-3 rounded-xl bg-gray-950 border border-gray-800 hover:border-red-500 text-left transition group">
-            <div class="flex items-center justify-between">
-              <span class="text-xs font-bold text-red-400">Write · architectural boundary</span>
-              <span class="text-base">🛡️</span>
-            </div>
-            <p class="text-xs text-gray-300 mt-1 font-mono break-all">Write src/acme_billing/domain/invoice.py ← "from boto3 import client"</p>
+        <div class="grid grid-cols-1 gap-2 mt-4">
+          <button type="button" onclick="probe('domain_write')" class="tf-card-quiet tf-probe p-3 text-left">
+            <span class="flex items-center justify-between gap-2">
+              <span class="tf-chip tf-chip-rose"><span data-tf-icon="shield" data-tf-size="13"></span>Write · architectural boundary</span>
+              <span class="tf-probe-go" aria-hidden="true" data-tf-icon="arrowright" data-tf-size="16"></span>
+            </span>
+            <span class="block text-xs text-gray-300 mt-2 font-mono break-all">Write src/acme_billing/domain/invoice.py ← "from boto3 import client"</span>
           </button>
 
-          <button onclick="probe('credential_command')" class="p-3 rounded-xl bg-gray-950 border border-gray-800 hover:border-amber-500 text-left transition group">
-            <div class="flex items-center justify-between">
-              <span class="text-xs font-bold text-amber-400">Bash · credential in the command</span>
-              <span class="text-base">🔑</span>
-            </div>
-            <p class="text-xs text-gray-300 mt-1 font-mono break-all">Bash export AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE</p>
+          <button type="button" onclick="probe('credential_command')" class="tf-card-quiet tf-probe p-3 text-left">
+            <span class="flex items-center justify-between gap-2">
+              <span class="tf-chip tf-chip-amber"><span data-tf-icon="key" data-tf-size="13"></span>Bash · credential in the command</span>
+              <span class="tf-probe-go" aria-hidden="true" data-tf-icon="arrowright" data-tf-size="16"></span>
+            </span>
+            <span class="block text-xs text-gray-300 mt-2 font-mono break-all">Bash export AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE</span>
           </button>
 
-          <button onclick="probe('ordinary_edit')" class="p-3 rounded-xl bg-gray-950 border border-gray-800 hover:border-emerald-500 text-left transition group">
-            <div class="flex items-center justify-between">
-              <span class="text-xs font-bold text-emerald-400">Edit · ordinary work</span>
-              <span class="text-base">✅</span>
-            </div>
-            <p class="text-xs text-gray-300 mt-1 font-mono break-all">Edit README.md ← a corrected sentence</p>
+          <button type="button" onclick="probe('ordinary_edit')" class="tf-card-quiet tf-probe p-3 text-left">
+            <span class="flex items-center justify-between gap-2">
+              <span class="tf-chip tf-chip-emerald"><span data-tf-icon="check" data-tf-size="13"></span>Edit · ordinary work</span>
+              <span class="tf-probe-go" aria-hidden="true" data-tf-icon="arrowright" data-tf-size="16"></span>
+            </span>
+            <span class="block text-xs text-gray-300 mt-2 font-mono break-all">Edit README.md ← a corrected sentence</span>
           </button>
         </div>
 
-        <div>
-          <p class="text-xs font-medium text-gray-400 uppercase">What <span id="agent-label">Claude Code</span> receives on stdout</p>
-          <pre class="code mt-2 p-3 rounded-xl bg-gray-950 border border-gray-800 text-[11px] font-mono text-gray-300 max-h-64 overflow-y-auto" id="hook-output">Press a button above.</pre>
+        <div class="mt-5">
+          <p class="tf-label">What <span id="agent-label">Claude Code</span> receives on stdout</p>
+          <pre class="tf-pre tf-pre-plain code" style="max-height:16rem;overflow:auto" id="hook-output" aria-live="polite">Press a button above.</pre>
         </div>
 
-        <div id="probe-fix-container" class="hidden">
-          <p class="text-xs font-medium text-gray-400 uppercase">The suggested fix, in full</p>
-          <p class="text-[11px] text-gray-500 mt-1">The agent is shown only its summary, as the last line of the reason above. The steps and the files are for a person, and are here.</p>
-          <div id="probe-fix" class="mt-2 p-3 rounded-xl bg-gray-950 border border-gray-800 text-xs text-gray-300 space-y-2"></div>
+        <div id="probe-fix-container" class="hidden mt-4">
+          <p class="tf-label">The suggested fix, in full</p>
+          <p class="tf-micro">The agent is shown only its summary, as the last line of the reason above. The steps and the files are for a person, and are here.</p>
+          <div id="probe-fix" class="mt-2 tf-card-quiet p-3 text-xs text-gray-300 space-y-2"></div>
         </div>
 
-        <div>
-          <p class="text-xs font-medium text-gray-400 uppercase">The service's own answer</p>
-          <pre class="code mt-2 p-3 rounded-xl bg-gray-950 border border-gray-800 text-[11px] font-mono text-gray-300 max-h-64 overflow-y-auto" id="raw-response">Nothing sent yet.</pre>
-        </div>
+        <details class="tf-disclosure mt-4">
+          <summary><span data-tf-icon="code"></span>The service's own answer</summary>
+          <div class="tf-disclosure-body">
+            <pre class="tf-pre tf-pre-plain code" style="max-height:16rem;overflow:auto;font-size:0.72rem" id="raw-response">Nothing sent yet.</pre>
+          </div>
+        </details>
       </div>
     </div>
 
     <!-- WHAT LEAVES YOUR MACHINE. This transcribes the contract in STATE.md and
          stops there. A reassurance the hook cannot back is worse than none, so
          nothing is added that the contract does not fix. -->
-    <section id="what-leaves" class="rounded-2xl bg-gray-900 border border-gray-800 p-5 space-y-4">
-      <div class="border-b border-gray-800 pb-3">
-        <h2 class="text-sm font-semibold text-white">What leaves your machine</h2>
-        <p class="text-[11px] text-gray-500">What the hook sends, what it holds back, and why. Read this before Step 2.</p>
+    <section id="what-leaves" class="tf-card tf-panel" aria-labelledby="what-leaves-title">
+      <div class="tf-panel-head">
+        <div>
+          <h2 id="what-leaves-title" class="tf-panel-title"><span data-tf-icon="lock" data-tf-size="18"></span>What leaves your machine</h2>
+          <p class="tf-panel-sub">What the hook sends, what it holds back, and why. Read this before Step 2.</p>
+        </div>
       </div>
-      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 text-xs">
-        <div class="p-4 rounded-xl bg-gray-950 border border-gray-800 space-y-2">
-          <p class="font-semibold text-emerald-300">Sent, for a call that passes the checks on the right</p>
-          <p class="text-gray-400">One <span class="font-mono">POST /evaluate-tool-call</span> with these fields and no others:</p>
-          <ul class="text-[11px] text-gray-400 space-y-1 list-disc pl-4">
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div class="tf-card-quiet p-4 space-y-2 tf-small">
+          <p class="font-semibold tf-good">Sent, for a call that passes the checks on the right</p>
+          <p>One <span class="font-mono">POST /evaluate-tool-call</span> with these fields and no others:</p>
+          <ul class="text-[12px] space-y-1 list-disc pl-4">
             <li><span class="font-mono text-gray-200">session_id</span></li>
             <li><span class="font-mono text-gray-200">project_name</span>: your <span class="font-mono">THREEFOLD_PROJECT</span> alias. A name that does not match the stack's pattern (<span class="font-mono">Acme-</span> and up to 40 letters, digits or dashes by default) is stored and counted as <span class="font-mono">unlabelled</span>, and the answer says so in <span class="font-mono">warnings</span>.</li>
             <li><span class="font-mono text-gray-200">developer</span>: <span class="font-mono">anonymous</span>, or a 12-character hex hash computed on your machine. Never a user name. Any developer value is shown in public only as a short hash.</li>
@@ -475,19 +512,19 @@
             <li><span class="font-mono text-gray-200">agent</span>: <span class="font-mono">claude-code</span>, <span class="font-mono">codex</span> or <span class="font-mono">antigravity</span>; <span class="font-mono text-gray-200">origin</span>: <span class="font-mono">hook</span>; <span class="font-mono text-gray-200">explain</span>: <span class="font-mono">false</span>, so the hook does not ask for the model's sentence.</li>
           </ul>
         </div>
-        <div class="p-4 rounded-xl bg-gray-950 border border-gray-800 space-y-2">
-          <p class="font-semibold text-amber-300">Never sent</p>
-          <ul class="text-[11px] text-gray-400 space-y-2 list-disc pl-4">
+        <div class="tf-card-quiet p-4 space-y-2 tf-small">
+          <p class="font-semibold tf-warn-text">Never sent</p>
+          <ul class="text-[12px] space-y-2 list-disc pl-4">
             <li>A tool call whose target does not resolve inside the project root. <span class="text-gray-500">The service governs the project, not the rest of your disk.</span></li>
             <li>Paths under an agent's own configuration or memory: <span class="font-mono text-gray-300">~/.claude</span>, <span class="font-mono text-gray-300">~/.codex</span>, <span class="font-mono text-gray-300">~/.gemini</span>. <span class="text-gray-500">Those hold your instructions and history for the agent, not project code.</span></li>
             <li>Data files, recognised by extension and by directory. <span class="text-gray-500">The gates judge code; a data file is where records live.</span></li>
             <li>Any call containing a term from your never-send list. <span class="text-gray-500">You name what must not leave, in <span class="font-mono">never_send.txt</span>, and the hook checks it before it sends anything.</span></li>
           </ul>
-          <p class="text-[11px] text-amber-300/80 border-t border-gray-800 pt-2">A call held back is not sent, so it is not checked.</p>
+          <p class="text-[12px] tf-warn-text pt-2" style="border-top:1px solid var(--tf-hairline)">A call held back is not sent, so it is not checked.</p>
         </div>
-        <div class="p-4 rounded-xl bg-gray-950 border border-gray-800 space-y-2">
-          <p class="font-semibold text-sky-300">Kept on your machine</p>
-          <p class="text-[11px] text-gray-400">
+        <div class="tf-card-quiet p-4 space-y-2 tf-small">
+          <p class="font-semibold" style="color:var(--tf-info-text)">Kept on your machine</p>
+          <p class="text-[12px]">
             The never-send list, your project aliases and the list of governed repositories live in
             <span class="font-mono text-gray-200">~/.threefold/</span>, or wherever <span class="font-mono">THREEFOLD_HOME</span>
             points. They are read there by the hook. Of the three, only the alias you set for this project appears in a request,
@@ -498,64 +535,72 @@
     </section>
 
     <!-- PER AGENT: WHAT IS SHOWN AND WHAT IS NOT YET -->
-    <section class="rounded-2xl bg-gray-900 border border-gray-800 p-5 space-y-3">
-      <div class="border-b border-gray-800 pb-3">
-        <h2 class="text-sm font-semibold text-white">What each agent does with a deny, as far as it has been shown</h2>
-        <p class="text-[11px] text-gray-500">The hook's side is fixed. The agent's side was measured on 2026-09-21, and for Codex on 2026-09-23, on one Windows machine, for the versions named, by checking whether the refused file existed afterwards.</p>
+    <section class="tf-card tf-panel" aria-labelledby="per-agent-title">
+      <div class="tf-panel-head">
+        <div>
+          <h2 id="per-agent-title" class="tf-panel-title"><span data-tf-icon="terminal" data-tf-size="18"></span>What each agent does with a deny, as far as it has been shown</h2>
+          <p class="tf-panel-sub">The hook's side is fixed. The agent's side was measured on 2026-09-21, and for Codex on 2026-09-23, on one Windows machine, for the versions named, by checking whether the refused file existed afterwards.</p>
+        </div>
       </div>
-      <div class="overflow-x-auto">
-        <table class="w-full text-xs">
+      <div class="tf-scroll-x">
+        <table class="tf-table tf-table-stack">
           <thead>
-            <tr class="text-gray-400 uppercase tracking-wider text-[11px] border-b border-gray-800">
-              <th class="text-left font-medium py-2 pr-3">Agent</th>
-              <th class="text-left font-medium py-2 pr-3">Tool calls sent</th>
-              <th class="text-left font-medium py-2 pr-3">What the hook prints on a refusal</th>
-              <th class="text-left font-medium py-2">Does the deny stop the write?</th>
+            <tr>
+              <th scope="col">Agent</th>
+              <th scope="col">Tool calls sent</th>
+              <th scope="col">What the hook prints on a refusal</th>
+              <th scope="col">Does the deny stop the write?</th>
             </tr>
           </thead>
-          <tbody class="text-gray-300">
+          <tbody>
             <!-- data-enforcement is what the evidence files measured for the agent, and a
                  test holds each row to them: "stopped" only where the refused file was
                  not created, "not-measured" where the agent was never run. Where an
                  evidence row says a route was not measured, the cell has to say so too,
                  so a measured route cannot stand in for the ones that were not. -->
-            <tr class="border-b border-gray-800/60" data-agent="claude-code" data-enforcement="stopped">
-              <td class="py-2 pr-3 font-semibold">Claude Code</td>
-              <td class="py-2 pr-3 font-mono text-[11px] text-gray-400">Write, Edit, MultiEdit, NotebookEdit, Bash</td>
-              <td class="py-2 pr-3 font-mono text-[11px] text-gray-400">hookSpecificOutput.permissionDecision "deny", with a reason</td>
-              <td class="py-2">
-                <span class="px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-950 text-emerald-300 border border-emerald-800">stops the write · measured</span>
-                <p class="text-[11px] text-gray-500 mt-1">2.1.220: a <span class="font-mono">Write</span> and a <span class="font-mono">Bash</span> redirection were refused and neither file was created. The other tools were not measured.</p>
+            <tr data-agent="claude-code" data-enforcement="stopped">
+              <td data-label="Agent" class="font-semibold text-gray-100">Claude Code</td>
+              <td data-label="Tool calls" class="font-mono text-[11px]">Write, Edit, MultiEdit, NotebookEdit, Bash</td>
+              <td data-label="On a refusal" class="font-mono text-[11px]">hookSpecificOutput.permissionDecision "deny", with a reason</td>
+              <td data-label="Stops the write?">
+                <div>
+                  <span class="tf-chip tf-chip-emerald">stops the write · measured</span>
+                  <p class="tf-micro mt-1.5">2.1.220: a <span class="font-mono">Write</span> and a <span class="font-mono">Bash</span> redirection were refused and neither file was created. The other tools were not measured.</p>
+                </div>
               </td>
             </tr>
-            <tr class="border-b border-gray-800/60" data-agent="codex" data-enforcement="stopped">
-              <td class="py-2 pr-3 font-semibold">Codex</td>
-              <td class="py-2 pr-3 font-mono text-[11px] text-gray-400">apply_patch, Edit, Write, Bash</td>
-              <td class="py-2 pr-3 font-mono text-[11px] text-gray-400">hookSpecificOutput.permissionDecision "deny", with a reason</td>
-              <td class="py-2">
-                <span class="px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-950 text-emerald-300 border border-emerald-800">stops the write · measured</span>
-                <p class="text-[11px] text-gray-500 mt-1">0.155.0, one run: the hook refused an <span class="font-mono">apply_patch</span> that added <span class="font-mono">boto3</span> to a governed file, and the file's sha256 was unchanged afterwards. Over the shell the hook was called four times in that run and refused none, so that route is not measured, and neither is a refusal over <span class="font-mono">apply_patch</span> from a hook that makes no network call.</p>
+            <tr data-agent="codex" data-enforcement="stopped">
+              <td data-label="Agent" class="font-semibold text-gray-100">Codex</td>
+              <td data-label="Tool calls" class="font-mono text-[11px]">apply_patch, Edit, Write, Bash</td>
+              <td data-label="On a refusal" class="font-mono text-[11px]">hookSpecificOutput.permissionDecision "deny", with a reason</td>
+              <td data-label="Stops the write?">
+                <div>
+                  <span class="tf-chip tf-chip-emerald">stops the write · measured</span>
+                  <p class="tf-micro mt-1.5">0.155.0, one run: the hook refused an <span class="font-mono">apply_patch</span> that added <span class="font-mono">boto3</span> to a governed file, and the file's sha256 was unchanged afterwards. Over the shell the hook was called four times in that run and refused none, so that route is not measured, and neither is a refusal over <span class="font-mono">apply_patch</span> from a hook that makes no network call.</p>
+                </div>
               </td>
             </tr>
             <tr data-agent="antigravity" data-enforcement="stopped">
-              <td class="py-2 pr-3 font-semibold">Antigravity</td>
-              <td class="py-2 pr-3 font-mono text-[11px] text-gray-400">write_to_file, replace_file_content, multi_replace_file_content, run_command</td>
-              <td class="py-2 pr-3 font-mono text-[11px] text-gray-400">{"decision": "deny", "reason": …}</td>
-              <td class="py-2">
-                <span class="px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-950 text-emerald-300 border border-emerald-800">stops the write · measured</span>
-                <p class="text-[11px] text-gray-500 mt-1">Desktop app, 2026-09: <span class="font-mono">write_to_file</span> was refused and the file was not created. The other tools were not measured.</p>
+              <td data-label="Agent" class="font-semibold text-gray-100">Antigravity</td>
+              <td data-label="Tool calls" class="font-mono text-[11px]">write_to_file, replace_file_content, multi_replace_file_content, run_command</td>
+              <td data-label="On a refusal" class="font-mono text-[11px]">{"decision": "deny", "reason": …}</td>
+              <td data-label="Stops the write?">
+                <div>
+                  <span class="tf-chip tf-chip-emerald">stops the write · measured</span>
+                  <p class="tf-micro mt-1.5">Desktop app, 2026-09: <span class="font-mono">write_to_file</span> was refused and the file was not created. The other tools were not measured.</p>
+                </div>
               </td>
             </tr>
           </tbody>
         </table>
       </div>
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-[11px] text-gray-400">
-        <p class="p-3 rounded-xl bg-gray-950 border border-gray-800">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
+        <p class="tf-card-quiet p-4 tf-small">
           On an approval the hook prints nothing, for every agent, so the agent's own permission flow still runs. Until a deny
           has been shown to stop the write for an agent, a refusal recorded for that agent says what the agent was told, not
           what it did.
         </p>
-        <p class="p-3 rounded-xl bg-gray-950 border border-gray-800">
+        <p class="tf-card-quiet p-4 tf-small">
           An edit that gets past the hook and is refused only at commit time, by the pre-commit gate, is recorded with agent
           <span class="font-mono text-gray-200">pre-commit</span>. It is reported as a commit-time refusal, never as an edit
           the hook stopped.
@@ -564,72 +609,79 @@
     </section>
 
     <!-- CONTRACT AND CONFIGURATION -->
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
 
-      <div class="rounded-2xl bg-gray-900 border border-gray-800 p-5 space-y-3">
-        <h2 class="text-sm font-semibold text-white border-b border-gray-800 pb-3">Environment</h2>
-        <div class="overflow-x-auto">
-          <table class="w-full text-xs">
+      <div class="tf-card tf-panel">
+        <div class="tf-panel-head">
+          <div>
+            <h2 class="tf-panel-title"><span data-tf-icon="settings" data-tf-size="18"></span>Environment</h2>
+          </div>
+        </div>
+        <div class="tf-scroll-x">
+          <table class="tf-table tf-table-stack">
             <thead>
-              <tr class="text-gray-400 uppercase tracking-wider text-[11px] border-b border-gray-800">
-                <th class="text-left font-medium py-2 pr-3">Variable</th>
-                <th class="text-left font-medium py-2 pr-3">Needed</th>
-                <th class="text-left font-medium py-2">Effect</th>
+              <tr>
+                <th scope="col">Variable</th>
+                <th scope="col">Needed</th>
+                <th scope="col">Effect</th>
               </tr>
             </thead>
-            <tbody class="text-gray-300">
-              <tr class="border-b border-gray-800/60">
-                <td class="py-2 pr-3 font-mono text-purple-300">THREEFOLD_PROJECT</td>
-                <td class="py-2 pr-3 font-mono text-gray-400">required</td>
-                <td class="py-2 text-gray-400">The name this project is sent under, as <span class="font-mono">project_name</span>. Use an alias in the <span class="font-mono">Acme-</span> style, never the real name: it is what the console and the metrics show.</td>
-              </tr>
-              <tr class="border-b border-gray-800/60">
-                <td class="py-2 pr-3 font-mono text-purple-300">THREEFOLD_DEVELOPER</td>
-                <td class="py-2 pr-3 font-mono text-gray-400">optional</td>
-                <td class="py-2 text-gray-400">Who you are, for the per-developer counts. The hook hashes it on your machine and sends only the 12-character hash; unset, it sends <span class="font-mono">anonymous</span>.</td>
-              </tr>
-              <tr class="border-b border-gray-800/60">
-                <td class="py-2 pr-3 font-mono text-purple-300">THREEFOLD_FAIL_CLOSED</td>
-                <td class="py-2 pr-3 font-mono text-gray-400">optional</td>
-                <td class="py-2 text-gray-400">Set to <span class="font-mono">1</span> to refuse the call when the service cannot be reached. Unset, an unreachable service means the hook prints nothing and exits 0.</td>
-              </tr>
-              <tr class="border-b border-gray-800/60">
-                <td class="py-2 pr-3 font-mono text-purple-300">THREEFOLD_HOME</td>
-                <td class="py-2 pr-3 font-mono text-gray-400">optional</td>
-                <td class="py-2 text-gray-400">Where the hook's local files live, <span class="font-mono">~/.threefold</span> unless set. <span class="font-mono">never_send.txt</span> goes there and holds the terms you never want sent: a call containing any of them is never sent.</td>
+            <tbody>
+              <tr>
+                <td data-label="Variable" class="font-mono tf-accent-text">THREEFOLD_PROJECT</td>
+                <td data-label="Needed" class="font-mono">required</td>
+                <td data-label="Effect">The name this project is sent under, as <span class="font-mono">project_name</span>. Use an alias in the <span class="font-mono">Acme-</span> style, never the real name: it is what the console and the metrics show.</td>
               </tr>
               <tr>
-                <td class="py-2 pr-3 font-mono text-purple-300">THREEFOLD_ENDPOINT</td>
-                <td class="py-2 pr-3 font-mono text-gray-400">optional</td>
-                <td class="py-2 text-gray-400">The service the hook asks. The snippets on this page set it to the endpoint in the bar above.</td>
+                <td data-label="Variable" class="font-mono tf-accent-text">THREEFOLD_DEVELOPER</td>
+                <td data-label="Needed" class="font-mono">optional</td>
+                <td data-label="Effect">Who you are, for the per-developer counts. The hook hashes it on your machine and sends only the 12-character hash; unset, it sends <span class="font-mono">anonymous</span>.</td>
+              </tr>
+              <tr>
+                <td data-label="Variable" class="font-mono tf-accent-text">THREEFOLD_FAIL_CLOSED</td>
+                <td data-label="Needed" class="font-mono">optional</td>
+                <td data-label="Effect">Set to <span class="font-mono">1</span> to refuse the call when the service cannot be reached. Unset, an unreachable service means the hook prints nothing and exits 0.</td>
+              </tr>
+              <tr>
+                <td data-label="Variable" class="font-mono tf-accent-text">THREEFOLD_HOME</td>
+                <td data-label="Needed" class="font-mono">optional</td>
+                <td data-label="Effect">Where the hook's local files live, <span class="font-mono">~/.threefold</span> unless set. <span class="font-mono">never_send.txt</span> goes there and holds the terms you never want sent: a call containing any of them is never sent.</td>
+              </tr>
+              <tr>
+                <td data-label="Variable" class="font-mono tf-accent-text">THREEFOLD_ENDPOINT</td>
+                <td data-label="Needed" class="font-mono">optional</td>
+                <td data-label="Effect">The service the hook asks. The snippets on this page set it to the endpoint set above.</td>
               </tr>
             </tbody>
           </table>
         </div>
 
-        <div class="p-3 rounded-xl bg-amber-950/20 border border-amber-900/40">
-          <p class="text-xs font-semibold text-amber-300">It fails open, and silently</p>
-          <p class="text-[11px] text-gray-400 mt-1">
-            If the service times out or the network drops, the hook prints nothing and exits 0, so the agent carries on as if
-            Threefold were not installed, and nothing on screen says the call went unchecked. That is a deliberate trade: a guard
-            that bricks the agent on a hiccup gets uninstalled by lunchtime. Where the risk is worth the interruption, set
-            <span class="font-mono text-amber-300">THREEFOLD_FAIL_CLOSED=1</span> and the same failure refuses the call instead.
-          </p>
+        <div class="tf-callout tf-callout-warn mt-4">
+          <span data-tf-icon="alert" data-tf-size="18"></span>
+          <div class="tf-callout-body">
+            <p class="tf-callout-title">It fails open, and silently</p>
+            <p>
+              If the service times out or the network drops, the hook prints nothing and exits 0, so the agent carries on as if
+              Threefold were not installed, and nothing on screen says the call went unchecked. That is a deliberate trade: a guard
+              that bricks the agent on a hiccup gets uninstalled by lunchtime. Where the risk is worth the interruption, set
+              <span class="font-mono tf-warn-text">THREEFOLD_FAIL_CLOSED=1</span> and the same failure refuses the call instead.
+            </p>
+          </div>
         </div>
       </div>
 
-      <div class="rounded-2xl bg-gray-900 border border-gray-800 p-5 space-y-3">
-        <div class="flex items-center justify-between gap-3 flex-wrap border-b border-gray-800 pb-3">
-          <h2 class="text-sm font-semibold text-white">The contract, both directions</h2>
-          <a id="spec-link-evaluate-2" href="swagger.html" title="Open this operation in the published OpenAPI document"
-             class="px-2 py-0.5 rounded text-[11px] font-semibold bg-purple-950 hover:bg-purple-900 text-purple-400 border border-purple-800 font-mono transition">
-            /evaluate-tool-call in the spec ↗
-          </a>
+      <div class="tf-card tf-panel">
+        <div class="tf-panel-head">
+          <div>
+            <h2 class="tf-panel-title"><span data-tf-icon="code" data-tf-size="18"></span>The contract, both directions</h2>
+          </div>
+          <a id="spec-link-evaluate-2" href="swagger.html" title="Open this operation in the published OpenAPI document" class="tf-spec-link">/evaluate-tool-call in the spec</a>
         </div>
 
-        <div>
-          <p class="text-xs font-medium text-gray-400 uppercase">Claude Code writes this on stdin</p>
-          <pre class="code mt-2 p-3 rounded-xl bg-gray-950 border border-gray-800 text-[11px] font-mono text-gray-300">{
+        <div class="space-y-5">
+          <div>
+            <p class="tf-label">Claude Code writes this on stdin</p>
+            <pre class="tf-pre tf-pre-plain code">{
   "session_id": "0f3c…",
   "tool_name": "Write",
   "tool_input": {
@@ -637,59 +689,63 @@
     "content": "from boto3 import client"
   }
 }</pre>
-          <p class="text-[11px] text-gray-500 mt-1">Codex and Antigravity hand over the same call in their own tool names; <span class="font-mono">--agent</span> tells the hook which shape to read.</p>
-        </div>
+            <p class="tf-micro mt-2">Codex and Antigravity hand over the same call in their own tool names; <span class="font-mono">--agent</span> tells the hook which shape to read.</p>
+          </div>
 
-        <div>
-          <p class="text-xs font-medium text-gray-400 uppercase">The hook writes this on stdout when it refuses</p>
-          <p class="text-[11px] text-gray-500 mt-1">Claude Code and Codex:</p>
-          <pre class="code mt-1 p-3 rounded-xl bg-gray-950 border border-gray-800 text-[11px] font-mono text-gray-300">{
+          <div>
+            <p class="tf-label">The hook writes this on stdout when it refuses</p>
+            <p class="tf-micro mb-1">Claude Code and Codex:</p>
+            <pre class="tf-pre tf-pre-plain code">{
   "hookSpecificOutput": {
     "hookEventName": "PreToolUse",
     "permissionDecision": "deny",
     "permissionDecisionReason": "Threefold refused this call. …"
   }
 }</pre>
-          <p class="text-[11px] text-gray-500 mt-2">Antigravity:</p>
-          <pre class="code mt-1 p-3 rounded-xl bg-gray-950 border border-gray-800 text-[11px] font-mono text-gray-300">{
+            <p class="tf-micro mt-3 mb-1">Antigravity:</p>
+            <pre class="tf-pre tf-pre-plain code">{
   "decision": "deny",
   "reason": "Threefold refused this call. …"
 }</pre>
-          <p class="text-[11px] text-gray-500 mt-2">When it approves, and when the service cannot be reached without <span class="font-mono">THREEFOLD_FAIL_CLOSED=1</span>: nothing at all, and exit 0.</p>
-        </div>
+            <p class="tf-micro mt-2">When it approves, and when the service cannot be reached without <span class="font-mono">THREEFOLD_FAIL_CLOSED=1</span>: nothing at all, and exit 0.</p>
+          </div>
 
-        <div>
-          <p class="text-xs font-medium text-gray-400 uppercase">Tool calls, in the service's vocabulary</p>
-          <div class="grid grid-cols-1 gap-2 mt-2 text-[11px] font-mono">
-            <div class="p-2 rounded bg-gray-950 border border-gray-800 flex items-center justify-between gap-3">
-              <span class="text-gray-300">Write, Edit, MultiEdit, NotebookEdit, apply_patch, write_to_file, replace_file_content, multi_replace_file_content</span><span class="text-purple-300">FILE_WRITE</span>
-            </div>
-            <div class="p-2 rounded bg-gray-950 border border-gray-800 flex items-center justify-between gap-3">
-              <span class="text-gray-300">Bash, run_command</span><span class="text-purple-300">COMMAND_EXEC</span>
+          <div>
+            <p class="tf-label">Tool calls, in the service's vocabulary</p>
+            <div class="grid grid-cols-1 gap-2 text-[11px] font-mono">
+              <div class="tf-card-quiet p-2.5 flex items-center justify-between gap-3">
+                <span class="text-gray-300">Write, Edit, MultiEdit, NotebookEdit, apply_patch, write_to_file, replace_file_content, multi_replace_file_content</span><span class="tf-accent-text">FILE_WRITE</span>
+              </div>
+              <div class="tf-card-quiet p-2.5 flex items-center justify-between gap-3">
+                <span class="text-gray-300">Bash, run_command</span><span class="tf-accent-text">COMMAND_EXEC</span>
+              </div>
             </div>
           </div>
-        </div>
 
-        <div>
-          <p class="text-xs font-medium text-gray-400 uppercase">Verify without an agent</p>
-          <div class="relative">
-            <pre class="code mt-2 p-3 rounded-xl bg-gray-950 border border-gray-800 text-[11px] font-mono text-gray-300" id="curl-snippet"></pre>
-            <button onclick="copyText('curl-snippet', this)" class="absolute top-3 right-2 text-[11px] px-2 py-0.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700">Copy</button>
+          <div>
+            <p class="tf-label">Verify without an agent</p>
+            <div class="tf-command">
+              <pre class="tf-pre code" id="curl-snippet"></pre>
+              <button type="button" onclick="copyText('curl-snippet', this)" class="tf-copy" aria-label="Copy the verification commands"><span data-tf-icon="copy" data-tf-size="14" data-tf-class="tf-icon-idle"></span><span data-tf-icon="check" data-tf-size="14" data-tf-class="tf-icon-done"></span><span data-tf-copy-label>Copy</span></button>
+            </div>
+            <p class="tf-micro mt-2">
+              Each command makes its own session id when it runs, so two people pasting the same text never share a session and
+              one reader's third call cannot halt the session the next reader lands on. A refused call never enters the session's
+              history, so repeating the boundary violation is refused for that reason every time and never reaches the loop gate.
+              The last command is the one that halts a session.
+            </p>
           </div>
-          <p class="text-[11px] text-gray-500 mt-1">
-            Each command makes its own session id when it runs, so two people pasting the same text never share a session and
-            one reader's third call cannot halt the session the next reader lands on. A refused call never enters the session's
-            history, so repeating the boundary violation is refused for that reason every time and never reaches the loop gate.
-            The last command is the one that halts a session.
-          </p>
         </div>
       </div>
     </div>
 
   </main>
 
-  <footer class="border-t border-gray-800 py-4 text-center text-xs text-gray-500">
-    Threefold · AWS Zero to Shipped Hackathon 2026 · Built with Amazon Bedrock &amp; AWS Serverless
+  <footer class="tf-footer">
+    <div class="tf-container">
+      <span>Threefold · AWS Zero to Shipped Hackathon 2026 · Built with Amazon Bedrock &amp; AWS Serverless</span>
+      <span>Every command on this page is written for the endpoint it can reach</span>
+    </div>
   </footer>
 
   <script>
@@ -764,7 +820,7 @@
       // the shared layer loaded; this page's own links when it did not.
       if (window.Threefold) { Threefold.mountNav(document.getElementById('page-nav'), { active: 'connect' }); return; }
       document.getElementById('page-nav').innerHTML = NAV.map(item =>
-        '<a href="' + PAGE_BASE + item.href + '" class="px-3 py-1.5 rounded-md bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700 transition">' + item.label + '</a>'
+        '<a href="' + PAGE_BASE + item.href + '" class="tf-nav-link">' + item.label + '</a>'
       ).join('');
     }
 
@@ -831,18 +887,28 @@
       return headers;
     }
 
-    function setConnection(ok, text) {
-      const badge = document.getElementById("apiConnectionStatus");
-      const tone = ok
-        ? "bg-emerald-950 text-emerald-400 border-emerald-800"
-        : "bg-red-950 text-red-400 border-red-800";
-      const dot = ok ? "bg-emerald-400" : "bg-red-400";
-      badge.className = "px-2 py-0.5 rounded text-[11px] font-mono border flex items-center gap-1.5 " + tone;
-      badge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full ' + dot + '"></span> ' + escapeHtml(text);
+    // An icon from the shared set, as markup this page writes; nothing without it.
+    function glyph(name, size) {
+      return window.Threefold ? String(Threefold.icon(name, size || 13)) : '';
     }
 
+    function setConnection(ok, text) {
+      const badge = document.getElementById("apiConnectionStatus");
+      badge.className = "tf-chip ml-2 " + (ok ? "tf-chip-emerald" : "tf-chip-rose");
+      badge.innerHTML = glyph(ok ? 'check' : 'alert') + escapeHtml(text);
+    }
+
+    function setProbeTag(tone, icon, text) {
+      const tag = document.getElementById('probe-tag');
+      tag.className = 'tf-chip ' + tone;
+      tag.innerHTML = (icon ? glyph(icon) : '') + escapeHtml(text);
+    }
+
+    // The shared layer's copy says so on the button and to a screen reader;
+    // without it, the button's own words change for a moment.
     function copyText(elementId, button) {
       const text = document.getElementById(elementId).textContent;
+      if (window.Threefold) { Threefold.copyText(text, button); return; }
       navigator.clipboard.writeText(text).then(() => {
         const original = button.innerText;
         button.innerText = 'Copied';
@@ -882,6 +948,8 @@
     // command pointing somewhere this page has not tried to reach.
     function renderSnippets() {
       const endpoint = getApiBase();
+      const summary = document.getElementById('endpoint-summary');
+      if (summary) summary.textContent = endpoint;
 
       // The one command, from the installer this endpoint serves.
       const installer = endpoint + '/install.py';
@@ -1024,7 +1092,7 @@
       const writes = Array.isArray(fix.writes) ? fix.writes.filter(w => w && typeof w.path === 'string' && typeof w.content === 'string') : [];
       box.innerHTML =
         (checked
-          ? '<p><span class="px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-950 text-emerald-300 border border-emerald-800">Checked by Threefold: passes the same gates</span></p>'
+          ? '<p><span class="tf-chip tf-chip-dot tf-chip-emerald">Checked by Threefold: passes the same gates</span></p>'
           : '') +
         '<p class="text-gray-200">' + escapeHtml(fix.summary) + '</p>' +
         (steps.length
@@ -1073,9 +1141,7 @@
 
     async function probe(caseName) {
       const testCase = CASES[caseName];
-      const tag = document.getElementById('probe-tag');
-      tag.className = 'text-xs px-2.5 py-1 rounded-full font-semibold bg-gray-800 text-gray-400';
-      tag.innerText = 'Calling…';
+      setProbeTag('tf-chip-gray', '', 'Calling…');
       lastVerdict = null;
       renderProbeFix(null);
       document.getElementById('hook-output').textContent = 'Waiting for the service…';
@@ -1091,8 +1157,7 @@
         document.getElementById('raw-response').textContent = JSON.stringify(data, null, 2);
         if (!res.ok) {
           setConnection(false, 'HTTP ' + res.status);
-          tag.className = 'text-xs px-2.5 py-1 rounded-full font-semibold bg-red-950 text-red-400 border border-red-800';
-          tag.innerText = 'HTTP ' + res.status;
+          setProbeTag('tf-chip-rose', 'alert', 'HTTP ' + res.status);
           document.getElementById('hook-output').textContent =
             'The service answered ' + res.status + '. The hook treats a non-answer as unreachable: it prints nothing and exits 0, ' +
             'unless THREEFOLD_FAIL_CLOSED=1, when it refuses the call.';
@@ -1102,15 +1167,12 @@
         renderDecision();
         renderProbeFix(data);
         const denied = (data.status || 'APPROVED') !== 'APPROVED';
-        setConnection(true, 'LIVE · ' + (data.status || 'ANSWERED'));
-        tag.className = denied
-          ? 'text-xs px-2.5 py-1 rounded-full font-semibold bg-red-950 text-red-400 border border-red-800'
-          : 'text-xs px-2.5 py-1 rounded-full font-semibold bg-emerald-950 text-emerald-400 border border-emerald-800';
-        tag.innerText = denied ? 'DENIED' : 'NOTHING PRINTED';
+        setConnection(true, 'Live · ' + (data.status || 'answered'));
+        setProbeTag(denied ? 'tf-chip-rose' : 'tf-chip-emerald', denied ? 'stop' : 'check', denied ? 'Denied' : 'Nothing printed');
+        if (window.Threefold) Threefold.pulse(document.getElementById('hook-output'), denied ? 'danger' : 'ok');
       } catch (err) {
-        setConnection(false, 'UNREACHABLE');
-        tag.className = 'text-xs px-2.5 py-1 rounded-full font-semibold bg-amber-950 text-amber-400 border border-amber-800';
-        tag.innerText = 'UNREACHABLE';
+        setConnection(false, 'Unreachable');
+        setProbeTag('tf-chip-amber', 'alert', 'Unreachable');
         document.getElementById('raw-response').textContent = JSON.stringify({ error: String(err) }, null, 2);
         document.getElementById('hook-output').textContent =
           '(nothing: the service could not be reached, so the hook prints no output and exits 0)\n\n' +
@@ -1125,6 +1187,12 @@
     document.getElementById('projects-link').href = PAGE_BASE + 'dashboard.html#/projects';
     document.getElementById('apiBaseInput').value = DEFAULT_API_BASE;
     renderSnippets();
+    // The shell a Windows reader has is PowerShell, so that tab opens first there.
+    (function chooseShell() {
+      if (!window.Threefold) return;
+      const platform = String((navigator && (navigator.platform || navigator.userAgent)) || '');
+      if (/Win/.test(platform)) Threefold.selectTab(document.getElementById('tab-powershell'), false);
+    })();
   </script>
 </body>
 </html>

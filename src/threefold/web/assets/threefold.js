@@ -736,7 +736,7 @@
   function drawIcons(scope) {
     all(scope || doc, '[data-tf-icon]').forEach(function (node) {
       if (node.getAttribute('data-tf-drawn') === '1') return;
-      setHtml(node, icon(node.getAttribute('data-tf-icon'), node.getAttribute('data-tf-size') || 16));
+      setHtml(node, icon(node.getAttribute('data-tf-icon'), node.getAttribute('data-tf-size') || 16, node.getAttribute('data-tf-class') || ''));
       node.setAttribute('data-tf-drawn', '1');
     });
   }
@@ -1212,6 +1212,10 @@
 
   function drawNav(entry, who) {
     var options = entry.options;
+    // Drawn again on a sign-in, a route change or the names switch: a sheet
+    // left open is closed first, so the page under it does not stay locked.
+    var sheet = doc && doc.getElementById ? doc.getElementById('tf-menu') : null;
+    if (sheet && sheet.classList && sheet.classList.contains && !sheet.classList.contains('hidden') && within(sheet, entry.el)) toggleMenu(null, false);
     var links = NAV.map(function (item) {
       return { item: item, current: item.id === options.active, href: navHref(item, options.inDashboard) };
     });
@@ -1304,7 +1308,10 @@
     var menu = doc.getElementById('tf-menu');
     if (!menu || !menu.classList) return;
     var show = open === undefined ? menu.classList.contains('hidden') : open;
+    var was = !menu.classList.contains('hidden');
     menu.classList.toggle('hidden', !show);
+    // The sheet covers the page, so the page under it holds still.
+    if (show !== was && !palette.open && !dialogState) lockScroll(show);
     var toggle = button || one(doc, '[data-tf-menu]');
     if (toggle && toggle.setAttribute) {
       toggle.setAttribute('aria-expanded', show ? 'true' : 'false');
