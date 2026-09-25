@@ -4,15 +4,13 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Threefold — Architecture Rules</title>
+  <meta name="description" content="The architecture rules Threefold enforces on coding agents: what each layer of your code may not import, drafted from a sentence, tried on a file, observed before it refuses." />
   <!-- Tailwind CSS via CDN, pinned to an exact version: an unpinned major is a
        script that can change under a page that did not change, and it runs on the
        same origin as the operator key this browser may hold. No integrity hash: the
        Play CDN answers with no Access-Control-Allow-Origin header, so a browser
        would refuse a script carrying one and the page would lose every style. -->
   <script src="https://cdn.tailwindcss.com/3.4.17"></script>
-  <!-- The layer every page shares: the navigation, the sign-in and the API base. -->
-  <link rel="stylesheet" href="assets/threefold.css" />
-  <script src="assets/threefold.js"></script>
   <script>
       // The server rewrites __THREEFOLD_BASE_PATH__ to the API Gateway stage prefix
       // when it serves this page, so the base is exact rather than guessed from the
@@ -28,65 +26,116 @@
 
     tailwind.config = { darkMode: 'class' }
   </script>
+  <!-- The layer every page shares: the design system, the shell, the sign-in
+       and the API base. It loads after the page's Tailwind config, which it
+       extends with the product's ink. -->
+  <link rel="stylesheet" href="assets/threefold.css" />
+  <script src="assets/threefold.js"></script>
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
-    body { font-family: 'Inter', sans-serif; background-color: #0a0d18; color: #f3f4f6; }
-    .font-mono { font-family: 'JetBrains Mono', monospace; }
     textarea { tab-size: 2; }
   </style>
 </head>
 <body class="min-h-screen flex flex-col">
+  <a class="tf-skip" href="#main">Skip to content</a>
 
-  <header class="border-b border-gray-800 bg-gray-950/80 backdrop-blur sticky top-0 z-40">
-    <div class="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-4">
-      <div class="flex items-center gap-3">
-        <div class="w-10 h-10 rounded-lg bg-gradient-to-br from-indigo-500 via-purple-600 to-pink-600 flex items-center justify-center font-bold text-white text-xl shadow-lg shadow-purple-500/20">
-          🏛️
-        </div>
-        <div>
-          <h1 class="text-lg font-bold tracking-tight text-white">Architecture Rules</h1>
-          <p class="text-xs text-gray-400">What each layer of your code may not depend on, enforced at the moment an agent writes the file</p>
-        </div>
+  <header class="tf-header">
+    <div class="tf-container tf-header-inner">
+      <a class="tf-brand" href="dashboard.html#/overview" data-tf-page="dashboard.html#/overview" aria-label="Threefold, the overview">
+        <span class="tf-brand-mark" aria-hidden="true" data-tf-icon="shield" data-tf-size="18"></span>
+        <span class="tf-brand-text"><span class="tf-brand-name">Threefold</span><span class="tf-brand-sub">Agent governance</span></span>
+      </a>
+      <div id="page-nav" class="tf-nav-mount">
+        <!-- Without script, the pages this one links to are still reachable. -->
+        <nav aria-label="Threefold" class="tf-nav-fallback">
+          <a href="dashboard.html#/overview">Overview</a>
+          <a href="sessions.html">Sessions</a>
+          <a href="settings.html">Settings</a>
+          <a href="connect.html">Connect</a>
+          <a href="index.html">Demo</a>
+          <a href="swagger.html">API</a>
+        </nav>
       </div>
-      <div id="page-nav" class="flex items-center gap-2 text-xs"></div>
     </div>
   </header>
 
-  <main class="flex-1 max-w-7xl mx-auto px-4 py-6 w-full space-y-6">
+  <main id="main" class="tf-main" tabindex="-1">
+
+    <div class="tf-page-head">
+      <div>
+        <p class="tf-eyebrow"><span data-tf-icon="shield"></span>Rules</p>
+        <h1 class="tf-h1">Architecture rules</h1>
+        <p class="tf-lede">Say what each layer of your code may not depend on. When an agent is about to write a file, Threefold reads the imports in what it would write and stops the write that crosses the line.</p>
+      </div>
+      <div class="tf-actions">
+        <a href="#draft" class="tf-btn tf-btn-primary"><span data-tf-icon="sparkles" data-tf-size="16"></span>Draft a rule</a>
+        <a id="console-link" href="dashboard.html#/overview" class="tf-btn">What they flagged this week <span data-tf-icon="arrowright" data-tf-size="16"></span></a>
+      </div>
+    </div>
 
     <!-- WHAT A RULE IS, IN ONE BREATH -->
-    <section class="p-6 rounded-2xl bg-gray-900 border border-gray-800 space-y-3">
-      <h2 class="text-lg text-white leading-snug">
-        A rule names some files, what they may not import, and what they may import anyway.
-      </h2>
-      <p class="text-xs text-gray-400 max-w-4xl">
-        When an agent asks to write a file a rule covers, Threefold reads the imports in the text it is about to write (for an
-        edit, the new text, not the text being replaced) and refuses the write if one is forbidden. Imports are read from files
-        ending <span id="languages" class="font-mono text-purple-300">…</span>.
-        A rule in <span class="text-amber-300 font-semibold">observe</span> mode never refuses: it records what it would have
-        stopped, so you can introduce it to every team and read a week of the console before anyone is stopped.
-      </p>
-      <p id="unsupported" class="text-[11px] text-gray-500 max-w-4xl"></p>
+    <section class="tf-card tf-panel" aria-labelledby="what-title">
+      <h2 id="what-title" class="sr-only">What a rule is</h2>
+      <ol class="tf-stepper">
+        <li class="tf-stepper-item" data-state="done">
+          <span class="tf-step-num"><span data-tf-icon="folder" data-tf-size="14"></span></span>
+          <div>
+            <p class="tf-stepper-title">It names some files</p>
+            <p class="tf-stepper-text">By path, with globs: <span class="font-mono text-gray-200">**/billing/domain/**/*.java</span>.</p>
+          </div>
+        </li>
+        <li class="tf-stepper-item" data-state="done">
+          <span class="tf-step-num"><span data-tf-icon="stop" data-tf-size="14"></span></span>
+          <div>
+            <p class="tf-stepper-title">It says what they may not import</p>
+            <p class="tf-stepper-text">A persistence layer, an HTTP client, the infrastructure package.</p>
+          </div>
+        </li>
+        <li class="tf-stepper-item" data-state="done">
+          <span class="tf-step-num"><span data-tf-icon="check" data-tf-size="14"></span></span>
+          <div>
+            <p class="tf-stepper-title">And what they may import anyway</p>
+            <p class="tf-stepper-text">The exceptions. The more specific pattern wins.</p>
+          </div>
+        </li>
+      </ol>
+      <div class="tf-prose mt-6 pt-5" style="border-top:1px solid var(--tf-hairline);max-width:none">
+        <p>
+          When an agent asks to write a file a rule covers, Threefold reads the imports in the text it is about to write (for an
+          edit, the new text, not the text being replaced) and refuses the write if one is forbidden. Imports are read from files
+          ending <span id="languages" class="font-mono tf-accent-text">…</span>.
+          A rule in <span class="tf-chip tf-chip-amber"><span data-tf-icon="eye" data-tf-size="13"></span>Observe</span> never refuses: it
+          records what it would have stopped, so you can introduce it to every team and read a week of what it flagged before anyone
+          is stopped.
+        </p>
+        <p id="unsupported" class="tf-micro"></p>
+      </div>
     </section>
 
     <!-- WHICH PROJECT. Each project may keep its own rules; a project with none is
          judged against the shared set. Everything below, the list, the try panel
          and the save, acts on the project chosen here. -->
-    <section class="p-5 rounded-2xl bg-gray-900 border border-gray-800 space-y-3">
-      <div class="flex flex-wrap items-end gap-3">
-        <label class="block">
-          <span class="text-[11px] uppercase tracking-wider text-gray-400">Project</span>
-          <input id="project-input" type="text" placeholder="Acme-Billing" autocomplete="off" spellcheck="false" maxlength="60"
-                 class="mt-1 w-64 bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-purple-500" />
-        </label>
-        <button onclick="chooseProject()" class="px-3 py-2 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold">Show its rules</button>
-        <button onclick="showSharedSet()" class="px-3 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-200 text-xs border border-gray-700">Show the shared set</button>
-        <span id="scope-badge" class="px-2 py-1 rounded text-[11px] font-semibold border bg-gray-950 text-gray-400 border-gray-800">Reading…</span>
+    <section class="tf-card tf-panel" aria-labelledby="scope-title">
+      <div class="tf-panel-head">
+        <div>
+          <h2 id="scope-title" class="tf-panel-title"><span data-tf-icon="folder" data-tf-size="18"></span>Whose rules</h2>
+          <p class="tf-panel-sub">A project that has saved rules of its own is judged against them; every other project is judged against the shared set.</p>
+        </div>
+        <span id="scope-badge" class="tf-chip tf-chip-gray" role="status">Reading…</span>
       </div>
-      <p id="project-problem" class="text-[11px] text-red-400"></p>
-      <p class="text-[11px] text-gray-500 max-w-4xl">
-        A project that has saved rules of its own is judged against them; every other project is judged against the shared
-        set. Names are checked here against the stack's default pattern, <span class="font-mono text-gray-300">Acme-</span>
+      <div class="tf-toolbar">
+        <label class="tf-field" style="flex:0 1 18rem">
+          <span class="tf-label">Project</span>
+          <input id="project-input" type="text" placeholder="Acme-Billing" autocomplete="off" spellcheck="false" maxlength="60"
+                 class="tf-input tf-mono" />
+        </label>
+        <div class="flex flex-wrap gap-2 self-end">
+          <button type="button" onclick="chooseProject()" class="tf-btn tf-btn-primary">Show its rules</button>
+          <button type="button" onclick="showSharedSet()" class="tf-btn">Show the shared set</button>
+        </div>
+      </div>
+      <p id="project-problem" class="tf-small tf-bad mt-2" role="alert"></p>
+      <p class="tf-micro mt-1">
+        Names are checked here against the stack's default pattern, <span class="font-mono text-gray-300">Acme-</span>
         and then 1 to 40 letters, digits or dashes, because a name outside it is recorded as
         <span class="font-mono">unlabelled</span> and would never match the calls you mean to govern.
       </p>
@@ -97,84 +146,81 @@
          validation a save uses and the verdicts the try panel gives. Drafting and
          saving are two buttons on purpose: asking for a draft never saves one, and
          a save only ever happens when Save to project is pressed. -->
-    <section id="draft" class="rounded-2xl bg-gray-900 border border-gray-800 p-5 space-y-4" aria-labelledby="draft-title">
-      <div class="flex items-start justify-between gap-3 flex-wrap border-b border-gray-800 pb-3">
-        <div class="max-w-4xl">
-          <h2 id="draft-title" class="text-sm font-semibold text-white">Draft a rule from a sentence <span class="ml-1"><a data-anchor="#/default/post_rules_draft" href="swagger.html" class="text-[10px] font-mono text-purple-400 hover:text-purple-300 underline">POST /rules/draft ↗</a></span></h2>
-          <p class="text-[11px] text-gray-500">
+    <section id="draft" class="tf-card tf-panel" aria-labelledby="draft-title" style="scroll-margin-top:calc(var(--tf-header-h) + 16px)">
+      <div class="tf-panel-head">
+        <div>
+          <h2 id="draft-title" class="tf-panel-title"><span data-tf-icon="sparkles" data-tf-size="18"></span>Draft a rule from a sentence <a data-anchor="#/default/post_rules_draft" href="swagger.html" class="tf-spec-link">POST /rules/draft</a></h2>
+          <p class="tf-panel-sub">
             Say the boundary in words. Amazon Bedrock proposes one rule; Threefold checks it as a save would, sets it to
             observe and tries it on your examples. Nothing is saved until you press Save to project.
           </p>
         </div>
-        <span class="px-2 py-0.5 rounded text-[10px] font-semibold border bg-amber-950 text-amber-300 border-amber-800">A drafted rule starts in OBSERVE</span>
+        <span class="tf-chip tf-chip-amber"><span data-tf-icon="eye" data-tf-size="13"></span>A drafted rule starts in OBSERVE</span>
       </div>
 
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div class="space-y-3">
-          <label class="block">
-            <span class="flex items-baseline justify-between gap-2 text-[11px] uppercase tracking-wider text-gray-400">
-              <span>The boundary, in a sentence</span>
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div class="space-y-4">
+          <label class="tf-field">
+            <span class="flex items-baseline justify-between gap-2">
+              <span class="tf-label">The boundary, in a sentence</span>
               <span id="draft-description-count" class="normal-case tracking-normal font-mono text-gray-500" aria-live="polite"></span>
             </span>
             <textarea id="draft-description" rows="3" spellcheck="true"
                       placeholder="Billing domain classes may not reach persistence or HTTP; java.util is fine."
-                      class="mt-1 w-full bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-purple-500"></textarea>
+                      class="tf-textarea w-full"></textarea>
           </label>
-          <label class="block">
-            <span class="text-[11px] uppercase tracking-wider text-gray-400">Project</span>
+          <label class="tf-field">
+            <span class="tf-label">Project</span>
             <input id="draft-project" type="text" placeholder="blank drafts for the shared set" autocomplete="off" spellcheck="false" maxlength="60"
-                   class="mt-1 w-64 max-w-full bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-purple-500" />
+                   class="tf-input tf-mono" style="max-width:18rem" />
+            <span class="tf-help">
+              The draft is checked against that project's rules in force, so an id already in use is caught before you save.
+              It starts as the project chosen above.
+            </span>
           </label>
-          <p class="text-[11px] text-gray-500">
-            The draft is checked against that project's rules in force, so an id already in use is caught before you save.
-            It starts as the project chosen above.
-          </p>
         </div>
 
         <div class="space-y-2">
           <div class="flex items-center justify-between gap-2">
-            <span class="text-[11px] uppercase tracking-wider text-gray-400">Examples <span id="draft-examples-count" class="normal-case tracking-normal font-mono text-gray-500"></span></span>
-            <button id="draft-add-example" type="button" onclick="addDraftExample()" class="text-[11px] px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700">Add an example</button>
+            <span class="tf-label" style="margin:0">Examples <span id="draft-examples-count" class="normal-case tracking-normal font-mono text-gray-500"></span></span>
+            <button id="draft-add-example" type="button" onclick="addDraftExample()" class="tf-btn tf-btn-sm"><span data-tf-icon="code" data-tf-size="14"></span>Add an example</button>
           </div>
           <div id="draft-examples" class="space-y-2"></div>
-          <p class="text-[11px] text-gray-500">
+          <p class="tf-help">
             Optional: files the rule should refuse or allow. Only each path, what it should do and the imports read in it
             reach the model; the rest of the file stays with Threefold. Up to two more examples are built from the drafted rule itself.
           </p>
         </div>
       </div>
 
-      <div class="flex flex-wrap items-center gap-3">
-        <button id="draft-button" type="button" onclick="draftRule()" disabled
-                class="px-3 py-2 rounded-lg bg-purple-600 hover:bg-purple-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-semibold">Draft with Amazon Bedrock</button>
+      <div class="flex flex-wrap items-center gap-3 mt-5">
+        <button id="draft-button" type="button" onclick="draftRule()" disabled class="tf-btn tf-btn-primary"><span data-tf-icon="sparkles" data-tf-size="16"></span>Draft with Amazon Bedrock</button>
         <span id="draft-hint" class="text-[11px] text-gray-500"></span>
       </div>
 
-      <div id="draft-result" class="text-xs space-y-2" aria-live="polite"></div>
+      <div id="draft-result" class="text-xs space-y-2 mt-4" aria-live="polite"></div>
 
       <!-- Shown only once a draft has arrived. The rule is kept as JSON in a
            textarea and written there as a value, never as markup, so whatever
            the model put in it is shown as text. -->
-      <div id="draft-box" hidden>
-        <div class="grid grid-cols-1 lg:grid-cols-5 gap-4">
+      <div id="draft-box" hidden class="mt-4">
+        <div class="grid grid-cols-1 lg:grid-cols-5 gap-5">
           <div class="lg:col-span-2 space-y-2">
             <div class="flex items-center justify-between gap-2 flex-wrap">
-              <span class="text-[11px] uppercase tracking-wider text-gray-400">The drafted rule, yours to edit</span>
+              <span class="tf-label" style="margin:0">The drafted rule, yours to edit</span>
               <span id="draft-mode"></span>
             </div>
-            <textarea id="draft-rule" rows="14" spellcheck="false"
-                      class="w-full bg-gray-950 border border-gray-800 rounded-xl px-3 py-2 text-[11px] text-gray-200 font-mono focus:outline-none focus:border-purple-500"></textarea>
+            <textarea id="draft-rule" rows="14" spellcheck="false" aria-label="The drafted rule, as JSON"
+                      class="tf-textarea tf-mono w-full"></textarea>
             <div class="flex flex-wrap gap-2">
-              <button id="draft-retry-button" type="button" onclick="retryDraft()"
-                      class="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 disabled:opacity-40 text-gray-200 text-xs border border-gray-700">Try again <span class="font-mono text-[10px] text-gray-400">POST /rules/explain</span></button>
-              <button id="draft-save-button" type="button" onclick="saveDraftedRule()" disabled
-                      class="px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-semibold">Save to project</button>
+              <button id="draft-retry-button" type="button" onclick="retryDraft()" class="tf-btn tf-btn-sm">Try again <span class="font-mono text-[10px] text-gray-400">POST /rules/explain</span></button>
+              <button id="draft-save-button" type="button" onclick="saveDraftedRule()" disabled class="tf-btn tf-btn-primary tf-btn-sm">Save to project</button>
             </div>
             <p id="draft-save-hint" class="text-[11px] text-gray-500"></p>
             <p id="draft-save-note" class="text-[11px] text-gray-400"></p>
             <div id="draft-save-result" class="text-xs"></div>
           </div>
-          <div class="lg:col-span-3 space-y-2 min-w-0">
+          <div class="lg:col-span-3 space-y-3 min-w-0">
             <div id="draft-validation" class="text-xs"></div>
             <div id="draft-tried" class="text-xs"></div>
           </div>
@@ -182,100 +228,109 @@
       </div>
     </section>
 
-    <div class="grid grid-cols-1 lg:grid-cols-5 gap-6">
+    <div class="grid grid-cols-1 lg:grid-cols-5 gap-6 items-start">
 
       <!-- THE RULES IN FORCE -->
-      <section class="lg:col-span-3 rounded-2xl bg-gray-900 border border-gray-800 p-5 space-y-3">
-        <div class="flex items-center justify-between gap-3 flex-wrap border-b border-gray-800 pb-3">
+      <section class="lg:col-span-3 tf-card tf-panel" aria-labelledby="in-force-title">
+        <div class="tf-panel-head">
           <div>
-            <h2 class="text-sm font-semibold text-white">Rules in force <span class="ml-1"><a data-anchor="#/default/get_rules" href="swagger.html" class="text-[10px] font-mono text-purple-400 hover:text-purple-300 underline">GET /rules ↗</a></span></h2>
-            <p id="rules-origin" class="text-[11px] text-gray-500"></p>
+            <h2 id="in-force-title" class="tf-panel-title"><span data-tf-icon="list" data-tf-size="18"></span>Rules in force <a data-anchor="#/default/get_rules" href="swagger.html" class="tf-spec-link">GET /rules</a></h2>
+            <p id="rules-origin" class="tf-panel-sub"></p>
           </div>
-          <a id="console-link" href="dashboard.html#/overview" class="text-[11px] text-purple-300 hover:text-purple-200 underline">what they refused this week ↗</a>
         </div>
-        <div id="rules-list" class="space-y-3"><p class="text-xs text-gray-500">Reading the rules…</p></div>
+        <div id="rules-list" class="space-y-3">
+          <div class="tf-skeleton-stack" aria-hidden="true"><span class="tf-skeleton" style="height:84px"></span><span class="tf-skeleton" style="height:84px"></span></div>
+          <p class="sr-only">Reading the rules…</p>
+        </div>
       </section>
 
       <!-- TRY ONE -->
-      <section class="lg:col-span-2 rounded-2xl bg-gray-900 border border-gray-800 p-5 space-y-3">
-        <div class="border-b border-gray-800 pb-3">
-          <h2 class="text-sm font-semibold text-white">Try the rules on a file <span class="ml-1"><a data-anchor="#/default/post_rules_explain" href="swagger.html" class="text-[10px] font-mono text-purple-400 hover:text-purple-300 underline">POST /rules/explain ↗</a></span></h2>
-          <p class="text-[11px] text-gray-500">Nothing is saved and nothing is recorded. Paste a path and what an agent might write there.</p>
+      <section class="lg:col-span-2 tf-card tf-panel" aria-labelledby="try-title">
+        <div class="tf-panel-head">
+          <div>
+            <h2 id="try-title" class="tf-panel-title"><span data-tf-icon="terminal" data-tf-size="18"></span>Try the rules on a file <a data-anchor="#/default/post_rules_explain" href="swagger.html" class="tf-spec-link">POST /rules/explain</a></h2>
+            <p class="tf-panel-sub">Nothing is saved and nothing is recorded. Paste a path and what an agent might write there.</p>
+          </div>
         </div>
-        <label class="block">
-          <span class="text-[11px] uppercase tracking-wider text-gray-400">Path</span>
-          <input id="try-path" type="text" value="src/main/java/com/acme/billing/domain/Order.java"
-                 class="mt-1 w-full bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-purple-500" />
-        </label>
-        <label class="block">
-          <span class="text-[11px] uppercase tracking-wider text-gray-400">Content</span>
-          <textarea id="try-content" rows="6"
-                    class="mt-1 w-full bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-purple-500">package com.acme.billing.domain;
+        <div class="space-y-4">
+          <label class="tf-field">
+            <span class="tf-label">Path</span>
+            <input id="try-path" type="text" value="src/main/java/com/acme/billing/domain/Order.java" spellcheck="false"
+                   class="tf-input tf-mono w-full" />
+          </label>
+          <label class="tf-field">
+            <span class="tf-label">Content</span>
+            <textarea id="try-content" rows="6" spellcheck="false"
+                      class="tf-textarea tf-mono w-full">package com.acme.billing.domain;
 
 import java.util.List;
 import javax.persistence.Entity;
 
 @Entity
 public class Order { }</textarea>
-        </label>
-        <div class="flex flex-wrap gap-2">
-          <button onclick="tryRules(false)" class="px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold">Try against the rules in force</button>
-          <button onclick="tryRules(true)" class="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-200 text-xs border border-gray-700">Try against my draft</button>
+          </label>
+          <div class="flex flex-wrap gap-2">
+            <button type="button" onclick="tryRules(false)" class="tf-btn tf-btn-primary">Try against the rules in force</button>
+            <button type="button" onclick="tryRules(true)" class="tf-btn">Try against my draft</button>
+          </div>
+          <div id="try-result" class="text-xs" aria-live="polite"></div>
         </div>
-        <div id="try-result" class="text-xs"></div>
       </section>
     </div>
 
     <!-- EDIT -->
-    <section class="rounded-2xl bg-gray-900 border border-gray-800 p-5 space-y-3">
-      <div class="flex items-center justify-between gap-3 flex-wrap border-b border-gray-800 pb-3">
+    <section class="tf-card tf-panel" aria-labelledby="edit-title">
+      <div class="tf-panel-head">
         <div>
-          <h2 class="text-sm font-semibold text-white">Edit the rules <span class="ml-1"><a data-anchor="#/default/post_rules" href="swagger.html" class="text-[10px] font-mono text-purple-400 hover:text-purple-300 underline">POST /rules ↗</a></span></h2>
-          <p class="text-[11px] text-gray-500">
-            The whole set is saved at once and replaces the set it is saved to: <span id="save-target" class="text-gray-300">the shared set</span>.
+          <h2 id="edit-title" class="tf-panel-title"><span data-tf-icon="code" data-tf-size="18"></span>Edit the rules <a data-anchor="#/default/post_rules" href="swagger.html" class="tf-spec-link">POST /rules</a></h2>
+          <p class="tf-panel-sub">
+            The whole set is saved at once and replaces the set it is saved to: <span id="save-target" class="text-gray-200">the shared set</span>.
             Written as data so it can be reviewed the way code is.
           </p>
         </div>
         <div class="flex flex-wrap gap-2">
-          <button onclick="loadExample('java')" class="text-[11px] px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700">Java example</button>
-          <button onclick="loadExample('dotnet')" class="text-[11px] px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700">.NET example</button>
-          <button onclick="loadExample('web')" class="text-[11px] px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700">TypeScript example</button>
-          <button onclick="resetEditor()" class="text-[11px] px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700">Back to what is in force</button>
+          <button type="button" onclick="loadExample('java')" class="tf-btn tf-btn-sm">Java example</button>
+          <button type="button" onclick="loadExample('dotnet')" class="tf-btn tf-btn-sm">.NET example</button>
+          <button type="button" onclick="loadExample('web')" class="tf-btn tf-btn-sm">TypeScript example</button>
+          <button type="button" onclick="resetEditor()" class="tf-btn tf-btn-ghost tf-btn-sm">Back to what is in force</button>
         </div>
       </div>
 
-      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <textarea id="editor" rows="22" spellcheck="false"
-                  class="lg:col-span-2 w-full bg-gray-950 border border-gray-800 rounded-xl px-3 py-2 text-[11px] text-gray-200 font-mono focus:outline-none focus:border-purple-500"></textarea>
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        <textarea id="editor" rows="22" spellcheck="false" aria-label="The rules, as JSON"
+                  class="lg:col-span-2 tf-textarea tf-mono w-full"></textarea>
         <div class="space-y-3 text-[11px] text-gray-400">
-          <div class="p-3 rounded-xl bg-gray-950 border border-gray-800 space-y-1">
-            <p class="text-gray-200 font-semibold">Each rule</p>
-            <p><span class="font-mono text-purple-300">id</span> — what a refusal quotes.</p>
-            <p><span class="font-mono text-purple-300">description</span> — the sentence a developer reads when stopped.</p>
-            <p><span class="font-mono text-purple-300">mode</span> — <span class="font-mono">enforce</span> (default) or <span class="font-mono">observe</span>.</p>
-            <p><span class="font-mono text-purple-300">when_path_matches</span> — globs; <span class="font-mono">**</span> crosses folders, <span class="font-mono">*</span> does not. Case is ignored.</p>
-            <p><span class="font-mono text-purple-300">forbid_imports</span> — <span class="font-mono">System.Data</span> forbids it and everything under it, never <span class="font-mono">System.DataAnnotations</span>.</p>
-            <p><span class="font-mono text-purple-300">allow_imports</span> — exceptions. The more specific pattern wins.</p>
+          <div class="tf-card-quiet p-4 space-y-1.5">
+            <p class="text-gray-200 font-semibold text-xs">Each rule</p>
+            <p><span class="font-mono tf-accent-text">id</span> — what a refusal quotes.</p>
+            <p><span class="font-mono tf-accent-text">description</span> — the sentence a developer reads when stopped.</p>
+            <p><span class="font-mono tf-accent-text">mode</span> — <span class="font-mono">enforce</span> (default) or <span class="font-mono">observe</span>.</p>
+            <p><span class="font-mono tf-accent-text">when_path_matches</span> — globs; <span class="font-mono">**</span> crosses folders, <span class="font-mono">*</span> does not. Case is ignored.</p>
+            <p><span class="font-mono tf-accent-text">forbid_imports</span> — <span class="font-mono">System.Data</span> forbids it and everything under it, never <span class="font-mono">System.DataAnnotations</span>.</p>
+            <p><span class="font-mono tf-accent-text">allow_imports</span> — exceptions. The more specific pattern wins.</p>
           </div>
-          <div id="validation" class="p-3 rounded-xl bg-gray-950 border border-gray-800"></div>
-          <label class="block">
-            <span class="uppercase tracking-wider">Operator key</span>
-            <input id="api-key" type="password" placeholder="needed to save; blank uses the key stored on the settings page"
-                   class="mt-1 w-full bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-xs text-sky-300 font-mono focus:outline-none focus:border-sky-500" />
+          <div id="validation" class="tf-card-quiet p-4" aria-live="polite"></div>
+          <label class="tf-field">
+            <span class="tf-label">Operator key</span>
+            <input id="api-key" type="password" placeholder="needed to save; blank uses your sign-in or the stored key" autocomplete="off"
+                   class="tf-input tf-mono" />
           </label>
           <!-- Shown when a drafted rule was saved after the rules here were read:
                the list and the editor then lack it, and Save below would replace
                the set without it. -->
-          <div id="rules-stale" hidden class="p-3 rounded-xl bg-gray-950 border border-amber-800 space-y-2" role="status"></div>
-          <button onclick="save()" id="save-button" class="w-full px-3 py-2 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold">Save and put in force</button>
-          <div id="save-result"></div>
+          <div id="rules-stale" hidden class="tf-callout tf-callout-warn" style="flex-direction:column" role="status"></div>
+          <button onclick="save()" id="save-button" type="button" class="tf-btn tf-btn-primary tf-btn-block">Save and put in force</button>
+          <div id="save-result" aria-live="polite"></div>
         </div>
       </div>
     </section>
   </main>
 
-  <footer class="border-t border-gray-800 py-4 text-center text-xs text-gray-500">
-    Threefold · AWS Zero to Shipped Hackathon 2026 · Built with Amazon Bedrock &amp; AWS Serverless
+  <footer class="tf-footer">
+    <div class="tf-container">
+      <span>Threefold · AWS Zero to Shipped Hackathon 2026 · Built with Amazon Bedrock &amp; AWS Serverless</span>
+      <span>The rules shown are read from the service as you look at them</span>
+    </div>
   </footer>
 
   <script>
@@ -382,7 +437,7 @@ public class Order { }</textarea>
       // the shared layer loaded; this page's own links when it did not.
       if (window.Threefold) Threefold.mountNav(document.getElementById('page-nav'), { active: 'rules' });
       else document.getElementById('page-nav').innerHTML = NAV.map(item =>
-        '<a href="' + PAGE_BASE + item.href + '" class="px-3 py-1.5 rounded-md bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700 transition">' + item.label + '</a>'
+        '<a href="' + PAGE_BASE + item.href + '" class="tf-nav-link">' + item.label + '</a>'
       ).join('');
       document.getElementById('console-link').href = PAGE_BASE + 'dashboard.html#/overview';
       document.querySelectorAll('a[data-anchor]').forEach(a => { a.href = PAGE_BASE + 'swagger.html' + a.getAttribute('data-anchor'); });
@@ -390,39 +445,67 @@ public class Order { }</textarea>
 
     function chips(values, tone) {
       if (!values || !values.length) return '<span class="text-gray-600">—</span>';
-      return values.map(v => '<span class="inline-block px-1.5 py-0.5 mr-1 mb-1 rounded font-mono text-[10px] border ' + tone + '">' + escapeHtml(v) + '</span>').join('');
+      return values.map(v => '<span class="inline-block px-1.5 py-0.5 mr-1 mb-1 rounded-md font-mono text-[10.5px] leading-4 border ' + tone + '">' + escapeHtml(v) + '</span>').join('');
+    }
+
+    // An icon from the shared set, as markup this page writes; nothing without it.
+    function glyph(name, size) {
+      return window.Threefold ? String(Threefold.icon(name, size || 13)) : '';
+    }
+
+    // A rule's mode as an icon and a word, never colour alone.
+    // `plain` draws the dot rather than the icon, for a panel that also holds
+    // what the model wrote (see verdictChip).
+    function modeChip(observing, words, plain) {
+      const mark = plain ? '' : glyph(observing ? 'eye' : 'stop');
+      return '<span class="tf-chip ' + (plain ? 'tf-chip-dot ' : '') + (observing ? 'tf-chip-amber' : 'tf-chip-rose') + '">' + mark +
+        escapeHtml(words || (observing ? 'Observe · records, never refuses' : 'Enforce · refuses the write')) + '</span>';
     }
 
     function renderRules(rules) {
       const holder = document.getElementById('rules-list');
       if (!rules.length) {
-        holder.innerHTML = '<p class="text-xs text-gray-500">No rule is in force.</p>';
+        holder.innerHTML = '<div class="tf-empty" data-state="empty"><span class="tf-empty-icon" aria-hidden="true">' + glyph('shield', 20) + '</span>' +
+          '<p class="tf-empty-text">No rule is in force. Draft one from a sentence above, or start from an example in the editor below.</p></div>';
         return;
       }
       holder.innerHTML = rules.map(rule => {
         const observing = (rule.mode || 'enforce') === 'observe';
-        return '<div class="p-4 rounded-xl bg-gray-950 border ' + (observing ? 'border-amber-900/60' : 'border-gray-800') + ' space-y-2">' +
-          '<div class="flex items-center justify-between gap-2 flex-wrap">' +
-            '<span class="font-mono text-xs text-white">' + escapeHtml(rule.id) + '</span>' +
-            '<span class="px-2 py-0.5 rounded text-[10px] font-semibold border ' +
-              (observing ? 'bg-amber-950 text-amber-300 border-amber-800' : 'bg-red-950 text-red-300 border-red-800') + '">' +
-              (observing ? 'OBSERVE · records, never refuses' : 'ENFORCE · refuses the write') + '</span>' +
+        const row = (label, values, tone) =>
+          '<div class="grid grid-cols-[7.5rem_minmax(0,1fr)] gap-2 items-baseline text-[11px]"><span class="text-gray-500">' + label + '</span><span>' + chips(values, tone) + '</span></div>';
+        return '<article class="tf-card-quiet p-4 space-y-3">' +
+          '<div class="flex items-start justify-between gap-3 flex-wrap">' +
+            '<div class="min-w-0 flex-1">' +
+              '<p class="font-mono text-[13px] text-gray-100 break-all">' + escapeHtml(rule.id) + '</p>' +
+              '<p class="text-xs text-gray-300 mt-1">' + escapeHtml(rule.description || '') + '</p>' +
+            '</div>' +
+            modeChip(observing) +
           '</div>' +
-          '<p class="text-xs text-gray-300">' + escapeHtml(rule.description || '') + '</p>' +
-          '<div class="text-[11px] text-gray-500">Files ' + chips(rule.when_path_matches, 'bg-gray-900 text-purple-300 border-gray-700') + '</div>' +
-          '<div class="text-[11px] text-gray-500">May not import ' + chips(rule.forbid_imports, 'bg-red-950/40 text-red-300 border-red-900/60') + '</div>' +
-          '<div class="text-[11px] text-gray-500">Allowed anyway ' + chips(rule.allow_imports, 'bg-emerald-950/40 text-emerald-300 border-emerald-900/60') + '</div>' +
-        '</div>';
+          '<div class="space-y-1.5 pt-3" style="border-top:1px solid var(--tf-hairline)">' +
+            row('Files', rule.when_path_matches, 'bg-gray-900 text-violet-300 border-gray-700') +
+            row('May not import', rule.forbid_imports, 'bg-rose-950/40 text-rose-300 border-rose-900/60') +
+            row('Allowed anyway', rule.allow_imports, 'bg-emerald-950/40 text-emerald-300 border-emerald-900/60') +
+          '</div>' +
+        '</article>';
       }).join('');
+      if (window.Threefold) Threefold.reveal(holder.children, { stagger: 40 });
     }
 
     function rulesUrl() {
       return DEFAULT_API_BASE + '/rules' + (currentProject ? '?project=' + encodeURIComponent(currentProject) : '');
     }
 
+    // The scope badge, in the chip the tone names. The words are set as text.
+    const SCOPE_TONES = {
+      'bg-gray-950 text-gray-300 border-gray-700': 'tf-chip-gray',
+      'bg-gray-950 text-gray-400 border-gray-800': 'tf-chip-gray',
+      'bg-amber-950 text-amber-300 border-amber-800': 'tf-chip-amber',
+      'bg-purple-950 text-purple-300 border-purple-800': 'tf-chip-purple',
+      'bg-red-950 text-red-300 border-red-800': 'tf-chip-rose'
+    };
     function setScope(tone, words) {
       const badge = document.getElementById('scope-badge');
-      badge.className = 'px-2 py-1 rounded text-[11px] font-semibold border ' + tone;
+      badge.className = 'tf-chip ' + (SCOPE_TONES[tone] || 'tf-chip-gray');
       badge.innerText = words;
     }
 
@@ -667,16 +750,13 @@ public class Order { }</textarea>
           }
           return;
         }
-        const tone = d.verdict === 'REFUSE' ? 'bg-red-950 text-red-300 border-red-800'
-          : d.verdict === 'OBSERVE' ? 'bg-amber-950 text-amber-300 border-amber-800'
-          : 'bg-emerald-950 text-emerald-300 border-emerald-800';
         const words = d.verdict === 'REFUSE' ? 'The agent would be refused'
           : d.verdict === 'OBSERVE' ? 'The write would run, and be recorded as something a rule would stop'
           : 'No layering rule refuses this file';
         out.innerHTML =
-          '<div class="p-3 rounded-xl bg-gray-950 border border-gray-800 space-y-2">' +
-            '<span class="inline-block px-2 py-0.5 rounded text-[11px] font-semibold border ' + tone + '">' + escapeHtml(d.verdict) + '</span> ' +
-            '<span class="text-gray-300">' + escapeHtml(words) + '</span>' +
+          '<div class="tf-card-quiet p-4 space-y-2">' +
+            verdictChip(d.verdict) + ' ' +
+            '<span class="text-gray-200">' + escapeHtml(words) + '</span>' +
             '<p class="text-[11px] text-gray-500">Against ' + (d.rules_considered === 'draft' ? 'your draft'
               : currentProject ? 'the rules in force for ' + escapeHtml(currentProject) : 'the shared rules in force') +
               ' · read as ' + escapeHtml(d.language || 'a file type Threefold does not read') + '</p>' +
@@ -788,7 +868,7 @@ public class Order { }</textarea>
         '<p class="text-amber-300">' + escapeHtml(staleRuleName() + ' was saved to ' + projectShownText(rulesStale.project) + ' from the draft panel after the rules on this page were read, ' +
           'so the list and this editor do not show it. Saving the editor as it stands would replace ' + projectShownText(rulesStale.project) + '’s set without it, so Save sends nothing for ' +
           projectShownText(rulesStale.project) + ' until the rules are read again.') + '</p>' +
-        '<button type="button" onclick="load()" class="text-[11px] px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700">Read the rules again</button>' +
+        '<button type="button" onclick="load()" class="tf-btn tf-btn-sm self-start">Read the rules again</button>' +
         '<p class="text-[11px] text-gray-500">Reading them again replaces what is in the editor, so copy any edits you want to keep first.</p>';
     }
 
@@ -867,23 +947,23 @@ public class Order { }</textarea>
     function renderDraftExamples() {
       const holder = document.getElementById('draft-examples');
       if (!draftExamples.length) {
-        holder.innerHTML = '<p class="text-[11px] text-gray-600">No example yet.</p>';
+        holder.innerHTML = '<p class="text-[11px] text-gray-500">No example yet. The draft is made from the sentence alone.</p>';
       } else {
         holder.innerHTML = draftExamples.map((example, i) =>
-          '<div class="p-3 rounded-xl bg-gray-950 border border-gray-800 space-y-2">' +
+          '<div class="tf-card-quiet p-3 space-y-2">' +
             '<div class="flex flex-wrap items-end gap-2">' +
-              '<label class="block flex-1 min-w-[12rem]"><span class="text-[10px] uppercase tracking-wider text-gray-500">Path</span>' +
+              '<label class="tf-field flex-1 min-w-[12rem]"><span class="tf-label">Path</span>' +
                 '<input id="draft-ex-path-' + i + '" type="text" spellcheck="false" autocomplete="off" placeholder="src/main/java/com/acme/billing/domain/Order.java" ' +
-                'class="mt-1 w-full bg-gray-900 border border-gray-800 rounded-lg px-2 py-1.5 text-[11px] text-white font-mono focus:outline-none focus:border-purple-500" /></label>' +
-              '<label class="block"><span class="text-[10px] uppercase tracking-wider text-gray-500">Should be</span>' +
-                '<select id="draft-ex-expect-' + i + '" class="mt-1 block bg-gray-900 border border-gray-800 rounded-lg px-2 py-1.5 text-[11px] text-white focus:outline-none focus:border-purple-500">' +
+                'class="tf-input tf-input-sm tf-mono w-full" /></label>' +
+              '<label class="tf-field"><span class="tf-label">Should be</span>' +
+                '<select id="draft-ex-expect-' + i + '" class="tf-select tf-input-sm">' +
                   '<option value="refuse">refused</option><option value="allow">allowed</option></select></label>' +
-              '<button type="button" onclick="removeDraftExample(' + i + ')" class="text-[11px] px-2 py-1.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700">Remove</button>' +
+              '<button type="button" onclick="removeDraftExample(' + i + ')" class="tf-btn tf-btn-ghost tf-btn-sm">Remove</button>' +
             '</div>' +
-            '<label class="block"><span class="flex items-baseline justify-between gap-2 text-[10px] uppercase tracking-wider text-gray-500"><span>Content</span>' +
+            '<label class="tf-field"><span class="flex items-baseline justify-between gap-2"><span class="tf-label">Content</span>' +
               '<span id="draft-ex-count-' + i + '" class="normal-case tracking-normal font-mono"></span></span>' +
               '<textarea id="draft-ex-content-' + i + '" rows="3" spellcheck="false" ' +
-              'class="mt-1 w-full bg-gray-900 border border-gray-800 rounded-lg px-2 py-1.5 text-[11px] text-white font-mono focus:outline-none focus:border-purple-500"></textarea></label>' +
+              'class="tf-textarea tf-mono w-full"></textarea></label>' +
           '</div>'
         ).join('');
         draftExamples.forEach((example, i) => {
@@ -989,12 +1069,16 @@ public class Order { }</textarea>
         : '';
     }
 
+    // A verdict as the service says it, in the tone of what it means. The panels
+    // that show verdicts also show what the model wrote, so they carry no inline
+    // SVG of their own: a dot drawn by the stylesheet stands in for the icon, and
+    // any <svg> in them is one that should not be there.
     function verdictChip(verdict) {
-      const tone = verdict === 'REFUSE' ? 'bg-red-950 text-red-300 border-red-800'
-        : verdict === 'OBSERVE' ? 'bg-amber-950 text-amber-300 border-amber-800'
-        : verdict === 'ALLOW' ? 'bg-emerald-950 text-emerald-300 border-emerald-800'
-        : 'bg-gray-950 text-gray-400 border-gray-700';
-      return '<span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold border ' + tone + '">' + escapeHtml(verdict || '—') + '</span>';
+      const tone = verdict === 'REFUSE' ? 'tf-chip-rose'
+        : verdict === 'OBSERVE' ? 'tf-chip-amber'
+        : verdict === 'ALLOW' ? 'tf-chip-emerald'
+        : 'tf-chip-gray';
+      return '<span class="tf-chip tf-chip-dot ' + tone + '">' + escapeHtml(verdict || '—') + '</span>';
     }
 
     // One row per file tried: what it should do, what the rule did and whether
@@ -1062,15 +1146,15 @@ public class Order { }</textarea>
     function renderDraftMode(rule) {
       const observing = rule && rule.mode === 'observe';
       document.getElementById('draft-mode').innerHTML = observing
-        ? '<span class="px-2 py-0.5 rounded text-[10px] font-semibold border bg-amber-950 text-amber-300 border-amber-800">OBSERVE · records, never refuses</span>'
-        : '<span class="px-2 py-0.5 rounded text-[10px] font-semibold border bg-red-950 text-red-300 border-red-800">mode is ' + escapeHtml(rule && rule.mode != null ? rule.mode : 'missing, which means enforce') + '</span>';
+        ? modeChip(true, 'OBSERVE · records, never refuses', true)
+        : modeChip(false, 'mode is ' + (rule && rule.mode != null ? rule.mode : 'missing, which means enforce'), true);
     }
 
     function renderDraft(d, project, examples) {
       lastDraft = { project: project, examples: examples, rule: d.rule, tried: Array.isArray(d.tried) ? d.tried : [] };
       writeNaming('draft-result', () =>
-        '<div class="p-3 rounded-xl bg-gray-950 border border-gray-800 space-y-1">' +
-          '<p class="text-gray-200">Drafted by Amazon Bedrock' + (d.model ? ' <span class="font-mono text-[10px] text-gray-500">' + escapeHtml(d.model) + '</span>' : '') +
+        '<div class="tf-callout tf-callout-accent" style="flex-direction:column;gap:4px">' +
+          '<p class="text-gray-100">Drafted by Amazon Bedrock' + (d.model ? ' <span class="font-mono text-[10px] text-gray-500">' + escapeHtml(d.model) + '</span>' : '') +
             (typeof d.attempts === 'number' ? ' in ' + escapeHtml(d.attempts) + ' model call' + (d.attempts === 1 ? '' : 's') : '') +
             ', for ' + escapeHtml(projectShownText(project) || 'the shared set') + '. <span class="text-emerald-300">Not saved.</span></p>' +
           listOf(d.warnings, 'text-[11px] text-amber-300') +
@@ -1090,7 +1174,7 @@ public class Order { }</textarea>
 
     function draftProblem(title, detail, extra) {
       document.getElementById('draft-result').innerHTML =
-        '<div class="p-3 rounded-xl bg-gray-950 border border-red-900/60 space-y-1" role="alert">' +
+        '<div class="tf-callout tf-callout-danger" style="flex-direction:column;gap:4px" role="alert">' +
           '<p class="text-red-300 font-semibold">' + escapeHtml(title) + '</p>' +
           (detail ? '<p class="text-[11px] text-gray-300">' + escapeHtml(detail) + '</p>' : '') +
           (extra || '') +
@@ -1110,7 +1194,7 @@ public class Order { }</textarea>
       drafting = true;
       clearDraft();
       document.getElementById('draft-result').innerHTML =
-        '<p class="text-gray-400" data-state="loading">Asking Amazon Bedrock for a draft. It is one or two model calls and can take several seconds; nothing is saved.</p>';
+        '<p class="tf-waiting" data-state="loading"><span class="tf-waiting-dot" aria-hidden="true"></span>Asking Amazon Bedrock for a draft. It is one or two model calls and can take several seconds; nothing is saved.</p>';
       updateDraftCounters();
       try {
         // Drafting only: this sends POST /rules/draft and nothing else. A save

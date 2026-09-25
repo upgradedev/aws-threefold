@@ -731,6 +731,16 @@
   // Markup built from the fixed table above, never from a caller's string.
   function icon(name, size, className) { return new SafeHtml(iconMarkup(name, size, className)); }
 
+  // A static page writes <span data-tf-icon="terminal" data-tf-size="16"></span>
+  // and the icon is drawn into it here, so the set stays defined in one place.
+  function drawIcons(scope) {
+    all(scope || doc, '[data-tf-icon]').forEach(function (node) {
+      if (node.getAttribute('data-tf-drawn') === '1') return;
+      setHtml(node, icon(node.getAttribute('data-tf-icon'), node.getAttribute('data-tf-size') || 16));
+      node.setAttribute('data-tf-drawn', '1');
+    });
+  }
+
   // The strings the pages already use with raw(T.ICONS.x), at the sizes they
   // were drawn at, and every other icon at 16px.
   var ICONS = {};
@@ -1188,6 +1198,7 @@
     entry.options = options;
     drawNav(entry, null);
     linkPages(doc);
+    drawIcons(doc);
     whoami().then(function (who) { drawNav(entry, who); });
   }
 
@@ -1755,6 +1766,9 @@
       if (closestAttr(event && event.target, 'data-tf-tip')) hideTip();
     });
   }
+  if (doc && doc.readyState === 'loading' && typeof doc.addEventListener === 'function') {
+    doc.addEventListener('DOMContentLoaded', function () { drawIcons(doc); linkPages(doc); });
+  }
   if (typeof root.addEventListener === 'function') {
     root.addEventListener('scroll', function () { if (tipFor) hideTip(); }, { passive: true });
     root.addEventListener('hashchange', function () { closePalette(false); hideTip(); });
@@ -2049,6 +2063,7 @@
     setHtml: setHtml,
     SafeHtml: SafeHtml,
     icon: icon,
+    drawIcons: drawIcons,
     readSession: readSession,
     writeSession: writeSession,
     clearSession: clearSession,

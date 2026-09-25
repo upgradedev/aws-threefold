@@ -290,6 +290,11 @@ svg a:focus-visible .tf-mark, svg g:focus-visible .tf-mark { stroke: #ffffff; st
 .tf-brand-name { display: block; font-size: 0.875rem; font-weight: 700; letter-spacing: -0.01em; color: var(--tf-text); }
 .tf-brand-sub { display: block; font-size: var(--tf-fs-micro); color: var(--tf-text-3); }
 
+/* The header's mount point, and the plain links it holds before script runs. */
+.tf-nav-mount { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; justify-content: flex-end; }
+.tf-nav-fallback { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: var(--tf-fs-small); }
+.tf-nav-fallback a { color: var(--tf-text-2); }
+
 /* What mountNav draws into the header's mount point. */
 .tf-shell { display: flex; align-items: center; gap: var(--tf-space-1); flex: 1 1 auto; min-width: 0; justify-content: flex-end; }
 .tf-nav { display: none; align-items: center; gap: 2px; margin: 0; padding: 0; }
@@ -391,6 +396,9 @@ svg a:focus-visible .tf-mark, svg g:focus-visible .tf-mark { stroke: #ffffff; st
 
 /* Icons: one set, stroke 1.5 on a 20px grid, drawn by Threefold.icon(). */
 .tf-icon { display: inline-block; flex-shrink: 0; vertical-align: -0.2em; }
+/* A placeholder a static page writes; the icon drawn into it lays out as if it
+   were the placeholder itself. */
+[data-tf-icon]:not([class]) { display: contents; }
 
 /* Cards and panels */
 .tf-card {
@@ -423,20 +431,20 @@ svg a:focus-visible .tf-mark, svg g:focus-visible .tf-mark { stroke: #ffffff; st
   display: flex; gap: var(--tf-space-1h); padding: var(--tf-space-1h) var(--tf-space-2); border-radius: var(--tf-radius-md);
   background: var(--tf-surface-2); border: 1px solid var(--tf-hairline); font-size: var(--tf-fs-small); line-height: var(--tf-lh-small); color: var(--tf-text-2);
 }
-.tf-callout > .tf-icon { width: 18px; height: 18px; margin-top: 1px; color: var(--tf-text-3); }
+.tf-callout > .tf-icon, .tf-callout > [data-tf-icon] > .tf-icon { width: 18px; height: 18px; margin-top: 1px; color: var(--tf-text-3); }
 .tf-callout-body { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 6px; }
 .tf-callout-body p { margin: 0; }
 .tf-callout-title { margin: 0; font-weight: 600; color: var(--tf-text); }
 .tf-callout-info { background: var(--tf-info-soft); border-color: var(--tf-info-line); }
-.tf-callout-info > .tf-icon, .tf-callout-info .tf-callout-title { color: var(--tf-info-text); }
+.tf-callout-info > .tf-icon, .tf-callout-info > [data-tf-icon] > .tf-icon, .tf-callout-info .tf-callout-title { color: var(--tf-info-text); }
 .tf-callout-ok { background: var(--tf-approved-soft); border-color: var(--tf-approved-line); }
-.tf-callout-ok > .tf-icon, .tf-callout-ok .tf-callout-title { color: var(--tf-approved-text); }
+.tf-callout-ok > .tf-icon, .tf-callout-ok > [data-tf-icon] > .tf-icon, .tf-callout-ok .tf-callout-title { color: var(--tf-approved-text); }
 .tf-callout-warn { background: var(--tf-observed-soft); border-color: var(--tf-observed-line); }
-.tf-callout-warn > .tf-icon, .tf-callout-warn .tf-callout-title { color: var(--tf-observed-text); }
+.tf-callout-warn > .tf-icon, .tf-callout-warn > [data-tf-icon] > .tf-icon, .tf-callout-warn .tf-callout-title { color: var(--tf-observed-text); }
 .tf-callout-danger { background: var(--tf-refused-soft); border-color: var(--tf-refused-line); }
-.tf-callout-danger > .tf-icon, .tf-callout-danger .tf-callout-title { color: var(--tf-refused-text); }
+.tf-callout-danger > .tf-icon, .tf-callout-danger > [data-tf-icon] > .tf-icon, .tf-callout-danger .tf-callout-title { color: var(--tf-refused-text); }
 .tf-callout-accent { background: var(--tf-accent-soft); border-color: var(--tf-accent-line); }
-.tf-callout-accent > .tf-icon, .tf-callout-accent .tf-callout-title { color: var(--tf-accent-text); }
+.tf-callout-accent > .tf-icon, .tf-callout-accent > [data-tf-icon] > .tf-icon, .tf-callout-accent .tf-callout-title { color: var(--tf-accent-text); }
 
 /* Buttons: primary, secondary (the default), ghost, danger; sm, default, lg;
    aria-busy="true" shows the loading state and holds the width. */
@@ -519,6 +527,9 @@ svg a:focus-visible .tf-mark, svg g:focus-visible .tf-mark { stroke: #ffffff; st
 .tf-chip-button:hover, button.tf-chip-button:hover { background: var(--tf-surface-3); color: var(--tf-text); }
 a.tf-chip:hover { filter: brightness(1.15); }
 .tf-chip-lg { height: 26px; padding: 0 10px; font-size: 0.75rem; }
+/* A status chip without an inline icon (where a panel must hold no <svg> of
+   its own) still leads with a mark before its word. */
+.tf-chip-dot::before { content: ''; width: 6px; height: 6px; border-radius: 99px; background: currentColor; flex-shrink: 0; }
 .tf-dot { width: 8px; height: 8px; border-radius: 99px; display: inline-block; flex-shrink: 0; background: currentColor; }
 
 /* A code block with a copy button that confirms. */
@@ -615,11 +626,53 @@ a.tf-chip:hover { filter: brightness(1.15); }
   .tf-table-stack td[colspan]::before { content: none; }
 }
 
+/* A disclosure: what most readers never need, one click away. */
+.tf-disclosure { border: 1px solid var(--tf-hairline); border-radius: var(--tf-radius-md); background: var(--tf-surface-1); }
+.tf-disclosure > summary {
+  display: flex; align-items: center; gap: 10px; padding: 12px 16px; cursor: pointer; list-style: none; border-radius: var(--tf-radius-md);
+  font: 500 var(--tf-fs-small)/1.25rem var(--tf-font-sans); color: var(--tf-text-2);
+}
+.tf-disclosure > summary::-webkit-details-marker { display: none; }
+.tf-disclosure > summary:hover { color: var(--tf-text); }
+.tf-disclosure > summary .tf-icon { width: 16px; height: 16px; color: var(--tf-text-3); }
+.tf-disclosure > summary::after {
+  content: ''; margin-left: auto; width: 8px; height: 8px; border-right: 1.5px solid var(--tf-text-3); border-bottom: 1.5px solid var(--tf-text-3);
+  transform: rotate(45deg) translateY(-2px); transition: transform var(--tf-dur-2) var(--tf-ease-out);
+}
+.tf-disclosure[open] > summary::after { transform: rotate(225deg) translateY(-2px); }
+.tf-disclosure[open] > summary { border-bottom: 1px solid var(--tf-hairline); border-radius: var(--tf-radius-md) var(--tf-radius-md) 0 0; }
+.tf-disclosure-body { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.tf-summary-note { margin-left: 4px; font-weight: 400; color: var(--tf-text-3); }
+
+/* A toolbar: the controls that scope what is below them, in one row. */
+.tf-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; }
+.tf-toolbar .tf-grow { flex: 1 1 14rem; min-width: 0; }
+.tf-toolbar-end { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+
+/* A meter: severity in the fill, the track a quieter step of the same ramp. */
+.tf-meter { height: 8px; border-radius: 4px; overflow: hidden; background: rgba(14, 165, 114, 0.16); }
+.tf-meter-fill { height: 100%; border-radius: 0 4px 4px 0; background: var(--tf-approved); transition: width var(--tf-dur-4) var(--tf-ease-out); }
+.tf-meter-warn { background: rgba(217, 119, 6, 0.18); }
+.tf-meter-warn .tf-meter-fill { background: var(--tf-observed); }
+.tf-meter-danger { background: rgba(225, 29, 72, 0.18); }
+.tf-meter-danger .tf-meter-fill { background: var(--tf-refused); }
+
+/* A definition list of label and value, as the detail panels use. */
+.tf-dl { margin: 0; display: flex; flex-direction: column; }
+.tf-dl-row { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding: 8px 0; border-bottom: 1px solid var(--tf-hairline); font-size: var(--tf-fs-small); line-height: 1.25rem; }
+.tf-dl-row:last-child { border-bottom: 0; }
+.tf-dl-row dt { color: var(--tf-text-3); flex-shrink: 0; }
+.tf-dl-row dd { margin: 0; min-width: 0; text-align: right; font-family: var(--tf-font-mono); font-size: 0.78rem; color: var(--tf-text); overflow-wrap: anywhere; }
+.tf-good { color: var(--tf-approved-text) !important; }
+.tf-bad { color: var(--tf-refused-text) !important; }
+.tf-warn-text { color: var(--tf-observed-text) !important; }
+.tf-accent-text { color: var(--tf-accent-text) !important; }
+
 /* Stat tiles: a label in plain words, the value, a sub-line that says what it
    means, and optionally a sparkline, a delta and the rows behind it. */
 .tf-tile { display: flex; flex-direction: column; gap: 6px; padding: 18px 18px 16px; min-width: 0; box-sizing: border-box; }
-.tf-tile-label { display: flex; align-items: center; gap: 6px; font: 500 var(--tf-fs-small)/1.25rem var(--tf-font-sans); color: var(--tf-text-2); text-transform: none; letter-spacing: normal; }
-.tf-tile-label .tf-icon { width: 16px; height: 16px; color: var(--tf-text-3); }
+.tf-tile-label { display: flex; align-items: flex-start; gap: 6px; font: 500 var(--tf-fs-small)/1.25rem var(--tf-font-sans); color: var(--tf-text-2); text-transform: none; letter-spacing: normal; }
+.tf-tile-label .tf-icon { width: 16px; height: 16px; margin-top: 2px; color: var(--tf-text-3); }
 .tf-tile-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; min-width: 0; }
 .tf-tile-value { font: 650 2rem/2.25rem var(--tf-font-sans); letter-spacing: -0.03em; color: var(--tf-text); font-variant-numeric: proportional-nums; }
 .tf-tile-sub { font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-3); }
