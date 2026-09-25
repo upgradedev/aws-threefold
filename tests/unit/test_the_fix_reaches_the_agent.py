@@ -447,7 +447,10 @@ def test_at_the_rewrite_ceiling_a_layering_refusal_is_rewritten_and_checked(eval
     rules, _ = evaluator.rules_in_force(PROJECT)
     for write in fix["writes"]:
         assert _passes_the_gate(write, rules), f"The validated fix is itself refused at {write['path']}"
-    assert proposals[-1]["options"] == {"max_content_chars": FIX_REWRITE_MAX_CHARS}
+    assert proposals[-1]["options"] == {
+        "max_content_chars": FIX_REWRITE_MAX_CHARS,
+        "blocked_patterns": evaluator.policy_config.blocked_patterns,
+    }
 
 
 def test_the_rewrite_ceiling_is_on_what_is_rewritten_not_on_the_path_beside_it(evaluator, proposals) -> None:
@@ -473,7 +476,10 @@ def test_a_write_one_character_past_the_rewrite_ceiling_is_told_in_words_what_to
     assert "adapter under src/acme_orders/infrastructure/ that implements it" in fix["steps"][1]
     assert "boto3 and 1 more" in fix["summary"] and "src/acme_orders/infrastructure" in fix["summary"]
     (call,) = proposals
-    assert call["options"] == {"max_content_chars": FIX_REWRITE_MAX_CHARS}
+    assert call["options"] == {
+        "max_content_chars": FIX_REWRITE_MAX_CHARS,
+        "blocked_patterns": evaluator.policy_config.blocked_patterns,
+    }
 
 
 def test_the_advice_reaches_the_agent_in_its_deny_reason(evaluator) -> None:

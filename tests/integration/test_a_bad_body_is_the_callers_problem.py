@@ -107,34 +107,29 @@ def test_invalid_json_is_a_400_that_names_the_body() -> None:
     assert problem["invalid_params"][0]["name"] == "body"
 
 
-def test_evaluations_that_are_not_verdict_objects_are_refused() -> None:
-    status, problem, _ = _post("/issue-certificate", json.dumps({"session_id": "s", "evaluations": ["x"]}))
-    assert status == 400
-    assert problem["invalid_params"][0]["name"] == "evaluations"
+@pytest.mark.parametrize("evaluations", ['["x"]', '"verdict"', "42", "[{}]", '[{"rule_evaluations": {"X": "false"}}]'])
+def test_a_supplied_evaluations_field_is_ignored_not_read(evaluations: str) -> None:
+    """The certificate covers the session's stored verdicts, whatever the body claims.
 
-
-@pytest.mark.parametrize(
-    "invariants",
-    ['"all good"', "[true]", '{"SECRET_LEAKAGE_FREE": "false"}', '{"SECRET_LEAKAGE_FREE": 1}'],
-)
-def test_invariants_that_are_not_true_or_false_are_refused(invariants: str) -> None:
-    """The issuer reads a verdict's invariants now, so their shape is checked at the door.
-
-    The session is a governed one, so nothing else stands between these and the
-    issuer: without the check a string reached `.values()` as a 500, and the
-    string "false" certified the session as compliant.
+    Malformed, mistyped or invented evaluations change nothing: a governed
+    session still gets its certificate, and an ungoverned one is still refused
+    for having no recorded verdicts rather than for the field's shape.
     """
-    session_id = "bodies-invariants"
+    session_id = f"bodies-ignored-{abs(hash(evaluations)) % 100000}"
     status, _, _ = _post(
         "/evaluate-tool-call",
         json.dumps({"session_id": session_id, "project_name": "Acme-Bodies", "tool_name": "view_file"}),
     )
     assert status == 200
-    raw = '{"session_id": "%s", "evaluations": [{"rule_evaluations": %s}]}' % (session_id, invariants)
+    raw = '{"session_id": "%s", "evaluations": %s}' % (session_id, evaluations)
+    status, cert, _ = _post("/issue-certificate", raw)
+    assert status == 200, cert
+    assert cert["evaluations_count"] == 1
+
+    raw = '{"session_id": "bodies-ignored-evaluations-stranger", "evaluations": %s}' % evaluations
     status, problem, _ = _post("/issue-certificate", raw)
-    assert status == 400, problem
-    assert problem["type"] == "urn:threefold:error:bad-request"
-    assert "rule_evaluations" in problem["detail"]
+    assert status == 400
+    assert problem["type"] == "urn:threefold:error:empty-attestation"
 
 
 def test_a_verdict_that_sends_no_invariants_is_still_accepted() -> None:

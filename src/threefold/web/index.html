@@ -362,11 +362,12 @@
             </div>
             <p id="cert-id" class="text-xs font-mono text-emerald-300">CERT-TF-...</p>
             <p id="cert-hash" class="text-xs font-mono text-gray-400 truncate">SHA256: ...</p>
+            <p id="cert-signature" class="text-xs font-mono text-gray-400 truncate">Signature: ...</p>
             <p id="cert-origin" class="text-[11px] text-gray-400"></p>
             <p class="text-[11px] text-gray-500 border-t border-emerald-900/40 pt-2">
               The fingerprint is an unkeyed SHA-256 of the payload. It detects corruption and casual edits, not an adversary:
-              anyone who changes the payload can recompute the hash. Nothing signs it, and nothing in CI requires one before a
-              merge.
+              anyone who changes the payload can recompute the hash. Where the stack holds a signing key the same bytes carry
+              a KMS signature, shown above; nothing in CI requires one before a merge.
             </p>
           </div>
         </div>
@@ -800,7 +801,6 @@
         { tool: "run_command", type: "COMMAND_EXEC", args: { CommandLine: "pytest tests/unit" } }
       ];
 
-      const evaluations = [];
       let totalCost = 0.0384;
       let totalTokens = 6400;
 
@@ -828,17 +828,17 @@
             });
             const data = await res.json();
             lastEvaluation = data;
-            evaluations.push(data);
             logTerminal(`⚡ [Step ${i+1}/4] ${s.tool} -> ${data.status} (Cost: $${data.current_session_cost_usd.toFixed(4)})`, 'text-emerald-400');
           }
 
-          // Ask the service for a certificate over the four verdicts just issued
+          // Ask the service for a certificate over the four verdicts just issued.
+          // The session id is all the service is told: it certifies its own
+          // stored verdicts, not verdicts echoed back to it.
           const certRes = await fetch(`${base}/issue-certificate`, {
             method: "POST",
             headers: authHeaders({ "Content-Type": "application/json" }),
             body: JSON.stringify({
-              session_id: sessId,
-              evaluations: evaluations
+              session_id: sessId
             })
           });
 
@@ -867,6 +867,9 @@
 
             document.getElementById('cert-id').innerText = certData.certificate_id;
             document.getElementById('cert-hash').innerText = 'SHA256: ' + certData.sha256_fingerprint;
+            document.getElementById('cert-signature').innerText = certData.signature
+              ? 'KMS signature by ' + certData.signing_key_id + ': ' + certData.signature.slice(0, 32) + '...'
+              : 'Signature: none (this stack holds no signing key)';
             document.getElementById('cert-container').classList.remove('hidden');
             return;
           }
@@ -915,6 +918,7 @@
 
       document.getElementById('cert-id').innerText = currentCertData.certificate_id;
       document.getElementById('cert-hash').innerText = 'SHA256: ' + currentCertData.sha256_fingerprint;
+      document.getElementById('cert-signature').innerText = 'Signature: none (simulated, nothing issued it)';
       document.getElementById('cert-origin').innerHTML =
         '<span class="text-amber-400 font-semibold">Simulated, offline demo.</span> No evaluation ran and the service was not reached. Every value here is invented, and the exported file says so on its face.';
       document.getElementById('cert-container').classList.remove('hidden');

@@ -153,25 +153,24 @@ so the rollout had to show what a rule would stop before it stops anything.
 
 ## 8. What's next
 
-- The benchmark, beyond what is measured. Four matrices ran on 2026-09-22:
-  Claude Code on six standard Acme tasks and on three pressure variants, with
-  `claude-sonnet-5` and with `claude-haiku-4-5`, each under no guidance, the
-  rules in `CLAUDE.md`, and Threefold enforcing. A governed violation landed in
-  17% / 0% / 0% and 39% / 17% / 0% on the standard tasks, and 67% / 0% / 0%
-  and 100% / 56% / 0% on the pressure ones: no violation under Threefold in any
-  series, while the rules in `CLAUDE.md` alone held in both families with
-  `claude-sonnet-5` and in neither with `claude-haiku-4-5`, the cheaper model.
+- The benchmark, beyond what is measured. Six series ran: four of Claude Code
+  2.1.220 on 2026-09-22 and two of Codex CLI 0.155.0 on 2026-09-23, each under
+  no guidance, the rules in the prompt, and Threefold enforcing. A governed
+  violation landed in 17% / 0% / 0%, 39% / 17% / 0% and 17% / 0% / 0% on the
+  standard tasks, and 67% / 0% / 0%, 100% / 56% / 0% and 100% / 11% / 0% on the
+  pressure ones: no violation under Threefold in any series, while the rules in
+  the prompt alone held everywhere with `claude-sonnet-5` and nowhere else.
   The price is in the pressure series, where the governed agent finished 10 of
-  18 runs and otherwise stopped and reported the conflict
-  (`docs/evidence/BENCHMARK_2026-09-22*.md`). What is still missing is another
-  agent (Codex and Antigravity are unmeasured), a task set someone else wrote,
-  and more than 18 or 9 runs a cell.
+  18 runs in the two Claude series (16 of 27 counting Codex) and otherwise
+  stopped and reported the conflict
+  (`docs/evidence/BENCHMARK_2026-09-2*.md`). What is still missing is a third
+  agent (Antigravity is unmeasured), a task set someone else wrote, and more
+  than 18 or 9 runs a cell.
 - Measure the three Codex enforcement cells 2026-09-23 did not reach: a
   refusal on the governed write over the shell, under the real hook and under a
   deny-only one, and one over `apply_patch` from a hook that makes no network
   call.
-- Price each call by the model actually in use, and let the session ceiling and
-  loop window come from the policy, as the settings page already admits they do
-  not [STATE-FILE].
-- Sign the governance certificate with a key and issue it from the session's
-  stored history instead of verdicts the caller supplies [STATE-FILE].
+- Verify a certificate before a merge: the document is now issued from stored
+  history and signed, but nothing in CI requires one. A check that refuses a
+  pull request whose session has no valid certificate would make it
+  load-bearing [STATE-FILE].

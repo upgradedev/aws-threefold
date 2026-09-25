@@ -1,7 +1,7 @@
 """Cycle detection over tool-call signatures, and which calls are only looking."""
 from __future__ import annotations
 
-from typing import List, Sequence, Tuple
+from typing import Callable, List, Optional, Sequence, Tuple
 from threefold.domain.boundary_guard import CONTENT_KEYS, READ_TOOLS, analysed, command_cwd, shell_command
 from threefold.domain.models import ToolActionType, ToolInvocation
 from threefold.domain.shell_writes import program_name
@@ -88,12 +88,34 @@ def is_read_or_poll(invocation: ToolInvocation) -> bool:
 class LoopDetector:
     """Detects runaway agent loops and ping-pong tool thrashing."""
 
+    MIN_CYCLE_LENGTH = 2
+    MAX_CYCLE_LENGTH = 25
+    # The fuzzy tier trips two repeats later than the byte-exact one. Three
+    # same-shape calls can still be an agent iterating; five in a row is a
+    # retry storm, and the tier exists for storms, not for iteration.
+    FUZZY_THRESHOLD_BUMP = 2
+
     def __init__(self, repetition_threshold: int = 3, max_cycle_length: int = 6) -> None:
         self.repetition_threshold = repetition_threshold
         # Cycles longer than this are not searched for. A six-step loop already
         # needs thirteen calls to be recognised at the default threshold, and
-        # beyond that the window costs more history than a session carries.
-        self.max_cycle_length = max_cycle_length
+        # beyond twenty-five the window costs more history than a session
+        # carries. The policy's loop_history_window lands here through the
+        # evaluator, clamped into range so a wild value cannot hang the gate.
+        self.max_cycle_length = max(
+            self.MIN_CYCLE_LENGTH, min(int(max_cycle_length), self.MAX_CYCLE_LENGTH)
+        )
+
+    def set_max_cycle_length(self, window: int) -> int:
+        """Adopts the policy's loop_history_window, clamped into range.
+
+        Returns the bound in force, so the caller can report what the detector
+        actually searches rather than what the policy asked for.
+        """
+        self.max_cycle_length = max(
+            self.MIN_CYCLE_LENGTH, min(int(window), self.MAX_CYCLE_LENGTH)
+        )
+        return self.max_cycle_length
 
     def evaluate_loop_risk(
         self,
@@ -127,7 +149,44 @@ class LoopDetector:
             f"({' -> '.join(cycle)}) for the {self.repetition_threshold}rd time"
         )
 
-    def _repeating_period(self, sequence: List[str]) -> int | None:
+    def evaluate_fuzzy_loop_risk(
+        self,
+        history: List[ToolInvocation],
+        next_call: ToolInvocation,
+        fuzzy: Callable[[ToolInvocation], Optional[str]],
+    ) -> Tuple[bool, str]:
+        """Whether next_call repeats the shape of what came before it.
+
+        The second tier, asked only when the byte-exact tier finds nothing.
+        `fuzzy` normalizes a call to what it does — the same tool on the same
+        targets — and returns None where a call has no shape to compare, which
+        keeps targetless calls out of both sequences rather than lumping them
+        into one false shape. A longer run is required than the exact tier —
+        threshold plus FUZZY_THRESHOLD_BUMP consecutive shapes — because
+        sameness here is cheaper than identity.
+        """
+        current = fuzzy(next_call)
+        if current is None:
+            return True, "Nothing to compare: the call names no targets"
+        fuzzy_history = [sig for sig in (fuzzy(prior) for prior in history) if sig is not None]
+        if not fuzzy_history:
+            return True, "No prior history"
+        sequence = fuzzy_history + [current]
+        period = self._repeating_period(sequence, repeats=max(self.repetition_threshold + 1, 1))
+        if period is None:
+            return True, "Execution flow is dissimilar"
+        if period == 1:
+            runs = self.repetition_threshold + self.FUZZY_THRESHOLD_BUMP
+            return False, (
+                f"Similar loop detected: tool '{next_call.tool_name}' ran {runs} times "
+                "on the same targets with differing arguments"
+            )
+        return False, (
+            f"Similar {period}-step cycle detected: the same tools on the same "
+            "targets with differing arguments"
+        )
+
+    def _repeating_period(self, sequence: List[str], repeats: Optional[int] = None) -> int | None:
         """Finds the shortest cycle the sequence has just closed, if any.
 
         Three hardcoded shapes used to be checked here: the same call repeated,
@@ -140,8 +199,12 @@ class LoopDetector:
         sequence shows it `repetition_threshold - 1` times over and then begins
         it again, which for the default threshold of three means the third
         occurrence of the first call in the cycle.
+
+        The fuzzy tier reuses this search, passing its own longer repeat
+        count: sameness is the caller's normalization, cycles are still cycles.
         """
-        repeats = max(self.repetition_threshold - 1, 1)
+        if repeats is None:
+            repeats = max(self.repetition_threshold - 1, 1)
         for period in range(1, self.max_cycle_length + 1):
             window_length = period * repeats + 1
             if len(sequence) < window_length:

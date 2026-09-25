@@ -322,7 +322,7 @@ a rule. As served by the public stack [PRIMARY, 2026-09-22]:
 |---|---|---|
 | Credentials | Ten credential shapes in any argument, at any depth, for every language | Credentials that do not match a known shape, and anything already in the file on disk |
 | Layering | 4 rules refusing (`python-domain-stays-pure`, `java-domain-stays-pure`, `dotnet-domain-stays-pure`, `web-domain-stays-pure`) over `**/Domain/**/*.cs`, `**/domain/**/*.java`, `**/domain/**/*.py`, `**/domain/**/*.pyi`, `**/domain/**/*.ts`, `**/domain/**/*.tsx`; imports read from `.cs`, `.java`, `.js`, `.jsx`, `.mjs`, `.py`, `.pyi`, `.ts`, `.tsx` | Any path no refusing rule covers, any file type not in that list, and the dependencies a file does not declare: an import is read from the file's own statements, not resolved, followed or injected |
-| Loops | Any repeating cycle of byte-identical tool calls, up to period six, within one session | Two calls that differ by one character, and repetition across separate sessions |
+| Loops | Any repeating cycle of byte-identical tool calls, up to the policy's history window, plus a second tier over same-shape calls (same tool, targets and keys) at a longer fuse, within one session | Near-identical calls below the fuzzy tier's fuse, and repetition across separate sessions |
 | Budget | Projected spend per call and per session, against the policy | Real usage. The counts are the ones the caller declares, so a caller declaring zero is not stopped |
 
 The same boundary gate also refuses writes that switch governance off (the
@@ -343,18 +343,18 @@ Blind by design, as the hook's contract in `STATE.md` sets it [STATE-FILE] and
   that way never shows up in Observe or the review queue. The same write made
   through a shell command is sent, and recorded under `PROTECTED_PATH`.
 
-Also true, and recorded in `STATE.md` as not yet fixed [STATE-FILE]:
+Also true [STATE-FILE]:
 
-- Three of the five keys `/policy/config` returns are enforced by nothing:
-  `max_session_budget_usd` and `loop_history_window` are stored and read by no
-  gate, and `blocked_patterns` is read by no module. The settings page says so
-  on its face.
-- Every session is priced at the default Sonnet-class rate, because no model id
-  reaches the cost calculator.
-- The governance certificate is an unkeyed SHA-256 fingerprint over verdicts
-  the caller supplies. It detects corruption, not an adversary, it is returned
-  rather than archived, and nothing in CI requires one before a merge. The S3
-  bucket the stack provisions is empty.
+- All five keys `/policy/config` returns are enforced: the session ceiling
+  trips through the breaker, the history window sets the detector's cycle
+  search, and the pattern list refuses through the secret gate. A saved policy
+  reaches every container within thirty seconds.
+- Every call is priced by the model that made it, or the default
+  Sonnet-class rate where the model is unknown.
+- The governance certificate covers the session's own stored verdicts, never
+  the caller's word, and carries a KMS signature where the stack holds a
+  signing key. It is returned rather than archived, and nothing in CI requires
+  one before a merge. The S3 bucket the stack provisions is empty.
 - The sessions listing's call count stops at 50, because a session keeps its
   last 50 calls.
 - Four of the five offline fallback panels on the demo page show canned text,

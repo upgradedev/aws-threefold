@@ -44,6 +44,7 @@ class TokenUsage:
     input_tokens: int
     output_tokens: int
     cost_usd: float
+    model_id: str = "default"
 
     @property
     def total_tokens(self) -> int:
@@ -67,6 +68,47 @@ class ToolInvocation:
         payload = f"{self.tool_name}:{canonical_args}"
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 
+@dataclass(frozen=True)
+class StoredVerdict:
+    """One verdict this service rendered, as the certificate reads it back.
+
+    Recorded by the evaluator for every judged call, approvals and refusals
+    alike, and kept with the session. The certificate covers exactly these,
+    so no caller-supplied verdict can appear on it. Only what the issuer
+    needs is kept: the caller-visible verdict id, the status, the invariant
+    outcomes, whether it was a dry run, and the proof hash the caller saw.
+    """
+    verdict_id: str
+    status: str
+    rule_evaluations: Dict[str, bool]
+    dry_run: bool
+    proof_hash: str
+    timestamp: str = field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "verdict_id": self.verdict_id,
+            "status": self.status,
+            "rule_evaluations": dict(self.rule_evaluations),
+            "dry_run": self.dry_run,
+            "proof_hash": self.proof_hash,
+            "timestamp": self.timestamp,
+        }
+
+    @staticmethod
+    def from_dict(raw: Dict[str, Any]) -> "StoredVerdict":
+        evaluations = raw.get("rule_evaluations") or {}
+        return StoredVerdict(
+            verdict_id=str(raw.get("verdict_id", "")),
+            status=str(raw.get("status", "")),
+            rule_evaluations={str(k): v is True for k, v in evaluations.items()},
+            dry_run=bool(raw.get("dry_run", False)),
+            proof_hash=str(raw.get("proof_hash", "")),
+            timestamp=str(raw.get("timestamp", "")),
+        )
+
 
 @dataclass
 class AgentSession:
@@ -79,6 +121,7 @@ class AgentSession:
     total_input_tokens: int = 0
     total_output_tokens: int = 0
     history: List[ToolInvocation] = field(default_factory=list)
+    verdicts: List[StoredVerdict] = field(default_factory=list)
     is_tripped: bool = False
     trip_reason: Optional[str] = None
     is_terminated: bool = False
@@ -97,6 +140,16 @@ class AgentSession:
     def record_tool_call(self, invocation: ToolInvocation) -> None:
         """Appends tool invocation to session audit history."""
         self.history.append(invocation)
+
+    def record_verdict(self, verdict: StoredVerdict) -> None:
+        """Appends a rendered verdict to what the certificate covers.
+
+        Approvals and refusals alike: a certificate over approvals only would
+        certify a session in which nothing was ever stopped. Like the call
+        history, the in-memory list is unbounded and the store keeps the
+        last fifty.
+        """
+        self.verdicts.append(verdict)
 
     def trip_circuit_breaker(self, reason: str) -> None:
         """Locks session and forbids further agent actuation."""

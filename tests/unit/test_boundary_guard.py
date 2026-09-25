@@ -52,3 +52,29 @@ def test_boundary_guard_blocks_destructive_shell_command():
     is_safe, reason = ArchitecturalBoundaryGuard.evaluate_tool_boundary(inv)
     assert is_safe is False
     assert "destructive" in reason.lower()
+
+
+def test_blocked_pattern_refuses_without_echoing_the_match():
+    inv = ToolInvocation(
+        tool_name="write_to_file",
+        action_type=ToolActionType.FILE_WRITE,
+        arguments={"TargetFile": "/src/notes.txt", "CodeContent": "deploy AcmeSecretProject at dawn"},
+    )
+    is_safe, reason = ArchitecturalBoundaryGuard.evaluate_tool_boundary(
+        inv, blocked_patterns=[r"AcmeSecret\w+"]
+    )
+    assert is_safe is False
+    assert "Blocked pattern" in reason
+    assert "AcmeSecretProject" not in reason, "The verdict must not hand the match back"
+
+
+def test_blocked_pattern_skips_what_does_not_compile():
+    inv = ToolInvocation(
+        tool_name="view_file",
+        action_type=ToolActionType.FILE_READ,
+        arguments={"path": "README.md"},
+    )
+    is_safe, _ = ArchitecturalBoundaryGuard.evaluate_tool_boundary(
+        inv, blocked_patterns=["([unclosed", "", None, 42]
+    )
+    assert is_safe is True

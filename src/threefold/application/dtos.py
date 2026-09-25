@@ -5,6 +5,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 import json
 import math
+import re
 from typing import Any, Dict, List, Optional
 
 from threefold.application.labels import label_project
@@ -100,6 +101,11 @@ class ToolCallRequestDTO:
     dry_run: bool = False
     # The hook's own mode, from KNOWN_HOOK_MODES, or "unknown".
     hook_mode: str = UNKNOWN
+    # The model that made the call, priced by the cost calculator. Not a closed
+    # set: models proliferate, and an id the table does not know is priced at
+    # the default Sonnet-class rate, which is what every call cost before this
+    # field existed.
+    model_id: str = "default"
     # What was changed about the request on the way in, returned to the caller.
     warnings: List[str] = field(default_factory=list)
 
@@ -158,6 +164,7 @@ class ToolCallRequestDTO:
             explain=_flag(body, "explain", True),
             dry_run=_flag(body, "dry_run", False),
             hook_mode=_closed_set(body, "hook_mode", KNOWN_HOOK_MODES, warnings),
+            model_id=str(body.get("model_id", "default") or "default")[:120],
             warnings=warnings,
         )
 
@@ -215,8 +222,11 @@ class EvaluationResultDTO:
 class GovernanceCertificateDTO:
     """Audit certificate summarising a compliant agent execution.
 
-    The fingerprint is an unkeyed SHA-256 over the canonical payload. Nothing
-    signs it, so it detects corruption and casual edits rather than an adversary.
+    The fingerprint is an unkeyed SHA-256 over the canonical payload: it
+    detects corruption and casual edits. Where the stack holds a signing key,
+    the same canonical bytes carry a KMS signature over them, and `signature`
+    is None anywhere else, which is the honest unsigned state rather than a
+    missing field.
     """
     certificate_id: str
     session_id: str
@@ -228,6 +238,8 @@ class GovernanceCertificateDTO:
     evaluations_count: int
     all_passed: bool
     sha256_fingerprint: str
+    signature: Optional[str] = None
+    signing_key_id: Optional[str] = None
     issued_at: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
@@ -238,23 +250,65 @@ class GovernanceCertificateDTO:
 
 @dataclass
 class PolicyConfigDTO:
-    """Enterprise-level dynamic governance policy configuration."""
+    """Enterprise-level dynamic governance policy configuration.
+
+    Every field is enforced: the single-call cap and the session ceiling by
+    the breaker, the history window by the loop detector's cycle search, the
+    threshold by its monomorphic run, and the blocked patterns by the secret
+    gate, which refuses a call whose arguments match any of them. The patterns
+    are additional secret shapes, so like the compiled ones they are always
+    enforced and never staged.
+    """
     max_single_call_usd: float = 1.00
     max_session_budget_usd: float = 10.00
     loop_history_window: int = 6
     monomorphic_repetition_threshold: int = 3
+    # Shapes no gate covers, deliberately. Path shapes do not belong here:
+    # `.env` refused the fixer's own `os.environ` rewrites, so no credential
+    # fix ever validated, and any shape a stageable gate already matches would
+    # refuse in observe mode what the gate is only watching, since a pattern
+    # hit is never staged. The gates keep judging the paths; an operator who
+    # wants a term refused everywhere adds it to this list.
     blocked_patterns: List[str] = field(
         default_factory=lambda: [
             r"AKIA[0-9A-Z]{16}",
             r"aws_secret_access_key",
-            r"\.env",
-            r"\.pem$",
-            r"id_rsa",
         ]
     )
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
+
+
+# At most fifty patterns of two hundred characters each. The gate compiles and
+# tries every one against every string a call carries, so without a bound an
+# operator's own list is the easiest denial of service this service offers.
+MAX_BLOCKED_PATTERNS = 50
+MAX_BLOCKED_PATTERN_CHARS = 200
+
+
+def clean_blocked_patterns(raw: Any) -> List[str]:
+    """The usable patterns out of a stored or defaulted list, leniently.
+
+    Drops what is not a string, what is too long, what does not compile, and
+    everything past the cap. Storage and defaults pass through here; the
+    policy write validates strictly instead, so an operator is told what was
+    wrong rather than silently kept on a subset.
+    """
+    if not isinstance(raw, list):
+        return []
+    cleaned: List[str] = []
+    for pattern in raw:
+        if len(cleaned) >= MAX_BLOCKED_PATTERNS:
+            break
+        if not isinstance(pattern, str) or not pattern or len(pattern) > MAX_BLOCKED_PATTERN_CHARS:
+            continue
+        try:
+            re.compile(pattern)
+        except re.error:
+            continue
+        cleaned.append(pattern)
+    return cleaned
 
 
 @dataclass

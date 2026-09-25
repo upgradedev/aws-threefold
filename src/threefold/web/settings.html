@@ -211,18 +211,18 @@
 
           <label class="block">
             <span class="text-xs font-medium text-gray-400 uppercase tracking-wider">max_session_budget_usd
-              <span class="ml-1 px-1.5 py-0.5 rounded bg-amber-950 text-amber-400 border border-amber-800 text-[10px] normal-case">stored, not enforced</span>
+              <span class="ml-1 px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800 text-[10px] normal-case">live</span>
             </span>
             <input id="in-budget" type="number" step="0.01" min="0.01" class="mt-1 w-full bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-purple-500" />
-            <span class="text-[11px] text-gray-500">Intended as the cumulative ceiling for a session. Today the evaluator never reads it: the ceiling a session is actually held to is the <span class="font-mono">budget_usd</span> the caller sends with each tool call, defaulting to $10.00.</span>
+            <span class="text-[11px] text-gray-500">The cumulative ceiling for every session, on top of the <span class="font-mono">budget_usd</span> the caller sends with each tool call. A session whose projected spend passes either one is halted.</span>
           </label>
 
           <label class="block">
             <span class="text-xs font-medium text-gray-400 uppercase tracking-wider">loop_history_window
-              <span class="ml-1 px-1.5 py-0.5 rounded bg-amber-950 text-amber-400 border border-amber-800 text-[10px] normal-case">stored, not enforced</span>
+              <span class="ml-1 px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800 text-[10px] normal-case">live</span>
             </span>
             <input id="in-window" type="number" step="1" min="2" max="50" class="mt-1 w-full bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-purple-500" />
-            <span class="text-[11px] text-gray-500">Intended as the length of the signature history searched for a cycle. The detector is never given it; it searches cycles up to six steps, compiled in.</span>
+            <span class="text-[11px] text-gray-500">How many steps back the detector searches for a cycle. Values past 25 are clamped to it: a wider search would need more history than a session carries.</span>
           </label>
 
           <label class="block">
@@ -262,15 +262,13 @@
         </div>
 
         <p class="text-xs text-gray-400">
-          <span class="font-mono text-amber-300">blocked_patterns</span> is reported by
-          <span class="font-mono">GET /policy/config</span>, but the <span class="font-mono">POST</span> handler does not accept the
-          field, so it cannot be changed from here and saving does not touch it. The credential shapes the secret gate actually
-          matches are in the domain rules, which this list only samples.
+          <span class="font-mono text-amber-300">blocked_patterns</span> is the policy's own list of secret shapes, one regular
+          expression per line. Saving sends it with the numbers above; the service refuses the whole save when an entry
+          does not compile, and allows at most fifty entries of two hundred characters each.
         </p>
 
-        <div id="blocked-patterns" class="space-y-2">
-          <p class="text-xs text-gray-500">Loading…</p>
-        </div>
+        <textarea id="blocked-patterns" rows="6" spellcheck="false" placeholder="Loading…"
+          class="w-full bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-xs text-amber-300 font-mono focus:outline-none focus:border-purple-500"></textarea>
 
         <div class="border-t border-gray-800 pt-3">
           <p class="text-xs font-medium text-gray-400 uppercase">Last response from the service</p>
@@ -280,8 +278,9 @@
         <div class="border-t border-gray-800 pt-3">
           <p class="text-xs font-medium text-gray-400 uppercase">Where a saved policy lives</p>
           <p class="text-xs text-gray-400 mt-1">
-            A saved policy is written to DynamoDB under <span class="font-mono text-purple-300">CONFIG#policy</span> and read back when a
-            cold Lambda container starts, so a change made here outlives the container that accepted it. If that write fails, the
+            A saved policy is written to DynamoDB under <span class="font-mono text-purple-300">CONFIG#policy</span>, read back
+            when a cold Lambda container starts, and re-read by warm containers every thirty seconds, so a change made here
+            outlives the container that accepted it and reaches the others within half a minute. If that write fails, the
             service keeps the value in process memory only and the next container starts on the previous policy.
           </p>
         </div>
@@ -362,22 +361,23 @@
       <h2 class="text-sm font-semibold text-white">What these numbers change, and what they do not</h2>
       <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
         <div class="p-3 rounded-xl bg-gray-950 border border-gray-800">
-          <p class="font-semibold text-emerald-300">Two are applied to the gates</p>
+          <p class="font-semibold text-emerald-300">All four numbers reach the gates</p>
           <p class="text-gray-400 mt-1">
             Saving sets the loop detector's repetition threshold from
-            <span class="font-mono">monomorphic_repetition_threshold</span> and the breaker's single-call cap from
-            <span class="font-mono">max_single_call_usd</span>. Raise the threshold to 5 and the first scenario on the dashboard no
-            longer halts on the third call: that is the quickest proof this page reaches the evaluator the gate uses. The cap is
-            weighed against caller-declared token counts, so a caller that declares zero tokens is not stopped by it.
+            <span class="font-mono">monomorphic_repetition_threshold</span>, its cycle search length from
+            <span class="font-mono">loop_history_window</span>, and the breaker's single-call cap and session ceiling from
+            <span class="font-mono">max_single_call_usd</span> and <span class="font-mono">max_session_budget_usd</span>.
+            Raise the threshold to 5 and the first scenario on the dashboard no longer halts on the third call: that is the
+            quickest proof this page reaches the evaluator the gate uses. The caps are weighed against caller-declared token
+            counts, so a caller that declares zero tokens is not stopped by them.
           </p>
         </div>
         <div class="p-3 rounded-xl bg-gray-950 border border-gray-800">
-          <p class="font-semibold text-amber-300">Two are stored and reported only</p>
+          <p class="font-semibold text-emerald-300">The patterns refuse like secrets</p>
           <p class="text-gray-400 mt-1">
-            <span class="font-mono">max_session_budget_usd</span> and <span class="font-mono">loop_history_window</span> are
-            persisted, re-read on a cold start and returned by this endpoint, but no gate reads them: the session ceiling comes
-            from each call's own <span class="font-mono">budget_usd</span>, and the detector's cycle search length is compiled in.
-            They are shown because hiding an unwired setting is how a dashboard starts lying.
+            Every <span class="font-mono">blocked_patterns</span> entry is an additional secret shape: a call whose arguments
+            match one is refused with the compiled shapes' force, which means always enforced and never staged. The list below
+            is editable, one regular expression per line; the service refuses the whole save when an entry does not compile.
           </p>
         </div>
       </div>
@@ -405,7 +405,11 @@
       max_single_call_usd: 1.00,
       max_session_budget_usd: 10.00,
       loop_history_window: 6,
-      monomorphic_repetition_threshold: 3
+      monomorphic_repetition_threshold: 3,
+      blocked_patterns: [
+        'AKIA[0-9A-Z]{16}',
+        'aws_secret_access_key'
+      ]
     };
 
     const NAV = [
@@ -576,15 +580,14 @@
       document.getElementById('in-threshold').value = Number(config.monomorphic_repetition_threshold);
 
       const patterns = Array.isArray(config.blocked_patterns) ? config.blocked_patterns : [];
-      document.getElementById('blocked-patterns').innerHTML = patterns.length
-        ? patterns.map(p => '<div class="p-2 rounded bg-gray-950 border border-gray-800 text-xs font-mono text-amber-300 break-all">' + escapeHtml(p) + '</div>').join('')
-        : '<p class="text-xs text-gray-500">The service reported no patterns.</p>';
+      document.getElementById('blocked-patterns').value = patterns.join('\n');
 
       const curlBody = JSON.stringify({
         max_single_call_usd: Number(config.max_single_call_usd),
         max_session_budget_usd: Number(config.max_session_budget_usd),
         loop_history_window: Number(config.loop_history_window),
-        monomorphic_repetition_threshold: Number(config.monomorphic_repetition_threshold)
+        monomorphic_repetition_threshold: Number(config.monomorphic_repetition_threshold),
+        blocked_patterns: patterns
       });
       document.getElementById('curl-example').textContent =
         'curl -X POST ' + getApiBase() + '/policy/config \\\n' +
@@ -620,8 +623,9 @@
         setConnection(false, 'UNREACHABLE');
         tag.className = 'text-xs px-2.5 py-1 rounded-full font-semibold bg-red-950 text-red-400 border border-red-800';
         tag.innerText = 'UNREACHABLE';
-        document.getElementById('blocked-patterns').innerHTML =
-          '<p class="text-xs text-red-400">The service could not be reached, so no policy is shown. Nothing here is filled in from a guess while it is offline.</p>';
+        document.getElementById('blocked-patterns').value = '';
+        document.getElementById('blocked-patterns').placeholder =
+          'The service could not be reached, so no policy is shown. Nothing here is filled in from a guess while it is offline.';
         showRaw({ error: String(err) });
       }
     }
@@ -631,6 +635,7 @@
       document.getElementById('in-budget').value = SHIPPED_DEFAULTS.max_session_budget_usd;
       document.getElementById('in-window').value = SHIPPED_DEFAULTS.loop_history_window;
       document.getElementById('in-threshold').value = SHIPPED_DEFAULTS.monomorphic_repetition_threshold;
+      document.getElementById('blocked-patterns').value = SHIPPED_DEFAULTS.blocked_patterns.join('\n');
       document.getElementById('save-status').innerHTML =
         '<span class="text-amber-400">Form filled with the shipped defaults. Nothing is saved until you press Save.</span>';
     }
@@ -640,7 +645,8 @@
         max_single_call_usd: parseFloat(document.getElementById('in-single').value),
         max_session_budget_usd: parseFloat(document.getElementById('in-budget').value),
         loop_history_window: parseInt(document.getElementById('in-window').value, 10),
-        monomorphic_repetition_threshold: parseInt(document.getElementById('in-threshold').value, 10)
+        monomorphic_repetition_threshold: parseInt(document.getElementById('in-threshold').value, 10),
+        blocked_patterns: document.getElementById('blocked-patterns').value.split('\n').map(s => s.trim()).filter(s => s.length > 0)
       };
     }
 

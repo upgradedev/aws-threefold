@@ -223,7 +223,7 @@ class ArchitecturalBoundaryGuard:
     # out (`find . -path ./.git -prune`, `grep --exclude-dir=.git`, `tree -I
     # .git`): the benchmark of 2026-09-22 found an agent refused for exactly
     # that, in a task where nothing was wrong. Writes under `.git` are still
-    # refused by the governance check on what a command writes (2b and 2c
+    # refused by the governance check on what a command writes (2b and 2d
     # below), and deleting it is a destructive command. `.git-credentials`, the
     # file git's store helper keeps passwords in, stays protected.
     COMMAND_PROTECTED_PATTERNS: List[re.Pattern] = [
@@ -259,6 +259,7 @@ class ArchitecturalBoundaryGuard:
         cls,
         invocation: ToolInvocation,
         rules: Optional[List[Dict[str, Any]]] = None,
+        blocked_patterns: Optional[List[str]] = None,
     ) -> Tuple[bool, str]:
         """Checks a tool invocation against safety and architectural boundaries.
 
@@ -266,7 +267,7 @@ class ArchitecturalBoundaryGuard:
         always has; a caller that stages rules one by one reads them all with
         `boundary_findings`.
         """
-        for finding in cls.boundary_findings(invocation, rules):
+        for finding in cls.boundary_findings(invocation, rules, blocked_patterns):
             return False, finding.reason
         return True, "Architectural boundaries respected"
 
@@ -275,6 +276,7 @@ class ArchitecturalBoundaryGuard:
         cls,
         invocation: ToolInvocation,
         rules: Optional[List[Dict[str, Any]]] = None,
+        blocked_patterns: Optional[List[str]] = None,
     ) -> Iterator["BoundaryFinding"]:
         """Everything wrong with this call, in the order the gates ask.
 
@@ -282,6 +284,11 @@ class ArchitecturalBoundaryGuard:
         stops, so an ordinary verdict costs exactly what it cost before; only a
         caller that has to look past a finding — because the project is still
         only observing that rule — pays for the rest.
+
+        `blocked_patterns` are the policy's additional secret shapes, asked
+        after every gate above. A pattern that does not compile is skipped
+        rather than trusted: the write path refuses such lists, so one that
+        arrives here came from storage written by hand.
 
         Each finding says which gate found it. Reading that back out of the
         sentence was the defect: the sentences quote the caller's own command,
@@ -298,7 +305,7 @@ class ArchitecturalBoundaryGuard:
             yield BoundaryFinding(CREDENTIAL_FOUND, secret_msg, label=secret_msg.rsplit(": ", 1)[-1])
             return
 
-        # What the call runs, read once: the writes it makes are judged in 2c,
+        # What the call runs, read once: the writes it makes are judged in 2d,
         # and the words it never opens are left out of the checks below, which
         # would otherwise read a command's own search pattern as a file.
         command_key, command = shell_command_at(invocation)
@@ -334,7 +341,7 @@ class ArchitecturalBoundaryGuard:
             if is_governance_path(target):
                 yield BoundaryFinding(GOVERNANCE_FOUND, governance_reason(target), path=target)
 
-        # 2c. What a shell command writes. A command was only ever read for the
+        # 2d. What a shell command writes. A command was only ever read for the
         #     paths it named, so `cat > src/domain/user.py <<'EOF'` carried
         #     `import boto3` past a gate that would have refused the same text
         #     sent as a Write.
@@ -397,6 +404,37 @@ class ArchitecturalBoundaryGuard:
                             from_shell=command is not None,
                         )
                         break
+
+        # 5. The policy's blocked patterns, asked last. A hit files under the
+        #    credential key: the shipped patterns are secret shapes, and an
+        #    operator's own are refused with the same force, which means always
+        #    enforced and never staged. Last because every finding above is
+        #    more specific about the same call: reading `.env` is refused as
+        #    the path it names (2), `cat .env` as the path the command reaches
+        #    (4), and a blocked term inside a domain write as the layer it
+        #    crosses (3). Last is still a refusal: a caller that stages a rule
+        #    walks past the observed findings, and a credential is never
+        #    observed, so an observed layer does not shelter a blocked term.
+        #    The reason names the operator's pattern, never the caller's text
+        #    that matched it: echoing the match would hand the secret back in
+        #    the verdict. A pattern that does not compile is skipped rather
+        #    than trusted: the write path refuses such lists, so one that
+        #    arrives here came from storage written by hand.
+        for pattern in blocked_patterns or []:
+            if not isinstance(pattern, str) or not pattern:
+                continue
+            try:
+                matcher = re.compile(pattern)
+            except re.error:
+                continue
+            if any(matcher.search(leaf) for leaf in iter_string_leaves(arguments)):
+                yield BoundaryFinding(
+                    CREDENTIAL_FOUND,
+                    f"Blocked pattern '{pattern[:80]}' matched the arguments. "
+                    "Remove the blocked term or have the operator change the policy.",
+                    label="BLOCKED_PATTERN",
+                )
+                return
 
 
 def describe_target(request: Any) -> str:

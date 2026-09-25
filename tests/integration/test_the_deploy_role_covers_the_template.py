@@ -261,6 +261,14 @@ def _required() -> Dict[str, List[tuple]]:
         "AWS::Logs::MetricFilter": each(
             ["logs:PutMetricFilter", "logs:DescribeMetricFilters", "logs:DeleteMetricFilter"], [FUNCTION_LOG_GROUP]
         ),
+        "AWS::KMS::Key": each(
+            [
+                "kms:CreateKey", "kms:DescribeKey", "kms:GetKeyPolicy", "kms:PutKeyPolicy",
+                "kms:EnableKeyRotation", "kms:GetKeyRotationStatus", "kms:TagResource",
+                "kms:UntagResource", "kms:ListResourceTags", "kms:ScheduleKeyDeletion",
+            ],
+            [f"arn:aws:kms:{REGION}:{ACCOUNT}:key/{SUFFIX}-key-id"],
+        ),
         "AWS::SNS::Topic": each(
             [
                 "sns:CreateTopic", "sns:GetTopicAttributes", "sns:SetTopicAttributes", "sns:Subscribe",
@@ -394,6 +402,10 @@ def test_every_named_resource_belongs_to_this_stack_or_its_deployment() -> None:
         # DescribeLogGroups is a listing: IAM checks it against every group in
         # the region, and API Gateway's logging guide grants it so.
         f"arn:aws:logs:{REGION}:{ACCOUNT}:log-group:*",
+        # KMS key ids are random, so no pattern can name this stack's key. The
+        # grant is still account- and region-scoped, and only this stack's
+        # deploys run under the role that carries it.
+        f"arn:aws:kms:{REGION}:{ACCOUNT}:key/*",
     }
     for statement in STATEMENTS:
         for resource in _as_list(statement["Resource"]):

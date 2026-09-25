@@ -12,7 +12,7 @@ import os
 import re
 import time
 import uuid
-from typing import Any, Dict
+from typing import Any, Dict, List
 from urllib.parse import unquote
 
 from threefold.application.audit_issuer import AuditIssuer
@@ -576,54 +576,18 @@ def _route(event: Dict[str, Any], http_method: str, request_id: str) -> Dict[str
             body = _parse_body(event)
             _check_named_session(body)
             session_id = body.get("session_id", "session-default")
-            evaluations = body.get("evaluations", [])
-            # Checked before the session is touched. A list of anything else
-            # used to reach `e.get` and come back as a server error.
-            if not isinstance(evaluations, list) or not all(isinstance(e, dict) for e in evaluations):
-                raise InvalidRequestError(
-                    "evaluations must be a list of verdict objects.", "evaluations"
-                )
-            # The issuer reads each verdict's invariants, not only its status,
-            # so their shape is the caller's to get right: anything but an
-            # object reached `.values()` as a server error, and the string
-            # "false" would have counted as an invariant that held.
-            for e in evaluations:
-                invariants = e.get("rule_evaluations") or {}
-                if not isinstance(invariants, dict) or not all(
-                    isinstance(held, bool) for held in invariants.values()
-                ):
-                    raise InvalidRequestError(
-                        "rule_evaluations must map each invariant to true or false.", "evaluations"
-                    )
+            # No `evaluations` are read. They used to be, and the certificate
+            # covered the caller's word; it now covers the session's own stored
+            # verdicts, and a body that still sends the field gets the same
+            # document as one that does not. The field is ignored rather than
+            # refused so older callers keep working against the true record.
             session = _evaluator.get_or_create_session(session_id)
-
-            parsed_evals = []
-            for e in evaluations:
-                from threefold.application.dtos import EvaluationResultDTO
-                parsed_evals.append(
-                    EvaluationResultDTO(
-                        verdict_id=e.get("verdict_id", "V-001"),
-                        session_id=session_id,
-                        status=e.get("status", "APPROVED"),
-                        risk_level=e.get("risk_level", "LOW"),
-                        reason=e.get("reason", "OK"),
-                        rule_evaluations=e.get("rule_evaluations") or {},
-                        current_session_cost_usd=float(e.get("current_session_cost_usd", 0.0)),
-                        session_tripped=bool(e.get("session_tripped", False)),
-                        proof_hash=e.get("proof_hash", "hash"),
-                        # Carried through, because it is what tells the issuer
-                        # the gate was watching rather than enforcing. Dropping
-                        # it here turned a session governed in dry run into a
-                        # compliant one on the way in.
-                        dry_run=bool(e.get("dry_run", False)),
-                    )
-                )
 
             # A certificate that attests to nothing is the one artifact this
             # product cannot afford to hand out, so the refusal is reported as a
             # problem the caller can read rather than as a server error.
             try:
-                cert = AuditIssuer.issue_certificate(session, parsed_evals)
+                cert = AuditIssuer.issue_certificate(session)
             except EmptyAttestationException as empty:
                 emit_threefold_emf_metrics(
                     {"CertificatesRefused": 1.0},
@@ -639,10 +603,11 @@ def _route(event: Dict[str, Any], http_method: str, request_id: str) -> Dict[str
                         error_type="urn:threefold:error:empty-attestation",
                         invalid_params=[
                             {
-                                "name": "evaluations",
+                                "name": "session_id",
                                 "reason": (
-                                    "Send the verdicts the certificate covers. This service "
-                                    "issues one only for a session it has evaluated."
+                                    "This service issues a certificate only for a session "
+                                    "it has evaluated. Govern at least one call under "
+                                    "this id first."
                                 ),
                             }
                         ],
@@ -963,12 +928,17 @@ def _route(event: Dict[str, Any], http_method: str, request_id: str) -> Dict[str
 
         if path in ("/policy/config", "/policy") and http_method == "POST":
             body = _parse_body(event)
+            # Checked outside the numbers' try: an InvalidRequestError is a
+            # ValueError, so raising it inside would come back as the numbers'
+            # message with the patterns' problem lost.
+            blocked_patterns = _checked_blocked_patterns(body)
             try:
                 config = PolicyConfigDTO(
                     max_single_call_usd=float(body.get("max_single_call_usd", 1.00)),
                     max_session_budget_usd=float(body.get("max_session_budget_usd", 10.00)),
                     loop_history_window=int(body.get("loop_history_window", 6)),
                     monomorphic_repetition_threshold=int(body.get("monomorphic_repetition_threshold", 3)),
+                    blocked_patterns=blocked_patterns,
                 )
             except (TypeError, ValueError):
                 raise InvalidRequestError("Every policy value must be a number.") from None
@@ -1223,6 +1193,50 @@ def _check_named_session(body: Dict[str, Any]) -> None:
     if named is None or named == "":
         return
     _checked_session_id(named)
+
+
+def _checked_blocked_patterns(body: Dict[str, Any]) -> List[str]:
+    """The policy write's blocked patterns, checked strictly.
+
+    Absent is the shipped list, so a write that only moves a number keeps the
+    shapes; an explicit list, empty included, is the operator's whole list.
+    Anything else is refused with the position of the problem, because a list
+    silently cleaned would enforce what the operator did not write.
+    """
+    from threefold.application.dtos import (
+        MAX_BLOCKED_PATTERN_CHARS,
+        MAX_BLOCKED_PATTERNS,
+        PolicyConfigDTO,
+    )
+
+    raw = body.get("blocked_patterns")
+    if raw is None:
+        return list(PolicyConfigDTO().blocked_patterns)
+    if not isinstance(raw, list):
+        raise InvalidRequestError("blocked_patterns must be a list of regular expressions.", "blocked_patterns")
+    if len(raw) > MAX_BLOCKED_PATTERNS:
+        raise InvalidRequestError(
+            f"blocked_patterns holds at most {MAX_BLOCKED_PATTERNS} patterns.", "blocked_patterns"
+        )
+    checked: List[str] = []
+    for index, pattern in enumerate(raw):
+        if not isinstance(pattern, str) or not pattern:
+            raise InvalidRequestError(
+                f"blocked_patterns[{index}] must be a non-empty string.", "blocked_patterns"
+            )
+        if len(pattern) > MAX_BLOCKED_PATTERN_CHARS:
+            raise InvalidRequestError(
+                f"blocked_patterns[{index}] is longer than {MAX_BLOCKED_PATTERN_CHARS} characters.",
+                "blocked_patterns",
+            )
+        try:
+            re.compile(pattern)
+        except re.error as exc:
+            raise InvalidRequestError(
+                f"blocked_patterns[{index}] does not compile: {exc}", "blocked_patterns"
+            ) from None
+        checked.append(pattern)
+    return checked
 
 
 def _bounded_text(body: Dict[str, Any], name: str, limit: int, default: str) -> str:

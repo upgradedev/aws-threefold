@@ -184,9 +184,9 @@ reserved concurrency of 25 (`aws lambda get-function-concurrency`).
   limits go with it: 18 or 9 runs a cell, one agent, tasks written by
   the people who built Threefold: rates under temptation, not base rates
   (`docs/evidence/BENCHMARK_2026-09-22*.md`).
-- **The certificate** Threefold issues is an unkeyed SHA-256 fingerprint over
-  verdicts the caller supplies. It detects corruption, not an adversary, and
-  nothing requires one before a merge **[STATE-FILE]**.
+- **The certificate** Threefold issues covers the session's own stored
+  verdicts and carries a KMS signature where the stack holds a signing key.
+  Nothing requires one before a merge **[STATE-FILE]**.
 
 ## Takeaways
 

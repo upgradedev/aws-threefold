@@ -185,6 +185,23 @@
       "Resource": "arn:aws:cloudwatch::308857099262:dashboard/threefold-prod-*"
     },
     {
+      "Sid": "KeysHaveRandomIdsSoOnlyTheAccountIsScoped",
+      "Effect": "Allow",
+      "Action": [
+        "kms:CreateKey",
+        "kms:DescribeKey",
+        "kms:GetKeyPolicy",
+        "kms:PutKeyPolicy",
+        "kms:EnableKeyRotation",
+        "kms:GetKeyRotationStatus",
+        "kms:TagResource",
+        "kms:UntagResource",
+        "kms:ListResourceTags",
+        "kms:ScheduleKeyDeletion"
+      ],
+      "Resource": "arn:aws:kms:eu-west-1:308857099262:key/*"
+    },
+    {
       "Sid": "TheAlarmTopicThisStackOwns",
       "Effect": "Allow",
       "Action": [

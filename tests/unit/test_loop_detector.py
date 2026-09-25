@@ -68,3 +68,62 @@ def test_circular_3_step_loop_detected():
     is_safe, reason = detector.evaluate_loop_risk(history, next_call)
     assert is_safe is False
     assert "Circular 3-step loop detected" in reason
+
+
+def test_cycle_window_clamps_into_range():
+    assert LoopDetector().max_cycle_length == 6
+    assert LoopDetector(max_cycle_length=1).max_cycle_length == 2
+    assert LoopDetector(max_cycle_length=10**9).max_cycle_length == 25
+    detector = LoopDetector()
+    assert detector.set_max_cycle_length(3) == 3
+    assert detector.max_cycle_length == 3
+    assert detector.set_max_cycle_length(10**9) == 25
+
+
+def test_a_wider_window_finds_a_longer_cycle():
+    tools = [make_invocation(f"tool_{i}", {"step": i}) for i in range(8)]
+    history = tools + tools
+    narrow = LoopDetector(max_cycle_length=6)
+    is_safe, _ = narrow.evaluate_loop_risk(history, tools[0])
+    assert is_safe is True
+    wide = LoopDetector(max_cycle_length=8)
+    is_safe, reason = wide.evaluate_loop_risk(history, tools[0])
+    assert is_safe is False
+    assert "Circular 8-step loop detected" in reason
+
+
+def _shape(invocation):
+    return "SAME"
+
+
+def test_fuzzy_tier_trips_two_repeats_later_than_exact():
+    detector = LoopDetector()
+    history = [make_invocation("edit", {"n": i}) for i in range(3)]
+    is_safe, _ = detector.evaluate_fuzzy_loop_risk(history, make_invocation("edit", {"n": 99}), _shape)
+    assert is_safe is True, "Four same-shape calls can still be an agent iterating"
+    history.append(make_invocation("edit", {"n": 100}))
+    is_safe, reason = detector.evaluate_fuzzy_loop_risk(history, make_invocation("edit", {"n": 101}), _shape)
+    assert is_safe is False
+    assert "Similar loop detected" in reason
+    assert "differing arguments" in reason
+
+
+def test_fuzzy_tier_skips_calls_with_no_shape():
+    detector = LoopDetector()
+    history = [make_invocation("search", {"q": i}) for i in range(9)]
+    is_safe, reason = detector.evaluate_fuzzy_loop_risk(history, make_invocation("search", {"q": 10}), lambda inv: None)
+    assert is_safe is True
+    assert "no targets" in reason
+
+
+def test_fuzzy_tier_finds_a_similar_cycle():
+    detector = LoopDetector()
+    read = make_invocation("read", {"path": "a.txt"})
+    write = make_invocation("write", {"path": "b.txt"})
+    history = [read, write] * 4
+    shapes = {"read": "R", "write": "W"}
+    is_safe, reason = detector.evaluate_fuzzy_loop_risk(
+        history, make_invocation("read", {"path": "c.txt"}), lambda inv: shapes[inv.tool_name]
+    )
+    assert is_safe is False
+    assert "Similar 2-step cycle detected" in reason

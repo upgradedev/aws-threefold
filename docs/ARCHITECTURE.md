@@ -292,7 +292,9 @@ outside the standard library.
    carries; and last, destructive commands. Every refusal after the credential
    is `BLOCKED_BOUNDARY_VIOLATION`.
 3. **The loop detector** looks for any repeating cycle of byte-identical call
-   signatures, up to period six. A repeated read or poll (`git status`, `ls`,
+   signatures, up to the policy's history window, and then for the same cycle
+   over same-shape calls — same tool, targets and argument keys, values
+   ignored — at a longer fuse. A repeated read or poll (`git status`, `ls`,
    `gh run view`, a file read) is noted and never refused. For a hook the
    repeating call is refused and the session is not halted; for the demo's
    `sim-*` and page sessions the session is halted, which is the flagship demo.
@@ -302,10 +304,12 @@ outside the standard library.
    take the session past 105% of the `budget_usd` the call declares ($10.00 when
    the caller sends none, `application/dtos.py`; the 5% is
    `CostCircuitBreaker`'s `hard_limit_buffer` in `domain/circuit_breaker.py`,
-   which nothing in `src/` overrides). Tokens are the caller's own
-   declaration, and every call is priced at the default Sonnet-class rate
-   because no model id reaches `TokenCostCalculator` **[STATE-FILE]**. A hook
-   declares no tokens, so a hook call costs nothing here.
+   which nothing in `src/` overrides), or past the policy's own session
+   ceiling, which binds every session regardless of the budget the caller
+   declared. Tokens are the caller's own declaration, priced by the
+   `model_id` the call names — a Haiku id takes the Haiku row, everything
+   else the default Sonnet-class rate. A hook declares no tokens, so a hook
+   call costs nothing here.
 
 **Stage.** For calls with `origin` `hook` or `ci` that are not dry runs, the
 project's configured stage applies (`CONFIG#project#<name>`), or the stack's
@@ -583,12 +587,12 @@ What it does not do:
 
 ## 9. The certificate, and what it is not
 
-`POST /issue-certificate` returns a record over a session's verdicts with an
-unkeyed SHA-256 fingerprint. It detects accidental corruption and casual edits.
-It is not tamper evidence: anyone who changes the payload can recompute the
-hash. It is returned in the response and not archived; the S3 bucket the stack
-provisions stays empty. An empty evaluation list, or a session this service has
-no record of, is refused with 400, but the evaluations themselves are the
-caller's word, and nothing in CI verifies a certificate before a merge
-**[STATE-FILE]**. Signing with KMS and issuing from the session's stored history
-would make it load-bearing; neither is done.
+`POST /issue-certificate` returns a record over a session's own stored
+verdicts: every judged call records its verdict on the session, and the
+issuer reads those back, so no caller-supplied verdict can appear on it. It
+carries an unkeyed SHA-256 fingerprint, which detects accidental corruption
+and casual edits, and a KMS signature over the same bytes where the stack
+holds a signing key. It is returned in the response and not archived; the S3
+bucket the stack provisions stays empty. A session with no recorded verdicts
+is refused with 400, and nothing in CI verifies a certificate before a merge
+**[STATE-FILE]**.

@@ -344,6 +344,7 @@ def propose_fix(
     max_write_bytes: int = MAX_WRITE_BYTES,
     max_content_chars: int = MAX_CONTENT_CHARS,
     skip_keys: Collection[str] = (),
+    blocked_patterns: Collection[str] = (),
 ) -> Optional[Dict[str, Any]]:
     """The fix for a refused call, or None when there is nothing to fix.
 
@@ -380,7 +381,9 @@ def propose_fix(
     """
     try:
         active = normalise_rules(rules) if rules else list(DEFAULT_RULES if rules is None else [])
-        fix = _propose(request, result, active, max(0, int(max_content_chars)), skip_keys)
+        fix = _propose(
+            request, result, active, max(0, int(max_content_chars)), skip_keys, blocked_patterns
+        )
         if fix is None:
             return None
         fix.withheld = list(dict.fromkeys(fix.withheld + _withheld(_field(request, "arguments"))))
@@ -458,6 +461,7 @@ def _propose(
     rules: List[Dict[str, Any]],
     max_content_chars: int = MAX_CONTENT_CHARS,
     skip_keys: Collection[str] = (),
+    blocked_patterns: Collection[str] = (),
 ) -> Optional[_Fix]:
     family = _family(result)
     if family is None:
@@ -469,7 +473,9 @@ def _propose(
     if family == "loop":
         return _loop_fix(request, result)
     invocation = _invocation(request)
-    diagnosis = _diagnose(invocation, rules, skip_keys) or _diagnose_observed(invocation, rules)
+    diagnosis = _diagnose(invocation, rules, skip_keys, blocked_patterns) or _diagnose_observed(
+        invocation, rules
+    )
     if diagnosis is None:
         # The gates, asked again with the rules in force, find nothing: the
         # rules changed since, or the refusal came from somewhere this module
@@ -483,12 +489,12 @@ def _propose(
         # refuse the call.
         rules = [rule for rule in rules if rule.get("id") not in skip_keys]
     if diagnosis.kind == KIND_CREDENTIAL:
-        return _credential_fix(invocation, rules, diagnosis, max_content_chars)
+        return _credential_fix(invocation, rules, diagnosis, max_content_chars, blocked_patterns)
     if diagnosis.kind == KIND_PROTECTED_PATH:
         return _protected_fix(diagnosis)
     if diagnosis.kind == KIND_DESTRUCTIVE:
         return _destructive_fix(diagnosis)
-    return _write_fix(invocation, rules, diagnosis, max_content_chars)
+    return _write_fix(invocation, rules, diagnosis, max_content_chars, blocked_patterns)
 
 
 # --- asking the guard's questions again ---------------------------------------------
@@ -514,7 +520,10 @@ _DIAGNOSIS_FOR_FINDING = {
 
 
 def _diagnose(
-    invocation: ToolInvocation, rules: List[Dict[str, Any]], skip_keys: Collection[str] = ()
+    invocation: ToolInvocation,
+    rules: List[Dict[str, Any]],
+    skip_keys: Collection[str] = (),
+    blocked_patterns: Collection[str] = (),
 ) -> Optional[_Diagnosis]:
     """The first check in evaluate_tool_boundary that refuses this call, and what it saw.
 
@@ -589,6 +598,18 @@ def _diagnose(
                 found_text = pattern.search(spelled.get(leaf, leaf))
                 if found_text and unstaged:
                     return _Diagnosis(KIND_PROTECTED_PATH, why="command", detail=found_text.group(0))
+
+    # Last, as the guard asks them: the policy's blocked patterns diagnose as
+    # the credential they are, but only when no gate above named the call.
+    for pattern in blocked_patterns or []:
+        if not isinstance(pattern, str) or not pattern:
+            continue
+        try:
+            matcher = re.compile(pattern)
+        except re.error:
+            continue
+        if any(matcher.search(leaf) for leaf in iter_string_leaves(arguments)):
+            return _Diagnosis(KIND_CREDENTIAL, label=f"blocked pattern '{pattern[:80]}'")
     return None
 
 
@@ -731,7 +752,10 @@ def _parses(path: str, content: str) -> bool:
 
 
 def _check_entry(
-    entry: Dict[str, Any], rules: List[Dict[str, Any]], must_parse: bool = False
+    entry: Dict[str, Any],
+    rules: List[Dict[str, Any]],
+    must_parse: bool = False,
+    blocked_patterns: Collection[str] = (),
 ) -> Tuple[List[Dict[str, Any]], str]:
     """Runs one proposed write through the gates. Returns the checks and why one failed.
 
@@ -743,7 +767,7 @@ def _check_entry(
     `must_parse`, a Python file is also parsed: the gates would pass a file that
     no interpreter could load.
     """
-    checks, why = _gate_entry(entry, rules)
+    checks, why = _gate_entry(entry, rules, blocked_patterns)
     path = entry["path"]
     if must_parse and language_for(path) == "python":
         parsed = _parses(path, entry["content"])
@@ -753,7 +777,11 @@ def _check_entry(
     return checks, why
 
 
-def _gate_entry(entry: Dict[str, Any], rules: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], str]:
+def _gate_entry(
+    entry: Dict[str, Any],
+    rules: List[Dict[str, Any]],
+    blocked_patterns: Collection[str] = (),
+) -> Tuple[List[Dict[str, Any]], str]:
     """The three gate questions of _check_entry."""
     path = entry["path"]
     content = entry["content"]
@@ -765,7 +793,9 @@ def _gate_entry(entry: Dict[str, Any], rules: List[Dict[str, Any]]) -> Tuple[Lis
     else:
         tool, arguments = "Write", {"file_path": path, "content": content}
     allowed, reason = ArchitecturalBoundaryGuard.evaluate_tool_boundary(
-        ToolInvocation(tool_name=tool, action_type=ToolActionType.FILE_WRITE, arguments=arguments), rules=rules
+        ToolInvocation(tool_name=tool, action_type=ToolActionType.FILE_WRITE, arguments=arguments),
+        rules=rules,
+        blocked_patterns=list(blocked_patterns),
     )
     checks = [
         {"gate": GATE_LAYERING, "path": path, "passed": not found},
@@ -1835,6 +1865,7 @@ def _plan_layers(
     removed: List[_Removed],
     rule_ids: List[str],
     rules: List[Dict[str, Any]],
+    blocked_patterns: Collection[str] = (),
 ) -> _Outcome:
     """The domain write, the port and the adapter, tried at each candidate layer until the rules accept one."""
     language = language_for(path)
@@ -1897,7 +1928,7 @@ def _plan_layers(
         new_files.append({"path": port_path, "content": port_text, "new_file": True})
 
     for entry, must_parse in [(entry, parsed_before) for entry in domain_entries] + [(entry, True) for entry in new_files]:
-        checks, why = _check_entry(entry, rules, must_parse=must_parse)
+        checks, why = _check_entry(entry, rules, must_parse=must_parse, blocked_patterns=blocked_patterns)
         outcome.checks.extend(checks)
         if why:
             outcome.ok = False
@@ -1927,7 +1958,7 @@ def _plan_layers(
             (domain_package, adapter_package), block_style,
         )
         entry = {"path": adapter_path, "content": text, "new_file": True}
-        checks, why = _check_entry(entry, rules, must_parse=True)
+        checks, why = _check_entry(entry, rules, must_parse=True, blocked_patterns=blocked_patterns)
         attempts.extend(checks)
         if why:
             refused_by_rules += any(not check["passed"] and check["gate"] != GATE_SYNTAX for check in checks)
@@ -2028,10 +2059,11 @@ def _write_fix(
     rules: List[Dict[str, Any]],
     diagnosis: _Diagnosis,
     max_content_chars: int = MAX_CONTENT_CHARS,
+    blocked_patterns: Collection[str] = (),
 ) -> _Fix:
     command = shell_command(invocation)
     if command is not None:
-        return _shell_write_fix(invocation, rules, diagnosis, command, max_content_chars)
+        return _shell_write_fix(invocation, rules, diagnosis, command, max_content_chars, blocked_patterns)
     written = [site for site in _tool_sites(invocation.arguments) if site.content is not None]
     sites = [site for site in written if _flagged_modules(site.path, site.content, rules)]
     if not sites:
@@ -2040,7 +2072,9 @@ def _write_fix(
             f"No checked fix: the rules flag {diagnosis.path or 'this call'}, but no write in it could be rewritten.",
             [f"Remove the import the rule names from {diagnosis.path or 'the file'} and move it behind a port outside the domain."],
         )
-    outcome = _fix_sites(sites, rules, max_content_chars, sum(len(site.content or "") for site in written))
+    outcome = _fix_sites(
+        sites, rules, max_content_chars, sum(len(site.content or "") for site in written), blocked_patterns
+    )
     return _assemble(diagnosis.kind, outcome, [], shell=False)
 
 
@@ -2049,6 +2083,7 @@ def _fix_sites(
     rules: List[Dict[str, Any]],
     max_content_chars: int = MAX_CONTENT_CHARS,
     written: Optional[int] = None,
+    blocked_patterns: Collection[str] = (),
 ) -> _Outcome:
     """The fix for these sites, rewritten while the call's writes come to `max_content_chars` or less.
 
@@ -2070,7 +2105,7 @@ def _fix_sites(
     size = sum(len(site.content or "") for site in sites) if written is None else max(0, written)
     too_large = size > max_content_chars
     for path, group in groups.items():
-        part = _fix_path(path, group, rules, max_content_chars if too_large else None)
+        part = _fix_path(path, group, rules, max_content_chars if too_large else None, blocked_patterns)
         outcome.writes.extend(part.writes)
         outcome.checks.extend(part.checks)
         outcome.steps.extend(part.steps)
@@ -2159,7 +2194,13 @@ def _too_large(path: str, group: List[_Site], rules: List[Dict[str, Any]], cap: 
     return _Outcome(ok=False, why=why, steps=steps, advice=True)
 
 
-def _fix_path(path: str, group: List[_Site], rules: List[Dict[str, Any]], too_large_over: Optional[int] = None) -> _Outcome:
+def _fix_path(
+    path: str,
+    group: List[_Site],
+    rules: List[Dict[str, Any]],
+    too_large_over: Optional[int] = None,
+    blocked_patterns: Collection[str] = (),
+) -> _Outcome:
     """The fix for one path's writes; advice in words when `too_large_over` names the cap the call is past."""
     flagged = [site for site in group if site.content is not None and _flagged_modules(path, site.content, rules)]
     if not flagged:
@@ -2168,7 +2209,7 @@ def _fix_path(path: str, group: List[_Site], rules: List[Dict[str, Any]], too_la
         part = _Outcome()
         for site in group:
             entry = _entry(site, site.content or "")
-            checks, why = _check_entry(entry, rules, must_parse=site.must_parse)
+            checks, why = _check_entry(entry, rules, must_parse=site.must_parse, blocked_patterns=blocked_patterns)
             part.writes.append(entry)
             part.checks.extend(checks)
             if why:
@@ -2187,7 +2228,7 @@ def _fix_path(path: str, group: List[_Site], rules: List[Dict[str, Any]], too_la
         cleaned.append(new)
         removed.extend(taken)
         rule_ids.extend(rule_id for rule_id in ids if rule_id not in rule_ids)
-    return _plan_layers(path, group, cleaned, removed, rule_ids, rules)
+    return _plan_layers(path, group, cleaned, removed, rule_ids, rules, blocked_patterns)
 
 
 def _route_advice(write: ShellWrite) -> str:
@@ -2231,6 +2272,7 @@ def _shell_write_fix(
     diagnosis: _Diagnosis,
     command: Any,
     max_content_chars: int = MAX_CONTENT_CHARS,
+    blocked_patterns: Collection[str] = (),
 ) -> _Fix:
     cwd = command_cwd(invocation)
     analysis = diagnosis.analysis or analysed(command, cwd)
@@ -2274,7 +2316,9 @@ def _shell_write_fix(
             "No checked fix: make the command's file writes with Write or Edit so the rules can read them.",
             ["Make the command's file writes with Write or Edit, naming each file, so the rules read them before they land."],
         )
-    outcome = _fix_sites(sites, rules, max_content_chars, written) if sites else _Outcome(ok=False)
+    outcome = (
+        _fix_sites(sites, rules, max_content_chars, written, blocked_patterns) if sites else _Outcome(ok=False)
+    )
     outcome.checks.extend(route_checks)
     extra: List[str] = []
     if any(site.literal_heredoc for site in sites):
@@ -2961,6 +3005,7 @@ def _credential_fix(
     rules: List[Dict[str, Any]],
     diagnosis: _Diagnosis,
     max_content_chars: int = MAX_CONTENT_CHARS,
+    blocked_patterns: Collection[str] = (),
 ) -> _Fix:
     arguments = invocation.arguments if isinstance(invocation.arguments, dict) else {}
     label = diagnosis.label or "credential"
@@ -2975,7 +3020,7 @@ def _credential_fix(
             if write.target and not write.pattern and not write.deletes and write.content is not None and _has_secret(write.content)
         ]
         if not sites:
-            return _command_credential_fix(invocation, rules, command, label)
+            return _command_credential_fix(invocation, rules, command, label, blocked_patterns)
         covered = [command] if isinstance(command, str) else list(command)
         text = command if isinstance(command, str) else " ".join(str(word) for word in command)
         # The Writes replace the command; if the command also carried the
@@ -3041,7 +3086,9 @@ def _credential_fix(
 
     names = list(dict.fromkeys(names))
     variable = names[0] if names else _DEFAULT_ENVIRONMENT_NAMES.get(label, "API_KEY")
-    outcome = _fix_sites(fixed, rules, max_content_chars) if fixed else _Outcome(ok=False)
+    outcome = (
+        _fix_sites(fixed, rules, max_content_chars, None, blocked_patterns) if fixed else _Outcome(ok=False)
+    )
     lead = []
     for site in fixed:
         lead.append(
@@ -3092,7 +3139,13 @@ def _script_word(words: Sequence[str]) -> Tuple[Optional[int], str]:
     return None, ""
 
 
-def _command_credential_fix(invocation: ToolInvocation, rules: List[Dict[str, Any]], command: Any, label: str) -> _Fix:
+def _command_credential_fix(
+    invocation: ToolInvocation,
+    rules: List[Dict[str, Any]],
+    command: Any,
+    label: str,
+    blocked_patterns: Collection[str] = (),
+) -> _Fix:
     """A command carrying a credential: the same command reading it from the environment.
 
     Validated only where the rewritten command still expands the variable at
@@ -3157,7 +3210,9 @@ def _command_credential_fix(invocation: ToolInvocation, rules: List[Dict[str, An
     arguments[key] = rewritten
     stray = [leaf for leaf in iter_string_leaves(arguments) if _has_secret(leaf)]
     allowed, _ = ArchitecturalBoundaryGuard.evaluate_tool_boundary(
-        ToolInvocation(tool_name=invocation.tool_name, action_type=invocation.action_type, arguments=arguments), rules=rules
+        ToolInvocation(tool_name=invocation.tool_name, action_type=invocation.action_type, arguments=arguments),
+        rules=rules,
+        blocked_patterns=list(blocked_patterns),
     )
     checks = [
         {"gate": GATE_CREDENTIAL, "path": "(command)", "passed": not stray},

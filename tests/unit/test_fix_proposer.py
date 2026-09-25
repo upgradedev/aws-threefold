@@ -1737,3 +1737,32 @@ def test_every_refusal_in_the_suite_gets_a_fix_and_every_validated_one_passes_th
     # Every one gets a validated fix; one that does not is named here.
     assert layering_writes >= 24, layering_writes
     assert layering_writes_validated == layering_writes, layering_writes_unvalidated
+
+
+def test_a_fix_for_a_blocked_term_names_the_pattern_and_rewrites_nothing() -> None:
+    """An operator's term cannot be located the way a compiled shape can.
+
+    The diagnosis still names what refused, and the answer is words rather
+    than a rewrite: no writes, unvalidated, and the pattern in the summary so
+    the agent knows what to take out.
+    """
+    request = {
+        "tool_name": "write_to_file",
+        "action_type": "FILE_WRITE",
+        "arguments": {
+            "TargetFile": "/src/notes.txt",
+            "CodeContent": "deploy AcmeSecretProject at dawn",
+        },
+    }
+    evaluations = dict(ALL_PASSED)
+    evaluations["SECRET_LEAKAGE_FREE"] = False
+    result = {
+        "status": "BLOCKED_SECRET_DETECTED",
+        "reason": "Blocked pattern matched the arguments.",
+        "rule_evaluations": evaluations,
+    }
+    fix = _fix(request, result, blocked_patterns=[r"AcmeSecret\w+"])
+    assert fix["kind"] == "credential"
+    assert "blocked pattern" in fix["summary"]
+    assert fix["writes"] == []
+    assert fix["validated"] is False

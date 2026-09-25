@@ -8,7 +8,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple
-from threefold.domain.models import AgentSession, ToolActionType, ToolInvocation
+from threefold.domain.models import AgentSession, StoredVerdict, ToolActionType, ToolInvocation
 
 logger = logging.getLogger(__name__)
 
@@ -137,6 +137,8 @@ def clean_decision(row: Dict[str, Any]) -> Dict[str, Any]:
         # Rows written before request v2 carry neither, and say so.
         "agent": row.get("agent", "unknown") or "unknown",
         "origin": row.get("origin", "unknown") or "unknown",
+        # Rows written before model ids default to what priced them: the default rate.
+        "model": row.get("model", "default") or "default",
         "dry_run": bool(row.get("dry_run", False)),
         "status": row.get("status", ""),
         "rule": row.get("rule", "NONE"),
@@ -286,6 +288,20 @@ class DynamoDBSessionRepository:
             except Exception as exc:
                 logger.warning("Could not parse history JSON: %s", exc)
 
+        # Reconstruct the recorded verdicts. Rows written before verdicts were
+        # kept carry no field and read back as none, which the issuer refuses
+        # to certify; a row whose verdicts cannot be parsed keeps its calls
+        # and loses only the certificate, never the session.
+        verdicts: List[StoredVerdict] = []
+        raw_verdicts = item.get("verdicts_json")
+        if raw_verdicts:
+            try:
+                for v in json.loads(raw_verdicts):
+                    if isinstance(v, dict):
+                        verdicts.append(StoredVerdict.from_dict(v))
+            except Exception as exc:
+                logger.warning("Could not parse verdicts JSON: %s", exc)
+
         session = AgentSession(
             session_id=session_id,
             developer_id=item.get("developer_id", "dev-default"),
@@ -295,6 +311,7 @@ class DynamoDBSessionRepository:
             total_input_tokens=int(item.get("total_input_tokens", 0)),
             total_output_tokens=int(item.get("total_output_tokens", 0)),
             history=history,
+            verdicts=verdicts,
             is_tripped=bool(item.get("is_tripped", False)),
             trip_reason=item.get("trip_reason") or None,
             is_terminated=bool(item.get("is_terminated", False)),
@@ -898,6 +915,7 @@ class DynamoDBSessionRepository:
             }
             for h in session.history[-50:]  # Keep last 50 actions for sliding window
         ])
+        verdicts_serialized = json.dumps([v.to_dict() for v in session.verdicts[-50:]])
 
         item = {
             "PK": f"SESSION#{session.session_id}",
@@ -914,6 +932,7 @@ class DynamoDBSessionRepository:
             "terminated_by": session.terminated_by or "",
             "termination_reason": session.termination_reason or "",
             "history_json": history_serialized,
+            "verdicts_json": verdicts_serialized,
             "created_at": session.created_at,
             "ttl": int(time.time()) + SESSION_TTL_SECONDS,
         }

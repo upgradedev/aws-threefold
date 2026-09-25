@@ -3,17 +3,19 @@ from __future__ import annotations
 
 import copy
 import datetime
+import hashlib
 import logging
 import time
 from collections import OrderedDict
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Collection, Dict, List, Optional, Tuple
 from threefold.domain import boundary_guard as boundary_guard_module
 from threefold.domain import loop_detector as loop_detector_module
 from threefold.domain.models import (
     AgentSession,
     GovernanceVerdict,
     RiskLevel,
+    StoredVerdict,
     ToolActionType,
     ToolInvocation,
     VerdictStatus,
@@ -29,6 +31,7 @@ from threefold.domain.boundary_guard import (
     observe_layering,
     redact_secrets,
     shell_command,
+    target_paths,
 )
 from threefold.application.fix_proposer import propose_fix
 from threefold.application.dtos import (
@@ -38,6 +41,7 @@ from threefold.application.dtos import (
     ReadinessResponseDTO,
     SubsystemHealthDTO,
     ToolCallRequestDTO,
+    clean_blocked_patterns,
 )
 from threefold.application.labels import is_labelled
 from threefold.application import projects as stages
@@ -73,6 +77,7 @@ logger = logging.getLogger(__name__)
 # enforcing the old set until they happened to be recycled. One read per
 # container per half minute is the price of that sentence being true.
 RULES_REFRESH_SECONDS = 30.0
+POLICY_REFRESH_SECONDS = 30.0
 
 # How a refusal that comes from the session's own state, rather than from a
 # gate, begins. Both wear the same status, so this prefix is what tells a call
@@ -200,6 +205,25 @@ def runs_a_command(request: Any) -> bool:
         action = ToolActionType.UNKNOWN
     invocation = ToolInvocation(tool_name=str(getattr(request, "tool_name", "") or ""), action_type=action, arguments=arguments)
     return shell_command(invocation) is not None
+
+
+def _fuzzy_signature(invocation: ToolInvocation) -> Optional[str]:
+    """What a call does, normalized past its bytes: tool, targets, keys.
+
+    Two edits of the same file with different content share this signature
+    while their canonical ones differ. None when the call names no file
+    targets at all: without targets there is no shape to compare, and lumping
+    every targetless call into one shape would halt an agent for searching
+    twice. Paths count in the spelling the call used; values below the top
+    level are ignored, which is the documented coarseness of the tier.
+    """
+    arguments = invocation.arguments if isinstance(invocation.arguments, dict) else {}
+    targets = sorted(set(target_paths(arguments)))
+    if not targets:
+        return None
+    keys = sorted(str(key) for key in arguments)
+    payload = f"{invocation.tool_name}:{','.join(targets)}:{','.join(keys)}"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 
 
 def fix_options(rule_key: str) -> Dict[str, Any]:
@@ -369,10 +393,12 @@ class GovernanceEvaluator:
         # policy. A gate a caller supplies is left exactly as it was supplied.
         self.policy_config = policy_config or PolicyConfigDTO()
         self.cost_breaker = cost_breaker or CostCircuitBreaker(
-            max_single_invocation_cost=self.policy_config.max_single_call_usd
+            max_single_invocation_cost=self.policy_config.max_single_call_usd,
+            max_session_budget_usd=self.policy_config.max_session_budget_usd,
         )
         self.loop_detector = loop_detector or LoopDetector(
-            repetition_threshold=self.policy_config.monomorphic_repetition_threshold
+            repetition_threshold=self.policy_config.monomorphic_repetition_threshold,
+            max_cycle_length=self.policy_config.loop_history_window,
         )
         if session_repo is not None:
             self.session_repo = session_repo
@@ -386,6 +412,7 @@ class GovernanceEvaluator:
         # never been given any enforces the shipped set.
         self.layering_rules = self._adopt_saved_rules()
         self._rules_read_at = time.monotonic()
+        self._policy_read_at = time.monotonic()
         # A project's own rules, when it has any, replace the shared set for
         # that project's calls. Read on first use and again after the same
         # interval the shared set is, one project at a time, least recently
@@ -410,6 +437,12 @@ class GovernanceEvaluator:
         if not saved:
             return
         try:
+            # A policy saved before the patterns existed carries no list and
+            # keeps the shipped shapes; an explicit list, empty included, is
+            # the operator's whole list.
+            raw_patterns = saved.get("blocked_patterns")
+            if raw_patterns is None:
+                raw_patterns = PolicyConfigDTO().blocked_patterns
             self._apply(
                 PolicyConfigDTO(
                     max_single_call_usd=float(saved.get("max_single_call_usd", 1.00)),
@@ -418,6 +451,7 @@ class GovernanceEvaluator:
                     monomorphic_repetition_threshold=int(
                         saved.get("monomorphic_repetition_threshold", 3)
                     ),
+                    blocked_patterns=clean_blocked_patterns(raw_patterns),
                 )
             )
         except (TypeError, ValueError) as exc:
@@ -461,6 +495,47 @@ class GovernanceEvaluator:
         cleaned = normalise_rules(saved)
         if cleaned:
             self.layering_rules = cleaned
+
+    def refresh_policy_if_stale(self) -> None:
+        """Reads the stored policy again when this container's copy is old.
+
+        The same staleness the layering rules accept: a policy saved on one
+        container applies everywhere within POLICY_REFRESH_SECONDS. A read
+        that fails, or a policy that no longer parses, keeps the policy held,
+        because a warm container that fell back to defaults on a transient
+        error would unenforce an operator's ceilings every thirty seconds,
+        and nothing would say so.
+        """
+        if time.monotonic() - self._policy_read_at < POLICY_REFRESH_SECONDS:
+            return
+        self._policy_read_at = time.monotonic()
+        loader = getattr(self.session_repo, "load_policy", None)
+        if loader is None:
+            return
+        try:
+            saved = loader()
+        except Exception as exc:  # pragma: no cover - storage is best effort
+            logger.warning("Could not re-read the policy; keeping the one held: %s", exc)
+            return
+        if not saved:
+            return
+        try:
+            raw_patterns = saved.get("blocked_patterns")
+            if raw_patterns is None:
+                raw_patterns = PolicyConfigDTO().blocked_patterns
+            self._apply(
+                PolicyConfigDTO(
+                    max_single_call_usd=float(saved.get("max_single_call_usd", 1.00)),
+                    max_session_budget_usd=float(saved.get("max_session_budget_usd", 10.00)),
+                    loop_history_window=int(saved.get("loop_history_window", 6)),
+                    monomorphic_repetition_threshold=int(
+                        saved.get("monomorphic_repetition_threshold", 3)
+                    ),
+                    blocked_patterns=clean_blocked_patterns(raw_patterns),
+                )
+            )
+        except (TypeError, ValueError) as exc:
+            logger.warning("Saved policy was unreadable, keeping the one held: %s", exc)
 
     def rules_in_force(self, project: Optional[str] = None) -> Tuple[List[Dict[str, Any]], str]:
         """The layering rules a call from `project` is judged by, and where they came from.
@@ -637,7 +712,10 @@ class GovernanceEvaluator:
     def _apply(self, config: PolicyConfigDTO) -> None:
         self.policy_config = config
         self.cost_breaker.max_single_invocation_cost = config.max_single_call_usd
+        self.cost_breaker.max_session_budget_usd = config.max_session_budget_usd
         self.loop_detector.repetition_threshold = config.monomorphic_repetition_threshold
+        self.loop_detector.set_max_cycle_length(config.loop_history_window)
+        self._policy_read_at = time.monotonic()
 
     def update_policy(self, config: PolicyConfigDTO) -> None:
         """Applies a policy and stores it.
@@ -808,6 +886,7 @@ class GovernanceEvaluator:
         # Resolved once, so every gate in this call reads the same set even if
         # a refresh lands halfway through. The stage is resolved the same way.
         project = getattr(request, "project_name", None)
+        self.refresh_policy_if_stale()
         rules, _ = self.rules_in_force(project)
         project_stage, config = self.stage_for(project)
         stage = stages.judged_stage(request, project_stage)
@@ -824,8 +903,11 @@ class GovernanceEvaluator:
         # After the stage and observe_rules have had their say, so the fix is
         # for the verdict the caller is actually given, and checked against the
         # same rules that judged the call.
-        result.suggested_fix = self._suggest_fix(request, result, rules, key)
+        result.suggested_fix = self._suggest_fix(
+            request, result, rules, key, self.policy_config.blocked_patterns
+        )
         self._record_decision(request, result, rules, stage=stage, rule_key=key)
+        self._record_verdict(request, result)
         return result
 
     @staticmethod
@@ -834,6 +916,7 @@ class GovernanceEvaluator:
         result: EvaluationResultDTO,
         rules: List[Dict[str, Any]],
         rule_key: Optional[str] = None,
+        blocked_patterns: Collection[str] = (),
     ) -> Optional[Dict[str, Any]]:
         """The fix for this verdict, when someone will read it and it fits the budget.
 
@@ -853,6 +936,8 @@ class GovernanceEvaluator:
         proposer is asked: see fix_max_chars. A fix that rewrites the call is
         told to rewrite no more than FIX_REWRITE_MAX_CHARS (fix_options), so a
         layering refusal between that and its own ceiling is answered in words.
+        `blocked_patterns` are the policy's shapes the call was judged by, and
+        the fix is checked against them too, as its own argument.
 
         No `phrase` is passed. A model call has no place inside a verdict's
         latency, and the summary the proposer writes is already one clean line.
@@ -878,7 +963,10 @@ class GovernanceEvaluator:
             # asked for.
             skipped = getattr(result, "skipped_keys", None) or frozenset()
             options = dict(fix_options(key), skip_keys=skipped) if skipped else fix_options(key)
-            return propose_fix(request, result, rules, **options)
+            # Beside the options, not inside them: the fix is checked against
+            # the same policy that judged the call, while the options stay the
+            # ceiling the rule key asked for.
+            return propose_fix(request, result, rules, blocked_patterns=blocked_patterns, **options)
         except Exception as exc:
             # The proposer never raises, and measuring a call that the gates
             # already read should not either; if either ever does, the caller
@@ -964,6 +1052,10 @@ class GovernanceEvaluator:
                     # arrive from closed sets, so they are safe to count by.
                     "agent": str(getattr(request, "agent", "") or "unknown")[:40],
                     "origin": str(getattr(request, "origin", "") or "unknown")[:40],
+                    # The model that made the call, as it priced the tokens. Not
+                    # a closed set, so counted by nothing; kept so a cost can
+                    # be audited against the rates that produced it.
+                    "model": str(getattr(request, "model_id", "") or "default")[:120],
                     "dry_run": bool(getattr(request, "dry_run", False)),
                     # The stage the call was judged under, and the mode the
                     # hook was told to send in. Kept apart from dry_run, which
@@ -1010,6 +1102,47 @@ class GovernanceEvaluator:
             )
         except Exception as exc:  # pragma: no cover - the ledger must not break a verdict
             logger.warning("Could not record the decision: %s", exc)
+
+    def _record_verdict(self, request: ToolCallRequestDTO, result: EvaluationResultDTO) -> None:
+        """Appends the rendered verdict to the session's own stored history.
+
+        This is what the certificate covers: approvals and refusals alike, as
+        this service rendered them, so no caller-supplied verdict can appear
+        on it. The gates only save the session for approvals and halts, so a
+        refusal's verdict would otherwise leave no trace here the way it used
+        to leave none in the ledger.
+
+        The session is re-read rather than reused because `_decide` owns its
+        copy, and the write retries once with force when the stored row is
+        tripped: a halted session's later refusals are verdicts too, and the
+        write preserves the terminal state it found. Recording never raises;
+        on a second failure the verdict still stands and the ledger still has
+        its row, and the certificate covers one verdict fewer, count included.
+        """
+        try:
+            stored = self.session_repo.get_session(request.session_id)
+            if stored is None:
+                logger.warning("No session to record the verdict on: %s", request.session_id)
+                return
+            stored.record_verdict(
+                StoredVerdict(
+                    verdict_id=str(result.verdict_id or ""),
+                    status=str(result.status or ""),
+                    rule_evaluations={str(k): v is True for k, v in (result.rule_evaluations or {}).items()},
+                    dry_run=bool(getattr(result, "dry_run", False)),
+                    proof_hash=str(result.proof_hash or ""),
+                )
+            )
+            try:
+                self.session_repo.save_session(stored, force=stored.is_tripped)
+            except SessionConflictError:
+                reread = self.session_repo.get_session(request.session_id)
+                if reread is None:
+                    return
+                reread.record_verdict(stored.verdicts[-1])
+                self.session_repo.save_session(reread, force=True)
+        except Exception as exc:  # pragma: no cover - recording must not break a verdict
+            logger.warning("Could not record the verdict: %s", exc)
 
     @staticmethod
     def _rule_that_fired(result: EvaluationResultDTO) -> str:
@@ -1186,7 +1319,9 @@ class GovernanceEvaluator:
         # asked; a project that is still watching a rule steps over that
         # finding and reads on, so the rest of the same call is still judged.
         refusal: Optional[Any] = None
-        for finding in ArchitecturalBoundaryGuard.boundary_findings(invocation, rules=rules):
+        for finding in ArchitecturalBoundaryGuard.boundary_findings(
+            invocation, rules=rules, blocked_patterns=self.policy_config.blocked_patterns
+        ):
             key = finding_key(finding)
             if key in observe_keys:
                 watched.append(_Observed(key, finding.reason, _INVARIANT_FOR_FINDING(finding), finding.path))
@@ -1233,6 +1368,13 @@ class GovernanceEvaluator:
 
         # Gate 2: Check for Loop & Thrashing
         is_loop_free, loop_reason = self.loop_detector.evaluate_loop_risk(session.history, invocation)
+        if is_loop_free:
+            # The fuzzy tier: the same tools on the same targets with differing
+            # arguments, at a longer fuse. Everything below — observe, reads,
+            # halts, dry runs — reads these two names, so it applies unchanged.
+            is_loop_free, loop_reason = self.loop_detector.evaluate_fuzzy_loop_risk(
+                session.history, invocation, _fuzzy_signature
+            )
         repeat_note = ""
         if not is_loop_free and LOOP_KEY in observe_keys and not is_read_or_poll(invocation):
             # LOOP is still only being watched here. The repeat is recorded and
@@ -1301,6 +1443,7 @@ class GovernanceEvaluator:
         projected_usage = TokenCostCalculator.calculate(
             input_tokens=request.projected_input_tokens,
             output_tokens=request.projected_output_tokens,
+            model_id=getattr(request, "model_id", "default") or "default",
         )
         if BUDGET_KEY in observe_keys:
             # The breaker trips the session it is handed as it judges, so while

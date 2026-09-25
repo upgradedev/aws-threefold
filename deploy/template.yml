@@ -175,6 +175,7 @@ Globals:
       Variables:
         TABLE_NAME: !Ref ThreefoldTable
         EVIDENCE_BUCKET: !Ref EvidenceBucket
+        CERT_KMS_KEY_ID: !Ref CertificateKey
         LOG_LEVEL: INFO
         # Empty by design: with no key configured the middleware refuses every
         # policy write rather than falling back to a placeholder that is printed
@@ -260,6 +261,10 @@ Resources:
             # uploader was deleted with the grant), so the function holds no
             # object rights on it. The bucket stays provisioned for the day
             # archival lands; until then it stays empty.
+            - Effect: Allow
+              Action:
+                - kms:Sign
+              Resource: !GetAtt CertificateKey.Arn
       Events:
         StatusRoute:
           Type: HttpApi
@@ -343,6 +348,27 @@ Resources:
       # creates a new table and never rewrites this one.
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
+
+  CertificateKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: Signs Threefold governance certificates (RSASSA_PKCS1_V1_5_SHA_256 over the canonical bytes)
+      EnableKeyRotation: true
+      KeyUsage: SIGN_VERIFY
+      KeySpec: RSA_2048
+      # The key policy names the account root only, which is what lets the
+      # function's own IAM statement below grant it kms:Sign. Naming the
+      # function's role here instead would close a circle (the role's policy
+      # names the key's ARN), and CloudFormation refuses to deploy a circle.
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AccountAdministration
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
+            Action: 'kms:*'
+            Resource: '*'
 
   EvidenceBucket:
     Type: AWS::S3::Bucket
@@ -1074,6 +1100,9 @@ Outputs:
   AlarmTopicArn:
     Description: The SNS topic every alarm of this stack notifies
     Value: !Ref ThreefoldAlarmTopic
+  CertificateKeyId:
+    Description: The KMS key signing governance certificates; verify a signature with kms:GetPublicKey on this id
+    Value: !Ref CertificateKey
   ApiEndpoint:
     # The trailing slash is part of the URL. API Gateway answers the bare /prod
     # with its own {"message":"Not Found"} before the function is reached, so a

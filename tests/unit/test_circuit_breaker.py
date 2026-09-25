@@ -66,3 +66,48 @@ def test_circuit_breaker_trips_when_cumulative_budget_exceeded():
     subsequent_call, sub_reason = breaker.evaluate_cost_risk(session, TokenUsage(10, 10, 0.0001))
     assert subsequent_call is False
     assert "Session already tripped" in sub_reason
+
+
+def test_policy_session_ceiling_binds_a_generous_caller_budget():
+    breaker = CostCircuitBreaker(max_single_invocation_cost=100.0, max_session_budget_usd=1.00)
+    session = AgentSession(
+        session_id="session-policy-cap",
+        developer_id="dev-test",
+        project_name="Test-Project",
+        budget_usd=100.00,
+        total_cost_usd=0.95,
+    )
+    usage = TokenCostCalculator.calculate(20_000, 5_000)  # ~$0.135
+    is_safe, reason = breaker.evaluate_cost_risk(session, usage)
+    assert is_safe is False
+    assert "policy session ceiling" in reason
+    assert session.is_tripped is True
+
+
+def test_no_policy_ceiling_means_only_the_session_budget_binds():
+    breaker = CostCircuitBreaker(max_single_invocation_cost=100.0)
+    session = AgentSession(
+        session_id="session-no-cap",
+        developer_id="dev-test",
+        project_name="Test-Project",
+        budget_usd=100.00,
+        total_cost_usd=50.0,
+    )
+    usage = TokenCostCalculator.calculate(1_000, 500)
+    is_safe, _ = breaker.evaluate_cost_risk(session, usage)
+    assert is_safe is True
+
+
+def test_haiku_ids_take_the_haiku_row_in_any_naming():
+    exact = TokenCostCalculator.calculate(1_000_000, 0, "eu.anthropic.claude-haiku-4-5-20251001-v1:0")
+    dated = TokenCostCalculator.calculate(1_000_000, 0, "claude-haiku-4-5-20251001")
+    assert exact.cost_usd == 1.00
+    assert dated.cost_usd == 1.00
+    assert dated.model_id == "claude-haiku-4-5-20251001"
+
+
+def test_unknown_models_fall_back_to_the_default_rate():
+    codex = TokenCostCalculator.calculate(1_000_000, 0, "codex-default")
+    default = TokenCostCalculator.calculate(1_000_000, 0)
+    assert codex.cost_usd == default.cost_usd == 3.00
+    assert codex.model_id == "codex-default"

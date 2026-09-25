@@ -213,6 +213,12 @@ paths:
                     managed leaves the decision to the project's stage on the server, enforce never sends a dry
                     run. Stored on the ledger row. Absent, or any other value, is recorded as 'unknown'; another
                     value is reported in warnings.
+                model_id:
+                  type: string
+                  description: >-
+                    The model that made the call, priced by it: a Haiku id takes the Haiku row, everything else
+                    the default Sonnet-class rate. Stored on the ledger row so a cost can be audited against the
+                    rates that produced it. Absent is 'default'.
       responses:
         '200':
           description: Evaluation verdict, the invariants it was measured against, and the explanation with its
@@ -395,16 +401,16 @@ paths:
     post:
       summary: Issue Governance Certificate
       description: >-
-        Issues a SHA-256 fingerprinted Governance Certificate over a session's verdicts. The fingerprint is unkeyed:
-        it detects corruption and casual edits, not an adversary, because nothing signs it and nothing in CI requires
-        one before a merge.
+        Issues a Governance Certificate over a session's own stored verdicts: the session id is the only input,
+        and any evaluations the body still sends are ignored. The SHA-256 fingerprint is unkeyed and detects corruption
+        and casual edits; where the stack holds a signing key the same bytes carry a KMS signature. Nothing in CI
+        requires one before a merge.
       responses:
         '200':
           description: The certificate, returned rather than archived
         '400':
-          description: >-
-            The body is not a JSON object, or there is nothing to certify: an empty list of evaluations, or a session
-            this service has no record of governing
+          description: 'The body is not a JSON object, or there is nothing to certify: a session with no recorded
+            verdicts'
   /policy/config:
     get:
       summary: Get Dynamic Policy Configuration
@@ -415,10 +421,11 @@ paths:
     post:
       summary: Update Dynamic Policy Configuration
       description: >-
-        Adjusts the runtime governance thresholds. This write is durable: it lands in DynamoDB and every container
-        that starts afterwards adopts it, so it requires the operator key even on a deployment where reads are anonymous.
-        The handler rebuilds the whole policy from the body, so send all four fields; blocked_patterns is not accepted
-        and is discarded.
+        Adjusts the runtime governance thresholds. This write is durable: it lands in DynamoDB, every container
+        that starts afterwards adopts it, and warm containers re-read it every thirty seconds, so it requires the
+        operator key even on a deployment where reads are anonymous. The handler rebuilds the whole policy from
+        the body; a field left out keeps its shipped default, and blocked_patterns holds at most fifty regular expressions
+        of two hundred characters each, each of which must compile.
       requestBody:
         required: true
         content:
@@ -430,8 +437,14 @@ paths:
                   type: number
                 max_session_budget_usd:
                   type: number
+                loop_history_window:
+                  type: integer
                 monomorphic_repetition_threshold:
                   type: integer
+                blocked_patterns:
+                  type: array
+                  items:
+                    type: string
       responses:
         '200':
           description: Updated policy configuration

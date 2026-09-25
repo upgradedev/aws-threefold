@@ -68,8 +68,8 @@ itself is in [`ARCHITECTURE.md`](ARCHITECTURE.md).
   its grant were deleted together, and the provisioned bucket stays empty. The
   Bedrock grant covers every Claude model on those two patterns, not only the
   one configured.
-- The certificate's fingerprint is unkeyed and covers verdicts the caller
-  supplies [STATE-FILE].
+- The certificate covers the session's own stored verdicts, fingerprinted
+  unkeyed and signed with KMS where the stack holds a key [STATE-FILE].
 
 ---
 

@@ -140,20 +140,13 @@ it, treat the later date as the one that governs teardown.
 These are recorded because they are still false or missing in the tree. None is
 hidden in a document that a judge would read as finished work.
 
-1. Three of the five keys `/policy/config` returns are enforced by nothing.
-   `max_session_budget_usd` and `loop_history_window` survive a cold start and
-   come back from that endpoint, but no gate reads them: the session ceiling is
-   the `budget_usd` each call declares, and the detector's cycle length is
-   compiled in at six. `blocked_patterns` is the third: it is defined on the DTO
-   and read by no module in `src/`, because the credential shapes the secret gate
-   matches live in the domain rules instead. The POST handler builds the policy
-   from four fields, so a caller that sends a pattern list has it discarded and
-   the defaults echoed back as though they had been accepted. `/settings.html` carries all three on
-   its face: the two numeric ones are badged "stored, not enforced", and the
-   pattern list is shown read only with the reason. The remaining two keys are
-   wired, and the breaker is now built from the policy rather than from its own
-   $2.50 default, so the cap `/policy/config` reports is the cap a call is
-   measured against, including on a cold container that was never sent a policy.
+1. Fixed on 2026-09-25: all five keys `/policy/config` returns are enforced.
+   The session ceiling trips through the breaker on top of each call's own
+   `budget_usd`, the history window sets the detector's cycle search (clamped
+   2-25), and the pattern list refuses through the secret gate under the
+   credential key, always enforced and never staged. The POST handler accepts
+   and strictly validates the list, and a saved policy is re-read every thirty
+   seconds rather than adopted at cold start only.
 2. The `calls` count in the sessions listing saturates at 50, because the store
    keeps `history[-50:]`. Cost and tokens are cumulative and are not capped. The
    page says so rather than presenting 50 as a total.
@@ -162,21 +155,22 @@ hidden in a document that a judge would read as finished work.
    rights at all. `EvidenceStore.create_sealed_bundle` stays: it seals locally
    and is covered by a test. The bucket stays provisioned and empty until
    archival lands.
-4. The certificate still covers verdicts the caller supplies. An empty list and
-   a session this service never governed are now both refused with 400, and the
-   invariant sits in `AuditIssuer` so no caller can go around it, but the
-   contents of the evaluations are still taken on the caller's word: a session
-   with one real call can be certified with four invented ones. Issuing from the
-   session's own stored history is the fix, and it is not done.
+4. Fixed on 2026-09-25: the certificate covers the session's own stored
+   verdicts. Every judged call records its verdict on the session, approvals
+   and refusals alike, and a supplied `evaluations` list is ignored. The same
+   canonical bytes carry a KMS signature where the stack holds a signing key
+   (unsigned with the absence stated, anywhere else). A session with no
+   recorded verdicts is refused with 400. What remains is requiring a
+   certificate before a merge, which nothing in CI does.
 5. Four of the five offline fallback panels still show canned prose. They now say
    "Simulated, offline demo, no model was reached" on their face, but the numbers
    inside them are invented and should be replaced with a real offline run.
-6. The loop detector compares signatures byte for byte. A signature is a SHA-256
-   of the tool name and its sorted arguments, so a call that differs by one
-   character is a different call and two semantically identical calls are not
-   matched. Any repeating cycle of those signatures is caught, up to period six,
-   which is what the audit table below means by an A, A, B cycle; what is missing
-   is fuzzy or semantic matching. The README no longer claims entropy scanning,
+6. Partly fixed on 2026-09-25: the byte-exact tier now searches up to the
+   policy's history window, and a second tier searches the same cycles over
+   normalized shapes (same tool, targets and argument keys, values ignored),
+   tripping two repeats later than the exact one. What is still missing is
+   semantic matching: two calls that do the same thing under different tools
+   or spellings are not matched. The README no longer claims entropy scanning,
    because there is no entropy code.
 7. The comparative number exists now (the row above), but it is one machine,
    one agent, six standard and three pressure tasks, three repetitions, two
@@ -256,25 +250,21 @@ traffic.
 
 ### Still open
 
-1. There is no Builder Center project and no public repository. Until both
-   exist there is no submission, whatever the code does. Publishing the repository is
-   an owner action. The Builder Center project is: it is
-   a profile, a Join, and a web form, and no command for it exists anywhere in
-   this repository.
+1. There is no Builder Center project. The public repository exists since
+   2026-09-25 (`https://github.com/upgradedev/aws-threefold`); until the
+   project exists alongside it there is no submission, whatever the code does.
+   The Builder Center project is owner-gated: it is a profile, a Join, and a
+   web form, and no command for it exists anywhere in this repository.
 2. No measured number yet. The hook is installed-ready but has not been run
    across a working week, which is where the number comes from.
-3. The certificate is a fingerprint, not a signature. There is no KMS call and
-   no key, so it detects corruption rather than an adversary, and nothing in CI
-   verifies one before a merge. Every surface now says so, including the panel
-   where a visitor meets the document: the dashboard, the README, the submission
-   dossier, the Builder Center article, the video script and the docstrings in
-   `dtos.py`, `audit_issuer.py` and `s3_store.py` were each corrected after an
-   audit found them claiming a signature, S3 archival or CI verification. What
-   remains open is the thing itself: making a CI check refuse a pull request
-   whose session has no valid certificate, which is the work that would make the
-   certificate load-bearing rather than decorative.
-4. `TokenCostCalculator` is never given a model id, so every session is priced
-   at the default Sonnet-class rate rather than the model actually in use.
+3. Fixed on 2026-09-25 except the CI check: the certificate is issued from
+   the session's stored verdicts and signed with a KMS key where the stack
+   holds one. What remains open is making a CI check refuse a pull request
+   whose session has no valid certificate, which is the work that would make
+   the certificate load-bearing rather than decorative.
+4. Fixed on 2026-09-25: the evaluate request carries `model_id`, the
+   calculator prices Haiku ids on the Haiku row and everything else on the
+   default rate, and the ledger row keeps the model so a cost can be audited.
 5. The API still enforces no key on reads, deliberately: `STAGE` is unset so an
    anonymous judge and the AI scorer reach everything, which is the ship gate's
    scorer row. The two writes that outlive their caller, the policy and the
@@ -287,21 +277,18 @@ traffic.
 6. The cost gate trusts caller-declared token counts. A caller declaring zero is
    not stopped. A proxy that meters real usage is the stronger control and this
    is not one.
-7. A saved policy reaches only the container that took it. The layering rules
-   are read again by every container after 30 seconds, so the rules page can say
-   when a save applies everywhere. The policy is still adopted only at cold
-   start, so after a `POST /policy/config` other warm containers keep the old
-   thresholds until they are recycled. The fix is the rules fix applied to
-   `_adopt_saved_policy`.
+7. Fixed on 2026-09-25: warm containers re-read the stored policy every
+   thirty seconds, the same staleness the layering rules accept, so a save
+   applies everywhere within half a minute.
 
 ## Cost and teardown
 
 Regional stacks (`threefold-prod`, `threefold-dogfood`, eu-west-1): PAY_PER_REQUEST
 DynamoDB with point-in-time recovery, one 256 MB arm64 Lambda with X-Ray and 25
 reserved copies, an HTTP API with throttling and access logs, alarms to an SNS
-topic, a CloudWatch dashboard, and an S3 bucket nothing writes to. ESTIMATE, from
-list prices: a few USD a month each at demo traffic, most of it alarms and custom
-metrics. The edge (`threefold-prod-edge`, us-east-1): WAF about 9 USD a month
+topic, a CloudWatch dashboard, a KMS signing key at 1 USD a month, and an S3
+bucket nothing writes to. ESTIMATE, from list prices: a few USD a month each
+at demo traffic, most of it alarms and custom metrics. The edge (`threefold-prod-edge`, us-east-1): WAF about 9 USD a month
 (web ACL plus four rules) plus requests, CloudFront inside the free tier, the
 pages bucket and a log bucket for cents. Bedrock calls are capped per container.
 
