@@ -345,14 +345,58 @@ def test_no_page_carries_an_operator_key() -> None:
     stored_literal = re.compile(r"""setItem\(\s*(OPERATOR_KEY_STORAGE|SESSION_STORAGE|'threefold-operator-key'|'threefold-session')\s*,\s*['"]""")
     filled_field = re.compile(r"""id="(apiKeyInput|operatorKeyInput|api-key)"[^>]*\bvalue="[^"]+""")
     long_token = re.compile(r"(?<![A-Za-z0-9_\-/.#])[A-Za-z0-9]{32,}(?![A-Za-z0-9])")
+    # The demo page replays one recorded run per scenario when offline. Those
+    # fixtures are public hashes and a public signature over the public demo
+    # ledger, verifiable by anyone, so the token-length rule does not apply to
+    # them; what applies instead is the shape rule below, which fails on an
+    # actual secret shape inside the recorded block.
+    secret_shape = re.compile(
+        r"AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----|"
+        r"sk-(?:proj-|ant-)?[A-Za-z0-9_\-]{20,}|xox[abposr]-[A-Za-z0-9\-]{10,}|"
+        r"gh[pousr]_[A-Za-z0-9_]{36,}|AIza[A-Za-z0-9_\-]{35}|"
+        r"(?i:api[_-]?key|secret[_-]?token)\s*[:=]\s*['\"][A-Za-z0-9_\-]{8,}['\"]"
+    )
     for path in _served_files():
         body = path.read_text(encoding="utf-8")
         name = path.relative_to(WEB).as_posix()
         assert not literal_header.search(body), f"{name} sends a literal credential"
         assert not stored_literal.search(body), f"{name} stores a literal credential"
         assert not filled_field.search(body), f"{name} ships a key field already filled"
+        body = _without_recorded_block(body, name, secret_shape)
         for token in long_token.findall(body):
             assert len(set(token)) == 1, f"{name} carries a long token-like string: {token[:12]}…"
+
+
+def _without_recorded_block(body: str, name: str, secret_shape: "re.Pattern[str]") -> str:
+    """The page without its recorded offline fixtures, which are checked apart."""
+    marker = "const RECORDED = {"
+    start = body.find(marker)
+    if start < 0:
+        return body
+    depth = 0
+    index = start + len(marker) - 1
+    in_string: str | None = None
+    while index < len(body):
+        char = body[index]
+        if in_string is not None:
+            if char == in_string and body[index - 1] != "\\":
+                in_string = None
+        elif char in ("'", '"'):
+            in_string = char
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                end = index + 1
+                if end < len(body) and body[end] == ";":
+                    end += 1
+                recorded = body[start:end]
+                found = secret_shape.search(recorded)
+                assert not found, f"{name} carries a recorded secret shape: {found.group(0)[:12]}…"
+                return body[:start] + body[end:]
+        index += 1
+    raise AssertionError(f"{name} opens a RECORDED block it never closes")
 
 
 def test_the_dashboard_invents_no_numbers(tmp_path: Path) -> None:

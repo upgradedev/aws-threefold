@@ -893,8 +893,10 @@ paths:
         in force is a separate POST /rules, which needs the operator. When the model cannot be reached the answer
         is 503 with no draft; Threefold never stands in for the model with a rule of its own. Each draft is at most
         two model calls, and only the description and the paths, expectations and imports of the examples reach
-        the model, never the rest of an example's file. Open where PublicReads is true, as POST /rules/explain is;
-        on a stack deployed with PublicReads=false it needs the operator key or a sign-in session.
+        the model, never the rest of an example's file. Drafting model calls are budgeted account-wide per UTC day;
+        past the budget the answer is 429 and no model call is made. Open where PublicReads is true, as POST
+        /rules/explain is; on a stack deployed with PublicReads=false it needs the operator key or a sign-in
+        session.
       security:
       - {}
       - OperatorApiKey: []
@@ -1076,6 +1078,32 @@ paths:
                     const: false
                   unsupported:
                     type: string
+        '429':
+          description: >-
+            The day's account-wide drafting budget is spent, so no model call was made and nothing was drafted
+            (urn:threefold:error:draft-budget-spent). The budget resets at midnight UTC.
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  type:
+                    type: string
+                  title:
+                    type: string
+                  status:
+                    type: integer
+                  detail:
+                    type: string
+                  instance:
+                    type: string
+                  model:
+                    type:
+                    - string
+                    - 'null'
+                  saved:
+                    type: boolean
+                    const: false
         '502':
           description: >-
             The model answered, but no answer was a usable rule, even after one repair; nothing was drafted (urn:threefold:error:undraftable-rule).

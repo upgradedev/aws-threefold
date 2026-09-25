@@ -56,10 +56,11 @@ def test_the_request_carries_the_caps_the_drafter_enforces() -> None:
 
 def test_every_status_the_route_answers_is_documented() -> None:
     responses = _draft()["responses"]
-    assert {"200", "400", "401", "403", "422", "502", "503"} <= set(responses)
+    assert {"200", "400", "401", "403", "422", "429", "502", "503"} <= set(responses)
     assert "model-unavailable" in responses["503"]["description"]
     assert "undraftable-rule" in responses["502"]["description"]
     assert "not-a-layering-rule" in responses["422"]["description"]
+    assert "draft-budget-spent" in responses["429"]["description"]
 
 
 def test_the_answer_says_the_rule_watches_and_nothing_was_saved() -> None:

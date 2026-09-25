@@ -1059,7 +1059,7 @@
     "/rules/draft": {
       "post": {
         "summary": "Draft one layering rule from a sentence with Amazon Bedrock, try it, and save nothing",
-        "description": "Asks the model for one rule in the format POST /rules accepts, checks it with the validation a save uses, as one more member of the rules in force for project (so an id already in force is caught), sets its mode to observe whatever the model proposed, and tries it on the examples sent and on up to two files built from the rule itself, with the verdicts POST /rules/explain gives. A drafted rule watches, so a file it would refuse reads OBSERVE. Nothing is saved, no verdict is issued and no ledger row is written: putting the draft in force is a separate POST /rules, which needs the operator. When the model cannot be reached the answer is 503 with no draft; Threefold never stands in for the model with a rule of its own. Each draft is at most two model calls, and only the description and the paths, expectations and imports of the examples reach the model, never the rest of an example's file. Open where PublicReads is true, as POST /rules/explain is; on a stack deployed with PublicReads=false it needs the operator key or a sign-in session.",
+        "description": "Asks the model for one rule in the format POST /rules accepts, checks it with the validation a save uses, as one more member of the rules in force for project (so an id already in force is caught), sets its mode to observe whatever the model proposed, and tries it on the examples sent and on up to two files built from the rule itself, with the verdicts POST /rules/explain gives. A drafted rule watches, so a file it would refuse reads OBSERVE. Nothing is saved, no verdict is issued and no ledger row is written: putting the draft in force is a separate POST /rules, which needs the operator. When the model cannot be reached the answer is 503 with no draft; Threefold never stands in for the model with a rule of its own. Each draft is at most two model calls, and only the description and the paths, expectations and imports of the examples reach the model, never the rest of an example's file. Drafting model calls are budgeted account-wide per UTC day; past the budget the answer is 429 and no model call is made. Open where PublicReads is true, as POST /rules/explain is; on a stack deployed with PublicReads=false it needs the operator key or a sign-in session.",
         "security": [
           {},
           {
@@ -1291,6 +1291,43 @@
                     },
                     "unsupported": {
                       "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The day's account-wide drafting budget is spent, so no model call was made and nothing was drafted (urn:threefold:error:draft-budget-spent). The budget resets at midnight UTC.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    },
+                    "model": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "saved": {
+                      "type": "boolean",
+                      "const": false
                     }
                   }
                 }

@@ -80,10 +80,12 @@ Fixed before the tracks split. A track that needs a field not listed here asks t
 
 The gate is pass or fail: live on AWS, reachable by a public URL, with documented
 proof of a coding agent connected to the AWS console. The stack stays up past the
-submission deadline, but **how far past is unresolved**: this file says judging runs
-the weeks of 6 and 13 October while `docs/RUNBOOK.md` says it finishes in the week of
-19 October, and neither cites the rules page it came from. Until the Rules tab settles
-it, treat the later date as the one that governs teardown.
+submission deadline of 2 October: the milestone table on the hackathon page
+(`builder.aws.com`, Zero to Shipped) puts Gate 1 (AI and human scoring) in the
+week of 5 October, Gate 2 (human judging) in the week of 12 October, and the
+winners' announcement in the week of 19 October. Both dates this file used to
+carry were halves of that table, so no teardown before the week of 19 October
+governs, and the runbook's teardown section says the same.
 
 | Requirement | State | Evidence `[PRIMARY]` |
 |---|---|---|
@@ -162,9 +164,12 @@ hidden in a document that a judge would read as finished work.
    (unsigned with the absence stated, anywhere else). A session with no
    recorded verdicts is refused with 400. What remains is requiring a
    certificate before a merge, which nothing in CI does.
-5. Four of the five offline fallback panels still show canned prose. They now say
-   "Simulated, offline demo, no model was reached" on their face, but the numbers
-   inside them are invented and should be replaced with a real offline run.
+5. Fixed on 2026-09-25: the four offline panels replay one real run each,
+   recorded against the live API that day and embedded in the page, with every
+   panel labelled "recorded, replayed offline". No value in them is invented;
+   the fifth panel never carried numbers. The replay shows no fix, only a live
+   answer does, and a served-file test fails on an actual secret shape inside
+   the recorded block.
 6. Partly fixed on 2026-09-25: the byte-exact tier now searches up to the
    policy's history window, and a second tier searches the same cycles over
    normalized shapes (same tool, targets and argument keys, values ignored),
@@ -255,8 +260,12 @@ traffic.
    project exists alongside it there is no submission, whatever the code does.
    The Builder Center project is owner-gated: it is a profile, a Join, and a
    web form, and no command for it exists anywhere in this repository.
-2. No measured number yet. The hook is installed-ready but has not been run
-   across a working week, which is where the number comes from.
+2. Superseded: the number comes from the benchmark rather than a working
+   week. Six series, 243 runs in all (four of Claude Code 2.1.220 on 2026-09-22
+   and two of Codex CLI 0.155.0 on 2026-09-23), each under no guidance, the
+   rules in the prompt, and Threefold enforcing: no governed violation landed
+   under Threefold in any series (dossier sections 6 and 8,
+   `docs/evidence/BENCHMARK_2026-09-2*.md`).
 3. Fixed on 2026-09-25 except the CI check: the certificate is issued from
    the session's stored verdicts and signed with a KMS key where the stack
    holds one. What remains open is making a CI check refuse a pull request

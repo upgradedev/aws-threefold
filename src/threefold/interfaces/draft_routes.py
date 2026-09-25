@@ -66,6 +66,14 @@ DRAFT_PATH = "/rules/draft"
 # the 200 the verdict explanations share.
 DRAFT_CALLS_PER_CONTAINER = 60
 
+# Drafting model calls the whole account may make in one UTC day, counted in
+# one table row every container adds to. The per-container cap above bounds a
+# container; this bounds the account, which is what a public route needs: N
+# busy containers could otherwise spend N times sixty. A draft claims its two
+# calls before the model is asked, so a draft past the budget reaches no model.
+DRAFT_MODEL_CALLS_PER_DAY = 400
+MODEL_CALLS_PER_DRAFT = 2
+
 _client: Optional[BedrockGovernanceClient] = None
 
 
@@ -144,6 +152,22 @@ def handle(path: str, method: str, event: Dict[str, Any]) -> Optional[Dict[str, 
         raise InvalidRequestError(
             "project must be a string. Leave it out to draft for the shared rules.", "project"
         )
+    description = body.get("description")
+    # Claimed only for a request that could draft at all: one the validation
+    # below will refuse costs nothing and must not spend the day's budget.
+    if isinstance(description, str) and description.strip() and not _claim_budget(router):
+        _count("budget", 0, time.monotonic())
+        problem = rfc7807_error(
+            429,
+            "Drafting Budget Spent",
+            "The drafting calls this account may make today are spent, so no model was asked and "
+            "nothing was drafted or saved. The budget resets at midnight UTC. A rule can still be "
+            "written by hand and tried with POST /rules/explain.",
+            path,
+            error_type="urn:threefold:error:draft-budget-spent",
+        )
+        problem.update({"model": None, "saved": False})
+        return router.build_response(429, problem)
     client = _drafting_client()
     model = getattr(client, "model_id", None)
 
@@ -223,6 +247,20 @@ def handle(path: str, method: str, event: Dict[str, Any]) -> Optional[Dict[str, 
     drafted["warnings"] = router._project_warnings(drafted.get("project"))
     _count("drafted", drafted.get("attempts", 0), started)
     return router.build_response(200, drafted)
+
+
+def _claim_budget(router: Any) -> bool:
+    """Claims one draft's model calls from the account's daily budget.
+
+    A store that cannot count (an older repository in a test double) lets the
+    draft through, bounded by the per-container cap as before; the store's own
+    fallback to memory keeps the bound per container through an outage.
+    """
+    repo = getattr(router._evaluator, "session_repo", None)
+    claim = getattr(repo, "claim_draft_calls", None)
+    if claim is None:
+        return True
+    return bool(claim(MODEL_CALLS_PER_DRAFT, DRAFT_MODEL_CALLS_PER_DAY))
 
 
 def _count(outcome: str, model_calls: int, started: float) -> None:

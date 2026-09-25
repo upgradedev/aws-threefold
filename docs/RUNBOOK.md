@@ -359,8 +359,11 @@ other stack, or create users or policies.
 
 ## 10. Tear down
 
-Not before judging ends. `STATE.md` records two dates for the end of judging,
-and the later one, the week of 19 October, governs teardown [STATE-FILE].
+Not before the winners are announced. The hackathon's milestone table
+(`builder.aws.com`, Zero to Shipped) puts Gate 1 (AI and human scoring) in the
+week of 5 October, Gate 2 (human judging) in the week of 12 October, and the
+announcement in the week of 19 October, so nothing below runs before that week
+[STATE-FILE].
 
 1. Disconnect every governed repository, or its hooks will fail open against a
    missing endpoint.

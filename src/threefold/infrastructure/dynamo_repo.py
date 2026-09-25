@@ -52,6 +52,13 @@ MAX_INDEX_PAGES = 20
 STATS_PARTITION = "STATS"
 ROLLUP_TTL_SECONDS = 35 * 24 * 3600
 
+# The drafting model calls spent in one UTC day, the whole account in one row
+# (PK=DRAFTBUDGET#<day>, SK=ACCOUNT). Two days of life: yesterday's row is
+# already garbage, and a row that outlived its day by a day is kept only so a
+# reader straddling midnight still finds it.
+DRAFT_BUDGET_PREFIX = "DRAFTBUDGET#"
+DRAFT_BUDGET_TTL_SECONDS = 2 * 24 * 3600
+
 
 def rollup_counters(decision: Dict[str, Any]) -> tuple:
     """The counters one decision adds to its day, and the stamps it sets.
@@ -512,6 +519,51 @@ class DynamoDBSessionRepository:
         for name, value in counters.items():
             stored[name] = int(stored.get(name, 0) or 0) + value
         stored.update(stamps)
+
+    def claim_draft_calls(self, calls: int, cap: int, day: Optional[str] = None) -> bool:
+        """Claims `calls` drafting model calls out of the day's account budget.
+
+        One conditional UpdateItem, so concurrent containers add rather than
+        overwrite and a claim past the cap counts nothing: True when the calls
+        were counted, False when the day already spent its `cap`. A claim
+        counts even when the draft then fails, on purpose: the budget bounds
+        model calls, and a failed draft spent them. A storage outage falls
+        back to this container's memory, as every counter here does, so the
+        bound holds per container until the store answers again.
+        """
+        calls, cap = int(calls), int(cap)
+        if calls <= 0:
+            return True
+        if calls > cap:
+            return False
+        day = day or str(datetime.now(timezone.utc).date())
+        partition = f"{DRAFT_BUDGET_PREFIX}{day}"
+        expires = int(time.time()) + DRAFT_BUDGET_TTL_SECONDS
+        if self._table is not None:
+            try:
+                self._table.update_item(
+                    Key={"PK": partition, "SK": "ACCOUNT"},
+                    UpdateExpression="SET #n = if_not_exists(#n, :zero) + :calls, #ttl = if_not_exists(#ttl, :ttl)",
+                    ConditionExpression="attribute_not_exists(#n) OR #n <= :remaining",
+                    ExpressionAttributeNames={"#n": "claimed", "#ttl": "ttl"},
+                    ExpressionAttributeValues={
+                        ":zero": 0, ":calls": calls, ":ttl": expires, ":remaining": cap - calls,
+                    },
+                )
+                return True
+            except Exception as exc:
+                code = ((getattr(exc, "response", None) or {}).get("Error") or {}).get("Code", "")
+                if type(exc).__name__ == "ConditionalCheckFailedException" or code == "ConditionalCheckFailedException":
+                    return False
+                logger.warning("DynamoDB draft budget claim failed, counting in memory: %s", exc)
+        stored = self._memory_store.setdefault(
+            f"{partition}#ACCOUNT", {"PK": partition, "SK": "ACCOUNT", "ttl": expires}
+        )
+        have = int(stored.get("claimed", 0) or 0)
+        if have + calls > cap:
+            return False
+        stored["claimed"] = have + calls
+        return True
 
     def list_rollups(self, days: int = 7, project: Optional[str] = None) -> List[Dict[str, Any]]:
         """The daily totals of the last `days` days, one dict per project and day.

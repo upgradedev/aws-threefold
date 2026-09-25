@@ -49,10 +49,12 @@ so the rollout had to show what a rule would stop before it stops anything.
    an approval it prints nothing, so the agent's own permission flow still runs.
 2. **Judges with deterministic gates.** Layering rules per project in Python,
    Java, C# and TypeScript, read from each file's own import statements; ten
-   credential shapes at any depth of the arguments; protected paths and every
-   shell route to a write (redirections, heredocs, `sed -i`, `cp`, `git apply`
-   and more); repeating cycles of identical calls up to period six; a spend
-   ceiling on the tokens the caller declares.
+   credential shapes at any depth of the arguments plus the policy's own
+   blocked-pattern list; protected paths and every shell route to a write
+   (redirections, heredocs, `sed -i`, `cp`, `git apply` and more); repeating
+   cycles up to the policy's history window (six by default), byte-exact and,
+   two repeats later, over normalized call shapes; a spend ceiling on the
+   tokens the caller declares, priced per model.
 3. **Rolls out in two stages.** Observe, review, readiness per rule (Ready,
    Quiet, Needs review, Noisy), Promote with the chosen rules, Demote in one
    click. Page and demo calls always enforce, so the public demo is unaffected.
@@ -96,8 +98,11 @@ so the rollout had to show what a rule would stop before it stops anything.
   standard-library files.
 - **Infrastructure as code:** two CloudFormation templates, `deploy/template.yml`
   (SAM transform) and `deploy/edge.yml`.
-- **Checking it live:** `scripts/probe_live.py`, run against the public origin
-  on 2026-09-22: 113 PASS, 0 FAIL, 3 SKIP (`docs/evidence/PROBES_2026-09-22.md`).
+- **Checking it live:** `scripts/probe_live.py`: 113 PASS, 0 FAIL, 3 SKIP
+  against the public origin on 2026-09-22 (`docs/evidence/PROBES_2026-09-22.md`),
+  rerun on 2026-09-25 after the behavior batch deployed with the same counts on
+  the API and on the edge (`docs/evidence/PROBES_2026-09-25-437df7c8.md`,
+  `docs/evidence/PROBES_2026-09-25-945ec047.md`).
 
 ## 5. Challenges we ran into
 
