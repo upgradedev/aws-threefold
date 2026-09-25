@@ -244,8 +244,9 @@ def _overview(names):
         "by_project": [{"project": name, "stage": "observe", "calls": 2105, "last_seen": "2026-09-29T08:00:00+00:00"}
                        for name in names],
         "stages": {"observe": len(names), "enforce": 0},
-        "self_correction": {"refusals_considered": 0, "self_corrected": 0, "rate": None,
-                            "median_calls_to_correct": None, "rows_read": 1900, "complete": True},
+        "self_correction": {"refusals_considered": 0, "refusals_with_later_call": 0, "refusals_without_later_call": 0,
+                            "self_corrected": 0, "rate": None, "median_calls_to_correct": None, "rows_read": 1900,
+                            "complete": True},
     }
 
 
@@ -406,6 +407,7 @@ def test_a_key_file_saved_with_a_byte_order_mark_reads_as_the_key_alone(tmp_path
     lambda o: o["totals"].__setitem__("calls", "Acme-Proj-Lighthouse"),
     lambda o: o.__setitem__("generated_at", "C:\\Users\\someone\\ledger"),
     lambda o: o["self_correction"].__setitem__("rate", "Acme-Proj-Harbour"),
+    lambda o: o["self_correction"].__setitem__("refusals_with_later_call", "Acme-Proj-Harbour"),
     lambda o: o["stages"].__setitem__("observe", "Acme-Proj-Harbour"),
     lambda o: o["series"][0].__setitem__("observed", "Acme-Proj-Harbour"),
 ])
@@ -442,6 +444,43 @@ def test_a_stack_that_predates_self_correction_still_gives_its_totals() -> None:
     older = _overview(SECRET_PROJECTS)
     del older["self_correction"]
     assert build_proof.private_section(older)["self_correction"] is None
+
+
+def _figure(**counts):
+    return dict({"refusals_considered": 5, "refusals_with_later_call": 3, "refusals_without_later_call": 2,
+                 "self_corrected": 2, "rate": 0.6667, "median_calls_to_correct": 2, "rows_read": 1900,
+                 "complete": True}, **counts)
+
+
+def test_self_correction_keeps_how_many_refusals_had_a_later_call_the_rates_denominator() -> None:
+    answer = _overview(SECRET_PROJECTS)
+    answer["self_correction"] = _figure()
+    figure = build_proof.private_section(answer)["self_correction"]
+    assert (figure["refusals_considered"], figure["refusals_with_later_call"], figure["refusals_without_later_call"]) == (5, 3, 2)
+    assert (figure["self_corrected"], figure["rate"], figure["complete"]) == (2, 0.6667, True)
+
+
+def test_a_stack_that_predates_the_later_call_counts_gives_them_as_null_not_as_zero() -> None:
+    # Its rate was over every refusal considered, and the page words a figure
+    # without the pair that way; a zero here would read as "none had a chance".
+    answer = _overview(SECRET_PROJECTS)
+    answer["self_correction"] = {name: value for name, value in _figure(rate=0.4).items() if name not in build_proof.CHANCES}
+    figure = build_proof.private_section(answer)["self_correction"]
+    assert (figure["refusals_with_later_call"], figure["refusals_without_later_call"]) == (None, None)
+    assert (figure["refusals_considered"], figure["rate"]) == (5, 0.4)
+
+
+@pytest.mark.parametrize("spoil", [
+    {"refusals_without_later_call": None},
+    {"refusals_with_later_call": -1, "refusals_without_later_call": 6},
+    {"refusals_with_later_call": 2.5},
+    {"refusals_with_later_call": 4},
+])
+def test_later_call_counts_that_are_half_given_or_do_not_add_up_are_refused(spoil) -> None:
+    answer = _overview(SECRET_PROJECTS)
+    answer["self_correction"] = _figure(**spoil)
+    with pytest.raises(build_proof.ProofError, match="not the shape the contract fixes"):
+        build_proof.private_section(answer)
 
 
 def test_the_false_alarm_rate_is_given_only_when_both_counts_are_of_the_same_calls() -> None:

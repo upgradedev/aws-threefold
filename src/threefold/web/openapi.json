@@ -3439,9 +3439,11 @@
       },
       "SelfCorrection": {
         "type": "object",
-        "description": "How often an agent that was refused went on to do the same thing acceptably, read from the ledger rather than the rollups because it is a question about the order of calls in a session. A refusal of a hook or ci call self-corrected when one of the next ten calls of the same session aimed at the same file and was approved or only observed. Commands are left out on both sides: the ledger keeps only the program a command ran, never the rest of its line, so it cannot say which file a refused command was aimed at; a refused command is not considered, and a later command is never taken as a correction, though it counts as one of the calls in between. Calls recorded at the same instant are not ordered against each other: one that shares the refusal's instant is never its correction, and a tie can only lengthen a distance. Page calls are never considered, and nothing is refused in the observe stage, so a project there considers no refusal. The read is bounded: complete is false when it stopped before the window's oldest day, and the figure then covers the newest rows_read rows only.",
+        "description": "How often an agent that was refused went on to do the same thing acceptably, read from the ledger rather than the rollups because it is a question about the order of calls in a session. A refusal of a hook or ci call self-corrected when one of the next ten calls of the same session aimed at the same file and was approved or only observed. Commands are left out on both sides: the ledger keeps only the program a command ran, never the rest of its line, so it cannot say which file a refused command was aimed at; a refused command is not considered, and a later command is never taken as a correction, though it counts as one of the calls in between. Calls recorded at the same instant are not ordered against each other: one that shares the refusal's instant is never its correction, and a tie can only lengthen a distance. Page calls are never considered, and nothing is refused in the observe stage, so a project there considers no refusal. Only a refusal whose session made a later call had a chance to be corrected: a live probe or a smoke test sends one call and stops, and is no agent failing to correct itself. So refusals_considered is split into refusals_with_later_call and refusals_without_later_call, and rate is taken over the first; until 2026-09-25 it was taken over refusals_considered. The read is bounded: complete is false when it stopped before the window's oldest day, and the figure then covers the newest rows_read rows only.",
         "required": [
           "refusals_considered",
+          "refusals_with_later_call",
+          "refusals_without_later_call",
           "self_corrected",
           "rate",
           "median_calls_to_correct",
@@ -3451,18 +3453,26 @@
         "properties": {
           "refusals_considered": {
             "type": "integer",
-            "description": "Refusals of hook and ci calls in the window aimed at a file the ledger recorded. A refusal with no recorded target, or of a command, whose recorded target is only the program it ran, cannot be matched with anything and is left out."
+            "description": "Refusals of hook and ci calls in the window aimed at a file the ledger recorded. A refusal with no recorded target, or of a command, whose recorded target is only the program it ran, cannot be matched with anything and is left out. Always refusals_with_later_call + refusals_without_later_call."
+          },
+          "refusals_with_later_call": {
+            "type": "integer",
+            "description": "Of refusals_considered, those whose session recorded at least one more hook or ci call at a later instant, of any kind: the refusals that had a chance to be corrected, and the rate's denominator. A call that shares the refusal's own instant is not known to have come after it, so it gives no chance. A refusal with a later call that was not corrected within ten calls counts here as a miss."
+          },
+          "refusals_without_later_call": {
+            "type": "integer",
+            "description": "Of refusals_considered, those after which their session recorded no further hook or ci call in the rows read: a single-call probe or smoke test, or an agent stopped for good. They had no chance to be corrected and are left out of the rate."
           },
           "self_corrected": {
             "type": "integer",
-            "description": "Of those, the refusals followed within the next ten calls of the same session by a call to the same file that was not refused and was not a command."
+            "description": "Of refusals_with_later_call, the refusals followed within the next ten calls of the same session by a call to the same file that was not refused and was not a command. Unchanged: a refusal with no later call could never have been corrected."
           },
           "rate": {
             "type": [
               "number",
               "null"
             ],
-            "description": "self_corrected / refusals_considered, rounded to four places; null when no refusal was considered, because none of none is not a rate."
+            "description": "self_corrected / refusals_with_later_call, rounded to four places; null when no refusal had a later call, because a window whose refusals all ended their sessions measured nothing, and none of none is not a rate. Changed 2026-09-25: the denominator used to be refusals_considered, which scored every single-call probe as an agent that failed to correct itself."
           },
           "median_calls_to_correct": {
             "type": [

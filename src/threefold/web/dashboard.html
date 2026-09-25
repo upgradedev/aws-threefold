@@ -206,8 +206,14 @@
     // nothing, and a read that stopped short says how much it covered: the
     // rows it read are of every project, which a project's page says too.
     const SELF_CORRECTION_SCOPE = 'It counts refusals of a hook or CI call to a file; a refused command is left out, because the ledger keeps only the program it ran.';
+    // The rate is over the refusals whose session made a later call: a
+    // single-call probe had no chance to correct itself. A stack that
+    // predates that count divided by every refusal, and is worded so.
+    function selfCorrectionChances(sc) {
+      return typeof sc.refusals_with_later_call === 'number' ? sc.refusals_with_later_call : sc.refusals_considered;
+    }
     function selfCorrectionShown(sc) {
-      return !!(sc && typeof sc.refusals_considered === 'number' && sc.refusals_considered > 0);
+      return !!(sc && typeof sc.refusals_considered === 'number' && sc.refusals_considered > 0 && selfCorrectionChances(sc) > 0);
     }
     function selfCorrectionWords(sc, ofOneProject) {
       if (!sc || typeof sc !== 'object') return 'not reported by this stack';
@@ -216,13 +222,19 @@
       const partial = sc.complete === false
         ? ' · read stopped after the newest ' + plural(sc.rows_read, 'call') + (ofOneProject ? ' of every project' : '')
         : '';
+      const n = sc.refusals_considered;
+      if (!selfCorrectionShown(sc) && typeof n === 'number' && n > 0) {
+        return 'not measured: ' + (n === 1 ? 'the one agent refusal had no later call' : 'none of the ' + num(n) + ' agent refusals had a later call') + ' in its session' + partial;
+      }
       if (!selfCorrectionShown(sc)) {
         return (sc.complete === false ? 'no agent (hook or CI) refusal among the calls read' : 'no agent (hook or CI) refusal in this window') + partial;
       }
       const median = typeof sc.median_calls_to_correct === 'number'
         ? ' · median ' + (Math.round(sc.median_calls_to_correct * 10) / 10) + (sc.median_calls_to_correct === 1 ? ' call' : ' calls')
         : '';
-      return pct(sc.rate) + ' of ' + plural(sc.refusals_considered, 'agent refusal') + median + partial;
+      const counted = typeof sc.refusals_with_later_call === 'number';
+      const without = counted && sc.refusals_without_later_call > 0 ? ' · ' + num(sc.refusals_without_later_call) + ' more had no later call' : '';
+      return pct(sc.rate) + ' of ' + plural(selfCorrectionChances(sc), 'agent refusal') + (counted ? ' followed by another call' : '') + median + without + partial;
     }
 
     function sum(list, key) { return (list || []).reduce((s, r) => s + (typeof r[key] === 'number' ? r[key] : 0), 0); }

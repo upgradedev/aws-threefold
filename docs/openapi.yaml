@@ -894,9 +894,8 @@ paths:
         is 503 with no draft; Threefold never stands in for the model with a rule of its own. Each draft is at most
         two model calls, and only the description and the paths, expectations and imports of the examples reach
         the model, never the rest of an example's file. Drafting model calls are budgeted account-wide per UTC day;
-        past the budget the answer is 429 and no model call is made. Open where PublicReads is true, as POST
-        /rules/explain is; on a stack deployed with PublicReads=false it needs the operator key or a sign-in
-        session.
+        past the budget the answer is 429 and no model call is made. Open where PublicReads is true, as POST /rules/explain
+        is; on a stack deployed with PublicReads=false it needs the operator key or a sign-in session.
       security:
       - {}
       - OperatorApiKey: []
@@ -1080,8 +1079,8 @@ paths:
                     type: string
         '429':
           description: >-
-            The day's account-wide drafting budget is spent, so no model call was made and nothing was drafted
-            (urn:threefold:error:draft-budget-spent). The budget resets at midnight UTC.
+            The day's account-wide drafting budget is spent, so no model call was made and nothing was drafted (urn:threefold:error:draft-budget-spent).
+            The budget resets at midnight UTC.
           content:
             application/problem+json:
               schema:
@@ -2609,11 +2608,16 @@ components:
         is not considered, and a later command is never taken as a correction, though it counts as one of the calls
         in between. Calls recorded at the same instant are not ordered against each other: one that shares the refusal's
         instant is never its correction, and a tie can only lengthen a distance. Page calls are never considered,
-        and nothing is refused in the observe stage, so a project there considers no refusal. The read is bounded:
-        complete is false when it stopped before the window's oldest day, and the figure then covers the newest
-        rows_read rows only.
+        and nothing is refused in the observe stage, so a project there considers no refusal. Only a refusal whose
+        session made a later call had a chance to be corrected: a live probe or a smoke test sends one call and
+        stops, and is no agent failing to correct itself. So refusals_considered is split into refusals_with_later_call
+        and refusals_without_later_call, and rate is taken over the first; until 2026-09-25 it was taken over refusals_considered.
+        The read is bounded: complete is false when it stopped before the window's oldest day, and the figure then
+        covers the newest rows_read rows only.
       required:
       - refusals_considered
+      - refusals_with_later_call
+      - refusals_without_later_call
       - self_corrected
       - rate
       - median_calls_to_correct
@@ -2625,19 +2629,35 @@ components:
           description: >-
             Refusals of hook and ci calls in the window aimed at a file the ledger recorded. A refusal with no recorded
             target, or of a command, whose recorded target is only the program it ran, cannot be matched with anything
-            and is left out.
+            and is left out. Always refusals_with_later_call + refusals_without_later_call.
+        refusals_with_later_call:
+          type: integer
+          description: >-
+            Of refusals_considered, those whose session recorded at least one more hook or ci call at a later instant,
+            of any kind: the refusals that had a chance to be corrected, and the rate's denominator. A call that
+            shares the refusal's own instant is not known to have come after it, so it gives no chance. A refusal
+            with a later call that was not corrected within ten calls counts here as a miss.
+        refusals_without_later_call:
+          type: integer
+          description: >-
+            Of refusals_considered, those after which their session recorded no further hook or ci call in the rows
+            read: a single-call probe or smoke test, or an agent stopped for good. They had no chance to be corrected
+            and are left out of the rate.
         self_corrected:
           type: integer
           description: >-
-            Of those, the refusals followed within the next ten calls of the same session by a call to the same
-            file that was not refused and was not a command.
+            Of refusals_with_later_call, the refusals followed within the next ten calls of the same session by
+            a call to the same file that was not refused and was not a command. Unchanged: a refusal with no later
+            call could never have been corrected.
         rate:
           type:
           - number
           - 'null'
           description: >-
-            self_corrected / refusals_considered, rounded to four places; null when no refusal was considered, because
-            none of none is not a rate.
+            self_corrected / refusals_with_later_call, rounded to four places; null when no refusal had a later
+            call, because a window whose refusals all ended their sessions measured nothing, and none of none is
+            not a rate. Changed 2026-09-25: the denominator used to be refusals_considered, which scored every single-call
+            probe as an agent that failed to correct itself.
         median_calls_to_correct:
           type:
           - number
