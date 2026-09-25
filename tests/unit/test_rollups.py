@@ -171,12 +171,14 @@ def test_the_overview_totals_come_from_the_rollups() -> None:
     assert payload["source"] == "rollups" and payload["window_days"] == 7
     assert payload["totals"] == {
         "calls": 8, "approved": 5, "refused": 1, "would_refuse": 2, "needs_review": 1,
-        "false_alarms": 1, "projects": 3, "agents": 3,
+        "false_alarms": 1, "projects": 3, "agents": 3, "coding_agents": 3,
     }, "The expired sandbox is left out, and a configured project with no calls is listed"
     assert len(payload["series"]) == 7 and payload["series"][-1] == {"day": DAY, "approved": 2, "observed": 2, "refused": 1}
     assert payload["by_agent"] == [
-        {"agent": "antigravity", "calls": 3}, {"agent": "codex", "calls": 3}, {"agent": "claude-code", "calls": 2},
-    ]
+        {"agent": "antigravity", "calls": 3, "kind": "coding_agent", "calls_in_sandboxes": 0},
+        {"agent": "codex", "calls": 3, "kind": "coding_agent", "calls_in_sandboxes": 0},
+        {"agent": "claude-code", "calls": 2, "kind": "coding_agent", "calls_in_sandboxes": 0},
+    ], "The expired sandbox's nine codex calls are left out here too"
     assert payload["by_origin"] == [{"origin": "hook", "calls": 5}, {"origin": "ci", "calls": 3}]
     assert {row["rule_key"]: (row["refused"], row["would_refuse"]) for row in payload["by_rule"]} == {
         "LOOP": (0, 2), "java-domain-stays-pure": (1, 0),

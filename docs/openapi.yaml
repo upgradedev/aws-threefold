@@ -1644,9 +1644,12 @@ paths:
         Read from one rollup item per project and day, added to as every decision is recorded, so the numbers are
         exact however busy the ledger is. approved, observed and refused are disjoint: observed is a call that ran
         and that a rule would have refused, and a day's calls are the sum of the three. needs_review is the observed
-        calls nobody has labelled; false_alarms the calls labelled false alarm. self_correction is the one figure
-        not read from the rollups: it is read from the ledger, a bounded number of rows, and says whether it covered
-        the whole window.
+        calls nobody has labelled; false_alarms the calls labelled false alarm. The totals are split in sandbox_split
+        between visitors' sandboxes and every other project, so a page can say what a number is made of; each by_agent
+        entry says what kind of caller it is, and coding_agents lists the coding agents alone. A sandbox whose configuration
+        has expired, a day after it was made, is left out of every figure here, as it always has been. self_correction
+        is the one figure not read from the rollups: it is read from the ledger, a bounded number of rows, and says
+        whether it covered the whole window.
       parameters:
       - name: days
         in: query
@@ -1666,8 +1669,8 @@ paths:
       responses:
         '200':
           description: >-
-            window_days, generated_at, source (always rollups), totals, series, by_agent, by_origin, by_rule, by_project,
-            stages, self_correction (read from the ledger, not the rollups)
+            window_days, generated_at, source (always rollups), totals, sandbox_split, series, by_agent, coding_agents,
+            by_origin, by_rule, by_project, stages, self_correction (read from the ledger, not the rollups)
           content:
             application/json:
               schema:
@@ -1700,6 +1703,23 @@ paths:
                         type: integer
                       agents:
                         type: integer
+                        description: 'Distinct values of agent with a call in the window, of every kind: page and
+                          unknown count here too.'
+                      coding_agents:
+                        type: integer
+                        description: 'Of those, the coding agents (claude-code, codex, antigravity): the length
+                          of coding_agents.'
+                  sandbox_split:
+                    type: object
+                    description: >-
+                      The totals split between visitors' sandboxes (names matching ^Acme-Sandbox-[0-9a-f]{8}$, whose
+                      calls include the would-refuse calls POST /api/sandbox seeds on purpose) and every other project.
+                      Each side is computed as the totals are, over its own projects, so the two add up to the totals.
+                    properties:
+                      sandbox:
+                        $ref: '#/components/schemas/OverviewPart'
+                      elsewhere:
+                        $ref: '#/components/schemas/OverviewPart'
                   series:
                     type: array
                     items:
@@ -1715,13 +1735,16 @@ paths:
                           type: integer
                   by_agent:
                     type: array
+                    description: Every value of agent with a call in the window, most calls first.
                     items:
-                      type: object
-                      properties:
-                        agent:
-                          type: string
-                        calls:
-                          type: integer
+                      $ref: '#/components/schemas/AgentCalls'
+                  coding_agents:
+                    type: array
+                    description: >-
+                      The by_agent entries whose kind is coding_agent, in the same order and shape: the coding agents
+                      being governed, without the page's buttons, pipelines or rows older than the agent field.
+                    items:
+                      $ref: '#/components/schemas/AgentCalls'
                   by_origin:
                     type: array
                     items:
@@ -1753,6 +1776,11 @@ paths:
                           type: string
                         configured:
                           type: boolean
+                        sandbox:
+                          type: boolean
+                          description: >-
+                            True for a visitor's sandbox (^Acme-Sandbox-[0-9a-f]{8}$): the side of sandbox_split
+                            this project is counted on.
                         calls:
                           type: integer
                         refused:
@@ -1946,6 +1974,11 @@ paths:
                           type: boolean
                           description: False for a project seen in the rollups with no configuration; its stage
                             is then the stack default.
+                        sandbox:
+                          type: boolean
+                          description: >-
+                            True for a visitor's sandbox: a name matching ^Acme-Sandbox-[0-9a-f]{8}$, however it
+                            was made. Its calls include the synthetic ones POST /api/sandbox seeds.
                         observe_rules:
                           type: array
                           items:
@@ -2597,6 +2630,50 @@ components:
                 type: array
                 items:
                   type: string
+    AgentCalls:
+      type: object
+      description: >-
+        One value of a call's agent field in the overview's window, its calls, and what kind of caller it is.
+      properties:
+        agent:
+          type: string
+        calls:
+          type: integer
+        kind:
+          type: string
+          enum:
+          - coding_agent
+          - page
+          - ci
+          - unknown
+          description: >-
+            coding_agent for claude-code, codex and antigravity; page for a visitor pressing a button on a page
+            here; ci for a pipeline or a pre-commit check (agent ci or pre-commit); unknown for a row written before
+            the agent field existed, and for any value not listed here.
+        calls_in_sandboxes:
+          type: integer
+          description: >-
+            Of calls, those in visitors' sandboxes. A sandbox is seeded with synthetic calls from all three coding
+            agents, so a coding agent whose calls in the window are all in sandboxes was governed nowhere else in
+            it.
+    OverviewPart:
+      type: object
+      description: The overview's totals over one side of sandbox_split, computed as the totals are.
+      properties:
+        projects:
+          type: integer
+        calls:
+          type: integer
+        approved:
+          type: integer
+        refused:
+          type: integer
+        would_refuse:
+          type: integer
+        needs_review:
+          type: integer
+        false_alarms:
+          type: integer
     SelfCorrection:
       type: object
       description: >-
