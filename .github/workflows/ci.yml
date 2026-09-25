@@ -1,5 +1,20 @@
 name: CI
 
+# The test pyramid, bottom to top: unit, integration, security, hook, pages.
+# Each layer is its own job, so a failure points at the layer, and every layer
+# runs the product's own governance gate first (the `gate` job below).
+#
+# Security, alongside the pyramid rather than after it:
+# - bandit: SAST over src/, medium severity and confidence and up.
+# - pip-audit: known CVEs in the installed packages (the product itself is
+#   standard-library only, so this audits the CI tooling environment).
+# - trivy: filesystem + CloudFormation misconfigurations + committed secrets.
+# - CodeQL: runs in its own workflow (codeql.yml) on the same branches.
+# - GitHub secret scanning + push protection: enabled on the repository itself.
+#
+# Hermeticity: conftest.py forces THREEFOLD_OFFLINE=1, so no test reaches AWS
+# whatever credentials the runner happens to carry.
+
 on:
   push:
     branches: [main]
@@ -9,15 +24,30 @@ on:
 permissions:
   contents: read
 
+env:
+  THREEFOLD_OFFLINE: '1'
+
 jobs:
-  verify:
-    name: Gate, tests, template
+  gate:
+    name: Gate on its own source
     runs-on: ubuntu-latest
-    env:
-      # Keeps the suite off the network. Without it the repository and Bedrock
-      # clients would pick up whatever credentials the runner has and the tests
-      # would pass or fail for reasons unrelated to the change.
-      THREEFOLD_OFFLINE: '1'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Threefold governance gate on its own source
+        # The product, run against the repository that ships it. Its negative
+        # controls live in tests/security/test_the_gate_still_bites.py, so a gate
+        # that has been quietened rather than fixed fails the suite below.
+        run: python scripts/pre-commit-gate.py --scan-dir src/
+
+  unit:
+    name: Pyramid · unit
+    needs: gate
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -28,21 +58,159 @@ jobs:
       - name: Install test tooling
         run: |
           python -m pip install --upgrade pip
-          pip install pytest pytest-cov bandit
+          pip install pytest pytest-cov
 
-      - name: Threefold governance gate on its own source
-        # The product, run against the repository that ships it. Its negative
-        # controls live in tests/security/test_the_gate_still_bites.py, so a gate
-        # that has been quietened rather than fixed fails the suite below.
-        run: python scripts/pre-commit-gate.py --scan-dir src/
+      - name: Unit layer, with coverage
+        run: python -m pytest tests/unit -q --cov=src/threefold --cov-report=term-missing --cov-report=xml
+
+      - name: Coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-unit
+          path: coverage.xml
+          if-no-files-found: warn
+
+  integration:
+    name: Pyramid · integration
+    needs: gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install test tooling
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest
+
+      - name: Integration layer
+        run: python -m pytest tests/integration -q
+
+  security:
+    name: Pyramid · security
+    needs: gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install test tooling
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest
+
+      - name: Security layer
+        run: python -m pytest tests/security -q
+
+  hook:
+    name: Pyramid · hook
+    needs: gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install test tooling
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest
+
+      - name: Hook layer
+        run: python -m pytest tests/hook -q
+
+  pages:
+    name: Pyramid · pages
+    needs: gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install test tooling
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest
+
+      - name: Pages layer
+        # The page tests drive the served markup through node (tests/pages/_browser.py),
+        # which is why this layer pins a runtime for it instead of trusting the runner's.
+        run: python -m pytest tests/pages -q
+
+  sast:
+    name: SAST · bandit
+    needs: gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
       - name: Static analysis
-        run: bandit -r src/ -ll -ii
+        run: |
+          pip install bandit
+          bandit -r src/ -ll -ii
 
-      - name: Tests
-        run: python -m pytest tests -v --cov=src/threefold --cov-report=term-missing
+  supply-chain:
+    name: Supply chain · pip-audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
-      - name: Validate the CloudFormation template
+      - name: Known CVEs in the installed packages
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-cov bandit pip-audit
+          pip-audit --desc
+
+  trivy:
+    name: Misconfig + secrets · trivy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Filesystem, IaC and secret scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,misconfig,secret
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+          format: table
+
+  iac:
+    name: IaC · sam validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Validate the CloudFormation templates
         run: |
           pip install aws-sam-cli
           sam validate --template deploy/template.yml --lint
+          sam validate --template deploy/edge.yml --lint

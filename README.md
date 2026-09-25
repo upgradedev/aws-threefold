@@ -6,6 +6,8 @@ Built for the AWS Zero to Shipped hackathon. **Category:** `#workplace-efficienc
 
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://python.org)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green)](LICENSE)
+[![CI](https://github.com/upgradedev/aws-threefold/actions/workflows/ci.yml/badge.svg)](https://github.com/upgradedev/aws-threefold/actions/workflows/ci.yml)
+[![Still up](https://github.com/upgradedev/aws-threefold/actions/workflows/keepalive.yml/badge.svg)](https://github.com/upgradedev/aws-threefold/actions/workflows/keepalive.yml)
 
 Threefold sits in front of the tool calls a coding agent makes (Claude Code,
 Codex and Antigravity, through one hook file) and answers each write or command

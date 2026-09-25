@@ -6,8 +6,9 @@ name: Deploy
 # product's central claim against the live URL and fails the run if it regressed.
 
 on:
-  push:
-    branches: [main]
+  # Manual only, until the OIDC role exists: deploy assumes
+  # threefold-github-deploy, which is an owner-created role (docs/RUNBOOK.md
+  # section 8). Running this on every push before then would only fail loudly.
   workflow_dispatch:
 
 permissions:
