@@ -1,0 +1,19 @@
+# Trivy exceptions, each a conscious decision rather than a blind spot.
+#
+# AVD-AWS-0013 (CloudFront minimum TLS): the distribution serves the
+# cloudfront.net domain, where the CloudFront API only allows TLSv1 as the
+# minimum. The check's own text names ignoring it as the only option there.
+AVD-AWS-0013
+#
+# AVD-AWS-0132 (S3 buckets without a customer managed key): the three buckets
+# use SSE-S3. The log bucket cannot use SSE-KMS at all (S3 server access
+# logging forbids it); the pages bucket holds public static content; the
+# evidence bucket is provisioned but nothing writes to it. A CMK per bucket
+# would buy key policy complexity, not protection.
+AVD-AWS-0132
+#
+# AVD-AWS-0095 (SNS topic without encryption): the alarm topic carries alarm
+# names and states only, and CloudWatch cannot publish to a topic under the
+# AWS managed key, so encrypting it would need a customer managed key to
+# protect alarm names. Said in deploy/template.yml beside the topic itself.
+AVD-AWS-0095

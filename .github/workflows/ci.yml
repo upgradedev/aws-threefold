@@ -58,7 +58,7 @@ jobs:
       - name: Install test tooling
         run: |
           python -m pip install --upgrade pip
-          pip install pytest pytest-cov
+          pip install pytest pytest-cov boto3 requests
 
       - name: Unit layer, with coverage
         run: python -m pytest tests/unit -q --cov=src/threefold --cov-report=term-missing --cov-report=xml
@@ -85,7 +85,7 @@ jobs:
       - name: Install test tooling
         run: |
           python -m pip install --upgrade pip
-          pip install pytest
+          pip install pytest boto3 requests
 
       - name: Integration layer
         run: python -m pytest tests/integration -q
@@ -104,7 +104,7 @@ jobs:
       - name: Install test tooling
         run: |
           python -m pip install --upgrade pip
-          pip install pytest
+          pip install pytest boto3 requests
 
       - name: Security layer
         run: python -m pytest tests/security -q
@@ -123,7 +123,7 @@ jobs:
       - name: Install test tooling
         run: |
           python -m pip install --upgrade pip
-          pip install pytest
+          pip install pytest boto3 requests
 
       - name: Hook layer
         run: python -m pytest tests/hook -q
@@ -146,7 +146,7 @@ jobs:
       - name: Install test tooling
         run: |
           python -m pip install --upgrade pip
-          pip install pytest
+          pip install pytest boto3 requests
 
       - name: Pages layer
         # The page tests drive the served markup through node (tests/pages/_browser.py),
@@ -179,8 +179,8 @@ jobs:
 
       - name: Known CVEs in the installed packages
         run: |
-          python -m pip install --upgrade pip
-          pip install pytest pytest-cov bandit pip-audit
+          python -m pip install --upgrade pip setuptools
+          pip install pytest pytest-cov bandit pip-audit boto3 requests
           pip-audit --desc
 
   trivy:
@@ -190,6 +190,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Filesystem, IaC and secret scan
+        # .trivyignore carries the three conscious exceptions; everything else gates.
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: fs
