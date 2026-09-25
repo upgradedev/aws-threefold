@@ -21,6 +21,10 @@
   - W3, the edge knows who is calling: `deploy/edge.yml`, `deploy/template.yml` (the edge secret parameter only), `deploy/iam/**`, `.github/workflows/**`, `interfaces/access_routes.py`, `interfaces/server.py`, `infrastructure/security_middleware.py` (the client address only), tests for these
   - W4, self-correction and the proof page: `application/insights.py`, `application/ledger.py`, `interfaces/app_routes.py`, `scripts/build_proof.py` (new), `web/assets/proof.json` (generated), the overview and a new `#/proof` route in `web/dashboard.html`, tests for these
   - W5, the benchmark runs for real: `benchmark/**`, `tests/unit/test_benchmark_*.py`
+- The product's face (2026-09-25 onward), in two waves, each track in its own worktree:
+  - UI-1a, the design system: `web/assets/threefold.css`, `web/assets/threefold.js` (tokens, primitives, icons, motion, the shell and navigation, a command palette, chart helpers), the shell adopted on `rules.html`, `sessions.html`, `settings.html`, `connect.html`, `swagger.html`, and tests for these
+  - UI-1b, numbers a reader can trust: `application/insights.py`, `application/rollups.py`, `interfaces/app_routes.py`, the OpenAPI entries for the fields they add, and tests for these
+  - UI-2, after UI-1 merges: the first screen (`web/index.html`), the walkthrough (`#/try` in `web/dashboard.html`), and the operator's screens (every other route of `web/dashboard.html`)
 - Shared, one dispatch line each: `src/threefold/interfaces/api_handlers.py`, `src/threefold/web/openapi.json`, `docs/openapi.yaml`
 - Owner: `STATE.md`, `LOG.md`, `TRAPS.md`, `CLAUDE.md`; merges and deploys
 
