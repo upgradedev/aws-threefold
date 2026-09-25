@@ -1,6 +1,6 @@
 # Threefold — State Ledger
 
-**Last updated:** 2026-09-23
+**Last updated:** 2026-09-25
 **Hackathon:** AWS Zero to Shipped, submissions close 2026-10-02 23:59 PDT
 **Category:** `#workplace-efficiency` · **Lane:** `#community` (hedge to `#commercial-potential` / `#startup` decided 2026-09-28)
 **Entries permitted:** one. The Rules tab, ELIGIBILITY section, reads "Limit one entry per person." Threefold is that entry.
@@ -91,7 +91,7 @@ it, treat the later date as the one that governs teardown.
 | A visitor can run the demo | **PASS** | Walked in a browser: Scenario 1 sent one `POST /simulate-loop`, the function evaluated the same call three times inside that request, the response was `BLOCKED_LOOP_DETECTED`, and the panel showed a genuine Haiku 4.5 sentence under the heading "Amazon Bedrock (Claude Haiku 4.5)" |
 | Reachable by the AI scorer | **PASS** | `STAGE` is unset on the function, so the middleware defaults to `dev` and enforces no key. Verified by unauthenticated request. Do not read this off `/status`, which prints `"stage": "prod"`: that field has its own default and says nothing about whether a key is required |
 | Proof of coding agent connected to AWS | **PASS** | `docs/PROOF_OF_AWS_AGENT.md` rewritten around the real session: the commands run, the two defects AWS surfaced, and the CloudTrail principal. Raw output in `docs/evidence/DEPLOYMENT_2026-09-20.md` |
-| Public repository | **BLOCKED, owner action** | `main` is local only, with no remote configured, so none of the work is published. Publishing is an owner action. The count of commits is deliberately not recorded here: `git log` holds it, and any line stating it is wrong again the moment it is committed |
+| Public repository | **PASS** | Since 2026-09-25: `https://github.com/upgradedev/aws-threefold`, public, `main` pushed. CI (10 jobs), CodeQL, secret scanning with push protection, dependabot and keepalive all live. The count of commits is deliberately not recorded here: `git log` holds it, and any line stating it is wrong again the moment it is committed |
 | Continuous delivery | **WRITTEN, role missing** | `.github/workflows/{ci,deploy,keepalive}.yml`. Deploy assumes `threefold-github-deploy`, which does not exist yet. Policy documents are committed at `deploy/iam/`, creation is `docs/RUNBOOK.md` section 8 |
 | Builder Center project, two tags | **NOT DONE** | Owner-gated. Requires Builder Center profile, Join, then the Create Project form |
 

@@ -229,3 +229,10 @@
 - **Private names for projects.** The owner could not tell their own work apart from aliases, and the answer is not to put real names on a server: a label typed on the settings page is kept in that browser alone and drawn beside the alias everywhere, with a switch in the navigation that hides them all for a screenshot. A page test drives the handlers with a sentinel label and proves it reaches no request, URL, copied command or field. `status --names-json` prints the mapping from this machine's own installs.
 - Six benchmark series are on `#/proof`, each naming its agent and model.
 - Tests 4787 → 4848.
+
+## 2026-09-25T12:30:00+03:00 — Published, pipelined, redeployed, probed
+- Public repository: https://github.com/upgradedev/aws-threefold, main pushed; 30 merged worktrees and their branches removed, five dependabot PRs superseded by one bump commit (actions to v7, configure-aws-credentials to v6). No open branches or PRs remain.
+- Full pipeline, green 10/10: test pyramid per layer behind the product gate, bandit, pip-audit, trivy (vuln, misconfig, secret) with three documented CloudFormation exceptions, sam validate on both templates, CodeQL, dependabot, secret scanning with push protection, keepalive.
+- The first CI run reported 8 bandit findings; all closed for real: every urlopen call site refuses non-http(s) URLs, the local server binds to loopback by default, the installed hook is owner-executable only. 14 tests pin the new behavior.
+- S3 dead code out: the uploader nothing called deleted with the function role's S3 statement; the benchmark README lists all six measured series.
+- Deployed to threefold-prod (eu-west-1) from this tree; probes after the deploy: 113 PASS, 0 FAIL, 3 SKIP (docs/evidence/PROBES_2026-09-25.md), the same as the 22/9 baseline.
