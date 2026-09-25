@@ -616,12 +616,15 @@ a.tf-chip:hover { filter: brightness(1.15); }
   .tf-table-stack thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
   .tf-table-stack, .tf-table-stack tbody, .tf-table-stack tr, .tf-table-stack td, .tf-table-stack tbody th { display: block; width: auto; }
   .tf-table-stack tr { padding: 12px 14px; margin-bottom: 8px; border-radius: var(--tf-radius-md); background: var(--tf-inset); border: 1px solid var(--tf-hairline); }
-  .tf-table-stack td, .tf-table-stack tbody th { display: flex; justify-content: space-between; gap: 16px; padding: 4px 0; border: 0; text-align: right; }
-  .tf-table-stack td.num { text-align: right; }
+  /* A cell of prose keeps its flow: the label sits above it. A number sits
+     beside its label, on the same line. */
+  .tf-table-stack td, .tf-table-stack tbody th { padding: 5px 0; border: 0; text-align: left; overflow-wrap: anywhere; }
+  .tf-table-stack td.num { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; text-align: right; }
   .tf-table-stack td[data-label]::before, .tf-table-stack tbody th[data-label]::before {
-    content: attr(data-label); flex-shrink: 0; text-align: left; font: 600 var(--tf-fs-micro)/1.25rem var(--tf-font-sans);
+    content: attr(data-label); display: block; margin-bottom: 2px; font: 600 var(--tf-fs-micro)/1.25rem var(--tf-font-sans);
     letter-spacing: var(--tf-track-caps); text-transform: uppercase; color: var(--tf-text-3);
   }
+  .tf-table-stack td.num[data-label]::before { display: inline; margin: 0; flex-shrink: 0; }
   .tf-table-stack td[colspan] { display: block; text-align: center; }
   .tf-table-stack td[colspan]::before { content: none; }
 }
