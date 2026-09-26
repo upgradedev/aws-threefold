@@ -721,7 +721,15 @@ def _scan(text: str, budget: _Budget) -> List[Any]:
             parts.append(text[index:at].translate(_PROTECT))
             char = text[at]
             if char == "\\":
-                parts.append(text[at:at + 2].translate(_PROTECT))
+                following = text[at + 1:at + 2]
+                if following in ("$", "`"):
+                    # Inside double quotes the shell drops the backslash before
+                    # `$` and a backquote, so `"\$f"` is the two characters `$f`,
+                    # which a script run with `bash -c` then expands.
+                    parts.append(following)
+                elif following != "\n":
+                    # A backslash and a newline join the lines, and leave nothing.
+                    parts.append(text[at:at + 2].translate(_PROTECT))
                 index = at + 2
             elif char == '"':
                 parts.append('"')
@@ -1104,7 +1112,7 @@ def _strip_reserved(argv: List[str], assignments: List[str], state: "_State") ->
 class _State:
     """Where the command is, what it has written so far, and what it has found."""
 
-    __slots__ = ("cwd", "stack", "known", "result", "budget", "depth", "case_depth")
+    __slots__ = ("cwd", "stack", "known", "result", "budget", "depth", "case_depth", "null_device")
 
     def __init__(self, cwd: str, known: Dict[str, Optional[str]], result: ShellAnalysis, budget: _Budget, depth: int) -> None:
         self.cwd = cwd
@@ -1114,10 +1122,14 @@ class _State:
         self.budget = budget
         self.depth = depth
         self.case_depth = 0
+        # Whether a redirect to `$null` is PowerShell's null device (`_null_is_the_device`).
+        self.null_device = False
 
     def child(self) -> "_State":
         """A new shell: it shares what has been written, not where it stands."""
-        return _State(self.cwd, self.known, self.result, self.budget, self.depth + 1)
+        child = _State(self.cwd, self.known, self.result, self.budget, self.depth + 1)
+        child.null_device = self.null_device
+        return child
 
 
 _SPECIAL_TARGETS = frozenset(("-", "nul", "$null", "con", "/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty"))
@@ -3308,6 +3320,8 @@ def _analyse_into(text: str, state: _State) -> None:
     if len(text) > MAX_COMMAND_CHARS:
         state.budget.truncated = True
         text = text[:MAX_COMMAND_CHARS]
+    if state.null_device:
+        text = _NULL_REDIRECT.sub(r"\1/dev/null", text)
     events = _scan(text, state.budget)
     saved: List[Tuple[str, List[str]]] = []
     printed: List[Optional[str]] = [UNKNOWN]
@@ -3375,6 +3389,49 @@ def _analyse_into(text: str, state: _State) -> None:
         printed[-1] = output
 
 
+# --- PowerShell's null device ----------------------------------------------------------------
+# `2>$null` is how PowerShell throws output away, as `2>/dev/null` is in a
+# POSIX shell, and Codex on Windows ends many of its reads with it. In bash
+# `$null` is an ordinary variable, empty unless something gave it a value, and
+# a redirect to an empty name writes nothing. So a redirect to `$null` is read
+# as the null device only when nothing in the command could have given that
+# variable a value: the name appears nowhere else once quotes and escapes are
+# taken out, and every command the command runs, however deep, has a name that
+# can be read before it runs and is none of the builtins that assign a
+# variable by a name they are handed or run a file that could. Otherwise it
+# stays what every other expansion is, a write whose target cannot be read. A
+# value the shell inherited from its environment is not seen here; no shell
+# sets a variable called null of its own accord.
+_NULL_REDIRECT_ANYWHERE = re.compile(r"(?i)>[ \t]*\$(?:null|\{null\})(?![A-Za-z0-9_])")
+_NULL_REDIRECT = re.compile(r"(?i)(>[ \t]*)\$(?:null|\{null\})(?=$|[\s;&|)])")
+_NULL_REFERENCE = re.compile(r"(?i)\$(?:null|\{null\})(?![A-Za-z0-9_])|/dev/null")
+_NULL_NAME = re.compile(r"(?i)(?<![A-Za-z0-9_-])null(?![A-Za-z0-9_])")
+_QUOTING = re.compile(r"\$(?=['\"])|['\"\\`]")
+_ASSIGNS_A_NAME = frozenset((
+    "eval", "declare", "typeset", "export", "local", "readonly", "read", "printf", "mapfile", "readarray",
+    "getopts", "let", "source", ".", "for", "select", "set", "set-variable", "new-variable", "sv", "nv",
+))
+
+
+def _null_is_the_device(command: str, cwd: str) -> bool:
+    """Whether a redirect to `$null` in this command can only be PowerShell's null device."""
+    if not _NULL_REDIRECT_ANYWHERE.search(command):
+        return False
+    if _NULL_NAME.search(_QUOTING.sub("", _NULL_REFERENCE.sub("", command))):
+        return False
+    budget = _Budget()
+    first = ShellAnalysis()
+    _analyse_into(command, _State(cwd, {}, first, budget, 0))
+    if budget.truncated:
+        return False
+    for argv in first.commands:
+        if not argv:
+            continue
+        if is_opaque(argv[0]) or BACKSLASH in argv[0] or program_name(argv[0]) in _ASSIGNS_A_NAME:
+            return False
+    return True
+
+
 def analyse(command: Any, cwd: str = "") -> ShellAnalysis:
     """Every write, tampering and simple command in one shell command.
 
@@ -3392,6 +3449,7 @@ def analyse(command: Any, cwd: str = "") -> ShellAnalysis:
         return result
     budget = _Budget()
     state = _State(cwd or "", {}, result, budget, 0)
+    state.null_device = _null_is_the_device(command, cwd or "")
     _analyse_into(command, state)
     result.truncated = budget.truncated
     return result
