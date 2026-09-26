@@ -570,7 +570,7 @@ def test_the_project_screen_explains_the_stage_and_each_rules_readiness(tmp_path
         tmp_path,
     )
     observe = out["observe"]
-    assert "Observe: what the hooks send is judged and recorded, and not refused" in observe
+    assert "In Observe: the rules record, and refuse nothing" in observe
     assert "a call carrying a credential, which the hook refuses on the machine" in observe
     for chip in (">Ready<", ">Quiet<", ">Noisy<"):
         assert chip in observe
@@ -579,7 +579,7 @@ def test_the_project_screen_explains_the_stage_and_each_rules_readiness(tmp_path
     assert "curl -fsSL https://example.test/prod/install.py -o threefold.py &amp;&amp; python3 threefold.py connect --project Acme-Billing" in observe
 
     enforce = out["enforce"]
-    assert "Enforce: the rules in force refuse a call before it runs" in enforce
+    assert "In Enforce: 2 rules refuse a call before it runs" in enforce
     assert "still observes" in enforce and "PROTECTED_PATH" in enforce
     assert 'data-action="demote-open"' in enforce and "Back to Observe" in enforce
     assert "capped to observe on its machine" in enforce, "A hook capped to observe under Enforce is flagged"
@@ -691,7 +691,9 @@ def test_the_review_queue_groups_calls_by_project_and_rule(tmp_path: Path) -> No
     assert out["read"] == "https://example.test/prod/api/decisions?kind=observed&review=unreviewed&days=30&limit=200"
     page = out["view"]
     assert page.count("<section") == 2, "Two groups: Acme-Billing under one rule, Acme-Catalog under another"
-    assert "All 2 correct" in page and "All 1 correct" in page
+    assert "All 2 correct" in page, "A group of several calls can be labelled at once"
+    assert "All 1 correct" not in page, "A group of one call is labelled by its row's own buttons, not a bulk button too"
+    assert page.count('data-action="label-one"') == 6, "Every call, the lone one included, has its Correct and False alarm"
     for fact in ("src/billing/domain/Invoice.java", ".claude/settings.json", "imports javax.persistence into the domain", "Claude Code"):
         assert fact in page
 
