@@ -1906,6 +1906,7 @@
       CONDITIONS.forEach(c => { sums[c.key] = { k: 0, n: 0, done: 0, doneN: 0 }; });
       let series = 0;
       let landed = 0;
+      let scripted = false;
       const agents = [];
       list.forEach(b => {
         if (!b || typeof b !== 'object' || b.pilot === true || !Array.isArray(b.conditions)) return;
@@ -1923,6 +1924,8 @@
         });
         if (counts.some(c => c === null)) return;
         series += 1;
+        // "Real" only where the snapshot says no row of the series was scripted.
+        if (wholeNumber(b.scripted_rows) !== 0) scripted = true;
         counts.forEach(c => {
           const sum = sums[c.key];
           sum.k += c.k; sum.n += c.n;
@@ -1932,7 +1935,7 @@
         if (typeof b.agent === 'string' && b.agent && agents.indexOf(b.agent) === -1) agents.push(b.agent);
       });
       const runs = CONDITIONS.reduce((s, c) => s + sums[c.key].n, 0);
-      return { series, runs, landed, agents, sums };
+      return { series, runs, landed, agents, sums, real: !scripted };
     }
 
     async function loadBenchmark() {
@@ -1987,7 +1990,7 @@
             <span class="tf-bench-big${tf.k === 0 ? ' tf-good' : ''}" data-metric="bench-threefold">${tf.k} of ${tf.n}</span>
             <span class="tf-bench-of">governed runs in which a rule-breaking write landed under Threefold</span>
           </div>
-          <p data-bench="headline">${plural(totals.series, 'series', 'series')}, ${plural(totals.runs, 'real run', 'real runs')} of ${agents}. ${verdictLine}</p>
+          <p data-bench="headline">${plural(totals.series, 'series', 'series')}, ${totals.real ? plural(totals.runs, 'real run', 'real runs') : plural(totals.runs, 'run', 'runs')} of ${agents}. ${verdictLine}</p>
           ${tf.doneN ? h`<p class="tf-bench-price" data-bench="price">The acceptance tests passed in ${tf.done} of those ${tf.doneN} governed runs: a refused agent sometimes stops instead of finishing.</p>` : ''}
           <a class="tf-link tf-bench-more" href="${T.pageHref('dashboard.html#/proof')}">Each series, apart, with its evidence</a>
         </div>

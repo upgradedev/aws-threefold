@@ -517,7 +517,8 @@ def test_the_benchmark_is_pooled_from_the_snapshot_this_stack_serves(tmp_path: P
     bench = _text(out["bench"])
     tf = want["sums"]["threefold"]
     assert _metrics(out["bench"])["bench-threefold"] == f"{tf['k']} of {tf['n']}"
-    assert f"{want['series']} series, {want['runs']:,} real runs of Claude Code and Codex." in bench
+    real = "real runs" if all(b.get("scripted_rows") == 0 for b in proof["benchmarks"] if not b.get("pilot")) else "runs"
+    assert f"{want['series']} series, {want['runs']:,} {real} of Claude Code and Codex." in bench
     if want["landed"] == 0:
         assert f"No governed violation landed under Threefold in any of the {want['series']} series." in bench
     for key in ("none", "prompt"):
@@ -527,13 +528,13 @@ def test_the_benchmark_is_pooled_from_the_snapshot_this_stack_serves(tmp_path: P
 
 
 def test_a_violation_under_threefold_is_said_and_a_pilot_is_not_counted(tmp_path: Path) -> None:
-    def series(agent, tf_k, pilot=False, complete=True):
+    def series(agent, tf_k, pilot=False, complete=True, scripted=0):
         conditions = [
             {"condition": "none", "violation": {"k": 5, "n": 9}, "completion": {"k": 9, "n": 9}},
             {"condition": "prompt", "violation": {"k": 2, "n": 9}, "completion": {"k": 9, "n": 9}},
             {"condition": "threefold", "violation": {"k": tf_k, "n": 9}, "completion": {"k": 7, "n": 9}},
         ]
-        return {"agent": agent, "pilot": pilot, "conditions": conditions if complete else conditions[:2]}
+        return {"agent": agent, "pilot": pilot, "scripted_rows": scripted, "conditions": conditions if complete else conditions[:2]}
 
     proof = {"benchmarks": [series("Codex", 1), series("Claude Code", 0), series("Claude Code", 9, pilot=True), series("Codex", 9, complete=False)]}
     out = _load(tmp_path, proof="{ status: 200, body: " + json.dumps(proof) + " }")
@@ -541,7 +542,10 @@ def test_a_violation_under_threefold_is_said_and_a_pilot_is_not_counted(tmp_path
     assert "2 series, 54 real runs of Codex and Claude Code." in bench
     assert "A governed violation landed under Threefold in 1 of the 2 series." in bench
     assert _metrics(out["bench"])["bench-threefold"] == "1 of 18"
-    evil = {"benchmarks": [dict(series("<img src=x onerror=alert(1)>", 0))]}
+    scripted = {"benchmarks": [series("Codex", 0), series("Claude Code", 0, scripted=3)]}
+    out = _load(tmp_path, proof="{ status: 200, body: " + json.dumps(scripted) + " }")
+    assert "2 series, 54 runs of Codex and Claude Code." in _text(out["bench"]), "Runs are called real only when none was scripted"
+    evil = {"benchmarks": [series("<img src=x onerror=alert(1)>", 0)]}
     out = _load(tmp_path, proof="{ status: 200, body: " + json.dumps(evil) + " }")
     assert "<img" not in out["bench"] and "&lt;img" in out["bench"]
 
