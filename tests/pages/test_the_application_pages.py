@@ -1355,6 +1355,53 @@ def test_the_walkthrough_runs_the_rollout_from_sandbox_to_a_real_refusal(tmp_pat
         assert href in finish, f"The completion screen does not offer {href}"
 
 
+def test_the_completion_counts_the_rules_the_promotion_s_answer_put_in_force(tmp_path: Path) -> None:
+    """The second completion fact reads the promotion as the service recorded it.
+
+    Its figure was counted from the list the page sent, while its source line
+    names the promotion's answer. And a rule's bar, one mark per flag, says
+    how many more there are past the 24 it draws rather than stopping short.
+    """
+    out = walk(
+        r"""
+  const P = 'Acme-Sandbox-0a1b2c3d';
+  const observed = [row(1, { project_name: P, rule_key: 'java-domain-stays-pure' })];
+  answer = api({
+    'POST /api/sandbox': { status: 200, body: { project: P, calls_seeded: 12 } },
+    ['/api/projects/' + P]: { status: 200, body: { project: P, config: { stage: 'observe' }, readiness: { rules: [
+      { rule_key: 'java-domain-stays-pure', kind: 'layering', state: 'ready', would_refuse: 30, correct: 30, false_alarms: 0, unreviewed: 0 },
+      { rule_key: 'LOOP', kind: 'gate', state: 'quiet', would_refuse: 0, correct: 0, false_alarms: 0, unreviewed: 0 }] } } },
+    '/api/decisions': { status: 200, body: { items: observed, next_cursor: null } },
+    ['POST /api/projects/' + P + '/reviews']: { status: 200, body: { updated: 1, skipped: [] } },
+    ['POST /api/projects/' + P + '/promote']: { status: 200, body: { project: P, config: { stage: 'enforce', observe_rules: ['LOOP'],
+      history: [{ at: NOW, action: 'create', enforce: [], observe: [] }, { at: NOW, action: 'promote', by: 'anonymous', enforce: ['java-domain-stays-pure'], observe: ['LOOP'] }] } } },
+    '/api/decision': { status: 200, body: { decision: observed[0], session: null, rule: { id: 'java-domain-stays-pure', forbid_imports: ['javax.persistence'] } } },
+    '/rules': { status: 200, body: { rules: [] } },
+    'POST /evaluate-tool-call': { status: 200, body: { status: 'BLOCKED_BOUNDARY_VIOLATION', reason: 'Refused.', project_stage: 'enforce' } }
+  });
+  await visit('#/try');
+  await click('try-create'); await tick();
+  await click('try-show'); await tick();
+  await click('try-review'); await tick();
+  await click('try-label', { 'data-verdict': 'VERDICT-1', 'data-label': 'correct' }); await tick();
+  await click('try-readiness'); await tick();
+  out.step4 = view();
+  await click('try-promote'); await tick();
+  out.sent = calls.filter(c => c.url.indexOf('/promote') !== -1).pop().body;
+  out.promoted = text(view());
+  await click('try-next'); await tick();
+  await click('try-send'); await tick();
+  await click('try-finish'); await tick();
+  out.done = text(view());
+""",
+        tmp_path,
+    )
+    assert out["sent"] == {"enforce": ["java-domain-stays-pure", "LOOP"]}
+    assert "1 rule now refuses the calls that break it; LOOP keeps observing." in out["promoted"]
+    assert "1 rule moved to Enforce" in out["done"], "The figure is the request's, not the answer's"
+    assert out["step4"].count('class="tf-try-bar-seg"') == 24 and 'class="tf-try-bar-more">+6<' in out["step4"]
+
+
 def test_the_walkthrough_is_labelled_by_keyboard_alone(tmp_path: Path) -> None:
     """C and F label the call on top of the stack and the arrows move through it.
 

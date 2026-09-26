@@ -2386,7 +2386,8 @@
 .tf-try-rule-key { font: 500 0.8125rem/1.25rem var(--tf-font-mono); color: var(--tf-text); overflow-wrap: anywhere; }
 .tf-try-rule-chips { display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; margin-left: auto; }
 .tf-try-rules-quiet .tf-try-rule-chips { flex-basis: 100%; justify-content: flex-start; margin-left: 0; }
-.tf-try-bar { display: flex; gap: 3px; height: 8px; max-width: 18rem; }
+.tf-try-bar { display: flex; align-items: center; gap: 3px; height: 8px; max-width: 18rem; }
+.tf-try-bar-more { flex-shrink: 0; margin-left: 3px; font: 600 0.6875rem/1 var(--tf-font-sans); color: var(--tf-text-3); font-variant-numeric: tabular-nums; }
 .tf-try-bar-seg { display: block; flex: 0 1 32px; min-width: 6px; height: 100%; border-radius: 2px; background: var(--tf-track); transform-origin: left center; }
 .tf-try-bar-seg[data-k="correct"] { background: var(--tf-approved); }
 .tf-try-bar-seg[data-k="false_alarm"] { background: var(--tf-refused); }
@@ -3189,7 +3190,10 @@
         const correct = count(r.correct);
         const alarms = count(r.false_alarms);
         const open = count(r.unreviewed);
-        const segs = [].concat(Array(correct).fill('correct'), Array(alarms).fill('false_alarm'), Array(open).fill('unreviewed')).slice(0, 24);
+        // One mark per flag, up to 24; past that the bar says how many more.
+        const marks = [].concat(Array(correct).fill('correct'), Array(alarms).fill('false_alarm'), Array(open).fill('unreviewed'));
+        const segs = marks.slice(0, 24);
+        const more = marks.length - segs.length;
         return html`<li><label class="tf-try-rule" for="try-rule-${i}" style="--tf-try-i:${i}">
           <input id="try-rule-${i}" type="checkbox" class="tf-try-check" data-change="try-toggle" data-rule="${r.rule_key}" ${checked ? raw('checked') : ''}${state.promoted || state.busy ? raw(' disabled') : ''} />
           <span class="tf-try-rule-main">
@@ -3198,7 +3202,7 @@
               <span class="tf-try-kind">${r.kind === 'gate' || tryIsGate(r.rule_key) ? 'gate' : 'layering rule'}</span>
               <span class="tf-try-rule-chips"><span class="tf-try-flip${flip ? ' tf-try-flipping' : ''}">${flip ? html`<span class="tf-try-was" aria-hidden="true">${stateChip(was)}</span>` : ''}<span class="tf-try-now">${stateChip(r.state)}</span></span>${mode ? modeChip(mode) : ''}</span>
             </span>
-            ${flagged ? html`<span class="tf-try-bar" aria-hidden="true">${segs.map(k => html`<span class="tf-try-bar-seg" data-k="${k}"></span>`)}</span>
+            ${flagged ? html`<span class="tf-try-bar" aria-hidden="true">${segs.map(k => html`<span class="tf-try-bar-seg" data-k="${k}"></span>`)}${more ? html`<span class="tf-try-bar-more">+${num(more)}</span>` : ''}</span>
               <span class="tf-try-rule-counts">${plural(flagged, 'flag')}: ${num(correct)} correct · ${plural(alarms, 'false alarm')}${open ? ' · ' + num(open) + ' without a label' : ''}</span>` : ''}
             ${quietWords ? '' : html`<span class="tf-try-rule-rec">${tryPlurals(r.recommendation || (STATES[r.state] || {}).says || '')}</span>`}
           </span>
@@ -4004,8 +4008,13 @@
             .then(answer => {
               const config = answer && answer.config && typeof answer.config === 'object' ? answer.config : {};
               const stage = typeof config.stage === 'string' ? config.stage : (answer && typeof answer.stage === 'string' ? answer.stage : 'enforce');
-              state.promoted = { stage, enforce, observe: Array.isArray(config.observe_rules) ? config.observe_rules.map(String) : state.observing.slice() };
-              return planReplay(enforce);
+              // The rules in force as the service recorded the promotion, in
+              // its history; the list sent stands in only when it has none.
+              const history = Array.isArray(config.history) ? config.history : [];
+              const entry = history.filter(h => h && h.action === 'promote' && Array.isArray(h.enforce)).pop();
+              const inForce = entry ? entry.enforce.map(String) : enforce;
+              state.promoted = { stage, enforce: inForce, observe: Array.isArray(config.observe_rules) ? config.observe_rules.map(String) : state.observing.slice() };
+              return planReplay(inForce);
             })
             .then(plan => {
               if (!ctx.alive()) return;
