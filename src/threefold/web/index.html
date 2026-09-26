@@ -361,20 +361,27 @@
     .tf-scenarios { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
     .tf-scenarios > :last-child { grid-column: 1 / -1; }
     @media (min-width: 1100px) { .tf-scenarios { grid-template-columns: repeat(5, minmax(0, 1fr)); } .tf-scenarios > :last-child { grid-column: auto; } }
-    @media (max-width: 639px) { .tf-scenario-text, .tf-scenario-route { display: none; } }
+    /* On a phone each card is its number, its kind and its name; the sentence
+       under the name waits for a wider screen. */
+    @media (max-width: 639px) { .tf-scenario-text, .tf-scenario-top > :last-child { display: none; } }
     .tf-scenario, button.tf-scenario {
       position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0; padding: 14px 14px 12px; text-align: left;
       border-radius: var(--tf-radius-md); border: 1px solid var(--tf-hairline); background: var(--tf-surface-1); color: var(--tf-text-2); cursor: pointer;
       font: inherit; transition: border-color var(--tf-dur-2) var(--tf-ease-out), background-color var(--tf-dur-2), transform var(--tf-dur-2) var(--tf-ease-out);
     }
     .tf-scenario:hover, button.tf-scenario:hover { border-color: var(--tf-accent-line); background: var(--tf-surface-2); transform: translateY(-1px); }
-    .tf-scenario[aria-pressed="true"], button.tf-scenario[aria-pressed="true"] { border-color: var(--tf-accent); background: rgba(139, 92, 246, 0.1); box-shadow: 0 0 0 3px var(--tf-accent-soft); }
+    .tf-scenario[aria-pressed="true"], button.tf-scenario[aria-pressed="true"] { border-color: var(--tf-accent); background: var(--tf-accent-soft); box-shadow: 0 0 0 3px var(--tf-accent-soft); }
     .tf-scenario-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; }
-    .tf-scenario-kicker { font: 600 var(--tf-fs-micro)/1rem var(--tf-font-sans); letter-spacing: var(--tf-track-caps); text-transform: uppercase; color: var(--tf-text-3); }
+    .tf-scenario-kicker { display: inline-flex; align-items: center; gap: 8px; min-width: 0; font: 600 var(--tf-fs-micro)/1rem var(--tf-font-sans); letter-spacing: var(--tf-track-caps); text-transform: uppercase; color: var(--tf-text-3); }
+    /* The four scenarios are numbered as the README and the runbook name them;
+       the adapter, which is not one of them, is not. */
+    .tf-scenario-num {
+      display: inline-flex; align-items: center; justify-content: center; flex: none; width: 20px; height: 20px; border-radius: var(--tf-radius-pill);
+      background: var(--tf-accent-soft); border: 1px solid var(--tf-accent-line); color: var(--tf-accent-text); font: 600 0.6875rem/1 var(--tf-font-mono); letter-spacing: 0;
+    }
     .tf-scenario-top .tf-icon { width: 18px; height: 18px; color: var(--tf-accent-text); }
     .tf-scenario-name { font: 600 0.875rem/1.25rem var(--tf-font-sans); color: var(--tf-text); }
     .tf-scenario-text { font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-3); }
-    .tf-scenario-route { margin-top: 2px; font: 500 0.6875rem/1rem var(--tf-font-mono); color: var(--tf-accent-text); overflow-wrap: anywhere; }
 
     .tf-result { margin-top: var(--tf-space-2); overflow: hidden; scroll-margin-top: calc(var(--tf-header-h) + 12px); }
     .tf-result-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; padding: 16px 18px; border-bottom: 1px solid var(--tf-hairline); }
@@ -392,7 +399,15 @@
       height: 12rem; overflow-y: auto; padding: 12px 14px; border-radius: var(--tf-radius-md); background: var(--tf-ink-0); border: 1px solid var(--tf-hairline);
       font: 400 0.75rem/1.25rem var(--tf-font-mono); color: var(--tf-text-2);
     }
-    @media (min-width: 640px) { .tf-terminal { height: 18rem; } }
+    @media (min-width: 640px) { .tf-terminal { height: 16rem; } }
+    /* Beside the verdict on a desk the terminal fills its column, however tall
+       the verdict's side grows with a fix or a certificate; its own lines
+       scroll inside it rather than making the row taller. */
+    @media (min-width: 1024px) { .tf-terminal { height: 0; flex: 1 1 auto; min-height: 16rem; } }
+    /* Before any scenario, the terminal says what each one will send. */
+    .tf-log-key { color: var(--tf-text); }
+    @media (min-width: 640px) { .tf-log-key { display: inline-block; min-width: 9.5rem; } }
+    .tf-log-route { color: var(--tf-accent-text); }
     .tf-log { margin: 0 0 6px; overflow-wrap: anywhere; }
     .tf-log-muted { color: var(--tf-text-3); }
     .tf-log-agent { color: var(--tf-info-text); }
@@ -802,22 +817,22 @@
 
       <div class="tf-scenarios" role="group" aria-label="Scenarios">
         <button type="button" id="scenario-loop" class="tf-scenario" aria-pressed="false" onclick="simulateLoop()">
-          <span class="tf-scenario-top"><span class="tf-scenario-kicker">Loop</span><span data-tf-icon="refresh"></span></span>
+          <span class="tf-scenario-top"><span class="tf-scenario-kicker"><span class="tf-scenario-num" aria-hidden="true">1</span><span class="tf-sr-only">Scenario 1: </span>Loop</span><span data-tf-icon="refresh"></span></span>
           <span class="tf-scenario-name">Runaway tool loop</span>
           <span class="tf-scenario-text">The same edit, again and again: the circuit breaker refuses the third and halts the session.</span>
         </button>
         <button type="button" id="scenario-secret" class="tf-scenario" aria-pressed="false" onclick="simulateSecret()">
-          <span class="tf-scenario-top"><span class="tf-scenario-kicker">Credential</span><span data-tf-icon="key"></span></span>
+          <span class="tf-scenario-top"><span class="tf-scenario-kicker"><span class="tf-scenario-num" aria-hidden="true">2</span><span class="tf-sr-only">Scenario 2: </span>Credential</span><span data-tf-icon="key"></span></span>
           <span class="tf-scenario-name">A secret in the arguments</span>
           <span class="tf-scenario-text">An AWS key passed in a command is refused before it leaves.</span>
         </button>
         <button type="button" id="scenario-boundary" class="tf-scenario" aria-pressed="false" onclick="simulateBoundary()">
-          <span class="tf-scenario-top"><span class="tf-scenario-kicker">Architecture</span><span data-tf-icon="layers"></span></span>
+          <span class="tf-scenario-top"><span class="tf-scenario-kicker"><span class="tf-scenario-num" aria-hidden="true">3</span><span class="tf-sr-only">Scenario 3: </span>Architecture</span><span data-tf-icon="layers"></span></span>
           <span class="tf-scenario-name">The AWS SDK in the domain</span>
           <span class="tf-scenario-text">A domain file importing boto3 is refused, with a checked fix.</span>
         </button>
         <button type="button" id="scenario-compliant" class="tf-scenario" aria-pressed="false" onclick="simulateCompliant()">
-          <span class="tf-scenario-top"><span class="tf-scenario-kicker">Certificate</span><span data-tf-icon="check"></span></span>
+          <span class="tf-scenario-top"><span class="tf-scenario-kicker"><span class="tf-scenario-num" aria-hidden="true">4</span><span class="tf-sr-only">Scenario 4: </span>Certificate</span><span data-tf-icon="check"></span></span>
           <span class="tf-scenario-name">A compliant run, certified</span>
           <span class="tf-scenario-text">Ordinary calls pass, and the service certifies its own verdicts.</span>
         </button>
@@ -825,7 +840,6 @@
           <span class="tf-scenario-top"><span class="tf-scenario-kicker">Adapter</span><span data-tf-icon="code"></span></span>
           <span class="tf-scenario-name">Universal adapter</span>
           <span class="tf-scenario-text">A native Anthropic tool_use payload, judged with no glue code.</span>
-          <span class="tf-scenario-route">POST /adapter/universal-tool-call</span>
         </button>
       </div>
 
@@ -844,7 +858,12 @@
           <div class="tf-result-pane">
             <div class="tf-terminal-bar"><span>agent-telemetry-stream</span><span id="terminal-badge" class="tf-chip tf-chip-gray">Idle</span></div>
             <div id="terminal-log" class="tf-terminal" role="log" aria-label="What the agent sent and what came back">
-              <p class="tf-log tf-log-muted">// Ready. Pick a scenario above to send its calls.</p>
+              <p class="tf-log tf-log-muted">// Ready. Each scenario sends real calls to this stack and prints what comes back; with no answer, the first four replay a recorded run.</p>
+              <p class="tf-log"><span class="tf-log-key">1 · Loop</span> <span class="tf-log-route">POST /simulate-loop</span></p>
+              <p class="tf-log"><span class="tf-log-key">2 · Credential</span> <span class="tf-log-route">POST /simulate-secret</span></p>
+              <p class="tf-log"><span class="tf-log-key">3 · Architecture</span> <span class="tf-log-route">POST /evaluate-tool-call</span></p>
+              <p class="tf-log"><span class="tf-log-key">4 · Certificate</span> <span class="tf-log-route">POST /evaluate-tool-call ×4, POST /issue-certificate</span></p>
+              <p class="tf-log"><span class="tf-log-key">Adapter</span> <span class="tf-log-route">POST /adapter/universal-tool-call</span></p>
             </div>
           </div>
           <div class="tf-result-pane">
@@ -1095,7 +1114,9 @@
         (checked
           ? '<p><span class="tf-chip tf-chip-emerald tf-chip-dot">Checked by Threefold: passes the same gates</span></p>'
           : '') +
-        `<p>${escapeHtml(fix.summary)}</p>` +
+        // Under a chip that already says it was checked, a leading "Checked
+        // fix:" is not said twice; the service's own words stay on hover.
+        `<p title="${escapeHtml(fix.summary)}">${escapeHtml(heroFixSummary(fix.summary))}</p>` +
         (steps.length
           ? '<ol>' + steps.map(s => `<li>${escapeHtml(s)}</li>`).join('') + '</ol>'
           : '') +
@@ -1240,13 +1261,27 @@
       document.getElementById('kpi-tokens').innerText = 'no session yet';
       setBreaker('armed');
       document.getElementById('terminal-badge').innerText = 'Idle';
-      document.getElementById('terminal-log').innerHTML = forScenario === true ? '' : '<p class="tf-log tf-log-muted">// Reset. Pick a scenario above to send its calls.</p>';
+      document.getElementById('terminal-log').innerHTML = forScenario === true ? '' : terminalGuide('// Reset.');
       setVerdictTag('Awaiting input', null);
       ['inv-secrets', 'inv-boundary', 'inv-loop', 'inv-cost'].forEach(id => setInvariant(id, '--', null));
       document.getElementById('bedrock-box').innerText = 'Waiting for a scenario: its verdict is explained here, with the name of whatever wrote the sentence.';
       renderFix(null);
       document.getElementById('cert-container').classList.add('hidden');
       document.getElementById('cert-origin').innerText = '';
+    }
+
+    // What the terminal says before any scenario has run: what each one sends.
+    // The words are the page's own; nothing in them comes from the service.
+    function terminalGuide(first) {
+      const guide = [
+        ['1 · Loop', 'POST /simulate-loop'],
+        ['2 · Credential', 'POST /simulate-secret'],
+        ['3 · Architecture', 'POST /evaluate-tool-call'],
+        ['4 · Certificate', 'POST /evaluate-tool-call ×4, POST /issue-certificate'],
+        ['Adapter', 'POST /adapter/universal-tool-call']
+      ];
+      return '<p class="tf-log tf-log-muted">' + escapeHtml(first) + ' Each scenario sends real calls to this stack and prints what comes back; with no answer, the first four replay a recorded run.</p>' +
+        guide.map(([key, route]) => '<p class="tf-log"><span class="tf-log-key">' + escapeHtml(key) + '</span> <span class="tf-log-route">' + escapeHtml(route) + '</span></p>').join('');
     }
 
     function escapeHtml(str) {

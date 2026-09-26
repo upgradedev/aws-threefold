@@ -102,7 +102,8 @@ def test_the_demo_refusal_panels_show_the_fix_the_service_sent(tmp_path: Path) -
     boundary = out["boundary"]
     assert out["boundaryShown"]
     assert "Checked by Threefold: passes the same gates" in boundary
-    assert "move boto3 out of the domain" in boundary and "Create the adapter outside the domain." in boundary
+    assert "<p title=\"Checked fix: move boto3 out of the domain behind AcmeOrderPort;" in boundary, "The service's own words, on hover"
+    assert ">Move boto3 out of the domain" in boundary and "Create the adapter outside the domain." in boundary,         "Under a chip that says it was checked, the summary does not open with 'Checked fix:' again"
     assert "<pre" in boundary and "<code>class AcmeOrderPort(Protocol):" in boundary, "The proposed file is shown as code"
     assert "src/infrastructure/acme_order_adapter.py" in boundary and "a new file" in boundary
     assert "A starting point, never applied automatically." in boundary
@@ -112,7 +113,7 @@ def test_the_demo_refusal_panels_show_the_fix_the_service_sent(tmp_path: Path) -
     assert "<pre" not in out["loop"], "Advice in words has no code block"
     assert "A starting point, never applied automatically." in out["loop"]
 
-    assert "use $AWS_ACCESS_KEY_ID" in out["secret"] and "Checked by Threefold" in out["secret"]
+    assert "Use $AWS_ACCESS_KEY_ID" in out["secret"] and "Checked by Threefold" in out["secret"]
     assert not out["noFixShown"] and out["noFix"] == "", "A refusal without a fix shows no panel"
     assert not out["offlineShown"], "The offline panels invent no fix"
 

@@ -870,3 +870,64 @@ def test_the_flagship_loop_still_trips_after_the_page_has_loaded(tmp_path: Path)
     assert out["pressed"] == ["true", "false", "false", "false", "false"] and out["title"] == "Runaway tool loop"
     assert out["badge"] == "Live answer"
     assert out["pressedAfterReset"] == ["false"] * 5 and "Circuit breaker: armed" in out["breakerAfterReset"]
+
+
+def test_the_four_scenarios_carry_the_numbers_the_readme_gives_them() -> None:
+    gates = _section("watch-the-gates")
+    cards = re.findall(r'<button type="button" id="scenario-(\w+)".*?</button>', gates, re.S)
+    kinds = {}
+    for key in cards:
+        card = gates.split(f'id="scenario-{key}"', 1)[1].split("</button>", 1)[0]
+        number = re.search(r'<span class="tf-scenario-num" aria-hidden="true">(\d)</span><span class="tf-sr-only">Scenario (\d): </span>', card)
+        kinds[key] = (number.group(1), number.group(2)) if number else None
+    assert kinds == {"loop": ("1", "1"), "secret": ("2", "2"), "boundary": ("3", "3"), "compliant": ("4", "4"), "adapter": None}, \
+        "Numbered one to four, seen and read aloud alike; the adapter is not one of the four"
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    for number in set(re.findall(r"Scenario (\d)", readme)):
+        assert number in {"1", "2", "3", "4"}, f"The README names a Scenario {number} the page does not have"
+    assert "tf-scenario-route" not in gates, "Every route is in the terminal's guide and the contract strip, none on one card alone"
+
+
+def test_the_idle_terminal_says_what_each_scenario_sends_and_reset_says_it_again(tmp_path: Path) -> None:
+    gates = _section("watch-the-gates")
+    idle = _text(gates.split('id="terminal-log"', 1)[1].split("</div>", 1)[0].split(">", 1)[1])
+    guide = [
+        ("1 · Loop", "POST /simulate-loop"), ("2 · Credential", "POST /simulate-secret"), ("3 · Architecture", "POST /evaluate-tool-call"),
+        ("4 · Certificate", "POST /evaluate-tool-call ×4, POST /issue-certificate"), ("Adapter", "POST /adapter/universal-tool-call"),
+    ]
+    for key, route in guide:
+        assert f"{key} {route}" in idle, f"The idle terminal does not say what {key} sends"
+    assert "with no answer, the first four replay a recorded run" in idle
+    out = run("index.html", "  resetDemo();\n  out.log = el('terminal-log').innerHTML;\n", tmp_path, before=DEMO_DOM)
+    after = _text(out["log"])
+    assert after.startswith("// Reset. Each scenario sends real calls to this stack")
+    assert all(f"{key} {route}" in after for key, route in guide), "Reset shows the same guide"
+
+
+def test_a_scenario_pressed_on_a_phone_brings_its_result_into_view(tmp_path: Path) -> None:
+    """On a phone the result panel sits under five cards; where it is already on screen nothing moves."""
+    scenario = r"""
+  const scrolled = [];
+  const panel = el('result-panel');
+  panel.scrollIntoView = o => scrolled.push(o);
+  globalThis.innerHeight = 812;
+  answer = api({ '/status': { status: 200, body: { service: 'Threefold', status: 'HEALTHY' } },
+    'POST /simulate-secret': { status: 200, body: { status: 'BLOCKED_SECRET_DETECTED', reason: 'Sensitive credential detected', session_id: 'sim-2', explanation_source: 'deterministic' } } });
+  await checkApiHealth();
+  panel.getBoundingClientRect = () => ({ top: 1460, bottom: 2100 });
+  await simulateSecret(); await tick();
+  out.below = scrolled.splice(0);
+  panel.getBoundingClientRect = () => ({ top: 140, bottom: 780 });
+  await simulateSecret(); await tick();
+  out.onScreen = scrolled.splice(0);
+  panel.getBoundingClientRect = () => ({ top: -600, bottom: 40 });
+  await simulateSecret(); await tick();
+  out.above = scrolled.splice(0);
+"""
+    out = run("index.html", scenario, tmp_path, before=DEMO_DOM)
+    assert out["below"] == [{"behavior": "smooth", "block": "start"}], "Off the bottom of the screen, it is brought up"
+    assert out["onScreen"] == [], "Already in view, nothing moves"
+    assert out["above"] == [{"behavior": "smooth", "block": "start"}], "Scrolled past, it is brought back"
+    still = run("index.html", scenario, tmp_path,
+                before=DEMO_DOM + "globalThis.matchMedia = q => ({ matches: q.indexOf('reduce') !== -1 });\n")
+    assert still["below"] == [{"behavior": "auto", "block": "start"}], "A reader who asked for less motion is taken there without a glide"
