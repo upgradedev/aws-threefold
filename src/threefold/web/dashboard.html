@@ -2926,7 +2926,7 @@
             art: html`<span class="tf-try-peek-pair"><span class="tf-try-peek-btn" data-tone="good">${T.icon('check', 12)}Correct</span><span class="tf-try-peek-btn" data-tone="bad">${T.icon('x', 12)}False alarm</span></span>` },
           { n: 4, name: TRY_STEPS[3], text: 'The rules you trust move to Enforce; a noisy one keeps observing.',
             art: html`<span class="tf-try-peek-switch"><span class="tf-try-peek-knob"></span><span>${T.icon('eye', 12)}Observe</span><span data-on>${T.icon('shield', 12)}Enforce</span></span>` },
-          { n: 5, name: TRY_STEPS[4], text: 'The same kind of call is refused before it runs, with why and a suggested fix.',
+          { n: 5, name: TRY_STEPS[4], text: 'The same call is refused before it runs, with why and a suggested fix.',
             art: html`<span class="tf-try-peek-refused">${T.icon('stop', 18)}<span class="tf-try-peek-refused-text"><b>Refused</b><span class="tf-try-ghost-bar" style="width:88%"></span></span></span>` }
         ];
         return html`<section class="tf-try-peeks${play.peeks || play.enter ? ' tf-try-play' : ''}" aria-labelledby="try-peeks-title">
@@ -3521,7 +3521,7 @@
         const rule = state.replay && state.replay.rule ? ' by ' + state.replay.rule : '';
         facts.push({
           figure: refused ? 'Refused' : (r.status ? 'Approved' : '—'), tone: refused ? 'refused' : '',
-          label: 'the same kind of call, in Enforce',
+          label: state.replay && earlierRow(state.replay) ? 'the same call, in Enforce' : 'the same kind of call, in Enforce',
           text: r.status
             ? (refused ? 'Stopped' + rule + ' before it ran' : 'Approved') + (extras.length ? ', with ' + tryList(extras) : '') + '. Its verdict: ' + r.status + '.'
             : state.planned && !state.replay ? 'No call was sent: no rule in force can be shown by a single call.' : 'No answer was recorded.',
