@@ -1350,7 +1350,7 @@ def test_the_walkthrough_runs_the_rollout_from_sandbox_to_a_real_refusal(tmp_pat
     assert "You marked 2 calls correct and 1 call a false alarm, so PROTECTED_PATH stayed in Observe" in words
     assert "2 rules moved to Enforce" in words
     # Plain words first, the precise verdict second.
-    assert "Stopped before it ran by python-domain-stays-pure, with a sentence from Amazon Bedrock. Its verdict: BLOCKED_BOUNDARY_VIOLATION." in words
+    assert "Stopped by python-domain-stays-pure before it ran, with a sentence from Amazon Bedrock. Its verdict: BLOCKED_BOUNDARY_VIOLATION." in words
     for href in ('href="#/connect"', 'href="#/projects/Acme-Sandbox-0a1b2c3d"', 'href="#/proof"'):
         assert href in finish, f"The completion screen does not offer {href}"
 
@@ -1961,6 +1961,80 @@ def test_a_resumed_sandbox_that_was_promoted_reads_as_enforce_on_every_step(tmp_
     assert out["sent"]["evaluate"]["arguments"] == {"file_path": "src/acme/domain/order.py", "content": "import boto3\n"}
     assert "3 calls judged 2 in Observe and 1 in Enforce" in out["done"]
     assert "calls judged in Observe" not in out["done"], "A call judged in Enforce is not counted as judged in Observe"
+    # Each stage's count on its own: the refusal in Enforce is not one of the calls Observe let run.
+    assert "In Observe, 2 calls would have been refused and ran; in Enforce, 1 call was refused." in out["done"]
+    assert "would have been refused, and 1 was" not in out["done"]
+
+
+def test_a_resumed_sandbox_says_it_is_reading_until_the_reads_answer(tmp_path: Path) -> None:
+    """While a sandbox made earlier is read back, the screen says so and claims nothing about it.
+
+    The resume once showed "Step 1 of 5 · done", "Your sandbox is ready",
+    "Every call was judged and recorded" and lanes "Sending its calls…"
+    before a single call had been read, and offered to continue "with the
+    labels you gave it" to a visitor who had given none.
+    """
+    out = dash(
+        r"""
+  const P = 'Acme-Sandbox-0a1b2c3d';
+  const hold = held();
+  store['threefold-try'] = JSON.stringify({ project: P, at: Date.now() });
+  answer = api({
+    ['/api/projects/' + P]: { status: 200, body: { project: P, config: { stage: 'observe', sandbox: true }, readiness: { rules: [] } } },
+    '/api/decisions': () => hold.promise.then(() => ({ status: 200, body: { items: [row(1, { project_name: P })], next_cursor: null } }))
+  });
+  await visit('#/try');
+  out.offer = text(view());
+  const resuming = click('try-resume');
+  await tick();
+  out.reading = text(view());
+  hold.release();
+  await resuming; await tick();
+  out.read = text(view());
+""",
+        tmp_path,
+    )
+    assert "You started one earlier: Acme-Sandbox-0a1b2c3d" in out["offer"] and "Continue with it where you left off" in out["offer"]
+    assert "with the labels you gave it" not in out["offer"]
+    reading = out["reading"]
+    assert "Opening your sandbox" in reading and "Reading its calls…" in reading and "Reading your sandbox…" in reading
+    for claim in ("· done", "Your sandbox is ready", "judged and recorded", "Sending its calls"):
+        assert claim not in reading, f"While reading, the screen claims {claim!r}"
+    assert "Step 1 of 5 · done" in out["read"] and "Every call was judged and recorded" in out["read"]
+
+
+def test_the_walkthrough_words_the_service_s_counts_and_its_sources_plainly(tmp_path: Path) -> None:
+    """The service's "1 false alarm(s)" reads "1 false alarm", and a caption names its source in a few words.
+
+    A sentence the model did not write is said so beneath the caption, in
+    sentence case, rather than in a caption of shouting capitals; and the
+    rail's note for a refusal is drawn in the refusal's colour.
+    """
+    out = dash(
+        REPLAY.replace(
+            "{ rule_key: 'PROTECTED_PATH', kind: 'gate', state: 'ready', would_refuse: 1, correct: 1, false_alarms: 0, unreviewed: 0 }",
+            "{ rule_key: 'PROTECTED_PATH', kind: 'gate', state: 'noisy', would_refuse: 3, correct: 2, false_alarms: 1, unreviewed: 0, recommendation: '1 false alarm(s): keep it observing, or refine the rule, before enforcing it.' },"
+            + " { rule_key: 'LOOP_TWO', kind: 'gate', state: 'needs_review', would_refuse: 2, correct: 0, false_alarms: 0, unreviewed: 2, recommendation: '2 flagged call(s) not reviewed: mark each correct or false alarm before deciding.' }",
+        ).replace(
+            "body: { status: 'BLOCKED_BOUNDARY_VIOLATION', reason: 'Refused.', project_stage: 'enforce' }",
+            "body: { status: 'BLOCKED_BOUNDARY_VIOLATION', reason: 'Refused.', project_stage: 'enforce', bedrock_explanation: 'The domain reached for an AWS client.', explanation_source: 'deterministic_fallback' }",
+        )
+        + r"""
+  await toStepFour(['python-domain-stays-pure']);
+  out.step4 = text(view());
+  await click('try-promote'); await tick();
+  await click('try-next'); await tick();
+  await click('try-send'); await tick();
+  out.climax = view();
+""",
+        tmp_path,
+    )
+    assert "1 false alarm: keep it observing, or refine the rule" in out["step4"]
+    assert "2 flagged calls not reviewed" in out["step4"] and "(s)" not in out["step4"]
+    climax = out["climax"]
+    assert re.search(r'class="tf-try-quote-src">\s*<svg[^>]*>.*?</svg>\s*Deterministic explanation</figcaption>', climax, re.S)
+    assert "Amazon Bedrock was asked and did not answer, so this sentence is the service's own." in text_of(climax).replace("&#039;", "'")
+    assert 'data-tone="refused">Refused<' in climax, "The rail's note for the refusal is not in the refusal's colour"
 
 
 def test_a_resumed_sandbox_s_rail_counts_only_the_lists_it_has_read(tmp_path: Path) -> None:
@@ -2090,6 +2164,7 @@ def test_the_walkthrough_says_where_it_runs_when_the_stack_is_private(tmp_path: 
   Threefold.whoami(true);
   await visit('#/try');
   out.private = text(view());
+  out.privateRail = view().indexOf('tf-try-rail') !== -1;
   answer = api({ 'POST /api/sandbox': { status: 403, body: { detail: 'Forbidden' } } });
   Threefold.whoami(true);
   await visit('#/overview');
@@ -2100,6 +2175,7 @@ def test_the_walkthrough_says_where_it_runs_when_the_stack_is_private(tmp_path: 
         tmp_path,
     )
     assert "The walkthrough runs on the public demo" in out["private"] and "Connect a repository" in out["private"]
+    assert out["privateRail"] is False, "A private stack draws the five steps with the first current, though none can be taken"
     assert "does not let visitors make a sandbox" in out["refused"]
 
 

@@ -2132,6 +2132,8 @@
   .tf-try-step[data-state="current"] .tf-try-step-name { color: var(--tf-text); }
   .tf-try-step-note { display: block; margin-top: 2px; font: 500 0.75rem/1.125rem var(--tf-font-mono); color: var(--tf-text-3); overflow-wrap: anywhere; }
   .tf-try-step[data-state="current"] .tf-try-step-note { color: var(--tf-accent-text); }
+  .tf-try-step .tf-try-step-note[data-tone="refused"] { color: var(--tf-refused-text); }
+  .tf-try-step .tf-try-step-note[data-tone="approved"] { color: var(--tf-approved-text); }
   .tf-try .tf-try-restart { display: inline-flex; align-self: flex-start; }
 }
 
@@ -2591,6 +2593,12 @@
       return !s || /[.!?…]$/.test(s) ? s : s + '.';
     }
 
+    // A sentence from the service with its counts worded for them: "1 false
+    // alarm(s)" reads "1 false alarm", and "2 flagged call(s)" "2 flagged calls".
+    function tryPlurals(text) {
+      return String(text == null ? '' : text).replace(/\b(\d+) ((?:[A-Za-z-]+ )*?[A-Za-z-]+)\(s\)/g, (all, n, words) => n + ' ' + words + (Number(n) === 1 ? '' : 's'));
+    }
+
     function tryWhyHtml(why) {
       return html`${why.sentence}${why.imports ? html` <span class="tf-try-import">It imports ${why.from ? 'from ' : ''}<mark>${why.imports}</mark>${why.from ? ', a package the rule forbids' : ''}.</span>` : ''}`;
     }
@@ -2812,7 +2820,7 @@
               const s = n < shown ? 'done' : n === shown ? 'current' : 'todo';
               return html`<li class="tf-try-step" data-state="${s}" aria-current="${s === 'current' ? 'step' : 'false'}">
                 <span class="tf-step-num" data-state="${s}">${s === 'done' ? T.icon('check', 14) : n}</span>
-                <span class="tf-try-step-text"><span class="tf-try-step-name">${label}${s === 'done' ? html`<span class="sr-only"> (done)</span>` : ''}</span>${notes[i] ? html`<span class="tf-try-step-note">${notes[i]}</span>` : ''}</span>
+                <span class="tf-try-step-text"><span class="tf-try-step-name">${label}${s === 'done' ? html`<span class="sr-only"> (done)</span>` : ''}</span>${notes[i] ? html`<span class="tf-try-step-note" data-tone="${i === 4 && state.result && state.result.status ? (state.result.status === 'APPROVED' ? 'approved' : 'refused') : ''}">${notes[i]}</span>` : ''}</span>
               </li>`;
             })}
           </ol>
@@ -2820,14 +2828,16 @@
       }
 
       function side() {
+        // On a private stack no step can be taken, so no step is drawn as current.
+        const closed = !!(state.who && state.who.reads_public === false);
         return html`<div class="tf-try-side">
           <div class="tf-try-head">
             <p class="tf-eyebrow">${T.icon('play', 16)}The 60-second walkthrough</p>
             <h1 id="view-title" tabindex="-1" class="tf-try-title">Try the two-stage rollout</h1>
             <p class="tf-try-lede">About a minute, on the public demo: a sandbox project, the calls its rules would have refused, your review, a promotion, and the same kind of call refused for real.</p>
-            ${state.who && state.who.reads_public === false ? '' : html`<p class="tf-try-tags"><span class="tf-chip tf-chip-sky">${T.icon('flask', 13)}Synthetic sandbox</span><span class="tf-chip tf-chip-gray">${T.icon('lock', 13)}No account</span></p>`}
+            ${closed ? '' : html`<p class="tf-try-tags"><span class="tf-chip tf-chip-sky">${T.icon('flask', 13)}Synthetic sandbox</span><span class="tf-chip tf-chip-gray">${T.icon('lock', 13)}No account</span></p>`}
           </div>
-          ${rail()}
+          ${closed ? '' : rail()}
           ${state.project && state.step > 1 ? html`<button type="button" class="tf-link-btn tf-try-restart" data-action="try-restart">${T.icon('refresh', 14)}Start again with a new sandbox</button>` : ''}
         </div>`;
       }
@@ -2887,7 +2897,7 @@
           ${agents.map(agent => {
             const mine = sorted.filter(r => r.agent === agent);
             return html`<section class="tf-try-lane"${ready ? '' : raw(' data-waiting')} aria-label="${agentLabel(agent)}">
-              <h3 class="tf-try-lane-head">${tryAvatar(agent)}<span class="tf-try-lane-name">${agentLabel(agent)}</span><span class="tf-try-lane-count">${ready ? plural(mine.length, 'call') : state.busy ? 'Sending its calls…' : 'Its calls land here'}</span></h3>
+              <h3 class="tf-try-lane-head">${tryAvatar(agent)}<span class="tf-try-lane-name">${agentLabel(agent)}</span><span class="tf-try-lane-count">${ready ? plural(mine.length, 'call') : state.busy ? (state.project ? 'Reading its calls…' : 'Sending its calls…') : 'Its calls land here'}</span></h3>
               ${ready
                 ? (mine.length ? html`<ol class="tf-try-calls">${mine.map(r => callItem(r, sorted.indexOf(r)))}</ol>` : html`<p class="tf-try-lane-empty">No call from this agent in the list.</p>`)
                 : html`<ol class="tf-try-calls tf-try-ghosts${state.busy ? ' tf-try-busy' : ''}" aria-hidden="true">${['62%', '84%', '48%'].map(w => html`<li class="tf-try-call tf-try-ghost"><span class="tf-try-call-dot"></span><span class="tf-try-call-body"><span class="tf-try-ghost-bar${state.busy ? ' tf-skeleton' : ''}" style="width:34%"></span><span class="tf-try-ghost-bar${state.busy ? ' tf-skeleton' : ''}" style="width:${w}"></span></span></li>`)}</ol>`}
@@ -2925,7 +2935,7 @@
             kicker: 'Step 1 of 5',
             title: 'Make a sandbox project',
             sentence: 'The stack creates a project of your own, in Observe, and sends about a dozen synthetic tool calls from Claude Code, Codex and Antigravity through the real evaluator.',
-            visual: html`${state.resume ? html`<div class="tf-callout tf-callout-accent tf-try-resume">${T.icon('clock', 18)}<div class="tf-callout-body"><p>You started one earlier: <span class="tf-mono tf-try-strong">${state.resume}</span>, with the labels you gave it. <button type="button" class="tf-link" data-action="try-resume">Continue with it</button> or make a new one.</p></div></div>` : ''}
+            visual: html`${state.resume ? html`<div class="tf-callout tf-callout-accent tf-try-resume">${T.icon('clock', 18)}<div class="tf-callout-body"><p>You started one earlier: <span class="tf-mono tf-try-strong">${state.resume}</span>. <button type="button" class="tf-link" data-action="try-resume">Continue with it</button> where you left off, or make a new one.</p></div></div>` : ''}
               ${lanes(null, play)}
               ${legend()}
               ${peeks(play)}`,
@@ -2934,6 +2944,17 @@
           };
         }
         const calls = Array.isArray(state.calls) ? state.calls : null;
+        // A sandbox made earlier, being read back: nothing is claimed about
+        // its calls or its stage until the reads answer.
+        if (state.busy && !calls && state.seeded === null) {
+          return {
+            kicker: 'Step 1 of 5',
+            title: 'Opening your sandbox',
+            sentence: html`Reading the calls, the labels and the stage of <span class="tf-mono tf-try-strong">${state.project}</span> from the ledger.`,
+            visual: html`${lanes(null, play)}${legend()}`,
+            actions: primary('try-resume', 'Continue', 'Reading your sandbox…')
+          };
+        }
         const t = tryTally(calls);
         const shortRead = calls && typeof state.seeded === 'number' && calls.length < state.seeded;
         const agents = calls && !shortRead ? tryAgentsOf(calls) : [];
@@ -3172,7 +3193,7 @@
             </span>
             ${flagged ? html`<span class="tf-try-bar" aria-hidden="true">${segs.map(k => html`<span class="tf-try-bar-seg" data-k="${k}"></span>`)}</span>
               <span class="tf-try-rule-counts">${plural(flagged, 'flag')}: ${num(correct)} correct · ${plural(alarms, 'false alarm')}${open ? ' · ' + num(open) + ' without a label' : ''}</span>` : ''}
-            ${quietWords ? '' : html`<span class="tf-try-rule-rec">${r.recommendation || (STATES[r.state] || {}).says || ''}</span>`}
+            ${quietWords ? '' : html`<span class="tf-try-rule-rec">${tryPlurals(r.recommendation || (STATES[r.state] || {}).says || '')}</span>`}
           </span>
         </label></li>`;
       }
@@ -3194,7 +3215,7 @@
         const quiet = rules.filter(r => flagged.indexOf(r) === -1);
         let k = 0;
         const row = r => ruleRow(r, k++, play);
-        const quietSays = Array.from(new Set(quiet.map(r => r.recommendation || (STATES[r.state] || {}).says || '')));
+        const quietSays = Array.from(new Set(quiet.map(r => tryPlurals(r.recommendation || (STATES[r.state] || {}).says || ''))));
         const quietWords = quiet.length > 1 && quietSays.length === 1 ? quietSays[0] : '';
         const quietRow = r => ruleRow(r, k++, play, quietWords);
         const byState = ['ready', 'noisy', 'needs_review', 'quiet']
@@ -3354,7 +3375,7 @@
             ${typeof fix.kind === 'string' ? html`<span class="tf-chip tf-chip-gray">${fixKindLabel(fix.kind, fix.kind)}</span>` : ''}
             ${checked ? html`<span class="tf-chip tf-chip-emerald">${T.icon('check', 13)}Checked by Threefold: passes the same gates</span>` : ''}
           </header>
-          <p class="tf-try-fix-summary">${fix.summary}</p>
+          <p class="tf-try-fix-summary">${tryPlurals(fix.summary)}</p>
           ${checks.length ? html`<p class="tf-try-fix-checks" data-passed="${passed === checks.length ? 'all' : 'some'}">${T.icon(passed === checks.length ? 'shield' : 'alert', 16)}${num(passed)} of ${num(checks.length)} gate checks passed on the proposed files</p>` : ''}
           ${more.length ? html`<details class="tf-try-fix-more">
             <summary>${T.icon('chevrondown', 14)}Show the ${tryList(more)}</summary>
@@ -3382,7 +3403,12 @@
         const r = state.result || {};
         const plan = state.replay;
         const refused = !!(r.status && r.status !== 'APPROVED');
-        const source = r.explanation_source === 'bedrock' ? 'Amazon Bedrock' : r.explanation_source === 'deterministic_fallback' ? 'Deterministic explanation: the model was asked and did not answer' : 'Deterministic explanation';
+        // The caption names the source in a few words; why a sentence is not
+        // the model's is said beneath it, in sentence case.
+        const source = r.explanation_source === 'bedrock' ? 'Amazon Bedrock' : 'Deterministic explanation';
+        const sourceNote = r.explanation_source === 'deterministic_fallback'
+          ? 'Amazon Bedrock was asked and did not answer, so this sentence is the service\'s own. The deterministic gate made the verdict either way.'
+          : 'It explains the verdict for the person reading; the deterministic gate made it.';
         const observing = Array.isArray(state.observing) ? state.observing : [];
         // Plain words first: the rule's reason as a reader would say it. The
         // precise terms (the rule, the verdict, the stage) come second.
@@ -3421,7 +3447,7 @@
               ${r.bedrock_explanation ? html`<figure class="tf-try-quote">
                 <figcaption class="tf-try-quote-src">${T.icon('sparkles', 14)}${source}</figcaption>
                 <blockquote>${r.bedrock_explanation}</blockquote>
-                <p class="tf-try-quote-note">It explains the verdict for the person reading; the deterministic gate made it.</p>
+                <p class="tf-try-quote-note">${sourceNote}</p>
               </figure>` : ''}
               ${tryFix(r.suggested_fix)}
             </div>` : ''}
@@ -3442,10 +3468,20 @@
         // one's list may hold calls judged after a promotion, and says so.
         const inEnforce = typeof state.seeded === 'number' || !calls ? 0 : calls.filter(r => r.stage === 'enforce').length;
         const where = inEnforce ? num(seeded - inEnforce) + ' in Observe and ' + num(inEnforce) + ' in Enforce. ' : '';
+        // With calls judged in both stages, each stage's count is said on its
+        // own, so a refusal in Enforce is never read as one of the calls
+        // Observe let run.
+        const refusedInEnforce = inEnforce ? calls.filter(r => r.stage === 'enforce' && outcomeOf(r) === 'refused').length : 0;
+        const refusedElsewhere = refusedFirst - refusedInEnforce;
+        const outcomes = inEnforce
+          ? 'In Observe, ' + (flagged ? plural(flagged, 'call') + ' would have been refused and ran' : 'no rule flagged a call')
+            + (refusedElsewhere ? ', and ' + num(refusedElsewhere) + ' other ' + (refusedElsewhere === 1 ? 'was' : 'were') + ' refused' : '')
+            + '; in Enforce, ' + (refusedInEnforce ? plural(refusedInEnforce, 'call') + (refusedInEnforce === 1 ? ' was' : ' were') + ' refused.' : 'none was refused.')
+          : flagged ? plural(flagged, 'call') + ' would have been refused, and ' + (refusedFirst ? num(refusedFirst) + (refusedFirst === 1 ? ' was.' : ' were.') : 'none was.') : 'No rule flagged one' + (refusedFirst ? '.' : ', and none was refused.');
         facts.push(seeded !== null
           ? {
             figure: num(seeded), label: inEnforce ? (seeded === 1 ? 'call judged' : 'calls judged') : (seeded === 1 ? 'call judged in Observe' : 'calls judged in Observe'),
-            text: where + (agents.length ? tryList(agents) + ' sent them. ' : '') + (flagged ? plural(flagged, 'call') + ' would have been refused, and ' + (refusedFirst ? num(refusedFirst) + (refusedFirst === 1 ? ' was.' : ' were.') : 'none was.') : 'No rule flagged one' + (refusedFirst ? '.' : ', and none was refused.')),
+            text: where + (agents.length ? tryList(agents) + ' sent them. ' : '') + outcomes,
             source: 'POST /api/sandbox · GET /api/decisions'
           }
           : { figure: num(flagged), label: 'calls flagged in Observe', text: 'Each one ran, and was recorded as a call its rule would have refused.', source: 'GET /api/decisions' });
@@ -3474,7 +3510,7 @@
           figure: refused ? 'Refused' : (r.status ? 'Approved' : '—'), tone: refused ? 'refused' : '',
           label: 'the same kind of call, in Enforce',
           text: r.status
-            ? (refused ? 'Stopped before it ran' + rule : 'Approved') + (extras.length ? ', with ' + tryList(extras) : '') + '. Its verdict: ' + r.status + '.'
+            ? (refused ? 'Stopped' + rule + ' before it ran' : 'Approved') + (extras.length ? ', with ' + tryList(extras) : '') + '. Its verdict: ' + r.status + '.'
             : state.planned && !state.replay ? 'No call was sent: no rule in force can be shown by a single call.' : 'No answer was recorded.',
           source: 'POST /evaluate-tool-call'
         });
