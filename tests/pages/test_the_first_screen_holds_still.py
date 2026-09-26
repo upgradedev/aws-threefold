@@ -159,8 +159,20 @@ LAYOUT = r"""() => {
 }"""
 
 
-def _layout(tmp_path: Path, width: int, height: int) -> dict:
-    return measure("index.html", tmp_path, width=width, height=height, replies=_replies(HEROES["live"]), moments={"landed": 3200}, probe=LAYOUT)["taken"]["landed"]
+# A face much wider than the page's own, as a machine without it may fall back
+# to: what holds in the fallback here must hold there too.
+WIDE_FONT = r"""
+document.addEventListener('DOMContentLoaded', () => {
+  const style = document.createElement('style');
+  style.textContent = ':root { --tf-font-sans: Verdana, sans-serif !important; }';
+  document.head.appendChild(style);
+});
+"""
+
+
+def _layout(tmp_path: Path, width: int, height: int, before: str = "") -> dict:
+    return measure("index.html", tmp_path, width=width, height=height, replies=_replies(HEROES["live"]), moments={"landed": 3200},
+                   probe=LAYOUT, before=before)["taken"]["landed"]
 
 
 def test_on_a_phone_the_steps_are_the_flow_and_how_it_works_stays_short(tmp_path: Path) -> None:
@@ -168,7 +180,10 @@ def test_on_a_phone_the_steps_are_the_flow_and_how_it_works_stays_short(tmp_path
     phone = _layout(tmp_path, 375, 812)
     assert phone["flowShown"] == [], "No second drawing of the three steps under them on a phone"
     assert "the call" in phone["connectors"], "The steps are joined by the call going down"
-    assert phone["how"]["height"] < 2.4 * 812, f"How it works takes {phone['how']['height'] / 812:.1f} phone screens"
+    # It took 3.3 screens when the drawing repeated the steps; the bound holds in a wide fallback face too.
+    for face in ("", WIDE_FONT):
+        how = _layout(tmp_path, 375, 812, face)["how"]["height"] if face else phone["how"]["height"]
+        assert how < 2.9 * 812, f"How it works takes {how / 812:.1f} phone screens"
     assert phone["scrollWidth"] <= phone["clientWidth"]
     desk = _layout(tmp_path, 1440, 900)
     assert desk["flowShown"] == ["tf-diagram-wide"], "On a desk the steps sit side by side and the one drawing joins them"
@@ -183,13 +198,14 @@ def test_the_verdict_fills_the_room_its_ghost_held(tmp_path: Path, width: int, h
     assert abs(got["slack"]) < 1, f"{got['slack']:.0f} px of empty room under the verdict at {width} px"
 
 
-def test_the_hero_actions_never_leave_one_button_alone_on_a_row(tmp_path: Path) -> None:
+@pytest.mark.parametrize("face", ["page", "wide"])
+def test_the_hero_actions_never_leave_one_button_alone_on_a_row(tmp_path: Path, face: str) -> None:
     for width, height in ((768, 1024), (1024, 768), (1280, 800), (1440, 900)):
-        acts = {a["id"]: a for a in _layout(tmp_path, width, height)["actions"]}
+        acts = {a["id"]: a for a in _layout(tmp_path, width, height, WIDE_FONT if face == "wide" else "")["actions"]}
         primary, secondary, link = acts["hero-try"], acts["hero-dashboard"], acts["hero-connect"]
         side_by_side = abs(primary["top"] - secondary["top"]) < 1
         stacked = abs(primary["left"] - secondary["left"]) < 1 and abs(primary["width"] - secondary["width"]) < 1
-        assert side_by_side or stacked, f"At {width} px the two buttons are neither on one row nor one column"
+        assert side_by_side or stacked, f"At {width} px, in the {face} face, the two buttons are neither on one row nor one column"
         assert link["top"] > max(primary["top"], secondary["top"]) and abs(link["left"] - primary["left"]) < 1, \
             f"At {width} px the quiet link has the line under the buttons to itself"
 

@@ -797,12 +797,14 @@ def test_the_counts_are_read_from_the_overview_at_load_and_say_what_they_are_mad
     ), "One clause, where a reader first meets the numbers, and the fleet called synthetic"
 
 
-def test_the_stopped_tile_says_how_many_of_its_refusals_were_this_pages_demos(tmp_path: Path) -> None:
+def test_the_stopped_tile_says_how_many_of_its_refusals_are_in_this_pages_demo_project(tmp_path: Path) -> None:
     """The hero's call and Scenario 3 are refused into Acme-Core, one per visit, and the tile opens those very rows.
 
     So the number stays the stack's own count, which is what its link lists,
-    and the line under it says exactly how many of them this page sent, from
-    the project's own row in by_project.
+    and the line under it says how many of them are in the page's demo
+    project, from that project's own row in by_project. It names the project
+    rather than the sender: anyone calling the open API may write to Acme-Core
+    too, and Scenarios 1 and 2 record elsewhere.
     """
     def stopped_sub(by_project: str) -> str:
         out = _load(tmp_path, overview="{ status: 200, body: " + _overview("by_project: " + by_project, refused=14).replace("by_project: [], ", "", 1) + " }")
@@ -811,8 +813,8 @@ def test_the_stopped_tile_says_how_many_of_its_refusals_were_this_pages_demos(tm
         return subs[1]
 
     rows = "[{ project: 'Acme-Payments', calls: 900, refused: 4 }, { project: 'Acme-Core', calls: 12, refused: 10 }]"
-    assert stopped_sub(rows) == "before they ran; 10 were this page’s own demos"
-    assert stopped_sub("[{ project: 'Acme-Core', calls: 3, refused: 1 }]") == "before they ran; 1 was this page’s own demo"
+    assert stopped_sub(rows) == "before they ran; 10 in this page’s demo project"
+    assert stopped_sub("[{ project: 'Acme-Core', calls: 3, refused: 1 }]") == "before they ran; 1 in this page’s demo project"
     for none in ("[{ project: 'Acme-Payments', calls: 900, refused: 14 }]", "[{ project: 'Acme-Core', calls: 4, refused: 0 }]",
                  "[{ project: 'Acme-Core', calls: 40, refused: 40 }]", "[{ project: 'Acme-Core', refused: '<img src=x>' }]", "'many'"):
         assert stopped_sub(none) == "before they ran", f"{none}: no share that is not a count within the tile's own"

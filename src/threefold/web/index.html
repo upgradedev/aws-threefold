@@ -98,12 +98,15 @@
     @media (min-width: 640px) { .tf-hero-lede { font-size: 1.0625rem; line-height: 1.65; } }
     .tf-hero-actions { display: flex; flex-direction: column; align-items: stretch; gap: var(--tf-space-1); }
     @media (min-width: 640px) { .tf-hero-actions { flex-direction: row; flex-wrap: wrap; align-items: center; gap: var(--tf-space-1h); } }
-    /* The two buttons share a row where they fit, and the quiet link always
-       takes the line under them; in a desk's narrow copy column, where the
-       two do not fit side by side, they stack at its full width instead of
-       one of them wrapping alone. */
-    @media (min-width: 640px) { .tf-hero-actions .tf-hero-link { flex-basis: 100%; justify-content: flex-start; } }
-    @media (min-width: 1024px) and (max-width: 1279px) { .tf-hero-actions { flex-direction: column; align-items: stretch; } }
+    /* The two buttons share a row where they fit and grow to fill it; where
+       they do not, whatever the width or the font, each grows to the full
+       row it wrapped onto, so they stack at one width instead of one of them
+       sitting alone. The quiet link always takes the line under them. */
+    @media (min-width: 640px) {
+      .tf-hero-actions { max-width: 36rem; }
+      .tf-hero-actions .tf-btn { flex: 1 1 auto; }
+      .tf-hero-actions .tf-hero-link { flex-basis: 100%; justify-content: flex-start; }
+    }
     /* A label that does not fit wraps inside its button rather than pushing a
        phone's page sideways. */
     .tf-hero-actions .tf-btn { white-space: normal; height: auto; min-height: 44px; padding-top: 10px; padding-bottom: 10px; line-height: 1.25; text-align: center; }
@@ -2406,7 +2409,7 @@
       const judged = trend('calls', 'Calls judged per day', T.COLORS.accent, calls, 'in ' + span);
       const ownDemos = demoRefusals(data, refused);
       const stopped = trend('refused', 'Calls stopped per day', T.COLORS.refused, refused,
-        ownDemos ? 'before they ran; ' + formatCount(ownDemos) + (ownDemos === 1 ? ' was this page’s own demo' : ' were this page’s own demos') : 'before they ran');
+        ownDemos ? 'before they ran; ' + formatCount(ownDemos) + ' in this page’s demo project' : 'before they ran');
       const observed = trend('observed', 'Calls that would have been stopped, per day', T.COLORS.observed, wouldRefuse, 'recorded while a project observes');
       const href = params => T.pageHref('dashboard.html#/calls' + T.query(Object.assign({ days: days }, params)));
       T.setHtml(strip, h`
@@ -2452,11 +2455,14 @@
       return h`${lead} probes, visitors’ sandboxes, page demos and other API callers.`;
     }
 
-    // How many of the refusals counted were this page's own demonstrations:
-    // the hero's call and Scenario 3 are sent to DEMO_PROJECT, so its row in
-    // by_project says so exactly. The tile's number is left as the stack
-    // counts it, because it opens the very rows it counts; the share is said
-    // under it instead. Nothing is said when the stack gives no such row.
+    // How many of the refusals counted are in this page's demo project: the
+    // hero's call and Scenario 3 are refused into DEMO_PROJECT, and its row in
+    // by_project counts them. It is a count of the project, not of who sent
+    // them: anyone calling the open API may write there too, and Scenarios 1
+    // and 2 record under the service's own simulation project instead, so the
+    // words name the project rather than claim the sender. The tile's number
+    // is left as the stack counts it, because it opens the very rows it
+    // counts. Nothing is said when the stack gives no such row.
     function demoRefusals(data, refused) {
       const rows = Array.isArray(data.by_project) ? data.by_project : [];
       const row = rows.find(r => r && typeof r === 'object' && r.project === DEMO_PROJECT);
