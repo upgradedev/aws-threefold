@@ -1052,6 +1052,27 @@ def test_sign_in_promises_only_what_the_code_does_and_fails_inside_its_card(tmp_
     assert 'data-action="signin-retry"' not in out["noSession"], "A link the stack took is spent, so no retry is offered"
 
 
+def test_what_the_operator_reads_is_12px_and_breaks_between_words(tmp_path: Path) -> None:
+    from _browser import page_source
+
+    ops_style = page_source("dashboard.html").split("/* OPS: the operator's screens", 1)[1].split("</style>", 1)[0]
+    assert "0.625rem" not in ops_style, "No 10px text on the operator's screens"
+    micro = [line.strip().split(" {", 1)[0] for line in ops_style.splitlines() if "--tf-fs-micro" in line]
+    assert micro == [".tf-ops-att-kicker", ".tf-ops-flow-q"], "Only the uppercase kickers keep the 11px step"
+    assert re.search(r"\.tf-ops-flow \.tf-chip \{[^}]*white-space: normal", ops_style), "A chip in the incident card wraps inside its card"
+    out = ops(
+        r"""
+  answer = contract({ '/api/decisions': { status: 200, body: { items: [row(1, { rule_key: 'PROTECTED_PATH', observed_rules: ['PROTECTED_PATH'], target: 'src/acme/domain/very_long_module_name.py', observed_target: 'src/acme/domain/very_long_module_name.py' })], next_cursor: null } } });
+  await visit('#/projects/Acme-Billing');
+  out.recent = view().split('Recent calls')[1].split('All calls from')[0];
+""",
+        tmp_path,
+    )
+    recent = out["recent"]
+    assert '<th scope="col">Rule</th>' not in recent, "A narrow card folds the rule under its call"
+    assert "PROTECTED_<wbr>PATH" in recent and "very_<wbr>long_<wbr>module_<wbr>name.py" in recent, "Keys and paths break between words"
+
+
 def test_a_screen_title_takes_the_focus_without_drawing_a_ring() -> None:
     from _browser import page_source
 

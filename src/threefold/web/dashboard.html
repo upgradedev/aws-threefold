@@ -39,7 +39,7 @@
     .tf-ops-h2 { margin: 0; display: flex; align-items: center; gap: 8px; font: 600 1rem/1.5rem var(--tf-font-sans); letter-spacing: -0.01em; color: var(--tf-text); }
     .tf-ops-h2 .tf-icon { width: 18px; height: 18px; color: var(--tf-accent-text); }
     .tf-ops-sub { margin: 2px 0 0; font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-3); }
-    .tf-ops-fresh { display: flex; align-items: center; gap: 8px; margin: -8px 0 var(--tf-space-2); font-size: var(--tf-fs-micro); line-height: 1rem; color: var(--tf-text-3); font-variant-numeric: tabular-nums; }
+    .tf-ops-fresh { display: flex; align-items: center; gap: 8px; margin: -8px 0 var(--tf-space-2); font-size: 0.75rem; line-height: 1rem; color: var(--tf-text-3); font-variant-numeric: tabular-nums; }
     .tf-ops-live { width: 6px; height: 6px; flex-shrink: 0; border-radius: 50%; background: var(--tf-approved); box-shadow: 0 0 0 3px rgba(14, 165, 114, 0.18); }
     .tf-ops-count { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 20px; padding: 0 6px; border-radius: var(--tf-radius-pill); font: 600 0.6875rem/1 var(--tf-font-sans); background: var(--tf-surface-3); color: var(--tf-text); font-variant-numeric: tabular-nums; }
 
@@ -59,7 +59,7 @@
     .tf-ops-share-bar { display: flex; gap: 2px; height: 8px; border-radius: 4px; overflow: hidden; background: var(--tf-track); }
     .tf-ops-share-bar > span { display: block; height: 100%; min-width: 3px; }
     .tf-ops-share-bar > span:last-child { border-radius: 0 4px 4px 0; }
-    .tf-ops-share .tf-legend { margin-top: 8px; font-size: var(--tf-fs-micro); }
+    .tf-ops-share .tf-legend { margin-top: 8px; font-size: 0.75rem; }
 
     /* Needs your attention: three slots, each either something to do or clear. */
     .tf-ops-attention { display: grid; grid-template-columns: 1fr; gap: var(--tf-space-1h); }
@@ -96,8 +96,8 @@
     .tf-ops-halt:hover { background: var(--tf-surface-2); }
     .tf-ops-halt-id { overflow-wrap: anywhere; }
     .tf-ops-halt-why { color: var(--tf-text-3); overflow-wrap: anywhere; }
-    .tf-ops-halt-when { font-size: var(--tf-fs-micro); color: var(--tf-text-3); font-variant-numeric: tabular-nums; }
-    .tf-ops-att-note { margin: 0; font-size: var(--tf-fs-micro); line-height: 1rem; color: var(--tf-text-3); }
+    .tf-ops-halt-when { font-size: 0.75rem; color: var(--tf-text-3); font-variant-numeric: tabular-nums; }
+    .tf-ops-att-note { margin: 0; font-size: 0.75rem; line-height: 1rem; color: var(--tf-text-3); }
     .tf-ops-att-foot { margin-top: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-top: 4px; }
 
     /* The tiles: the first carries the busiest story and spans two columns. */
@@ -116,7 +116,7 @@
     .tf-ops-meter[data-state="done"] .tf-ops-meter-track { background: rgba(14, 165, 114, 0.18); }
     .tf-ops-meter[data-state="done"] .tf-ops-meter-fill { background: var(--tf-approved); }
     .tf-ops-meter[data-state="none"] .tf-ops-meter-track { background: var(--tf-track); }
-    .tf-ops-meter-words { flex-shrink: 0; font-size: var(--tf-fs-micro); line-height: 1rem; color: var(--tf-text-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .tf-ops-meter-words { flex-shrink: 0; font-size: 0.75rem; line-height: 1rem; color: var(--tf-text-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
 
     /* A project's readiness in the portfolio: its state, and its flagged calls split by label. */
     .tf-ops-ready { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-width: 12rem; }
@@ -138,13 +138,13 @@
     .tf-ops-portfolio .tf-table td, .tf-ops-portfolio .tf-table tbody th { vertical-align: middle; }
     .tf-ops-portfolio .tf-table tbody tr[data-row-href] { cursor: pointer; }
     .tf-ops-pname { display: flex; flex-direction: column; gap: 4px; min-width: 12rem; }
-    .tf-ops-pmeta { font-size: var(--tf-fs-micro); line-height: 1rem; color: var(--tf-text-3); overflow-wrap: anywhere; }
+    .tf-ops-pmeta { font-size: 0.75rem; line-height: 1rem; color: var(--tf-text-3); overflow-wrap: anywhere; }
     .tf-ops-pcard { display: flex; flex-direction: column; gap: 10px; padding: 14px; border-radius: var(--tf-radius-md); background: var(--tf-inset); border: 1px solid var(--tf-hairline); }
     .tf-ops-pnums { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; text-align: center; }
     .tf-ops-pnums a { display: block; padding: 6px 2px; border-radius: var(--tf-radius); background: var(--tf-surface-1); border: 1px solid var(--tf-hairline); text-decoration: none; }
     .tf-ops-pnums a:hover { border-color: var(--tf-hairline-strong); background: var(--tf-surface-2); }
     .tf-ops-pnums b { display: block; font: 600 0.9375rem/1.25rem var(--tf-font-mono); font-variant-numeric: tabular-nums; }
-    .tf-ops-pnums small { display: block; font-size: 0.625rem; line-height: 0.875rem; color: var(--tf-text-3); }
+    .tf-ops-pnums small { display: block; font-size: 0.75rem; line-height: 1rem; color: var(--tf-text-3); }
 
     /* A project's stage: where it is on the way from Observe to Enforce. */
     .tf-ops-hero { position: relative; overflow: hidden; padding: var(--tf-space-3); border-radius: var(--tf-radius-xl); border: 1px solid var(--tf-hairline-strong); background: radial-gradient(640px 220px at 0% 0%, var(--tf-observed-soft), transparent 70%), var(--tf-surface-1); box-shadow: var(--tf-shadow-2); }
@@ -154,10 +154,10 @@
     .tf-ops-hero-title { margin: 10px 0 0; font: 650 1.375rem/1.875rem var(--tf-font-sans); letter-spacing: -0.02em; color: var(--tf-text); text-wrap: balance; }
     @media (min-width: 768px) { .tf-ops-hero-title { font-size: 1.625rem; line-height: 2.125rem; } }
     .tf-ops-hero-text { margin: 8px 0 0; max-width: 62ch; font-size: var(--tf-fs-small); line-height: 1.375rem; color: var(--tf-text-2); }
-    .tf-ops-hero-fine { margin: 8px 0 0; max-width: 62ch; font-size: var(--tf-fs-micro); line-height: 1rem; color: var(--tf-text-3); }
+    .tf-ops-hero-fine { margin: 8px 0 0; max-width: 62ch; font-size: 0.75rem; line-height: 1rem; color: var(--tf-text-3); }
     .tf-ops-hero-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: var(--tf-space-2); }
     .tf-ops-hero-more { margin-top: var(--tf-space-2); max-width: 62ch; }
-    .tf-ops-hero-more > summary { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; list-style: none; padding: 2px 0; border-radius: var(--tf-radius-sm); font-size: var(--tf-fs-micro); line-height: 1rem; color: var(--tf-text-3); }
+    .tf-ops-hero-more > summary { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; list-style: none; padding: 2px 0; border-radius: var(--tf-radius-sm); font-size: 0.75rem; line-height: 1rem; color: var(--tf-text-3); }
     .tf-ops-hero-more > summary::-webkit-details-marker { display: none; }
     .tf-ops-hero-more > summary:hover { color: var(--tf-text-2); }
     .tf-ops-hero-more > summary:focus-visible { outline: 2px solid var(--tf-focus); outline-offset: 2px; }
@@ -174,7 +174,7 @@
     .tf-ops-tally { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
     .tf-ops-tally > div { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: var(--tf-radius); background: var(--tf-surface-1); border: 1px solid var(--tf-hairline); }
     .tf-ops-tally b { font: 650 1.125rem/1.5rem var(--tf-font-sans); color: var(--tf-text); }
-    .tf-ops-tally small { font-size: var(--tf-fs-micro); line-height: 1rem; color: var(--tf-text-3); }
+    .tf-ops-tally small { font-size: 0.75rem; line-height: 1rem; color: var(--tf-text-3); }
 
     /* Readiness, rule by rule. */
     .tf-ops-rules { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
@@ -186,9 +186,9 @@
     .tf-ops-rule-name { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
     .tf-ops-rule-name .tf-ops-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
     .tf-ops-rule-key { font: 500 0.8125rem/1.25rem var(--tf-font-mono); color: var(--tf-text); overflow-wrap: anywhere; }
-    .tf-ops-rule-what { font-size: var(--tf-fs-micro); line-height: 1rem; color: var(--tf-text-3); }
+    .tf-ops-rule-what { font-size: 0.75rem; line-height: 1rem; color: var(--tf-text-3); }
     .tf-ops-rule-say { font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-2); }
-    .tf-ops-rule-links { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 4px; font-size: var(--tf-fs-micro); }
+    .tf-ops-rule-links { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 4px; font-size: 0.75rem; }
     .tf-ops-rule-quiet { background: transparent; border-style: dashed; }
     .tf-ops-quiet-count { font: 500 0.8125rem/1.25rem var(--tf-font-sans); color: var(--tf-text); }
     .tf-ops-quiet-keys { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
@@ -197,7 +197,7 @@
     .tf-ops-stack { display: flex; gap: 2px; height: 8px; border-radius: 4px; background: var(--tf-track); overflow: hidden; }
     .tf-ops-stack > a, .tf-ops-stack > span { display: block; height: 100%; min-width: 3px; }
     .tf-ops-stack > :last-child { border-radius: 0 4px 4px 0; }
-    .tf-ops-stack-words { display: flex; flex-wrap: wrap; gap: 2px 10px; margin-top: 6px; font-size: var(--tf-fs-micro); line-height: 1rem; color: var(--tf-text-3); font-variant-numeric: tabular-nums; }
+    .tf-ops-stack-words { display: flex; flex-wrap: wrap; gap: 2px 10px; margin-top: 6px; font-size: 0.75rem; line-height: 1rem; color: var(--tf-text-3); font-variant-numeric: tabular-nums; }
     .tf-ops-stack-words i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; vertical-align: -0.05em; font-style: normal; }
 
     /* Review: a keyboard-first queue. */
@@ -240,7 +240,7 @@
     .tf-ops-qrow-actions .tf-kbd { margin-left: 2px; }
     .tf-ops-group-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 10px 16px; }
     .tf-ops-group-title { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font: 600 0.875rem/1.375rem var(--tf-font-sans); color: var(--tf-text); }
-    .tf-ops-note-add { display: inline-flex; align-items: center; gap: 6px; padding: 2px 0; border: 0; background: none; cursor: pointer; font-size: var(--tf-fs-micro); line-height: 1rem; color: var(--tf-text-3); }
+    .tf-ops-note-add { display: inline-flex; align-items: center; gap: 6px; padding: 2px 0; border: 0; background: none; cursor: pointer; font-size: 0.75rem; line-height: 1rem; color: var(--tf-text-3); }
     button.tf-ops-note-add { background: none; }
     .tf-ops-note-add:hover { color: var(--tf-text); }
     /* Signed out on the public demo: which groups a visitor may label. */
@@ -263,8 +263,10 @@
     .tf-ops-flow-q .tf-icon { width: 14px; height: 14px; }
     .tf-ops-flow-a { font-size: var(--tf-fs-small); line-height: 1.375rem; color: var(--tf-text); overflow-wrap: anywhere; }
     .tf-ops-flow-a code { font: 500 0.78rem/1.25rem var(--tf-font-mono); }
+    /* A chip inside a card of the flow wraps with its card rather than running out of it. */
+    .tf-ops-flow .tf-chip { height: auto; min-height: 22px; max-width: 100%; padding-top: 4px; padding-bottom: 4px; white-space: normal; line-height: 1.25; text-align: left; }
     .tf-ops-flow-sub { font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-3); overflow-wrap: anywhere; }
-    .tf-ops-facts { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: var(--tf-space-2) 0 0; font-size: var(--tf-fs-micro); line-height: 1rem; color: var(--tf-text-3); }
+    .tf-ops-facts { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: var(--tf-space-2) 0 0; font-size: 0.75rem; line-height: 1rem; color: var(--tf-text-3); }
     .tf-ops-facts b { font-weight: 500; color: var(--tf-text-2); }
 
     /* Connect: the wait, as a calm radar, and the arrival. */
@@ -327,7 +329,7 @@
     @media (min-width: 1200px) { .tf-ops-multiples { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
     .tf-ops-multiple { display: flex; flex-direction: column; gap: 12px; padding: 14px 16px 16px; border-radius: var(--tf-radius-md); background: var(--tf-inset); border: 1px solid var(--tf-hairline); min-width: 0; }
     .tf-ops-multiple-title { margin: 0; font: 600 0.8125rem/1.25rem var(--tf-font-sans); color: var(--tf-text); }
-    .tf-ops-multiple-sub { display: block; font: 400 var(--tf-fs-micro)/1rem var(--tf-font-sans); color: var(--tf-text-3); }
+    .tf-ops-multiple-sub { display: block; font: 400 0.75rem/1rem var(--tf-font-sans); color: var(--tf-text-3); }
     .tf-ops-multiple .tf-hbars { gap: 10px; }
     .tf-ops-multiple .tf-hbar-head > :first-child { font-family: var(--tf-font-sans); color: var(--tf-text-2); }
     /* Every bar starts at a tick on its baseline, so a measured zero reads
@@ -336,7 +338,7 @@
     .tf-ops-multiple .tf-hbar::before { content: ''; position: absolute; left: 0; top: -2px; width: 2px; height: 12px; border-radius: 1px; background: var(--tf-text-3); }
     /* A condition's name is read, not cut: it wraps on a narrow screen. */
     .tf-ops-multiple .tf-hbar-head > :first-child { white-space: normal; overflow: visible; text-overflow: clip; }
-    .tf-ops-scale { display: flex; justify-content: space-between; margin-top: -4px; font-size: 0.625rem; line-height: 0.875rem; color: var(--tf-text-3); font-variant-numeric: tabular-nums; }
+    .tf-ops-scale { display: flex; justify-content: space-between; margin-top: -4px; font-size: 0.75rem; line-height: 1rem; color: var(--tf-text-3); font-variant-numeric: tabular-nums; }
     .tf-ops-verdict { display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px; border-radius: var(--tf-radius-md); background: var(--tf-accent-soft); border: 1px solid var(--tf-accent-line); }
     .tf-ops-verdict .tf-icon { width: 20px; height: 20px; color: var(--tf-accent-text); flex-shrink: 0; margin-top: 2px; }
     .tf-ops-verdict p { margin: 0; font-size: 0.9375rem; line-height: 1.375rem; color: var(--tf-text); }
@@ -505,10 +507,10 @@
     }
     function agentChip(agent) { return html`<span class="tf-chip tf-chip-gray">${agentLabel(agent)}</span>`; }
     // A path or an identifier that may not fit its column breaks after a
-    // slash, a dot, a dash or an underscore, never inside a word. Every part
+    // slash, a dash or an underscore, never inside a word. Every part
     // is escaped by html``; only the break opportunities are markup.
     function breakable(text) {
-      const parts = String(text == null ? '' : text).split(/(?<=[/._-])/);
+      const parts = String(text == null ? '' : text).split(/(?<=[/_-])/);
       return html`${parts.map((p, i) => html`${i ? raw('<wbr>') : ''}${p}`)}`;
     }
 
@@ -596,7 +598,7 @@
     }
 
     function crumbs(items) {
-      return html`<nav aria-label="Breadcrumb" class="text-[11px] text-gray-500 mb-2 flex flex-wrap items-center gap-1">
+      return html`<nav aria-label="Breadcrumb" class="text-xs text-gray-500 mb-2 flex flex-wrap items-center gap-1">
         ${items.map((item, i) => html`${i ? html`<span aria-hidden="true">/</span>` : ''}${item.href
           ? html`<a href="${item.href}" class="hover:text-gray-300 underline-offset-2 hover:underline">${item.label}</a>`
           : html`<span class="text-gray-400 tf-break" aria-current="page">${item.label}</span>`}`)}
@@ -1859,7 +1861,7 @@
         const recent = state.recent;
         const recentBody = recent === null
           ? (state.recentError ? failure(state.recentError, 'the recent calls') : emptyNote('Recent calls could not be read.'))
-          : recent.length ? callsList(recent.slice(0, 12), { project: false }) : emptyNote('No call from this project in ' + windowWords(days) + '.', 'Run the connect command below, then use your agent as usual.');
+          : recent.length ? callsList(recent.slice(0, 12), { project: false, foldRule: true }) : emptyNote('No call from this project in ' + windowWords(days) + '.', 'Run the connect command below, then use your agent as usual.');
 
         ctx.render(html`${crumb}
           ${pageTitle(html`<span class="font-mono">${shown}</span>`, null, html`${stageChip(stage, config ? true : false)}${sourceBadge({ project: name, sandbox, source: d.source })}${sandbox ? html`<span class="tf-chip tf-chip-sky" title="A sandbox made by the walkthrough; its stage expires on its own">Sandbox · expires within a day</span>` : ''}`)}
@@ -1895,7 +1897,7 @@
           return html`<li class="tf-card-quiet p-3 space-y-1.5">
             <div class="flex flex-wrap items-center justify-between gap-2">
               <span class="text-sm text-white inline-flex items-center gap-2">${T.icon('terminal', 16)}${agentLabel(agent)}</span>
-              <span class="text-[11px] text-gray-500">${plural(info.calls, 'call')} · last ${timeAgo(info.last)}</span>
+              <span class="text-xs text-gray-500">${plural(info.calls, 'call')} · last ${timeAgo(info.last)}</span>
             </div>
             <div class="flex flex-wrap items-center gap-x-2 gap-y-1">${modes.map(m => html`<span class="tf-chip ${m === 'observe' ? 'tf-chip-amber' : m === 'managed' ? 'tf-chip-emerald' : 'tf-chip-gray'}" title="${HOOK_MODES[m] || m}">${m}</span><span class="text-xs text-gray-400">${HOOK_MODE_WORDS[m] || HOOK_MODES[m] || m}</span>`)}</div>
             ${capped ? html`<p class="text-xs text-amber-300" role="note">This project is in Enforce, but this agent's hook is capped to observe on its machine, so its calls are never refused. On that machine, run <span class="font-mono">python threefold.py connect --mode managed</span>.</p>` : ''}
@@ -2050,29 +2052,32 @@
     function callsList(rows, options) {
       options = options || {};
       const showProject = options.project !== false;
+      // A narrow card folds the rule under the call it judged, so a rule key
+      // is never broken inside a word to fit a column of its own.
+      const foldRule = options.foldRule === true;
       const desktop = html`<div class="hidden md:block tf-scroll-x">
         <table class="tf-table">
           <thead><tr>
             <th scope="col">When</th><th scope="col">Outcome</th>
             ${showProject ? html`<th scope="col">Project</th>` : ''}
-            <th scope="col">Agent</th><th scope="col">Call</th><th scope="col">Rule</th><th scope="col">Review</th>
+            <th scope="col">Agent</th><th scope="col">Call</th>${foldRule ? '' : html`<th scope="col">Rule</th>`}<th scope="col">Review</th>
           </tr></thead>
           <tbody>${rows.map(row => html`<tr class="cursor-pointer" data-row-href="${callHref(row)}">
             <td class="whitespace-nowrap"><a href="${callHref(row)}" class="tf-link-quiet" title="${dateTime(row.timestamp)}">${timeAgo(row.timestamp)}</a></td>
             <td>${outcomeChip(row)}</td>
             ${showProject ? html`<td class="font-mono text-gray-300 tf-break">${T.projectName(row.project_name)}</td>` : ''}
             <td class="text-gray-300 whitespace-nowrap">${agentLabel(row.agent)}</td>
-            <td class="min-w-[12rem]"><span class="font-mono text-gray-200">${row.tool_name}</span> <span class="font-mono text-gray-500 tf-break">${targetOf(row)}</span></td>
-            <td class="font-mono text-gray-400 tf-break">${outcomeOf(row) === 'approved' ? html`<span class="text-gray-600">—</span>` : ruleKeyOf(row)}</td>
+            <td class="min-w-[12rem]"><span class="font-mono text-gray-200">${row.tool_name}</span> <span class="font-mono text-gray-500 tf-break">${breakable(targetOf(row))}</span>${foldRule && outcomeOf(row) !== 'approved' ? html`<span class="block font-mono text-xs text-gray-400 mt-0.5">${breakable(ruleKeyOf(row))}</span>` : ''}</td>
+            ${foldRule ? '' : html`<td class="font-mono text-gray-400 whitespace-nowrap">${outcomeOf(row) === 'approved' ? html`<span class="text-gray-600">—</span>` : ruleKeyOf(row)}</td>`}
             <td>${outcomeOf(row) === 'observed' ? reviewChip(row.review) : ''}</td>
           </tr>`)}</tbody>
         </table>
       </div>`;
       const mobile = html`<ul class="md:hidden space-y-2">${rows.map(row => html`<li>
         <a href="${callHref(row)}" class="block tf-card-quiet p-3 space-y-1.5">
-          <span class="flex flex-wrap items-center justify-between gap-2">${outcomeChip(row)}<span class="text-[11px] text-gray-500">${timeAgo(row.timestamp)}</span></span>
+          <span class="flex flex-wrap items-center justify-between gap-2">${outcomeChip(row)}<span class="text-xs text-gray-500">${timeAgo(row.timestamp)}</span></span>
           <span class="block text-xs"><span class="font-mono text-gray-200">${row.tool_name}</span> <span class="font-mono text-gray-500 tf-break">${targetOf(row)}</span></span>
-          <span class="block text-[11px] text-gray-500">${showProject ? html`<span class="font-mono">${T.projectName(row.project_name)}</span> · ` : ''}${agentLabel(row.agent)}${outcomeOf(row) !== 'approved' ? html` · <span class="font-mono">${ruleKeyOf(row)}</span>` : ''}</span>
+          <span class="block text-xs text-gray-500">${showProject ? html`<span class="font-mono">${T.projectName(row.project_name)}</span> · ` : ''}${agentLabel(row.agent)}${outcomeOf(row) !== 'approved' ? html` · <span class="font-mono">${ruleKeyOf(row)}</span>` : ''}</span>
           ${outcomeOf(row) === 'observed' ? html`<span class="block">${reviewChip(row.review)}</span>` : ''}
         </a>
       </li>`)}</ul>`;
@@ -3985,7 +3990,7 @@
     }
 
     function provenance(source, snapshot) {
-      return html`<p class="text-[11px] text-gray-500 mt-4 pt-3 border-t border-gray-800" data-proof="provenance">
+      return html`<p class="text-xs text-gray-500 mt-4 pt-3 border-t border-gray-800" data-proof="provenance">
         Source: <span class="text-gray-400">${source || 'not recorded'}</span> · Snapshot taken: <span class="text-gray-400">${when(snapshot)}</span>
       </p>`;
     }
@@ -3994,7 +3999,7 @@
     function share(stat) {
       if (!stat || typeof stat.n !== 'number' || stat.n <= 0) return html`<span class="text-gray-500">not measured</span>`;
       const interval = typeof stat.ci_low === 'number' && typeof stat.ci_high === 'number'
-        ? html`<span class="block text-[10px] text-gray-500">95% CI ${pct(stat.ci_low)}–${pct(stat.ci_high)}</span>` : '';
+        ? html`<span class="block text-xs text-gray-500">95% CI ${pct(stat.ci_low)}–${pct(stat.ci_high)}</span>` : '';
       return html`<span class="font-mono">${pct(stat.rate)}</span> <span class="text-gray-500">(${num(stat.k)}/${num(stat.n)})</span>${interval}`;
     }
 
@@ -4006,7 +4011,7 @@
       if (condition.condition === 'none') return html`<span class="text-gray-500">the baseline</span>`;
       const o = condition.overhead;
       if (!o || ['turns', 'seconds', 'cost'].every(k => typeof o[k] !== 'number')) return html`<span class="text-gray-500">not measured</span>`;
-      return html`<span class="font-mono text-[11px]">turns ${ratio(o.turns)} · time ${ratio(o.seconds)} · cost ${ratio(o.cost)}</span>`;
+      return html`<span class="font-mono text-xs">turns ${ratio(o.turns)} · time ${ratio(o.seconds)} · cost ${ratio(o.cost)}</span>`;
     }
 
     function correctedCell(condition) {
@@ -4118,8 +4123,8 @@
             <th scope="col">Self-corrected</th><th scope="col">Overhead against no guidance</th>
           </tr></thead>
           <tbody>${conditions.map(c => html`<tr data-condition="${c.condition}">
-            <th scope="row" class="font-normal min-w-[9rem]"><span class="text-gray-200">${c.label || c.condition}</span><span class="block text-[10px] text-gray-500 font-mono">${c.condition}</span></th>
-            <td class="num"><span class="font-mono">${num(c.n)}</span>${c.not_measured ? html`<span class="block text-[10px] text-amber-300">${plural(c.not_measured, 'run')} measured nothing</span>` : ''}</td>
+            <th scope="row" class="font-normal min-w-[9rem]"><span class="text-gray-200">${c.label || c.condition}</span><span class="block text-xs text-gray-500 font-mono">${c.condition}</span></th>
+            <td class="num"><span class="font-mono">${num(c.n)}</span>${c.not_measured ? html`<span class="block text-xs text-amber-300">${plural(c.not_measured, 'run')} measured nothing</span>` : ''}</td>
             <td>${share(c.violation)}</td>
             <td>${share(c.completion)}</td>
             <td>${correctedCell(c)}</td>
@@ -4135,7 +4140,7 @@
       return card(title, 'The same Acme tasks under each condition, judged by checkers that do not import Threefold.', html`
         ${pilot}
         <blockquote class="border-l-2 border-purple-700 pl-4 text-sm text-gray-200 tf-break" data-proof="headline">${b.headline || 'No headline was computed.'}</blockquote>
-        <p class="text-[11px] text-gray-500 mt-1">The headline sentence exactly as benchmark/report.py computed it from the rows.</p>
+        <p class="text-xs text-gray-500 mt-1">The headline sentence exactly as benchmark/report.py computed it from the rows.</p>
         <dl class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4">${facts.map(([label, value]) => html`<div class="tf-card-quiet p-3 min-w-0"><dt class="tf-label">${label}</dt><dd class="text-xs text-gray-200 tf-break">${value}</dd></div>`)}</dl>
         ${table}
         ${provenance(b.source, b.snapshot_at)}`, 'min-w-0');
@@ -4206,7 +4211,7 @@
           ? html`Snapshot written ${when(proof.generated_at)}` : 'The snapshot does not record when it was written';
         const by = typeof proof.generated_by === 'string' && proof.generated_by ? html` by <span class="font-mono">${proof.generated_by}</span>` : '';
         ctx.render(html`${pageTitle('Proof', PROOF_SUB)}
-          <p class="text-[11px] text-gray-500 -mt-3 mb-4" data-proof="generated">${written}${by}. It changes only when a new one is deployed.</p>
+          <p class="text-xs text-gray-500 -mt-3 mb-4" data-proof="generated">${written}${by}. It changes only when a new one is deployed.</p>
           <div class="space-y-4">
             ${benchmarkCards(proof)}
             ${ownUseCard(proof.private)}
