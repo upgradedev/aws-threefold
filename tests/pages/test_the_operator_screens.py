@@ -929,6 +929,10 @@ def test_the_incident_card_speaks_of_whoever_sent_the_call(tmp_path: Path) -> No
   answer = contract({ '/api/decision': { status: 200, body: observed } });
   await visit('#/call?timestamp=t&verdict_id=VERDICT-1&n=2');
   out.observed = view();
+  const capped = Object.assign({}, observed, { decision: row(1, { dry_run: true, hook_mode: 'observe' }) });
+  answer = contract({ '/api/decision': { status: 200, body: capped } });
+  await visit('#/call?timestamp=t&verdict_id=VERDICT-1&n=3');
+  out.capped = text(view());
 """,
         tmp_path,
     )
@@ -944,6 +948,9 @@ def test_the_incident_card_speaks_of_whoever_sent_the_call(tmp_path: Path) -> No
     assert 'data-acted="observe"' in rule and "Observed this call" in rule, "The rule card says how the rule acted on this call"
     assert "Written to enforce; it only watched because the project was in Observe." in re.sub(r"<[^>]+>", "", rule)
     assert 'tf-chip-purple">enforce<' not in observed, "No enforce chip under a call the rule only watched"
+    capped = out["capped"]
+    assert "the hook on that machine is capped to Observe" in capped, "A capped hook's call is real work, named as such"
+    assert "test call" not in capped and "dry run" not in capped
 
 
 def test_a_count_the_service_did_not_inflect_reads_as_a_reader_would(tmp_path: Path) -> None:

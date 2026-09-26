@@ -3092,11 +3092,14 @@
         if (row.origin === 'ci') return { kind: 'ci', ask: 'What the check tried', who: agentLabel(row.agent) + ', in CI', told: 'the check printed why' };
         return { kind: 'hook', ask: 'What the agent tried', who: agentLabel(row.agent) + (row.origin === 'hook' ? ' through its hook' : ''), told: 'the agent was told why' };
       }
-      // Why a flagged call ran: a test call is never refused, a project in
+      // Why a flagged call ran: a hook capped to Observe on its machine sends
+      // every call as a dry run, a dry run is never refused, a project in
       // Observe refuses nothing, and a project in Enforce can keep a rule
-      // observing.
+      // observing. The cap is named first: its calls are real work, not the
+      // installer's test call.
       function whyItRan(row) {
-        if (row.dry_run === true) return 'a test call is never refused';
+        if (row.hook_mode === 'observe') return 'the hook on that machine is capped to Observe';
+        if (row.dry_run === true) return 'it was a dry run, which is never refused';
         if (row.stage === 'enforce') return 'the project keeps this rule observing';
         return 'the project was in Observe';
       }
