@@ -609,7 +609,7 @@ a.tf-chip:hover { filter: brightness(1.15); }
 .tf-table .num { text-align: right; font-family: var(--tf-font-mono); font-variant-numeric: tabular-nums; }
 .tf-table th.num { font-family: var(--tf-font-sans); }
 .tf-table :is(th, td):first-child { padding-left: 4px; }
-.tf-scroll-x { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.tf-scroll-x { overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; }
 .tf-table-scroll { max-height: 70vh; overflow: auto; }
 .tf-row-link { cursor: pointer; }
 @media (max-width: 639px) {
