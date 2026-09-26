@@ -25,8 +25,9 @@ written `<token file>` and the Codex home's `<Codex home>`: both are the
 owner's, and neither is printed anywhere. A day whose row went its course is
 not run again, whether or not the row counts; a day whose run did not go as
 planned (a harness error, an agent that never ran, a Threefold that stopped
-answering) is run again when the script is started again that day, as the
-next attempt in a session of its own, up to three rows a day.
+answering, a session someone else used while the agent worked) is run again
+when the script is started again that day, as the next attempt in a session
+of its own, up to three rows a day.
 
 What it refuses, before anything is created:
 - an endpoint that is not https, that carries a user name, a password, a
@@ -178,11 +179,11 @@ def run_arguments(pick: Pick, endpoint: str, results_dir: Path, work_root: Path,
 
 
 def shown_command(arguments: Sequence[str], codex_home: bool = False) -> str:
-    """The command a dry run prints: the token file's path is not printed, and neither is the Codex home.
+    """The benchmark's arguments as a dry run and the log show them: no token file path, and no Codex home.
 
-    The run is made in this process, with CODEX_HOME set for it alone, so the
-    Codex home is said in words after the command rather than as a shell's
-    variable prefix, which cmd and PowerShell would not take.
+    The run is made in this process, by benchmark/run.py's main with these
+    arguments and CODEX_HOME set for it alone, not by a command a shell
+    runs: the line names the script and says the Codex home in words.
     """
     shown: List[str] = []
     hide_next = False
@@ -193,7 +194,7 @@ def shown_command(arguments: Sequence[str], codex_home: bool = False) -> str:
             continue
         hide_next = item == "--token-file"
         shown.append(f'"{item}"' if " " in item else item)
-    command = " ".join(["python", "benchmark/run.py", *shown])
+    command = " ".join(["benchmark/run.py", *shown])
     return command + (f" ({CODEX_HOME_SET})" if codex_home else "")
 
 
@@ -412,7 +413,7 @@ def summary_line(pick: Pick, row: Optional[Mapping[str, Any]], note: str = "", r
     """
     head = f"live {pick.date} {pick.agent} on {pick.task}"
     if row is None:
-        return f"{head}: no row. {note}".strip()
+        return _one_line(f"{head}: no row. {note}")
     if row.get("harness_error"):
         outcome = f"harness error: {row['harness_error']}"
     elif not row.get("agent_ran"):
@@ -443,7 +444,12 @@ def summary_line(pick: Pick, row: Optional[Mapping[str, Any]], note: str = "", r
         except ValueError:
             shown = Path(results).name
         line += f"; row in {shown}"
-    return line + (f". {note}" if note else "")
+    return _one_line(line + (f". {note}" if note else ""))
+
+
+def _one_line(text: str) -> str:
+    """The text on one line, whatever an error or a reason in it carried: a scheduled task's output is read by line."""
+    return " ".join(text.split())
 
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
@@ -494,7 +500,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             arguments[arguments.index("--run-id")] = "--resume"
         print(f"live {pick.date}: {pick.agent} on {pick.task}, project {pick.project}, session {pick.session} "
               f"(or the next free -a<n>), against {endpoint}")
-        print("would run: " + shown_command(arguments, bool(args.codex_home and pick.agent == "codex")))
+        print("would run, in this process: "
+              + shown_command(arguments, bool(args.codex_home and pick.agent == "codex")))
         if again:
             print(f"(today already has {len(earlier)} row(s) in {results.name} and the last did not go as planned, so "
                   "a real run would run the day again)")
