@@ -367,7 +367,7 @@ def test_the_hero_asks_the_stack_once_and_shows_its_live_answer(tmp_path: Path) 
     assert "Live" in out["source"] and re.search(r"Live · \d+ ms", _text(out["source"])), "The round trip, in milliseconds under a second"
     assert out["caption"] == (
         "Judged just now by this stack through POST /evaluate-tool-call, and kept in its ledger as a page call, "
-        "which is always enforced."
+        "which is always enforced. For an hour, this browser shows this answer again rather than adding another call."
     ), "A page call is enforced where a hook's call on an observing project would only be recorded, so it is not called a hook's"
     assert "import boto3" in out["diff"] and "class User:" in out["diff"] and "src/domain/user.py" in out["call"]
     assert not out["verdictHidden"] and out["waitingHidden"]
@@ -383,6 +383,75 @@ def test_the_hero_asks_the_stack_once_and_shows_its_live_answer(tmp_path: Path) 
     assert "A starting point, never applied automatically." in fix
     assert out["motion"] == "off", "With no animation frames the moment lands at once"
     assert out["scenarioFix"] == "" and out["freezeTitle"] == "", "The hero touches neither the scenarios' panel nor their session"
+
+
+KEPT = "threefold-hero-answer"
+
+
+def _kept(minutes_ago: float, base: str = "https://example.test/prod", **fields) -> str:
+    """A live answer this browser kept `minutes_ago`, as the page stores it."""
+    entry = (
+        "{ base: " + json.dumps(base) + ", at: Date.now() - " + repr(minutes_ago) + " * 60000, ms: 101, "
+        "status: LIVE_REFUSAL.status, reason: LIVE_REFUSAL.reason, "
+        "fix: { summary: LIVE_REFUSAL.suggested_fix.summary, validated: true, checks: [{ passed: true }, { passed: true }, { passed: true }], "
+        "writes: [{ path: 'src/domain/user.py', new_file: false }, { path: 'src/infrastructure/user_adapter.py', new_file: true }] } }"
+    )
+    overrides = "".join(f"kept[{json.dumps(key)}] = {value};\n" for key, value in fields.items())
+    return "{ const kept = " + entry + ";\n" + overrides + f"store[{json.dumps(KEPT)}] = JSON.stringify(kept); }}\n"
+
+
+def test_a_live_answer_is_kept_in_this_browser_with_only_what_the_hero_shows(tmp_path: Path) -> None:
+    """Every ask is one more refused page call in the ledger the strip and the sessions console read."""
+    out = _load(tmp_path, hero="{ status: 200, body: LIVE_REFUSAL }", scenario=f"  out.kept = JSON.parse(store[{json.dumps(KEPT)}]);\n")
+    kept = out["kept"]
+    assert kept["base"] == "https://example.test/prod", "Kept for the stack that gave it"
+    assert (kept["status"], kept["reason"]) == ("BLOCKED_BOUNDARY_VIOLATION", html.unescape(RECORDED_REASON))
+    assert isinstance(kept["at"], (int, float)) and isinstance(kept["ms"], (int, float))
+    assert kept["fix"]["validated"] is True and len(kept["fix"]["checks"]) == 3
+    assert kept["fix"]["writes"] == [{"path": "src/domain/user.py", "new_file": False},
+                                     {"path": "src/infrastructure/user_adapter.py", "new_file": True}], \
+        "Only what the hero shows: the files' names, never their content"
+    for reply in ("'network'", "{ status: 500, body: {} }", "{ status: 200, body: { status: 7 } }"):
+        out = _load(tmp_path, hero=reply, scenario=f"  out.kept = store[{json.dumps(KEPT)}] || null;\n")
+        assert out["kept"] is None, f"{reply}: a recorded replay is never kept"
+
+
+def test_a_visit_within_the_hour_shows_the_kept_answer_and_asks_nothing(tmp_path: Path) -> None:
+    out = _load(tmp_path, overview="{ status: 200, body: " + _overview() + " }", before=_kept(12))
+    assert out["heroAsked"] == [], "A reload adds no refused page call to the ledger"
+    assert _text(out["source"]) == "Live · 12 min ago", "The chip says when the answer was given, not a round trip that did not happen now"
+    assert out["caption"] == (
+        "Judged by this stack 12 minutes ago through POST /evaluate-tool-call, and shown again rather than asked again, "
+        "so a reload adds no call to its ledger. This browser asks afresh once the answer is an hour old."
+    )
+    assert out["dataSource"] == "live" and out["landed"] == "refused" and out["flagged"] == [True, False, False]
+    assert _read(out["reason"]) == PLAIN_REASON + " " + RULE_LINE
+    assert "3 of 3 gate checks passed" in out["fix"] and "src/infrastructure/user_adapter.py · new" in out["fix"]
+    assert _metrics(out["live"])["calls"] == "1,284"
+
+
+def test_an_old_foreign_or_unreadable_kept_answer_is_not_used(tmp_path: Path) -> None:
+    cases = {
+        "older than an hour": _kept(61),
+        "from another stack": _kept(5, base="https://elsewhere.example.test/prod"),
+        "dated in the future": _kept(-5),
+        "not a verdict": _kept(5, status="7"),
+        "not JSON": f"store[{json.dumps(KEPT)}] = '{{not json';\n",
+        "storage that throws": _kept(5) + "storageBlocked = true;\n",
+    }
+    for name, before in cases.items():
+        out = _load(tmp_path, hero="{ status: 200, body: LIVE_REFUSAL }", before=before)
+        assert len(out["heroAsked"]) == 1, f"{name}: the stack is asked again"
+        assert re.search(r"Live · \d+ ms", _text(out["source"])), f"{name}: and its fresh answer shown"
+
+
+def test_a_kept_answer_is_escaped_like_any_answer(tmp_path: Path) -> None:
+    before = _kept(3, status="'BLOCKED_' + EVIL", reason="EVIL + \" rule '\" + EVIL + \"'\"", fix="{ summary: EVIL, validated: true, writes: [{ path: EVIL, new_file: true }], checks: [{ passed: true }] }")
+    out = _load(tmp_path, before=before)
+    assert out["heroAsked"] == []
+    for markup in (out["verdict"], out["fix"], out["reason"]):
+        assert "<img" not in markup and "<svg onload" not in markup, "Storage is data, never markup"
+    assert out["fix"].count("&lt;img") >= 2 and out["reason"].count("&lt;img") >= 3
 
 
 def test_the_hero_asks_only_once_the_counts_are_read_so_a_visit_never_counts_itself(tmp_path: Path) -> None:

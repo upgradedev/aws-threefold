@@ -1636,11 +1636,78 @@
     // in the stack's ledger as a page call, and a page call is always enforced.
     // It is sent only once the counts under the hero have been read, so the
     // strip never counts the visit that is looking at it.
+    //
+    // A live answer is kept in this browser for HERO_KEEP_MS, and a visit in
+    // that time shows it again, with its age, instead of asking again: every
+    // ask is one more refused page call in the ledger the proof strip and the
+    // sessions console read, and a reader who reloads, or comes back from the
+    // dashboard, would otherwise fill both with this page's own refusals. A
+    // new ask always gets a new session, because a page session keeps the
+    // loop gate's halt, and the same call asked a third time under one id
+    // would be refused as a loop. A recorded replay is never kept.
 
     const HERO_MIN_MS = 1000;
     const HERO_TIMEOUT_MS = 6000;
     const HERO_COUNTS_WAIT_MS = 4000;
+    const HERO_KEEP_MS = 60 * 60 * 1000;
+    const HERO_STORE = 'threefold-hero-answer';
     const hero = { answer: null, motion: false };
+
+    // How long an answer is kept, in words, from the constant itself.
+    function heroKeepWords() {
+      const minutes = Math.round(HERO_KEEP_MS / 60000);
+      if (minutes % 60 === 0) return minutes === 60 ? 'an hour' : (minutes / 60) + ' hours';
+      return minutes + ' minutes';
+    }
+
+    // How long ago an answer was given, in the chip's few words and in the
+    // caption's sentence.
+    function heroAgo(at, short) {
+      const minutes = Math.max(0, Math.floor((Date.now() - at) / 60000));
+      if (short) return minutes < 1 ? 'just now' : minutes + ' min ago';
+      return minutes < 1 ? 'less than a minute ago' : minutes === 1 ? 'a minute ago' : minutes + ' minutes ago';
+    }
+
+    // A kept answer is read back as if the stack had just sent it: through the
+    // same check, and it is shown only through the escaping template like any
+    // other answer. One from another stack, or from longer ago than
+    // HERO_KEEP_MS, is not used. Storage that throws, or holds anything else,
+    // means there is nothing kept.
+    function heroRemembered(base) {
+      try {
+        const text = window.localStorage ? window.localStorage.getItem(HERO_STORE) : null;
+        if (!text) return null;
+        const kept = JSON.parse(text);
+        if (!kept || typeof kept !== 'object' || kept.base !== base) return null;
+        const at = kept.at;
+        if (typeof at !== 'number' || !isFinite(at)) return null;
+        const age = Date.now() - at;
+        if (!(age >= 0 && age < HERO_KEEP_MS)) return null;
+        const answer = heroAnswerFrom({ status: kept.status, reason: kept.reason, suggested_fix: kept.fix }, kept.ms);
+        if (!answer) return null;
+        answer.at = at;
+        answer.kept = true;
+        return answer;
+      } catch (err) {
+        return null;
+      }
+    }
+
+    // Only what the hero shows is kept: the verdict, its reason, and of the fix
+    // its summary, whether it was checked, how each check went and the files.
+    function heroRemember(base, answer) {
+      const fix = answer.fix && typeof answer.fix === 'object' ? answer.fix : null;
+      const kept = {
+        base: base, at: answer.at, ms: answer.ms, status: answer.status, reason: answer.reason,
+        fix: fix ? {
+          summary: fix.summary,
+          validated: fix.validated === true,
+          checks: Array.isArray(fix.checks) ? fix.checks.filter(c => c && typeof c === 'object').map(c => ({ passed: c.passed })) : [],
+          writes: Array.isArray(fix.writes) ? fix.writes.filter(w => w && typeof w === 'object').map(w => ({ path: w.path, new_file: w.new_file === true })) : []
+        } : null
+      };
+      try { if (window.localStorage) window.localStorage.setItem(HERO_STORE, JSON.stringify(kept)); } catch (err) { /* asked again next time */ }
+    }
 
     function heroCanAnimate() {
       return !!T && !T.reducedMotion() && typeof window.requestAnimationFrame === 'function';
@@ -1725,7 +1792,7 @@
           let data = null;
           try { data = await res.json(); } catch (err) { data = null; }
           const answer = heroAnswerFrom(data, heroRoundTrip(url, Math.round(performance.now() - t0)));
-          if (answer) return answer;
+          if (answer) { answer.at = Date.now(); return answer; }
           why = { kind: 'unreadable', http: Number(res.status) || 0 };
         }
       } catch (err) {
@@ -1840,12 +1907,20 @@
         T.setHtml(fixBox, h``);
         fixBox.hidden = true;
       }
-      if (answer.source === 'live') {
+      if (answer.source === 'live' && answer.kept) {
+        // Shown again, so the chip says when it was given rather than a round
+        // trip that did not happen now.
+        const took = formatRoundTrip(answer.ms);
+        source.className = 'tf-chip tf-chip-emerald';
+        source.setAttribute('title', 'A live answer this stack gave ' + heroAgo(answer.at) + (took ? ', ' + took + ' there and back' : '') + '; shown again, not asked again');
+        T.setHtml(source, h`${T.icon('bolt', 13)}Live · ${heroAgo(answer.at, true)}`);
+        caption.textContent = 'Judged by this stack ' + heroAgo(answer.at) + ' through POST /evaluate-tool-call, and shown again rather than asked again, so a reload adds no call to its ledger. This browser asks afresh once the answer is ' + heroKeepWords() + ' old.';
+      } else if (answer.source === 'live') {
         const took = formatRoundTrip(answer.ms);
         source.className = 'tf-chip tf-chip-emerald';
         source.setAttribute('title', 'A live answer from this stack' + (took ? ', ' + took + ' there and back from this browser' : ''));
         T.setHtml(source, h`${T.icon('bolt', 13)}Live${took ? h` · ${took}` : ''}`);
-        caption.textContent = 'Judged just now by this stack through POST /evaluate-tool-call, and kept in its ledger as a page call, which is always enforced.';
+        caption.textContent = 'Judged just now by this stack through POST /evaluate-tool-call, and kept in its ledger as a page call, which is always enforced. For ' + heroKeepWords() + ', this browser shows this answer again rather than adding another call.';
       } else {
         source.className = 'tf-chip tf-chip-amber';
         source.setAttribute('title', 'A recorded answer, replayed in this browser');
@@ -1874,15 +1949,20 @@
       drawHeroCall();
       heroShowWaiting(true);
       const started = Date.now();
-      if (countsRead && typeof countsRead.then === 'function') {
-        let timer = null;
-        await Promise.race([
-          Promise.resolve(countsRead).catch(() => null),
-          new Promise(resolve => { timer = setTimeout(resolve, HERO_COUNTS_WAIT_MS); })
-        ]);
-        if (timer) clearTimeout(timer);
+      const base = getApiBase();
+      let answer = heroRemembered(base);
+      if (!answer) {
+        if (countsRead && typeof countsRead.then === 'function') {
+          let timer = null;
+          await Promise.race([
+            Promise.resolve(countsRead).catch(() => null),
+            new Promise(resolve => { timer = setTimeout(resolve, HERO_COUNTS_WAIT_MS); })
+          ]);
+          if (timer) clearTimeout(timer);
+        }
+        answer = await askHero();
+        if (answer.source === 'live') heroRemember(base, answer);
       }
-      const answer = await askHero();
       // The lines finish arriving before the verdict lands on them; with motion
       // off nothing waits.
       if (hero.motion) {
