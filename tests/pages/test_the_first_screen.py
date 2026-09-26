@@ -785,6 +785,27 @@ def test_no_count_is_shown_when_the_stack_does_not_answer_with_figures(tmp_path:
             assert not re.search(r"\d", _text(out["live"]).replace("HTTP 404", "")), f"{name}: not one number invented"
 
 
+def test_an_answer_that_is_not_json_is_called_an_answer_not_silence(tmp_path: Path) -> None:
+    """A 200 whose body is not JSON: the stack answered, so neither card says it did not."""
+    not_json = r"""
+const stubFetch = globalThis.fetch;
+globalThis.fetch = async (url, init) => {
+  const res = await stubFetch(url, init);
+  const path = String(url).split('?')[0];
+  if (path.endsWith('/api/overview') || path.endsWith('/proof.json')) {
+    return { ok: res.ok, status: res.status, json: async () => { throw new SyntaxError('Unexpected token < in JSON'); } };
+  }
+  return res;
+};
+"""
+    out = _load(tmp_path, overview="{ status: 200, body: {} }", proof="{ status: 200, body: {} }", before=not_json)
+    live, bench = _text(out["live"]), _text(out["bench"])
+    assert "The stack answered, but not with figures this page can read" in live and "did not answer" not in live
+    assert "The stack answered, but not with a snapshot this page can read" in bench
+    assert "could not be read" not in bench and "holds no complete series" not in bench
+    assert "data-metric" not in out["live"] + out["bench"] and out["whereHidden"]
+
+
 def test_hostile_totals_never_reach_the_page(tmp_path: Path) -> None:
     evil = "'<img src=x onerror=alert(1)>'"
     for totals in (dict(calls=evil, refused=evil), dict(calls=-3), dict(calls=2.5)):

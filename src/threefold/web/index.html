@@ -2202,6 +2202,14 @@
       </div>`);
     }
 
+    // A body that is not JSON is an answer all the same: the stack was
+    // reached and said something this page cannot read. It is never passed
+    // off as a stack that did not answer, so its parse stays out of the
+    // catch that stands for an unreachable one.
+    async function readJson(res) {
+      try { return await res.json(); } catch (err) { return null; }
+    }
+
     async function loadLiveTotals() {
       const strip = document.getElementById('proof-live');
       const where = document.getElementById('proof-where');
@@ -2213,7 +2221,7 @@
           method: 'GET',
           headers: { 'Accept': 'application/json' }
         });
-        reply = { status: res.status, ok: !!res.ok, body: res.ok ? await res.json() : null };
+        reply = { status: res.status, ok: !!res.ok, body: res.ok ? await readJson(res) : null };
       } catch (err) {
         reply = { status: 0, ok: false, body: null };
       }
@@ -2378,7 +2386,7 @@
       try {
         const base = getApiBase();
         const res = await fetch(`${base}/proof.json`, { method: 'GET', headers: { 'Accept': 'application/json' } });
-        reply = { status: res.status, ok: !!res.ok, body: res.ok ? await res.json() : null };
+        reply = { status: res.status, ok: !!res.ok, body: res.ok ? await readJson(res) : null };
       } catch (err) {
         reply = { status: 0, ok: false, body: null };
       }
@@ -2396,7 +2404,11 @@
         else say('The benchmark snapshot could not be read, so no result is shown rather than one invented.');
         return;
       }
-      const totals = benchmarkTotals(reply.body && typeof reply.body === 'object' ? reply.body : null);
+      if (!reply.body || typeof reply.body !== 'object') {
+        say('The stack answered, but not with a snapshot this page can read, so no result is shown.');
+        return;
+      }
+      const totals = benchmarkTotals(reply.body);
       if (!totals.series) {
         say('The snapshot holds no complete series, so no result is shown.');
         return;
