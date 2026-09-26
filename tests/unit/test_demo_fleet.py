@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import ast
 import collections
+import copy
 import datetime
 import inspect
 import json
@@ -833,3 +834,104 @@ def test_a_store_that_cannot_take_the_claim_fails_the_tick_before_it_sends_anyth
     evaluator.evaluate_tool_call = lambda request: sent.append(request)
     assert demo_fleet.run_scheduled_tick(evaluator, _Context(15000)) == {"threefold_fleet": {"ok": False}}
     assert not sent
+
+
+# ---------------------------------------------------------------- never over what it could not read
+
+
+class _FlakyTable:
+    """A table whose reads can fail while its writes still land, as they can on a cold container."""
+
+    def __init__(self) -> None:
+        self.items: Dict[tuple, Dict[str, Any]] = {}
+        self.reads_fail = False
+
+    def put_item(self, Item, ConditionExpression=None, **_):  # noqa: N803 - boto3 spells it this way
+        key = (Item["PK"], Item["SK"])
+        if ConditionExpression == "attribute_not_exists(PK)" and key in self.items:
+            error = type("ConditionalCheckFailedException", (Exception,), {})()
+            error.response = {"Error": {"Code": "ConditionalCheckFailedException"}}
+            raise error
+        self.items[key] = json.loads(json.dumps(Item))
+
+    def get_item(self, Key, **_):  # noqa: N803
+        if self.reads_fail:
+            raise ConnectionError("simulated throttling after the retries")
+        found = self.items.get((Key["PK"], Key["SK"]))
+        return {"Item": json.loads(json.dumps(found))} if found else {}
+
+    def query(self, **kwargs):
+        if self.reads_fail:
+            raise ConnectionError("simulated throttling after the retries")
+        partition = kwargs["ExpressionAttributeValues"][":pk"]
+        return {"Items": [dict(item) for (pk, _), item in sorted(self.items.items()) if pk == partition]}
+
+    def configs(self) -> Dict[tuple, Dict[str, Any]]:
+        prefixes = (dynamo_repo.PROJECT_CONFIG_PREFIX, dynamo_repo.PROJECT_INDEX_PARTITION)
+        return {key: item for key, item in self.items.items() if key[0].startswith(prefixes)}
+
+
+def _a_container(table: _FlakyTable) -> GovernanceEvaluator:
+    """A new container on the table: it holds nothing of its own yet."""
+    return GovernanceEvaluator(session_repo=_repo_on(table))
+
+
+def _an_enforcing_ledger(table: _FlakyTable) -> Dict[tuple, Dict[str, Any]]:
+    evaluator = _a_container(table)
+    now = datetime.datetime.now(UTC)
+    for name in rollups.FLEET_PROJECTS:
+        evaluator.save_project_config(name, stages.new_config(now.isoformat(), stage=stages.OBSERVE))
+    keys = demo_fleet._keys(evaluator, "Acme-Ledger")
+    evaluator.save_project_config("Acme-Ledger", stages.promoted(None, now.isoformat(), "fleet", keys, keys))
+    stored = table.items[("CONFIG#project#Acme-Ledger", "METADATA")]
+    assert stored["stage"] == stages.ENFORCE and len(stored["history"]) == 1 and stored["promoted_at"]
+    return copy.deepcopy(table.configs())
+
+
+def test_a_configuration_the_store_cannot_read_is_never_written_over() -> None:
+    """A cold container whose reads fail must not take "could not read" for "never configured"."""
+    table = _FlakyTable()
+    before = _an_enforcing_ledger(table)
+    table.reads_fail = True
+    with pytest.raises(ConnectionError):
+        demo_fleet._ensure_configured(_a_container(table), datetime.datetime.now(UTC))
+    assert table.configs() == before, "Acme-Ledger still enforces, with its history and its promotion"
+
+
+def test_a_tick_that_cannot_read_the_stages_sends_nothing_and_changes_nothing() -> None:
+    table = _FlakyTable()
+    before = _an_enforcing_ledger(table)
+    table.reads_fail = True
+    evaluator = _a_container(table)
+    sent = []
+    evaluator.evaluate_tool_call = lambda request: sent.append(request)
+    assert demo_fleet.run_scheduled_tick(evaluator, _Context(15000)) == {"threefold_fleet": {"ok": False}}
+    assert not sent and table.configs() == before
+
+
+def test_a_project_the_store_has_never_seen_is_created_in_observe() -> None:
+    table = _FlakyTable()
+    configs = demo_fleet._ensure_configured(_a_container(table), datetime.datetime.now(UTC))
+    assert set(configs) == set(rollups.FLEET_PROJECTS)
+    assert all(config["stage"] == stages.OBSERVE and config["history"] == [] for config in configs.values())
+    assert all(("CONFIG#project#" + name, "METADATA") in table.items for name in rollups.FLEET_PROJECTS)
+
+
+@pytest.mark.parametrize("change", ["promote", "demote", "observe_noisy"])
+def test_a_change_of_stage_that_cannot_read_the_configuration_changes_nothing(change: str, monkeypatch) -> None:
+    """Each change reads the stored configuration before it writes; a failed read leaves the store alone."""
+    monkeypatch.setattr(demo_fleet, "MIN_CALLS_OBSERVED", 0)
+    table = _FlakyTable()
+    before = _an_enforcing_ledger(table)
+    table.reads_fail = True
+    evaluator = _a_container(table)
+    now = datetime.datetime.now(UTC)
+    summary = demo_fleet.TickSummary(tick=0)
+    steps = {
+        "promote": lambda: demo_fleet._promote(evaluator, "Acme-Ledger", now, summary, None),
+        "demote": lambda: demo_fleet._demote(evaluator, "Acme-Ledger", now),
+        "observe_noisy": lambda: demo_fleet._observe_noisy(evaluator, "Acme-Ledger", now),
+    }
+    demo_fleet._act(summary, change, "Acme-Ledger", steps[change])
+    assert summary.operator_errors == 1 and summary.actions == []
+    assert table.configs() == before

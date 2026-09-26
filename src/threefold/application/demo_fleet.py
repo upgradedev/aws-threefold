@@ -788,6 +788,8 @@ class TickSummary:
     actions: List[Dict[str, Any]] = field(default_factory=list)
     stages: Dict[str, str] = field(default_factory=dict)
     cut_short: bool = False
+    # Changes to a stage the operator tried and could not make, each logged.
+    operator_errors: int = 0
     # Projects given a false alarm this tick: the only ones whose enforcing
     # rules can have turned noisy since the last tick. Not reported.
     false_alarms_in: set = field(default_factory=set)
@@ -808,6 +810,7 @@ class TickSummary:
             "actions": [dict(action) for action in self.actions],
             "stages": dict(sorted(self.stages.items())),
             "cut_short": self.cut_short,
+            "operator_errors": self.operator_errors,
         }
 
 
@@ -844,18 +847,18 @@ def run_tick(
     bucket = bucket_of(now)
     plan = plan_tick(bucket)
     summary = TickSummary(tick=bucket, planned=plan.most)
-    _ensure_configured(evaluator, now)
+    configs = _ensure_configured(evaluator, now)
     # The stage each project's hooks last saw: what the service named on its
     # last answer, which is the project's stage as this tick begins, since
     # the operator changes stages only after the tick's calls.
-    stages_seen = {name: stages.stage_of(evaluator.project_config(name)) for name in rollups.FLEET_PROJECTS}
+    stages_seen = {name: stages.stage_of(config) for name, config in configs.items()}
     outcomes = _send(evaluator, plan, summary, stop_at, stages_seen)
     stamps = [moment for moment in (_instant(outcome.timestamp) for outcome in outcomes) if moment is not None]
     operator_now = max([now] + stamps)
     if _out_of_time(stop_at):
         summary.cut_short = True
     else:
-        _operate(evaluator, bucket, operator_now, outcomes, summary, stop_at)
+        _operate(evaluator, bucket, operator_now, outcomes, summary, stop_at, configs)
     summary.stages = {name: stages.stage_of(evaluator.project_config(name)) for name in rollups.FLEET_PROJECTS}
     return summary.to_dict()
 
@@ -864,12 +867,37 @@ def _out_of_time(stop_at: Optional[float]) -> bool:
     return stop_at is not None and time.monotonic() >= stop_at
 
 
-def _ensure_configured(evaluator: Any, now: datetime.datetime) -> None:
-    """Each fleet project exists as a configured project, starting in Observe as every project does."""
-    configs = evaluator.list_project_configs()
+def _stored_config(evaluator: Any, name: str) -> Optional[Dict[str, Any]]:
+    """A project's configuration as the store holds it now, or None when it has none.
+
+    Read from the store itself, never from what this container holds: the
+    evaluator keeps its held copy when a read fails, and on a cold container
+    that copy is None, which reads exactly like "never configured". A read
+    that fails raises here instead, so nothing the fleet writes is built on a
+    configuration it could not see.
+    """
+    loader = getattr(evaluator.session_repo, "load_project_config", None)
+    if loader is None:
+        return None
+    return stages.normalise_config(loader(name))
+
+
+def _ensure_configured(evaluator: Any, now: datetime.datetime) -> Dict[str, Optional[Dict[str, Any]]]:
+    """Each fleet project's configuration, creating in Observe, as every project starts, one it lacks.
+
+    A configuration is created only when the store answered that there is
+    none. A read that fails raises before anything is written or sent, so a
+    store that answers writes and not reads can never reset a project that
+    enforces to a fresh Observe with no history; the tick fails instead, and
+    the next quarter hour tries again.
+    """
+    configs: Dict[str, Optional[Dict[str, Any]]] = {}
     for name in rollups.FLEET_PROJECTS:
-        if name not in configs and evaluator.project_config(name, fresh=True) is None:
-            evaluator.save_project_config(name, stages.new_config(now.isoformat(), stage=stages.OBSERVE))
+        config = _stored_config(evaluator, name)
+        if config is None:
+            config = evaluator.save_project_config(name, stages.new_config(now.isoformat(), stage=stages.OBSERVE))
+        configs[name] = config
+    return configs
 
 
 def _key_of(result: Any) -> str:
@@ -1051,26 +1079,41 @@ def _operate(
     outcomes: Sequence[_Outcome],
     summary: TickSummary,
     stop_at: Optional[float],
+    configs: Mapping[str, Optional[Mapping[str, Any]]],
 ) -> None:
+    """The operator's turn. `configs` are the fleet's configurations as the store gave them this tick."""
     _review_now(evaluator, bucket, now, outcomes, summary)
     _sweep(evaluator, now, summary, stop_at=stop_at)
-    configs = evaluator.list_project_configs()
     fleet = {name: configs.get(name) for name in rollups.FLEET_PROJECTS}
     # A rule that turned noisy while enforcing goes back to observing first,
     # so the promotion below reads the stages as they now are.
     for name in sorted(summary.false_alarms_in):
         if stages.stage_of(fleet.get(name)) == stages.ENFORCE and not _out_of_time(stop_at):
-            _record(summary, _observe_noisy(evaluator, name, now))
+            _act(summary, "observe_noisy", name, lambda name=name: _observe_noisy(evaluator, name, now))
     for action in stage_actions(bucket, now, fleet):
         if _out_of_time(stop_at):
             return
+        name = action["project"]
         if action["action"] == "promote":
-            _record(summary, _promote(evaluator, action["project"], now, summary, stop_at))
+            _act(summary, "promote", name, lambda: _promote(evaluator, name, now, summary, stop_at))
         else:
-            _record(summary, _demote(evaluator, action["project"], now))
+            _act(summary, "demote", name, lambda: _demote(evaluator, name, now))
 
 
-def _record(summary: TickSummary, action: Optional[Dict[str, Any]]) -> None:
+def _act(summary: TickSummary, what: str, name: str, step: Callable[[], Optional[Dict[str, Any]]]) -> None:
+    """Runs one change to a project's stage and records it; one that fails is logged and changes nothing.
+
+    Each change reads the project's configuration from the store before it
+    writes, and a read that fails raises, so a failure here leaves the stored
+    configuration exactly as it was. The calls the tick sent are already
+    recorded, so a failed step does not fail the tick.
+    """
+    try:
+        action = step()
+    except Exception as exc:
+        summary.operator_errors += 1
+        logger.warning("The demo fleet's operator could not %s %s; nothing changed: %s", what, name, exc)
+        return
     if action is not None:
         summary.actions.append(action)
 
@@ -1117,7 +1160,7 @@ def _keys(evaluator: Any, name: str) -> List[str]:
 
 def _readiness(evaluator: Any, name: str) -> Dict[str, Any]:
     """The project's readiness as its page shows it: same window, same rules, same function."""
-    config = evaluator.project_config(name, fresh=True)
+    config = _stored_config(evaluator, name)
     rules, _ = evaluator.rules_in_force(name)
     items = evaluator.list_rollups(days=READINESS_DAYS, project=name)
     return rollups.readiness(items, config, rules)
@@ -1146,14 +1189,14 @@ def _promote(
         return None
     keys = _keys(evaluator, name)
     enforce = [row["rule_key"] for row in rows if row["state"] in ("ready", "quiet")]
-    config = evaluator.project_config(name, fresh=True)
+    config = _stored_config(evaluator, name)
     evaluator.save_project_config(name, stages.promoted(config, now.isoformat(), REVIEWER, enforce, keys))
     return {"action": "promote", "project": name, "enforce": enforce,
             "observe": [key for key in keys if key not in enforce]}
 
 
 def _demote(evaluator: Any, name: str, now: datetime.datetime) -> Dict[str, Any]:
-    config = evaluator.project_config(name, fresh=True)
+    config = _stored_config(evaluator, name)
     evaluator.save_project_config(name, stages.demoted(config, now.isoformat(), REVIEWER, _keys(evaluator, name)))
     return {"action": "demote", "project": name}
 
@@ -1165,7 +1208,7 @@ def _observe_noisy(evaluator: Any, name: str, now: datetime.datetime) -> Optiona
     if not noisy:
         return None
     enforce = [row["rule_key"] for row in rows if row["mode_now"] == stages.ENFORCE and row["rule_key"] not in noisy]
-    config = evaluator.project_config(name, fresh=True)
+    config = _stored_config(evaluator, name)
     evaluator.save_project_config(name, stages.promoted(config, now.isoformat(), REVIEWER, enforce, _keys(evaluator, name)))
     return {"action": "observe_noisy", "project": name, "observe": noisy}
 
