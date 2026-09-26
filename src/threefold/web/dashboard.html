@@ -2463,17 +2463,33 @@
 
     // A would-refuse reason, split into the rule's sentence and the import it
     // caught, so a card can say both plainly. The service keeps the first 240
-    // characters of it; a reason cut there says so with an ellipsis rather
-    // than ending mid-word as if that were the end.
-    function tryWhy(row) {
+    // characters of a reason. An import cut there is named by the package it
+    // falls under, which the rule's own definition lists; without that it
+    // ends in an ellipsis rather than mid-word as if that were the end. A
+    // command's reason is said of the call, since the card names the command.
+    function tryWhy(row, defs) {
       const full = String(reasonOf(row) || '');
       const cut = full.length >= 240;
       const text = full
         .replace(/^Observe stage, not enforced\. This call would have been refused: /, '')
         .replace(/^Clean Architecture violation: Layering rule '[^']*' refuses this write: /, '');
+      const command = /^Command '.*' (reaches .*)$/.exec(text);
+      if (command) return { sentence: tryStop('It ' + command[1]), imports: null };
       const m = /^(.*?\.)\s+'[^']*' imports '([^']*)('?)/.exec(text);
-      if (!m) return { sentence: text + (cut ? '…' : ''), imports: null };
-      return { sentence: m[1], imports: m[2] + (m[3] ? '' : '…') };
+      if (!m) return { sentence: cut ? text + '…' : tryStop(text), imports: null };
+      if (m[3]) return { sentence: m[1], imports: m[2] };
+      const rule = defs && defs[ruleKeyOf(row)];
+      const pkg = tryPackageFor(m[2], rule && Array.isArray(rule.forbid_imports) ? rule.forbid_imports : []);
+      return pkg ? { sentence: m[1], imports: pkg, from: true } : { sentence: m[1], imports: m[2] + '…' };
+    }
+
+    function tryStop(sentence) {
+      const s = String(sentence || '').trim();
+      return !s || /[.!?…]$/.test(s) ? s : s + '.';
+    }
+
+    function tryWhyHtml(why) {
+      return html`${why.sentence}${why.imports ? html` <span class="tf-try-import">It imports ${why.from ? 'from ' : ''}<mark>${why.imports}</mark>${why.from ? ', a package the rule forbids' : ''}.</span>` : ''}`;
     }
 
     // The command a gate's call ran. For a command the ledger keeps only the
@@ -2770,15 +2786,15 @@
       }
 
       function flagCard(r, i) {
-        const why = tryWhy(r);
+        const why = tryWhy(r, state.rulesDef);
         const key = ruleKeyOf(r);
         const command = r.action_type === 'COMMAND_EXEC';
         return html`<article class="tf-try-flag tf-try-rise" style="--tf-try-i:${i}">
           <header class="tf-try-flag-top">${tryAvatar(r.agent)}<span class="tf-try-flag-agent">${agentLabel(r.agent)}</span><span class="tf-mono tf-try-muted">${r.tool_name}</span>${T.statusChip('observed')}</header>
           <dl class="tf-try-dl">
-            <div><dt>${command ? 'Command' : 'File'}</dt><dd class="tf-try-file">${targetOf(r) || '—'}</dd></div>
+            <div><dt>${command ? 'Command' : 'File'}</dt><dd class="tf-try-file">${tryTarget(r) || '—'}</dd></div>
             <div><dt>Rule</dt><dd><span class="tf-mono tf-try-strong">${key}</span> <span class="tf-try-kind">${tryIsGate(key) ? 'gate' : 'layering rule'}</span></dd></div>
-            <div><dt>Why</dt><dd>${why.sentence}${why.imports ? html` <span class="tf-try-import">It imports <mark>${why.imports}</mark>.</span>` : ''}</dd></div>
+            <div><dt>Why</dt><dd>${tryWhyHtml(why)}</dd></div>
           </dl>
         </article>`;
       }
@@ -2834,7 +2850,7 @@
         const i = clampCursor();
         const row = rows[i];
         const l = state.labels[row.verdict_id];
-        const why = tryWhy(row);
+        const why = tryWhy(row, state.rulesDef);
         const rest = rows.filter((r, j) => j !== i && !state.labels[r.verdict_id]).length;
         return html`<div class="tf-try-review">
           <div class="tf-try-stack" data-behind="${Math.min(2, rest)}">
@@ -2843,9 +2859,9 @@
                 <span class="tf-try-card-count">Call ${num(i + 1)} of ${num(total)}</span>
                 <span class="tf-try-card-agent">${tryAvatar(row.agent, true)}${agentLabel(row.agent)} · <span class="tf-mono">${row.tool_name}</span></span>
               </header>
-              <p id="try-card-file" class="tf-try-card-file">${targetOf(row) || row.tool_name}</p>
+              <p id="try-card-file" class="tf-try-card-file">${tryTarget(row)}</p>
               <p class="tf-try-card-rule">${T.statusChip('observed')}<span class="tf-break">${ruleKeyOf(row)}</span></p>
-              <p id="try-card-why" class="tf-try-card-why">${why.sentence}${why.imports ? html` It imports <mark>${why.imports}</mark>.` : ''}</p>
+              <p id="try-card-why" class="tf-try-card-why">${tryWhyHtml(why)}</p>
               <div class="tf-try-verdicts" role="group" aria-label="Your label for this call">
                 <button type="button" id="try-correct" class="tf-btn tf-btn-good tf-try-verdict" data-action="try-label" data-verdict="${row.verdict_id}" data-label="correct" aria-pressed="${l === 'correct' ? 'true' : 'false'}" aria-keyshortcuts="C">${T.icon('check', 20)}Correct${T.kbd('C')}</button>
                 <button type="button" id="try-false" class="tf-btn tf-btn-danger tf-try-verdict" data-action="try-label" data-verdict="${row.verdict_id}" data-label="false_alarm" aria-pressed="${l === 'false_alarm' ? 'true' : 'false'}" aria-keyshortcuts="F">${T.icon('x', 20)}False alarm${T.kbd('F')}</button>
@@ -2867,7 +2883,7 @@
                 const mark = state.labels[r.verdict_id] || '';
                 return html`<li><button type="button" data-action="try-goto" data-index="${j}" aria-current="${j === i ? 'true' : 'false'}">
                   <span class="tf-try-q-mark" data-label="${mark}" aria-hidden="true">${mark === 'correct' ? T.icon('check', 11) : mark === 'false_alarm' ? T.icon('x', 11) : ''}</span>
-                  <span class="tf-try-q-text"><span class="tf-try-q-file">${targetOf(r) || r.tool_name}</span><span class="tf-try-q-state">${agentLabel(r.agent)} · ${mark ? REVIEWS[mark].label : 'to label'}</span></span>
+                  <span class="tf-try-q-text"><span class="tf-try-q-file">${tryTarget(r)}</span><span class="tf-try-q-state">${agentLabel(r.agent)} · ${mark ? REVIEWS[mark].label : 'to label'}</span></span>
                 </button></li>`;
               })}
             </ol>
@@ -3265,7 +3281,10 @@
         const p = state.project;
         return Promise.all([
           T.api('/api/projects/' + encodeURIComponent(p) + query({ days: 1 })),
-          T.api('/api/decisions' + query({ project: p, kind: 'observed', days: 1, limit: 50 }))
+          T.api('/api/decisions' + query({ project: p, kind: 'observed', days: 1, limit: 50 })),
+          // The rules' own definitions, so a card can name an import the
+          // reason cut short. Never in the way: a failed read is no names.
+          ruleDefinitions()
         ]).then(([detail, list]) => {
           state.readiness = (detail && detail.readiness) || { rules: [] };
           applyConfig(detail);
@@ -3408,7 +3427,7 @@
           state.cursor = next;
           state.focusId = 'try-correct';
         }
-        announce(REVIEWS[value].label + ': ' + (targetOf(row) || row.tool_name) + '. ' + labelledCount() + ' of ' + state.observed.length + ' labelled.');
+        announce(REVIEWS[value].label + ': ' + tryTarget(row) + '. ' + labelledCount() + ' of ' + state.observed.length + ' labelled.');
         draw();
         // Kept until the service has answered, so readiness is never read
         // ahead of a label the reader has already seen land.

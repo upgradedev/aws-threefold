@@ -1534,6 +1534,52 @@ def test_the_walkthrough_builds_a_quiet_rule_s_write_from_the_rule_and_sends_not
     assert out["nonePromoted"] == 0 and "Check at least one rule to promote" in out["noneError"]
 
 
+def test_the_flagged_cards_name_the_whole_command_and_an_import_the_reason_cut(tmp_path: Path) -> None:
+    """A card never shows a cut import as the thing a call imported, nor a program as the command.
+
+    The service keeps 240 characters of a reason, which ends a Java reason
+    inside the import ("javax.persistence.Enti"); the rule's own definition
+    names the package it falls under. A command's target is only its program
+    ("cat"); the whole command is in its reason.
+    """
+    cut = (
+        "Observe stage, not enforced. This call would have been refused: Clean Architecture violation: Layering rule "
+        "'java-domain-stays-pure' refuses this write: A Java class under domain/ may not reach persistence, HTTP or the "
+        "container. 'src/main/java/com/acme/domain/Order.java' imports 'javax.persistence.Enti"
+    )
+    out = dash(
+        r"""
+  const P = 'Acme-Sandbox-0a1b2c3d';
+  const CUT = """ + json.dumps(cut) + r""";
+  const observed = [
+    row(1, { project_name: P, agent: 'codex', tool_name: 'apply_patch', rule_key: 'java-domain-stays-pure', observed_rules: ['java-domain-stays-pure'],
+      target: 'src/main/java/com/acme/domain/Order.java', observed_target: 'src/main/java/com/acme/domain/Order.java', observed_reason: CUT.replace(/^Observe stage, not enforced\. This call would have been refused: /, ''), reason: CUT.slice(0, 240) }),
+    row(2, { project_name: P, agent: 'codex', tool_name: 'shell', action_type: 'COMMAND_EXEC', rule_key: 'PROTECTED_PATH', observed_rules: ['PROTECTED_PATH'],
+      target: 'cat', observed_target: '', observed_reason: "Command 'cat .env' reaches a protected path or credential store" })
+  ];
+  answer = api({
+    'POST /api/sandbox': { status: 200, body: { project: P, calls_seeded: 12 } },
+    ['/api/projects/' + P]: { status: 200, body: { project: P, config: { stage: 'observe' }, readiness: { rules: [] } } },
+    '/api/decisions': { status: 200, body: { items: observed, next_cursor: null } },
+    '/rules': { status: 200, body: { rules: [{ id: 'java-domain-stays-pure', when_path_matches: ['**/domain/**/*.java'], forbid_imports: ['java.sql', 'javax.persistence', '**.infrastructure.**'] }] } }
+  });
+  await visit('#/try');
+  await click('try-create'); await tick();
+  await click('try-show'); await tick();
+  out.cards = text(view());
+  await click('try-review'); await tick();
+  out.stack = text(view());
+""",
+        tmp_path,
+    )
+    cards = out["cards"]
+    assert "It imports from javax.persistence , a package the rule forbids." in cards
+    assert "javax.persistence.Enti" not in cards, "A cut import is shown as if it were the import"
+    assert "Command cat .env" in cards, "The command row names the program alone"
+    assert "It reaches a protected path or credential store." in cards
+    assert "cat .env" in out["stack"]
+
+
 def text_of(markup: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", markup))
 
