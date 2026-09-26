@@ -1175,7 +1175,10 @@
           method: "GET",
           headers: authHeaders({ "Accept": "application/json" })
         });
-        const latency = Math.round(performance.now() - t0);
+        // The browser's own record of the request when it keeps one: a tab
+        // opened in the background runs its timers late, and the clock around
+        // the call then says minutes where the round trip took milliseconds.
+        const latency = heroRoundTrip(`${base}/status`, Math.round(performance.now() - t0));
         if (res.ok) {
           problem = "HTTP " + res.status + ", not JSON";
           const data = await res.json();

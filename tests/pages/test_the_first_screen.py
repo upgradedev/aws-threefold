@@ -940,3 +940,12 @@ def test_the_page_draws_only_in_the_design_systems_colours() -> None:
     assert not re.findall(r"#[0-9a-fA-F]{3,8}\b|rgba?\(", style), "A colour written outside the tokens"
     script = page_source("index.html").split("<script>", 2)[2]
     assert not re.search(r"color:\s*'#", script), "A chart colour written outside T.COLORS"
+
+
+def test_the_status_round_trip_is_the_browsers_record_of_it_when_it_keeps_one(tmp_path: Path) -> None:
+    """A tab opened in the background runs its timers late; the clock around the call then says minutes."""
+    record = (
+        "performance.getEntriesByName = url => url.endsWith('/status') ? [{ startTime: 1000, responseEnd: 1176 }] : [];\n"
+    )
+    out = _load(tmp_path, before=record, scenario="  out.badge = el('statusRouteBadge').innerHTML;\n")
+    assert _text(out["badge"]) == "live · /status 200 HEALTHY · 176 ms"
