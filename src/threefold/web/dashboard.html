@@ -207,6 +207,13 @@
     .tf-ops-steps li[data-state="current"] { color: var(--tf-text); }
     .tf-ops-steps li[data-state="done"] { color: var(--tf-text-2); }
     .tf-ops-steps .tf-step-num { width: 24px; height: 24px; font-size: 0.6875rem; }
+    /* On a phone the stepper above numbers the steps, so each card gives its
+       width to the command, and the copy button sits above the text. */
+    @media (max-width: 639px) {
+      .tf-ops-connect .tf-step { padding: 16px; }
+      .tf-ops-connect .tf-step > .tf-step-num { display: none; }
+      .tf-ops-connect .tf-pre { padding: 44px 14px 14px; }
+    }
 
     /* Sign-in: the brand, and what is and is not kept. */
     .tf-ops-signin { max-width: 44rem; margin: var(--tf-space-2) auto 0; }
@@ -2567,7 +2574,7 @@
       function draw() {
         const ok = nameOk();
         const steps = ['Name the project', 'Run one command', 'See the first call'];
-        ctx.render(html`<div class="max-w-3xl">${pageTitle('Connect a repository', 'One command installs the hook for the agents on the machine and starts the project in Observe, so nothing is refused while you watch what would be.', html`<a class="tf-btn tf-btn-quiet tf-btn-sm" href="${T.pageHref('connect.html')}">Every detail, by hand</a>`)}
+        ctx.render(html`<div class="max-w-3xl tf-ops-connect">${pageTitle('Connect a repository', 'One command installs the hook for the agents on the machine and starts the project in Observe, so nothing is refused while you watch what would be.', html`<a class="tf-btn tf-btn-quiet tf-btn-sm" href="${T.pageHref('connect.html')}">Every detail, by hand</a>`)}
           <ol class="tf-ops-steps" aria-label="Where you are">${steps.map((label, i) => {
             const s = stepState(i + 1);
             return html`<li data-state="${s}"${s === 'current' ? raw(' aria-current="step"') : ''}><span class="tf-step-num" data-state="${s}">${s === 'done' ? T.icon('check', 13) : i + 1}</span>${label}</li>`;
@@ -3234,7 +3241,7 @@
             <th scope="col">Threefold enforcing</th><th scope="col">Tests passed, Threefold</th>
           </tr></thead>
           <tbody>${list.map(b => html`<tr data-series="${b.family || 'standard'}">
-            <th scope="row" class="font-normal text-gray-200 tf-break">${b.label || (Array.isArray(b.models) ? b.models.join(', ') : 'series')}</th>
+            <th scope="row" class="font-normal text-gray-200 min-w-[13rem]">${b.label || (Array.isArray(b.models) ? b.models.join(', ') : 'series')}</th>
             <td>${cell(b, 'none', 'violation')}</td>
             <td>${cell(b, 'prompt', 'violation')}</td>
             <td>${cell(b, 'threefold', 'violation')}</td>
@@ -3316,7 +3323,7 @@
             <th scope="col">Self-corrected</th><th scope="col">Overhead against no guidance</th>
           </tr></thead>
           <tbody>${conditions.map(c => html`<tr data-condition="${c.condition}">
-            <th scope="row" class="font-normal"><span class="text-gray-200">${c.label || c.condition}</span><span class="block text-[10px] text-gray-500 font-mono">${c.condition}</span></th>
+            <th scope="row" class="font-normal min-w-[9rem]"><span class="text-gray-200">${c.label || c.condition}</span><span class="block text-[10px] text-gray-500 font-mono">${c.condition}</span></th>
             <td class="num"><span class="font-mono">${num(c.n)}</span>${c.not_measured ? html`<span class="block text-[10px] text-amber-300">${plural(c.not_measured, 'run')} measured nothing</span>` : ''}</td>
             <td>${share(c.violation)}</td>
             <td>${share(c.completion)}</td>
