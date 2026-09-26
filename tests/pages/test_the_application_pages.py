@@ -1579,6 +1579,84 @@ def test_the_walkthrough_builds_a_quiet_rule_s_write_from_the_rule_and_sends_not
     assert out["nonePromoted"] == 0 and "Check at least one rule to promote" in out["noneError"]
 
 
+def test_the_replay_prefers_claude_code_s_call_and_says_so_when_another_agent_made_it(tmp_path: Path) -> None:
+    """Step 5 sends its call as Claude Code's hook would, so it prefers a call Claude Code made.
+
+    On the default run no such call is in force (Claude Code's only flagged
+    call is under the rule the false alarm makes noisy), and the screen once
+    set Antigravity's write_to_file beside Claude Code's Write as if they were
+    one call. When the agents differ, every place that compares them says so.
+    """
+    out = dash(
+        r"""
+  const P = 'Acme-Sandbox-0a1b2c3d';
+  const layer = (i, rule, target, agent, tool, imp, desc) => row(i, { project_name: P, agent, tool_name: tool, rule_key: rule, observed_rules: [rule], observed_rule: rule,
+    target, observed_target: target, observed_reason: "Clean Architecture violation: Layering rule '" + rule + "' refuses this write: " + desc + ". '" + target + "' imports '" + imp + "', which matches '" + imp + "'" });
+  const observed = [
+    layer(1, 'web-domain-stays-pure', 'src/web/domain/cart.ts', 'antigravity', 'write_to_file', 'axios', 'A TypeScript module under domain/ may not import a client or a framework'),
+    layer(2, 'java-domain-stays-pure', 'src/main/java/com/acme/domain/Order.java', 'codex', 'apply_patch', 'javax.persistence.Entity', 'A Java class under domain/ may not reach persistence'),
+    layer(3, 'python-domain-stays-pure', 'src/acme/domain/order.py', 'claude-code', 'Write', 'boto3', 'A Python file under domain/ may not import infrastructure or a driver')
+  ];
+  const labels = {};
+  const readiness = () => ['web-domain-stays-pure', 'java-domain-stays-pure', 'python-domain-stays-pure'].map(key => {
+    const mine = observed.filter(r => r.rule_key === key).map(r => labels[r.verdict_id]);
+    const alarms = mine.filter(l => l === 'false_alarm').length;
+    const correct = mine.filter(l => l === 'correct').length;
+    return { rule_key: key, kind: 'layering', would_refuse: mine.length, correct, false_alarms: alarms, unreviewed: mine.length - alarms - correct,
+      state: alarms ? 'noisy' : correct === mine.length ? 'ready' : 'needs_review' };
+  });
+  const sent = [];
+  answer = api({
+    'POST /api/sandbox': { status: 200, body: { project: P, calls_seeded: 12 } },
+    ['/api/projects/' + P]: () => ({ status: 200, body: { project: P, config: { stage: 'observe', sandbox: true }, readiness: { rules: readiness() } } }),
+    '/api/decisions': { status: 200, body: { items: observed, next_cursor: null } },
+    ['POST /api/projects/' + P + '/reviews']: (u, i, body) => { labels[body.items[0].verdict_id] = body.items[0].label; return { status: 200, body: { updated: 1, skipped: [] } }; },
+    ['POST /api/projects/' + P + '/promote']: { status: 200, body: { project: P, config: { stage: 'enforce', observe_rules: [] } } },
+    '/api/decision': { status: 200, body: { decision: null, session: null, rule: null } },
+    '/rules': { status: 200, body: { rules: [] } },
+    'POST /evaluate-tool-call': (u, i, body) => { sent.push(body); return { status: 200, body: { status: 'BLOCKED_BOUNDARY_VIOLATION', reason: 'Refused.', project_stage: 'enforce' } }; }
+  });
+  async function run(claudeLabel) {
+    Object.keys(labels).forEach(k => delete labels[k]);
+    await visit('#/try');
+    await click('try-restart'); await tick();
+    await click('try-create'); await tick();
+    await click('try-show'); await tick();
+    await click('try-review'); await tick();
+    for (const r of Dash.tryState.observed.slice()) {
+      await click('try-label', { 'data-verdict': r.verdict_id, 'data-label': r.agent === 'claude-code' ? claudeLabel : 'correct' });
+    }
+    await tick();
+    await click('try-readiness'); await tick();
+    await click('try-promote'); await tick();
+    await click('try-next'); await tick();
+    const send = text(view());
+    await click('try-send'); await tick();
+    return { send, climax: text(view()), sent: sent[sent.length - 1] };
+  }
+  out.claude = await run('correct');
+  out.other = await run('false_alarm');
+""",
+        tmp_path,
+    )
+    claude, other = out["claude"], out["other"]
+    # Claude Code's call is in force and the newest is Antigravity's: Claude Code's is sent again.
+    assert claude["sent"]["arguments"]["file_path"] == "src/acme/domain/order.py" and claude["sent"]["agent"] == "claude-code"
+    assert "Now, in Enforce · sent as a hook would" in claude["send"] and "Agent Claude Code, again" in claude["send"]
+    assert "from Claude Code" not in claude["send"]
+    # Claude Code's rule is noisy and keeps observing: the newest call in force is Antigravity's, sent as Claude Code's.
+    assert other["sent"]["arguments"] == {"file_path": "src/web/domain/cart.ts", "content": "import client from 'axios';\n"}
+    assert other["sent"]["agent"] == "claude-code" and other["sent"]["tool_name"] == "Write", "What is sent does not change"
+    send = other["send"]
+    assert "The same write Antigravity made in Observe, sent this time by Claude Code as its hook would" in send
+    assert "now in Enforce. This time the rule in force refuses it" in send
+    assert "Now, in Enforce · the same write, from Claude Code" in send
+    assert "Antigravity sent it then and Claude Code sends it now" in send
+    assert "File the same" in send and "Import the same" in send and "Agent Antigravity → Claude Code" in send and "Stage Observe → Enforce" in send
+    assert "The write Antigravity made in Observe is refused in Enforce when Claude Code sends it" in other["climax"]
+    assert "Now, in Enforce · refused, from Claude Code" in other["climax"]
+
+
 # A phone of 375px: every `max-width` query up to that width matches, the page
 # is scrolled down a long step, and each scroll the page asks for is recorded.
 PHONE = r"""
