@@ -500,7 +500,23 @@
       </div>`;
     }
 
+    // Grey shapes in the layout the screen is about to draw, so nothing jumps
+    // when the answer lands.
     function skeleton(kind) {
+      const block = (h, w) => html`<div class="tf-skeleton ${h} ${w}"></div>`;
+      if (kind === 'attention') {
+        return html`<div class="tf-ops-attention" aria-hidden="true">
+          ${['a', 'b', 'c'].map(() => html`<div class="tf-ops-att space-y-3">${block('h-3', 'w-16')}${block('h-5', 'w-2/3')}${block('h-3', 'w-full')}${block('h-3', 'w-4/5')}</div>`)}
+        </div>`;
+      }
+      if (kind === 'kpis') {
+        return html`<div class="tf-ops-tiles" aria-hidden="true">
+          ${['wide', 'a', 'b', 'c', 'd', 'e', 'f'].map(k => html`<div class="tf-card p-4 space-y-3${k === 'wide' ? ' tf-ops-tile-wide' : ''}">${block('h-3', 'w-24')}${block('h-8', 'w-20')}${block('h-3', 'w-32')}</div>`)}
+        </div>`;
+      }
+      if (kind === 'hero') {
+        return html`<div class="tf-ops-hero space-y-4" aria-hidden="true">${block('h-6', 'w-40')}${block('h-7', 'w-3/4')}${block('h-4', 'w-full')}${block('h-4', 'w-2/3')}${block('h-10', 'w-48')}</div>`;
+      }
       if (kind === 'tiles') {
         return html`<div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3" aria-hidden="true">
           ${[1, 2, 3, 4, 5, 6].map(() => html`<div class="tf-card p-4 space-y-3"><div class="tf-skeleton h-3 w-20"></div><div class="tf-skeleton h-7 w-16"></div><div class="tf-skeleton h-3 w-28"></div></div>`)}
@@ -949,7 +965,7 @@
       let attStarted = false;
       const actions = pageTitleActions(days);
       const sub = 'What Threefold judged across every project in ' + windowWords(days) + '.';
-      ctx.render(loadingView('Overview', sub, ['tiles', 'chart', 'table']));
+      ctx.render(loadingView('Overview', sub, ['attention', 'kpis', 'chart']));
 
       function load(quiet) {
         return T.api('/api/overview' + query({ days })).then(body => {
@@ -1289,6 +1305,11 @@
             <div class="tf-card tf-tile"><span class="tf-tile-label">${T.icon('shield', 16)}In Enforce</span><span class="tf-tile-value">${num(enforce)}</span><span class="tf-tile-sub">the rules in force refuse</span></div>
             <a class="tf-card tf-card-link tf-tile" href="${reviewHref()}"><span class="tf-tile-label">${T.icon('inbox', 16)}Waiting for a label</span><span class="tf-tile-value">${num(waiting)}</span><span class="tf-tile-sub">${waiting ? 'across ' + plural(rows.filter(p => (p.needs_review || 0) > 0).length, 'project') : 'nothing to review'}</span></a>
           </div>` : '';
+        if (!rows.length) {
+          ctx.render(html`${pageTitle('Projects', sub)}
+            ${T.emptyState({ icon: 'folder', text: 'No project sent a call in the last 7 days. Connect a repository: it starts in Observe, and its first call appears here.', action: { label: 'Connect a repository', href: '#/connect', primary: true } })}`);
+          return;
+        }
         ctx.render(html`${pageTitle('Projects', sub, html`<a href="#/connect" class="tf-btn tf-btn-primary">${T.icon('plug', 16)}Connect a repository</a>`)}
           ${summary}
           ${card('The portfolio', 'Sorted by what waits for a label, then by calls. Numbers cover the last 7 days and open the calls behind them; a row opens its project.', projectsTable(rows, 7, false))}`);
@@ -1349,7 +1370,9 @@
           <span class="tf-ops-att-kicker">Readiness, ${windowWords(days)}</span>
           <div class="tf-ops-tally">${tally.map(([key, value, label, tone]) => html`<div><b class="${value ? tone : 'text-gray-500'}">${num(value)}</b><small>${label}</small></div>`)}</div>
           <p class="text-xs text-gray-300">${rules.length
-            ? html`${enforce ? 'Of its ' + plural(rules.length, 'rule') + ', ' : ''}<strong class="text-white">${num(canEnforce)} of ${num(rules.length)}</strong> ${rules.length === 1 ? 'rule' : 'rules'} could enforce today: Ready or Quiet.`
+            ? (enforce
+              ? html`<strong class="text-white">${num(canEnforce)} of ${num(rules.length)}</strong> ${rules.length === 1 ? 'rule reads' : 'rules read'} Ready or Quiet.`
+              : html`<strong class="text-white">${num(canEnforce)} of ${num(rules.length)}</strong> ${rules.length === 1 ? 'rule' : 'rules'} could enforce today: Ready or Quiet.`)
             : 'Readiness appears once this project has sent calls in the window.'}</p>
           <p class="text-[11px] text-gray-500">False-alarm rate ${pct(summary.false_alarm_rate)} over ${plural(summary.reviewed || 0, 'labelled call')}.</p>
         </aside>`;
@@ -1410,7 +1433,7 @@
       // below sends; T.projectName adds the reader's own name for display only.
       const shown = T.projectName(name);
       const crumb = crumbs([{ label: 'Projects', href: '#/projects' }, { label: shown }]);
-      ctx.render(html`${crumb}${loadingView(shown, 'Reading its stage and readiness…', ['tiles', 'table'])}`);
+      ctx.render(html`${crumb}${loadingView(shown, 'Reading its stage and readiness…', ['hero', 'tiles', 'table'])}`);
 
       function load() {
         const detail = T.api('/api/projects/' + encodeURIComponent(name) + query({ days }));
@@ -1734,7 +1757,7 @@
       }
 
       function keysLegend() {
-        return html`<div class="tf-ops-keys mb-4" role="note" aria-label="Keyboard">
+        return html`<div class="tf-ops-keys mb-4 hidden md:flex" role="note" aria-label="Keyboard">
           <span class="text-gray-300 font-semibold">${T.icon('command', 14)}Keyboard</span>
           ${REVIEW_KEYS.map(([key, what]) => html`<span>${T.kbd(key)}${what}</span>`)}
           <span class="text-gray-500">Buttons work too; a group's note goes with the labels set in it.</span>
@@ -2324,7 +2347,7 @@
         ctx.render(html`${crumb}${pageTitle('Which call?', 'A call is opened from a list, which names its time and verdict id.')}<a class="tf-btn tf-btn-primary" href="#/calls">Open the calls</a>`);
         return;
       }
-      ctx.render(html`${crumb}${loadingView('Call', 'Reading the decision…', ['chart'])}`);
+      ctx.render(html`${crumb}${loadingView('Call', 'Reading the decision…', ['hero', 'table'])}`);
       const state = { data: null };
 
       function load() {
