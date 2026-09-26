@@ -4,15 +4,13 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Threefold — Policy Settings</title>
+  <meta name="description" content="Sign in to a Threefold stack, tune the breakers every agent call is judged against, and keep your own names for projects in this browser." />
   <!-- Tailwind CSS via CDN, pinned to an exact version: an unpinned major is a
        script that can change under a page that did not change, and it runs on the
        same origin as the operator key this browser may hold. No integrity hash: the
        Play CDN answers with no Access-Control-Allow-Origin header, so a browser
        would refuse a script carrying one and the page would lose every style. -->
   <script src="https://cdn.tailwindcss.com/3.4.17"></script>
-  <!-- The layer every page shares: the navigation, the sign-in and the API base. -->
-  <link rel="stylesheet" href="assets/threefold.css" />
-  <script src="assets/threefold.js"></script>
   <script>
       // The server rewrites __THREEFOLD_BASE_PATH__ to the API Gateway stage prefix
       // when it serves this page, so the base is exact rather than guessed from the
@@ -29,375 +27,416 @@
         ? ""
         : location.origin + SERVED_BASE_PATH + "/";
 
-    tailwind.config = {
-      darkMode: 'class',
-      theme: {
-        extend: {
-          colors: {
-            brand: {
-              50: '#f5f3ff',
-              500: '#8b5cf6',
-              900: '#4c1d95',
-              dark: '#0a0d18',
-              card: '#111528',
-              border: '#1e243d'
-            }
-          }
-        }
-      }
-    }
+    tailwind.config = { darkMode: 'class' }
   </script>
+  <!-- The layer every page shares: the design system, the shell, the sign-in
+       and the API base. It loads after the page's Tailwind config, which it
+       extends with the product's ink. -->
+  <link rel="stylesheet" href="assets/threefold.css" />
+  <script src="assets/threefold.js"></script>
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
-    body { font-family: 'Inter', sans-serif; background-color: #0a0d18; color: #f3f4f6; }
-    .font-mono { font-family: 'JetBrains Mono', monospace; }
-    .glow-purple { box-shadow: 0 0 25px -5px rgba(139, 92, 246, 0.35); }
+    .settings-toc a { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; font-size: 0.8125rem; color: var(--tf-text-2); text-decoration: none; }
+    .settings-toc a:hover { background: var(--tf-surface-2); color: var(--tf-text); }
+    .settings-toc .tf-icon { color: var(--tf-text-3); }
+    .settings-section { scroll-margin-top: calc(var(--tf-header-h) + 16px); }
   </style>
 </head>
 <body class="min-h-screen flex flex-col">
+  <a class="tf-skip" href="#main">Skip to content</a>
 
-  <!-- TOP HEADER -->
-  <header class="border-b border-gray-800 bg-gray-950/80 backdrop-blur sticky top-0 z-50">
-    <div class="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-4">
-      <div class="flex items-center gap-3">
-        <div class="w-10 h-10 rounded-lg bg-gradient-to-br from-indigo-500 via-purple-600 to-pink-600 flex items-center justify-center font-bold text-white text-xl shadow-lg shadow-purple-500/20">
-          ⚙️
-        </div>
-        <div>
-          <div class="flex items-center gap-2">
-            <h1 class="text-lg font-bold tracking-tight text-white">Policy Settings</h1>
-            <a id="spec-link-policy" href="swagger.html" title="Open this operation in the published OpenAPI document"
-               class="px-2 py-0.5 rounded text-xs font-semibold bg-purple-950 hover:bg-purple-900 text-purple-400 border border-purple-800 font-mono transition">
-              /policy/config ↗
-            </a>
-          </div>
-          <p class="text-xs text-gray-400">The stored governance policy · read from and written to the live service, with each field labelled by whether a gate reads it</p>
-        </div>
-      </div>
-      <div id="page-nav" class="flex items-center gap-2 text-xs"></div>
-    </div>
-
-    <!-- LIVE API CONNECTION BAR -->
-    <div class="bg-gray-950/90 border-b border-gray-800 px-4 py-2 text-xs flex flex-wrap items-center justify-between gap-3">
-      <div class="flex items-center gap-2 flex-wrap">
-        <span class="text-gray-400 font-medium">Sidecar REST:</span>
-        <input id="apiBaseInput" type="text" value="" class="bg-gray-900 border border-gray-700 rounded px-2 py-0.5 text-xs text-purple-300 font-mono w-56 focus:outline-none focus:border-purple-500" />
-        <span class="text-gray-400 font-medium ml-1">API Key:</span>
-        <input id="apiKeyInput" type="password" value="" placeholder="needed to save; blank uses the stored key" class="bg-gray-900 border border-gray-700 rounded px-2 py-0.5 text-xs text-sky-300 font-mono w-44 focus:outline-none focus:border-sky-500" />
-        <button onclick="loadPolicy()" class="px-2 py-0.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs border border-gray-700">Reload from API</button>
-        <span id="apiConnectionStatus" class="px-2 py-0.5 rounded text-[11px] font-mono bg-amber-950 text-amber-400 border border-amber-800 flex items-center gap-1.5">
-          <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span> NOT READ YET
-        </span>
-      </div>
-      <div class="text-gray-400 text-[11px] hidden md:block">
-        🛡️ Every value on this page came from <span class="font-mono text-purple-400">GET /policy/config</span>, not from a default in the markup
+  <header class="tf-header">
+    <div class="tf-container tf-header-inner">
+      <a class="tf-brand" href="dashboard.html#/overview" data-tf-page="dashboard.html#/overview" aria-label="Threefold, the overview">
+        <span class="tf-brand-mark" aria-hidden="true" data-tf-icon="shield" data-tf-size="18"></span>
+        <span class="tf-brand-text"><span class="tf-brand-name">Threefold</span><span class="tf-brand-sub">Agent governance</span></span>
+      </a>
+      <div id="page-nav" class="tf-nav-mount">
+        <!-- Without script, the pages this one links to are still reachable. -->
+        <nav aria-label="Threefold" class="tf-nav-fallback">
+          <a href="dashboard.html#/overview">Overview</a>
+          <a href="rules.html">Rules</a>
+          <a href="sessions.html">Sessions</a>
+          <a href="connect.html">Connect</a>
+          <a href="index.html">Demo</a>
+          <a href="swagger.html">API</a>
+        </nav>
       </div>
     </div>
   </header>
 
-  <main class="flex-1 max-w-7xl mx-auto px-4 py-6 w-full space-y-6">
+  <main id="main" class="tf-main" tabindex="-1">
 
-    <!-- CURRENT POLICY, AS THE SERVICE REPORTS IT -->
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-      <div class="p-4 rounded-xl bg-gray-900 border border-gray-800">
-        <p class="text-xs font-medium text-gray-400 uppercase tracking-wider">Max Single Call</p>
-        <p id="kpi-single" class="text-2xl font-bold text-white mt-1">--</p>
-        <p class="text-xs text-gray-400 mt-1">One tool call above this is refused</p>
+    <div class="tf-page-head">
+      <div>
+        <p class="tf-eyebrow"><span data-tf-icon="settings"></span>Settings</p>
+        <h1 class="tf-h1">Settings</h1>
+        <p class="tf-lede">Sign in to a private stack, tune the breakers every agent call is judged against, and give your projects names only this browser knows.</p>
       </div>
-      <div class="p-4 rounded-xl bg-gray-900 border border-gray-800">
-        <p class="text-xs font-medium text-gray-400 uppercase tracking-wider">Session Budget</p>
-        <p id="kpi-budget" class="text-2xl font-bold text-white mt-1">--</p>
-        <p class="text-xs text-gray-400 mt-1">Cumulative ceiling before the breaker trips</p>
-      </div>
-      <div class="p-4 rounded-xl bg-gray-900 border border-gray-800">
-        <p class="text-xs font-medium text-gray-400 uppercase tracking-wider">Loop Window</p>
-        <p id="kpi-window" class="text-2xl font-bold text-purple-400 mt-1">--</p>
-        <p class="text-xs text-gray-400 mt-1">Calls kept in the signature history</p>
-      </div>
-      <div class="p-4 rounded-xl bg-gray-900 border border-gray-800">
-        <p class="text-xs font-medium text-gray-400 uppercase tracking-wider">Repetition Threshold</p>
-        <p id="kpi-threshold" class="text-2xl font-bold text-purple-400 mt-1">--</p>
-        <p class="text-xs text-gray-400 mt-1">Identical calls before the session halts</p>
+      <div class="tf-actions">
+        <a id="spec-link-policy" href="swagger.html" class="tf-spec-link" title="Open this operation in the published OpenAPI document">/policy/config <span data-tf-icon="external" data-tf-size="12"></span></a>
       </div>
     </div>
 
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-
-      <!-- EDITABLE POLICY -->
-      <div class="rounded-2xl bg-gray-900 border border-gray-800 p-5 space-y-4">
-        <div class="flex items-center justify-between border-b border-gray-800 pb-3">
-          <h2 class="text-sm font-semibold text-white">Editable thresholds</h2>
-          <span id="policy-source" class="text-xs px-2.5 py-1 rounded-full font-semibold bg-gray-800 text-gray-400">Loading…</span>
+    <!-- WHERE THIS PAGE READS AND WRITES. Most readers never change it. -->
+    <details class="tf-disclosure" id="connection">
+      <summary><span data-tf-icon="plug"></span>Connection <span class="tf-summary-note">the API this page talks to</span>
+        <span id="apiConnectionStatus" class="tf-chip tf-chip-gray ml-2" role="status">Not read yet</span>
+      </summary>
+      <div class="tf-disclosure-body">
+        <div class="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-4 items-end">
+          <label class="tf-field">
+            <span class="tf-label">API address</span>
+            <input id="apiBaseInput" type="text" value="" class="tf-input tf-mono" spellcheck="false" />
+          </label>
+          <label class="tf-field">
+            <span class="tf-label">Operator key, for this request</span>
+            <input id="apiKeyInput" type="password" value="" placeholder="needed to save; blank uses your sign-in or the stored key" class="tf-input tf-mono" autocomplete="off" />
+          </label>
+          <button type="button" onclick="loadPolicy()" class="tf-btn"><span data-tf-icon="refresh" data-tf-size="16"></span>Read again</button>
         </div>
+        <p class="tf-help">Every value on this page came from <span class="font-mono">GET /policy/config</span>, not from a default written into the page.</p>
+      </div>
+    </details>
 
-        <p class="text-xs text-gray-400">
-          The service rebuilds the whole policy from each <span class="font-mono text-purple-300">POST</span>, so this form always
-          submits all four fields together. Sending one field on its own would reset the other three to their defaults.
-          Two of the four are wired to a gate today and two are not; each is labelled with which it is.
-        </p>
+    <div class="grid grid-cols-1 lg:grid-cols-[220px_minmax(0,1fr)] gap-6 items-start">
 
-        <div class="p-3 rounded-xl bg-sky-950/20 border border-sky-900/40">
-          <p class="text-xs font-semibold text-sky-300">Saving needs the operator. On the public demo, reading does not.</p>
-          <p class="text-[11px] text-gray-400 mt-1">
-            A saved policy is written to DynamoDB and adopted by every container that starts afterwards, so an anonymous write
-            would change the thresholds this product leads with for everyone who came after it. The public demo keeps reads
-            open, because a reader has to be able to see what is enforced; a stack deployed with private reads needs the key
-            for those too. Sign in with <span class="font-mono">python threefold.py open</span>, as below; the key, typed into the
-            <span class="font-mono">API Key</span> field above or stored in this browser, is the fallback. A deployment that has
-            configured no key refuses writes outright and says so.
-          </p>
-        </div>
+      <nav class="settings-toc tf-card p-2 hidden lg:block lg:sticky" style="top:calc(var(--tf-header-h) + 16px)" aria-label="On this page">
+        <p class="tf-menu-label">On this page</p>
+        <a href="#access"><span data-tf-icon="key"></span>Sign in</a>
+        <a href="#policy"><span data-tf-icon="bolt"></span>Breakers</a>
+        <a href="#patterns"><span data-tf-icon="lock"></span>Secret shapes</a>
+        <a href="#local-names"><span data-tf-icon="user"></span>Your names</a>
+        <a href="#what-changes"><span data-tf-icon="info"></span>What changes</a>
+      </nav>
 
-        <!-- The key lives in this browser's localStorage and nowhere else. The
-             field is never filled from storage and the key is never printed, so a
-             screen share or a screenshot of this page cannot carry it. What the
-             panel below has to say out loud is the other half: localStorage is
-             readable by every script on this origin, and these pages load two
-             bundles from a CDN, so a page that only reassured the reader would be
-             leaving out the thing that decides whether storing it is safe. -->
-        <!-- Signing in is the way in. The operator runs one command on the machine
-             that holds the key, and this browser receives a session that expires,
-             never the key itself. -->
-        <div id="sign-in" class="p-3 rounded-xl bg-emerald-950/20 border border-emerald-900/40 space-y-2">
-          <p class="text-xs font-semibold text-emerald-300">Sign in, rather than paste a key</p>
-          <p class="text-[11px] text-gray-400">
-            On the machine that holds the operator key, in the folder where you ran connect, run
-            <span class="font-mono text-gray-200">python threefold.py open</span>. It opens the dashboard already signed in,
-            through a link that works once and only for a short while. This browser then holds a sign-in session that
-            expires, never the key, and every page here uses it for reads and saves.
-          </p>
-          <p id="sign-in-state" class="text-[11px] text-gray-500"></p>
-        </div>
+      <div class="space-y-6 min-w-0">
 
-        <div id="operator-key" class="p-3 rounded-xl bg-gray-950 border border-gray-800 space-y-2">
-          <p class="text-xs font-semibold text-gray-200">Fallback: an operator key for this browser</p>
-          <p class="text-[11px] text-gray-400">
-            For a machine without <span class="font-mono">threefold.py</span>. A sign-in replaces it: signing in removes a key
-            stored here, and while this browser is signed in the session is sent instead.
-          </p>
-          <p class="text-[11px] text-gray-400">
-            Kept in this browser's localStorage under <span class="font-mono text-purple-300">threefold-operator-key</span> and
-            sent as <span class="font-mono">X-API-Key</span> on the requests the console, rules, sessions and settings pages make
-            to the API. It is not shown again after you store it. A key typed into a page's own field is used before this one.
-          </p>
-          <p class="text-[11px] text-amber-300/90">
-            Any script these pages load can read what is stored here, and that includes the Tailwind bundle every page loads
-            from <span class="font-mono">cdn.tailwindcss.com</span> and the Swagger UI bundle the API page loads from
-            <span class="font-mono">unpkg.com</span>. Both are pinned to an exact version, and Swagger UI is checked against a
-            hash, but a third party still serves them. Store the key only on a machine you trust, and clear it when you are done.
-          </p>
-          <p class="text-[11px] text-gray-400">
-            The stored key is sent only to the host that served this page. Point the <span class="font-mono">Sidecar REST</span>
-            field at another host and it is held back, so only a key you type into <span class="font-mono">API Key</span> goes
-            there.
-          </p>
-          <div class="flex flex-wrap items-center gap-2">
-            <input id="operatorKeyInput" type="password" value="" autocomplete="off" placeholder="paste the key to store it"
-                   class="flex-1 min-w-[12rem] bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-sky-300 font-mono focus:outline-none focus:border-sky-500" />
-            <button onclick="storeOperatorKey()" class="px-2 py-1 rounded bg-sky-950 hover:bg-sky-900 text-sky-300 text-xs border border-sky-800">Store</button>
-            <button onclick="clearOperatorKey()" class="px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs border border-gray-700">Clear</button>
+        <!-- SIGNING IN. The operator runs one command on the machine that holds
+             the key, and this browser receives a session that expires, never the
+             key itself. The key below is the fallback. -->
+        <section id="access" class="settings-section tf-card tf-panel" aria-labelledby="access-title">
+          <div class="tf-panel-head">
+            <div>
+              <h2 id="access-title" class="tf-panel-title"><span data-tf-icon="key" data-tf-size="18"></span>Sign in</h2>
+              <p class="tf-panel-sub">Reading the public demo needs nothing. Saving, and reading a private stack, need the operator.</p>
+            </div>
           </div>
-          <p id="operator-key-state" class="text-[11px] text-gray-500"></p>
-        </div>
 
-        <div class="space-y-3">
-          <label class="block">
-            <span class="text-xs font-medium text-gray-400 uppercase tracking-wider">max_single_call_usd
-              <span class="ml-1 px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800 text-[10px] normal-case">live</span>
-            </span>
-            <input id="in-single" type="number" step="0.01" min="0.01" class="mt-1 w-full bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-purple-500" />
-            <span class="text-[11px] text-gray-500">A single projected call costing more than this is refused before it runs.</span>
-          </label>
+          <div class="space-y-4">
+            <!-- The key lives in this browser's localStorage and nowhere else. The
+                 field is never filled from storage and the key is never printed, so a
+                 screen share or a screenshot of this page cannot carry it. What the
+                 panel below has to say out loud is the other half: localStorage is
+                 readable by every script on this origin, and these pages load two
+                 bundles from a CDN, so a page that only reassured the reader would be
+                 leaving out the thing that decides whether storing it is safe. -->
+            <div id="sign-in" class="tf-callout tf-callout-ok">
+              <span data-tf-icon="check" data-tf-size="18"></span>
+              <div class="tf-callout-body">
+                <p class="tf-callout-title">Sign in, rather than paste a key</p>
+                <p>On the machine that holds the operator key, in the folder where you ran connect, run
+                  <span class="font-mono text-gray-100">python threefold.py open</span>. It opens the dashboard already signed in,
+                  through a link that works once and only for a short while. This browser then holds a sign-in session that
+                  expires, never the key, and every page here uses it for reads and saves.</p>
+                <p id="sign-in-state" class="tf-micro"></p>
+              </div>
+            </div>
 
-          <label class="block">
-            <span class="text-xs font-medium text-gray-400 uppercase tracking-wider">max_session_budget_usd
-              <span class="ml-1 px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800 text-[10px] normal-case">live</span>
-            </span>
-            <input id="in-budget" type="number" step="0.01" min="0.01" class="mt-1 w-full bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-purple-500" />
-            <span class="text-[11px] text-gray-500">The cumulative ceiling for every session, on top of the <span class="font-mono">budget_usd</span> the caller sends with each tool call. A session whose projected spend passes either one is halted.</span>
-          </label>
+            <details id="operator-key" class="tf-disclosure">
+              <summary><span data-tf-icon="lock"></span>Fallback: an operator key for this browser</summary>
+              <div class="tf-disclosure-body tf-small">
+                <p>
+                  For a machine without <span class="font-mono">threefold.py</span>. A sign-in replaces it: signing in removes a key
+                  stored here, and while this browser is signed in the session is sent instead.
+                </p>
+                <p>
+                  Kept in this browser's localStorage under <span class="font-mono tf-accent-text">threefold-operator-key</span> and
+                  sent as <span class="font-mono">X-API-Key</span> on the requests the dashboard, rules, sessions and settings pages make
+                  to the API. It is not shown again after you store it. A key typed into a page's own field is used before this one.
+                </p>
+                <div class="tf-callout tf-callout-warn">
+                  <span data-tf-icon="alert" data-tf-size="18"></span>
+                  <div class="tf-callout-body"><p>
+                    Any script these pages load can read what is stored here, and that includes the Tailwind bundle every page loads
+                    from <span class="font-mono">cdn.tailwindcss.com</span> and the Swagger UI bundle the API page loads from
+                    <span class="font-mono">unpkg.com</span>. Both are pinned to an exact version, and Swagger UI is checked against a
+                    hash, but a third party still serves them. Store the key only on a machine you trust, and clear it when you are done.
+                  </p></div>
+                </div>
+                <p>
+                  The stored key is sent only to the host that served this page. Point the API address under
+                  <a href="#connection" class="tf-link">Connection</a> at another host and it is held back, so only a key you type
+                  there goes to it.
+                </p>
+                <div class="flex flex-wrap items-center gap-2">
+                  <input id="operatorKeyInput" type="password" value="" autocomplete="off" placeholder="paste the key to store it"
+                         aria-label="Operator key to store in this browser" class="tf-input tf-mono flex-1 min-w-[12rem]" />
+                  <button type="button" onclick="storeOperatorKey()" class="tf-btn">Store</button>
+                  <button type="button" onclick="clearOperatorKey()" class="tf-btn tf-btn-ghost">Clear</button>
+                </div>
+                <p id="operator-key-state" class="tf-micro" role="status"></p>
+              </div>
+            </details>
+          </div>
+        </section>
 
-          <label class="block">
-            <span class="text-xs font-medium text-gray-400 uppercase tracking-wider">loop_history_window
-              <span class="ml-1 px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800 text-[10px] normal-case">live</span>
-            </span>
-            <input id="in-window" type="number" step="1" min="2" max="50" class="mt-1 w-full bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-purple-500" />
-            <span class="text-[11px] text-gray-500">How many steps back the detector searches for a cycle. Values past 25 are clamped to it: a wider search would need more history than a session carries.</span>
-          </label>
+        <!-- THE BREAKERS, AS THE SERVICE REPORTS THEM -->
+        <section id="policy" class="settings-section tf-card tf-panel" aria-labelledby="policy-title">
+          <div class="tf-panel-head">
+            <div>
+              <h2 id="policy-title" class="tf-panel-title"><span data-tf-icon="bolt" data-tf-size="18"></span>Breakers</h2>
+              <p class="tf-panel-sub">What stops a call, or a whole session, before it runs. All four reach the gates.</p>
+            </div>
+            <span id="policy-source" class="tf-chip tf-chip-gray">Reading…</span>
+          </div>
 
-          <label class="block">
-            <span class="text-xs font-medium text-gray-400 uppercase tracking-wider">monomorphic_repetition_threshold
-              <span class="ml-1 px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800 text-[10px] normal-case">live</span>
-            </span>
-            <input id="in-threshold" type="number" step="1" min="2" max="20" class="mt-1 w-full bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-purple-500" />
-            <span class="text-[11px] text-gray-500">Identical consecutive calls tolerated. At this count the session halts. The product's headline is 3.</span>
-          </label>
-        </div>
+          <div class="grid grid-cols-2 xl:grid-cols-4 gap-3 mb-6">
+            <div class="tf-card-quiet tf-tile">
+              <span class="tf-tile-label">Most one call may cost</span>
+              <span id="kpi-single" class="tf-tile-value">—</span>
+              <span class="tf-tile-sub">Above this, the call is refused before it runs</span>
+            </div>
+            <div class="tf-card-quiet tf-tile">
+              <span class="tf-tile-label">Budget per session</span>
+              <span id="kpi-budget" class="tf-tile-value">—</span>
+              <span class="tf-tile-sub">Past this, the breaker halts the session</span>
+            </div>
+            <div class="tf-card-quiet tf-tile">
+              <span class="tf-tile-label">Loop search window</span>
+              <span id="kpi-window" class="tf-tile-value">—</span>
+              <span class="tf-tile-sub">Steps back a repeating cycle is looked for</span>
+            </div>
+            <div class="tf-card-quiet tf-tile">
+              <span class="tf-tile-label">Repeats before a halt</span>
+              <span id="kpi-threshold" class="tf-tile-value">—</span>
+              <span class="tf-tile-sub">Identical calls in a row that stop a session</span>
+            </div>
+          </div>
 
-        <div class="flex flex-wrap items-center gap-2 pt-1">
-          <button onclick="savePolicy()" id="btnSave" class="px-4 py-2 bg-purple-600 hover:bg-purple-500 font-semibold text-xs rounded-lg text-white shadow-lg shadow-purple-600/20 transition">
-            Save policy ▷
-          </button>
-          <button onclick="loadPolicy()" class="px-3 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs border border-gray-700">
-            Discard edits
-          </button>
-          <button onclick="applyDefaults()" class="px-3 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs border border-gray-700">
-            Fill shipped defaults
-          </button>
-          <span id="save-status" class="text-xs text-gray-500"></span>
-        </div>
+          <div class="tf-callout tf-callout-info mb-5">
+            <span data-tf-icon="info" data-tf-size="18"></span>
+            <div class="tf-callout-body">
+              <p class="tf-callout-title">Saving needs the operator. On the public demo, reading does not.</p>
+              <p>
+                A saved policy is written to DynamoDB and adopted by every container that starts afterwards, so an anonymous write
+                would change the thresholds this product leads with for everyone who came after it. The public demo keeps reads
+                open, because a reader has to be able to see what is enforced; a stack deployed with private reads needs the key
+                for those too. Sign in with <span class="font-mono">python threefold.py open</span>, as above; the key, typed into the
+                key field under Connection or stored in this browser, is the fallback. A deployment that has
+                configured no key refuses writes outright and says so.
+              </p>
+            </div>
+          </div>
 
-        <div class="text-[11px] text-gray-500 border-t border-gray-800 pt-3">
-          The bounds on this form are enforced in the browser. The API accepts any parseable number and answers
-          <span class="font-mono">400</span> only when a value cannot be parsed at all, so a policy written with
-          <span class="font-mono">curl</span> is not checked the way this form checks it.
-        </div>
-      </div>
-
-      <!-- READ-ONLY POLICY AND THE WRITE LOG -->
-      <div class="rounded-2xl bg-gray-900 border border-gray-800 p-5 space-y-4">
-        <div class="flex items-center justify-between border-b border-gray-800 pb-3">
-          <h2 class="text-sm font-semibold text-white">Compiled in, not editable here</h2>
-          <span class="text-xs px-2.5 py-1 rounded-full font-semibold bg-amber-950 text-amber-400 border border-amber-800">READ ONLY</span>
-        </div>
-
-        <p class="text-xs text-gray-400">
-          <span class="font-mono text-amber-300">blocked_patterns</span> is the policy's own list of secret shapes, one regular
-          expression per line. Saving sends it with the numbers above; the service refuses the whole save when an entry
-          does not compile, and allows at most fifty entries of two hundred characters each.
-        </p>
-
-        <textarea id="blocked-patterns" rows="6" spellcheck="false" placeholder="Loading…"
-          class="w-full bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-xs text-amber-300 font-mono focus:outline-none focus:border-purple-500"></textarea>
-
-        <div class="border-t border-gray-800 pt-3">
-          <p class="text-xs font-medium text-gray-400 uppercase">Last response from the service</p>
-          <pre id="raw-response" class="mt-2 p-3 rounded-xl bg-gray-950 border border-gray-800 text-[11px] font-mono text-gray-300 overflow-x-auto max-h-72 overflow-y-auto">Nothing sent yet.</pre>
-        </div>
-
-        <div class="border-t border-gray-800 pt-3">
-          <p class="text-xs font-medium text-gray-400 uppercase">Where a saved policy lives</p>
-          <p class="text-xs text-gray-400 mt-1">
-            A saved policy is written to DynamoDB under <span class="font-mono text-purple-300">CONFIG#policy</span>, read back
-            when a cold Lambda container starts, and re-read by warm containers every thirty seconds, so a change made here
-            outlives the container that accepted it and reaches the others within half a minute. If that write fails, the
-            service keeps the value in process memory only and the next container starts on the previous policy.
+          <p class="tf-small mb-4">
+            The service rebuilds the whole policy from each <span class="font-mono tf-accent-text">POST</span>, so this form always
+            submits all four numbers and the secret shapes together. Sending one field on its own would reset the others to their
+            defaults.
           </p>
-        </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <label class="tf-field">
+              <span class="flex items-center justify-between gap-2"><span class="tf-label">Most one call may cost, in USD</span><span class="tf-chip tf-chip-emerald">Enforced</span></span>
+              <input id="in-single" type="number" step="0.01" min="0.01" class="tf-input tf-mono" />
+              <span class="tf-help">A single projected call costing more than this is refused before it runs. <span class="font-mono">max_single_call_usd</span></span>
+            </label>
+
+            <label class="tf-field">
+              <span class="flex items-center justify-between gap-2"><span class="tf-label">Budget per session, in USD</span><span class="tf-chip tf-chip-emerald">Enforced</span></span>
+              <input id="in-budget" type="number" step="0.01" min="0.01" class="tf-input tf-mono" />
+              <span class="tf-help">The cumulative ceiling for every session, on top of the <span class="font-mono">budget_usd</span> the caller sends with each tool call. A session whose projected spend passes either one is halted. <span class="font-mono">max_session_budget_usd</span></span>
+            </label>
+
+            <label class="tf-field">
+              <span class="flex items-center justify-between gap-2"><span class="tf-label">Loop search window</span><span class="tf-chip tf-chip-emerald">Enforced</span></span>
+              <input id="in-window" type="number" step="1" min="2" max="50" class="tf-input tf-mono" />
+              <span class="tf-help">How many steps back the detector searches for a cycle. Values past 25 are clamped to it: a wider search would need more history than a session carries. <span class="font-mono">loop_history_window</span></span>
+            </label>
+
+            <label class="tf-field">
+              <span class="flex items-center justify-between gap-2"><span class="tf-label">Repeats before a halt</span><span class="tf-chip tf-chip-emerald">Enforced</span></span>
+              <input id="in-threshold" type="number" step="1" min="2" max="20" class="tf-input tf-mono" />
+              <span class="tf-help">Identical consecutive calls tolerated. At this count the session halts. The product's headline is 3. <span class="font-mono">monomorphic_repetition_threshold</span></span>
+            </label>
+          </div>
+
+          <div class="flex flex-wrap items-center gap-2 mt-6 pt-5" style="border-top:1px solid var(--tf-hairline)">
+            <button type="button" onclick="savePolicy()" id="btnSave" class="tf-btn tf-btn-primary">Save policy</button>
+            <button type="button" onclick="loadPolicy()" class="tf-btn">Discard edits</button>
+            <button type="button" onclick="applyDefaults()" class="tf-btn tf-btn-ghost">Fill shipped defaults</button>
+            <span id="save-status" class="tf-small" role="status"></span>
+          </div>
+
+          <p class="tf-micro mt-4">
+            The bounds on this form are enforced in the browser. The API accepts any parseable number and answers
+            <span class="font-mono">400</span> only when a value cannot be parsed at all, so a policy written with
+            <span class="font-mono">curl</span> is not checked the way this form checks it.
+          </p>
+        </section>
+
+        <!-- THE SECRET SHAPES AND WHERE A SAVED POLICY LIVES -->
+        <section id="patterns" class="settings-section tf-card tf-panel" aria-labelledby="patterns-title">
+          <div class="tf-panel-head">
+            <div>
+              <h2 id="patterns-title" class="tf-panel-title"><span data-tf-icon="lock" data-tf-size="18"></span>Secret shapes</h2>
+              <p class="tf-panel-sub">Saved with the numbers above, by the same Save policy button.</p>
+            </div>
+            <span class="tf-chip tf-chip-rose"><span data-tf-icon="stop" data-tf-size="13"></span>Always refused</span>
+          </div>
+
+          <p class="tf-small mb-3">
+            <span class="font-mono tf-warn-text">blocked_patterns</span> is the policy's own list of secret shapes, one regular
+            expression per line. A call whose arguments match one is refused as a credential is: always, never staged. The
+            service refuses the whole save when an entry does not compile, and allows at most fifty entries of two hundred
+            characters each.
+          </p>
+
+          <label class="sr-only" for="blocked-patterns">Secret shapes, one regular expression per line</label>
+          <textarea id="blocked-patterns" rows="6" spellcheck="false" placeholder="Loading…"
+            class="tf-textarea tf-mono w-full"></textarea>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-5">
+            <div class="tf-card-quiet p-4">
+              <p class="tf-label">Where a saved policy lives</p>
+              <p class="tf-small">
+                A saved policy is written to DynamoDB under <span class="font-mono tf-accent-text">CONFIG#policy</span>, read back
+                when a cold Lambda container starts, and re-read by warm containers every thirty seconds, so a change made here
+                outlives the container that accepted it and reaches the others within half a minute. If that write fails, the
+                service keeps the value in process memory only and the next container starts on the previous policy.
+              </p>
+            </div>
+            <details class="tf-disclosure">
+              <summary><span data-tf-icon="code"></span>The service's last answer</summary>
+              <div class="tf-disclosure-body">
+                <pre id="raw-response" class="tf-pre tf-pre-plain" style="max-height:18rem;overflow:auto;font-size:0.72rem">Nothing sent yet.</pre>
+              </div>
+            </details>
+          </div>
+        </section>
+
+        <!-- THE READER'S OWN NAMES FOR THE ALIASES.
+             The ledger knows a project only by its alias, because no real
+             repository name may leave the machine it is on. That is what makes the
+             dashboard unreadable to the person who owns the repositories. These
+             labels are the answer, and the whole point of them is that they never
+             leave this browser: they are written to localStorage by the Save button
+             below and by nothing else, and no request this page makes carries one. -->
+        <section id="local-names" class="settings-section tf-card tf-panel" aria-labelledby="local-names-title">
+          <div class="tf-panel-head">
+            <div>
+              <h2 id="local-names-title" class="tf-panel-title"><span data-tf-icon="user" data-tf-size="18"></span>Your own names for these projects</h2>
+              <p class="tf-panel-sub">
+                The service knows each project only by its alias, so that is what every page, every link and every request uses.
+                Give an alias a name of your own here and every page shows it beside the alias, quieter.
+              </p>
+            </div>
+            <span class="tf-chip tf-chip-emerald"><span data-tf-icon="lock" data-tf-size="13"></span>This browser only</span>
+          </div>
+
+          <div class="tf-callout tf-callout-ok mb-5">
+            <span data-tf-icon="check" data-tf-size="18"></span>
+            <div class="tf-callout-body">
+              <p class="tf-callout-title">Nothing here is sent anywhere.</p>
+              <p>
+                Save writes to this browser's localStorage under <span class="font-mono tf-accent-text">threefold-local-names</span> and does
+                nothing else. No request this page or any other makes carries one of these names: not in a URL, not in a query string, not in a
+                body and not in a header. The service is never told them, so they cannot reach the ledger, a screenshot of a public page, or
+                anyone else.
+              </p>
+              <p class="tf-warn-text">
+                A browser's storage belongs to that browser on that machine. These names do not follow you to another browser, another machine
+                or a private window, and clearing this site's data deletes them. Keep the copy that matters in a file of your own:
+                <span class="font-mono">Copy as JSON</span> hands you exactly that.
+              </p>
+              <p>
+                Any script this page loads can read what is stored here, as it can the operator key. That includes the Tailwind bundle from
+                <span class="font-mono">cdn.tailwindcss.com</span>. Name what you would not mind a script on this page reading.
+              </p>
+            </div>
+          </div>
+
+          <div id="local-names-rows" class="space-y-2">
+            <p class="tf-small">Loading the projects this stack knows…</p>
+          </div>
+
+          <div class="tf-field mt-5">
+            <label for="local-names-json" class="tf-label">Or paste the mapping</label>
+            <p class="tf-help">
+              A JSON object of alias to name, for a mapping you keep in a file. It is applied over the fields above when you press Save,
+              so it can name an alias that has no field yet. A name is one line of at most <span id="local-names-max" class="font-mono">60</span>
+              characters; anything that is not text is left out and the count below says how many were.
+            </p>
+            <textarea id="local-names-json" rows="4" spellcheck="false" autocomplete="off"
+                      placeholder='{"Acme-Proj-FB": "the front desk portal"}'
+                      class="tf-textarea tf-mono w-full"></textarea>
+          </div>
+
+          <div class="flex flex-wrap items-center gap-2 mt-4">
+            <button type="button" onclick="saveLocalNames()" class="tf-btn tf-btn-primary">Save</button>
+            <button type="button" onclick="clearLocalNames()" class="tf-btn tf-btn-ghost">Clear all</button>
+            <button type="button" id="local-names-copy" onclick="copyLocalNames(this)" class="tf-btn">Copy as JSON</button>
+            <span id="local-names-state" class="tf-small" role="status"></span>
+          </div>
+
+          <p class="tf-micro mt-5 pt-4" style="border-top:1px solid var(--tf-hairline)">
+            The switch in the navigation above turns every name off at once, for a screenshot or a demo, and remembers that in this browser
+            too. It appears as soon as one name is saved. Building the mapping from the checkouts on your own machine:
+            <span class="font-mono text-gray-300">python threefold.py status --names-json</span> prints a JSON object of alias to folder name,
+            ready to paste above.
+          </p>
+        </section>
+
+        <!-- WHAT EACH THRESHOLD GATES -->
+        <section id="what-changes" class="settings-section tf-card tf-panel" aria-labelledby="what-changes-title">
+          <div class="tf-panel-head">
+            <div>
+              <h2 id="what-changes-title" class="tf-panel-title"><span data-tf-icon="info" data-tf-size="18"></span>What these numbers change, and what they do not</h2>
+            </div>
+          </div>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div class="tf-card-quiet p-4">
+              <p class="tf-small font-semibold tf-good">All four numbers reach the gates</p>
+              <p class="tf-small mt-1">
+                Saving sets the loop detector's repetition threshold from
+                <span class="font-mono">monomorphic_repetition_threshold</span>, its cycle search length from
+                <span class="font-mono">loop_history_window</span>, and the breaker's single-call cap and session ceiling from
+                <span class="font-mono">max_single_call_usd</span> and <span class="font-mono">max_session_budget_usd</span>.
+                Raise the threshold to 5 and the first scenario on the demo no longer halts on the third call: that is the
+                quickest proof this page reaches the evaluator the gate uses. The caps are weighed against caller-declared token
+                counts, so a caller that declares zero tokens is not stopped by them.
+              </p>
+            </div>
+            <div class="tf-card-quiet p-4">
+              <p class="tf-small font-semibold tf-good">The patterns refuse like secrets</p>
+              <p class="tf-small mt-1">
+                Every <span class="font-mono">blocked_patterns</span> entry is an additional secret shape: a call whose arguments
+                match one is refused with the compiled shapes' force, which means always enforced and never staged. The list
+                above is editable, one regular expression per line; the service refuses the whole save when an entry does not compile.
+              </p>
+            </div>
+          </div>
+          <div class="mt-4">
+            <div class="flex items-center justify-between gap-3 flex-wrap mb-2">
+              <p class="tf-label" style="margin:0">The same change over curl</p>
+              <span class="tf-micro">
+                Both operations in the spec:
+                <a id="spec-link-policy-get" href="swagger.html" class="tf-link font-mono">GET</a> ·
+                <a id="spec-link-policy-post" href="swagger.html" class="tf-link font-mono">POST</a>
+              </span>
+            </div>
+            <pre class="tf-pre tf-pre-plain" style="overflow-x:auto;white-space:pre" id="curl-example">Loading the current policy first.</pre>
+          </div>
+        </section>
+
       </div>
     </div>
-
-    <!-- THE READER'S OWN NAMES FOR THE ALIASES.
-         The ledger knows a project only by its alias, because no real
-         repository name may leave the machine it is on. That is what makes the
-         dashboard unreadable to the person who owns the repositories. These
-         labels are the answer, and the whole point of them is that they never
-         leave this browser: they are written to localStorage by the Save button
-         below and by nothing else, and no request this page makes carries one. -->
-    <div id="local-names" class="rounded-2xl bg-gray-900 border border-gray-800 p-5 space-y-4">
-      <div class="flex flex-wrap items-center justify-between gap-2 border-b border-gray-800 pb-3">
-        <div>
-          <h2 class="text-sm font-semibold text-white">Your own names for these projects</h2>
-          <p class="text-xs text-gray-400 mt-1">
-            The service knows each project only by its alias, so that is what every page, every link and every request uses.
-            Give an alias a name of your own here and every page shows it beside the alias, quieter.
-          </p>
-        </div>
-        <span class="text-xs px-2.5 py-1 rounded-full font-semibold bg-emerald-950 text-emerald-400 border border-emerald-800">THIS BROWSER ONLY</span>
-      </div>
-
-      <div class="p-3 rounded-xl bg-emerald-950/20 border border-emerald-900/40 space-y-1">
-        <p class="text-xs font-semibold text-emerald-300">Nothing here is sent anywhere.</p>
-        <p class="text-[11px] text-gray-400">
-          Save writes to this browser's localStorage under <span class="font-mono text-purple-300">threefold-local-names</span> and does
-          nothing else. No request this page or any other makes carries one of these names: not in a URL, not in a query string, not in a
-          body and not in a header. The service is never told them, so they cannot reach the ledger, a screenshot of a public page, or
-          anyone else.
-        </p>
-        <p class="text-[11px] text-amber-300/90">
-          A browser's storage belongs to that browser on that machine. These names do not follow you to another browser, another machine
-          or a private window, and clearing this site's data deletes them. Keep the copy that matters in a file of your own:
-          <span class="font-mono">Copy as JSON</span> hands you exactly that.
-        </p>
-        <p class="text-[11px] text-gray-400">
-          Any script this page loads can read what is stored here, as it can the operator key. That includes the Tailwind bundle from
-          <span class="font-mono">cdn.tailwindcss.com</span>. Name what you would not mind a script on this page reading.
-        </p>
-      </div>
-
-      <div id="local-names-rows" class="space-y-2">
-        <p class="text-xs text-gray-500">Loading the projects this stack knows…</p>
-      </div>
-
-      <div class="space-y-1">
-        <label for="local-names-json" class="text-xs font-medium text-gray-400 uppercase tracking-wider">Or paste the mapping</label>
-        <p class="text-[11px] text-gray-500">
-          A JSON object of alias to name, for a mapping you keep in a file. It is applied over the fields above when you press Save,
-          so it can name an alias that has no field yet. A name is one line of at most <span id="local-names-max" class="font-mono">60</span>
-          characters; anything that is not text is left out and the count below says how many were.
-        </p>
-        <textarea id="local-names-json" rows="4" spellcheck="false" autocomplete="off"
-                  placeholder='{"Acme-Proj-FB": "the front desk portal"}'
-                  class="w-full bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-xs text-gray-200 font-mono focus:outline-none focus:border-purple-500"></textarea>
-      </div>
-
-      <div class="flex flex-wrap items-center gap-2">
-        <button type="button" onclick="saveLocalNames()" class="px-4 py-2 bg-purple-600 hover:bg-purple-500 font-semibold text-xs rounded-lg text-white shadow-lg shadow-purple-600/20 transition">Save</button>
-        <button type="button" onclick="clearLocalNames()" class="px-3 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs border border-gray-700">Clear all</button>
-        <button type="button" id="local-names-copy" onclick="copyLocalNames(this)" class="px-3 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs border border-gray-700">Copy as JSON</button>
-        <span id="local-names-state" class="text-xs text-gray-500"></span>
-      </div>
-
-      <p class="text-[11px] text-gray-500 border-t border-gray-800 pt-3">
-        The switch in the navigation above turns every name off at once, for a screenshot or a demo, and remembers that in this browser
-        too. It appears as soon as one name is saved. Building the mapping from the checkouts on your own machine:
-        <span class="font-mono text-gray-300">python threefold.py status --names-json</span> prints a JSON object of alias to folder name,
-        ready to paste above.
-      </p>
-    </div>
-
-    <!-- WHAT EACH THRESHOLD GATES -->
-    <div class="rounded-2xl bg-gray-900 border border-gray-800 p-5 space-y-3">
-      <h2 class="text-sm font-semibold text-white">What these numbers change, and what they do not</h2>
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-        <div class="p-3 rounded-xl bg-gray-950 border border-gray-800">
-          <p class="font-semibold text-emerald-300">All four numbers reach the gates</p>
-          <p class="text-gray-400 mt-1">
-            Saving sets the loop detector's repetition threshold from
-            <span class="font-mono">monomorphic_repetition_threshold</span>, its cycle search length from
-            <span class="font-mono">loop_history_window</span>, and the breaker's single-call cap and session ceiling from
-            <span class="font-mono">max_single_call_usd</span> and <span class="font-mono">max_session_budget_usd</span>.
-            Raise the threshold to 5 and the first scenario on the dashboard no longer halts on the third call: that is the
-            quickest proof this page reaches the evaluator the gate uses. The caps are weighed against caller-declared token
-            counts, so a caller that declares zero tokens is not stopped by them.
-          </p>
-        </div>
-        <div class="p-3 rounded-xl bg-gray-950 border border-gray-800">
-          <p class="font-semibold text-emerald-300">The patterns refuse like secrets</p>
-          <p class="text-gray-400 mt-1">
-            Every <span class="font-mono">blocked_patterns</span> entry is an additional secret shape: a call whose arguments
-            match one is refused with the compiled shapes' force, which means always enforced and never staged. The list below
-            is editable, one regular expression per line; the service refuses the whole save when an entry does not compile.
-          </p>
-        </div>
-      </div>
-      <div class="p-3 rounded-xl bg-gray-950 border border-gray-800 text-xs">
-        <div class="flex items-center justify-between gap-3 flex-wrap">
-          <p class="font-semibold text-gray-300">The same change over curl</p>
-          <span class="text-[11px] text-gray-500">
-            Both operations in the spec:
-            <a id="spec-link-policy-get" href="swagger.html" class="font-mono text-purple-300 hover:text-purple-200 underline">GET</a> ·
-            <a id="spec-link-policy-post" href="swagger.html" class="font-mono text-purple-300 hover:text-purple-200 underline">POST</a>
-          </span>
-        </div>
-        <pre class="mt-2 text-[11px] font-mono text-gray-400 overflow-x-auto" id="curl-example">Loading the current policy first.</pre>
-      </div>
-    </div>
-
   </main>
 
-  <footer class="border-t border-gray-800 py-4 text-center text-xs text-gray-500">
-    Threefold · AWS Zero to Shipped Hackathon 2026 · Built with Amazon Bedrock &amp; AWS Serverless
+  <footer class="tf-footer">
+    <div class="tf-container">
+      <span>Threefold · AWS Zero to Shipped Hackathon 2026 · Built with Amazon Bedrock &amp; AWS Serverless</span>
+      <span>Every value on this page is read from the service as you look at it</span>
+    </div>
   </footer>
 
   <script>
@@ -426,7 +465,7 @@
       // the shared layer loaded; this page's own links when it did not.
       if (window.Threefold) { Threefold.mountNav(document.getElementById('page-nav'), { active: 'settings' }); return; }
       document.getElementById('page-nav').innerHTML = NAV.map(item =>
-        '<a href="' + PAGE_BASE + item.href + '" class="px-3 py-1.5 rounded-md bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700 transition">' + item.label + '</a>'
+        '<a href="' + PAGE_BASE + item.href + '" class="tf-nav-link">' + item.label + '</a>'
       ).join('');
     }
 
@@ -459,12 +498,17 @@
       }[m]));
     }
 
+    // An icon from the shared set, as markup this page writes; nothing without it.
+    function glyph(name, size) {
+      return window.Threefold ? String(Threefold.icon(name, size || 13)) : '';
+    }
+
     function getApiBase() {
       const configured = document.getElementById("apiBaseInput").value.trim().replace(/\/+$/, "");
       return configured || DEFAULT_API_BASE;
     }
 
-    // The operator key this browser keeps for the console, rules, sessions and
+    // The operator key this browser keeps for the dashboard, rules, sessions and
     // settings pages. Every access is guarded: storage throws when site data is
     // blocked, and the page has to work without it, as the public demo does.
     const OPERATOR_KEY_STORAGE = 'threefold-operator-key';
@@ -472,10 +516,10 @@
       try { return (window.localStorage.getItem(OPERATOR_KEY_STORAGE) || '').trim(); } catch (err) { return ''; }
     }
 
-    // localStorage belongs to an origin, but the Sidecar REST field above can be
+    // localStorage belongs to an origin, but the API address field can be
     // pointed at any host, so a key stored for this page would otherwise be sent
     // to whatever is typed there. The stored key goes out only when the target is
-    // the origin that served this page. A key typed into the API Key field is the
+    // the origin that served this page. A key typed into the key field is the
     // reader's own choice for that request and always goes. A base that will not
     // parse is not this origin, so it gets nothing.
     function baseIsThisOrigin(base) {
@@ -494,7 +538,7 @@
           ? 'A key is stored in this browser. It is not shown.'
           : 'No key is stored in this browser.';
       } catch (err) {
-        text = 'This browser blocks site storage, so no key can be kept here. Type it in the API Key field above instead.';
+        text = 'This browser blocks site storage, so no key can be kept here. Type it into the key field under Connection instead.';
       }
       document.getElementById('operator-key-state').textContent = note ? text + ' ' + note : text;
     }
@@ -554,12 +598,20 @@
 
     function setConnection(ok, text) {
       const badge = document.getElementById("apiConnectionStatus");
-      const tone = ok
-        ? "bg-emerald-950 text-emerald-400 border-emerald-800"
-        : "bg-red-950 text-red-400 border-red-800";
-      const dot = ok ? "bg-emerald-400" : "bg-red-400";
-      badge.className = "px-2 py-0.5 rounded text-[11px] font-mono border flex items-center gap-1.5 " + tone;
-      badge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full ' + dot + '"></span> ' + escapeHtml(text);
+      badge.className = "tf-chip ml-2 " + (ok ? "tf-chip-emerald" : "tf-chip-rose");
+      badge.innerHTML = glyph(ok ? 'check' : 'alert') + escapeHtml(text);
+    }
+
+    // A tone for the save line and the names line, as a class this page's
+    // stylesheet knows, and the words escaped.
+    function said(text, tone) {
+      return '<span class="' + (tone || 'text-gray-400') + '">' + escapeHtml(text) + '</span>';
+    }
+
+    function setSource(tone, text) {
+      const tag = document.getElementById('policy-source');
+      tag.className = 'tf-chip ' + tone;
+      tag.innerText = text;
     }
 
     function showRaw(obj) {
@@ -596,33 +648,28 @@
     }
 
     async function loadPolicy() {
-      const tag = document.getElementById('policy-source');
-      tag.className = 'text-xs px-2.5 py-1 rounded-full font-semibold bg-gray-800 text-gray-400';
-      tag.innerText = 'Loading…';
+      setSource('tf-chip-gray', 'Reading…');
       try {
         const res = await fetch(getApiBase() + '/policy/config', { method: 'GET', headers: authHeaders() });
         const data = await res.json();
         if (!res.ok) {
           setConnection(false, 'HTTP ' + res.status);
-          tag.className = 'text-xs px-2.5 py-1 rounded-full font-semibold bg-red-950 text-red-400 border border-red-800';
-          tag.innerText = 'READ FAILED';
+          setSource('tf-chip-rose', 'Read failed');
           showRaw(data);
           if (res.status === 401 || res.status === 403) {
             document.getElementById('save-status').innerHTML =
-              '<span class="text-amber-400">This stack keeps its reads private. Sign in with python threefold.py open, or store the operator key in this browser, below.</span>';
+              said('This stack keeps its reads private. Sign in with python threefold.py open, or store the operator key in this browser, above.', 'tf-warn-text');
           }
           return;
         }
         renderPolicy(data);
         showRaw(data);
-        setConnection(true, 'LIVE POLICY READ');
-        tag.className = 'text-xs px-2.5 py-1 rounded-full font-semibold bg-emerald-950 text-emerald-400 border border-emerald-800';
-        tag.innerText = 'LIVE FROM API';
+        setConnection(true, 'Policy read live');
+        setSource('tf-chip-emerald', 'Live from the service');
         document.getElementById('save-status').innerText = '';
       } catch (err) {
-        setConnection(false, 'UNREACHABLE');
-        tag.className = 'text-xs px-2.5 py-1 rounded-full font-semibold bg-red-950 text-red-400 border border-red-800';
-        tag.innerText = 'UNREACHABLE';
+        setConnection(false, 'Unreachable');
+        setSource('tf-chip-rose', 'Unreachable');
         document.getElementById('blocked-patterns').value = '';
         document.getElementById('blocked-patterns').placeholder =
           'The service could not be reached, so no policy is shown. Nothing here is filled in from a guess while it is offline.';
@@ -637,7 +684,7 @@
       document.getElementById('in-threshold').value = SHIPPED_DEFAULTS.monomorphic_repetition_threshold;
       document.getElementById('blocked-patterns').value = SHIPPED_DEFAULTS.blocked_patterns.join('\n');
       document.getElementById('save-status').innerHTML =
-        '<span class="text-amber-400">Form filled with the shipped defaults. Nothing is saved until you press Save.</span>';
+        said('Form filled with the shipped defaults. Nothing is saved until you press Save policy.', 'tf-warn-text');
     }
 
     function readForm() {
@@ -667,13 +714,14 @@
       const body = readForm();
       const problems = validate(body);
       if (problems.length) {
-        status.innerHTML = '<span class="text-red-400">' + escapeHtml(problems[0]) + '</span>';
+        status.innerHTML = said(problems[0], 'tf-bad');
         return;
       }
 
       const button = document.getElementById('btnSave');
       button.disabled = true;
-      status.innerHTML = '<span class="text-gray-400">Sending…</span>';
+      if (window.Threefold) Threefold.setBusy(button, true);
+      status.innerHTML = said('Sending…');
       try {
         const res = await fetch(getApiBase() + '/policy/config', {
           method: 'POST',
@@ -689,11 +737,11 @@
           if (data && data.type === 'urn:threefold:error:policy-write-disabled') {
             explanation = 'This deployment has no policy-write key configured, so the policy is read only here. The values above are unchanged.';
           } else if (res.status === 401) {
-            explanation = 'Saving needs the operator. Sign in with python threefold.py open, or put the key in the API Key field above, or store it in this browser. The policy is unchanged.';
+            explanation = 'Saving needs the operator. Sign in with python threefold.py open, or put the key in the key field under Connection, or store it in this browser. The policy is unchanged.';
           } else if (res.status === 403) {
             explanation = 'That key was not accepted. The policy is unchanged.';
           }
-          status.innerHTML = '<span class="text-red-400">' + escapeHtml(explanation) + '</span>';
+          status.innerHTML = said(explanation, 'tf-bad');
           setConnection(false, 'HTTP ' + res.status);
           return;
         }
@@ -709,22 +757,27 @@
           verified = null;
         }
         if (!verified || typeof verified.max_single_call_usd === 'undefined') {
-          status.innerHTML = '<span class="text-amber-400">The service accepted the write, but reading the policy back failed, so the values above are still the ones from before the save.</span>';
-          setConnection(false, 'READ BACK FAILED');
+          status.innerHTML = said('The service accepted the write, but reading the policy back failed, so the values above are still the ones from before the save.', 'tf-warn-text');
+          setConnection(false, 'Read back failed');
           return;
         }
         renderPolicy(verified);
         const matches = ['max_single_call_usd', 'max_session_budget_usd', 'loop_history_window', 'monomorphic_repetition_threshold']
           .every(k => Number(verified[k]) === Number(body[k]));
         status.innerHTML = matches
-          ? '<span class="text-emerald-400">Saved, and read back from the service.</span>'
-          : '<span class="text-amber-400">Saved, but the value read back differs from what was sent. The panel on the right shows what the service reports.</span>';
-        setConnection(true, matches ? 'POLICY UPDATED' : 'READ BACK DIFFERS');
+          ? said('Saved, and read back from the service.', 'tf-good')
+          : said('Saved, but the value read back differs from what was sent. The service\'s last answer, below, shows what it reports.', 'tf-warn-text');
+        setConnection(true, matches ? 'Policy updated' : 'Read back differs');
+        if (matches && window.Threefold) {
+          ['kpi-single', 'kpi-budget', 'kpi-window', 'kpi-threshold'].forEach(id => Threefold.pulse(document.getElementById(id).parentNode, 'ok'));
+          Threefold.toast('The policy is saved and was read back from the service.', { tone: 'ok' });
+        }
       } catch (err) {
-        status.innerHTML = '<span class="text-red-400">' + escapeHtml(String(err)) + '</span>';
-        setConnection(false, 'UNREACHABLE');
+        status.innerHTML = said(String(err), 'tf-bad');
+        setConnection(false, 'Unreachable');
       } finally {
         button.disabled = false;
+        if (window.Threefold) Threefold.setBusy(button, false);
       }
     }
 
@@ -754,7 +807,7 @@
 
     function setLocalNamesState(text, tone) {
       const el = document.getElementById('local-names-state');
-      if (el) el.innerHTML = '<span class="' + (tone || 'text-gray-400') + '">' + escapeHtml(text) + '</span>';
+      if (el) el.innerHTML = said(text, tone);
     }
 
     function renderLocalNames() {
@@ -767,21 +820,21 @@
       localNameAliases = aliases;
       const max = localNamesMax();
       const note = localNamesProblem
-        ? '<p class="text-[11px] text-amber-300">The project list could not be read (' + escapeHtml(localNamesProblem) +
+        ? '<p class="tf-micro tf-warn-text">The project list could not be read (' + escapeHtml(localNamesProblem) +
           '), so only the aliases this browser already has a name for are listed. Paste a mapping below to add others.</p>'
         : '';
       if (!aliases.length) {
         rows.innerHTML = note +
-          '<p class="text-xs text-gray-500">No project to name yet: this stack listed none and this browser holds none. ' +
+          '<p class="tf-small">No project to name yet: this stack listed none and this browser holds none. ' +
           'Connect a repository, or paste a mapping below.</p>';
         return;
       }
       rows.innerHTML = note + aliases.map((alias, i) =>
-        '<label class="flex flex-wrap items-center gap-2">' +
-          '<span class="font-mono text-xs text-gray-300 w-full sm:w-56 shrink-0 break-all">' + escapeHtml(alias) + '</span>' +
+        '<label class="flex flex-wrap items-center gap-x-4 gap-y-1 py-1">' +
+          '<span class="font-mono text-xs text-gray-200 w-full sm:w-56 shrink-0 break-all">' + escapeHtml(alias) + '</span>' +
           '<input id="ln-' + i + '" type="text" maxlength="' + max + '" autocomplete="off" spellcheck="false" ' +
             'placeholder="your own name for it" value="' + escapeHtml(stored[alias] || '') + '" ' +
-            'class="flex-1 min-w-[12rem] bg-gray-950 border border-gray-800 rounded px-2 py-1 text-xs text-gray-200 focus:outline-none focus:border-purple-500" />' +
+            'class="tf-input flex-1 min-w-[12rem]" />' +
         '</label>'
       ).join('');
     }
@@ -805,11 +858,11 @@
         try {
           parsed = JSON.parse(pasted);
         } catch (err) {
-          setLocalNamesState('That is not JSON, so nothing was saved and nothing changed: ' + String((err && err.message) || err), 'text-red-400');
+          setLocalNamesState('That is not JSON, so nothing was saved and nothing changed: ' + String((err && err.message) || err), 'tf-bad');
           return;
         }
         if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-          setLocalNamesState('The pasted text has to be a JSON object of alias to name, such as {"Acme-Proj-FB": "the front desk portal"}. Nothing was saved.', 'text-red-400');
+          setLocalNamesState('The pasted text has to be a JSON object of alias to name, such as {"Acme-Proj-FB": "the front desk portal"}. Nothing was saved.', 'tf-bad');
           return;
         }
         Object.keys(parsed).forEach(alias => { if (alias !== '__proto__') map[alias] = parsed[alias]; });
@@ -828,7 +881,7 @@
         stored
           ? 'Saved in this browser: ' + kept + (kept === 1 ? ' name' : ' names') + '. Nothing was sent to the service.' + left
           : 'This browser blocks site storage, so the names are kept for this tab only and go when it closes. Nothing was sent to the service.' + left,
-        stored ? 'text-emerald-400' : 'text-amber-400'
+        stored ? 'tf-good' : 'tf-warn-text'
       );
     }
 
@@ -841,7 +894,7 @@
         stored
           ? 'Cleared from this browser. The pages show the aliases alone again.'
           : 'This browser blocks site storage, so there was nothing stored here to clear.',
-        stored ? 'text-emerald-400' : 'text-amber-400'
+        stored ? 'tf-good' : 'tf-warn-text'
       );
     }
 
@@ -880,10 +933,19 @@
       renderLocalNames();
     }
 
+    // A link to #operator-key opens the fallback, which is folded by default.
+    function openLinkedPanel() {
+      const id = (location.hash || '').slice(1);
+      const target = id ? document.getElementById(id) : null;
+      if (target && target.tagName === 'DETAILS') target.open = true;
+    }
+
     renderNav();
     linkToSpec();
     renderSignInState();
     renderOperatorKeyState();
+    openLinkedPanel();
+    if (typeof window.addEventListener === 'function') window.addEventListener('hashchange', openLinkedPanel);
     const maxNote = document.getElementById('local-names-max');
     if (maxNote) maxNote.textContent = String(localNamesMax());
     if (window.Threefold) Threefold.onLocalNamesChange(renderLocalNames);
