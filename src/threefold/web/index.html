@@ -2029,8 +2029,8 @@
     // (sources, from the fleet's contract) and its parts add up to the calls
     // counted beside them, by sandbox when it says only that (sandbox_split),
     // and in words alone when it says neither. Parts read over another window,
-    // or parts that add up to nothing, would contradict the tiles, so they are
-    // not used.
+    // or parts that add up to nothing, would contradict the tiles, so their
+    // figures are not used; a fleet among them is still named in words.
     function sourcesSentence(data, calls) {
       const h = T.html;
       const end = ' They show the stack at work, not how widely Threefold is used.';
@@ -2045,6 +2045,11 @@
         if (sandbox) pieces.push(formatCount(sandbox) + ' from sandboxes visitors started');
         if (other) pieces.push(formatCount(other) + ' from the service’s own probes, the demos on this page and anyone else calling its open API');
         return h`<strong>Where they come from:</strong> of ${plural(calls, 'call', 'calls')} on this stack, ${pieces.join('; ')}.${end}`;
+      }
+      // A fleet the stack reports is always named, even when its parts cannot
+      // be given as figures: synthetic calls are never left unlabelled.
+      if (fleet !== null && fleet > 0) {
+        return h`<strong>Where they come from:</strong> this stack's own traffic, including a synthetic Acme fleet that sends its calls through the real gates, the sandboxes visitors start, the service's own probes, the demos on this page and anyone else calling its open API.${end}`;
       }
       const split = data.sandbox_split && typeof data.sandbox_split === 'object' ? data.sandbox_split : null;
       const inSandboxes = split ? part(split.sandbox) : null;

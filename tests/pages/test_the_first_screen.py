@@ -495,11 +495,14 @@ def test_without_sources_the_sandboxes_are_still_told_apart(tmp_path: Path) -> N
     hostile = "sources: { fleet: { calls: '<img src=x onerror=alert(1)>' }, sandbox: { calls: 1 }, other: { calls: 1 } }"
     out = _load(tmp_path, overview="{ status: 200, body: " + _overview(hostile) + " }")
     assert "<img" not in out["where"] and "synthetic Acme fleet" not in out["where"], "A source that is not a count is not used"
-    for parts in ("fleet: { calls: 900 }, sandbox: { calls: 120 }, other: { calls: 62 }",
-                  "fleet: { calls: 0 }, sandbox: { calls: 0 }, other: { calls: 0 }"):
-        out = _load(tmp_path, overview="{ status: 200, body: " + _overview("sources: { " + parts + " }") + " }")
-        assert "synthetic Acme fleet" not in _text(out["where"]), f"Parts that do not add up to the 1,284 calls are not used: {parts}"
-        assert "this stack's own traffic" in _text(out["where"])
+    mismatched = "sources: { fleet: { calls: 900 }, sandbox: { calls: 120 }, other: { calls: 62 } }"
+    out = _load(tmp_path, overview="{ status: 200, body: " + _overview(mismatched) + " }")
+    where = _text(out["where"])
+    assert "900" not in where and "1,284" not in where and "120" not in where, "Parts that do not add up to the 1,284 calls give no figure"
+    assert "this stack's own traffic, including a synthetic Acme fleet that sends its calls through the real gates" in where,         "A fleet the stack reports is named in words even then: synthetic calls are never left unlabelled"
+    nothing = "sources: { fleet: { calls: 0 }, sandbox: { calls: 0 }, other: { calls: 0 } }"
+    out = _load(tmp_path, overview="{ status: 200, body: " + _overview(nothing) + " }")
+    assert "synthetic Acme fleet" not in _text(out["where"]) and "this stack's own traffic" in _text(out["where"]),         "Parts that add up to nothing are not used, and no fleet is claimed"
 
 
 def test_the_counts_are_read_without_a_key_even_when_one_is_typed(tmp_path: Path) -> None:
