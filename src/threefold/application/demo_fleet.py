@@ -539,13 +539,14 @@ def _credential(rng: random.Random, project: FleetProject, tools: _Tools) -> Lis
     return [tools.read(module.config), attempt, instead]
 
 
-# Out of 100 episodes. Ordinary work first; about one call in eight is one a
-# rule flags, which is what a team adopting the rules sees in its first weeks.
+# Out of 100 episodes. Ordinary work first; about one call in ten is one a
+# rule flags: a share chosen so that every chart and tile has something to
+# show, not a measurement of any real team.
 EPISODES: Tuple[Tuple[str, Callable[..., List[Step]], int], ...] = (
-    ("feature", _feature, 44),
+    ("feature", _feature, 47),
     ("domain_edit", _domain_edit, 12),
     ("layering", _layering, 16),
-    ("noisy", _noisy, 7),
+    ("noisy", _noisy, 4),
     ("shell_write", _shell_write, 6),
     ("protected", _protected, 6),
     ("loop", _loop, 5),
