@@ -25,7 +25,17 @@ Modes: ok, expired, not_logged_in, usage_limit, overloaded, and:
 - hide (Claude Code only): behaves like ok but hides the token in the shapes a
   plain search misses: in file and folder names (as text and as hex), as
   UTF-16, JSON-escaped in the transcript, inside base64, and, when the
-  behaviour names `link_to`, as a hard link to that file in the repository.
+  behaviour names `link_to`, as a hard link to that file in the repository;
+- governed (Claude Code only): behaves like ok, but first makes two governed
+  calls, a Write of a cloud import into a domain module and a `git status`,
+  asking the hook `.claude/settings.local.json` registers before each, as
+  Claude Code does, with its hook events in the transcript. A refused call is
+  not carried out; an approved Write is.
+
+`commands` (a list, Claude Code in governed mode and Codex) adds one Bash call
+per entry after those, asked of the hook the same way; each `<ENV:NAME>` in it
+is replaced by that variable as the stand-in's own environment holds it, so a
+test can have the agent spell out its TEMP folder or its home in full.
 
 `modes` (a list) gives one mode per call, in order, the last repeated. Not a
 test itself, and never used by a real run.
@@ -36,6 +46,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -125,6 +136,12 @@ def _behaviour(bin_dir: Path, agent: str) -> Dict[str, Any]:
     return json.loads((bin_dir / f"{agent}.behaviour.json").read_text(encoding="utf-8"))
 
 
+def _commands(bin_dir: Path, agent: str) -> List[str]:
+    """The behaviour's extra Bash commands, each `<ENV:NAME>` replaced from this process's environment."""
+    return [re.sub(r"<ENV:([A-Za-z_][A-Za-z0-9_]*)>", lambda found: os.environ.get(found.group(1), ""), str(command))
+            for command in _behaviour(bin_dir, agent).get("commands") or []]
+
+
 def _mode(bin_dir: Path, agent: str) -> str:
     behaviour = _behaviour(bin_dir, agent)
     counter = bin_dir / f"{agent}.count"
@@ -205,6 +222,8 @@ def fake_claude(bin_dir: Path, argv: List[str]) -> int:
             Path(config, ".credentials.json").write_text(json.dumps({"accessToken": token}), encoding="utf-8")
     if mode == "hide" and token:
         _hide(token, _behaviour(bin_dir, "claude"))
+    if mode == "governed" and streaming:
+        _governed_calls(Path.cwd(), _commands(bin_dir, "claude"))
     _emit({"type": "result", "subtype": "success", "is_error": False, "terminal_reason": "completed", "num_turns": 2,
            "duration_ms": 1500, "duration_api_ms": 900, "total_cost_usd": 0.0123, "result": "ok",
            "usage": {"input_tokens": 12, "output_tokens": 34, "cache_read_input_tokens": 100, "cache_creation_input_tokens": 0},
@@ -233,6 +252,68 @@ def _hide(token: str, behaviour: Dict[str, Any]) -> None:
         folder = Path(config, f"cache-{token}")
         folder.mkdir(parents=True, exist_ok=True)
         (folder / "entry.txt").write_text("kept in a folder named after the token\n", encoding="utf-8")
+
+
+def _claude_hook(repo: Path, payload: Dict[str, Any], tool: str) -> Optional[str]:
+    """Runs the hook .claude/settings.local.json registers, the way Claude Code would, and returns its refusal or None.
+
+    The hook's start and its response go to the transcript, as they do under
+    --include-hook-events, so the runner reads this stand-in's hook the same way.
+    """
+    settings = repo / ".claude" / "settings.local.json"
+    if not settings.is_file():
+        return None
+    document = json.loads(settings.read_text(encoding="utf-8"))
+    for entry in (document.get("hooks") or {}).get("PreToolUse") or []:
+        for hook in entry.get("hooks") or []:
+            _emit({"type": "system", "subtype": "hook_started", "hook_event": "PreToolUse",
+                   "hook_name": "PreToolUse:" + tool})
+            completed = subprocess.run(hook["command"], shell=True, input=json.dumps(payload).encode("utf-8"),
+                                       capture_output=True, cwd=str(repo), timeout=60)
+            text = completed.stdout.decode("utf-8", "replace").strip()
+            _emit({"type": "system", "subtype": "hook_response", "hook_event": "PreToolUse",
+                   "hook_name": "PreToolUse:" + tool, "stdout": text,
+                   "stderr": completed.stderr.decode("utf-8", "replace"), "exit_code": completed.returncode,
+                   "outcome": "success" if completed.returncode == 0 else "error"})
+            if text:
+                output = json.loads(text.splitlines()[-1]).get("hookSpecificOutput") or {}
+                if output.get("permissionDecision") == "deny":
+                    return str(output.get("permissionDecisionReason") or "denied")
+    return None
+
+
+def _domain_module(repo: Path) -> Path:
+    """A module in the repository's domain package, wherever the task keeps it."""
+    for folder in sorted(repo.glob("src/*/domain")):
+        if folder.is_dir():
+            return folder / "archive.py"
+    return repo / "src" / "domain" / "archive.py"
+
+
+def _governed_calls(repo: Path, commands: Optional[List[str]] = None) -> None:
+    """Two governed calls, each asked of the registered hook first: a Write a layering rule refuses, and a read-only
+    command; then one Bash call for each of `commands`."""
+    target = _domain_module(repo)
+    calls = [("toolu_w", "Write", {"file_path": str(target), "content": "import boto3\n\n\ndef archive(order):\n    return order\n"}),
+             ("toolu_b", "Bash", {"command": "git status", "description": "look at the working tree"})]
+    calls += [(f"toolu_c{number}", "Bash", {"command": command, "description": "run a command"})
+              for number, command in enumerate(commands or [], 1)]
+    for tool_id, tool, tool_input in calls:
+        _emit({"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "id": tool_id, "name": tool, "input": tool_input}]}})
+        payload = {"session_id": "fake-claude-session", "transcript_path": "", "cwd": str(repo),
+                   "permission_mode": "acceptEdits", "hook_event_name": "PreToolUse", "tool_name": tool,
+                   "tool_input": tool_input}
+        reason = _claude_hook(repo, payload, tool)
+        if reason:
+            _emit({"type": "user", "message": {"content": [
+                {"type": "tool_result", "tool_use_id": tool_id, "is_error": True, "content": reason}]}})
+            continue
+        if tool == "Write":
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(tool_input["content"], encoding="utf-8")
+        _emit({"type": "user", "message": {"content": [
+            {"type": "tool_result", "tool_use_id": tool_id, "is_error": False, "content": "ok"}]}})
 
 
 def _codex_hook(repo: Path, payload: Dict[str, Any]) -> Optional[str]:
@@ -287,6 +368,8 @@ def fake_codex(bin_dir: Path, argv: List[str]) -> int:
         ("item_2", "file_change", {"tool_name": "apply_patch", "tool_input": {"command": (
             "*** Begin Patch\n*** Add File: src/acme_orders/domain/archive.py\n+import boto3\n*** End Patch\n")}}),
     ]
+    calls_made += [(f"item_c{number}", "command_execution", {"tool_name": "Bash", "tool_input": {"command": command}})
+                   for number, command in enumerate(_commands(bin_dir, "codex"), 1)]
     for item_id, item_type, call in calls_made:
         payload = dict(call, session_id="fake-codex-session", cwd=str(repo), hook_event_name="PreToolUse")
         started = {"id": item_id, "type": item_type, "status": "in_progress"}
