@@ -2420,7 +2420,7 @@
 .tf-try-editor-tab { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 10px 14px; background: var(--tf-surface-1); border-bottom: 1px solid var(--tf-hairline);
   font: 500 0.75rem/1.125rem var(--tf-font-mono); color: var(--tf-text-2); }
 .tf-try-editor-tab .tf-icon { color: var(--tf-text-3); }
-.tf-try-editor-path { min-width: 0; overflow-wrap: break-word; }
+.tf-try-editor-path { flex: 1 1 10rem; min-width: 0; overflow-wrap: break-word; }
 .tf-try-editor-meta { margin-left: auto; font-family: var(--tf-font-sans); color: var(--tf-text-3); }
 .tf-try-code { margin: 0; padding: 12px 0; font: 400 0.8125rem/1.6 var(--tf-font-mono); color: #dde1ea; }
 .tf-try-code code { font: inherit; }
@@ -2429,8 +2429,9 @@
 .tf-try-editor[data-tone="refused"] .tf-try-line[data-bad] { background: var(--tf-refused-soft); box-shadow: inset 3px 0 0 var(--tf-refused); text-decoration: line-through; text-decoration-color: rgba(253, 164, 175, 0.7); }
 .tf-try-ln { display: inline-block; width: 2ch; margin-right: 14px; color: var(--tf-text-decor); text-align: right; user-select: none; text-decoration: none; }
 .tf-try-editor-note { margin: 0; padding: 10px 14px; border-top: 1px solid var(--tf-hairline); font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-3); }
-.tf-try-delta { margin: 0; display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr)); }
+.tf-try-delta { margin: 0; display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr)); }
 .tf-try-delta > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 10px 12px; border-radius: var(--tf-radius-md); background: var(--tf-inset); border: 1px solid var(--tf-hairline); }
+@media (max-width: 479px) { .tf-try-delta > div { padding: 8px 10px; } }
 .tf-try-delta dt { font: 600 var(--tf-fs-micro)/1rem var(--tf-font-sans); letter-spacing: var(--tf-track-caps); text-transform: uppercase; color: var(--tf-text-3); }
 .tf-try-delta dd { margin: 0; display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 0.8125rem; line-height: 1.25rem; color: var(--tf-text); }
 .tf-try-delta dd .tf-icon { flex-shrink: 0; }
@@ -3273,7 +3274,7 @@
           ? { k: 'Agent', v: agentLabel(TRY_SENDER) + ', again', kind: 'same' }
           : { k: 'Agent', v: agentLabel(row.agent) + ' → ' + agentLabel(TRY_SENDER), kind: 'changed' });
         items.push({ k: 'Stage', v: 'Observe → Enforce', kind: 'stage' });
-        return html`<dl class="tf-try-delta" aria-label="Between the call in Observe and this one">${items.map(i => html`<div data-kind="${i.kind}"><dt>${i.k}</dt><dd>${T.icon(i.kind === 'stage' ? 'shield' : i.kind === 'same' ? 'check' : 'arrowright', 14)}<span>${i.v}</span></dd></div>`)}</dl>`;
+        return html`<dl class="tf-try-delta" aria-label="Between the call in Observe and this one">${items.map(i => html`<div data-kind="${i.kind}"><dt>${i.k}</dt><dd>${i.kind === 'changed' ? '' : T.icon(i.kind === 'stage' ? 'shield' : 'check', 14)}<span>${i.v}</span></dd></div>`)}</dl>`;
       }
 
       function editor(plan, tone) {
