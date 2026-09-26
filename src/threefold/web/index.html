@@ -962,9 +962,8 @@
               <p id="cert-signature">Signature: ...</p>
               <p id="cert-origin" class="tf-cert-note"></p>
               <p class="tf-cert-note">
-                The fingerprint is an unkeyed SHA-256 of the payload. It detects corruption and casual edits, not an adversary:
-                anyone who changes the payload can recompute the hash. Where the stack holds a signing key the same bytes carry
-                a KMS signature, shown above; nothing in CI requires one before a merge.
+                An unkeyed SHA-256 catches corruption, not tampering: whoever edits the payload can recompute it. Where the
+                stack holds a signing key, a KMS signature over the same bytes is shown above; no CI step requires one.
               </p>
             </div>
             <div class="tf-session-stats" aria-label="The last scenario's session">
