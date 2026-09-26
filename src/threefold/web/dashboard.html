@@ -2329,7 +2329,9 @@
 .tf-try-card[data-label="false_alarm"] { border-color: var(--tf-refused-line); }
 .tf-try-card-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
 .tf-try-card-count { font: 600 var(--tf-fs-micro)/1rem var(--tf-font-sans); letter-spacing: var(--tf-track-caps); text-transform: uppercase; color: var(--tf-text-3); }
-.tf-try-card-agent { display: inline-flex; align-items: center; gap: 8px; font-size: 0.8125rem; color: var(--tf-text-2); }
+.tf-try-card-agent { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; font-size: 0.8125rem; color: var(--tf-text-2); }
+.tf-try-agent-name { white-space: nowrap; }
+.tf-try-card-agent .tf-mono { min-width: 0; overflow-wrap: anywhere; }
 .tf-try-card-file { margin: 0; font: 500 1.0625rem/1.5rem var(--tf-font-mono); color: var(--tf-text); overflow-wrap: break-word; }
 @media (min-width: 768px) { .tf-try-card-file { font-size: 1.1875rem; line-height: 1.75rem; } }
 .tf-try-card-rule { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font: 500 0.8125rem/1.25rem var(--tf-font-mono); color: var(--tf-text-2); }
@@ -2397,7 +2399,7 @@
 .tf-try-rule-counts { color: var(--tf-text-2); }
 
 .tf-try-compare { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); align-items: start; }
-@media (min-width: 960px) {
+@media (min-width: 1180px) {
   .tf-try-compare { grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); }
   .tf-try-compare > .tf-try-then-col { order: -1; }
 }
@@ -2437,7 +2439,7 @@
 .tf-try-editor[data-tone="refused"] .tf-try-line[data-bad] { background: var(--tf-refused-soft); box-shadow: inset 3px 0 0 var(--tf-refused); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--tf-refused-text) 70%, transparent); }
 .tf-try-ln { display: inline-block; width: 2ch; margin-right: 14px; color: var(--tf-text-decor); text-align: right; user-select: none; text-decoration: none; }
 .tf-try-editor-note { margin: 0; padding: 10px 14px; border-top: 1px solid var(--tf-hairline); font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-3); }
-.tf-try-delta { margin: 0; display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr)); }
+.tf-try-delta { margin: 0; display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr)); }
 .tf-try-delta > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 10px 12px; border-radius: var(--tf-radius-md); background: var(--tf-inset); border: 1px solid var(--tf-hairline); }
 @media (max-width: 479px) { .tf-try-delta > div { padding: 8px 10px; } }
 .tf-try-delta dt { font: 600 var(--tf-fs-micro)/1rem var(--tf-font-sans); letter-spacing: var(--tf-track-caps); text-transform: uppercase; color: var(--tf-text-3); }
@@ -3118,7 +3120,7 @@
               <article class="tf-try-card" data-dir="${play.card || ''}" data-label="${l || ''}" aria-labelledby="try-card-file" aria-describedby="try-card-why">
                 <header class="tf-try-card-top">
                   <span id="try-card-count" class="tf-try-card-count">Call ${num(i + 1)} of ${num(total)}</span>
-                  <span class="tf-try-card-agent">${tryAvatar(row.agent, true)}${agentLabel(row.agent)} · <span class="tf-mono">${row.tool_name}</span></span>
+                  <span class="tf-try-card-agent">${tryAvatar(row.agent, true)}<span class="tf-try-agent-name">${agentLabel(row.agent)} ·</span><span class="tf-mono">${row.tool_name}</span></span>
                 </header>
                 <p id="try-card-file" class="tf-try-card-file">${tryPath(tryTarget(row))}</p>
                 <p id="try-card-rule" class="tf-try-card-rule">${T.statusChip('observed')}<span class="tf-break">${ruleKeyOf(row)}</span></p>
@@ -3334,7 +3336,7 @@
         const l = state.labels[row.verdict_id];
         return html`<div class="tf-try-then">
           <p class="tf-try-then-label">Earlier, in Observe</p>
-          <p class="tf-try-card-agent">${tryAvatar(row.agent, true)}${agentLabel(row.agent)} · <span class="tf-mono">${row.tool_name}</span></p>
+          <p class="tf-try-card-agent">${tryAvatar(row.agent, true)}<span class="tf-try-agent-name">${agentLabel(row.agent)} ·</span><span class="tf-mono">${row.tool_name}</span></p>
           <p class="tf-try-file tf-try-then-file">${tryPath(tryTarget(row))}</p>
           <p class="tf-try-summary">${T.statusChip('observed')}<span class="tf-try-muted">It ran, and was recorded.</span>${l ? html`<span class="tf-try-muted">You marked it</span>${reviewChip(l)}` : ''}</p>
         </div>`;
