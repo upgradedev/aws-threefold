@@ -273,7 +273,9 @@ people read. What changes:
   for a stand-in (`fake_threefold.py`).
 - The row records `ledger_source: "remote"`, `threefold_endpoint`,
   `threefold_project`, `threefold_session`, `project_stage_cached` (the stage
-  the hook last saw in a response), `hook_calls` and
+  the hook last saw in a response), `project_stage_remote` (the stage the
+  stack reports for the project, `GET /api/projects/<project>`, read only
+  when the ledger holds no call of the run's), `hook_calls` and
   `threefold_config_intact` (whether `.threefold.json` still named that
   endpoint and project when the agent stopped). Its `ledger` counts `refused` (a `BLOCKED*` verdict) apart from
   `would_refuse` (a call that ran although a rule would have refused it) and

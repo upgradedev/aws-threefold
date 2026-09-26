@@ -885,6 +885,9 @@ class RemoteServer:
     def session_url(self) -> str:
         return self.endpoint + "sessions/" + urllib.parse.quote(self.session, safe="")
 
+    def project_url(self) -> str:
+        return self.endpoint + "api/projects/" + urllib.parse.quote(self.project, safe="")
+
     def _read(self) -> Dict[str, Any]:
         rows: List[Mapping[str, Any]] = []
         other = 0
@@ -954,6 +957,20 @@ class RemoteServer:
             answer = "an answer that is not a ledger" if status == 200 else (status or "nothing")
             raise RuntimeError(f"the remote Threefold answered GET api/decisions with {answer}, so no agent was started")
         return not found.get("decisions") and not found.get("other_projects") and found.get("complete") is not False
+
+    def project_stage(self) -> Optional[str]:
+        """The stage the remote Threefold holds this run's project in (its own, or the stack's default), or None.
+
+        Read from GET api/projects/<project>, the project page's own read. Asked
+        only after a run whose ledger holds no call of its own: the rows say
+        which stage each call was judged under, and with no row this is the one
+        witness left of whether the stack would have enforced anything.
+        """
+        status, document = remote_json(self.project_url())
+        readiness = document.get("readiness") if status == 200 and isinstance(document, dict) else None
+        summary = readiness.get("summary") if isinstance(readiness, dict) else None
+        stage = summary.get("stage") if isinstance(summary, dict) else None
+        return stage if stage in ("observe", "enforce") else None
 
     def ledger(self, wait_for_rows: bool = False) -> Dict[str, Any]:
         """What the remote ledger holds for this run. With wait_for_rows, an empty answer is read again after a pause."""
@@ -1888,16 +1905,23 @@ def stage_problem(row: Mapping[str, Any]) -> Optional[str]:
     way again until someone promotes the project there (see
     scripts/daily_live_agent.py). Every other reason a remote run falls short
     is a failure of the run itself.
+
+    The rows say which stage each call was judged under. A run with no row
+    of its own is judged by the stage the hook last saw in a response, or,
+    when it made no call the stack answered, by the stage the stack reports
+    for the project (RemoteServer.project_stage).
     """
     if row.get("ledger_source") != "remote":
         return None
     ledger = row.get("ledger") or {}
     observed = int((ledger.get("stages") or {}).get("observe") or 0)
-    if observed or (not ledger.get("decisions") and row.get("project_stage_cached") == "observe"):
-        counted = f"{observed} of this run's {ledger.get('decisions')} call(s)" if observed else "this run's calls"
-        return (f"the remote Threefold judged {counted} in Observe (the project {ledger.get('project')} is not "
-                "promoted there), so it recorded what it would have refused and refused nothing: this run did "
-                "not measure Threefold enforcing")
+    if observed:
+        return (f"the remote Threefold judged {observed} of this run's {ledger.get('decisions')} call(s) in Observe "
+                f"(the project {ledger.get('project')} is not promoted there), so it recorded what it would have "
+                "refused and refused nothing: this run did not measure Threefold enforcing")
+    if not ledger.get("decisions") and "observe" in (row.get("project_stage_cached"), row.get("project_stage_remote")):
+        return (f"the remote Threefold holds the project {ledger.get('project')} in Observe and its ledger holds no "
+                "call of this run's, so it would have refused nothing: this run did not measure Threefold enforcing")
     watched = int(ledger.get("would_refuse") or 0)
     if watched:
         rules = sorted(ledger.get("would_refuse_by_rule_key") or {}) or ["a rule"]
@@ -2411,6 +2435,8 @@ def run_one(task: Task, condition: str, rep: int, plan: RunPlan, base_env: Optio
             # so a ledger holding more under this run's project and session holds calls this run did not send.
             row["hook_calls"] = int(codex_agent.read_hook_log(run_dir / HOOK_LOG_NAME).get("calls") or 0)
             row["ledger"] = server.ledger(wait_for_rows=governed_calls(row, options.agent) > 0)
+            row["project_stage_remote"] = (server.project_stage() if row["ledger"].get("reachable")
+                                           and not row["ledger"].get("decisions") else None)
         elif server is not None:
             row["server_healthy_after"] = server.healthy()
             row["ledger"] = server.ledger()
