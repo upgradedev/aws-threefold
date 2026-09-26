@@ -237,7 +237,8 @@ def test_the_hero_fits_a_phone_without_scrolling_sideways() -> None:
     assert '<meta name="viewport" content="width=device-width, initial-scale=1.0" />' in body
     style = _style()
     assert ".tf-hero { position: relative; display: grid; grid-template-columns: minmax(0, 1fr);" in style
-    assert "@media (min-width: 1024px) { .tf-hero { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);" in style
+    assert re.search(r"@media \(min-width: 1024px\) \{\s*\.tf-hero \{ grid-template-columns: minmax\(0, 1fr\) minmax\(0, 1fr\);", style), \
+        "Side by side only from a desk's width"
     assert ".tf-hero-actions { display: flex; flex-direction: column;" in style
     assert "@media (min-width: 640px) { .tf-hero-actions { flex-direction: row; flex-wrap: wrap;" in style
     assert ".tf-hero-actions .tf-btn { white-space: normal;" in style, "A long label wraps inside its button"

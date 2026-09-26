@@ -45,7 +45,14 @@
 
     /* ------------------------------------------------------------ the hero */
     .tf-hero { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--tf-space-5); align-items: center; }
-    @media (min-width: 1024px) { .tf-hero { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--tf-space-8); } }
+    /* Top-aligned, and the demonstration holds its room from the first frame, so
+       nothing beside it moves while the verdict lands. */
+    @media (min-width: 1024px) {
+      .tf-hero { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--tf-space-8); align-items: start; }
+      .tf-hero-copy { padding-top: var(--tf-space-3); }
+      .tf-demo-body { min-height: 31.75rem; box-sizing: border-box; }
+      .tf-demo-foot p { min-height: 2.25rem; }
+    }
     .tf-hero::before {
       /* Inside the hero's own width: a glow that reached past it would give a
          phone's page a sideways scroll. */
@@ -154,6 +161,7 @@
     .tf-proof-live > .tf-state, .tf-proof-live > .tf-proof-note { grid-column: 1 / -1; }
     .tf-proof-note { display: flex; flex-direction: column; justify-content: center; gap: 8px; padding: 20px; }
     .tf-proof-note p { margin: 0; }
+    .tf-proof-note .tf-link { align-self: flex-start; font-size: 0.8125rem; line-height: 1.25rem; }
     .tf-proof-where { display: flex; gap: 10px; margin: var(--tf-space-2) 0 0; max-width: 64rem; font-size: 0.8125rem; line-height: 1.3125rem; color: var(--tf-text-3); }
     .tf-proof-where .tf-icon { width: 16px; height: 16px; margin-top: 2px; color: var(--tf-info-text); }
     .tf-proof-where strong { color: var(--tf-text-2); font-weight: 600; }
@@ -1695,7 +1703,7 @@
       if (answer.source === 'live') {
         source.className = 'tf-chip tf-chip-emerald';
         T.setHtml(source, h`${T.icon('bolt', 13)}Live${typeof answer.ms === 'number' ? h` · ${answer.ms} ms` : ''}`);
-        caption.textContent = 'Judged just now by this stack: POST /evaluate-tool-call, sent from this page as a hook would send it. It is in the public ledger as a page call.';
+        caption.textContent = 'Judged just now by this stack: POST /evaluate-tool-call, sent from this page as a hook would send it. It is in this stack’s ledger as a page call.';
       } else {
         source.className = 'tf-chip tf-chip-amber';
         T.setHtml(source, h`${T.icon('clock', 13)}Recorded ${RECORDED.recorded_at}, replayed offline`);
@@ -1735,12 +1743,16 @@
     async function replayHero() {
       if (!hero.answer || !hero.motion) return;
       const card = document.getElementById('hero-demo');
+      // The card keeps the height it has while it plays again, so the page
+      // under it does not jump.
+      if (card && card.style) card.style.minHeight = card.offsetHeight + 'px';
       hideHeroVerdict();
       if (card) { card.setAttribute('data-motion', 'off'); void card.offsetWidth; card.setAttribute('data-motion', 'on'); }
       drawHeroCall();
       heroShowWaiting(true);
       await wait(HERO_MIN_MS);
       landHero(hero.answer);
+      if (card && card.style) card.style.minHeight = '';
     }
 
     // ---------------------------------------------------------- the proof strip
