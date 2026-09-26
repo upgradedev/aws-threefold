@@ -80,6 +80,14 @@
     .tf-ops-att-list a:hover { background: var(--tf-surface-2); color: var(--tf-text); }
     .tf-ops-att-list .tf-ops-att-what { min-width: 0; overflow-wrap: anywhere; }
     .tf-ops-att-list .tf-ops-att-n { flex-shrink: 0; font-family: var(--tf-font-mono); font-variant-numeric: tabular-nums; color: var(--tf-text); }
+    /* A halted session: who, why and when, stacked so the reason keeps the width. */
+    .tf-ops-halts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+    .tf-ops-halts > li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+    .tf-ops-halt { flex: 1 1 14rem; min-width: 0; display: flex; flex-direction: column; gap: 2px; padding: 6px 8px; margin: 0 -8px; border-radius: var(--tf-radius-sm); text-decoration: none; font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-2); }
+    .tf-ops-halt:hover { background: var(--tf-surface-2); }
+    .tf-ops-halt-id { overflow-wrap: anywhere; }
+    .tf-ops-halt-why { color: var(--tf-text-3); overflow-wrap: anywhere; }
+    .tf-ops-halt-when { font-size: var(--tf-fs-micro); color: var(--tf-text-3); font-variant-numeric: tabular-nums; }
     .tf-ops-att-note { margin: 0; font-size: var(--tf-fs-micro); line-height: 1rem; color: var(--tf-text-3); }
     .tf-ops-att-foot { margin-top: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-top: 4px; }
 
@@ -882,8 +890,12 @@
         return attSlot({ slot: 'reviews', tone: 'ok', icon: 'check', kicker: 'Reviews', title: 'Nothing waits for a label',
           body: html`<p class="tf-ops-att-note">Every call a rule in Observe flagged in ${windowWords(days)} has a label.</p>` });
       }
+      // A visitor's sandbox expires within a day and is the visitor's to
+      // label, so for the operator the projects that are theirs lead, and a
+      // sandbox is listed only where room is left.
+      const theirs = p => (visitor || sourceOf(p) !== 'sandbox' ? 1 : 0);
       const rows = (Array.isArray(data.by_project) ? data.by_project : []).filter(p => (p.needs_review || 0) > 0)
-        .sort((a, b) => (b.needs_review || 0) - (a.needs_review || 0) || String(a.project).localeCompare(String(b.project)));
+        .sort((a, b) => theirs(b) - theirs(a) || (b.needs_review || 0) - (a.needs_review || 0) || String(a.project).localeCompare(String(b.project)));
       const split = data.sandbox_split && data.sandbox_split.sandbox;
       const inSandboxes = split && typeof split.needs_review === 'number' && split.needs_review > 0 ? split.needs_review : 0;
       return attSlot({
@@ -891,7 +903,7 @@
         title: html`${plural(waiting, 'call')} ${waiting === 1 ? 'waits' : 'wait'} for ${visitor ? 'a' : 'your'} label`,
         body: html`<ul class="tf-ops-att-list">${rows.slice(0, 3).map(p => html`<li><a href="${reviewHref({ project: p.project, days })}"><span class="tf-ops-att-what font-mono">${T.projectName(p.project)}</span><span class="tf-ops-att-n">${num(p.needs_review)}</span></a></li>`)}</ul>
           ${rows.length > 3 ? html`<p class="tf-ops-att-note">and ${plural(rows.length - 3, 'more project')}.</p>` : ''}
-          ${inSandboxes ? html`<p class="tf-ops-att-note">${num(inSandboxes)} of them ${inSandboxes === 1 ? 'is' : 'are'} in visitors' sandboxes${visitor ? ', which anyone may label' : ''}.</p>` : ''}
+          ${inSandboxes ? html`<p class="tf-ops-att-note">${num(inSandboxes)} of them ${inSandboxes === 1 ? 'is' : 'are'} in visitors' sandboxes${visitor ? ', which anyone may label' : ', which drop out of these figures within a day'}.</p>` : ''}
           ${visitor ? html`<p class="tf-ops-att-note">The other projects' labels are the operator's. Your own sandbox takes a minute, and you label, promote and watch its rule hold.</p>` : ''}`,
         foot: visitor
           ? html`<a class="tf-btn tf-btn-primary tf-btn-sm" href="#/try">Try it with your own sandbox${T.icon('arrowright', 14)}</a><a class="tf-btn tf-btn-quiet tf-btn-sm" href="${reviewHref({ days })}">See the queue</a>`
@@ -905,7 +917,13 @@
       if (att.noisy.error) return attUnread('noisy', kicker, 'alert', 'False alarms', att.noisy.error);
       const groups = {};
       const order = [];
-      att.noisy.rows.forEach(row => {
+      // A visitor's sandbox is a walkthrough that asks the visitor to find
+      // its one false alarm, so a sandbox's false alarm is the exercise done,
+      // not a rule gone wrong. It is counted apart, never listed.
+      const inSandboxes = att.noisy.rows.filter(row => SANDBOX_NAME.test(String(row.project_name || ''))).length;
+      const apart = inSandboxes
+        ? html`<p class="tf-ops-att-note">Left out: ${plural(inSandboxes, 'false alarm')} in visitors' sandboxes, where the walkthrough asks for one.</p>` : '';
+      att.noisy.rows.filter(row => !SANDBOX_NAME.test(String(row.project_name || ''))).forEach(row => {
         const project = String(row.project_name || '');
         const rule = ruleKeyOf(row);
         const key = project + '\u0000' + rule;
@@ -916,14 +934,14 @@
       const partial = att.noisy.partial ? html`<p class="tf-ops-att-note">Counted over the newest ${plural(att.noisy.rows.length, 'false alarm')}; the ledger holds more.</p>` : '';
       if (!list.length) {
         return attSlot({ slot: 'noisy', tone: 'ok', icon: 'check', kicker, title: 'No rule turned noisy',
-          body: html`<p class="tf-ops-att-note">No call from ${windowWords(days)} is marked a false alarm.</p>` });
+          body: html`<p class="tf-ops-att-note">No call from ${windowWords(days)} is marked a false alarm.</p>${apart}${partial}` });
       }
       return attSlot({
         slot: 'noisy', tone: 'danger', icon: 'alert', kicker,
         title: html`${plural(list.length, 'rule')} turned noisy`,
         body: html`<ul class="tf-ops-att-list">${list.slice(0, 3).map(g => html`<li><a href="${projectHref(g.project)}" title="Open the project: keep the rule observing, or refine it, before it enforces"><span class="tf-ops-att-what"><span class="font-mono text-gray-200">${g.rule}</span> <span class="text-gray-500">in</span> <span class="font-mono">${T.projectName(g.project)}</span></span><span class="tf-ops-att-n">${plural(g.count, 'false alarm')}</span></a></li>`)}</ul>
           ${list.length > 3 ? html`<p class="tf-ops-att-note">and ${plural(list.length - 3, 'more rule')}.</p>` : ''}
-          <p class="tf-ops-att-note">A false alarm makes a rule Noisy: keep it observing, or refine it, before it enforces.</p>${partial}`,
+          <p class="tf-ops-att-note">Keep each observing, or refine it, before it enforces.</p>${apart}${partial}`,
         foot: html`<a class="tf-btn tf-btn-sm" href="${callsHref({ review: 'false_alarm', days })}">The calls marked false alarm</a>`
       });
     }
@@ -931,27 +949,40 @@
     // How many sessions the strip reads: the route's own ceiling.
     const SESSIONS_READ = 200;
 
-    function haltedSlot(att) {
+    // Sessions that halt on purpose: the demo page's scenarios (sim-) and the
+    // service's own live probes (probe-), each of which trips the breaker to
+    // show it working. Nobody has to act on them, so the strip leaves them out.
+    const HALTS_ON_PURPOSE = /^(sim|probe)-/;
+
+    function haltedSlot(att, who) {
       const kicker = 'Sessions';
       if (!att.sessions) return attLoading('halted', kicker, 'stop');
       if (att.sessions.error) return attUnread('halted', kicker, 'stop', 'Sessions', att.sessions.error);
-      // The demo page's scenarios halt their own sim- sessions on purpose; they
-      // show the breaker working, and nobody has to act on them.
-      const halted = att.sessions.rows.filter(s => s && s.is_tripped === true && !/^sim-/.test(String(s.session_id || '')));
+      const halted = att.sessions.rows.filter(s => s && s.is_tripped === true && !HALTS_ON_PURPOSE.test(String(s.session_id || '')));
+      // Resuming clears a halt, so it is the operator's: a visitor is told so
+      // rather than offered a button the stack would refuse.
+      const operator = !!who && who.authenticated === true;
       // The list is read up to a limit; a full read may not be every session.
       const partial = att.sessions.rows.length >= SESSIONS_READ
         ? html`<p class="tf-ops-att-note">Among the newest ${plural(att.sessions.rows.length, 'session')} read; the table holds more.</p>` : '';
       if (!halted.length) {
         return attSlot({ slot: 'halted', tone: 'ok', icon: 'check', kicker, title: 'No session is halted',
-          body: html`<p class="tf-ops-att-note">The circuit breaker has stopped no agent session. The demo page's own scenario sessions are left out.</p>${partial}` });
+          body: html`<p class="tf-ops-att-note">Left out: the demo page's scenarios and the service's own probes, which halt their sessions on purpose.</p>${partial}` });
       }
       return attSlot({
         slot: 'halted', tone: 'danger', icon: 'stop', kicker,
         title: html`${plural(halted.length, 'session')} halted`,
-        body: html`<ul class="tf-ops-att-list">${halted.slice(0, 3).map(s => html`<li><a href="${T.pageHref('sessions.html' + query({ session: s.session_id }))}" title="${s.trip_reason || 'Halted'}"><span class="tf-ops-att-what"><span class="font-mono text-gray-200">${s.session_id}</span>${s.project_name ? html` <span class="text-gray-500">in</span> <span class="font-mono">${T.projectName(s.project_name)}</span>` : ''}${s.trip_reason ? html`<span class="block text-gray-500">${s.trip_reason}</span>` : ''}</span><span class="tf-ops-att-n">started ${timeAgo(s.created_at)}</span></a></li>`)}</ul>
+        body: html`<ul class="tf-ops-halts">${halted.slice(0, 3).map(s => html`<li>
+            <a class="tf-ops-halt" href="${T.pageHref('sessions.html' + query({ session: s.session_id }))}">
+              <span class="tf-ops-halt-id"><span class="font-mono text-gray-100">${s.session_id}</span>${s.project_name ? html` <span class="text-gray-500">in</span> <span class="font-mono">${T.projectName(s.project_name)}</span>` : ''}</span>
+              ${s.trip_reason ? html`<span class="tf-ops-halt-why">${s.trip_reason}</span>` : ''}
+              <span class="tf-ops-halt-when">started ${timeAgo(s.created_at)}</span>
+            </a>
+            ${operator ? html`<button type="button" class="tf-btn tf-btn-sm" data-action="resume-open" data-session="${s.session_id}">${T.icon('refresh', 14)}Resume…</button>` : ''}
+          </li>`)}</ul>
           ${halted.length > 3 ? html`<p class="tf-ops-att-note">and ${plural(halted.length - 3, 'more session')}.</p>` : ''}
-          <p class="tf-ops-att-note">Every later call in a halted session is refused until an operator resumes it.</p>${partial}`,
-        foot: html`<a class="tf-btn tf-btn-sm" href="${T.pageHref('sessions.html')}">Open Sessions</a>`
+          <p class="tf-ops-att-note">Every later call in it is refused until ${operator ? 'you resume it' : 'the operator resumes it'}.</p>${partial}`,
+        foot: html`<a class="tf-btn tf-btn-quiet tf-btn-sm" href="${T.pageHref('sessions.html')}">All sessions</a>`
       });
     }
 
@@ -961,7 +992,7 @@
           <h2 id="attention-title" class="tf-ops-h2">${T.icon('bolt', 18)}Needs your attention</h2>
           <p class="tf-ops-sub">What to act on: calls waiting for a label and rules a false alarm made noisy in ${windowWords(days)}, and every session the circuit breaker holds halted now.</p>
         </div></div>
-        <div class="tf-ops-attention">${reviewSlot(data, days, who)}${noisySlot(att, days)}${haltedSlot(att)}</div>
+        <div class="tf-ops-attention">${reviewSlot(data, days, who)}${noisySlot(att, days)}${haltedSlot(att, who)}</div>
       </section>`;
     }
 
@@ -1142,6 +1173,8 @@
         const codingCount = typeof t.coding_agents === 'number' ? t.coding_agents : null;
         const coding = byAgent.filter(a => (a.calls || 0) > 0 && (!kinded || a.kind === 'coding_agent')).sort((a, b) => (b.calls || 0) - (a.calls || 0));
         const others = kinded ? byAgent.filter(a => (a.calls || 0) > 0 && a.kind !== 'coding_agent') : [];
+        // Signed out on the public demo, the queue is not the reader's own.
+        const visitor = !!who && who.reads_public === true && who.authenticated !== true;
         const agentWords = (coding.length ? coding.slice(0, 3).map(a => agentLabel(a.agent)).join(', ') : 'none in this window') +
           (others.length ? ' · not agents: ' + others.map(a => agentLabel(a.agent) + ' (' + plural(a.calls, 'call') + ')').join(', ') : '');
         const tiles = [
@@ -1162,7 +1195,7 @@
             value: selfCorrectionShown(data.self_correction) ? data.self_correction.self_corrected : null,
             href: callsHref({ kind: 'refused', days }), sub: selfCorrectionWords(data.self_correction),
             opens: SELF_CORRECTION_SCOPE + ' Opens every refused call in this window', more: 'See the refusals' },
-          { label: 'Waiting for your label', metric: 'needs_review', value: t.needs_review, href: callsHref({ kind: 'observed', review: 'unreviewed', days }), icon: 'inbox', term: 'needs review',
+          { label: visitor ? 'Waiting for a label' : 'Waiting for your label', metric: 'needs_review', value: t.needs_review, href: callsHref({ kind: 'observed', review: 'unreviewed', days }), icon: 'inbox', term: 'needs review',
             sub: t.needs_review ? 'label them so their rules can become Ready' : 'every flagged call has a label' },
           { label: 'Projects', metric: 'projects', value: t.projects, href: '#/projects', icon: 'folder', more: 'See the projects',
             sub: num(stages.observe) + ' in Observe · ' + num(stages.enforce) + ' in Enforce' },
@@ -1249,10 +1282,61 @@
         if (typeof window.removeEventListener === 'function') window.removeEventListener('resize', onResize);
         if (typeof document.removeEventListener === 'function') document.removeEventListener('visibilitychange', onVisible);
       });
-      ctx.actions({ refresh: () => { if (attStarted) loadAttention(); return load(true); } });
+      // Resuming a halted session, from the strip. The route records who
+      // cleared the halt and why, so both are asked for; the name is kept in
+      // this browser for next time, as a convenience only.
+      const NAME_KEY = 'threefold-operator-name';
+      function resumeBody(id, halt) {
+        let remembered = '';
+        try { remembered = localStorage.getItem(NAME_KEY) || ''; } catch (err) { /* a convenience */ }
+        return html`<p class="text-sm text-gray-300">Session <span class="font-mono text-white tf-break">${id}</span> was halted${halt && halt.trip_reason ? html`: <span class="text-gray-200">${halt.trip_reason}</span>` : ''}. Resuming clears the halt and keeps its history and spend, so the gates still apply to its next call.</p>
+          <label class="block"><span class="tf-label">Why it is safe to resume</span>
+            <input id="dialog-first" type="text" maxlength="240" class="tf-input w-full" placeholder="For example: the loop was a retry I stopped" /></label>
+          <label class="block"><span class="tf-label">Your name, for the record</span>
+            <input id="resume-name" type="text" maxlength="120" class="tf-input w-full" value="${remembered}" autocomplete="name" /></label>
+          <p id="resume-error" class="text-xs text-rose-300" role="alert"></p>`;
+      }
+      function resumeFooter(id, busy) {
+        return html`<button type="button" class="tf-btn" data-action="close-dialog">Cancel</button>
+          <button type="button" class="tf-btn tf-btn-primary" data-action="resume-confirm" data-session="${id}" ${busy ? raw('disabled') : ''}>${busy ? 'Resuming…' : 'Resume the session'}</button>`;
+      }
+      ctx.actions({
+        refresh: () => { if (attStarted) loadAttention(); return load(true); },
+        'resume-open': el => {
+          const id = el.getAttribute('data-session') || '';
+          const halt = att.sessions && att.sessions.rows ? att.sessions.rows.find(s => s && s.session_id === id) : null;
+          openDialog('Resume this session?', resumeBody(id, halt), resumeFooter(id, false));
+        },
+        'resume-confirm': el => {
+          const id = el.getAttribute('data-session') || '';
+          const field = key => { const node = document.getElementById(key); return node && typeof node.value === 'string' ? node.value.trim() : ''; };
+          const reason = field('dialog-first').slice(0, 240);
+          const name = field('resume-name').slice(0, 120);
+          const problem = document.getElementById('resume-error');
+          if (!reason || !name) {
+            if (problem) problem.textContent = 'Say why, and who you are: the record of a cleared halt keeps both.';
+            return;
+          }
+          try { localStorage.setItem(NAME_KEY, name); } catch (err) { /* a convenience */ }
+          setHtml(document.getElementById('dialog-footer'), resumeFooter(id, true));
+          return T.api('/sessions/' + encodeURIComponent(id) + '/resume', { method: 'POST', body: { operator_name: name, reason } }).then(() => {
+            if (!ctx.alive()) return;
+            closeDialog();
+            toast('Resumed ' + id + '. Its history and spend are kept, so the gates still apply.');
+            loadAttention();
+          }, err => {
+            if (!ctx.alive()) return;
+            const said = document.getElementById('resume-error');
+            if (said) said.textContent = T.isAuthError(err) ? 'Resuming needs the operator. Sign in with python threefold.py open, then try again.' : 'Nothing changed: ' + trimStop(err.message) + '.';
+            setHtml(document.getElementById('dialog-footer'), resumeFooter(id, false));
+          });
+        }
+      });
       T.whoami().then(answer => {
         who = answer;
-        if (ctx.alive() && data && answer && answer.reads_public === true) draw();
+        // Who is reading decides what the strip offers: the public demo's
+        // words, and the operator's Resume.
+        if (ctx.alive() && data && answer) draw();
       });
       return load(false);
     }
@@ -1825,7 +1909,10 @@
         const perRule = {};
         state.items.forEach(row => { const r = ruleKeyOf(row); perRule[r] = (perRule[r] || 0) + 1; });
         const open = g => (mayLabel(state.who, g.project) ? 1 : 0);
-        fresh.sort((a, b) => open(b) - open(a) ||
+        // For the operator, a visitor's sandbox, which expires within a day,
+        // follows the projects that are theirs; a visitor's order is `open`.
+        const own = g => (isVisitor(state.who) || !SANDBOX_NAME.test(g.project) ? 1 : 0);
+        fresh.sort((a, b) => open(b) - open(a) || own(b) - own(a) ||
           (perRule[b.rule] || 0) - (perRule[a.rule] || 0) || a.rule.localeCompare(b.rule) ||
           b.items.length - a.items.length || a.project.localeCompare(b.project));
         state.order = state.order.concat(fresh.map(g => g.key));

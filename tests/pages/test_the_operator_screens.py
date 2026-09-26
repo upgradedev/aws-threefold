@@ -128,6 +128,67 @@ def test_a_slot_that_cannot_be_read_says_so_and_guesses_nothing(tmp_path: Path) 
     assert ".." not in out["network"], "The service's own full stop is not doubled"
 
 
+def test_the_strip_leaves_out_what_halts_or_misfires_on_purpose(tmp_path: Path) -> None:
+    out = ops(
+        r"""
+  const body = overviewBody({ needs_review: 25 });
+  body.by_project = [
+    { project: 'Acme-Sandbox-0a1b2c3d', stage: 'observe', configured: true, sandbox: true, calls: 12, refused: 0, would_refuse: 5, needs_review: 20, last_seen: NOW },
+    { project: 'Acme-Ledger', stage: 'observe', configured: true, source: 'fleet', calls: 90, refused: 0, would_refuse: 9, needs_review: 5, last_seen: NOW }
+  ];
+  const resumed = [];
+  let sessions = [session('probe-20260926a-loop-page', 'Acme-Core', true), session('sim-0a1b2c3d', 'Acme-Demo', true), session('fleet-ledger-codex-1', 'Acme-Ledger', true)];
+  answer = contract({
+    '/api/auth/whoami': PRIVATE,
+    '/api/overview': { status: 200, body },
+    '/api/decisions': { status: 200, body: { items: [
+      falseAlarm(1, 'Acme-Sandbox-0a1b2c3d', 'python-domain-stays-pure'), falseAlarm(2, 'Acme-Sandbox-1a2b3c4d', 'python-domain-stays-pure'),
+      falseAlarm(3, 'Acme-Ledger', 'LOOP')
+    ], next_cursor: null } },
+    '/api/sessions': () => ({ status: 200, body: { sessions } }),
+    'POST /sessions/fleet-ledger-codex-1/resume': (u, i, b) => { resumed.push(b); sessions = sessions.map(s => Object.assign({}, s, { is_tripped: s.session_id.indexOf('fleet') === 0 ? false : s.is_tripped })); return { status: 200, body: { status: 'SESSION_RESUMED' } }; }
+  });
+  Threefold.whoami(true);
+  await visit('#/overview?days=7');
+  await tick();
+  out.operator = view();
+  out.reviews = text(view().split('data-slot="reviews"')[1].split('</article>')[0]);
+  out.noisy = text(view().split('data-slot="noisy"')[1].split('</article>')[0]);
+  out.halted = text(view().split('data-slot="halted"')[1].split('</article>')[0]);
+  await click('resume-open', { 'data-session': 'fleet-ledger-codex-1' });
+  el('dialog-first').value = '';
+  el('resume-name').value = 'Ops on call';
+  await click('resume-confirm', { 'data-session': 'fleet-ledger-codex-1' });
+  out.unsaid = el('resume-error').textContent;
+  el('dialog-first').value = 'The loop was a retry I stopped';
+  await click('resume-confirm', { 'data-session': 'fleet-ledger-codex-1' });
+  await tick();
+  out.resumed = resumed;
+  out.after = text(view().split('data-slot="halted"')[1].split('</article>')[0]);
+  answer = contract({ '/api/auth/whoami': PUBLIC, '/api/overview': { status: 200, body },
+    '/api/sessions': { status: 200, body: { sessions: [session('fleet-ledger-codex-1', 'Acme-Ledger', true)] } } });
+  Threefold.whoami(true);
+  await visit('#/overview?days=14');
+  await tick();
+  out.visitor = view();
+""",
+        tmp_path,
+    )
+    reviews, noisy, halted = out["reviews"], out["noisy"], out["halted"]
+    assert reviews.index("Acme-Ledger") < reviews.index("Acme-Sandbox-0a1b2c3d"), "The operator's own projects lead a visitor's sandbox"
+    assert "1 rule turned noisy" in noisy and "LOOP" in noisy and "python-domain-stays-pure" not in noisy
+    assert "Left out: 2 false alarms in visitors' sandboxes, where the walkthrough asks for one." in noisy
+    assert "1 session halted" in halted and "fleet-ledger-codex-1" in halted
+    assert "probe-20260926a" not in halted and "sim-0a1b2c3d" not in halted, "The probes and the demo's scenarios halt on purpose"
+    assert 'data-action="resume-open"' in out["operator"] and "until you resume it" in halted
+    assert "Say why, and who you are" in out["unsaid"], "A resume with no reason sends nothing"
+    assert out["resumed"] == [{"operator_name": "Ops on call", "reason": "The loop was a retry I stopped"}]
+    assert "No session is halted" in out["after"], "After a resume, the strip reads the sessions again"
+    visitor = out["visitor"]
+    assert 'data-action="resume-open"' not in visitor and "until the operator resumes it" in visitor
+    assert "Waiting for a label" in visitor and "Waiting for your label" not in visitor
+
+
 # --------------------------------------------------- what the numbers are made of
 
 
