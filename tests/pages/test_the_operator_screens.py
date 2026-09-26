@@ -71,7 +71,7 @@ def test_the_overview_leads_with_what_needs_the_operator(tmp_path: Path) -> None
     assert page.index("java-domain-stays-pure") < page.index("PROTECTED_PATH"), "The noisiest rule first"
     assert "https://example.test/prod/api/decisions?review=false_alarm&days=7&limit=200" in out["reads"]
     # Halted sessions, leaving out the demo page's own scenarios.
-    assert "1 session halted" in words and "fleet-ledger-codex-1" in words
+    assert "1 session halted" in words and "fleet-ledger-codex-1" in words and "started just now" in words
     assert "sim-0a1b2c3d" not in words and "fleet-ledger-codex-2" not in words
     assert "https://example.test/prod/sessions.html?session=fleet-ledger-codex-1" in page
     assert "https://example.test/prod/api/sessions?limit=200" in out["reads"]
@@ -88,7 +88,7 @@ def test_a_quiet_window_says_each_slot_is_clear(tmp_path: Path) -> None:
   answer = contract({
     '/api/overview': { status: 200, body: overviewBody({ needs_review: 0 }) },
     '/api/decisions': { status: 200, body: { items: [], next_cursor: null } },
-    '/api/sessions': { status: 200, body: { sessions: [session('fleet-search-claude-code-1', 'Acme-Search', false)] } }
+    '/api/sessions': { status: 200, body: { sessions: Array.from({ length: 200 }, (_, i) => session('fleet-search-codex-' + i, 'Acme-Search', false)) } }
   });
   await visit('#/overview?days=7');
   await tick();
@@ -99,6 +99,7 @@ def test_a_quiet_window_says_each_slot_is_clear(tmp_path: Path) -> None:
     )
     words = out["text"]
     assert "Nothing waits for a label" in words and "No rule turned noisy" in words and "No session is halted" in words
+    assert "Among the newest 200 sessions read; the table holds more." in words, "A full read is not claimed as every session"
     assert out["tones"] == 3
 
 
@@ -150,7 +151,7 @@ def test_the_public_demo_says_what_its_numbers_are_made_of(tmp_path: Path) -> No
     assert "96 from visitors' sandboxes" in sources and "41 from the service's own probes and the demo page" in sources
     split = re.sub(r"<[^>]+>", "", out["split"])
     assert 'data-sources="sandbox_split"' in out["split"]
-    assert "96 of these calls come from visitors' sandboxes, and the other 3,251 from the synthetic Acme fleet" in split
+    assert "96 of these calls come from visitors' sandboxes, and the other 3,251 from the synthetic Acme fleet, whose agents run through the real gates" in split
     assert "30 of them are in visitors' sandboxes." in split, "The queue says how much of it is sandboxes'"
     assert "tf-ops-source" not in out["private"], "A private stack's numbers are the operator's own"
 

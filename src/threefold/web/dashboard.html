@@ -34,8 +34,10 @@
     .tf-ops-count { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 20px; padding: 0 6px; border-radius: var(--tf-radius-pill); font: 600 0.6875rem/1 var(--tf-font-sans); background: var(--tf-surface-3); color: var(--tf-text); font-variant-numeric: tabular-nums; }
 
     /* Where the numbers come from, on the public demo. */
-    .tf-ops-source { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 20px; padding: 12px 16px; margin-bottom: var(--tf-space-2); border-radius: var(--tf-radius-md); background: var(--tf-info-soft); border: 1px solid var(--tf-info-line); font-size: var(--tf-fs-small); line-height: var(--tf-lh-small); color: var(--tf-text-2); }
-    .tf-ops-source > .tf-icon { width: 18px; height: 18px; color: var(--tf-info-text); flex-shrink: 0; }
+    /* Neutral on purpose: its bar is drawn in categorical hues, and the info
+       tint sits too close to the cyan one to share a figure with it. */
+    .tf-ops-source { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 20px; padding: 12px 16px; margin-bottom: var(--tf-space-2); border-radius: var(--tf-radius-md); background: var(--tf-surface-1); border: 1px solid var(--tf-hairline-strong); font-size: var(--tf-fs-small); line-height: var(--tf-lh-small); color: var(--tf-text-2); }
+    .tf-ops-source > .tf-icon { width: 18px; height: 18px; color: var(--tf-text-3); flex-shrink: 0; }
     .tf-ops-source p { margin: 0; flex: 1 1 26rem; min-width: 0; }
     .tf-ops-source strong { color: var(--tf-text); font-weight: 600; }
     .tf-ops-share { flex: 0 1 15rem; min-width: 11rem; }
@@ -212,7 +214,7 @@
     @media (max-width: 639px) {
       .tf-ops-connect .tf-step { padding: 16px; }
       .tf-ops-connect .tf-step > .tf-step-num { display: none; }
-      .tf-ops-connect .tf-pre { padding: 44px 14px 14px; }
+      .tf-ops-connect .tf-pre, .tf-ops-signin .tf-pre { padding: 44px 14px 14px; }
     }
 
     /* Sign-in: the brand, and what is and is not kept. */
@@ -894,6 +896,9 @@
       });
     }
 
+    // How many sessions the strip reads: the route's own ceiling.
+    const SESSIONS_READ = 200;
+
     function haltedSlot(att) {
       const kicker = 'Sessions';
       if (!att.sessions) return attLoading('halted', kicker, 'stop');
@@ -901,16 +906,19 @@
       // The demo page's scenarios halt their own sim- sessions on purpose; they
       // show the breaker working, and nobody has to act on them.
       const halted = att.sessions.rows.filter(s => s && s.is_tripped === true && !/^sim-/.test(String(s.session_id || '')));
+      // The list is read up to a limit; a full read may not be every session.
+      const partial = att.sessions.rows.length >= SESSIONS_READ
+        ? html`<p class="tf-ops-att-note">Among the newest ${plural(att.sessions.rows.length, 'session')} read; the table holds more.</p>` : '';
       if (!halted.length) {
         return attSlot({ slot: 'halted', tone: 'ok', icon: 'check', kicker, title: 'No session is halted',
-          body: html`<p class="tf-ops-att-note">The circuit breaker has stopped no agent session. The demo page's own scenario sessions are left out.</p>` });
+          body: html`<p class="tf-ops-att-note">The circuit breaker has stopped no agent session. The demo page's own scenario sessions are left out.</p>${partial}` });
       }
       return attSlot({
         slot: 'halted', tone: 'warn', icon: 'stop', kicker,
         title: html`${plural(halted.length, 'session')} halted`,
-        body: html`<ul class="tf-ops-att-list">${halted.slice(0, 3).map(s => html`<li><a href="${T.pageHref('sessions.html' + query({ session: s.session_id }))}" title="${s.trip_reason || 'Halted'}"><span class="tf-ops-att-what"><span class="font-mono text-gray-200">${s.session_id}</span>${s.project_name ? html` <span class="text-gray-500">in</span> <span class="font-mono">${T.projectName(s.project_name)}</span>` : ''}</span><span class="tf-ops-att-n">${timeAgo(s.created_at)}</span></a></li>`)}</ul>
+        body: html`<ul class="tf-ops-att-list">${halted.slice(0, 3).map(s => html`<li><a href="${T.pageHref('sessions.html' + query({ session: s.session_id }))}" title="${s.trip_reason || 'Halted'}"><span class="tf-ops-att-what"><span class="font-mono text-gray-200">${s.session_id}</span>${s.project_name ? html` <span class="text-gray-500">in</span> <span class="font-mono">${T.projectName(s.project_name)}</span>` : ''}</span><span class="tf-ops-att-n">started ${timeAgo(s.created_at)}</span></a></li>`)}</ul>
           ${halted.length > 3 ? html`<p class="tf-ops-att-note">and ${plural(halted.length - 3, 'more session')}.</p>` : ''}
-          <p class="tf-ops-att-note">Every later call in a halted session is refused until an operator resumes it.</p>`,
+          <p class="tf-ops-att-note">Every later call in a halted session is refused until an operator resumes it.</p>${partial}`,
         foot: html`<a class="tf-btn tf-btn-sm" href="${T.pageHref('sessions.html')}">Open Sessions</a>`
       });
     }
@@ -944,7 +952,7 @@
           { label: 'Probes and demo page', value: count(s.other), color: T.CATEGORICAL_OTHER }
         ];
       } else if (split) {
-        sentence = html`Everything on this public demo is synthetic: <strong>${num(count(split.sandbox))}</strong> of these calls come from visitors' sandboxes, and the other <strong>${num(count(split.elsewhere))}</strong> from the synthetic Acme fleet and the service's own probes.`;
+        sentence = html`Everything on this public demo is synthetic: <strong>${num(count(split.sandbox))}</strong> of these calls come from visitors' sandboxes, and the other <strong>${num(count(split.elsewhere))}</strong> from the synthetic Acme fleet, whose agents run through the real gates on a schedule, and the service's own probes.`;
         parts = [
           { label: 'Sandboxes', value: count(split.sandbox), color: T.CATEGORICAL[1] },
           { label: 'Fleet and probes', value: count(split.elsewhere), color: T.CATEGORICAL_OTHER }
@@ -1009,7 +1017,7 @@
           const rows = body && Array.isArray(body.items) ? body.items : [];
           att.noisy = { rows: rows.filter(r => r && r.review === 'false_alarm'), partial: !!(body && body.next_cursor) };
         }, err => { att.noisy = { error: err }; });
-        const sessions = T.api('/api/sessions' + query({ limit: 200 })).then(body => {
+        const sessions = T.api('/api/sessions' + query({ limit: SESSIONS_READ })).then(body => {
           att.sessions = { rows: body && Array.isArray(body.sessions) ? body.sessions : [] };
         }, err => { att.sessions = { error: err }; });
         [noisy, sessions].forEach(p => p.then(() => { if (ctx.alive() && data) draw(); }));
