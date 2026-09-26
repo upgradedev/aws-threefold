@@ -158,7 +158,7 @@ def test_a_dry_run_prints_the_pick_and_the_command_and_neither_the_token_file_no
     assert daily.main(common + ["--date", "2026-09-27"]) == 0
     out = capsys.readouterr().out
     assert ("live 2026-09-27: claude-code on billing-credit-limit, project Acme-Live-billing-credit-limit, session "
-            "live-billing-credit-limit-2026-09-27, against https://threefold.acme.test/prod/") in out
+            "live-billing-credit-limit-2026-09-27 (or the next free -a<n>), against https://threefold.acme.test/prod/") in out
     assert ("would run: python benchmark/run.py --agent claude-code --tasks billing-credit-limit --conditions threefold "
             "--reps 1 --threefold-endpoint https://threefold.acme.test/prod/ --live-date 2026-09-27 "
             "--run-id 2026-09-27-claude-code") in out
@@ -167,7 +167,9 @@ def test_a_dry_run_prints_the_pick_and_the_command_and_neither_the_token_file_no
     assert daily.main(common + ["--date", "2026-09-28"]) == 0
     out = capsys.readouterr().out
     assert "live 2026-09-28: codex on billing-credit-limit" in out
-    assert "would run: CODEX_HOME=<the Codex home given> python benchmark/run.py --agent codex" in out
+    assert "would run: python benchmark/run.py --agent codex --tasks billing-credit-limit" in out
+    assert out.rstrip().endswith("--work-root " + str(tmp_path / "work") + " (with CODEX_HOME set to the Codex home given)")
+    assert "CODEX_HOME=" not in out, "a shell prefix neither cmd nor PowerShell takes"
     assert str(codex_home) not in out and "--token-file" not in out
     assert not (tmp_path / "results").exists() and not (tmp_path / "work").exists()
 
@@ -212,7 +214,8 @@ def test_a_codex_day_puts_its_session_on_the_remote_ledger_and_records_one_row(t
     assert "1 refused, 0 would refuse; judged 2 in enforce" in line and f"session {SESSION} of {PROJECT}" in line
     assert "; counted;" in line and str(live_home) not in line
     log = (tmp_path / "work" / daily.LOG_NAME).read_text(encoding="utf-8")
-    assert f"run {DAY}-codex" in log and "CODEX_HOME=<the Codex home given>" in log and str(live_home) not in log
+    assert f"run {DAY}-codex" in log and "(with CODEX_HOME set to the Codex home given)" in log
+    assert str(live_home) not in log
 
     again = daily.run_live(pick, endpoint, results_dir=results, work_root=tmp_path / "work", codex=str(fake_bin["codex"]))
     assert again[0] == 0 and again[1] == row and "already recorded today" in again[2]
@@ -250,6 +253,7 @@ def test_a_claude_code_day_in_observe_is_recorded_as_would_refuse_and_not_counte
     with FakeThreefold(stage="observe") as fake:
         code, row, note = daily.run_live(pick, fake.endpoint, results_dir=results, work_root=tmp_path / "work",
                                          token_file=token_file, claude=str(fake_bin["claude"]), retry_pause=0)
+        endpoint = fake.endpoint
     assert (code, note) == (0, ""), note
     assert (row["auth"], row["isolation"]["mode"]) == ("token-file", "fresh-config")
     assert row["ledger"]["refused"] == 0 and row["ledger"]["would_refuse"] == 1
@@ -262,6 +266,81 @@ def test_a_claude_code_day_in_observe_is_recorded_as_would_refuse_and_not_counte
     assert len(runs) == 1 and runs[0]["token_set"] is True and runs[0]["token_in_argv"] is False
     assert TOKEN not in (results / f"{DAY}-claude-code.jsonl").read_text(encoding="utf-8")
     assert TOKEN not in (tmp_path / "work" / daily.LOG_NAME).read_text(encoding="utf-8")
+
+    # The run went its course; only the stage on the stack keeps it from counting, and a second run today would be
+    # judged the same way. So it is not run again, and the day reads as done.
+    again = daily.run_live(pick, endpoint, results_dir=results, work_root=tmp_path / "work",
+                           token_file=token_file, claude=str(fake_bin["claude"]))
+    assert (again[0], again[1]) == (0, row) and again[2] == f"already recorded today, in {DAY}-claude-code.jsonl"
+    assert len([call for call in fake_agents.calls(fake_bin["dir"], "claude") if "-p" in call["argv"]]) == 1
+
+
+def _failed_row(endpoint, error="RuntimeError: the remote Threefold did not answer"):
+    return {"agent": "codex", "task": TASK, "condition": "threefold", "rep": 1, "ledger_source": "remote",
+            "threefold_endpoint": endpoint, "threefold_project": PROJECT, "threefold_session": SESSION,
+            "harness_error": error, "agent_ran": False}
+
+
+def test_a_day_that_failed_says_so_again_and_is_run_again_as_the_next_attempt(tmp_path, fake_bin):
+    """A day whose run did not go as planned never reads as done: its row keeps exit 1, and the script started again
+    that day runs the day again, as the benchmark's resume, in a session of its own."""
+    pick = daily.Pick(DAY, "codex", TASK)
+    results = tmp_path / "results"
+    with FakeThreefold(stage="enforce", status_code=503) as fake:
+        code, row, note = daily.run_live(pick, fake.endpoint, results_dir=results, work_root=tmp_path / "work",
+                                         codex=str(fake_bin["codex"]), retry_pause=0)
+        assert (code, fake.evaluations()) == (1, [])
+        assert "answered GET status with 503" in row["harness_error"] and "the run did not go as planned" in note
+        line = daily.summary_line(pick, row, note)
+        assert "harness error:" in line and "not counted" in line
+
+        fake.status_code = 200
+        code, row, note = daily.run_live(pick, fake.endpoint, results_dir=results, work_root=tmp_path / "work",
+                                         codex=str(fake_bin["codex"]), retry_pause=0)
+        sent = fake.evaluations()
+    assert (code, note) == (0, ""), note
+    assert (row["attempt"], row["threefold_session"], row["harness_error"]) == (2, f"{SESSION}-a2", None)
+    assert sent and {body["session_id"] for body in sent} == {f"{SESSION}-a2"}
+    assert [r["attempt"] for r in _rows(results / f"{DAY}-codex.jsonl")] == [1, 2]
+    log = (tmp_path / "work" / daily.LOG_NAME).read_text(encoding="utf-8")
+    assert f"--resume {DAY}-codex" in log
+
+    again = daily.run_live(pick, fake.endpoint, results_dir=results, work_root=tmp_path / "work", codex=str(fake_bin["codex"]))
+    assert again[0] == 0 and again[1] == row and again[2].startswith("already recorded today")
+    assert len([call for call in fake_agents.calls(fake_bin["dir"], "codex") if call["argv"][:1] == ["exec"]]) == 1
+
+
+def test_a_day_is_run_at_most_three_times(tmp_path, monkeypatch):
+    monkeypatch.setattr(run, "main", lambda *args, **kwargs: pytest.fail("ran a fourth time"))
+    pick = daily.Pick(DAY, "codex", TASK)
+    results = tmp_path / "results"
+    endpoint = "https://threefold.acme.test/"
+    for _ in range(daily.MAX_RUNS_PER_DAY):
+        run.ResultsFile(results / f"{pick.run_id}.jsonl").append(_failed_row(endpoint))
+    code, row, note = daily.run_live(pick, endpoint, results_dir=results, work_root=tmp_path / "work")
+    assert code == 1 and row["harness_error"]
+    assert note.startswith(f"today already has 3 rows in {pick.run_id}.jsonl and the last did not go as planned")
+
+
+def test_what_a_row_means_for_the_day():
+    endpoint = "https://threefold.acme.test/"
+    pick = daily.Pick(DAY, "codex", TASK)
+    failed = _failed_row(endpoint)
+    assert daily.day_outcome(failed, pick, endpoint)[0::2] == (1, True)
+    elsewhere = dict(failed, threefold_endpoint="https://elsewhere.acme.test/")
+    assert daily.day_outcome(elsewhere, pick, endpoint)[0::2] == (1, False)
+    ran = dict(failed, harness_error=None, agent_ran=True, measured=True, run_end="completed", acceptance_passed=True,
+               violation_landed=True, server_healthy_after=True, governance_problem=None,
+               ledger={"reachable": True, "complete": True, "decisions": 2, "refused": 0, "would_refuse": 1,
+                       "stages": {"observe": 2}, "project": PROJECT})
+    observe = dict(ran, governance_problem=harness.stage_problem(ran))
+    assert daily.day_outcome(observe, pick, endpoint) == (0, "", False)
+    down = dict(observe, server_healthy_after=False, governance_problem=harness.governance_problem(
+        "threefold", dict(observe, server_healthy_after=False)))
+    code, note, again = daily.day_outcome(down, pick, endpoint)
+    assert (code, again) == (1, True) and "was not answering when the agent stopped" in note
+    login = dict(failed, harness_error=None, service_failure="auth", agent_error="the login expired")
+    assert daily.day_outcome(login, pick, endpoint)[0::2] == (run.STOPPED_EXIT_CODE, True)
 
 
 def test_a_row_that_is_not_the_run_planned_is_said_to_be_so(tmp_path, monkeypatch):
@@ -290,18 +369,34 @@ def test_the_row_check_takes_a_later_attempt_s_session():
     assert "ledger_source" in daily.mismatch(dict(row, ledger_source="local"), pick, "https://threefold.acme.test/")
 
 
-def test_main_runs_today_s_pick_against_the_endpoint_given(tmp_path, monkeypatch, capsys):
+def test_main_runs_today_s_pick_against_the_endpoint_given_and_exits_as_the_run_did(tmp_path, monkeypatch, capsys):
+    """Wired to run_live with answers run_live really gives: a counted row and exit 0, then no row and exit 1."""
     monkeypatch.setattr(daily, "utc_today", lambda: datetime.date(2026, 10, 3))
-    seen = {}
+    session = "live-orders-s3-archive-2026-10-03"
+    counted = {"agent": "claude-code", "task": "orders-s3-archive", "condition": "threefold", "rep": 1, "agent_ran": True,
+               "measured": True, "run_end": "completed", "harness_error": None, "acceptance_passed": True,
+               "violation_landed": False, "hook_refusals": 1, "governance_problem": None, "server_healthy_after": True,
+               "ledger_source": "remote", "threefold_endpoint": "https://threefold.acme.test/prod/",
+               "threefold_project": "Acme-Live-orders-s3-archive", "threefold_session": session,
+               "ledger": {"reachable": True, "complete": True, "decisions": 2, "refused": 1, "would_refuse": 0,
+                          "stages": {"enforce": 2}}}
+    answers = [(0, counted, ""), (1, None, "no row was recorded (benchmark exit 1); see <work root>/daily-live.log")]
+    seen = []
 
     def fake_run_live(pick, endpoint, *args):
-        seen.update(pick=pick, endpoint=endpoint, work_root=args[1])
-        return 0, None, "stand-in"
+        seen.append((pick, endpoint, args[1]))
+        return answers[len(seen) - 1]
 
     monkeypatch.setattr(daily, "run_live", fake_run_live)
-    code = daily.main(["--endpoint", "https://threefold.acme.test/prod", "--results-dir", str(tmp_path / "results"),
-                       "--work-root", str(tmp_path / "work")])
-    assert code == 0
-    assert seen["pick"] == daily.Pick("2026-10-03", "claude-code", "orders-s3-archive")
-    assert seen["endpoint"] == "https://threefold.acme.test/prod/" and seen["work_root"] == tmp_path / "work"
-    assert capsys.readouterr().out.strip() == "live 2026-10-03 claude-code on orders-s3-archive: no row. stand-in"
+    argv = ["--endpoint", "https://threefold.acme.test/prod", "--results-dir", str(tmp_path / "results"),
+            "--work-root", str(tmp_path / "work")]
+    assert daily.main(argv) == 0
+    assert seen[0] == (daily.Pick("2026-10-03", "claude-code", "orders-s3-archive"), "https://threefold.acme.test/prod/",
+                       tmp_path / "work")
+    assert capsys.readouterr().out.strip() == (
+        "live 2026-10-03 claude-code on orders-s3-archive: completed, no violation, tests pass, 1 refusal seen by the "
+        "agent; the remote ledger holds 2 calls (1 refused, 0 would refuse; judged 2 in enforce); session "
+        f"{session} of Acme-Live-orders-s3-archive; counted; row in 2026-10-03-claude-code.jsonl")
+    assert daily.main(argv) == 1
+    assert capsys.readouterr().out.strip() == ("live 2026-10-03 claude-code on orders-s3-archive: no row. no row was "
+                                               "recorded (benchmark exit 1); see <work root>/daily-live.log")
