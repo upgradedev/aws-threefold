@@ -312,12 +312,14 @@ row to `results/live/<date>-<agent>.jsonl` and prints one line: how the run
 ended, what the remote ledger holds for its session (refused and would refuse
 apart, and the stage they were judged under) and whether the row counts. The
 benchmark's own output goes to `daily-live.log` in the run's work root, not to
-the terminal; the dry run prints the command with the token file shown as
-`<token file>` and the Codex home (`--codex-home`) not at all, only that it is
-set. It refuses an endpoint that is not https or holds anything but visible
-ASCII (there is no default), `--date` outside a dry run, and a work root
-inside the repository or its workspace, before anything is created; after the
-run it checks the row names the endpoint, project and session it planned.
+the terminal. The token file and the Codex home (`--codex-home`) are the
+owner's and are never printed: the log writes their paths, and the
+benchmark's defaults for them, as `<token file>` and `<Codex home>`, and the
+dry run prints the command the same way. It refuses an endpoint that is not
+https or holds anything but visible ASCII (there is no default), `--date`
+outside a dry run, and a work root inside the repository or its workspace,
+before anything is created; after the run it checks the row names the
+endpoint, project and session it planned.
 
 A day's row decides both the exit code and whether the day is run again, the
 same way for a new row and one already recorded:
