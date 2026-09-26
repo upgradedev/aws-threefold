@@ -1580,6 +1580,39 @@ def test_the_flagged_cards_name_the_whole_command_and_an_import_the_reason_cut(t
     assert "cat .env" in out["stack"]
 
 
+def test_a_sandbox_with_nothing_flagged_says_so_and_offers_a_second_read(tmp_path: Path) -> None:
+    """Step 2 with no flagged call is a designed state, not a blank stage.
+
+    A ledger can lag a moment behind a new sandbox, so the read that found
+    nothing is offered again, and the calls that did arrive stay on screen.
+    """
+    out = dash(
+        r"""
+  const P = 'Acme-Sandbox-0a1b2c3d';
+  let reads = 0;
+  answer = api({
+    'POST /api/sandbox': { status: 200, body: { project: P, calls_seeded: 12 } },
+    ['/api/projects/' + P]: { status: 200, body: { project: P, config: { stage: 'observe' }, readiness: { rules: [] } } },
+    '/api/decisions': u => {
+      if (u.searchParams.get('kind') === 'observed') { reads += 1; return { status: 200, body: { items: [], next_cursor: null } }; }
+      return { status: 200, body: { items: [row(1, { project_name: P, observed_rules: [], observed_rule: '', rule_key: 'NONE', target: 'README.md', observed_target: '', tool_name: 'Read', action_type: 'FILE_READ' })], next_cursor: null } };
+    }
+  });
+  await visit('#/try');
+  await click('try-create'); await tick();
+  await click('try-show'); await tick();
+  out.empty = view();
+  await click('try-show'); await tick();
+  out.reads = reads;
+""",
+        tmp_path,
+    )
+    words = text_of(out["empty"])
+    assert "No call was flagged" in words and 'class="tf-empty"' in out["empty"]
+    assert "Read the list again" in words and "README.md" in words, "The calls that arrived stay on the empty step"
+    assert out["reads"] == 2
+
+
 def text_of(markup: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", markup))
 

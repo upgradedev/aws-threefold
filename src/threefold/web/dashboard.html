@@ -2870,7 +2870,11 @@
             ? 'Each one ran: in Observe a rule that would refuse a call only records it. Here is who sent it, what it touched, the rule, and why.'
             : 'No observing rule flagged a call in this sandbox, so there is nothing to label. Promote anyway to see a rule refuse.',
           visual: html`${projectBar(html`<span class="tf-try-stat" data-outcome="observed">${T.icon('eye', 14)}<b>${num(rows.length)}</b>${total !== null ? html`of ${num(total)} calls` : 'calls'} · ${plural(rules.length, 'rule')}</span>${Array.isArray(state.calls) ? stat('refused', tryTally(state.calls).refused, 'refused') : ''}`)}
-            ${rows.length ? html`<div class="tf-try-cards${play.cards ? ' tf-try-play' : ''}">${rows.map(flagCard)}</div>` : ''}`,
+            ${rows.length ? html`<div class="tf-try-cards${play.cards ? ' tf-try-play' : ''}">${rows.map(flagCard)}</div>` : html`${T.emptyState({
+              icon: 'check',
+              text: 'Every call in the list ran, and none broke a rule in Observe. The ledger can lag a moment behind a new sandbox, so a second read may find more.',
+              action: { label: 'Read the list again', action: 'try-show' }
+            })}${Array.isArray(state.calls) && state.calls.length ? lanes(state.calls, {}) : ''}`}`,
           actions: rows.length ? primary('try-review', 'Label each call') : primary('try-readiness', 'See the rules', 'Reading readiness…')
         };
       }
@@ -2961,7 +2965,7 @@
           sentence: total && done
             ? 'You marked ' + plural(labelCounts().correct, 'call') + ' correct and ' + plural(labelCounts().false_alarm, 'call') + ' a false alarm. Each rule now reads its state from those labels.'
             : 'Mark each call Correct if the rule was right, or False alarm if the call should run. One of them is a false alarm: spot it.',
-          visual: total ? reviewBoard(play) : emptyNote('No call in the sandbox was flagged by an observing rule, so there is nothing to label. Promote anyway to see a rule refuse.'),
+          visual: total ? reviewBoard(play) : T.emptyState({ icon: 'check', text: 'No call in the sandbox was flagged by an observing rule, so there is nothing to label. Promote anyway to see a rule refuse.' }),
           actions: done
             ? primary('try-readiness', 'See what that did', 'Reading readiness…')
             : html`<span class="tf-try-wait">${primary('try-readiness', 'See what that did', null, true)}</span><p class="tf-try-hint">${num(labelledCount())} of ${num(total)} labelled. Label every call to continue.<span class="tf-try-keys"> Keys: ${T.kbd('C')} correct ${T.kbd('F')} false alarm ${T.kbd('←')}${T.kbd('→')} move</span></p>`
@@ -3584,7 +3588,8 @@
         },
         'try-show': () => {
           state.busy = true; state.error = null; draw();
-          return loadSandbox().then(() => {
+          // A second read from step 2 reads the whole list again as well.
+          return Promise.all([loadSandbox(), state.step === 2 ? loadCalls() : null]).then(() => {
             if (!ctx.alive()) return;
             state.busy = false;
             enter(2, { cards: true });
