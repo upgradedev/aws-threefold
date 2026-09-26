@@ -119,12 +119,19 @@ COOLDOWN = datetime.timedelta(hours=6)
 # observed in it first: some hours of a project's work, not its first minutes.
 READINESS_DAYS = 14
 MIN_CALLS_OBSERVED = 120
-# Stop sending calls this long before the function would time out, so a tick
-# ends with a summary in the log rather than a timeout. The time is checked
-# between calls, so one store call that stalls can still outlast it; a tick's
-# claim on its bucket is what keeps a retry from sending the batch again.
+# Stop this long before the function would time out, so a tick ends with a
+# summary in the log rather than a timeout. The time is checked between store
+# calls, so one that stalls can still outlast it; a tick's claim on its bucket
+# is what keeps a retry from sending the batch again.
 STOP_BEFORE_DEADLINE_SECONDS = 5.0
 DEFAULT_BUDGET_SECONDS = 10.0
+# The share of a tick's time its calls may use; the rest is the operator's.
+# Each call is several store round trips, so on a slow table the calls alone
+# could use the whole budget, and an operator that never ran would never
+# label, promote or demote: every project would stay in Observe and the review
+# queue would only grow. The summary's send_seconds and operate_seconds say
+# how the split went on the real table.
+SEND_SHARE = 0.6
 # How long a tick's claim on its bucket is kept: well past any redelivery.
 CLAIM_TTL_SECONDS = 24 * 3600
 
@@ -787,9 +794,15 @@ class TickSummary:
     labelled: Dict[str, int] = field(default_factory=lambda: {"correct": 0, "false_alarm": 0})
     actions: List[Dict[str, Any]] = field(default_factory=list)
     stages: Dict[str, str] = field(default_factory=dict)
+    # The batch was not sent whole: its calls ran out of their share of the time.
     cut_short: bool = False
+    # The operator ran out of time before it had done everything it meant to.
+    operator_cut_short: bool = False
     # Changes to a stage the operator tried and could not make, each logged.
     operator_errors: int = 0
+    # Seconds spent reading the stages and sending the calls, then operating.
+    send_seconds: float = 0.0
+    operate_seconds: float = 0.0
     # Projects given a false alarm this tick: the only ones whose enforcing
     # rules can have turned noisy since the last tick. Not reported.
     false_alarms_in: set = field(default_factory=set)
@@ -799,8 +812,9 @@ class TickSummary:
     # not to label it again. Not reported.
     labelled_rows: set = field(default_factory=set)
 
-    def to_dict(self) -> Dict[str, Any]:
-        return {
+    def to_dict(self, timings: bool = False) -> Dict[str, Any]:
+        """The summary. `timings` adds the seconds each half took, which no two runs share."""
+        summary = {
             "tick": self.tick,
             "calls": self.calls,
             "planned": self.planned,
@@ -810,8 +824,12 @@ class TickSummary:
             "actions": [dict(action) for action in self.actions],
             "stages": dict(sorted(self.stages.items())),
             "cut_short": self.cut_short,
+            "operator_cut_short": self.operator_cut_short,
             "operator_errors": self.operator_errors,
         }
+        if timings:
+            summary.update(send_seconds=self.send_seconds, operate_seconds=self.operate_seconds)
+        return summary
 
 
 def is_false_alarm(row: Mapping[str, Any]) -> bool:
@@ -834,15 +852,27 @@ def run_tick(
     evaluator: Any,
     now: Optional[datetime.datetime] = None,
     stop_at: Optional[float] = None,
+    timings: bool = False,
 ) -> Dict[str, Any]:
-    """One tick: the calls, then the operator. Returns a small summary.
+    """One tick (`_tick`), summarised. Without `timings` the summary is the same on every run of a tick."""
+    return _tick(evaluator, now=now, stop_at=stop_at).to_dict(timings=timings)
+
+
+def _tick(
+    evaluator: Any,
+    now: Optional[datetime.datetime] = None,
+    stop_at: Optional[float] = None,
+) -> TickSummary:
+    """One tick: the calls, then the operator. Returns its summary.
 
     `now` places the tick in its bucket. The evaluator stamps every call with
     its own clock, and the operator acts once the calls are made, so its clock
     is the later of `now` and the last call's stamp: a review is never dated
-    before the call it reviews. `stop_at` is a time.monotonic() after which no
-    further call is sent and the operator does nothing.
+    before the call it reviews. `stop_at` is a time.monotonic() by which the
+    tick is done: its calls stop at SEND_SHARE of the time left, and the
+    operator always has the rest, however slow the calls were.
     """
+    started = time.monotonic()
     now = now or datetime.datetime.now(datetime.timezone.utc)
     bucket = bucket_of(now)
     plan = plan_tick(bucket)
@@ -852,15 +882,16 @@ def run_tick(
     # last answer, which is the project's stage as this tick begins, since
     # the operator changes stages only after the tick's calls.
     stages_seen = {name: stages.stage_of(config) for name, config in configs.items()}
-    outcomes = _send(evaluator, plan, summary, stop_at, stages_seen)
+    send_by = None if stop_at is None else started + SEND_SHARE * max(0.0, stop_at - started)
+    outcomes = _send(evaluator, plan, summary, send_by, stages_seen)
+    sent = time.monotonic()
+    summary.send_seconds = round(sent - started, 3)
     stamps = [moment for moment in (_instant(outcome.timestamp) for outcome in outcomes) if moment is not None]
     operator_now = max([now] + stamps)
-    if _out_of_time(stop_at):
-        summary.cut_short = True
-    else:
-        _operate(evaluator, bucket, operator_now, outcomes, summary, stop_at, configs)
+    _operate(evaluator, bucket, operator_now, outcomes, summary, stop_at, configs)
+    summary.operate_seconds = round(time.monotonic() - sent, 3)
     summary.stages = {name: stages.stage_of(evaluator.project_config(name)) for name in rollups.FLEET_PROJECTS}
-    return summary.to_dict()
+    return summary
 
 
 def _out_of_time(stop_at: Optional[float]) -> bool:
@@ -1010,7 +1041,14 @@ def label_for(row: Mapping[str, Any]) -> Optional[str]:
     return None
 
 
-def _review_now(evaluator: Any, bucket: int, now: datetime.datetime, outcomes: Sequence[_Outcome], summary: TickSummary) -> None:
+def _review_now(
+    evaluator: Any,
+    bucket: int,
+    now: datetime.datetime,
+    outcomes: Sequence[_Outcome],
+    summary: TickSummary,
+    stop_at: Optional[float] = None,
+) -> None:
     """A share (LABEL_NOW_SHARE) of this tick's would-refuse calls, and every refusal that was a false alarm."""
     rng = _rng(bucket, "labels")
     for outcome in outcomes:
@@ -1019,6 +1057,8 @@ def _review_now(evaluator: Any, bucket: int, now: datetime.datetime, outcomes: S
         label = label_for(row)
         if label is None or (outcome.kind == "observed" and draw >= LABEL_NOW_SHARE):
             continue
+        if _out_of_time(stop_at):
+            return
         _label(evaluator, row, label, now, summary)
 
 
@@ -1081,23 +1121,48 @@ def _operate(
     stop_at: Optional[float],
     configs: Mapping[str, Optional[Mapping[str, Any]]],
 ) -> None:
-    """The operator's turn. `configs` are the fleet's configurations as the store gave them this tick."""
-    _review_now(evaluator, bucket, now, outcomes, summary)
-    _sweep(evaluator, now, summary, stop_at=stop_at)
+    """The operator's turn, most visible first, each step only while time is left.
+
+    `configs` are the fleet's configurations as the store gave them this
+    tick. First this tick's calls are labelled, then an enforcing rule that
+    just raised a false alarm goes back to observing, then a project is
+    promoted or demoted (a promotion first reviews that project's queue),
+    and last the sweep labels what older calls are still waiting, which is
+    the step a slow tick can best leave to the next one. A false alarm the
+    sweep finds on an enforcing rule is acted on at the end.
+    """
     fleet = {name: configs.get(name) for name in rollups.FLEET_PROJECTS}
-    # A rule that turned noisy while enforcing goes back to observing first,
-    # so the promotion below reads the stages as they now are.
-    for name in sorted(summary.false_alarms_in):
-        if stages.stage_of(fleet.get(name)) == stages.ENFORCE and not _out_of_time(stop_at):
-            _act(summary, "observe_noisy", name, lambda name=name: _observe_noisy(evaluator, name, now))
+    handled: set = set()
+    _review_now(evaluator, bucket, now, outcomes, summary, stop_at)
+    _observe_noisy_rules(evaluator, now, summary, fleet, handled, stop_at)
     for action in stage_actions(bucket, now, fleet):
         if _out_of_time(stop_at):
-            return
+            break
         name = action["project"]
         if action["action"] == "promote":
             _act(summary, "promote", name, lambda: _promote(evaluator, name, now, summary, stop_at))
         else:
             _act(summary, "demote", name, lambda: _demote(evaluator, name, now))
+    _sweep(evaluator, now, summary, stop_at=stop_at)
+    _observe_noisy_rules(evaluator, now, summary, fleet, handled, stop_at)
+    summary.operator_cut_short = _out_of_time(stop_at)
+
+
+def _observe_noisy_rules(
+    evaluator: Any,
+    now: datetime.datetime,
+    summary: TickSummary,
+    fleet: Mapping[str, Optional[Mapping[str, Any]]],
+    handled: set,
+    stop_at: Optional[float],
+) -> None:
+    """Each enforcing project given a false alarm this tick has its noisy rule put back to observing, once."""
+    for name in sorted(summary.false_alarms_in - handled):
+        if _out_of_time(stop_at):
+            return
+        handled.add(name)
+        if stages.stage_of(fleet.get(name)) == stages.ENFORCE:
+            _act(summary, "observe_noisy", name, lambda: _observe_noisy(evaluator, name, now))
 
 
 def _act(summary: TickSummary, what: str, name: str, step: Callable[[], Optional[Dict[str, Any]]]) -> None:
@@ -1184,6 +1249,8 @@ def _promote(
     if _readiness(evaluator, name)["summary"]["calls_observed"] < MIN_CALLS_OBSERVED:
         return None
     _sweep(evaluator, now, summary, project=name, min_age=datetime.timedelta(0), stop_at=stop_at)
+    if _out_of_time(stop_at):
+        return None
     rows = _readiness_rows(evaluator, name)
     if not any(row["state"] == "ready" for row in rows):
         return None
@@ -1230,8 +1297,9 @@ def run_scheduled_tick(evaluator: Any, context: Any = None) -> Dict[str, Any]:
     So the tick first claims its fifteen-minute bucket with a conditional
     write; a second delivery finds it taken and sends nothing (`skipped`), and
     a store that cannot take the claim fails the tick (`ok` false, logged as
-    an error) before anything is sent. It also stops sending well before the
-    deadline, and any failure is logged and answered rather than raised.
+    an error) before anything is sent. It stops well before the deadline,
+    with a share of its time kept for the operator (SEND_SHARE), and any
+    failure is logged and answered rather than raised.
     """
     started = time.monotonic()
     remaining = getattr(context, "get_remaining_time_in_millis", None)
@@ -1246,7 +1314,7 @@ def run_scheduled_tick(evaluator: Any, context: Any = None) -> Dict[str, Any]:
         if claim is not None and not claim(f"fleet-tick-{bucket}", CLAIM_TTL_SECONDS):
             logger.info("Demo fleet tick %d was claimed already; nothing sent", bucket)
             return {FLEET_EVENT_KEY: {"ok": True, "tick": bucket, "skipped": "claimed already"}}
-        summary = run_tick(evaluator, now=now, stop_at=started + budget)
+        summary = run_tick(evaluator, now=now, stop_at=started + budget, timings=True)
     except Exception:
         logger.exception("The demo fleet's tick failed; nothing is retried")
         return {FLEET_EVENT_KEY: {"ok": False}}

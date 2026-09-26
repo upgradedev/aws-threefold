@@ -722,18 +722,81 @@ class _Context:
 
 
 def test_a_tick_stops_sending_well_before_the_function_times_out() -> None:
-    """With less time left than the margin, nothing is sent and nothing is raised."""
+    """With less time left than the margin, nothing is sent, the operator does nothing, and nothing is raised."""
     answer = demo_fleet.run_scheduled_tick(_fresh_evaluator(), _Context(int(demo_fleet.STOP_BEFORE_DEADLINE_SECONDS * 1000) - 1))
     summary = answer["threefold_fleet"]
     assert summary["ok"] is True and summary["cut_short"] is True and summary["calls"] == 0
+    assert summary["operator_cut_short"] is True and summary["actions"] == []
 
 
 def test_a_tick_with_time_to_spare_runs_whole() -> None:
     answer = demo_fleet.run_scheduled_tick(_fresh_evaluator(), _Context(15000))
     summary = answer["threefold_fleet"]
-    assert summary["ok"] is True and summary["cut_short"] is False
+    assert summary["ok"] is True and summary["cut_short"] is False and summary["operator_cut_short"] is False
     assert demo_fleet.MIN_CALLS <= summary["calls"] <= demo_fleet.MAX_CALLS
-    assert set(summary) >= {"tick", "calls", "planned", "verdicts", "held_on_machine", "labelled", "actions", "stages", "seconds"}
+    assert set(summary) >= {"tick", "calls", "planned", "verdicts", "held_on_machine", "labelled", "actions", "stages",
+                            "seconds", "send_seconds", "operate_seconds", "operator_errors"}
+    assert 0 <= summary["send_seconds"] and 0 <= summary["operate_seconds"]
+    assert summary["send_seconds"] + summary["operate_seconds"] <= summary["seconds"] + 0.01
+
+
+class _SlowStore:
+    """A clock the test moves: every call the fleet sends costs `per_call` seconds, as on a slow table."""
+
+    def __init__(self, per_call: float) -> None:
+        self.now = 1000.0
+        self.per_call = per_call
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def slow(self, evaluate):
+        def call(request):
+            self.now += self.per_call
+            return evaluate(request)
+        return call
+
+
+def _four_enforcing(evaluator, now: datetime.datetime) -> None:
+    """More projects enforcing than the operator keeps, so it demotes one at once."""
+    long_ago = (now - datetime.timedelta(days=1)).isoformat()
+    demo_fleet._ensure_configured(evaluator, now)
+    for name in rollups.FLEET_PROJECTS[:4]:
+        keys = demo_fleet._keys(evaluator, name)
+        evaluator.save_project_config(name, stages.promoted(None, long_ago, "fleet", keys, keys))
+
+
+def test_calls_that_run_slow_leave_the_operator_its_share_of_the_time(monkeypatch) -> None:
+    """On a slow table the batch is cut short, and the operator still acts in the time kept for it."""
+    clock = _SlowStore(per_call=1.0)
+    monkeypatch.setattr(demo_fleet, "time", clock)
+    evaluator = _fresh_evaluator()
+    now = datetime.datetime.now(UTC)
+    _four_enforcing(evaluator, now)
+    evaluator.evaluate_tool_call = clock.slow(evaluator.evaluate_tool_call)
+    budget = 10.0
+    summary = demo_fleet.run_tick(evaluator, now=now, stop_at=clock.now + budget, timings=True)
+    assert summary["cut_short"] is True
+    assert summary["calls"] == round(budget * demo_fleet.SEND_SHARE), "The calls stop at their share of the time"
+    assert summary["send_seconds"] == pytest.approx(budget * demo_fleet.SEND_SHARE)
+    assert [action["action"] for action in summary["actions"]] == ["demote"], "The operator still ran"
+    assert summary["operator_cut_short"] is False
+    assert list(summary["stages"].values()).count(stages.ENFORCE) == 3
+
+
+def test_the_operator_s_steps_stop_when_its_time_does(monkeypatch) -> None:
+    """With the whole budget spent on the calls, no stage changes and nothing more is labelled."""
+    clock = _SlowStore(per_call=1.0)
+    monkeypatch.setattr(demo_fleet, "time", clock)
+    monkeypatch.setattr(demo_fleet, "SEND_SHARE", 1.0)
+    evaluator = _fresh_evaluator()
+    now = datetime.datetime.now(UTC)
+    _four_enforcing(evaluator, now)
+    evaluator.evaluate_tool_call = clock.slow(evaluator.evaluate_tool_call)
+    summary = demo_fleet.run_tick(evaluator, now=now, stop_at=clock.now + 10.0)
+    assert summary["cut_short"] is True and summary["operator_cut_short"] is True
+    assert summary["actions"] == [] and summary["labelled"] == {"correct": 0, "false_alarm": 0}
+    assert list(summary["stages"].values()).count(stages.ENFORCE) == 4
 
 
 def test_every_tick_leaves_one_line_in_the_function_s_log(caplog) -> None:
