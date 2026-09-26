@@ -113,6 +113,10 @@ def test_a_slot_that_cannot_be_read_says_so_and_guesses_nothing(tmp_path: Path) 
   await visit('#/overview?days=7');
   await tick();
   out.text = text(view());
+  answer = contract({ '/api/decisions': 'network', '/api/sessions': { status: 200, body: { sessions: [] } } });
+  await visit('#/overview?days=14');
+  await tick();
+  out.network = text(view());
 """,
         tmp_path,
     )
@@ -120,6 +124,8 @@ def test_a_slot_that_cannot_be_read_says_so_and_guesses_nothing(tmp_path: Path) 
     assert "Sessions could not be read" in words and "needs the operator" in words
     assert "No session is halted" not in words, "An unread list is not an empty one"
     assert "Counted over the newest 1 false alarm; the ledger holds more." in words
+    assert "False alarms could not be read The service could not be reached. Nothing is shown rather than a guess." in out["network"]
+    assert ".." not in out["network"], "The service's own full stop is not doubled"
 
 
 # --------------------------------------------------- what the numbers are made of
@@ -147,13 +153,44 @@ def test_the_public_demo_says_what_its_numbers_are_made_of(tmp_path: Path) -> No
     )
     sources = re.sub(r"<[^>]+>", "", out["sources"])
     assert 'data-sources="sources"' in out["sources"]
-    assert "Everything on this public demo is synthetic. 3,210 of these calls come from the Acme fleet, 6 synthetic projects" in sources
-    assert "96 from visitors' sandboxes" in sources and "41 from the service's own probes and the demo page" in sources
+    assert "Where these calls come from, on this public demo: 3,210 from the synthetic Acme fleet, 6 projects whose scheduled agents run through the real gates" in sources
+    assert "; 96 from visitors' sandboxes" in sources
+    assert "; 41 from other callers: the service's own probes, the demo page, or a repository connected to this stack." in sources
     split = re.sub(r"<[^>]+>", "", out["split"])
     assert 'data-sources="sandbox_split"' in out["split"]
-    assert "96 of these calls come from visitors' sandboxes, and the other 3,251 from the synthetic Acme fleet, whose agents run through the real gates" in split
-    assert "30 of them are in visitors' sandboxes." in split, "The queue says how much of it is sandboxes'"
+    assert "96 from visitors' sandboxes; the other 3,251 from everything else: the service's own probes, the demo page and, where it runs, the synthetic Acme fleet." in split
+    for page in (sources, split):
+        # Only the fleet is synthetic by contract: the page cannot know what
+        # else reached a public stack, so it does not claim the rest is.
+        assert "Everything on this public demo is synthetic" not in page
+    assert "30 of them are in visitors' sandboxes, which anyone may label." in split, "The queue says how much of it is sandboxes'"
     assert "tf-ops-source" not in out["private"], "A private stack's numbers are the operator's own"
+
+
+def test_a_visitor_is_offered_a_sandbox_rather_than_a_queue_they_cannot_work(tmp_path: Path) -> None:
+    out = ops(
+        r"""
+  answer = contract({ '/api/auth/whoami': PUBLIC, '/api/decisions': { status: 200, body: { items: [], next_cursor: null } } });
+  Threefold.whoami(true);
+  await visit('#/overview?days=7');
+  await tick();
+  out.visitor = view().split('data-slot="reviews"')[1].split('</article>')[0];
+  out.visitorText = text(out.visitor);
+  answer = contract({ '/api/auth/whoami': PRIVATE, '/api/decisions': { status: 200, body: { items: [], next_cursor: null } } });
+  Threefold.whoami(true);
+  await visit('#/overview?days=14');
+  await tick();
+  out.operator = view().split('data-slot="reviews"')[1].split('</article>')[0];
+  out.operatorText = text(out.operator);
+""",
+        tmp_path,
+    )
+    visitor, operator = out["visitorText"], out["operatorText"]
+    assert "21 calls wait for a label" in visitor and "The other projects' labels are the operator's." in visitor
+    assert 'href="#/try"' in out["visitor"] and "Try it with your own sandbox" in visitor
+    assert "tf-kbd" not in out["visitor"], "No keys offered for labels a visitor could not set"
+    assert "21 calls wait for your label" in operator and "Start reviewing" in operator
+    assert "tf-ops-kbd-hint" in out["operator"], "The operator's keys are named, and hidden where there is no keyboard"
 
 
 def test_the_agents_tile_counts_coding_agents_and_names_the_rest_apart(tmp_path: Path) -> None:

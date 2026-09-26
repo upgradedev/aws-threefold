@@ -853,11 +853,16 @@
 
     function attUnread(slot, kicker, icon, what, err) {
       return attSlot({ slot, kicker, icon, title: what + ' could not be read',
-        body: html`<p class="tf-ops-att-note">${T.isAuthError(err) ? 'This needs the operator: sign in with python threefold.py open.' : (err && err.message ? err.message : 'The service did not answer') + '. Nothing is shown rather than a guess.'}</p>` });
+        body: html`<p class="tf-ops-att-note">${T.isAuthError(err) ? 'This needs the operator: sign in with python threefold.py open.' : trimStop(err && err.message ? err.message : 'The service did not answer') + '. Nothing is shown rather than a guess.'}</p>` });
     }
 
-    function reviewSlot(data, days) {
+    // Signed out on the public demo, the queue is not the reader's to work:
+    // anyone may label a sandbox's calls, and only the operator the rest. The
+    // slot says so, and offers the walkthrough, which makes a sandbox of the
+    // reader's own, rather than a keyboard for labels that would be refused.
+    function reviewSlot(data, days, who) {
       const t = data.totals || {};
+      const visitor = !!who && who.reads_public === true && who.authenticated !== true;
       const waiting = typeof t.needs_review === 'number' ? t.needs_review : 0;
       if (!waiting) {
         return attSlot({ slot: 'reviews', tone: 'ok', icon: 'check', kicker: 'Reviews', title: 'Nothing waits for a label',
@@ -869,11 +874,14 @@
       const inSandboxes = split && typeof split.needs_review === 'number' && split.needs_review > 0 ? split.needs_review : 0;
       return attSlot({
         slot: 'reviews', tone: 'info', icon: 'inbox', kicker: 'Reviews',
-        title: html`${plural(waiting, 'call')} ${waiting === 1 ? 'waits' : 'wait'} for your label`,
+        title: html`${plural(waiting, 'call')} ${waiting === 1 ? 'waits' : 'wait'} for ${visitor ? 'a' : 'your'} label`,
         body: html`<ul class="tf-ops-att-list">${rows.slice(0, 3).map(p => html`<li><a href="${reviewHref({ project: p.project, days })}"><span class="tf-ops-att-what font-mono">${T.projectName(p.project)}</span><span class="tf-ops-att-n">${num(p.needs_review)}</span></a></li>`)}</ul>
           ${rows.length > 3 ? html`<p class="tf-ops-att-note">and ${plural(rows.length - 3, 'more project')}.</p>` : ''}
-          ${inSandboxes ? html`<p class="tf-ops-att-note">${num(inSandboxes)} of them are in visitors' sandboxes.</p>` : ''}`,
-        foot: html`<a class="tf-btn tf-btn-primary tf-btn-sm" href="${reviewHref({ days })}">Start reviewing${T.icon('arrowright', 14)}</a><span class="tf-micro inline-flex items-center gap-1">${T.kbd('J')}${T.kbd('K')} move, ${T.kbd('C')}${T.kbd('F')} label</span>`
+          ${inSandboxes ? html`<p class="tf-ops-att-note">${num(inSandboxes)} of them ${inSandboxes === 1 ? 'is' : 'are'} in visitors' sandboxes${visitor ? ', which anyone may label' : ''}.</p>` : ''}
+          ${visitor ? html`<p class="tf-ops-att-note">The other projects' labels are the operator's. Your own sandbox takes a minute, and you label, promote and watch its rule hold.</p>` : ''}`,
+        foot: visitor
+          ? html`<a class="tf-btn tf-btn-primary tf-btn-sm" href="#/try">Try it with your own sandbox${T.icon('arrowright', 14)}</a><a class="tf-btn tf-btn-quiet tf-btn-sm" href="${reviewHref({ days })}">See the queue</a>`
+          : html`<a class="tf-btn tf-btn-primary tf-btn-sm" href="${reviewHref({ days })}">Start reviewing${T.icon('arrowright', 14)}</a><span class="tf-micro tf-ops-kbd-hint inline-flex items-center gap-1">${T.kbd('J')}${T.kbd('K')} move, ${T.kbd('C')}${T.kbd('F')} label</span>`
       });
     }
 
@@ -894,7 +902,7 @@
       const partial = att.noisy.partial ? html`<p class="tf-ops-att-note">Counted over the newest ${plural(att.noisy.rows.length, 'false alarm')}; the ledger holds more.</p>` : '';
       if (!list.length) {
         return attSlot({ slot: 'noisy', tone: 'ok', icon: 'check', kicker, title: 'No rule turned noisy',
-          body: html`<p class="tf-ops-att-note">No call was marked a false alarm in ${windowWords(days)}.</p>` });
+          body: html`<p class="tf-ops-att-note">No call from ${windowWords(days)} is marked a false alarm.</p>` });
       }
       return attSlot({
         slot: 'noisy', tone: 'danger', icon: 'alert', kicker,
@@ -924,52 +932,64 @@
           body: html`<p class="tf-ops-att-note">The circuit breaker has stopped no agent session. The demo page's own scenario sessions are left out.</p>${partial}` });
       }
       return attSlot({
-        slot: 'halted', tone: 'warn', icon: 'stop', kicker,
+        slot: 'halted', tone: 'danger', icon: 'stop', kicker,
         title: html`${plural(halted.length, 'session')} halted`,
-        body: html`<ul class="tf-ops-att-list">${halted.slice(0, 3).map(s => html`<li><a href="${T.pageHref('sessions.html' + query({ session: s.session_id }))}" title="${s.trip_reason || 'Halted'}"><span class="tf-ops-att-what"><span class="font-mono text-gray-200">${s.session_id}</span>${s.project_name ? html` <span class="text-gray-500">in</span> <span class="font-mono">${T.projectName(s.project_name)}</span>` : ''}</span><span class="tf-ops-att-n">started ${timeAgo(s.created_at)}</span></a></li>`)}</ul>
+        body: html`<ul class="tf-ops-att-list">${halted.slice(0, 3).map(s => html`<li><a href="${T.pageHref('sessions.html' + query({ session: s.session_id }))}" title="${s.trip_reason || 'Halted'}"><span class="tf-ops-att-what"><span class="font-mono text-gray-200">${s.session_id}</span>${s.project_name ? html` <span class="text-gray-500">in</span> <span class="font-mono">${T.projectName(s.project_name)}</span>` : ''}${s.trip_reason ? html`<span class="block text-gray-500">${s.trip_reason}</span>` : ''}</span><span class="tf-ops-att-n">started ${timeAgo(s.created_at)}</span></a></li>`)}</ul>
           ${halted.length > 3 ? html`<p class="tf-ops-att-note">and ${plural(halted.length - 3, 'more session')}.</p>` : ''}
           <p class="tf-ops-att-note">Every later call in a halted session is refused until an operator resumes it.</p>${partial}`,
         foot: html`<a class="tf-btn tf-btn-sm" href="${T.pageHref('sessions.html')}">Open Sessions</a>`
       });
     }
 
-    function attentionStrip(data, days, att) {
+    function attentionStrip(data, days, att, who) {
       return html`<section aria-labelledby="attention-title">
         <div class="tf-ops-head"><div>
           <h2 id="attention-title" class="tf-ops-h2">${T.icon('bolt', 18)}Needs your attention</h2>
-          <p class="tf-ops-sub">What to act on in ${windowWords(days)}: the queue, rules a false alarm made noisy, and sessions the circuit breaker halted.</p>
+          <p class="tf-ops-sub">What to act on: calls waiting for a label and rules a false alarm made noisy in ${windowWords(days)}, and every session the circuit breaker holds halted now.</p>
         </div></div>
-        <div class="tf-ops-attention">${reviewSlot(data, days)}${noisySlot(att, days)}${haltedSlot(att)}</div>
+        <div class="tf-ops-attention">${reviewSlot(data, days, who)}${noisySlot(att, days)}${haltedSlot(att)}</div>
       </section>`;
     }
 
     // On the public demo, the one sentence that says what the numbers are made
     // of, from `sources` where the stack reports it and from `sandbox_split`
-    // where it predates that field. Nothing is said on a private stack.
+    // where it predates that field. Only the fleet is called synthetic: the
+    // page cannot know what else reached a public stack, so the rest is named
+    // by where it came from. Nothing is said on a private stack.
     function sourceNote(data, who) {
       if (!who || who.reads_public !== true) return '';
       const count = part => (part && typeof part.calls === 'number' ? part.calls : null);
-      let sentence;
+      const some = part => (count(part) || 0) > 0;
+      let clauses = [];
       let parts = [];
       const s = data.sources && typeof data.sources === 'object' ? data.sources : null;
       const split = data.sandbox_split && typeof data.sandbox_split === 'object' ? data.sandbox_split : null;
       if (s) {
         const fleet = s.fleet || {};
-        sentence = html`Everything on this public demo is synthetic. <strong>${num(count(s.fleet))}</strong> of these calls come from the Acme fleet, ${typeof fleet.projects === 'number' ? plural(fleet.projects, 'synthetic project') : 'synthetic projects'} whose agents run through the real gates on a schedule; <strong>${num(count(s.sandbox))}</strong> from visitors' sandboxes; and <strong>${num(count(s.other))}</strong> from the service's own probes and the demo page.`;
+        clauses = [
+          some(s.fleet) && html`<strong>${num(count(s.fleet))}</strong> from the synthetic Acme fleet, ${typeof fleet.projects === 'number' ? plural(fleet.projects, 'project') : 'projects'} whose scheduled agents run through the real gates`,
+          some(s.sandbox) && html`<strong>${num(count(s.sandbox))}</strong> from visitors' sandboxes`,
+          some(s.other) && html`<strong>${num(count(s.other))}</strong> from other callers: the service's own probes, the demo page, or a repository connected to this stack`
+        ];
         parts = [
-          { label: 'Acme fleet', value: count(s.fleet), color: T.CATEGORICAL[0] },
+          { label: 'Acme fleet, synthetic', value: count(s.fleet), color: T.CATEGORICAL[0] },
           { label: 'Sandboxes', value: count(s.sandbox), color: T.CATEGORICAL[1] },
-          { label: 'Probes and demo page', value: count(s.other), color: T.CATEGORICAL_OTHER }
+          { label: 'Other callers', value: count(s.other), color: T.CATEGORICAL_OTHER }
         ];
       } else if (split) {
-        sentence = html`Everything on this public demo is synthetic: <strong>${num(count(split.sandbox))}</strong> of these calls come from visitors' sandboxes, and the other <strong>${num(count(split.elsewhere))}</strong> from the synthetic Acme fleet, whose agents run through the real gates on a schedule, and the service's own probes.`;
+        clauses = [
+          some(split.sandbox) && html`<strong>${num(count(split.sandbox))}</strong> from visitors' sandboxes`,
+          some(split.elsewhere) && html`${some(split.sandbox) ? 'the other ' : ''}<strong>${num(count(split.elsewhere))}</strong> from everything else: the service's own probes, the demo page and, where it runs, the synthetic Acme fleet`
+        ];
         parts = [
           { label: 'Sandboxes', value: count(split.sandbox), color: T.CATEGORICAL[1] },
-          { label: 'Fleet and probes', value: count(split.elsewhere), color: T.CATEGORICAL_OTHER }
+          { label: 'Everything else', value: count(split.elsewhere), color: T.CATEGORICAL_OTHER }
         ];
-      } else {
-        sentence = html`Everything on this public demo is synthetic: the Acme fleet, visitors' sandboxes and the service's own probes.`;
       }
+      const said = clauses.filter(Boolean);
+      const sentence = said.length
+        ? html`Where these calls come from, on this public demo: ${said.map((c, i) => html`${i ? '; ' : ''}${c}`)}.`
+        : html`On this public demo, calls come from visitors' sandboxes, the service's own probes, the demo page and, where it runs, the synthetic Acme fleet.`;
       const drawn = parts.filter(p => typeof p.value === 'number' && p.value > 0);
       const bar = drawn.length ? html`<div class="tf-ops-share">
           <div class="tf-ops-share-bar" role="img" aria-label="${parts.map(p => p.label + ' ' + num(p.value)).join(', ')}">${drawn.map(p => html`<span style="flex-grow:${p.value};background:${p.color}" data-tf-tip="${p.label}" data-tf-tip-value="${num(p.value)}" data-tf-tip-color="${p.color}"></span>`)}</div>
@@ -1017,19 +1037,19 @@
 
       // Read once a visit and on Refresh, never on the timer: the session list
       // is a scan of the table, and the false alarms change only when someone
-      // labels a call.
+      // labels a call. A Refresh keeps what the slots show until the new
+      // answers land, and a read that fails then leaves the last good one.
       function loadAttention() {
-        att.noisy = null;
-        att.sessions = null;
+        const failed = (was, err) => (was && !was.error ? was : { error: err });
         const noisy = T.api('/api/decisions' + query({ review: 'false_alarm', days, limit: 200 })).then(body => {
           // Only rows the ledger says were marked false alarm: a stack that did
           // not filter would otherwise have every call counted as one.
           const rows = body && Array.isArray(body.items) ? body.items : [];
           att.noisy = { rows: rows.filter(r => r && r.review === 'false_alarm'), partial: !!(body && body.next_cursor) };
-        }, err => { att.noisy = { error: err }; });
+        }, err => { att.noisy = failed(att.noisy, err); });
         const sessions = T.api('/api/sessions' + query({ limit: SESSIONS_READ })).then(body => {
           att.sessions = { rows: body && Array.isArray(body.sessions) ? body.sessions : [] };
-        }, err => { att.sessions = { error: err }; });
+        }, err => { att.sessions = failed(att.sessions, err); });
         [noisy, sessions].forEach(p => p.then(() => { if (ctx.alive() && data) draw(); }));
       }
 
@@ -1112,12 +1132,12 @@
           (others.length ? ' · not agents: ' + others.map(a => agentLabel(a.agent) + ' (' + plural(a.calls, 'call') + ')').join(', ') : '');
         const tiles = [
           { label: 'Calls judged', metric: 'calls', value: t.calls, href: callsHref({ days }), icon: 'layers', wide: true,
-            sub: num(t.approved) + ' approved, ' + num(t.refused) + ' stopped and ' + num(t.would_refuse) + ' flagged in ' + windowWords(days),
+            sub: num(t.approved) + ' approved, ' + num(t.refused) + ' refused and ' + num(t.would_refuse) + ' would refuse, in ' + windowWords(days),
             spark: T.sparkline(perDay, { label: 'Calls per day', color: C.accent, labels: dayLabels, width: 168, height: 40 }) },
-          { label: 'Stopped before they ran', metric: 'refused', value: t.refused, href: callsHref({ kind: 'refused', days }), icon: 'stop', term: 'refused',
-            sub: t.refused ? pct(t.refused / t.calls) + ' of calls, refused by a rule in force' : 'nothing was refused in this window',
+          { label: 'Refused', metric: 'refused', value: t.refused, href: callsHref({ kind: 'refused', days }), icon: 'stop',
+            sub: t.refused ? 'stopped before they ran: ' + pct(t.refused / t.calls) + ' of calls' : 'nothing was refused in this window',
             spark: T.sparkline(series.map(r => r.refused || 0), { label: 'Refused per day', color: C.refused, labels: dayLabels }) },
-          { label: 'Would have been stopped', metric: 'would_refuse', value: t.would_refuse, href: callsHref({ kind: 'observed', days }), icon: 'eye', term: 'would refuse',
+          { label: 'Would refuse', metric: 'would_refuse', value: t.would_refuse, href: callsHref({ kind: 'observed', days }), icon: 'eye',
             sub: t.would_refuse ? 'they ran; a rule in Observe flagged them' : 'no observing rule flagged a call',
             spark: T.sparkline(series.map(r => r.observed || 0), { label: 'Would refuse per day', color: C.observed, labels: dayLabels }) },
           // Read from the ledger rather than the rollups: whether a refused
@@ -1165,7 +1185,7 @@
 
         ctx.render(html`${head}${fresh}${sourceNote(data, who)}
           <div class="space-y-8">
-            ${attentionStrip(data, days, att)}
+            ${attentionStrip(data, days, att, who)}
             <section aria-labelledby="numbers-title">
               <div class="tf-ops-head"><div>
                 <h2 id="numbers-title" class="tf-ops-h2">${T.icon('chart', 18)}The numbers</h2>
@@ -1270,8 +1290,8 @@
         <table class="tf-table">
           <thead><tr>
             <th scope="col">Project</th><th scope="col">Stage</th>
-            <th scope="col" class="num">Calls</th><th scope="col" class="num">Stopped</th>
-            <th scope="col" class="num">Would stop</th><th scope="col" class="num">Waiting</th>
+            <th scope="col" class="num">Calls</th><th scope="col" class="num">Refused</th>
+            <th scope="col" class="num">Would refuse</th><th scope="col" class="num">Waiting</th>
             <th scope="col">Labelled</th>
           </tr></thead>
           <tbody>${sorted.map(p => html`<tr data-row-href="${projectHref(p.project)}">
@@ -1294,7 +1314,7 @@
           ${stageChip(p.stage, p.configured)}
         </div>
         <div class="tf-ops-pnums">
-          ${[['Calls', p.calls, {}, 'text-gray-200'], ['Stopped', p.refused, { kind: 'refused' }, 'text-rose-300'], ['Would stop', p.would_refuse, { kind: 'observed' }, 'text-amber-300']].map(([label, value, params, tone]) =>
+          ${[['Calls', p.calls, {}, 'text-gray-200'], ['Refused', p.refused, { kind: 'refused' }, 'text-rose-300'], ['Would refuse', p.would_refuse, { kind: 'observed' }, 'text-amber-300']].map(([label, value, params, tone]) =>
             html`<a href="${callsHref(Object.assign({ days, project: p.project }, params))}"><b class="${value ? tone : 'text-gray-500'}">${num(value)}</b><small>${label}</small></a>`)}
           <a href="${reviewHref({ project: p.project })}"><b class="${p.needs_review ? 'text-sky-300' : 'text-gray-500'}">${num(p.needs_review)}</b><small>Waiting</small></a>
         </div>
@@ -1490,7 +1510,7 @@
         const stats = [
           ['Days observed', summary.days_observed, 'days_observed', 'with a call, in ' + windowWords(days)],
           ['Calls observed', summary.calls_observed, 'calls_observed', 'judged and recorded'],
-          ['Would have refused', summary.would_have_refused, 'would_have_refused', 'flagged by a rule in Observe'],
+          ['Would refuse', summary.would_have_refused, 'would_have_refused', 'flagged by a rule in Observe'],
           ['Reviewed', summary.reviewed, 'reviewed', 'flagged calls with a label'],
           ['False alarms', summary.false_alarms, 'false_alarms', 'labels that said the rule was wrong']
         ];
@@ -3531,7 +3551,7 @@
       const tiles = [
         ['Days observed', num(p.days_observed), 'days_observed', typeof p.window_days === 'number' ? 'with a governed call, of the last ' + num(p.window_days) : 'with a governed call'],
         ['Calls governed', num(p.calls_governed), 'calls_governed', 'judged and recorded'],
-        ['Would refuse', num(p.would_refuse), 'would_refuse', 'ran; a rule in Observe would have stopped them'],
+        ['Would refuse', num(p.would_refuse), 'would_refuse', 'ran; a rule in Observe would have refused them'],
         ['Reviewed', num(p.reviewed), 'reviewed', 'would-refuse calls the owner labelled'],
         ['False-alarm rate', pct(p.false_alarm_rate), 'false_alarm_rate', typeof p.false_alarm_rate === 'number' && typeof p.false_alarms === 'number' && typeof p.reviewed === 'number'
           ? num(p.false_alarms) + ' of ' + num(p.reviewed) + ' reviewed'
