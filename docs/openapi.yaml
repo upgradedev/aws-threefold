@@ -1646,10 +1646,12 @@ paths:
         and that a rule would have refused, and a day's calls are the sum of the three. needs_review is the observed
         calls nobody has labelled; false_alarms the calls labelled false alarm. The totals are split in sandbox_split
         between visitors' sandboxes and every other project, so a page can say what a number is made of; each by_agent
-        entry says what kind of caller it is, and coding_agents lists the coding agents alone. A sandbox whose configuration
-        has expired, a day after it was made, is left out of every figure here, as it always has been. self_correction
-        is the one figure not read from the rollups: it is read from the ledger, a bounded number of rows, and says
-        whether it covered the whole window.
+        entry says what kind of caller it is, and coding_agents lists the coding agents alone. sources says the
+        same of where the calls come from: the synthetic Acme fleet, visitors' sandboxes, or anything else, and
+        every by_project row names its source. A sandbox whose configuration has expired, a day after it was made,
+        is left out of every figure here, as it always has been. self_correction is the one figure not read from
+        the rollups: it is read from the ledger, a bounded number of rows, and says whether it covered the whole
+        window.
       parameters:
       - name: days
         in: query
@@ -1669,8 +1671,9 @@ paths:
       responses:
         '200':
           description: >-
-            window_days, generated_at, source (always rollups), totals, sandbox_split, series, by_agent, coding_agents,
-            by_origin, by_rule, by_project, stages, self_correction (read from the ledger, not the rollups)
+            window_days, generated_at, source (always rollups), totals, sandbox_split, sources, series, by_agent,
+            coding_agents, by_origin, by_rule, by_project, stages, self_correction (read from the ledger, not the
+            rollups)
           content:
             application/json:
               schema:
@@ -1720,6 +1723,21 @@ paths:
                         $ref: '#/components/schemas/OverviewPart'
                       elsewhere:
                         $ref: '#/components/schemas/OverviewPart'
+                  sources:
+                    type: object
+                    description: >-
+                      The window's calls and projects by where they come from: the synthetic fleet, visitors' sandboxes,
+                      and everything else, each as by_project's source names it. Computed over the same projects
+                      as the totals, so the three calls add up to totals.calls and the three projects to totals.projects.
+                      A page on the public stack says in words that the fleet is synthetic and runs through the
+                      real gates.
+                    properties:
+                      fleet:
+                        $ref: '#/components/schemas/OverviewSource'
+                      sandbox:
+                        $ref: '#/components/schemas/OverviewSource'
+                      other:
+                        $ref: '#/components/schemas/OverviewSource'
                   series:
                     type: array
                     items:
@@ -1781,6 +1799,18 @@ paths:
                           description: >-
                             True for a visitor's sandbox (^Acme-Sandbox-[0-9a-f]{8}$): the side of sandbox_split
                             this project is counted on.
+                        source:
+                          type: string
+                          enum:
+                          - fleet
+                          - sandbox
+                          - other
+                          description: >-
+                            Where this project's calls come from: fleet for the six projects of the synthetic Acme
+                            fleet (Acme-Payments, Acme-Checkout, Acme-Ledger, Acme-Search, Acme-Mobile, Acme-Platform,
+                            exactly), whose calls a schedule sends through the real evaluator on the public stack;
+                            sandbox for a visitor's sandbox (^Acme-Sandbox-[0-9a-f]{8}$); other for everything else,
+                            the service's own probes and page calls included.
                         calls:
                           type: integer
                         refused:
@@ -1979,6 +2009,18 @@ paths:
                           description: >-
                             True for a visitor's sandbox: a name matching ^Acme-Sandbox-[0-9a-f]{8}$, however it
                             was made. Its calls include the synthetic ones POST /api/sandbox seeds.
+                        source:
+                          type: string
+                          enum:
+                          - fleet
+                          - sandbox
+                          - other
+                          description: >-
+                            Where this project's calls come from: fleet for the six projects of the synthetic Acme
+                            fleet (Acme-Payments, Acme-Checkout, Acme-Ledger, Acme-Search, Acme-Mobile, Acme-Platform,
+                            exactly), whose calls a schedule sends through the real evaluator on the public stack;
+                            sandbox for a visitor's sandbox (^Acme-Sandbox-[0-9a-f]{8}$); other for everything else,
+                            the service's own probes and page calls included.
                         observe_rules:
                           type: array
                           items:
@@ -2678,6 +2720,16 @@ components:
           type: integer
         false_alarms:
           type: integer
+    OverviewSource:
+      type: object
+      description: One source's share of the overview's window.
+      properties:
+        calls:
+          type: integer
+          description: Calls recorded in the window under this source's projects.
+        projects:
+          type: integer
+          description: Of by_project, the rows with this source.
     SelfCorrection:
       type: object
       description: >-

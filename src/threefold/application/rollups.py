@@ -48,6 +48,35 @@ def is_sandbox(project: Any) -> bool:
     return bool(stages.SANDBOX_PATTERN.match(str(project or "")))
 
 
+# Where a project's calls come from, so a page can say which numbers are
+# synthetic. `fleet` is the synthetic Acme fleet that application/demo_fleet.py
+# runs on the public stack, `sandbox` a visitor's sandbox, and `other`
+# everything else: the service's own probes, the demo's page calls, and on a
+# private stack the governed repositories themselves. The fleet's projects are
+# these six names exactly; `Acme-Ledger-2` or `Acme-Payments-Internal` is other.
+FLEET = "fleet"
+SANDBOX = "sandbox"
+OTHER = "other"
+SOURCES = (FLEET, SANDBOX, OTHER)
+FLEET_PROJECTS = (
+    "Acme-Payments",
+    "Acme-Checkout",
+    "Acme-Ledger",
+    "Acme-Search",
+    "Acme-Mobile",
+    "Acme-Platform",
+)
+
+
+def source_of(project: Any) -> str:
+    """fleet, sandbox or other: where a project's calls come from, read off its name."""
+    if is_sandbox(project):
+        return SANDBOX
+    if str(project or "") in FLEET_PROJECTS:
+        return FLEET
+    return OTHER
+
+
 def _sum(rollups: Iterable[Mapping[str, Any]], name: str) -> int:
     return sum(int(item.get(name, 0) or 0) for item in rollups)
 
@@ -157,6 +186,7 @@ def _project_totals(name: str, rollups: List[Mapping[str, Any]], configs: Mappin
         "stage": stages.stage_of(config),
         "configured": config is not None,
         "sandbox": is_sandbox(name),
+        "source": source_of(name),
         "calls": _sum(own, "calls"),
         "refused": _sum(own, "refused"),
         "would_refuse": _sum(own, "observed"),
@@ -176,6 +206,20 @@ def _by_agent(agents: Counter, in_sandboxes: Counter) -> List[Dict[str, Any]]:
         dict(entry, kind=agent_kind(entry["agent"]), calls_in_sandboxes=in_sandboxes.get(entry["agent"], 0))
         for entry in _ranked(agents, "agent")
     ]
+
+
+def _sources(rows: List[Mapping[str, Any]], rollups: List[Mapping[str, Any]]) -> Dict[str, Dict[str, int]]:
+    """sources: the calls and the projects of the window by where they come from.
+
+    Computed over the same projects as the totals, so each figure adds up to
+    its total: the three `calls` to `totals.calls`, the three `projects` to
+    `totals.projects`.
+    """
+    calls: Counter = Counter()
+    for item in rollups:
+        calls[source_of(item.get("project"))] += int(item.get("calls", 0) or 0)
+    projects = Counter(row["source"] for row in rows)
+    return {name: {"calls": calls.get(name, 0), "projects": projects.get(name, 0)} for name in SOURCES}
 
 
 def _part_totals(rows: List[Mapping[str, Any]], rollups: List[Mapping[str, Any]], sandbox: bool) -> Dict[str, Any]:
@@ -205,7 +249,9 @@ def overview(
     totals for visitors' sandboxes and for every other project, each by_agent
     entry carries its `kind` and its `calls_in_sandboxes`, and `coding_agents`
     lists the coding agents alone, so a page can say what each number is made
-    of. A sandbox whose configuration has expired stays out of all of them.
+    of. `sources` gives the calls and projects of the synthetic fleet, of
+    sandboxes and of everything else, and each by_project row names its
+    `source`. A sandbox whose configuration has expired stays out of all of them.
     """
     today = today or datetime.datetime.now(datetime.timezone.utc).date()
     days_covered = _window(days, today)
@@ -249,6 +295,10 @@ def overview(
             "sandbox": _part_totals([row for row in by_project if row["sandbox"]], shown, True),
             "elsewhere": _part_totals([row for row in by_project if not row["sandbox"]], shown, False),
         },
+        # Where the calls come from: the synthetic fleet, visitors' sandboxes,
+        # or anything else. A public page says in words that the fleet is
+        # synthetic; this is the figure it says it with.
+        "sources": _sources(by_project, shown),
         "series": [
             {
                 "day": day,
