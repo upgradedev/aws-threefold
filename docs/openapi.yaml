@@ -894,9 +894,8 @@ paths:
         is 503 with no draft; Threefold never stands in for the model with a rule of its own. Each draft is at most
         two model calls, and only the description and the paths, expectations and imports of the examples reach
         the model, never the rest of an example's file. Drafting model calls are budgeted account-wide per UTC day;
-        past the budget the answer is 429 and no model call is made. Open where PublicReads is true, as POST
-        /rules/explain is; on a stack deployed with PublicReads=false it needs the operator key or a sign-in
-        session.
+        past the budget the answer is 429 and no model call is made. Open where PublicReads is true, as POST /rules/explain
+        is; on a stack deployed with PublicReads=false it needs the operator key or a sign-in session.
       security:
       - {}
       - OperatorApiKey: []
@@ -1080,8 +1079,8 @@ paths:
                     type: string
         '429':
           description: >-
-            The day's account-wide drafting budget is spent, so no model call was made and nothing was drafted
-            (urn:threefold:error:draft-budget-spent). The budget resets at midnight UTC.
+            The day's account-wide drafting budget is spent, so no model call was made and nothing was drafted (urn:threefold:error:draft-budget-spent).
+            The budget resets at midnight UTC.
           content:
             application/problem+json:
               schema:
@@ -1645,9 +1644,12 @@ paths:
         Read from one rollup item per project and day, added to as every decision is recorded, so the numbers are
         exact however busy the ledger is. approved, observed and refused are disjoint: observed is a call that ran
         and that a rule would have refused, and a day's calls are the sum of the three. needs_review is the observed
-        calls nobody has labelled; false_alarms the calls labelled false alarm. self_correction is the one figure
-        not read from the rollups: it is read from the ledger, a bounded number of rows, and says whether it covered
-        the whole window.
+        calls nobody has labelled; false_alarms the calls labelled false alarm. The totals are split in sandbox_split
+        between visitors' sandboxes and every other project, so a page can say what a number is made of; each by_agent
+        entry says what kind of caller it is, and coding_agents lists the coding agents alone. A sandbox whose configuration
+        has expired, a day after it was made, is left out of every figure here, as it always has been. self_correction
+        is the one figure not read from the rollups: it is read from the ledger, a bounded number of rows, and says
+        whether it covered the whole window.
       parameters:
       - name: days
         in: query
@@ -1667,8 +1669,8 @@ paths:
       responses:
         '200':
           description: >-
-            window_days, generated_at, source (always rollups), totals, series, by_agent, by_origin, by_rule, by_project,
-            stages, self_correction (read from the ledger, not the rollups)
+            window_days, generated_at, source (always rollups), totals, sandbox_split, series, by_agent, coding_agents,
+            by_origin, by_rule, by_project, stages, self_correction (read from the ledger, not the rollups)
           content:
             application/json:
               schema:
@@ -1701,6 +1703,23 @@ paths:
                         type: integer
                       agents:
                         type: integer
+                        description: 'Distinct values of agent with a call in the window, of every kind: page and
+                          unknown count here too.'
+                      coding_agents:
+                        type: integer
+                        description: 'Of those, the coding agents (claude-code, codex, antigravity): the length
+                          of coding_agents.'
+                  sandbox_split:
+                    type: object
+                    description: >-
+                      The totals split between visitors' sandboxes (names matching ^Acme-Sandbox-[0-9a-f]{8}$, whose
+                      calls include the would-refuse calls POST /api/sandbox seeds on purpose) and every other project.
+                      Each side is computed as the totals are, over its own projects, so the two add up to the totals.
+                    properties:
+                      sandbox:
+                        $ref: '#/components/schemas/OverviewPart'
+                      elsewhere:
+                        $ref: '#/components/schemas/OverviewPart'
                   series:
                     type: array
                     items:
@@ -1716,13 +1735,16 @@ paths:
                           type: integer
                   by_agent:
                     type: array
+                    description: Every value of agent with a call in the window, most calls first.
                     items:
-                      type: object
-                      properties:
-                        agent:
-                          type: string
-                        calls:
-                          type: integer
+                      $ref: '#/components/schemas/AgentCalls'
+                  coding_agents:
+                    type: array
+                    description: >-
+                      The by_agent entries whose kind is coding_agent, in the same order and shape: the coding agents
+                      being governed, without the page's buttons, pipelines or rows older than the agent field.
+                    items:
+                      $ref: '#/components/schemas/AgentCalls'
                   by_origin:
                     type: array
                     items:
@@ -1754,6 +1776,11 @@ paths:
                           type: string
                         configured:
                           type: boolean
+                        sandbox:
+                          type: boolean
+                          description: >-
+                            True for a visitor's sandbox (^Acme-Sandbox-[0-9a-f]{8}$): the side of sandbox_split
+                            this project is counted on.
                         calls:
                           type: integer
                         refused:
@@ -1947,6 +1974,11 @@ paths:
                           type: boolean
                           description: False for a project seen in the rollups with no configuration; its stage
                             is then the stack default.
+                        sandbox:
+                          type: boolean
+                          description: >-
+                            True for a visitor's sandbox: a name matching ^Acme-Sandbox-[0-9a-f]{8}$, however it
+                            was made. Its calls include the synthetic ones POST /api/sandbox seeds.
                         observe_rules:
                           type: array
                           items:
@@ -2354,10 +2386,14 @@ paths:
                     type: object
                     description: >-
                       source, snapshot_at, window_days, days_observed, calls_governed, would_refuse, refused, reviewed,
-                      false_alarms, false_alarm_rate, projects, agents, stages and self_correction: numbers only.
-                      false_alarms and false_alarm_rate are null when calls were refused in the window, because
-                      the overview counts false alarms on refused calls as well and reviewed calls on would-refuse
-                      calls only.
+                      false_alarms, false_alarm_rate, projects, agents, coding_agents, stages and self_correction:
+                      numbers only. false_alarms and false_alarm_rate are null when calls were refused in the window,
+                      because the overview counts false alarms on refused calls as well and reviewed calls on would-refuse
+                      calls only. agents counts every value of a call's agent field, page and unknown included;
+                      coding_agents counts Claude Code, Codex and Antigravity alone, and is null from a stack that
+                      predates it. self_correction carries refusals_with_later_call and refusals_without_later_call,
+                      the rate's denominator and the refusals left out of it, or null for both from a stack that
+                      predates them, whose rate was over every refusal considered.
                   method:
                     type: array
                     description: The evidence files, by their path in the repository.
@@ -2598,6 +2634,50 @@ components:
                 type: array
                 items:
                   type: string
+    AgentCalls:
+      type: object
+      description: >-
+        One value of a call's agent field in the overview's window, its calls, and what kind of caller it is.
+      properties:
+        agent:
+          type: string
+        calls:
+          type: integer
+        kind:
+          type: string
+          enum:
+          - coding_agent
+          - page
+          - ci
+          - unknown
+          description: >-
+            coding_agent for claude-code, codex and antigravity; page for a visitor pressing a button on a page
+            here; ci for a pipeline or a pre-commit check (agent ci or pre-commit); unknown for a row written before
+            the agent field existed, and for any value not listed here.
+        calls_in_sandboxes:
+          type: integer
+          description: >-
+            Of calls, those in visitors' sandboxes. A sandbox is seeded with synthetic calls from all three coding
+            agents, so a coding agent whose calls in the window are all in sandboxes was governed nowhere else in
+            it.
+    OverviewPart:
+      type: object
+      description: The overview's totals over one side of sandbox_split, computed as the totals are.
+      properties:
+        projects:
+          type: integer
+        calls:
+          type: integer
+        approved:
+          type: integer
+        refused:
+          type: integer
+        would_refuse:
+          type: integer
+        needs_review:
+          type: integer
+        false_alarms:
+          type: integer
     SelfCorrection:
       type: object
       description: >-
@@ -2609,11 +2689,16 @@ components:
         is not considered, and a later command is never taken as a correction, though it counts as one of the calls
         in between. Calls recorded at the same instant are not ordered against each other: one that shares the refusal's
         instant is never its correction, and a tie can only lengthen a distance. Page calls are never considered,
-        and nothing is refused in the observe stage, so a project there considers no refusal. The read is bounded:
-        complete is false when it stopped before the window's oldest day, and the figure then covers the newest
-        rows_read rows only.
+        and nothing is refused in the observe stage, so a project there considers no refusal. Only a refusal whose
+        session made a later call had a chance to be corrected: a live probe or a smoke test sends one call and
+        stops, and is no agent failing to correct itself. So refusals_considered is split into refusals_with_later_call
+        and refusals_without_later_call, and rate is taken over the first; until 2026-09-25 it was taken over refusals_considered.
+        The read is bounded: complete is false when it stopped before the window's oldest day, and the figure then
+        covers the newest rows_read rows only.
       required:
       - refusals_considered
+      - refusals_with_later_call
+      - refusals_without_later_call
       - self_corrected
       - rate
       - median_calls_to_correct
@@ -2625,19 +2710,35 @@ components:
           description: >-
             Refusals of hook and ci calls in the window aimed at a file the ledger recorded. A refusal with no recorded
             target, or of a command, whose recorded target is only the program it ran, cannot be matched with anything
-            and is left out.
+            and is left out. Always refusals_with_later_call + refusals_without_later_call.
+        refusals_with_later_call:
+          type: integer
+          description: >-
+            Of refusals_considered, those whose session recorded at least one more hook or ci call at a later instant,
+            of any kind: the refusals that had a chance to be corrected, and the rate's denominator. A call that
+            shares the refusal's own instant is not known to have come after it, so it gives no chance. A refusal
+            with a later call that was not corrected within ten calls counts here as a miss.
+        refusals_without_later_call:
+          type: integer
+          description: >-
+            Of refusals_considered, those after which their session recorded no further hook or ci call in the rows
+            read: a single-call probe or smoke test, or an agent stopped for good. They had no chance to be corrected
+            and are left out of the rate.
         self_corrected:
           type: integer
           description: >-
-            Of those, the refusals followed within the next ten calls of the same session by a call to the same
-            file that was not refused and was not a command.
+            Of refusals_with_later_call, the refusals followed within the next ten calls of the same session by
+            a call to the same file that was not refused and was not a command. Unchanged: a refusal with no later
+            call could never have been corrected.
         rate:
           type:
           - number
           - 'null'
           description: >-
-            self_corrected / refusals_considered, rounded to four places; null when no refusal was considered, because
-            none of none is not a rate.
+            self_corrected / refusals_with_later_call, rounded to four places; null when no refusal had a later
+            call, because a window whose refusals all ended their sessions measured nothing, and none of none is
+            not a rate. Changed 2026-09-25: the denominator used to be refusals_considered, which scored every single-call
+            probe as an agent that failed to correct itself.
         median_calls_to_correct:
           type:
           - number

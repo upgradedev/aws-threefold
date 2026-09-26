@@ -47,12 +47,14 @@ def figure(rows):
 
 def test_a_refusal_followed_by_an_approval_on_the_same_target_is_corrected() -> None:
     result = figure(session((REFUSED, DOMAIN), ("APPROVED", ADAPTER), ("APPROVED", DOMAIN)))
-    assert result == {"refusals_considered": 1, "self_corrected": 1, "rate": 1.0, "median_calls_to_correct": 2}
+    assert result == {"refusals_considered": 1, "refusals_with_later_call": 1, "refusals_without_later_call": 0,
+                      "self_corrected": 1, "rate": 1.0, "median_calls_to_correct": 2}
 
 
 def test_a_refusal_never_followed_by_an_acceptable_call_is_not_corrected() -> None:
     result = figure(session((REFUSED, DOMAIN), (REFUSED, DOMAIN), ("APPROVED", "README.md")))
     assert (result["refusals_considered"], result["self_corrected"], result["rate"]) == (2, 0, 0.0)
+    assert result["refusals_with_later_call"] == 2, "Both had a later call, so both had a chance and missed it"
     assert result["median_calls_to_correct"] is None, "No correction has no median; zero would read as at once"
 
 
@@ -78,7 +80,8 @@ def test_the_observe_stage_refuses_nothing_so_it_considers_nothing() -> None:
     watched = [dict(row, observed_rules=["python-domain-stays-pure"], stage="observe", dry_run=True)
                for row in session(("APPROVED", DOMAIN), ("APPROVED", DOMAIN))]
     result = figure(watched)
-    assert result == {"refusals_considered": 0, "self_corrected": 0, "rate": None, "median_calls_to_correct": None}
+    assert result == {"refusals_considered": 0, "refusals_with_later_call": 0, "refusals_without_later_call": 0,
+                      "self_corrected": 0, "rate": None, "median_calls_to_correct": None}
 
 
 def test_a_later_call_that_is_only_observed_is_a_correction() -> None:
@@ -97,7 +100,10 @@ def test_only_hook_and_ci_refusals_are_considered() -> None:
 
 def test_a_refusal_with_no_recorded_target_is_not_considered() -> None:
     result = figure(session((REFUSED, ""), ("APPROVED", ""), (REFUSED, DOMAIN)))
-    assert (result["refusals_considered"], result["self_corrected"], result["rate"]) == (1, 0, 0.0)
+    # The one refusal considered is the session's last call: it had no chance
+    # to be corrected, so the rate is of nothing rather than 0%.
+    assert (result["refusals_considered"], result["self_corrected"], result["rate"]) == (1, 0, None)
+    assert (result["refusals_with_later_call"], result["refusals_without_later_call"]) == (0, 1)
 
 
 def test_calls_are_ordered_in_time_whatever_order_they_are_read_in() -> None:
@@ -112,7 +118,10 @@ def test_each_refusal_counts_and_the_median_is_of_the_distances() -> None:
     rows = session((REFUSED, DOMAIN), (REFUSED, DOMAIN), ("APPROVED", DOMAIN), ("BLOCKED_LOOP_DETECTED", "npm"))
     result = figure(rows)
     assert (result["refusals_considered"], result["self_corrected"]) == (3, 2)
-    assert result["rate"] == round(2 / 3, 4) and result["median_calls_to_correct"] == 1.5
+    # The refusal of `npm` is the session's last call, so it had no chance and
+    # the rate is over the two that did.
+    assert (result["refusals_with_later_call"], result["refusals_without_later_call"]) == (2, 1)
+    assert result["rate"] == 1.0 and result["median_calls_to_correct"] == 1.5
 
 
 def test_a_path_written_with_backslashes_or_a_leading_dot_is_the_same_target() -> None:
@@ -123,6 +132,78 @@ def test_a_path_written_with_backslashes_or_a_leading_dot_is_the_same_target() -
 def test_a_row_read_twice_counts_once() -> None:
     rows = session((REFUSED, DOMAIN), ("APPROVED", DOMAIN))
     assert figure(rows + [dict(rows[0])])["refusals_considered"] == 1
+
+
+# ---------------------------------------------------------------- only a refusal with a later call had a chance
+
+
+def test_a_refusal_whose_session_made_no_later_call_is_counted_apart_and_not_in_the_rate() -> None:
+    # A live probe or a smoke test: one call, refused, and the session ends.
+    result = figure(session((REFUSED, DOMAIN), session_id="probe-0a1b2c3d-layering"))
+    assert result == {"refusals_considered": 1, "refusals_with_later_call": 0, "refusals_without_later_call": 1,
+                      "self_corrected": 0, "rate": None, "median_calls_to_correct": None}
+
+
+def test_when_no_refusal_had_a_later_call_the_rate_is_null_not_zero() -> None:
+    single_shots = []
+    for index, prefix in enumerate(("probe", "smoke", "probe", "smoke", "acme-agent")):
+        single_shots += session((REFUSED, DOMAIN), session_id=f"{prefix}-{index}")
+    result = figure(single_shots)
+    assert (result["refusals_considered"], result["refusals_without_later_call"]) == (5, 5)
+    assert result["refusals_with_later_call"] == 0 and result["self_corrected"] == 0
+    assert result["rate"] is None, "Nothing had a chance to correct itself, so nothing was measured: not 0%"
+
+
+def test_single_call_sessions_leave_the_rate_of_the_agents_that_went_on() -> None:
+    probes = [row for index in range(20) for row in session((REFUSED, DOMAIN), session_id=f"probe-{index:02d}")]
+    agent = session((REFUSED, DOMAIN), ("APPROVED", ADAPTER), ("APPROVED", DOMAIN), session_id="acme-agent")
+    walked_on = session((REFUSED, DOMAIN), ("APPROVED", "README.md"), session_id="acme-agent-2")
+    result = figure(probes + agent + walked_on)
+    assert result["refusals_considered"] == 22, "refusals_considered keeps its meaning: every refusal considered"
+    assert (result["refusals_with_later_call"], result["refusals_without_later_call"]) == (2, 20)
+    assert (result["self_corrected"], result["rate"]) == (1, 0.5)
+
+
+def test_a_refusal_corrected_within_ten_calls_had_its_chance_and_took_it() -> None:
+    filler = [("APPROVED", f"src/acme/app/step_{index}.py") for index in range(9)]
+    result = figure(session((REFUSED, DOMAIN), *filler, ("APPROVED", DOMAIN)))
+    assert (result["refusals_with_later_call"], result["refusals_without_later_call"]) == (1, 0)
+    assert (result["self_corrected"], result["rate"], result["median_calls_to_correct"]) == (1, 1.0, 10)
+
+
+def test_a_refusal_corrected_only_on_the_eleventh_call_had_its_chance_and_missed_it() -> None:
+    filler = [("APPROVED", f"src/acme/app/step_{index}.py") for index in range(10)]
+    result = figure(session((REFUSED, DOMAIN), *filler, ("APPROVED", DOMAIN)))
+    assert (result["refusals_with_later_call"], result["refusals_without_later_call"]) == (1, 0)
+    assert (result["self_corrected"], result["rate"]) == (0, 0.0), "It had later calls, so a miss is 0%, not null"
+    assert result["median_calls_to_correct"] is None
+
+
+def test_any_later_call_is_a_chance_even_one_that_could_never_be_the_correction() -> None:
+    # A later command, or the same refusal again, is the session going on:
+    # the agent had a chance and did not take it within the window.
+    command = session((REFUSED, DOMAIN), ("APPROVED", "pytest"))
+    command[1]["action_type"] = "COMMAND_EXEC"
+    assert (figure(command)["refusals_with_later_call"], figure(command)["rate"]) == (1, 0.0)
+    again = figure(session((REFUSED, DOMAIN), (REFUSED, DOMAIN)))
+    assert (again["refusals_with_later_call"], again["refusals_without_later_call"], again["rate"]) == (1, 1, 0.0)
+
+
+def test_a_later_call_from_a_page_or_another_session_is_not_this_sessions_chance() -> None:
+    refused = session((REFUSED, DOMAIN), session_id="acme-agent")
+    page = session(("APPROVED", "README.md"), ("APPROVED", "README.md"), session_id="acme-agent", origin="page")
+    other = session(("APPROVED", DOMAIN), ("APPROVED", DOMAIN), session_id="acme-agent-2")
+    result = figure(refused + page + other)
+    assert (result["refusals_with_later_call"], result["refusals_without_later_call"], result["rate"]) == (0, 1, None)
+
+
+def test_with_and_without_a_later_call_always_add_up_to_the_refusals_considered() -> None:
+    rows = (session((REFUSED, DOMAIN), (REFUSED, ADAPTER), ("APPROVED", DOMAIN), (REFUSED, "src/acme/web/cart.ts"))
+            + session((REFUSED, DOMAIN), session_id="smoke-1")
+            + session((REFUSED, ""), ("APPROVED", DOMAIN), session_id="acme-agent-3"))
+    result = figure(rows)
+    assert result["refusals_with_later_call"] + result["refusals_without_later_call"] == result["refusals_considered"] == 4
+    assert (result["refusals_with_later_call"], result["self_corrected"], result["rate"]) == (2, 1, 0.5)
 
 
 
@@ -156,6 +237,9 @@ def test_a_call_at_the_refusals_own_instant_counts_as_in_between_but_never_as_it
     # An approval at the very instant of the refusal may have come before it.
     same_instant = [_at("066617", REFUSED, DOMAIN, "VERDICT-888888"), _at("066617", "APPROVED", DOMAIN, read_id)]
     assert (figure(same_instant)["refusals_considered"], figure(same_instant)["self_corrected"]) == (1, 0)
+    # Nor is it a later call: it gave the refusal no known chance, so the rate
+    # is of nothing rather than a miss.
+    assert (figure(same_instant)["refusals_without_later_call"], figure(same_instant)["rate"]) == (1, None)
 
 
 def test_a_tie_at_the_edge_of_the_window_does_not_stretch_it() -> None:
@@ -177,7 +261,8 @@ def test_a_refused_command_is_not_considered_because_its_target_is_only_a_progra
         row["action_type"] = "COMMAND_EXEC"
     # A refused `git commit --no-verify` followed by `git status` is not an
     # agent correcting itself; the ledger cannot tell them apart.
-    assert figure(rows) == {"refusals_considered": 0, "self_corrected": 0, "rate": None, "median_calls_to_correct": None}
+    assert figure(rows) == {"refusals_considered": 0, "refusals_with_later_call": 0, "refusals_without_later_call": 0,
+                            "self_corrected": 0, "rate": None, "median_calls_to_correct": None}
 
 
 def test_a_refused_shell_write_is_left_out_rather_than_scored_as_never_corrected() -> None:
@@ -224,8 +309,8 @@ def test_the_whole_window_read_is_complete(monkeypatch) -> None:
     rows = (session((REFUSED, DOMAIN), ("APPROVED", DOMAIN), day="2026-09-22")
             + session((REFUSED, ADAPTER), ("APPROVED", "README.md"), session_id="acme-session-2", day="2026-09-20"))
     result = ledger.self_correction(_Reader(rows), days=7, today=TODAY)
-    assert result == {"refusals_considered": 2, "self_corrected": 1, "rate": 0.5, "median_calls_to_correct": 1,
-                      "rows_read": 4, "complete": True}
+    assert result == {"refusals_considered": 2, "refusals_with_later_call": 2, "refusals_without_later_call": 0,
+                      "self_corrected": 1, "rate": 0.5, "median_calls_to_correct": 1, "rows_read": 4, "complete": True}
 
 
 def test_a_read_that_runs_out_of_budget_says_it_is_incomplete(monkeypatch) -> None:
@@ -278,8 +363,8 @@ def test_only_the_named_projects_rows_are_counted_and_every_row_is_reduced_first
 
 def test_the_figure_when_nothing_could_be_read() -> None:
     assert ledger.self_correction_unread() == {
-        "refusals_considered": 0, "self_corrected": 0, "rate": None, "median_calls_to_correct": None,
-        "rows_read": 0, "complete": False,
+        "refusals_considered": 0, "refusals_with_later_call": 0, "refusals_without_later_call": 0,
+        "self_corrected": 0, "rate": None, "median_calls_to_correct": None, "rows_read": 0, "complete": False,
     }
 
 

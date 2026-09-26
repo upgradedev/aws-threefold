@@ -386,13 +386,53 @@ def _self_correction_totals(figure: Any) -> Optional[Dict[str, Any]]:
     counts = {name: _count(figure.get(name)) for name in ("refusals_considered", "self_corrected", "rows_read")}
     if None in counts.values() or not isinstance(figure.get("complete"), bool):
         raise _not_the_contract("self_correction does not carry its counts and complete")
+    chances = _self_correction_chances(figure, counts["refusals_considered"])
     numbers = {}
     for name in ("rate", "median_calls_to_correct"):
         value = figure.get(name)
         if value is not None and _number(value) is None:
             raise _not_the_contract(f"self_correction.{name} is neither a number nor null")
         numbers[name] = value
-    return dict(counts, **numbers, complete=figure["complete"])
+    return dict(counts, **chances, **numbers, complete=figure["complete"])
+
+
+# Since 2026-09-25 the rate is taken over the refusals whose session made a
+# later call, and the figure says how many had one and how many did not.
+CHANCES = ("refusals_with_later_call", "refusals_without_later_call")
+
+
+def _self_correction_chances(figure: Mapping[str, Any], considered: int) -> Dict[str, Optional[int]]:
+    """The two counts the rate is read against, or both None from a stack that predates them.
+
+    Such a stack divided by every refusal it considered, and the page words a
+    figure without the pair that way. A stack that sends one of them sends
+    both, as counts that add up to the refusals considered; anything else is
+    refused rather than half copied, so the rate is never shown against the
+    wrong number.
+    """
+    if all(figure.get(name) is None for name in CHANCES):
+        return dict.fromkeys(CHANCES)
+    chances = {name: _count(figure.get(name)) for name in CHANCES}
+    if None in chances.values():
+        raise _not_the_contract("self_correction does not carry both counts of refusals with and without a later call")
+    if sum(chances.values()) != considered:
+        raise _not_the_contract("self_correction's refusals with and without a later call do not add up to those considered")
+    return chances
+
+
+def _coding_agents(totals: Mapping[str, Any]) -> Optional[int]:
+    """How many of the agents are coding agents, or None from a stack that predates the count.
+
+    `agents` counts every value of a call's agent field, so the demo's page
+    buttons and rows older than the field count there too; this is the number
+    of Claude Code, Codex and Antigravity alone.
+    """
+    value = totals.get("coding_agents")
+    if value is None:
+        return None
+    if _count(value) is None:
+        raise _not_the_contract("totals.coding_agents is not a count")
+    return value
 
 
 def private_section(overview: Mapping[str, Any]) -> Dict[str, Any]:
@@ -450,6 +490,7 @@ def private_section(overview: Mapping[str, Any]) -> Dict[str, Any]:
         "false_alarm_rate": round(counts["false_alarms"] / reviewed, 4) if comparable and reviewed else None,
         "projects": counts["projects"],
         "agents": counts["agents"],
+        "coding_agents": _coding_agents(totals),
         "stages": {stage: stages[stage] for stage in STAGES},
         "self_correction": _self_correction_totals(overview.get("self_correction")),
     }

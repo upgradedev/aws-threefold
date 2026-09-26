@@ -22,7 +22,8 @@ from threefold.infrastructure.dynamo_repo import DynamoDBSessionRepository
 from threefold.interfaces import api_handlers, app_routes
 
 CLEAN_WRITE = {"file_path": DOMAIN_WRITE["file_path"], "content": "from dataclasses import dataclass\n"}
-FIELDS = {"refusals_considered", "self_corrected", "rate", "median_calls_to_correct", "rows_read", "complete"}
+FIELDS = {"refusals_considered", "refusals_with_later_call", "refusals_without_later_call", "self_corrected", "rate",
+          "median_calls_to_correct", "rows_read", "complete"}
 
 
 @pytest.fixture(autouse=True)
@@ -65,7 +66,10 @@ def test_the_overview_reports_self_correction_beside_its_unchanged_totals(correc
     payload = get("/api/overview", project=corrected, days=7)
     figure = payload["self_correction"]
     assert set(figure) == FIELDS
-    assert (figure["refusals_considered"], figure["self_corrected"], figure["rate"]) == (2, 1, 0.5)
+    # Two refusals were considered; only the first session went on after its
+    # refusal, so the rate is of that one: the codex session walked away.
+    assert (figure["refusals_considered"], figure["self_corrected"], figure["rate"]) == (2, 1, 1.0)
+    assert (figure["refusals_with_later_call"], figure["refusals_without_later_call"]) == (1, 1)
     assert figure["median_calls_to_correct"] == 2 and figure["rows_read"] == 4 and figure["complete"] is True
     # The fields the contract fixed are all still there, with the same meaning.
     assert payload["source"] == "rollups"
@@ -77,6 +81,9 @@ def test_the_project_page_reports_it_in_the_readiness_summary(corrected) -> None
     body = get(f"/api/projects/{corrected}", days=14)
     summary = body["readiness"]["summary"]
     assert (summary["self_correction"]["refusals_considered"], summary["self_correction"]["self_corrected"]) == (2, 1)
+    # The same definition as the overview's: the rate is over the refusals whose session went on.
+    assert (summary["self_correction"]["refusals_with_later_call"], summary["self_correction"]["rate"]) == (1, 1.0)
+    assert summary["self_correction"] == get("/api/overview", project=corrected, days=14)["self_correction"]
     assert {"stage", "days_observed", "calls_observed", "would_have_refused", "reviewed", "false_alarms",
             "false_alarm_rate", "rules_ready", "rules_quiet", "rules_noisy", "rules_needing_review"} <= set(summary)
     assert isinstance(body["readiness"]["rules"], list) and body["project"] == corrected
@@ -98,6 +105,28 @@ def test_a_project_in_observe_refuses_nothing_so_nothing_is_considered(monkeypat
     figure = get(f"/api/projects/{name}")["readiness"]["summary"]["self_correction"]
     assert figure["refusals_considered"] == 0 and figure["rate"] is None and figure["complete"] is True
     assert get("/api/overview", project=name)["totals"]["would_refuse"] == 1
+
+
+def test_single_call_probe_and_smoke_sessions_had_no_chance_so_they_leave_the_rate_alone() -> None:
+    # The public stack's case: live probes and smoke tests send one hook call
+    # each, are refused, and stop. Scored as never corrected they read as "0%
+    # of 22 agent refusals"; they are counted apart, and the rate is null.
+    name = fresh_project("Acme-Probe")
+    for session in ("probe-0a1b2c3d-layering", "probe-0a1b2c3d-java", "smoke-acme-1"):
+        assert hook_call(name, session, DOMAIN_WRITE)["status"].startswith("BLOCKED")
+        _next_instant()
+    figure = get("/api/overview", project=name)["self_correction"]
+    assert (figure["refusals_considered"], figure["refusals_without_later_call"]) == (3, 3)
+    assert (figure["refusals_with_later_call"], figure["self_corrected"], figure["rate"]) == (0, 0, None)
+    assert get(f"/api/projects/{name}")["readiness"]["summary"]["self_correction"]["rate"] is None
+
+    # An agent that went on after its refusal is what the rate is about.
+    hook_call(name, f"{name}-cc", DOMAIN_WRITE)
+    _next_instant()
+    assert hook_call(name, f"{name}-cc", CLEAN_WRITE)["status"] == "APPROVED"
+    figure = get("/api/overview", project=name)["self_correction"]
+    assert (figure["refusals_considered"], figure["refusals_with_later_call"], figure["refusals_without_later_call"]) == (4, 1, 3)
+    assert (figure["self_corrected"], figure["rate"], figure["median_calls_to_correct"]) == (1, 1.0, 1)
 
 
 def test_a_page_refusal_is_not_an_agent_to_correct() -> None:

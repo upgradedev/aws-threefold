@@ -280,7 +280,8 @@ def self_correction(
     today: Optional[datetime.date] = None,
     budget: Optional[int] = None,
 ) -> Dict[str, Any]:
-    """{refusals_considered, self_corrected, rate, median_calls_to_correct, rows_read, complete}.
+    """{refusals_considered, refusals_with_later_call, refusals_without_later_call, self_corrected, rate,
+    median_calls_to_correct, rows_read, complete}.
 
     Read from the ledger rather than the rollups, because whether a refusal
     was followed by an acceptable call is a question about the order of calls
@@ -298,6 +299,8 @@ def self_correction_unread() -> Dict[str, Any]:
     """The figure when the ledger could not be read: nothing considered, and not complete."""
     return {
         "refusals_considered": 0,
+        "refusals_with_later_call": 0,
+        "refusals_without_later_call": 0,
         "self_corrected": 0,
         "rate": None,
         "median_calls_to_correct": None,

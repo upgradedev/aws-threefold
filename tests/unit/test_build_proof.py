@@ -176,7 +176,8 @@ def test_the_committed_snapshot_is_what_the_script_builds_from_the_committed_ser
     if private is not None:
         assert set(private) <= {
             "source", "snapshot_at", "window_days", "days_observed", "calls_governed", "would_refuse", "refused",
-            "reviewed", "false_alarms", "false_alarm_rate", "projects", "agents", "stages", "self_correction",
+            "reviewed", "false_alarms", "false_alarm_rate", "projects", "agents", "coding_agents", "stages",
+            "self_correction",
         }
 
 
@@ -235,7 +236,7 @@ def _overview(names):
     return {
         "window_days": 30, "generated_at": "2026-09-29T08:00:00+00:00", "source": "rollups",
         "totals": {"calls": 4210, "approved": 4000, "refused": 0, "would_refuse": 210, "needs_review": 60,
-                   "false_alarms": 12, "projects": len(names), "agents": 2},
+                   "false_alarms": 12, "projects": len(names), "agents": 2, "coding_agents": 1},
         "series": [{"day": "2026-09-27", "approved": 900, "observed": 40, "refused": 0},
                    {"day": "2026-09-28", "approved": 0, "observed": 0, "refused": 0},
                    {"day": "2026-09-29", "approved": 3100, "observed": 170, "refused": 0}],
@@ -244,8 +245,9 @@ def _overview(names):
         "by_project": [{"project": name, "stage": "observe", "calls": 2105, "last_seen": "2026-09-29T08:00:00+00:00"}
                        for name in names],
         "stages": {"observe": len(names), "enforce": 0},
-        "self_correction": {"refusals_considered": 0, "self_corrected": 0, "rate": None,
-                            "median_calls_to_correct": None, "rows_read": 1900, "complete": True},
+        "self_correction": {"refusals_considered": 0, "refusals_with_later_call": 0, "refusals_without_later_call": 0,
+                            "self_corrected": 0, "rate": None, "median_calls_to_correct": None, "rows_read": 1900,
+                            "complete": True},
     }
 
 
@@ -314,6 +316,7 @@ def test_the_private_section_keeps_totals_and_nothing_that_names_anything(tmp_pa
     assert (private["calls_governed"], private["would_refuse"], private["reviewed"], private["false_alarms"]) == (4210, 210, 150, 12)
     assert private["false_alarm_rate"] == 0.08 and private["days_observed"] == 2 and private["window_days"] == 30
     assert (private["projects"], private["agents"], private["stages"]) == (2, 2, {"observe": 2, "enforce": 0})
+    assert private["coding_agents"] == 1, "agents counts every caller; coding_agents the coding agents alone"
     assert private["self_correction"]["refusals_considered"] == 0 and private["snapshot_at"] == "2026-09-29T08:00:00+00:00"
     for name in SECRET_PROJECTS + ("Acme-Proj-Quiet", "Lighthouse", "claude-code", "python-domain-stays-pure"):
         assert name not in written, f"{name} reached the snapshot"
@@ -406,6 +409,8 @@ def test_a_key_file_saved_with_a_byte_order_mark_reads_as_the_key_alone(tmp_path
     lambda o: o["totals"].__setitem__("calls", "Acme-Proj-Lighthouse"),
     lambda o: o.__setitem__("generated_at", "C:\\Users\\someone\\ledger"),
     lambda o: o["self_correction"].__setitem__("rate", "Acme-Proj-Harbour"),
+    lambda o: o["self_correction"].__setitem__("refusals_with_later_call", "Acme-Proj-Harbour"),
+    lambda o: o["totals"].__setitem__("coding_agents", "Acme-Proj-Harbour"),
     lambda o: o["stages"].__setitem__("observe", "Acme-Proj-Harbour"),
     lambda o: o["series"][0].__setitem__("observed", "Acme-Proj-Harbour"),
 ])
@@ -442,6 +447,50 @@ def test_a_stack_that_predates_self_correction_still_gives_its_totals() -> None:
     older = _overview(SECRET_PROJECTS)
     del older["self_correction"]
     assert build_proof.private_section(older)["self_correction"] is None
+
+
+def test_a_stack_that_predates_the_coding_agent_count_gives_it_as_null() -> None:
+    older = _overview(SECRET_PROJECTS)
+    del older["totals"]["coding_agents"]
+    section = build_proof.private_section(older)
+    assert section["coding_agents"] is None and section["agents"] == 2
+
+
+def _figure(**counts):
+    return dict({"refusals_considered": 5, "refusals_with_later_call": 3, "refusals_without_later_call": 2,
+                 "self_corrected": 2, "rate": 0.6667, "median_calls_to_correct": 2, "rows_read": 1900,
+                 "complete": True}, **counts)
+
+
+def test_self_correction_keeps_how_many_refusals_had_a_later_call_the_rates_denominator() -> None:
+    answer = _overview(SECRET_PROJECTS)
+    answer["self_correction"] = _figure()
+    figure = build_proof.private_section(answer)["self_correction"]
+    assert (figure["refusals_considered"], figure["refusals_with_later_call"], figure["refusals_without_later_call"]) == (5, 3, 2)
+    assert (figure["self_corrected"], figure["rate"], figure["complete"]) == (2, 0.6667, True)
+
+
+def test_a_stack_that_predates_the_later_call_counts_gives_them_as_null_not_as_zero() -> None:
+    # Its rate was over every refusal considered, and the page words a figure
+    # without the pair that way; a zero here would read as "none had a chance".
+    answer = _overview(SECRET_PROJECTS)
+    answer["self_correction"] = {name: value for name, value in _figure(rate=0.4).items() if name not in build_proof.CHANCES}
+    figure = build_proof.private_section(answer)["self_correction"]
+    assert (figure["refusals_with_later_call"], figure["refusals_without_later_call"]) == (None, None)
+    assert (figure["refusals_considered"], figure["rate"]) == (5, 0.4)
+
+
+@pytest.mark.parametrize("spoil", [
+    {"refusals_without_later_call": None},
+    {"refusals_with_later_call": -1, "refusals_without_later_call": 6},
+    {"refusals_with_later_call": 2.5},
+    {"refusals_with_later_call": 4},
+])
+def test_later_call_counts_that_are_half_given_or_do_not_add_up_are_refused(spoil) -> None:
+    answer = _overview(SECRET_PROJECTS)
+    answer["self_correction"] = _figure(**spoil)
+    with pytest.raises(build_proof.ProofError, match="not the shape the contract fixes"):
+        build_proof.private_section(answer)
 
 
 def test_the_false_alarm_rate_is_given_only_when_both_counts_are_of_the_same_calls() -> None:

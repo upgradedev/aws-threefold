@@ -21,6 +21,32 @@ from threefold.application.rule_keys import GATE_KEYS, NONE
 
 LABELS = ("correct", "false_alarm")
 
+# What each value of a call's `agent` is, so a page can list the coding agents
+# being governed apart from everything else that calls the service: `page` is a
+# visitor pressing a button on a page here, `ci` a pipeline or a pre-commit
+# check, and `unknown` a row written before the field existed. A value not
+# listed here is `unknown` too.
+CODING_AGENT = "coding_agent"
+AGENT_KINDS = {
+    "claude-code": CODING_AGENT,
+    "codex": CODING_AGENT,
+    "antigravity": CODING_AGENT,
+    "page": "page",
+    "ci": "ci",
+    "pre-commit": "ci",
+}
+UNKNOWN_KIND = "unknown"
+
+
+def agent_kind(agent: Any) -> str:
+    """coding_agent, page, ci or unknown: what a by_agent entry is."""
+    return AGENT_KINDS.get(str(agent or ""), UNKNOWN_KIND)
+
+
+def is_sandbox(project: Any) -> bool:
+    """Whether a project is a visitor's sandbox, `Acme-Sandbox-<8 hex>`, however it was made."""
+    return bool(stages.SANDBOX_PATTERN.match(str(project or "")))
+
 
 def _sum(rollups: Iterable[Mapping[str, Any]], name: str) -> int:
     return sum(int(item.get(name, 0) or 0) for item in rollups)
@@ -113,7 +139,7 @@ def _as_shown(
 
 def _is_expired_sandbox(project: str, configs: Mapping[str, Any]) -> bool:
     """A sandbox is gone a day after it was made; its counts stay out of the lists."""
-    return project not in configs and bool(stages.SANDBOX_PATTERN.match(project))
+    return project not in configs and is_sandbox(project)
 
 
 def _projects_in(rollups: List[Mapping[str, Any]], configs: Mapping[str, Any], only: Optional[str]) -> List[str]:
@@ -130,11 +156,39 @@ def _project_totals(name: str, rollups: List[Mapping[str, Any]], configs: Mappin
         "project": name,
         "stage": stages.stage_of(config),
         "configured": config is not None,
+        "sandbox": is_sandbox(name),
         "calls": _sum(own, "calls"),
         "refused": _sum(own, "refused"),
         "would_refuse": _sum(own, "observed"),
         "needs_review": needs_review(own),
         "last_seen": _latest(own, "last_seen"),
+    }
+
+
+def _by_agent(agents: Counter, in_sandboxes: Counter) -> List[Dict[str, Any]]:
+    """by_agent: each agent's calls, what kind of caller it is, and how many of its calls were in sandboxes.
+
+    A sandbox is seeded with synthetic calls from every coding agent, so a
+    coding agent can appear here from the seeding alone; `calls_in_sandboxes`
+    lets a page say so.
+    """
+    return [
+        dict(entry, kind=agent_kind(entry["agent"]), calls_in_sandboxes=in_sandboxes.get(entry["agent"], 0))
+        for entry in _ranked(agents, "agent")
+    ]
+
+
+def _part_totals(rows: List[Mapping[str, Any]], rollups: List[Mapping[str, Any]], sandbox: bool) -> Dict[str, Any]:
+    """The overview's totals over one side of the sandbox split, computed as the totals are."""
+    own = [item for item in rollups if is_sandbox(item.get("project")) == sandbox]
+    return {
+        "projects": len(rows),
+        "calls": _sum(own, "calls"),
+        "approved": _sum(own, "approved"),
+        "refused": _sum(own, "refused"),
+        "would_refuse": _sum(own, "observed"),
+        "needs_review": needs_review(own),
+        "false_alarms": _sum(own, "review:false_alarm"),
     }
 
 
@@ -145,7 +199,14 @@ def overview(
     project: Optional[str] = None,
     today: Optional[datetime.date] = None,
 ) -> Dict[str, Any]:
-    """GET /api/overview: tiles, a daily series, and totals by agent, origin, rule and project."""
+    """GET /api/overview: tiles, a daily series, and totals by agent, origin, rule and project.
+
+    Beside the totals, which keep their meaning, `sandbox_split` gives the same
+    totals for visitors' sandboxes and for every other project, each by_agent
+    entry carries its `kind` and its `calls_in_sandboxes`, and `coding_agents`
+    lists the coding agents alone, so a page can say what each number is made
+    of. A sandbox whose configuration has expired stays out of all of them.
+    """
     today = today or datetime.datetime.now(datetime.timezone.utc).date()
     days_covered = _window(days, today)
     rollups, configs = _as_shown(rollups, configs)
@@ -159,6 +220,8 @@ def overview(
     observed_by_rule = _prefixed(shown, "observed:")
     by_project = [_project_totals(name, shown, configs) for name in names]
     stage_counts = Counter(row["stage"] for row in by_project)
+    by_agent = _by_agent(agents, _prefixed([item for item in shown if is_sandbox(item.get("project"))], "agent:"))
+    coding_agents = [entry for entry in by_agent if entry["kind"] == CODING_AGENT]
     return {
         "window_days": days,
         # The first UTC day these numbers cover. `window_days` alone reads as a
@@ -176,6 +239,15 @@ def overview(
             "false_alarms": _sum(shown, "review:false_alarm"),
             "projects": len(by_project),
             "agents": sum(1 for count in agents.values() if count > 0),
+            "coding_agents": len(coding_agents),
+        },
+        # The same totals, for the visitors' sandboxes and for every other
+        # project. A public stack's review backlog is mostly sandboxes', whose
+        # seeded calls include would-refuse calls on purpose; split, a page can
+        # say what its number is made of rather than leave a reader to guess.
+        "sandbox_split": {
+            "sandbox": _part_totals([row for row in by_project if row["sandbox"]], shown, True),
+            "elsewhere": _part_totals([row for row in by_project if not row["sandbox"]], shown, False),
         },
         "series": [
             {
@@ -186,7 +258,9 @@ def overview(
             }
             for day in days_covered
         ],
-        "by_agent": _ranked(agents, "agent"),
+        "by_agent": by_agent,
+        # Beside by_agent, the coding agents alone, in the same order and shape.
+        "coding_agents": coding_agents,
         "by_origin": _ranked(_prefixed(shown, "origin:"), "origin"),
         "by_rule": [
             {"rule_key": key, "refused": refused_by_rule[key], "would_refuse": observed_by_rule[key]}

@@ -330,9 +330,23 @@ def self_correction(rows: Iterable[Mapping[str, Any]], window: int = SELF_CORREC
     correction, though it still counts as one of the calls in between. In the
     observe stage nothing is refused, so such a window considers no refusal.
 
+    Only a refusal its session went on from had a chance to be corrected. A
+    probe or a smoke test sends one call and stops; an agent a person halted
+    after a refusal makes no further call. Neither is an agent that failed to
+    correct itself, so the rate is taken over the refusals with a later call,
+    `refusals_with_later_call`: at least one call of the same session recorded
+    at a later instant, whatever that call was. A call that shares the
+    refusal's own instant is not known to have come after it, and could never
+    be its correction, so it gives no chance. The refusals with no later call
+    are counted apart, `refusals_without_later_call`, and the two add up to
+    `refusals_considered`, which keeps its meaning: every refusal considered.
+    A refusal with a later call but no correction within `window` calls is
+    counted as uncorrected, because it had its chance.
+
     `rate` and `median_calls_to_correct` are None when there is nothing to
-    divide or rank: none of none is not a rate, and a median of no distances
-    would read as corrected at once.
+    divide or rank: none of none is not a rate, a window whose refusals all
+    ended their sessions measured nothing, and a median of no distances would
+    read as corrected at once.
     """
     sessions: Dict[str, List[Mapping[str, Any]]] = defaultdict(list)
     seen = set()
@@ -346,6 +360,7 @@ def self_correction(rows: Iterable[Mapping[str, Any]], window: int = SELF_CORREC
         sessions[str(row["session_id"])].append(row)
 
     considered = 0
+    with_later_call = 0
     distances: List[int] = []
     for calls in sessions.values():
         calls.sort(key=_instant)
@@ -355,6 +370,9 @@ def self_correction(rows: Iterable[Mapping[str, Any]], window: int = SELF_CORREC
             if not _is_refusal(str(call.get("status") or "")) or not target or _is_command(call):
                 continue
             considered += 1
+            if not _has_later_call(instants, index):
+                continue
+            with_later_call += 1
             distance = _calls_to_correct(calls, instants, index, target, window)
             if distance is not None:
                 distances.append(distance)
@@ -362,10 +380,21 @@ def self_correction(rows: Iterable[Mapping[str, Any]], window: int = SELF_CORREC
     corrected = len(distances)
     return {
         "refusals_considered": considered,
+        "refusals_with_later_call": with_later_call,
+        "refusals_without_later_call": considered - with_later_call,
         "self_corrected": corrected,
-        "rate": round(corrected / considered, 4) if considered else None,
+        "rate": round(corrected / with_later_call, 4) if with_later_call else None,
         "median_calls_to_correct": statistics.median(distances) if distances else None,
     }
+
+
+def _has_later_call(instants: List[str], index: int) -> bool:
+    """Whether the session recorded any call at an instant after the call at `index`.
+
+    `instants` is the session's timestamps in order. A call at the same
+    instant may have come before it, so only a strictly later one counts.
+    """
+    return bisect.bisect_right(instants, instants[index]) < len(instants)
 
 
 def describe_layering(rules: List[Dict[str, Any]], languages_read: List[str]) -> Dict[str, str]:
