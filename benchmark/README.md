@@ -311,15 +311,17 @@ round every twelve days. It runs the `threefold` condition once, writes the
 row to `results/live/<date>-<agent>.jsonl` and prints one line: how the run
 ended, what the remote ledger holds for its session (refused and would refuse
 apart, and the stage they were judged under) and whether the row counts. The
-benchmark's own output goes to `daily-live.log` in the run's work root, not to
-the terminal. The token file and the Codex home (`--codex-home`) are the
-owner's and are never printed: the log writes their paths, and the
-benchmark's defaults for them, as `<token file>` and `<Codex home>`, and the
-dry run prints the command the same way. It refuses an endpoint that is not
-https or holds anything but visible ASCII (there is no default), `--date`
-outside a dry run, and a work root inside the repository or its workspace,
-before anything is created; after the run it checks the row names the
-endpoint, project and session it planned.
+benchmark runs in the script's own process, and its output goes to
+`daily-live.log` in the run's work root, not to the terminal. The token file
+and the Codex home (`--codex-home`) are the owner's and are never printed:
+the log writes their paths, and the benchmark's defaults for them, as
+`<token file>` and `<Codex home>`, and the dry run shows the benchmark's
+arguments the same way. The line is one line, whatever an error message in
+it carried. It refuses an endpoint that is not https or holds anything but
+visible ASCII (there is no default), `--date` outside a dry run, and a work
+root inside the repository or its workspace, before anything is created;
+after the run it checks the row names the endpoint, project and session it
+planned.
 
 A day's row decides both the exit code and whether the day is run again, the
 same way for a new row and one already recorded:
@@ -327,7 +329,7 @@ same way for a new row and one already recorded:
 | Exit | The day's last row | Started again the same day |
 |---|---|---|
 | 0 | went its course and is the run planned: it counts, or only the project's stage on the stack keeps it from counting (the line says which) | does nothing |
-| 1 | no row, a row that is not the run planned, or a run that did not go as planned: a harness error, an agent that never ran, a Threefold that stopped answering or could not be read, a hook that failed | runs the day again as the benchmark's resume (the next attempt, in a session of its own), up to three rows a day; a row that is not the run planned is never run again |
+| 1 | no row, a row that is not the run planned, or a run that did not go as planned: a harness error, an agent that never ran, a Threefold that stopped answering or could not be read, a hook that failed, a session someone else used while the agent worked | runs the day again as the benchmark's resume (the next attempt, in a session of its own), up to three rows a day; a row that is not the run planned is never run again |
 | 2 | refused before running | |
 | 3 | the benchmark stopped: a usage limit that outlasted its retry, or a login that stopped working | runs the day again, once the login works |
 

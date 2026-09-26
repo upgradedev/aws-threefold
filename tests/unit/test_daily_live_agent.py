@@ -159,7 +159,7 @@ def test_a_dry_run_prints_the_pick_and_the_command_and_neither_the_token_file_no
     out = capsys.readouterr().out
     assert ("live 2026-09-27: claude-code on billing-credit-limit, project Acme-Live-billing-credit-limit, session "
             "live-billing-credit-limit-2026-09-27 (or the next free -a<n>), against https://threefold.acme.test/prod/") in out
-    assert ("would run: python benchmark/run.py --agent claude-code --tasks billing-credit-limit --conditions threefold "
+    assert ("would run, in this process: benchmark/run.py --agent claude-code --tasks billing-credit-limit --conditions threefold "
             "--reps 1 --threefold-endpoint https://threefold.acme.test/prod/ --live-date 2026-09-27 "
             "--run-id 2026-09-27-claude-code") in out
     assert "--token-file <token file>" in out and str(token_file) not in out and "CODEX_HOME" not in out
@@ -167,11 +167,59 @@ def test_a_dry_run_prints_the_pick_and_the_command_and_neither_the_token_file_no
     assert daily.main(common + ["--date", "2026-09-28"]) == 0
     out = capsys.readouterr().out
     assert "live 2026-09-28: codex on billing-credit-limit" in out
-    assert "would run: python benchmark/run.py --agent codex --tasks billing-credit-limit" in out
+    assert "would run, in this process: benchmark/run.py --agent codex --tasks billing-credit-limit" in out
     assert out.rstrip().endswith("--work-root " + str(tmp_path / "work") + " (with CODEX_HOME set to the Codex home given)")
     assert "CODEX_HOME=" not in out, "a shell prefix neither cmd nor PowerShell takes"
     assert str(codex_home) not in out and "--token-file" not in out
     assert not (tmp_path / "results").exists() and not (tmp_path / "work").exists()
+
+
+def _dry_run_of(tmp_path, capsys, day="2026-09-28"):
+    code = daily.main(["--endpoint", "https://threefold.acme.test/", "--dry-run", "--date", day,
+                       "--results-dir", str(tmp_path / "results"), "--work-root", str(tmp_path / "work")])
+    return code, capsys.readouterr().out
+
+
+def test_a_dry_run_of_a_day_whose_run_failed_shows_the_resume_a_real_run_would_make(tmp_path, capsys):
+    """The day's last row did not go as planned: a real run would run the day again, as the benchmark's resume of the
+    same run id, so the dry run shows --resume where a first run has --run-id, and says so."""
+    results = tmp_path / "results" / "2026-09-28-codex.jsonl"
+    failed = dict(_failed_row("https://threefold.acme.test/"), task="billing-credit-limit",
+                  threefold_project="Acme-Live-billing-credit-limit",
+                  threefold_session="live-billing-credit-limit-2026-09-28")
+    run.ResultsFile(results).append(failed)
+    code, out = _dry_run_of(tmp_path, capsys)
+    assert code == 0
+    assert "benchmark/run.py --agent codex --tasks billing-credit-limit" in out
+    assert "--resume 2026-09-28-codex" in out and "--run-id" not in out
+    assert ("(today already has 1 row(s) in 2026-09-28-codex.jsonl and the last did not go as planned, so a real run "
+            "would run the day again)") in out
+    assert not (tmp_path / "work").exists() and len(run.ResultsFile(results).rows()) == 1
+
+    # Three failed rows: a real run would not run the day a fourth time, and the dry run shows the first command.
+    for _ in range(daily.MAX_RUNS_PER_DAY - 1):
+        run.ResultsFile(results).append(failed)
+    code, out = _dry_run_of(tmp_path, capsys)
+    assert code == 0 and "--run-id 2026-09-28-codex" in out and "--resume" not in out
+    assert "would run the day again" not in out
+    assert "(a row for this day is already in 2026-09-28-codex.jsonl, so a real run would do nothing)" in out
+
+
+def test_a_dry_run_of_a_day_already_done_says_a_real_run_would_do_nothing(tmp_path, capsys):
+    """A row that went its course (here judged in Observe, the stack's default) is the day done."""
+    done = dict(_failed_row("https://threefold.acme.test/"), task="billing-credit-limit",
+                threefold_project="Acme-Live-billing-credit-limit",
+                threefold_session="live-billing-credit-limit-2026-09-28-a2", harness_error=None, agent_ran=True,
+                measured=True, run_end="completed", acceptance_passed=True, violation_landed=True,
+                server_healthy_after=True,
+                ledger={"reachable": True, "complete": True, "decisions": 2, "refused": 0, "would_refuse": 1,
+                        "stages": {"observe": 2}, "project": "Acme-Live-billing-credit-limit", "other_projects": 0})
+    done["governance_problem"] = harness.stage_problem(done)
+    assert daily.day_outcome(done, daily.pick_for(datetime.date(2026, 9, 28)), "https://threefold.acme.test/")[0] == 0
+    run.ResultsFile(tmp_path / "results" / "2026-09-28-codex.jsonl").append(done)
+    code, out = _dry_run_of(tmp_path, capsys)
+    assert code == 0 and "--run-id 2026-09-28-codex" in out and "--resume" not in out
+    assert "(a row for this day is already in 2026-09-28-codex.jsonl, so a real run would do nothing)" in out
 
 
 def test_the_command_a_dry_run_prints_is_one_the_runner_takes(tmp_path):
@@ -359,6 +407,42 @@ def test_the_log_hides_a_path_written_in_pieces_and_in_any_case():
         again.write(str(home).upper() + "\n")
         assert written[-1] == "<Codex home>\n"
     assert daily._spellings(Path("C:/")) == [] or os.name != "nt"
+
+
+def test_the_summary_is_one_line_whatever_an_error_carried():
+    pick = daily.Pick(DAY, "codex", TASK)
+    row = dict(_failed_row("https://threefold.acme.test/"), harness_error="RuntimeError: first\nsecond\r\n  third")
+    line = daily.summary_line(pick, row, "the run did not go as planned:\nsee the log")
+    assert "\n" not in line and "\r" not in line
+    assert "harness error: RuntimeError: first second third" in line and line.endswith("as planned: see the log")
+    assert "\n" not in daily.summary_line(pick, None, "no row was recorded\n(benchmark exit 1)")
+
+
+def test_a_day_whose_session_someone_used_while_the_agent_worked_is_run_again(tmp_path, fake_bin, monkeypatch):
+    """On the stack's default stage, the reviewer's case: a stranger's call in the session while the agent works. The
+    row is not the day done: exit 1, and the script started again runs the day as the next attempt."""
+    pick = daily.Pick(DAY, "codex", TASK)
+    results = tmp_path / "results"
+    claim = harness.claim_unused_session
+    with FakeThreefold(stage="observe") as fake:
+        def claim_then_meddle(server, remote, task, rep, attempt):
+            session = claim(server, remote, task, rep, attempt)
+            fake.rows.append({"timestamp": "2026-09-26T00:00:00Z", "session_id": session, "project_name": "Acme-Stranger",
+                              "status": "APPROVED", "rule_key": "NONE", "stage": "enforce"})
+            return session
+
+        monkeypatch.setattr(harness, "claim_unused_session", claim_then_meddle)
+        code, row, note = daily.run_live(pick, fake.endpoint, results_dir=results, work_root=tmp_path / "work",
+                                         codex=str(fake_bin["codex"]), retry_pause=0)
+        assert code == 1 and row["ledger"]["other_projects"] == 1
+        assert note.startswith(f"the run did not go as planned: the remote ledger holds 1 call(s) in this run's session "
+                               f"{SESSION} under another project")
+        monkeypatch.setattr(harness, "claim_unused_session", claim)
+        code, row, note = daily.run_live(pick, fake.endpoint, results_dir=results, work_root=tmp_path / "work",
+                                         codex=str(fake_bin["codex"]), retry_pause=0)
+    assert (row["attempt"], row["threefold_session"], row["ledger"]["other_projects"]) == (2, f"{SESSION}-a2", 0)
+    # Observe is the stack's default: the second run is the day done, and its line says why it does not count.
+    assert (code, note) == (0, "") and "in Observe" in row["governance_problem"]
 
 
 def test_a_day_is_run_at_most_three_times(tmp_path, monkeypatch):
