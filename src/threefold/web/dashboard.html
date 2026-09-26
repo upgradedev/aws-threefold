@@ -2199,7 +2199,14 @@
 .tf-try-was { display: none; }
 
 .tf-try-lanes { display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr); }
-@media (min-width: 768px) { .tf-try-lanes { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (min-width: 1180px) { .tf-try-lanes { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (min-width: 640px) and (max-width: 1179px) {
+  .tf-try-lane .tf-try-calls { flex-direction: row; flex-wrap: wrap; gap: 10px 16px; }
+  .tf-try-lane .tf-try-calls::before { display: none; }
+  .tf-try-lane .tf-try-call { flex: 1 1 13rem; }
+  .tf-try-lane .tf-try-ghosts { flex-direction: row; }
+  .tf-try-lane .tf-try-ghost { flex: 1 1 0; }
+}
 .tf-try-lane { min-width: 0; padding: 14px; background: var(--tf-inset); border: 1px solid var(--tf-hairline); border-radius: var(--tf-radius-md); }
 .tf-try-lane-head { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; }
 .tf-try-lane-name { font: 600 0.875rem/1.25rem var(--tf-font-sans); color: var(--tf-text); }
@@ -2416,7 +2423,7 @@
 @media (prefers-reduced-motion: no-preference) {
   .tf-try-enter .tf-try-stage-head { animation: tf-try-rise 420ms var(--tf-ease-out) both; }
   .tf-try-enter .tf-try-visual { animation: tf-try-rise 480ms var(--tf-ease-out) 90ms both; }
-  .tf-try-step[data-state="current"] > .tf-step-num { animation: tf-try-dot 900ms var(--tf-ease-out) 1; }
+  .tf-try-entering .tf-try-step[data-state="current"] > .tf-step-num { animation: tf-try-dot 900ms var(--tf-ease-out) 1; }
   .tf-try-play .tf-try-arrive { animation: tf-try-arrive 420ms var(--tf-ease-out) both; animation-delay: calc(var(--tf-try-i, 0) * 110ms + 200ms); }
   .tf-try-play .tf-try-rise { animation: tf-try-rise 420ms var(--tf-ease-out) both; animation-delay: calc(var(--tf-try-i, 0) * 80ms + 120ms); }
   .tf-try-card[data-dir="next"] { animation: tf-try-in-next 320ms var(--tf-ease-out) both; }
@@ -2657,7 +2664,7 @@
         return {
           kicker: 'Step 1 of 5 · done',
           title: state.seeded !== null ? plural(state.seeded, 'call') + ' arrived' : calls && calls.length ? plural(calls.length, 'call') + ' in your sandbox' : 'Your sandbox is ready',
-          sentence: html`<span class="tf-mono tf-try-strong">${state.project}</span> ${state.seeded !== null ? html`received ${plural(state.seeded, 'call')}` : 'is ready'}. Every call was judged and recorded, and nothing was refused: the project is in Observe.`,
+          sentence: html`<span class="tf-mono tf-try-strong">${state.project}</span> ${state.seeded !== null ? html`received ${plural(state.seeded, 'call')}` : 'is ready'}. Every call was judged and recorded, and ${calls && t.refused ? plural(t.refused, 'call') + (t.refused === 1 ? ' was' : ' were') + ' refused' : 'nothing was refused'}: the project is in Observe.`,
           visual: html`${projectBar(calls ? html`${stat('approved', t.approved, 'approved')}${stat('observed', t.observed, 'would refuse')}${stat('refused', t.refused, 'refused')}` : '')}
             ${lanes(calls, play)}
             ${legend()}
@@ -2691,7 +2698,7 @@
           sentence: rows.length
             ? 'Each one ran: in Observe a rule that would refuse a call only records it. Here is who sent it, what it touched, the rule, and why.'
             : 'No observing rule flagged a call in this sandbox, so there is nothing to label. Promote anyway to see a rule refuse.',
-          visual: html`${projectBar(html`<span class="tf-try-stat" data-outcome="observed">${T.icon('eye', 14)}<b>${num(rows.length)}</b>${total !== null ? html`of ${num(total)} calls` : 'calls'} · ${plural(rules.length, 'rule')}</span>${stat('refused', 0, 'refused')}`)}
+          visual: html`${projectBar(html`<span class="tf-try-stat" data-outcome="observed">${T.icon('eye', 14)}<b>${num(rows.length)}</b>${total !== null ? html`of ${num(total)} calls` : 'calls'} · ${plural(rules.length, 'rule')}</span>${Array.isArray(state.calls) ? stat('refused', tryTally(state.calls).refused, 'refused') : ''}`)}
             ${rows.length ? html`<div class="tf-try-cards${play.cards ? ' tf-try-play' : ''}">${rows.map(flagCard)}</div>` : ''}`,
           actions: rows.length ? primary('try-review', 'Label each call') : primary('try-readiness', 'See the rules', 'Reading readiness…')
         };
@@ -2984,20 +2991,23 @@
         const flagged = state.observed.length;
         const rank = a => { const i = TRY_AGENTS.indexOf(a); return i === -1 ? TRY_AGENTS.length : i; };
         const agents = calls ? Array.from(new Set(calls.map(r => r.agent))).sort((a, b) => rank(a) - rank(b)).map(agentLabel) : [];
+        const refusedFirst = calls ? tryTally(calls).refused : 0;
         facts.push(seeded !== null
           ? {
             figure: num(seeded), label: seeded === 1 ? 'call judged in Observe' : 'calls judged in Observe',
-            text: (agents.length ? tryList(agents) + ' sent them. ' : '') + (flagged ? plural(flagged, 'call') + ' would have been refused, and none was.' : 'No rule flagged one, and none was refused.'),
+            text: (agents.length ? tryList(agents) + ' sent them. ' : '') + (flagged ? plural(flagged, 'call') + ' would have been refused, and ' + (refusedFirst ? num(refusedFirst) + (refusedFirst === 1 ? ' was.' : ' were.') : 'none was.') : 'No rule flagged one' + (refusedFirst ? '.' : ', and none was refused.')),
             source: 'POST /api/sandbox · GET /api/decisions'
           }
           : { figure: num(flagged), label: 'calls flagged in Observe', text: 'Each one ran, and was recorded as a call its rule would have refused.', source: 'GET /api/decisions' });
         const c = labelCounts();
         const p = state.promoted;
-        const noisy = readinessRules().filter(r => r.state === 'noisy').map(r => r.rule_key);
+        // The noisy rules the promotion left observing, as its answer lists them.
+        const noisy = readinessRules().filter(r => r.state === 'noisy').map(r => r.rule_key)
+          .filter(key => !p || p.observe.indexOf(key) !== -1);
         facts.push({
           figure: p ? num(p.enforce.length) : '—',
           label: p && p.enforce.length === 1 ? 'rule moved to Enforce' : 'rules moved to Enforce',
-          text: 'You marked ' + plural(c.correct, 'call') + ' correct and ' + plural(c.false_alarm, 'call') + ' a false alarm' + (noisy.length ? ', so ' + tryList(noisy) + (noisy.length === 1 ? ' stayed' : ' stayed') + ' in Observe.' : '.'),
+          text: 'You marked ' + plural(c.correct, 'call') + ' correct and ' + plural(c.false_alarm, 'call') + ' a false alarm' + (noisy.length ? ', so ' + tryList(noisy) + ' stayed in Observe.' : '.'),
           source: 'POST …/reviews · GET …/projects · POST …/promote'
         });
         const r = state.result || {};
@@ -3007,7 +3017,7 @@
           figure: refused ? 'Refused' : (r.status ? 'Approved' : '—'), tone: refused ? 'refused' : '',
           label: 'the same kind of call, in Enforce',
           text: r.status
-            ? 'Answered ' + r.status + (fix ? (fix.validated === true ? ', with a fix checked by Threefold' : ', with a fix in words') : '') + (r.explanation_source === 'bedrock' ? ' and a sentence from Amazon Bedrock' : '') + '.'
+            ? 'Answered ' + r.status + (fix ? (fix.validated === true ? ', with a fix checked by Threefold' : ', with a fix the gates did not validate') : '') + (r.explanation_source === 'bedrock' ? ' and a sentence from Amazon Bedrock' : '') + '.'
             : 'No answer was recorded.',
           source: 'POST /evaluate-tool-call'
         });
@@ -3066,7 +3076,7 @@
         const play = state.play || {};
         state.play = {};
         const s = screen(play);
-        ctx.render(html`<div class="tf-try" data-step="${state.step}">
+        ctx.render(html`<div class="tf-try${play.enter ? ' tf-try-entering' : ''}" data-step="${state.step}">
           ${side()}
           <section id="try-stage" class="tf-card tf-try-stage${play.enter ? ' tf-try-enter' : ''}" data-tone="${s.tone || ''}" aria-labelledby="try-step-title">
             <header class="tf-try-stage-head">
