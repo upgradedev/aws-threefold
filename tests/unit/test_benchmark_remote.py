@@ -264,6 +264,58 @@ def test_a_remote_threefold_that_does_not_answer_starts_no_agent(tmp_path):
     assert not report.is_valid(dict(row, agent="claude-code"))
 
 
+def _plan_in(tmp_path, endpoint, folder):
+    plan = _plan(tmp_path, endpoint)
+    plan.work_root = tmp_path / folder
+    return plan
+
+
+def test_a_second_run_on_the_same_day_is_a_session_of_its_own_and_counts_only_its_own_calls(tmp_path):
+    """The reviewer's probe as a test: two runs on one day, each with a fresh work root, so the folders say nothing of
+    the first. The session already holding rows on the remote ledger is never reused."""
+    with FakeThreefold(stage="enforce") as fake:
+        first = harness.run_one(_task(), "threefold", 1, _plan_in(tmp_path, fake.endpoint, "work-1"), _confined_env(tmp_path))
+        second = harness.run_one(_task(), "threefold", 1, _plan_in(tmp_path, fake.endpoint, "work-2"), _confined_env(tmp_path))
+        sent = fake.evaluations()
+    assert first["harness_error"] is None and second["harness_error"] is None, (first["harness_error"], second["harness_error"])
+    assert (first["threefold_session"], second["threefold_session"]) == (SESSION, f"{SESSION}-a2")
+    assert first["attempt"] == second["attempt"] == 1
+    each = len(sent) // 2
+    assert each and [body["session_id"] for body in sent] == [SESSION] * each + [f"{SESSION}-a2"] * each
+    for row in (first, second):
+        assert (row["ledger"]["decisions"], row["ledger"]["refused"], row["ledger"]["sessions"]) == (each, 1, 1)
+        assert row["governance_problem"] is None
+
+
+def test_a_ledger_that_cannot_be_read_before_the_run_starts_no_agent(tmp_path):
+    """Checked before the agent starts, after GET status: a run whose ledger cannot be read back measures nothing."""
+    class Unreadable(FakeThreefold):
+        def _decisions(self, query):
+            return None  # the handler answers 200 with {} and no items: not a ledger
+
+    with Unreadable() as fake:
+        row = harness.run_one(_task(), "threefold", 1, _plan(tmp_path, fake.endpoint), _confined_env(tmp_path))
+    assert "answered GET api/decisions with an answer that is not a ledger, so no agent was started" in row["harness_error"]
+    assert fake.paths() == ["/status", "/api/decisions"] and fake.evaluations() == []
+    assert not (tmp_path / "work" / f"{TASK}--threefold--r1" / "transcript.jsonl").exists()
+    with FakeThreefold(redirect_decisions_to="https://elsewhere.acme.test/api/decisions") as fake:
+        row = harness.run_one(_task(), "threefold", 1, _plan_in(tmp_path, fake.endpoint, "work-2"), _confined_env(tmp_path))
+    assert "answered GET api/decisions with 302, so no agent was started" in row["harness_error"]
+    assert fake.evaluations() == []
+
+
+def test_when_every_session_name_is_taken_no_agent_starts(tmp_path, monkeypatch):
+    monkeypatch.setattr(harness, "MAX_SESSION_TRIES", 2)
+    with FakeThreefold() as fake:
+        for session in (SESSION, f"{SESSION}-a2"):
+            fake.rows.append({"session_id": session, "project_name": PROJECT, "status": "APPROVED", "rule_key": "NONE",
+                              "stage": "enforce"})
+        row = harness.run_one(_task(), "threefold", 1, _plan(tmp_path, fake.endpoint), _confined_env(tmp_path))
+    assert row["harness_error"] == (f"RuntimeError: the sessions {SESSION} to {SESSION}-a2 all hold rows on the remote "
+                                    "ledger already, so no agent was started")
+    assert fake.evaluations() == []
+
+
 def test_the_ledger_is_never_read_through_a_redirect(tmp_path):
     with FakeThreefold() as elsewhere, FakeThreefold(redirect_decisions_to=None) as fake:
         fake.redirect_decisions_to = elsewhere.endpoint + "api/decisions"

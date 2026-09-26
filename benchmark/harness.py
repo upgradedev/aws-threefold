@@ -869,6 +869,22 @@ class RemoteServer:
         return {"source": "remote", "reachable": True, "complete": False, "pages": MAX_LEDGER_PAGES,
                 "project": self.project, "session": self.session, **summarise_decisions(rows)}
 
+    def unused(self) -> bool:
+        """Whether this run's session holds no row yet on the remote ledger, or RuntimeError when that cannot be read.
+
+        Asked before an agent starts: a run whose ledger cannot be read back
+        measures nothing, and a session that already holds rows (an earlier
+        run of the same day, or anyone's calls under that name) would have
+        them counted as this run's, and would hand this run its loop history
+        and its spend.
+        """
+        found = self._read()
+        if not found.get("reachable"):
+            status = found.get("status")
+            answer = "an answer that is not a ledger" if status == 200 else (status or "nothing")
+            raise RuntimeError(f"the remote Threefold answered GET api/decisions with {answer}, so no agent was started")
+        return not found.get("decisions") and found.get("complete") is not False
+
     def ledger(self, wait_for_rows: bool = False) -> Dict[str, Any]:
         """What the remote ledger holds for this run. With wait_for_rows, an empty answer is read again after a pause."""
         found = self._read()
@@ -934,6 +950,22 @@ def carry_never_send(owner_home: Path, run_home: Path) -> str:
     run_home.mkdir(parents=True, exist_ok=True)
     (run_home / NEVER_SEND_NAME).write_bytes(data)
     return "copied"
+
+
+def claim_unused_session(server: RemoteServer, remote: RemoteThreefold, task: Task, rep: int, attempt: int) -> str:
+    """The first of the run's session names that holds no row on the remote ledger; the server is left on it.
+
+    `live-<task>-<date>` first (with `-r<rep>` and `-a<attempt>` as the run
+    has them), then the next attempts' names, so a second run on the same day
+    (a retry, or a results file deleted to run again) is a session of its own.
+    """
+    for offset in range(MAX_SESSION_TRIES):
+        server.session = remote.session(task, rep, attempt + offset)
+        if server.unused():
+            return server.session
+    raise RuntimeError(f"the sessions {remote.session(task, rep, attempt)} to "
+                       f"{remote.session(task, rep, attempt + MAX_SESSION_TRIES - 1)} all hold rows on the remote ledger "
+                       "already, so no agent was started")
 
 
 def read_threefold_config(repo: Path) -> Optional[Dict[str, Any]]:
@@ -2203,6 +2235,9 @@ def run_one(task: Task, condition: str, rep: int, plan: RunPlan, base_env: Optio
             else:
                 server = LocalServer(run_dir, python=options.python)
             server.start(base_env)
+            if remote is not None:
+                session = claim_unused_session(server, remote, task, rep, attempt)
+                row["threefold_session"] = session
             installed = install_hook(task, repo, run_dir, plan.work_root, server.endpoint, python=options.python,
                                      agent="codex" if options.agent == "codex" else "claude-code",
                                      project=project, session=session,

@@ -239,8 +239,13 @@ people read. What changes:
   repetition or attempt). The per-run wrapper sends every call under that
   session name instead of the agent's own id, so the run's calls can be found
   on the remote ledger and read back.
-- Before the agent starts, the endpoint must answer `GET status`; if it does
-  not, no agent is started. After it stops, the run's decisions are read back
+- Before the agent starts, the endpoint must answer `GET status`, and the
+  remote ledger is read for the run's session: a session that already holds
+  rows (an earlier run the same day, or anyone's calls under that name) is
+  never reused, since its rows would be counted as this run's and its loop
+  history and spend would carry over, so the next attempt's name (`-a2`, ...,
+  up to ten) is taken instead. If either read fails, no agent is started.
+  After the agent stops, the run's decisions are read back
   from `GET /api/decisions?project=Acme-Live-<task>&session=live-<task>-<date>&days=2`,
   page by page, with no redirect followed, instead of the local ledger.
 - The endpoint must be https; plain http is accepted only on this machine,
