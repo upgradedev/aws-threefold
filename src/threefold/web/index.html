@@ -207,7 +207,7 @@
     .tf-demo[data-verdict="approved"] .tf-demo-landed .tf-demo-status { border-color: var(--tf-approved-line); background: var(--tf-approved-soft); color: var(--tf-approved-text); }
     /* The fix in three rows of known height: a title on one line, the service's
        summary in at most --tf-demo-fix-lines lines (all of it on hover on a
-       desk, and in full in Scenario 3 below), and one quiet line about the files. */
+       desk, and in full in Scenario 3), and one quiet line about the files. */
     .tf-demo-fix { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: var(--tf-radius-md); background: var(--tf-approved-soft); border: 1px solid var(--tf-approved-line); font-size: 0.8125rem; line-height: 1.25rem; color: var(--tf-text-2); }
     @media (min-width: 640px) { .tf-demo-fix { padding: 12px 14px; } }
     .tf-demo-fix p { margin: 0; min-width: 0; }
@@ -1798,7 +1798,7 @@
     // drawn as the agent proposes it, this stack is asked about it through the
     // same route a hook uses, and the verdict lands on the line it refuses. The
     // answer is the stack's own when it gives one, labelled live, with its reason
-    // and the fix it checked; otherwise RECORDED.boundary is replayed, labelled
+    // and whatever fix came with it; otherwise RECORDED.boundary is replayed, labelled
     // recorded, with a caption that says why, and shows no fix, because a
     // recording kept none. The call asks for no model sentence (explain false):
     // a verdict is plain code, and a page view should not spend a Bedrock call.

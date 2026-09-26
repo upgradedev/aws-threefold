@@ -5,8 +5,8 @@ promise line under twelve words, one sentence of how, "Watch it stop a bad
 write — 60 s", "Open the live dashboard" and a quiet "Connect your
 repository", and beside them the product's core moment. That moment is one
 proposed write, the boundary write RECORDED.boundary was recorded from, asked
-of this stack exactly as a hook asks it: the answer is the stack's own when it
-gives one, labelled live, with its reason and the fix it checked, and the
+of this stack through the route a hook asks: the answer is the stack's own when
+it gives one, labelled live, with its reason and whatever fix came with it, and the
 recorded run otherwise, labelled recorded, with no fix, because a recording
 kept none.
 
