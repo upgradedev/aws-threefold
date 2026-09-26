@@ -7,7 +7,10 @@ service uses:
     POST /evaluate-tool-call   a crude judge: a call whose arguments put a cloud
                                SDK import in a domain module is refused under
                                `enforce` and recorded as would-refuse under
-                               `observe`; every call is recorded as a ledger row
+                               `observe`, or under `enforce` when its rule is in
+                               `observe_rules` (a project promoted with that
+                               rule still observing); every call is recorded
+                               as a ledger row
     GET  /api/decisions        the recorded rows, filtered by project and
                                session, a few per page behind an opaque cursor
 
@@ -28,7 +31,7 @@ import json
 import threading
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 from urllib.parse import parse_qs, urlsplit
 
 FLAGGED_WORD = "boto3"
@@ -40,8 +43,10 @@ class FakeThreefold:
     """A threaded HTTP server on 127.0.0.1 with a free port; use it as a context manager."""
 
     def __init__(self, stage: str = "enforce", page_size: int = 2, status_code: int = 200,
-                 redirect_decisions_to: Optional[str] = None, endless: bool = False, hidden_reads: int = 0) -> None:
+                 redirect_decisions_to: Optional[str] = None, endless: bool = False, hidden_reads: int = 0,
+                 observe_rules: Sequence[str] = ()) -> None:
         self.stage = stage
+        self.observe_rules = frozenset(observe_rules)
         self.page_size = page_size
         self.status_code = status_code
         self.redirect_decisions_to = redirect_decisions_to
@@ -79,7 +84,7 @@ class FakeThreefold:
         text = json.dumps(body.get("arguments")).replace("\\\\", "/")
         flagged = FLAGGED_WORD in text and "/domain/" in text
         stage = "observe" if body.get("dry_run") else self.stage
-        refused = flagged and stage == "enforce"
+        refused = flagged and stage == "enforce" and RULE not in self.observe_rules
         now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
         row = {
             "timestamp": now, "verdict_id": uuid.uuid4().hex[:12], "session_id": str(body.get("session_id") or ""),

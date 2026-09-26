@@ -789,8 +789,10 @@ def summarise_decisions(rows: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
 
     A refusal is a row whose status is BLOCKED*; a call that ran although a
     rule would have refused it (the stage was Observe, or the rule observes)
-    is `would_refuse`, never counted as a refusal. `stages` is the stage each
-    call was judged under, as the ledger recorded it.
+    is `would_refuse`, never counted as a refusal, and
+    `would_refuse_by_rule_key` names the rules that let those calls through.
+    A repeated read carries the key NONE and is neither. `stages` is the stage
+    each call was judged under, as the ledger recorded it.
     """
     refused = [row for row in rows if _is_refusal(row)]
     flagged = [row for row in rows if not _is_refusal(row) and str(row.get("rule_key") or "NONE") != "NONE"]
@@ -802,6 +804,7 @@ def summarise_decisions(rows: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
         "by_category": dict(Counter(str(row.get("category") or "OTHER") for row in refused)),
         "by_rule": dict(Counter(str(row.get("rule") or "UNKNOWN") for row in refused)),
         "by_rule_key": dict(Counter(str(row.get("rule_key")) for row in refused + flagged)),
+        "would_refuse_by_rule_key": dict(Counter(str(row.get("rule_key")) for row in flagged)),
         "stages": dict(Counter(str(row.get("stage") or "unknown") for row in rows)),
         "sessions": len({str(row.get("session_id")) for row in rows}),
     }
@@ -1678,12 +1681,17 @@ def governance_problem(condition: str, row: Mapping[str, Any]) -> Optional[str]:
     happened is partly a run with no guidance, so it cannot stand for
     Threefold enforcing.
 
-    A run against a remote Threefold has two more ways to fall short. The
-    remote stack decides by the project's stage, and a project it holds in
-    Observe has every call recorded and none refused: such a run measured
-    Threefold watching, not enforcing, whatever the hook was told. And the
-    repository's .threefold.json must still name the endpoint and project the
-    run was given when the agent stops, or some calls may have gone elsewhere.
+    A run against a remote Threefold has more ways to fall short. The remote
+    stack decides by the project's stage, and a project it holds in Observe
+    has every call recorded and none refused: such a run measured Threefold
+    watching, not enforcing, whatever the hook was told. A project it has
+    promoted may still keep some rules observing (a promotion enforces only
+    the rules the operator picked, STATE.md's Promote contract): a call such a
+    rule flags is recorded under the stage `enforce` but lets the call
+    through, so any would-refuse in the run's rows means a rule watched where
+    the run needed it to enforce. And the repository's .threefold.json must
+    still name the endpoint and project the run was given when the agent
+    stops, or some calls may have gone elsewhere.
     """
     if not uses_threefold(condition):
         return None
@@ -1713,6 +1721,13 @@ def governance_problem(condition: str, row: Mapping[str, Any]) -> Optional[str]:
             return (f"the remote Threefold judged {counted} in Observe (the project {ledger.get('project')} is not "
                     "promoted there), so it recorded what it would have refused and refused nothing: this run did "
                     "not measure Threefold enforcing")
+        watched = int(ledger.get("would_refuse") or 0)
+        if watched:
+            rules = sorted(ledger.get("would_refuse_by_rule_key") or {}) or ["a rule"]
+            return (f"the remote Threefold let {watched} of this run's call(s) through that {', '.join(rules)} would "
+                    f"have refused, because the project {ledger.get('project')} is promoted there with "
+                    f"{'that rule' if len(rules) == 1 else 'those rules'} still observing: this run did not measure "
+                    "Threefold enforcing")
     if int(row.get("governed_calls") or 0) and not row.get("governance_observed") and row.get("hook_fired"):
         return (f"the hook ran on the agent's {row['governed_calls']} governed call(s), but no decision reached the "
                 f"{'remote ' if remote else ''}ledger and nothing was refused")

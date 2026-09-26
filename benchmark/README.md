@@ -257,7 +257,13 @@ people read. What changes:
   recorded and none refused: such a row carries a `governance_problem` saying
   so, and the report never counts it as Threefold enforcing. Promoting the
   `Acme-Live-*` projects on that stack is what turns these runs into
-  measurements of enforcement.
+  measurements of enforcement, and only a promotion that enforces every rule
+  that flags the run does: Promote enforces the rules the operator picks and
+  keeps the others observing, and a call such a rule flags is recorded under
+  the stage `enforce` yet runs. Any `would_refuse` in a remote run's rows
+  (`would_refuse_by_rule_key` names the rules) therefore makes the same
+  `governance_problem`, naming those rules. A repeated read carries the key
+  `NONE` and is not a would-refuse.
 - The report refuses to pool one agent's Threefold rows from a remote
   Threefold with its matrix rows from a local server, and a resume refuses to
   switch where a run id's Threefold rows report to.

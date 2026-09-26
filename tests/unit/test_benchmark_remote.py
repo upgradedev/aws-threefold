@@ -15,6 +15,7 @@ import os
 import re
 import subprocess
 import sys
+import urllib.request
 from pathlib import Path
 
 import pytest
@@ -220,6 +221,39 @@ def test_a_project_the_remote_stack_holds_in_observe_is_recorded_but_not_counted
     assert report.invalid_reason(dict(row, agent="claude-code")) == row["governance_problem"]
 
 
+def test_a_project_promoted_with_the_flagging_rule_still_observing_is_not_counted_as_enforcing(tmp_path):
+    """After Promote, the rules the operator did not pick keep observing: their flags are recorded under the stage
+    `enforce` and let the call through. That is the normal state after the README's own step, and a run in it did not
+    measure Threefold enforcing the rule that flagged it."""
+    with FakeThreefold(stage="enforce", observe_rules=["python-domain-stays-pure"]) as fake:
+        row = harness.run_one(_task(), "threefold", 1, _plan(tmp_path, fake.endpoint), _confined_env(tmp_path))
+    assert row["harness_error"] is None, row["harness_error"]
+    ledger = row["ledger"]
+    assert (ledger["refused"], ledger["would_refuse"], set(ledger["stages"])) == (0, 1, {"enforce"})
+    assert ledger["would_refuse_by_rule_key"] == {"python-domain-stays-pure": 1}
+    assert row["project_stage_cached"] == "enforce" and row["violation_landed"] is True
+    assert row["governance_problem"] == (
+        "the remote Threefold let 1 of this run's call(s) through that python-domain-stays-pure would have refused, "
+        f"because the project {PROJECT} is promoted there with that rule still observing: this run did not measure "
+        "Threefold enforcing")
+    assert not report.is_valid(dict(row, agent="claude-code"))
+
+
+def test_a_repeated_read_is_not_a_rule_that_watched():
+    """A repeated read or poll is noted with the key NONE: nothing would have refused it, so it is no would-refuse."""
+    rows = [{"session_id": SESSION, "project_name": PROJECT, "status": "APPROVED", "rule_key": "NONE", "stage": "enforce"},
+            {"session_id": SESSION, "project_name": PROJECT, "status": "BLOCKED_BOUNDARY_VIOLATION",
+             "rule_key": "python-domain-stays-pure", "stage": "enforce"}]
+    ledger = dict(harness.summarise_decisions(rows), reachable=True, complete=True, project=PROJECT)
+    assert (ledger["would_refuse"], ledger["would_refuse_by_rule_key"]) == (0, {})
+    row = {"condition": "threefold", "ledger_source": "remote", "server_healthy_after": True, "ledger": ledger}
+    assert harness.governance_problem("threefold", row) is None
+    two = dict(ledger, would_refuse=3, would_refuse_by_rule_key={"LOOP": 1, "python-domain-stays-pure": 2})
+    assert "through that LOOP, python-domain-stays-pure would have refused" in harness.governance_problem(
+        "threefold", dict(row, ledger=two))
+    assert "with those rules still observing" in harness.governance_problem("threefold", dict(row, ledger=two))
+
+
 def test_a_remote_threefold_that_does_not_answer_starts_no_agent(tmp_path):
     with FakeThreefold(status_code=503) as fake:
         row = harness.run_one(_task(), "threefold", 1, _plan(tmp_path, fake.endpoint), _confined_env(tmp_path))
@@ -297,8 +331,12 @@ def test_a_changed_threefold_json_and_an_unreachable_endpoint_are_named_as_remot
 
 # --- against a real Threefold from this repository's source, as the remote ---------------------------------
 
+OPERATOR_KEY = "acme-fixture-operator-key-0001"
+
+
 class _ServerAsRemote(harness.LocalServer):
-    """A server from this repository's source on 127.0.0.1, standing in for a public stack, in the stage given."""
+    """A server from this repository's source on 127.0.0.1, standing in for a public stack, in the stage given, with a
+    fixture operator key so a test can promote a project as the operator would."""
 
     def __init__(self, run_dir, stage):
         super().__init__(run_dir)
@@ -306,8 +344,16 @@ class _ServerAsRemote(harness.LocalServer):
 
     def environment(self, base):
         env = super().environment(base)
-        env["DEFAULT_HOOK_STAGE"] = self.stage
+        env.update({"DEFAULT_HOOK_STAGE": self.stage, "THREEFOLD_API_KEYS": OPERATOR_KEY})
         return env
+
+    def configure(self, project, body):
+        request = urllib.request.Request(self.endpoint + f"api/projects/{project}", data=json.dumps(body).encode("utf-8"),
+                                         method="POST", headers={"Content-Type": "application/json",
+                                                                 "X-API-Key": OPERATOR_KEY})
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(request, timeout=30) as response:
+            return response.status, json.loads(response.read().decode("utf-8"))
 
 
 def test_the_real_service_s_decisions_read_back_as_the_run_s_ledger(tmp_path):
@@ -327,6 +373,28 @@ def test_the_real_service_s_decisions_read_back_as_the_run_s_ledger(tmp_path):
     assert ledger["by_rule_key"] == {"python-domain-stays-pure": 1}
     assert row["project_stage_cached"] == "enforce" and row["governance_problem"] is None
     assert row["violation_landed"] is False and report.is_valid(dict(row, agent="claude-code"))
+
+
+def test_the_real_service_promoted_with_the_rule_still_observing_is_not_counted_as_enforcing(tmp_path):
+    """The reviewer's probe as a test: the stack's default stage is Observe, the operator puts the live project in
+    Enforce with the layering rule still observing, and the run's row says it did not measure Threefold enforcing."""
+    server = _ServerAsRemote(tmp_path / "remote", "observe")
+    (tmp_path / "remote").mkdir()
+    server.start()
+    try:
+        status, _ = server.configure(PROJECT, {"stage": "enforce", "observe_rules": ["python-domain-stays-pure"]})
+        assert status == 200
+        row = harness.run_one(_task(), "threefold", 1, _plan(tmp_path, server.endpoint), _confined_env(tmp_path))
+    finally:
+        server.stop()
+    assert row["harness_error"] is None, row["harness_error"]
+    ledger = row["ledger"]
+    assert (ledger["refused"], ledger["would_refuse"], set(ledger["stages"])) == (0, 1, {"enforce"})
+    assert ledger["would_refuse_by_rule_key"] == {"python-domain-stays-pure": 1}
+    assert row["project_stage_cached"] == "enforce" and row["violation_landed"] is True
+    assert "python-domain-stays-pure would have refused" in row["governance_problem"]
+    assert "still observing: this run did not measure Threefold enforcing" in row["governance_problem"]
+    assert not report.is_valid(dict(row, agent="claude-code"))
 
 
 # --- the runner -----------------------------------------------------------------------------------------
