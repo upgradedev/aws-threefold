@@ -1376,6 +1376,49 @@ def test_the_walkthrough_is_labelled_by_keyboard_alone(tmp_path: Path) -> None:
     assert out["afterLeaving"] == 3, "The keys stop listening when the reader leaves the walkthrough"
 
 
+def test_the_walkthrough_reads_readiness_only_after_every_label_is_saved(tmp_path: Path) -> None:
+    """A reader who labels the last call and presses on at once sees that label counted.
+
+    The last label moves the keyboard to the way on, so Enter can follow it
+    within milliseconds, while its save is still in flight; readiness read
+    then would show the rule just labelled as still needing review, and leave
+    it unchecked. The read waits for every save.
+    """
+    out = dash(
+        r"""
+  const P = 'Acme-Sandbox-0a1b2c3d';
+  const only = row(1, { project_name: P });
+  const hold = held();
+  answer = api({
+    'POST /api/sandbox': { status: 200, body: { project: P, calls_seeded: 12 } },
+    ['/api/projects/' + P]: { status: 200, body: { project: P, config: { stage: 'observe' }, readiness: { rules: [{ rule_key: 'java-domain-stays-pure', state: 'ready' }] } } },
+    '/api/decisions': { status: 200, body: { items: [only], next_cursor: null } },
+    ['POST /api/projects/' + P + '/reviews']: () => hold.promise.then(() => ({ status: 200, body: { updated: 1, skipped: [] } }))
+  });
+  const reads = () => calls.filter(c => c.method === 'GET' && new URL(c.url).pathname.endsWith('/api/projects/' + P)).length;
+  await visit('#/try');
+  await click('try-create'); await tick();
+  await click('try-show'); await tick();
+  await click('try-review'); await tick();
+  out.readsBefore = reads();
+  click('try-label', { 'data-verdict': 'VERDICT-1', 'data-label': 'correct' });
+  await tick();
+  const pressing = click('try-readiness');
+  await tick();
+  out.readsWhileSaving = reads();
+  out.busyWhileSaving = Dash.tryState.busy;
+  hold.release();
+  await pressing; await tick();
+  out.readsAfter = reads();
+  out.step = Dash.tryState.step;
+""",
+        tmp_path,
+    )
+    assert out["readsWhileSaving"] == out["readsBefore"], "Readiness was read while a label was still being saved"
+    assert out["busyWhileSaving"] is True, "The way on shows it is waiting"
+    assert out["readsAfter"] == out["readsBefore"] + 1 and out["step"] == 4
+
+
 def test_the_walkthrough_escapes_every_value_the_service_sends(tmp_path: Path) -> None:
     """Every string the walkthrough shows from a response is escaped, on every step.
 

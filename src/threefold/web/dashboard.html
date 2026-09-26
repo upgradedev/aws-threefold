@@ -2503,7 +2503,8 @@
       ensureTryStyle();
       const state = {
         step: 1, project: '', seeded: null, calls: null, callsError: null, readiness: null, before: null, observed: [], labels: {}, cursor: 0,
-        selected: null, promoted: null, observing: null, result: null, replay: null, error: null, busy: false, who: null, play: {}, focusId: null
+        selected: null, promoted: null, observing: null, result: null, replay: null, error: null, busy: false, who: null, play: {}, focusId: null,
+        saves: []
       };
       try {
         const saved = JSON.parse(localStorage.getItem(TRY_STORAGE) || 'null');
@@ -3224,7 +3225,9 @@
         }
         announce(REVIEWS[value].label + ': ' + (targetOf(row) || row.tool_name) + '. ' + labelledCount() + ' of ' + state.observed.length + ' labelled.');
         draw();
-        return T.api('/api/projects/' + encodeURIComponent(state.project) + '/reviews', {
+        // Kept until the service has answered, so readiness is never read
+        // ahead of a label the reader has already seen land.
+        const saving = T.api('/api/projects/' + encodeURIComponent(state.project) + '/reviews', {
           method: 'POST', body: { items: [{ timestamp: row.timestamp, verdict_id: row.verdict_id, label: value }] }
         }).then(answer => {
           if (!ctx.alive()) return;
@@ -3241,6 +3244,9 @@
           state.cursor = index;
           fail(err, 'label');
         });
+        state.saves.push(saving);
+        saving.then(() => { const at = state.saves.indexOf(saving); if (at !== -1) state.saves.splice(at, 1); });
+        return saving;
       }
 
       function move(delta, focusId) {
@@ -3333,7 +3339,8 @@
         },
         'try-readiness': () => {
           state.busy = true; state.error = null; draw();
-          return T.api('/api/projects/' + encodeURIComponent(state.project) + query({ days: 1 })).then(detail => {
+          // Every label saved first: a rule's state is read from them.
+          return Promise.all(state.saves.slice()).then(() => T.api('/api/projects/' + encodeURIComponent(state.project) + query({ days: 1 }))).then(detail => {
             if (!ctx.alive()) return;
             state.busy = false;
             state.readiness = (detail && detail.readiness) || { rules: [] };
@@ -3415,7 +3422,7 @@
           try { localStorage.removeItem(TRY_STORAGE); } catch (err) { /* nothing stored */ }
           Object.assign(state, {
             step: 1, project: '', seeded: null, calls: null, callsError: null, readiness: null, before: null, observed: [], labels: {}, cursor: 0,
-            selected: null, promoted: null, observing: null, result: null, replay: null, error: null, busy: false, resume: null
+            selected: null, promoted: null, observing: null, result: null, replay: null, error: null, busy: false, resume: null, saves: []
           });
           enter(1);
           draw();
