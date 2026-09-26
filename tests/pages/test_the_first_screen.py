@@ -678,7 +678,10 @@ def test_the_counts_are_read_from_the_overview_at_load_and_say_what_they_are_mad
     assert 'href="https://example.test/prod/dashboard.html#/calls?days=7&amp;kind=refused"' in out["live"], "Each tile opens its rows"
     assert "totals." not in out["live"], "A reader is shown words, not the API's field names"
     subs = [_text(s) for s in re.findall(r'<span class="tf-tile-sub">(.*?)</span>', out["live"], re.S)]
-    assert subs == ["in the last 7 days", "refused before they ran", "recorded while a project observes"],         "Each sub-line says what its number means, and the window is named once"
+    assert subs == ["in the last 7 days", "before they ran", "recorded while a project observes"],         "Each sub-line says what its number means, and the window is named once"
+    terms = [_text(t) for t in re.findall(r'<span class="tf-tile-term">(.*?)</span>', out["live"], re.S)]
+    assert terms == ["Refused", "Would refuse"], "Plain words first, then the dashboard's own term for the same calls"
+    assert "Open the refused calls" in out["live"] and "Open the would-refuse calls" in out["live"], "Each link says which rows it opens, in the dashboard's words"
     assert not out["whereHidden"]
     assert _text(out["where"]) == (
         "Where they come from: of 1,284 calls on this stack, 1,102 from a synthetic Acme fleet that sends "
@@ -727,7 +730,7 @@ def test_a_sparse_window_says_what_it_holds_instead_of_drawing_a_flat_line(tmp_p
     out = _load(tmp_path, overview="{ status: 200, body: " + _overview(one_day) + " }")
     assert "tf-spark" not in out["live"] and "all on 21 Sep" in out["live"]
     subs = [_text(sub) for sub in re.findall(r'<span class="tf-tile-sub">(.*?)</span>', out["live"], re.S)]
-    assert subs == ["in the last 7 days, all on 21 Sep", "refused before they ran", "recorded while a project observes"],         "The day is named once, on the first tile, when every call fell on it"
+    assert subs == ["in the last 7 days, all on 21 Sep", "before they ran", "recorded while a project observes"],         "The day is named once, on the first tile, when every call fell on it"
     two_days = "series: [{ day: '2026-09-20', approved: 3, observed: 1, refused: 2 }, { day: '2026-09-21', approved: 5, observed: 2, refused: 1 }]"
     out = _load(tmp_path, overview="{ status: 200, body: " + _overview(two_days) + " }")
     assert out["live"].count("tf-spark") == 3, "Two days with a count make a trend"

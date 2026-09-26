@@ -229,12 +229,13 @@
       .tf-proof-live { gap: var(--tf-space-1); }
       .tf-proof-live .tf-tile {
         display: grid; grid-template-columns: minmax(3.5rem, auto) minmax(0, 1fr) auto; column-gap: 14px; row-gap: 2px; align-items: center; padding: 14px 16px;
-        grid-template-areas: "value label more" "value sub more" "value spark more";
+        grid-template-areas: "value label more" "value sub more" "value term more" "value spark more";
       }
       .tf-proof-live .tf-tile-row { display: contents; }
       .tf-proof-live .tf-tile-value { grid-area: value; }
       .tf-proof-live .tf-tile-label { grid-area: label; }
       .tf-proof-live .tf-tile-sub { grid-area: sub; }
+      .tf-proof-live .tf-tile-term { grid-area: term; }
       .tf-proof-live .tf-tile-spark { grid-area: spark; justify-self: start; margin-top: 4px; }
       .tf-proof-live .tf-tile-more { grid-area: more; margin: 0; padding: 0; gap: 0; font-size: 0; }
       .tf-proof-live .tf-tile-more .tf-icon { width: 16px; height: 16px; }
@@ -2217,7 +2218,9 @@
       // the number means, in a few words, and the window is named once, on the
       // first tile; the words a reader needs, never the API's field names.
       // When every call fell on one day the first tile names it, and the other
-      // two, which count some of those calls, do not say it again.
+      // two, which count some of those calls, do not say it again. Under the
+      // plain words, each of those two carries the term the dashboard and the
+      // rows it opens use for the same calls, Refused and Would refuse.
       const oneDay = daily('calls').filter(v => v > 0).length === 1;
       const trend = (key, label, color, total, meaning) => {
         const values = daily(key);
@@ -2228,13 +2231,13 @@
         return { spark: spark, sub: meaning };
       };
       const judged = trend('calls', 'Calls judged per day', T.COLORS.accent, calls, 'in ' + span);
-      const stopped = trend('refused', 'Calls stopped per day', T.COLORS.refused, refused, 'refused before they ran');
+      const stopped = trend('refused', 'Calls stopped per day', T.COLORS.refused, refused, 'before they ran');
       const observed = trend('observed', 'Calls that would have been stopped, per day', T.COLORS.observed, wouldRefuse, 'recorded while a project observes');
       const href = params => T.pageHref('dashboard.html#/calls' + T.query(Object.assign({ days: days }, params)));
       T.setHtml(strip, h`
         ${T.statTile({ label: 'Calls judged', metric: 'calls', value: calls, icon: 'shield', sub: judged.sub, spark: judged.spark, href: href({}), opens: 'Open the calls' })}
-        ${T.statTile({ label: 'Stopped', metric: 'refused', value: refused, icon: 'stop', sub: stopped.sub, spark: stopped.spark, href: href({ kind: 'refused' }), opens: 'Open what was stopped' })}
-        ${T.statTile({ label: 'Would have been stopped', metric: 'would_refuse', value: wouldRefuse, icon: 'eye', sub: observed.sub, spark: observed.spark, href: href({ kind: 'observed' }), opens: 'Open what was observed' })}`);
+        ${T.statTile({ label: 'Stopped', term: 'Refused', metric: 'refused', value: refused, icon: 'stop', sub: stopped.sub, spark: stopped.spark, href: href({ kind: 'refused' }), opens: 'Open the refused calls' })}
+        ${T.statTile({ label: 'Would have been stopped', term: 'Would refuse', metric: 'would_refuse', value: wouldRefuse, icon: 'eye', sub: observed.sub, spark: observed.spark, href: href({ kind: 'observed' }), opens: 'Open the would-refuse calls' })}`);
       T.animateNumbers(strip);
       T.setHtml(where, h`${T.icon('info', 16)}<span>${sourcesSentence(data, calls)}</span>`);
       where.hidden = false;
