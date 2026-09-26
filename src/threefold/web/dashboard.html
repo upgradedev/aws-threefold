@@ -178,6 +178,11 @@
     .tf-ops-rule-what { font-size: var(--tf-fs-micro); line-height: 1rem; color: var(--tf-text-3); }
     .tf-ops-rule-say { font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-2); }
     .tf-ops-rule-links { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 4px; font-size: var(--tf-fs-micro); }
+    .tf-ops-rule-quiet { background: transparent; border-style: dashed; }
+    .tf-ops-quiet-count { font: 500 0.8125rem/1.25rem var(--tf-font-sans); color: var(--tf-text); }
+    .tf-ops-quiet-keys { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+    .tf-ops-quiet-keys .tf-chip { text-decoration: none; max-width: 100%; overflow-wrap: anywhere; }
+    .tf-ops-quiet-keys .tf-chip:hover { border-color: var(--tf-hairline-strong); color: var(--tf-text); }
     .tf-ops-stack { display: flex; gap: 2px; height: 8px; border-radius: 4px; background: var(--tf-track); overflow: hidden; }
     .tf-ops-stack > a, .tf-ops-stack > span { display: block; height: 100%; min-width: 3px; }
     .tf-ops-stack > :last-child { border-radius: 0 4px 4px 0; }
@@ -1614,7 +1619,7 @@
         ? html`<div class="tf-ops-stack" role="img" aria-label="${r.rule_key}: ${parts.map(p => num(p.value) + ' ' + p.label).join(', ')} of ${num(would)} flagged">${drawn.map(p => html`<a href="${p.href}" style="flex-grow:${p.value};background:${p.color}" aria-label="${num(p.value)} ${p.label}, open these calls" data-tf-tip="${r.rule_key} · ${p.label}" data-tf-tip-value="${num(p.value)}" data-tf-tip-color="${p.color}"></a>`)}</div>`
         : html`<div class="tf-ops-stack" aria-hidden="true"></div>`;
       const words = would > 0
-        ? html`<p class="tf-ops-stack-words"><span><a class="tf-num-link" href="${callsHref({ project: name, rule: r.rule_key, kind: 'observed', days })}">${num(would)}</a> flagged</span>${parts.map(p => html`<span><i style="background:${p.color}"></i>${num(p.value)} ${p.label}</span>`)}${r.refused ? html`<span class="text-rose-300"><a class="tf-num-link" href="${callsHref({ project: name, rule: r.rule_key, kind: 'refused', days })}">${num(r.refused)}</a> refused</span>` : ''}</p>`
+        ? html`<p class="tf-ops-stack-words"><span><a class="tf-num-link" href="${callsHref({ project: name, rule: r.rule_key, kind: 'observed', days })}">${num(would)}</a> flagged</span>${parts.filter(p => p.value > 0).map(p => html`<span><i style="background:${p.color}"></i>${num(p.value)} ${p.label}</span>`)}${r.refused ? html`<span class="text-rose-300"><a class="tf-num-link" href="${callsHref({ project: name, rule: r.rule_key, kind: 'refused', days })}">${num(r.refused)}</a> refused</span>` : ''}</p>`
         : html`<p class="tf-ops-stack-words">Flagged nothing in ${windowWords(days)}${r.refused ? html` · <span class="text-rose-300"><a class="tf-num-link" href="${callsHref({ project: name, rule: r.rule_key, kind: 'refused', days })}">${num(r.refused)}</a> refused</span>` : ''}</p>`;
       return html`<li class="tf-ops-rule" data-state="${r.state || ''}">
         <div class="tf-ops-rule-name">
@@ -1644,8 +1649,36 @@
     function readinessList(name, rules, days) {
       if (!rules.length) return emptyNote('No rule readiness yet.', 'Readiness appears once this project has sent calls in the window.');
       const sorted = rules.slice().sort((a, b) => (STATE_ORDER[a.state] === undefined ? 9 : STATE_ORDER[a.state]) - (STATE_ORDER[b.state] === undefined ? 9 : STATE_ORDER[b.state]));
-      return html`${T.legend([{ label: 'Correct', color: C.approved }, { label: 'False alarm', color: C.refused }, { label: 'Not labelled', color: UNLABELLED }])}
-        <ul class="tf-ops-rules mt-3">${sorted.map(r => ruleRow(name, r, days))}</ul>`;
+      // A Quiet rule that refused nothing has nothing to show but an empty
+      // bar and the same two sentences, and a project has several; one row
+      // names them all, so the rules that need a decision stand out. A Quiet
+      // rule that refused calls keeps its own row: it did something.
+      const silent = sorted.filter(r => r.state === 'quiet' && !r.refused);
+      const rows = silent.length >= 2 ? sorted.filter(r => silent.indexOf(r) === -1) : sorted;
+      const flagged = rows.some(r => (r.would_refuse || 0) > 0);
+      return html`${flagged ? T.legend([{ label: 'Correct', color: C.approved }, { label: 'False alarm', color: C.refused }, { label: 'Not labelled', color: UNLABELLED }]) : ''}
+        <ul class="tf-ops-rules${flagged ? ' mt-3' : ''}">${rows.map(r => ruleRow(name, r, days))}${silent.length >= 2 ? quietRow(name, silent, days) : ''}</ul>`;
+    }
+
+    // The Quiet rules that refused nothing, as one row: how many, each by its
+    // key and mode, and what follows for them.
+    function quietRow(name, silent, days) {
+      const enforcing = silent.filter(r => r.mode_now === 'enforce').length;
+      const observing = silent.length - enforcing;
+      const say = !observing
+        ? 'Enforcing, and none of them flagged anything in this window.'
+        : !enforcing
+          ? 'Promoting them would have refused nothing seen here.'
+          : html`${num(enforcing)} enforce and ${num(observing)} observe; promoting the ${observing === 1 ? 'one that observes' : num(observing) + ' that observe'} would have refused nothing seen here.`;
+      return html`<li class="tf-ops-rule tf-ops-rule-quiet" data-state="quiet" data-rules="${silent.length}">
+        <div class="tf-ops-rule-name">
+          <span class="tf-ops-chips">${stateChip('quiet')}</span>
+          <span class="tf-ops-quiet-count">${plural(silent.length, 'rule')} flagged nothing</span>
+          <span class="tf-ops-rule-what">in ${windowWords(days)}</span>
+        </div>
+        <ul class="tf-ops-quiet-keys" aria-label="The quiet rules">${silent.map(r => html`<li><a class="tf-chip tf-chip-gray font-mono" href="${callsHref({ project: name, rule: r.rule_key, days })}" title="${r.rule_key}: ${r.mode_now === 'enforce' ? 'enforcing' : 'observing'}, ${r.kind === 'gate' ? (GATE_KEYS[r.rule_key] || 'a gate of the service') : 'a layering rule'}">${T.icon(r.mode_now === 'enforce' ? 'shield' : 'eye', 13)}${r.rule_key}</a></li>`)}</ul>
+        <div class="min-w-0"><p class="tf-ops-rule-say">${say}</p></div>
+      </li>`;
     }
 
     function viewProject(ctx) {

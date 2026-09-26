@@ -374,6 +374,29 @@ def test_the_stage_hero_is_a_headline_a_consequence_and_the_action(tmp_path: Pat
     assert "False-alarm rate" not in unlabelled and "over 0" not in unlabelled, "No rate is shown over nothing"
 
 
+def test_quiet_rules_that_did_nothing_share_one_row(tmp_path: Path) -> None:
+    out = ops(
+        r"""
+  const quiet = (key, mode, refused) => ({ rule_key: key, kind: 'gate', mode_now: mode, would_refuse: 0, refused: refused || 0, correct: 0, false_alarms: 0, unreviewed: 0, last_seen: null, state: 'quiet', recommendation: 'Enforcing, and it flagged nothing in this window.' });
+  const rules = [quiet('LOOP', 'enforce'), quiet('BUDGET', 'enforce'), quiet('UNREADABLE_WRITE', 'observe'), quiet('CREDENTIAL', 'enforce', 4),
+    { rule_key: 'python-domain-stays-pure', kind: 'layering', mode_now: 'observe', would_refuse: 2, refused: 0, correct: 1, false_alarms: 1, unreviewed: 0, last_seen: NOW, state: 'noisy', recommendation: '1 false alarm(s): keep it observing, or refine the rule, before enforcing it.' }];
+  answer = contract({ '/api/projects/Acme-Billing': { status: 200, body: detailBody('enforce', rules) } });
+  await visit('#/projects/Acme-Billing');
+  out.list = view().split('class="tf-ops-rules')[1].split('</section>')[0];
+""",
+        tmp_path,
+    )
+    rows = re.findall(r'<li class="tf-ops-rule[^"]*" data-state="([a-z_]+)"', out["list"])
+    assert rows == ["noisy", "quiet", "quiet"], "The noisy rule, the quiet rule that refused, then one row for the rest"
+    quiet = out["list"].split('class="tf-ops-rule tf-ops-rule-quiet"', 1)[1]
+    assert 'data-rules="3"' in out["list"] and "3 rules flagged nothing" in quiet
+    for key in ("LOOP", "BUDGET", "UNREADABLE_WRITE"):
+        assert f"rule={key}" in quiet, f"{key} is named, and opens its calls"
+    assert "CREDENTIAL" not in quiet, "A quiet rule that refused keeps its own row"
+    assert "2 enforce and 1 observe" in re.sub(r"<[^>]+>", "", quiet)
+    assert out["list"].count("Enforcing, and it flagged nothing in this window.") == 1, "The boilerplate is said once, not once a rule"
+
+
 # ---------------------------------------------------------------- review keys
 
 
