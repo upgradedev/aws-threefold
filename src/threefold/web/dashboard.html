@@ -2097,7 +2097,7 @@
 .tf-try-head .tf-eyebrow { margin-bottom: 6px; }
 .tf-try-lede { display: none; margin: 8px 0 0; font-size: var(--tf-fs-small); line-height: var(--tf-lh-small); color: var(--tf-text-2); }
 .tf-try-tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 0; }
-.tf-try-restart { display: none; }
+.tf-try .tf-try-restart { display: none; }
 @media (min-width: 640px) { .tf-try-lede { display: block; } }
 
 .tf-try-rail { position: sticky; top: var(--tf-header-h); z-index: 30; margin: 0 -16px; padding: 10px 16px;
@@ -2113,6 +2113,7 @@
 .tf-try-step[data-state="current"] .tf-try-step-text { display: block; }
 .tf-try-step-name { display: block; font: 600 var(--tf-fs-small)/1.25rem var(--tf-font-sans); color: var(--tf-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tf-try-step-note { display: none; }
+@media (max-width: 1023px) { .tf-try-step > .tf-step-num { width: 26px; height: 26px; font-size: 0.6875rem; } }
 
 @media (min-width: 1024px) {
   .tf-try { display: grid; grid-template-columns: 17rem minmax(0, 1fr); gap: 32px; align-items: start; }
@@ -2129,7 +2130,7 @@
   .tf-try-step[data-state="current"] .tf-try-step-name { color: var(--tf-text); }
   .tf-try-step-note { display: block; margin-top: 2px; font: 500 0.75rem/1.125rem var(--tf-font-mono); color: var(--tf-text-3); overflow-wrap: anywhere; }
   .tf-try-step[data-state="current"] .tf-try-step-note { color: var(--tf-accent-text); }
-  .tf-try-restart { display: inline-flex; align-self: flex-start; }
+  .tf-try .tf-try-restart { display: inline-flex; align-self: flex-start; }
 }
 
 .tf-try-stage { display: flex; flex-direction: column; gap: 24px; min-width: 0; box-sizing: border-box; padding: 20px 16px 0;
@@ -2147,15 +2148,20 @@
 .tf-try-visual { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
 .tf-try-foot { margin: 0; max-width: 72ch; font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-3); }
 .tf-try-actions { position: sticky; bottom: 0; z-index: 5; margin: auto -16px 0; padding: 12px 16px 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px;
-  background: var(--tf-surface-1); border-top: 1px solid var(--tf-hairline); border-radius: 0 0 var(--tf-radius-lg) var(--tf-radius-lg); }
+  background: var(--tf-surface-1); border-top: 1px solid var(--tf-hairline); border-radius: 0 0 var(--tf-radius-lg) var(--tf-radius-lg);
+  box-shadow: 0 -16px 24px -18px rgba(0, 0, 0, 0.8); }
 .tf-try-actions .tf-try-primary { flex: 1 1 100%; }
 @media (min-width: 640px) {
   .tf-try-actions { margin: auto -28px 0; padding: 18px 28px 22px; }
   .tf-try-actions .tf-try-primary { flex: 0 0 auto; }
 }
-@media (min-width: 1024px) { .tf-try-actions { position: static; margin: auto -40px 0; padding: 20px 40px 24px; background: transparent; } }
+@media (min-width: 1024px) { .tf-try-actions { margin: auto -40px 0; padding: 18px 40px 22px; } }
 .tf-try-hint { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 0; font-size: 0.75rem; line-height: 1.25rem; color: var(--tf-text-3); }
 .tf-try-muted { color: var(--tf-text-3); font-size: 0.75rem; line-height: 1.125rem; }
+.tf-try-keys { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.tf-try-wait { display: contents; }
+@media (max-width: 639px) { .tf-try-wait { display: none; } }
+@media (hover: none) { .tf-try-keys, .tf-try-verdict .tf-kbd { display: none; } }
 
 .tf-try-avatar { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; flex-shrink: 0; box-sizing: border-box; border-radius: 8px;
   font: 700 0.65rem/1 var(--tf-font-sans); letter-spacing: 0.02em; color: var(--tf-text-2); background: var(--tf-surface-3); border: 1px solid var(--tf-hairline-strong); }
@@ -2175,6 +2181,19 @@
 .tf-try-stat[data-outcome="observed"] .tf-icon { color: var(--tf-observed-text); }
 .tf-try-stat[data-outcome="refused"] .tf-icon { color: var(--tf-refused-text); }
 
+.tf-try-switch { position: relative; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 4px; border-radius: 14px; background: var(--tf-inset); border: 1px solid var(--tf-hairline); }
+.tf-try-switch-knob { position: absolute; top: 4px; bottom: 4px; left: 4px; width: calc(50% - 4px); box-sizing: border-box; border-radius: 10px;
+  background: var(--tf-observed-soft); border: 1px solid var(--tf-observed-line); }
+.tf-try-switch[data-stage="enforce"] .tf-try-switch-knob { left: 50%; background: var(--tf-accent-soft); border-color: var(--tf-accent-line); box-shadow: 0 0 28px -8px rgba(139, 92, 246, 0.7); }
+.tf-try-switch-opt { position: relative; z-index: 1; display: flex; align-items: center; gap: 10px; min-width: 0; padding: 10px 14px; color: var(--tf-text-3); }
+.tf-try-switch-opt .tf-icon { width: 18px; height: 18px; flex-shrink: 0; }
+.tf-try-switch-opt b { display: block; font: 600 0.875rem/1.25rem var(--tf-font-sans); }
+.tf-try-switch-opt small { display: block; font-size: 0.75rem; line-height: 1rem; color: var(--tf-text-3); }
+.tf-try-switch[data-stage="observe"] [data-opt="observe"], .tf-try-switch[data-stage="enforce"] [data-opt="enforce"] { color: var(--tf-text); }
+.tf-try-switch[data-stage="observe"] [data-opt="observe"] .tf-icon { color: var(--tf-observed-text); }
+.tf-try-switch[data-stage="enforce"] [data-opt="enforce"] .tf-icon { color: var(--tf-accent-text); }
+@media (max-width: 479px) { .tf-try-switch-opt small { display: none; } }
+
 .tf-try-flip { display: inline-grid; vertical-align: middle; }
 .tf-try-flip > * { grid-area: 1 / 1; }
 .tf-try-was { display: none; }
@@ -2187,7 +2206,10 @@
 .tf-try-lane-count { margin-left: auto; font: 500 0.75rem/1rem var(--tf-font-mono); color: var(--tf-text-3); }
 .tf-try-lane-empty { margin: 10px 0 0; font-size: 0.75rem; line-height: 1rem; color: var(--tf-text-3); }
 .tf-try-ghosts { display: flex; flex-direction: column; gap: 8px; }
-.tf-try-ghost { display: block; height: 40px; border-radius: 10px; border: 1px dashed var(--tf-hairline-strong); box-sizing: border-box; }
+.tf-try-ghost { display: block; height: 40px; border-radius: 10px; border: 1px dashed rgba(138, 147, 171, 0.3); box-sizing: border-box; }
+@media (max-width: 767px) { .tf-try-ghost:nth-child(n+2) { display: none; } }
+.tf-try-legend { margin: 0; display: flex; flex-wrap: wrap; gap: 8px 20px; font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-3); }
+.tf-try-legend > span { display: inline-flex; align-items: center; gap: 8px; }
 .tf-try-ghost.tf-skeleton { border: 0; }
 .tf-try-calls { position: relative; list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
 .tf-try-calls::before { content: ''; position: absolute; left: 11px; top: 14px; bottom: 14px; width: 1px; background: var(--tf-hairline-strong); }
@@ -2213,6 +2235,7 @@
 .tf-try-flag-top .tf-chip { margin-left: auto; }
 .tf-try-dl { margin: 0; display: flex; flex-direction: column; gap: 10px; }
 .tf-try-dl > div { display: grid; grid-template-columns: 4.5rem minmax(0, 1fr); gap: 10px; align-items: baseline; }
+@media (max-width: 479px) { .tf-try-dl > div { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
 .tf-try-dl dt { font: 600 var(--tf-fs-micro)/1rem var(--tf-font-sans); letter-spacing: var(--tf-track-caps); text-transform: uppercase; color: var(--tf-text-3); }
 .tf-try-dl dd { margin: 0; min-width: 0; font-size: 0.8125rem; line-height: 1.25rem; color: var(--tf-text-2); overflow-wrap: anywhere; }
 .tf-try-file { font: 500 0.8125rem/1.25rem var(--tf-font-mono); color: var(--tf-text); }
@@ -2222,13 +2245,14 @@
 
 .tf-try-review { display: grid; gap: 20px; grid-template-columns: minmax(0, 1fr); align-items: start; }
 @media (min-width: 1180px) { .tf-try-review { grid-template-columns: minmax(0, 1fr) 17rem; gap: 28px; } }
-.tf-try-stack { position: relative; padding-bottom: 14px; min-width: 0; }
-.tf-try-stack::before, .tf-try-stack::after { content: ''; position: absolute; border-radius: var(--tf-radius-lg); background: var(--tf-surface-2); border: 1px solid var(--tf-hairline); }
-.tf-try-stack::before { left: 24px; right: 24px; bottom: 0; top: 16px; opacity: 0.5; }
-.tf-try-stack::after { left: 12px; right: 12px; bottom: 7px; top: 8px; opacity: 0.85; }
+.tf-try-stack { position: relative; min-width: 0; }
+.tf-try-stack { padding-bottom: 20px; }
+.tf-try-stack::before, .tf-try-stack::after { content: ''; position: absolute; border-radius: var(--tf-radius-lg); background: var(--tf-surface-2); border: 1px solid var(--tf-hairline-strong); }
+.tf-try-stack::before { left: 32px; right: 32px; bottom: 0; top: 20px; opacity: 0.45; }
+.tf-try-stack::after { left: 16px; right: 16px; bottom: 10px; top: 10px; opacity: 0.8; }
 .tf-try-stack[data-behind="1"]::before, .tf-try-stack[data-behind="0"]::before, .tf-try-stack[data-behind="0"]::after { display: none; }
 .tf-try-stack[data-behind="0"] { padding-bottom: 0; }
-.tf-try-stack[data-behind="1"] { padding-bottom: 7px; }
+.tf-try-stack[data-behind="1"] { padding-bottom: 10px; }
 .tf-try-card { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 16px; min-width: 0; padding: 20px; box-sizing: border-box;
   background: var(--tf-surface-2); border: 1px solid var(--tf-hairline-strong); border-radius: var(--tf-radius-lg); box-shadow: var(--tf-shadow-2); }
 @media (min-width: 640px) { .tf-try-card { padding: 24px 28px; } }
@@ -2247,7 +2271,12 @@
 .tf-try-verdict .tf-kbd { background: rgba(0, 0, 0, 0.25); border-color: currentColor; color: inherit; opacity: 0.8; }
 .tf-try-verdict[aria-pressed="true"].tf-btn-good, button.tf-try-verdict[aria-pressed="true"].tf-btn-good { background: rgba(14, 165, 114, 0.3); box-shadow: inset 0 0 0 1px var(--tf-approved-text); }
 .tf-try-verdict[aria-pressed="true"].tf-btn-danger, button.tf-try-verdict[aria-pressed="true"].tf-btn-danger { background: rgba(225, 29, 72, 0.3); box-shadow: inset 0 0 0 1px var(--tf-refused-text); }
-@media (max-width: 380px) { .tf-try-verdict .tf-kbd { display: none; } }
+@media (max-width: 480px) {
+  .tf-try-card { padding: 16px; }
+  .tf-try-verdict, button.tf-try-verdict { gap: 6px; padding: 0 8px; font-size: 0.9375rem; }
+  .tf-try-verdict .tf-icon { width: 18px; height: 18px; }
+  .tf-try-verdict .tf-kbd { display: none; }
+}
 .tf-try-card-nav { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 12px; border-top: 1px solid var(--tf-hairline); }
 .tf-try-side-panel { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .tf-try-progress-text { margin: 0; font: 600 0.8125rem/1.25rem var(--tf-font-sans); color: var(--tf-text); }
@@ -2274,8 +2303,9 @@
 .tf-try-tally-marks { display: inline-flex; gap: 3px; flex-shrink: 0; }
 
 .tf-try-states { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; }
+.tf-try-group-note { margin: -4px 0 0; }
 .tf-try-group { margin: 8px 0 0; font: 600 var(--tf-fs-micro)/1rem var(--tf-font-sans); letter-spacing: var(--tf-track-caps); text-transform: uppercase; color: var(--tf-text-3); }
-.tf-try-rules { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; grid-template-columns: minmax(0, 1fr); }
+.tf-try-rules { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 8px; grid-template-columns: minmax(0, 1fr); }
 @media (min-width: 900px) { .tf-try-rules-quiet { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .tf-try-rule { display: flex; align-items: flex-start; gap: 14px; padding: 14px 16px; box-sizing: border-box; height: 100%; cursor: pointer;
   background: var(--tf-inset); border: 1px solid var(--tf-hairline); border-radius: var(--tf-radius-md); transition: border-color var(--tf-dur-2), background-color var(--tf-dur-2); }
@@ -2288,7 +2318,7 @@
 .tf-try-rule-key { font: 500 0.8125rem/1.25rem var(--tf-font-mono); color: var(--tf-text); overflow-wrap: anywhere; }
 .tf-try-rule-top .tf-try-flip { margin-left: auto; }
 .tf-try-bar { display: flex; gap: 3px; height: 8px; max-width: 18rem; }
-.tf-try-bar-seg { display: block; height: 100%; border-radius: 2px; background: var(--tf-track); transform-origin: left center; }
+.tf-try-bar-seg { display: block; flex: 0 1 32px; min-width: 6px; height: 100%; border-radius: 2px; background: var(--tf-track); transform-origin: left center; }
 .tf-try-bar-seg[data-k="correct"] { background: var(--tf-approved); }
 .tf-try-bar-seg[data-k="false_alarm"] { background: var(--tf-refused); }
 .tf-try-bar-seg[data-k="unreviewed"] { background: var(--tf-hairline-strong); }
@@ -2298,6 +2328,7 @@
 .tf-try-compare { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); align-items: start; }
 @media (min-width: 960px) { .tf-try-compare { grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); } }
 .tf-try-then { display: flex; flex-direction: column; gap: 12px; padding: 16px; background: var(--tf-inset); border: 1px solid var(--tf-hairline); border-radius: var(--tf-radius-md); box-shadow: inset 3px 0 0 var(--tf-observed); }
+.tf-try-now-col { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .tf-try-then-label { margin: 0; font: 600 var(--tf-fs-micro)/1rem var(--tf-font-sans); letter-spacing: var(--tf-track-caps); text-transform: uppercase; color: var(--tf-text-3); }
 .tf-try-editor { margin: 0; min-width: 0; overflow: hidden; border-radius: var(--tf-radius-md); border: 1px solid var(--tf-hairline-strong); background: var(--tf-ink-0); }
 .tf-try-editor[data-tone="refused"] { border-color: var(--tf-refused-line); }
@@ -2319,6 +2350,7 @@
 .tf-try-verdict-banner[data-tone="refused"] { border-color: var(--tf-refused-line);
   background: radial-gradient(120% 160% at 0% 0%, rgba(225, 29, 72, 0.26), rgba(225, 29, 72, 0.05) 60%), var(--tf-surface-2); }
 @media (min-width: 640px) { .tf-try-verdict-banner { padding: 22px 24px; gap: 20px; } }
+@media (max-width: 479px) { .tf-try-verdict-banner { flex-direction: column; gap: 12px; } }
 .tf-try-verdict-icon { display: inline-flex; align-items: center; justify-content: center; width: 52px; height: 52px; flex-shrink: 0; border-radius: 16px;
   background: var(--tf-approved-soft); border: 1px solid var(--tf-approved-line); color: var(--tf-approved-text); }
 .tf-try-verdict-banner[data-tone="refused"] .tf-try-verdict-icon { background: var(--tf-refused-soft); border-color: var(--tf-refused-line); color: var(--tf-refused-text); }
@@ -2379,6 +2411,7 @@
 @keyframes tf-try-glow { 0% { box-shadow: 0 0 0 0 rgba(225, 29, 72, 0.55); } 100% { box-shadow: 0 0 0 18px rgba(225, 29, 72, 0); } }
 @keyframes tf-try-pop { 0% { transform: scale(0.4) rotate(-20deg); opacity: 0; } 70% { transform: scale(1.12) rotate(4deg); opacity: 1; } 100% { transform: none; opacity: 1; } }
 @keyframes tf-try-mark { from { background-size: 0% 100%; } to { background-size: 100% 100%; } }
+@keyframes tf-try-slide { from { left: 4px; background: var(--tf-observed-soft); border-color: var(--tf-observed-line); box-shadow: none; } to { left: 50%; } }
 
 @media (prefers-reduced-motion: no-preference) {
   .tf-try-enter .tf-try-stage-head { animation: tf-try-rise 420ms var(--tf-ease-out) both; }
@@ -2392,6 +2425,7 @@
   .tf-try-flipping > .tf-try-now { animation: tf-try-now 520ms var(--tf-ease-spring) both; animation-delay: calc(var(--tf-try-i, 0) * 160ms + 620ms); }
   .tf-try-play .tf-try-bar-seg { animation: tf-try-grow 560ms var(--tf-ease-out) both; animation-delay: calc(var(--tf-try-i, 0) * 160ms + 300ms); }
   .tf-try-ring .tf-try-now .tf-chip { animation: tf-try-ring 1100ms var(--tf-ease-out) 900ms 1 both; }
+  .tf-try-switching .tf-try-switch-knob { animation: tf-try-slide 760ms var(--tf-ease-spring) 200ms both; }
   .tf-try-play .tf-try-verdict-banner { animation: tf-try-slam 560ms var(--tf-ease-out) both, tf-try-glow 1200ms var(--tf-ease-out) 300ms 1; }
   .tf-try-play .tf-try-verdict-icon { animation: tf-try-pop 620ms var(--tf-ease-spring) 180ms both; }
   .tf-try-play .tf-try-climax-grid, .tf-try-play .tf-try-fix { animation: tf-try-rise 480ms var(--tf-ease-out) both; }
@@ -2439,6 +2473,13 @@
       const t = { approved: 0, observed: 0, refused: 0 };
       (rows || []).forEach(r => { t[outcomeOf(r)] += 1; });
       return t;
+    }
+
+    // Oldest first. The ledger lists newest first, so the list is turned over
+    // before it is sorted: two calls recorded in the same instant keep the
+    // order they were recorded in.
+    function tryChronological(rows) {
+      return (rows || []).slice().reverse().sort((a, b) => String(a.timestamp).localeCompare(String(b.timestamp)));
     }
 
     function tryList(words) {
@@ -2505,7 +2546,7 @@
       function rail() {
         const notes = railNotes();
         const shown = Math.min(state.step, 6);
-        return html`<div class="tf-try-rail">
+        return html`<div class="tf-try-rail" id="try-rail">
           <ol class="tf-try-steps" aria-label="Walkthrough steps">
             ${TRY_STEPS.map((label, i) => {
               const n = i + 1;
@@ -2525,7 +2566,7 @@
             <p class="tf-eyebrow">${T.icon('play', 16)}The 60-second walkthrough</p>
             <h1 id="view-title" tabindex="-1" class="tf-try-title">Try the two-stage rollout</h1>
             <p class="tf-try-lede">About a minute, on the public demo: a sandbox project, the calls its rules would have refused, your review, a promotion, and the same kind of call refused for real.</p>
-            <p class="tf-try-tags"><span class="tf-chip tf-chip-sky">${T.icon('flask', 13)}Synthetic sandbox</span><span class="tf-chip tf-chip-gray">${T.icon('lock', 13)}No account</span></p>
+            ${state.who && state.who.reads_public === false ? '' : html`<p class="tf-try-tags"><span class="tf-chip tf-chip-sky">${T.icon('flask', 13)}Synthetic sandbox</span><span class="tf-chip tf-chip-gray">${T.icon('lock', 13)}No account</span></p>`}
           </div>
           ${rail()}
           ${state.project && state.step > 1 ? html`<button type="button" class="tf-link-btn tf-try-restart" data-action="try-restart">${T.icon('refresh', 14)}Start again with a new sandbox</button>` : ''}
@@ -2556,6 +2597,14 @@
         return html`<span class="tf-try-stat" data-outcome="${outcome}">${T.icon(tryOutcomeIcon(outcome), 14)}<b>${num(value)}</b>${word}</span>`;
       }
 
+      function legend() {
+        return html`<p class="tf-try-legend">
+          <span>${T.statusChip('approved')}ran; nothing flagged it</span>
+          <span>${T.statusChip('observed')}ran; a rule in Observe flagged it</span>
+          <span>${T.statusChip('refused')}stopped before it ran</span>
+        </p>`;
+      }
+
       function callItem(r, i) {
         const o = outcomeOf(r);
         const target = targetOf(r);
@@ -2572,7 +2621,7 @@
       // ledger recorded them. Before there are any, the lanes are drawn empty.
       function lanes(calls, play) {
         const ready = Array.isArray(calls);
-        const sorted = ready ? calls.slice().sort((a, b) => String(a.timestamp).localeCompare(String(b.timestamp))) : [];
+        const sorted = ready ? tryChronological(calls) : [];
         const agents = TRY_AGENTS.slice();
         sorted.forEach(r => { if (agents.indexOf(r.agent) === -1) agents.push(r.agent); });
         return html`<div class="tf-try-lanes${play.arrive ? ' tf-try-play' : ''}">
@@ -2596,6 +2645,7 @@
             title: 'Make a sandbox project',
             sentence: 'The stack creates a project of your own, in Observe, and sends about a dozen synthetic tool calls from Claude Code, Codex and Antigravity through the real evaluator.',
             visual: html`${lanes(null, play)}
+              ${legend()}
               ${state.resume ? html`<div class="tf-callout tf-callout-accent">${T.icon('clock', 18)}<div class="tf-callout-body"><p>You started one earlier: <span class="tf-mono tf-try-strong">${state.resume}</span>. <button type="button" class="tf-link" data-action="try-resume">Continue with it</button> or make a new one.</p></div></div>` : ''}`,
             foot: 'Its stage expires within a day, and the project then drops out of the overview and the project list; the calls and the labels stay in the public call lists for 30 days.',
             actions: primary('try-create', 'Make my sandbox', 'Making your sandbox…')
@@ -2606,10 +2656,11 @@
         const shortRead = calls && typeof state.seeded === 'number' && calls.length < state.seeded;
         return {
           kicker: 'Step 1 of 5 · done',
-          title: state.seeded !== null ? plural(state.seeded, 'call') + ' arrived' : 'Your sandbox is ready',
+          title: state.seeded !== null ? plural(state.seeded, 'call') + ' arrived' : calls && calls.length ? plural(calls.length, 'call') + ' in your sandbox' : 'Your sandbox is ready',
           sentence: html`<span class="tf-mono tf-try-strong">${state.project}</span> ${state.seeded !== null ? html`received ${plural(state.seeded, 'call')}` : 'is ready'}. Every call was judged and recorded, and nothing was refused: the project is in Observe.`,
           visual: html`${projectBar(calls ? html`${stat('approved', t.approved, 'approved')}${stat('observed', t.observed, 'would refuse')}${stat('refused', t.refused, 'refused')}` : '')}
             ${lanes(calls, play)}
+            ${legend()}
             ${shortRead ? html`<p class="tf-try-muted">The list read back ${num(calls.length)} of the ${num(state.seeded)} so far: the ledger can lag a moment behind a write, and the next step reads it again.</p>` : ''}
             ${!calls && state.callsError ? html`<p class="tf-try-muted">The calls were recorded, but the list could not be read just now (${state.callsError.message || 'no answer'}). The next step reads it again.</p>` : ''}`,
           actions: primary('try-show', 'Show what would be refused', 'Reading the ledger…')
@@ -2729,11 +2780,13 @@
         return {
           kicker: 'Step 3 of 5',
           title: total && done ? 'Every call has a label' : 'Was the rule right?',
-          sentence: 'Mark each call Correct if the rule was right, or False alarm if the call should run. One of them is a false alarm: spot it.',
+          sentence: total && done
+            ? 'You marked ' + plural(labelCounts().correct, 'call') + ' correct and ' + plural(labelCounts().false_alarm, 'call') + ' a false alarm. Each rule now reads its state from those labels.'
+            : 'Mark each call Correct if the rule was right, or False alarm if the call should run. One of them is a false alarm: spot it.',
           visual: total ? reviewBoard(play) : emptyNote('No call in the sandbox was flagged by an observing rule, so there is nothing to label. Promote anyway to see a rule refuse.'),
           actions: done
             ? primary('try-readiness', 'See what that did', 'Reading readiness…')
-            : html`${primary('try-readiness', 'See what that did', null, true)}<p class="tf-try-hint">Label every call to continue. Keys: ${T.kbd('C')} correct ${T.kbd('F')} false alarm ${T.kbd('←')}${T.kbd('→')} move</p>`
+            : html`<span class="tf-try-wait">${primary('try-readiness', 'See what that did', null, true)}</span><p class="tf-try-hint">${num(labelledCount())} of ${num(total)} labelled. Label every call to continue.<span class="tf-try-keys"> Keys: ${T.kbd('C')} correct ${T.kbd('F')} false alarm ${T.kbd('←')}${T.kbd('→')} move</span></p>`
         };
       }
 
@@ -2743,7 +2796,7 @@
           : html`<span class="tf-chip tf-chip-amber">${T.icon('eye', 13)}Keeps observing</span>`;
       }
 
-      function ruleRow(r, i, play) {
+      function ruleRow(r, i, play, quietWords) {
         const count = v => (typeof v === 'number' && v > 0 ? v : 0);
         const was = state.before && state.before[r.rule_key];
         const flip = !!(play.flip && was && was !== r.state);
@@ -2763,11 +2816,20 @@
               <span class="tf-try-flip${flip ? ' tf-try-flipping' : ''}">${flip ? html`<span class="tf-try-was" aria-hidden="true">${stateChip(was)}</span>` : ''}<span class="tf-try-now">${stateChip(r.state)}</span></span>
               ${mode ? modeChip(mode) : ''}
             </span>
-            ${flagged ? html`<span class="tf-try-bar" aria-hidden="true">${segs.map(k => html`<span class="tf-try-bar-seg" data-k="${k}" style="flex:1 1 0"></span>`)}</span>
+            ${flagged ? html`<span class="tf-try-bar" aria-hidden="true">${segs.map(k => html`<span class="tf-try-bar-seg" data-k="${k}"></span>`)}</span>
               <span class="tf-try-rule-counts">${plural(flagged, 'flag')}: ${num(correct)} correct · ${plural(alarms, 'false alarm')}${open ? ' · ' + num(open) + ' without a label' : ''}</span>` : ''}
-            <span class="tf-try-rule-rec">${r.recommendation || (STATES[r.state] || {}).says || ''}</span>
+            ${quietWords ? '' : html`<span class="tf-try-rule-rec">${r.recommendation || (STATES[r.state] || {}).says || ''}</span>`}
           </span>
         </label></li>`;
+      }
+
+      function stageSwitch(animate) {
+        const enforce = !!(state.promoted && state.promoted.stage === 'enforce');
+        return html`<div class="tf-try-switch${animate && enforce ? ' tf-try-switching' : ''}" data-stage="${enforce ? 'enforce' : 'observe'}" role="img" aria-label="The project's stage: ${enforce ? 'Enforce' : 'Observe'}">
+          <span class="tf-try-switch-knob"></span>
+          <span class="tf-try-switch-opt" data-opt="observe">${T.icon('eye', 18)}<span><b>Observe</b><small>judges and records; refuses nothing</small></span></span>
+          <span class="tf-try-switch-opt" data-opt="enforce">${T.icon('shield', 18)}<span><b>Enforce</b><small>refuses a call that breaks a rule in force</small></span></span>
+        </div>`;
       }
 
       function screenPromote(play) {
@@ -2778,6 +2840,9 @@
         const quiet = rules.filter(r => flagged.indexOf(r) === -1);
         let k = 0;
         const row = r => ruleRow(r, k++, play);
+        const quietSays = Array.from(new Set(quiet.map(r => r.recommendation || (STATES[r.state] || {}).says || '')));
+        const quietWords = quiet.length > 1 && quietSays.length === 1 ? quietSays[0] : '';
+        const quietRow = r => ruleRow(r, k++, play, quietWords);
         const byState = ['ready', 'noisy', 'needs_review', 'quiet']
           .map(s => [s, rules.filter(r => r.state === s).length]).filter(([, n]) => n > 0);
         const p = state.promoted;
@@ -2791,9 +2856,10 @@
               ? (noisy === 1 ? 'The rule with a false alarm is Noisy and stays' : 'The rules with false alarms are Noisy and stay') + ' in Observe, where it records and refuses nothing.'
               : 'No rule is Noisy: you marked every flag correct. An unchecked rule keeps observing.'),
           visual: html`${projectBar(html`<span class="tf-try-states">${byState.map(([s, n]) => html`<span class="tf-try-stat">${stateChip(s)}<b>${num(n)}</b></span>`)}</span>`, !!play.promote)}
+            ${stageSwitch(!!play.promote)}
             <div class="${play.flip ? 'tf-try-play' : ''}">
               ${flagged.length ? html`<ul class="tf-try-rules">${flagged.map(row)}</ul>` : ''}
-              ${quiet.length ? html`<p class="tf-try-group">Flagged nothing here</p><ul class="tf-try-rules tf-try-rules-quiet">${quiet.map(row)}</ul>` : ''}
+              ${quiet.length ? html`<p class="tf-try-group">Flagged nothing here</p>${quietWords ? html`<p class="tf-try-rule-rec tf-try-group-note">${quietWords}</p>` : ''}<ul class="tf-try-rules tf-try-rules-quiet">${quiet.map(quietRow)}</ul>` : ''}
               ${rules.length ? '' : emptyNote('The service returned no rules for this project.')}
             </div>`,
           actions: p
@@ -2843,7 +2909,7 @@
           title: 'Send the same kind of call again',
           sentence: 'As a hook would: origin hook, agent Claude Code, to your sandbox, now in Enforce. This time the rule in force refuses it, and Amazon Bedrock explains why.',
           visual: plan
-            ? html`${projectBar()}<div class="tf-try-compare">${earlier}${editor(plan, 'pending')}</div>`
+            ? html`${projectBar()}<div class="tf-try-compare">${earlier}<div class="tf-try-now-col"><p class="tf-try-then-label">Now, in Enforce · sent as a hook would</p>${editor(plan, 'pending')}</div></div>`
             : emptyNote('There is no call to send yet: promote the project first.'),
           actions: plan ? primary('try-send', 'Send it', 'Sending…') : primary('try-restart', 'Start again')
         };
@@ -2916,7 +2982,8 @@
         const calls = Array.isArray(state.calls) ? state.calls : null;
         const seeded = typeof state.seeded === 'number' ? state.seeded : (calls ? calls.length : null);
         const flagged = state.observed.length;
-        const agents = calls ? Array.from(new Set(calls.map(r => r.agent))).map(agentLabel) : [];
+        const rank = a => { const i = TRY_AGENTS.indexOf(a); return i === -1 ? TRY_AGENTS.length : i; };
+        const agents = calls ? Array.from(new Set(calls.map(r => r.agent))).sort((a, b) => rank(a) - rank(b)).map(agentLabel) : [];
         facts.push(seeded !== null
           ? {
             figure: num(seeded), label: seeded === 1 ? 'call judged in Observe' : 'calls judged in Observe',
@@ -3001,7 +3068,7 @@
         const s = screen(play);
         ctx.render(html`<div class="tf-try" data-step="${state.step}">
           ${side()}
-          <section class="tf-card tf-try-stage${play.enter ? ' tf-try-enter' : ''}" data-tone="${s.tone || ''}" aria-labelledby="try-step-title">
+          <section id="try-stage" class="tf-card tf-try-stage${play.enter ? ' tf-try-enter' : ''}" data-tone="${s.tone || ''}" aria-labelledby="try-step-title">
             <header class="tf-try-stage-head">
               <p class="tf-try-kicker">${s.kicker}</p>
               <h2 id="try-step-title" tabindex="-1" class="tf-try-h2">${s.title}</h2>
@@ -3014,13 +3081,30 @@
           </section>
         </div>`);
         if (!ctx.alive()) return;
-        if (play.enter && typeof window.scrollTo === 'function') { try { window.scrollTo(0, 0); } catch (err) { /* no scroll */ } }
+        if (play.enter) scrollToStage();
         const id = state.focusId;
         state.focusId = null;
         if (id) {
           const node = document.getElementById(id);
           if (node && typeof node.focus === 'function' && !node.disabled) { try { node.focus({ preventScroll: true }); } catch (err) { /* focus is a courtesy */ } }
         }
+      }
+
+      // A new step starts at the top of the stage: on a desk that is the top of
+      // the page, and on a phone the stage's title just under the sticky rail.
+      function scrollToStage() {
+        if (typeof window.scrollTo !== 'function') return;
+        let y = 0;
+        try {
+          const narrow = typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 1023px)').matches;
+          const stageEl = document.getElementById('try-stage');
+          const railEl = document.getElementById('try-rail');
+          if (narrow && stageEl && typeof stageEl.getBoundingClientRect === 'function' && railEl && typeof railEl.getBoundingClientRect === 'function') {
+            const top = stageEl.getBoundingClientRect().top + (window.scrollY || 0);
+            y = Math.max(0, Math.round(top - 56 - railEl.getBoundingClientRect().height - 12));
+          }
+        } catch (err) { y = 0; }
+        try { window.scrollTo(0, y); } catch (err) { /* no scroll */ }
       }
 
       // A new step: the stage animates in, the page returns to its top, and
@@ -3035,7 +3119,7 @@
         state.busy = false;
         state.error = T.isAuthError(err)
           ? (doing === 'create' ? 'This stack does not let visitors make a sandbox (HTTP ' + err.status + '). The walkthrough runs on the public demo.' : 'The stack refused (HTTP ' + err.status + '): a sandbox is open to anyone only on the public demo.')
-          : 'That did not work: ' + err.message + '. Try again.';
+          : 'That did not work: ' + String((err && err.message) || 'no answer').replace(/[.\s]+$/, '') + '. Try again.';
         state.focusId = 'try-primary';
         draw();
       }
@@ -3058,8 +3142,7 @@
           state.before = {};
           readinessRules().forEach(r => { state.before[r.rule_key] = r.state; });
           // Oldest first, the order they arrived in on step 1.
-          state.observed = (list && Array.isArray(list.items) ? list.items : []).slice()
-            .sort((a, b) => String(a.timestamp).localeCompare(String(b.timestamp)));
+          state.observed = tryChronological(list && Array.isArray(list.items) ? list.items : []);
           state.labels = {};
           state.observed.forEach(r => { if (r.review === 'correct' || r.review === 'false_alarm') state.labels[r.verdict_id] = r.review; });
           const first = state.observed.findIndex(r => !state.labels[r.verdict_id]);
