@@ -3395,29 +3395,43 @@ def _analyse_into(text: str, state: _State) -> None:
 # `$null` is an ordinary variable, empty unless something gave it a value, and
 # a redirect to an empty name writes nothing. So a redirect to `$null` is read
 # as the null device only when nothing in the command could have given that
-# variable a value: the name appears nowhere else once quotes and escapes are
-# taken out, and every command the command runs, however deep, has a name that
-# can be read before it runs and is none of the builtins that assign a
-# variable by a name they are handed or run a file that could. Otherwise it
-# stays what every other expansion is, a write whose target cannot be read. A
-# value the shell inherited from its environment is not seen here; no shell
-# sets a variable called null of its own accord.
+# variable a value, which is decided narrowly, because bash has many ways to
+# assign a name it is handed and a check that missed one would approve a write
+# the gate used to refuse:
+# - the name appears nowhere else once quotes and escapes are taken out;
+# - no other expansion could make code or a name: no `$(...)`, backquote,
+#   `${...}` (whose `:=` and `!` assign and point) or `((...))`; a plain `$x`
+#   or PowerShell's `$_` assigns nothing by itself;
+# - every command the command runs, however deep, has a name that can be read
+#   before it runs, is none of the builtins that assign a variable by a name
+#   they are handed or run code they are handed (`eval`, `read`, `trap`, ...),
+#   and is not a POSIX shell, which reads `BASH_ENV`, `ENV` or its rc files
+#   before its script.
+# Otherwise it stays what every other expansion is, a write whose target cannot
+# be read. What is left is arithmetic, such as an array subscript `a[$x$y=5]`,
+# which can give the variable only a number, so the file it names is `5` where
+# the command stands. A value the shell inherited from its environment is not
+# seen here; no shell sets a variable called null of its own accord.
 _NULL_REDIRECT_ANYWHERE = re.compile(r"(?i)>[ \t]*\$(?:null|\{null\})(?![A-Za-z0-9_])")
 _NULL_REDIRECT = re.compile(r"(?i)(>[ \t]*)\$(?:null|\{null\})(?=$|[\s;&|)])")
 _NULL_REFERENCE = re.compile(r"(?i)\$(?:null|\{null\})(?![A-Za-z0-9_])|/dev/null")
 _NULL_NAME = re.compile(r"(?i)(?<![A-Za-z0-9_-])null(?![A-Za-z0-9_])")
 _QUOTING = re.compile(r"\$(?=['\"])|['\"\\`]")
+_MAKES_CODE_OR_A_NAME = re.compile(r"\$\(|`|\$\{|\(\(")
 _ASSIGNS_A_NAME = frozenset((
     "eval", "declare", "typeset", "export", "local", "readonly", "read", "printf", "mapfile", "readarray",
-    "getopts", "let", "source", ".", "for", "select", "set", "set-variable", "new-variable", "sv", "nv",
+    "getopts", "let", "source", ".", "for", "select", "set", "trap", "alias", "wait", "compgen", "enable",
+    "coproc", "set-variable", "new-variable", "sv", "nv",
 ))
+_POSIX_SHELLS = frozenset(("sh", "bash", "dash", "zsh", "ksh", "mksh", "ash", "yash", "posh", "busybox"))
 
 
 def _null_is_the_device(command: str, cwd: str) -> bool:
     """Whether a redirect to `$null` in this command can only be PowerShell's null device."""
     if not _NULL_REDIRECT_ANYWHERE.search(command):
         return False
-    if _NULL_NAME.search(_QUOTING.sub("", _NULL_REFERENCE.sub("", command))):
+    rest = _NULL_REFERENCE.sub("", command)
+    if _MAKES_CODE_OR_A_NAME.search(rest) or _NULL_NAME.search(_QUOTING.sub("", rest)):
         return False
     budget = _Budget()
     first = ShellAnalysis()
@@ -3427,7 +3441,8 @@ def _null_is_the_device(command: str, cwd: str) -> bool:
     for argv in first.commands:
         if not argv:
             continue
-        if is_opaque(argv[0]) or BACKSLASH in argv[0] or program_name(argv[0]) in _ASSIGNS_A_NAME:
+        name = program_name(argv[0])
+        if is_opaque(argv[0]) or BACKSLASH in argv[0] or name in _ASSIGNS_A_NAME or name in _POSIX_SHELLS:
             return False
     return True
 

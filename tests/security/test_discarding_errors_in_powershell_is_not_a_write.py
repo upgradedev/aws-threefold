@@ -34,6 +34,7 @@ READS = [
     "Get-ChildItem -Recurse -Filter *.cs 2>$null | Select-Object -First 5",
     "rg x 2>$null | Out-Null",
     "pwsh -Command 'rg x 2>$null'",
+    "Get-ChildItem -File | ForEach-Object { $_.FullName } 2>$null",
 ]
 
 STILL_REFUSED = [
@@ -52,6 +53,18 @@ STILL_REFUSED = [
     "for null in src/domain/user.py; do echo 'import boto3' > $null; done",
     ". ./env.sh; echo 'import boto3' > $null",
     "sourc? env.sh; echo 'import boto3' > $null",
+    # Ways bash gives a name a value it is handed. On 2026-09-26 the two traps,
+    # the indirect default, BASH_ENV, --rcfile and an alias (with
+    # expand_aliases on) each did so in a real bash; ENV and a login shell are
+    # refused because they read a file first, whether or not this one sets it.
+    'x=u; trap "n${x}ll=src/domain/user.py" DEBUG; echo "import boto3" > $null',
+    "trap 'eval nu\"\"ll=src/domain/user.py' DEBUG; echo 'import boto3' > $null",
+    'x=u; y=n${x}ll; : ${!y:=src/domain/user.py}; echo "import boto3" > $null',
+    "BASH_ENV=./env.sh bash -c 'echo import boto3 > $null'",
+    "ENV=./env.sh sh -c 'echo import boto3 > $null'",
+    "bash --rcfile ./env.sh -ic 'echo import boto3 > $null'",
+    "bash -lc 'echo import boto3 > $null'",
+    "alias x='eval nu\"\"ll=src/domain/user.py'; echo 'import boto3' > $null",
     # Not `$null` at all.
     "echo 'import boto3' > $null.py",
     "echo 'import boto3' > $nullx",
