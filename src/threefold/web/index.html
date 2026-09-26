@@ -182,17 +182,39 @@
     .tf-proof-live { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--tf-space-2); }
     @media (min-width: 640px) { .tf-proof-live { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
     .tf-proof-live > .tf-state, .tf-proof-live > .tf-proof-note { grid-column: 1 / -1; }
+    /* On a phone each tile is one row: the number, then what it means, then the
+       way to its rows; a trend line, when there is one, sits under the words. */
+    @media (max-width: 639px) {
+      .tf-proof-live { gap: var(--tf-space-1); }
+      .tf-proof-live .tf-tile {
+        display: grid; grid-template-columns: minmax(3.5rem, auto) minmax(0, 1fr) auto; column-gap: 14px; row-gap: 2px; align-items: center; padding: 14px 16px;
+        grid-template-areas: "value label more" "value sub more" "value spark more";
+      }
+      .tf-proof-live .tf-tile-row { display: contents; }
+      .tf-proof-live .tf-tile-value { grid-area: value; }
+      .tf-proof-live .tf-tile-label { grid-area: label; }
+      .tf-proof-live .tf-tile-sub { grid-area: sub; }
+      .tf-proof-live .tf-tile-spark { grid-area: spark; justify-self: start; margin-top: 4px; }
+      .tf-proof-live .tf-tile-more { grid-area: more; margin: 0; padding: 0; gap: 0; font-size: 0; }
+      .tf-proof-live .tf-tile-more .tf-icon { width: 16px; height: 16px; }
+    }
     .tf-proof-note { display: flex; flex-direction: column; justify-content: center; gap: 8px; padding: 20px; }
     .tf-proof-note p { margin: 0; }
     .tf-proof-note .tf-link { align-self: flex-start; font-size: 0.8125rem; line-height: 1.25rem; }
-    .tf-proof-where { display: flex; gap: 10px; margin: var(--tf-space-2) 0 0; max-width: 64rem; font-size: 0.8125rem; line-height: 1.3125rem; color: var(--tf-text-3); }
-    .tf-proof-where .tf-icon { width: 16px; height: 16px; margin-top: 2px; color: var(--tf-info-text); }
+    /* Where the counts come from, right under the three tiles it describes. */
+    .tf-proof-where { display: flex; gap: 10px; margin: 0 0 var(--tf-space-1); max-width: 64rem; font-size: 0.8125rem; line-height: 1.3125rem; color: var(--tf-text-3); }
+    .tf-proof-where .tf-icon { width: 16px; height: 16px; margin-top: 2px; flex-shrink: 0; color: var(--tf-info-text); }
     .tf-proof-where strong { color: var(--tf-text-2); font-weight: 600; }
-    .tf-proof-links { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: var(--tf-space-1h) 0 0; font-size: 0.75rem; color: var(--tf-text-3); }
+    .tf-proof-links { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 0; font-size: 0.75rem; color: var(--tf-text-3); }
+    #proof .tf-sec-row { margin-bottom: 20px; }
+    #proof .tf-sec-head { gap: var(--tf-space-1); }
     .tf-bench { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; padding: 18px 18px 16px; min-width: 0; }
     @media (min-width: 900px) { .tf-bench { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 48px; align-items: center; padding: 24px; } }
     .tf-bench-main, .tf-bench-chart { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
-    .tf-bench-chart .tf-pane-label { margin: 0; }
+    .tf-bench-label { display: flex; flex-direction: column; gap: 2px; }
+    .tf-bench .tf-bench-label p { margin: 0; }
+    .tf-bench .tf-bench-label .tf-bench-label-main { font-weight: 600; color: var(--tf-text); }
+    .tf-bench .tf-bench-label .tf-bench-label-sub { font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-3); }
     .tf-bench-head { display: flex; align-items: flex-start; gap: 6px; font: 500 var(--tf-fs-small)/1.25rem var(--tf-font-sans); color: var(--tf-text-2); }
     .tf-bench-head .tf-icon { width: 16px; height: 16px; margin-top: 2px; color: var(--tf-text-3); }
     .tf-bench-value { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
@@ -452,9 +474,16 @@
          One clause says where the counts come from, once, where a reader first
          meets them. Where nothing is measured, the strip says so. -->
     <section id="proof" aria-labelledby="proof-title">
-      <div class="tf-sec-head">
-        <p class="tf-eyebrow"><span data-tf-icon="chart"></span>Proof</p>
-        <h2 id="proof-title" class="tf-h2">At work on this stack, and measured in a benchmark</h2>
+      <div class="tf-sec-row">
+        <div class="tf-sec-head">
+          <p class="tf-eyebrow"><span data-tf-icon="chart"></span>Proof</p>
+          <h2 id="proof-title" class="tf-h2">At work on this stack, and measured in a benchmark</h2>
+        </div>
+        <p class="tf-proof-links">Read as this page loaded, from
+          <a class="tf-spec-link" href="swagger.html#/default/get_api_overview" data-tf-page="swagger.html#/default/get_api_overview" title="Open this operation in the published OpenAPI document">GET /api/overview</a>
+          and
+          <a class="tf-spec-link" href="swagger.html#/default/get_proof_json" data-tf-page="swagger.html#/default/get_proof_json" title="Open this operation in the published OpenAPI document">GET /proof.json</a>
+        </p>
       </div>
       <div class="tf-proof-grid">
         <div id="proof-live" class="tf-proof-live" aria-busy="true">
@@ -462,6 +491,7 @@
           <div class="tf-card tf-tile" aria-hidden="true"><span class="tf-skeleton tf-skeleton-line" style="width:45%"></span><span class="tf-skeleton" style="height:32px;width:30%"></span><span class="tf-skeleton tf-skeleton-line" style="width:65%"></span></div>
           <div class="tf-card tf-tile" aria-hidden="true"><span class="tf-skeleton tf-skeleton-line" style="width:60%"></span><span class="tf-skeleton" style="height:32px;width:35%"></span><span class="tf-skeleton tf-skeleton-line" style="width:75%"></span></div>
         </div>
+        <p id="proof-where" class="tf-proof-where" hidden></p>
         <div id="proof-bench" class="tf-card tf-bench" aria-busy="true">
           <span class="tf-skeleton tf-skeleton-line" style="width:70%" aria-hidden="true"></span>
           <span class="tf-skeleton" style="height:32px;width:40%" aria-hidden="true"></span>
@@ -469,12 +499,6 @@
           <span class="tf-skeleton tf-skeleton-line" style="width:80%" aria-hidden="true"></span>
         </div>
       </div>
-      <p id="proof-where" class="tf-proof-where" hidden></p>
-      <p class="tf-proof-links">Read as this page loaded, from
-        <a class="tf-spec-link" href="swagger.html#/default/get_api_overview" data-tf-page="swagger.html#/default/get_api_overview" title="Open this operation in the published OpenAPI document">GET /api/overview</a>
-        and
-        <a class="tf-spec-link" href="swagger.html#/default/get_proof_json" data-tf-page="swagger.html#/default/get_proof_json" title="Open this operation in the published OpenAPI document">GET /proof.json</a>
-      </p>
     </section>
 
     <!-- HOW IT WORKS. The three steps, the flow they make, the two-stage rollout,
@@ -584,7 +608,7 @@
         <ol class="tf-track">
           <li class="tf-stage tf-stage-observe">
             <span class="tf-stage-name"><span data-tf-icon="eye"></span>Observe</span>
-            <p>Every call is judged and recorded; nothing is refused. What a rule would have stopped is kept for review.</p>
+            <p>Every call is judged and recorded, and the service refuses none of them yet. What a rule would have stopped is kept for review.</p>
           </li>
           <li class="tf-stage tf-stage-review">
             <span class="tf-stage-name"><span data-tf-icon="inbox"></span>Review</span>
@@ -1961,9 +1985,11 @@
         return;
       }
       if (calls === 0) {
+        // Said as of the moment the page asked: the demonstration above may have
+        // added the first call since, and it is counted from the next visit.
         proofState(strip, 'sparkles', 'Nothing judged here yet',
-          'This stack has judged no call in the last ' + plural(days, 'day', 'days') + ', so there is nothing to count yet.',
-          h`<a class="tf-link" href="${T.pageHref('dashboard.html#/try')}">Be the first: watch it stop a bad write</a>`);
+          'When this page asked, this stack had judged no call in the last ' + plural(days, 'day', 'days') + ', so there was nothing to count.',
+          h`<a class="tf-link" href="${T.pageHref('dashboard.html#/try')}">Watch it stop a bad write, step by step</a>`);
         return;
       }
       const rows = Array.isArray(data.series) ? data.series.filter(r => r && typeof r === 'object' && typeof r.day === 'string') : [];
@@ -1972,50 +1998,57 @@
         : (wholeNumber(r[key]) || 0));
       const span = 'the last ' + plural(days, 'day', 'days');
       // A trend line only where there is a trend: two days or more with a count.
-      // Otherwise the sub-line says what the window holds.
+      // Otherwise the sub-line says what the window holds. Each sub-line is what
+      // the number means, in a few words, and the window is named once, on the
+      // first tile; the words a reader needs, never the API's field names.
       const trend = (key, label, color, total, meaning) => {
         const values = daily(key);
         const active = values.filter(v => v > 0).length;
         if (total === 0) return { spark: null, sub: 'none in ' + span };
-        const lead = meaning ? meaning + ', ' : '';
-        if (active >= 2) return { spark: T.sparkline(values, { label: label, labels: rows.map(r => T.shortDay(r.day)), color: color }), sub: lead + 'in ' + span };
-        if (active === 1) return { spark: null, sub: lead + 'all on ' + T.shortDay(rows[values.findIndex(v => v > 0)].day) + ', in ' + span };
-        return { spark: null, sub: lead + 'in ' + span };
+        if (active === 1) return { spark: null, sub: meaning + ', all on ' + T.shortDay(rows[values.findIndex(v => v > 0)].day) };
+        const spark = active >= 2 ? T.sparkline(values, { label: label, labels: rows.map(r => T.shortDay(r.day)), color: color }) : null;
+        return { spark: spark, sub: meaning };
       };
-      const judged = trend('calls', 'Calls judged per day', T.COLORS.accent, calls, '');
+      const judged = trend('calls', 'Calls judged per day', T.COLORS.accent, calls, 'in ' + span);
       const stopped = trend('refused', 'Calls stopped per day', T.COLORS.refused, refused, 'refused before they ran');
       const observed = trend('observed', 'Calls that would have been stopped, per day', T.COLORS.observed, wouldRefuse, 'recorded while a project observes');
       const href = params => T.pageHref('dashboard.html#/calls' + T.query(Object.assign({ days: days }, params)));
       T.setHtml(strip, h`
-        ${T.statTile({ label: 'Calls judged', metric: 'calls', value: calls, icon: 'shield', sub: judged.sub, term: 'totals.calls', spark: judged.spark, href: href({}), opens: 'Open the calls' })}
-        ${T.statTile({ label: 'Stopped', metric: 'refused', value: refused, icon: 'stop', sub: stopped.sub, term: 'totals.refused', spark: stopped.spark, href: href({ kind: 'refused' }), opens: 'Open what was stopped' })}
-        ${T.statTile({ label: 'Would have been stopped', metric: 'would_refuse', value: wouldRefuse, icon: 'eye', sub: observed.sub, term: 'totals.would_refuse', spark: observed.spark, href: href({ kind: 'observed' }), opens: 'Open what was observed' })}`);
+        ${T.statTile({ label: 'Calls judged', metric: 'calls', value: calls, icon: 'shield', sub: judged.sub, spark: judged.spark, href: href({}), opens: 'Open the calls' })}
+        ${T.statTile({ label: 'Stopped', metric: 'refused', value: refused, icon: 'stop', sub: stopped.sub, spark: stopped.spark, href: href({ kind: 'refused' }), opens: 'Open what was stopped' })}
+        ${T.statTile({ label: 'Would have been stopped', metric: 'would_refuse', value: wouldRefuse, icon: 'eye', sub: observed.sub, spark: observed.spark, href: href({ kind: 'observed' }), opens: 'Open what was observed' })}`);
       T.animateNumbers(strip);
       T.setHtml(where, h`${T.icon('info', 16)}<span>${sourcesSentence(data, calls)}</span>`);
       where.hidden = false;
     }
 
     // Where the counts come from, in one sentence: by source when the stack says
-    // (sources, from the fleet's contract), by sandbox when it says only that
-    // (sandbox_split), and in words alone when it says neither.
+    // (sources, from the fleet's contract) and its parts add up to the calls
+    // counted beside them, by sandbox when it says only that (sandbox_split),
+    // and in words alone when it says neither. Parts read over another window,
+    // or parts that add up to nothing, would contradict the tiles, so they are
+    // not used.
     function sourcesSentence(data, calls) {
       const h = T.html;
       const end = ' They show the stack at work, not how widely Threefold is used.';
       const s = data.sources && typeof data.sources === 'object' ? data.sources : null;
       const part = (v) => v && typeof v === 'object' ? wholeNumber(v.calls) : null;
-      if (s && part(s.fleet) !== null && part(s.sandbox) !== null && part(s.other) !== null) {
+      const fleet = s ? part(s.fleet) : null;
+      const sandbox = s ? part(s.sandbox) : null;
+      const other = s ? part(s.other) : null;
+      if (fleet !== null && sandbox !== null && other !== null && calls > 0 && fleet + sandbox + other === calls) {
         const pieces = [];
-        if (part(s.fleet)) pieces.push(formatCount(part(s.fleet)) + ' from a synthetic Acme fleet that sends its calls through the real gates');
-        if (part(s.sandbox)) pieces.push(formatCount(part(s.sandbox)) + ' from sandboxes visitors started');
-        if (part(s.other)) pieces.push(formatCount(part(s.other)) + ' from the service’s own probes, the demos on this page and anyone else calling its open API');
-        return h`<strong>Where they come from:</strong> of ${plural(calls, 'call', 'calls')} on this public demo stack, ${pieces.join('; ')}.${end}`;
+        if (fleet) pieces.push(formatCount(fleet) + ' from a synthetic Acme fleet that sends its calls through the real gates');
+        if (sandbox) pieces.push(formatCount(sandbox) + ' from sandboxes visitors started');
+        if (other) pieces.push(formatCount(other) + ' from the service’s own probes, the demos on this page and anyone else calling its open API');
+        return h`<strong>Where they come from:</strong> of ${plural(calls, 'call', 'calls')} on this stack, ${pieces.join('; ')}.${end}`;
       }
       const split = data.sandbox_split && typeof data.sandbox_split === 'object' ? data.sandbox_split : null;
       const inSandboxes = split ? part(split.sandbox) : null;
-      if (inSandboxes !== null && inSandboxes > 0) {
-        return h`<strong>Where they come from:</strong> this public demo stack's own traffic. ${formatCount(inSandboxes)} of the ${plural(calls, 'call', 'calls')} came from sandboxes visitors started; the rest from the service's own probes, the demos on this page and anyone else calling its open API.${end}`;
+      if (inSandboxes !== null && inSandboxes > 0 && inSandboxes <= calls) {
+        return h`<strong>Where they come from:</strong> this stack's own traffic. ${formatCount(inSandboxes)} of the ${plural(calls, 'call', 'calls')} came from sandboxes visitors started; the rest from the service's own probes, the demos on this page and anyone else calling its open API.${end}`;
       }
-      return h`<strong>Where they come from:</strong> this public demo stack's own traffic: the service's own probes, the sandboxes visitors start, the demos on this page and anyone else calling its open API.${end}`;
+      return h`<strong>Where they come from:</strong> this stack's own traffic: the service's own probes, the sandboxes visitors start, the demos on this page and anyone else calling its open API.${end}`;
     }
 
     // The benchmark, pooled from the snapshot the dashboard's #/proof shows
@@ -2100,9 +2133,11 @@
       const agents = totals.agents.length > 1
         ? totals.agents.slice(0, -1).join(', ') + ' and ' + totals.agents[totals.agents.length - 1]
         : (totals.agents[0] || 'coding agents');
+      // One plain term throughout the card, a rule-breaking write, and the
+      // benchmark's own term, a governed violation, named once under the chart.
       const verdictLine = totals.landed === 0
-        ? 'No governed violation landed under Threefold in any of the ' + plural(totals.series, 'series', 'series') + '.'
-        : 'A governed violation landed under Threefold in ' + formatCount(totals.landed) + ' of the ' + plural(totals.series, 'series', 'series') + '.';
+        ? 'No rule-breaking write landed under Threefold in any of the ' + plural(totals.series, 'series', 'series') + '.'
+        : 'A rule-breaking write landed under Threefold in ' + formatCount(totals.landed) + ' of the ' + plural(totals.series, 'series', 'series') + '.';
       const max = Math.max.apply(null, CONDITIONS.map(c => totals.sums[c.key].n));
       const bars = T.hbars(CONDITIONS.map(c => {
         const sum = totals.sums[c.key];
@@ -2110,20 +2145,27 @@
         return {
           label: c.label,
           value: isTf && sum.k === 0 ? h`<span class="tf-good">${T.icon('check', 13)} ${sum.k} of ${sum.n}</span>` : h`${sum.k} of ${sum.n}`,
-          segments: [{ value: sum.k, label: 'runs in which a governed violation landed', color: isTf ? T.COLORS.accent : '#818ba5' }]
+          segments: [{ value: sum.k, label: 'runs in which a rule-breaking write landed', color: isTf ? T.COLORS.accent : '#818ba5' }]
         };
-      }), { max: max, title: 'Runs in which a governed violation landed, by condition' });
+      }), { max: max, title: 'Runs in which a rule-breaking write landed, by condition' });
+      // The price is stated with the result, and beside it what the agents
+      // finished with no guidance at all, so the cost reads against a baseline.
+      const none = totals.sums.none;
+      const baseline = none.doneN ? h`, against ${none.done} of ${none.doneN} with no guidance` : '';
       T.setHtml(card, h`<div class="tf-bench-main">${head}
           <div class="tf-bench-value">
             <span class="tf-bench-big${tf.k === 0 ? ' tf-good' : ''}" data-metric="bench-threefold">${tf.k} of ${tf.n}</span>
-            <span class="tf-bench-of">governed runs in which a rule-breaking write landed under Threefold</span>
+            <span class="tf-bench-of">runs under Threefold in which a rule-breaking write landed</span>
           </div>
           <p data-bench="headline">${plural(totals.series, 'series', 'series')}, ${totals.real ? plural(totals.runs, 'real run', 'real runs') : plural(totals.runs, 'run', 'runs')} of ${agents}. ${verdictLine}</p>
-          ${tf.doneN ? h`<p class="tf-bench-price" data-bench="price">The acceptance tests passed in ${tf.done} of those ${tf.doneN} governed runs: a refused agent sometimes stops instead of finishing.</p>` : ''}
+          ${tf.doneN ? h`<p class="tf-bench-price" data-bench="price">The price: the acceptance tests passed in ${tf.done} of those ${tf.doneN} runs under Threefold${baseline}, because a refused agent sometimes stops instead of finishing.</p>` : ''}
           <a class="tf-link tf-bench-more" href="${T.pageHref('dashboard.html#/proof')}">Each series, apart, with its evidence</a>
         </div>
         <div class="tf-bench-chart">
-          <p class="tf-pane-label">Runs in which a governed violation landed, all series together</p>
+          <div class="tf-bench-label">
+            <p class="tf-bench-label-main">Runs in which a rule-breaking write landed</p>
+            <p class="tf-bench-label-sub">By condition, the ${plural(totals.series, 'series', 'series')} pooled. The benchmark calls these governed violations.</p>
+          </div>
           ${bars}
         </div>`);
     }

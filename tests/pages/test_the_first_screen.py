@@ -474,9 +474,12 @@ def test_the_counts_are_read_from_the_overview_at_load_and_say_what_they_are_mad
     assert _metrics(out["live"]) == {"calls": "1,284", "refused": "37", "would_refuse": "57"}
     assert "Calls judged" in out["live"] and "Stopped" in out["live"] and "Would have been stopped" in out["live"]
     assert 'href="https://example.test/prod/dashboard.html#/calls?days=7&amp;kind=refused"' in out["live"], "Each tile opens its rows"
+    assert "totals." not in out["live"], "A reader is shown words, not the API's field names"
+    subs = [_text(s) for s in re.findall(r'<span class="tf-tile-sub">(.*?)</span>', out["live"], re.S)]
+    assert subs == ["in the last 7 days", "refused before they ran", "recorded while a project observes"],         "Each sub-line says what its number means, and the window is named once"
     assert not out["whereHidden"]
     assert _text(out["where"]) == (
-        "Where they come from: of 1,284 calls on this public demo stack, 1,102 from a synthetic Acme fleet that sends "
+        "Where they come from: of 1,284 calls on this stack, 1,102 from a synthetic Acme fleet that sends "
         "its calls through the real gates; 120 from sandboxes visitors started; 62 from the service’s own probes, "
         "the demos on this page and anyone else calling its open API. They show the stack at work, not how widely "
         "Threefold is used."
@@ -488,10 +491,15 @@ def test_without_sources_the_sandboxes_are_still_told_apart(tmp_path: Path) -> N
     out = _load(tmp_path, overview="{ status: 200, body: " + _overview(split) + " }")
     assert "24 of the 1,284 calls came from sandboxes visitors started" in _text(out["where"])
     out = _load(tmp_path, overview="{ status: 200, body: " + _overview() + " }")
-    assert "this public demo stack's own traffic: the service's own probes, the sandboxes visitors start" in _text(out["where"])
+    assert "this stack's own traffic: the service's own probes, the sandboxes visitors start" in _text(out["where"])
     hostile = "sources: { fleet: { calls: '<img src=x onerror=alert(1)>' }, sandbox: { calls: 1 }, other: { calls: 1 } }"
     out = _load(tmp_path, overview="{ status: 200, body: " + _overview(hostile) + " }")
     assert "<img" not in out["where"] and "synthetic Acme fleet" not in out["where"], "A source that is not a count is not used"
+    for parts in ("fleet: { calls: 900 }, sandbox: { calls: 120 }, other: { calls: 62 }",
+                  "fleet: { calls: 0 }, sandbox: { calls: 0 }, other: { calls: 0 }"):
+        out = _load(tmp_path, overview="{ status: 200, body: " + _overview("sources: { " + parts + " }") + " }")
+        assert "synthetic Acme fleet" not in _text(out["where"]), f"Parts that do not add up to the 1,284 calls are not used: {parts}"
+        assert "this stack's own traffic" in _text(out["where"])
 
 
 def test_the_counts_are_read_without_a_key_even_when_one_is_typed(tmp_path: Path) -> None:
@@ -576,10 +584,13 @@ def test_the_benchmark_is_pooled_from_the_snapshot_this_stack_serves(tmp_path: P
     real = "real runs" if all(b.get("scripted_rows") == 0 for b in proof["benchmarks"] if not b.get("pilot")) else "runs"
     assert f"{want['series']} series, {want['runs']:,} {real} of Claude Code and Codex." in bench
     if want["landed"] == 0:
-        assert f"No governed violation landed under Threefold in any of the {want['series']} series." in bench
+        assert f"No rule-breaking write landed under Threefold in any of the {want['series']} series." in bench
+    assert "governed violation" not in bench.replace("The benchmark calls these governed violations.", ""),         "One plain term on the card; the benchmark's own term is named once, under the chart"
     for key in ("none", "prompt"):
         assert f"{want['sums'][key]['k']} of {want['sums'][key]['n']}" in bench
-    assert f"The acceptance tests passed in {tf['done']} of those {tf['done_n']} governed runs" in bench, "The price is stated with the result"
+    none = want["sums"]["none"]
+    assert (f"The price: the acceptance tests passed in {tf['done']} of those {tf['done_n']} runs under Threefold, "
+            f"against {none['done']} of {none['done_n']} with no guidance") in bench,         "The price is stated with the result, and read against what the agents finished with no guidance"
     assert 'href="https://example.test/prod/dashboard.html#/proof"' in out["bench"]
 
 
@@ -596,7 +607,7 @@ def test_a_violation_under_threefold_is_said_and_a_pilot_is_not_counted(tmp_path
     out = _load(tmp_path, proof="{ status: 200, body: " + json.dumps(proof) + " }")
     bench = _text(out["bench"])
     assert "2 series, 54 real runs of Codex and Claude Code." in bench
-    assert "A governed violation landed under Threefold in 1 of the 2 series." in bench
+    assert "A rule-breaking write landed under Threefold in 1 of the 2 series." in bench
     assert _metrics(out["bench"])["bench-threefold"] == "1 of 18"
     scripted = {"benchmarks": [series("Codex", 0), series("Claude Code", 0, scripted=3)]}
     out = _load(tmp_path, proof="{ status: 200, body: " + json.dumps(scripted) + " }")
