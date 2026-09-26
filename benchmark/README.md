@@ -290,13 +290,46 @@ ended, what the remote ledger holds for its session (refused and would refuse
 apart, and the stage they were judged under) and whether the row counts. The
 benchmark's own output goes to `daily-live.log` in the run's work root, not to
 the terminal; the dry run prints the command with the token file shown as
-`<token file>` and the Codex home (`--codex-home`) not at all. It refuses an
-endpoint that is not https (there is no default), `--date` outside a dry run,
-and a work root inside the repository or its workspace, before anything is
-created; after the run it checks the row names the endpoint, project and
-session it planned. A day that already has a row is not run again. These rows
-are single runs on a public stack, never a matrix: they are reported apart,
-if at all.
+`<token file>` and the Codex home (`--codex-home`) not at all, only that it is
+set. It refuses an endpoint that is not https or holds anything but visible
+ASCII (there is no default), `--date` outside a dry run, and a work root
+inside the repository or its workspace, before anything is created; after the
+run it checks the row names the endpoint, project and session it planned.
+
+A day's row decides both the exit code and whether the day is run again, the
+same way for a new row and one already recorded:
+
+| Exit | The day's last row | Started again the same day |
+|---|---|---|
+| 0 | went its course and is the run planned: it counts, or only the project's stage on the stack keeps it from counting (the line says which) | does nothing |
+| 1 | no row, a row that is not the run planned, or a run that did not go as planned: a harness error, an agent that never ran, a Threefold that stopped answering or could not be read, a hook that failed | runs the day again as the benchmark's resume (the next attempt, in a session of its own), up to three rows a day; a row that is not the run planned is never run again |
+| 2 | refused before running | |
+| 3 | the benchmark stopped: a usage limit that outlasted its retry, or a login that stopped working | runs the day again, once the login works |
+
+These rows are single runs on a public stack, never a matrix: they are
+reported apart, if at all.
+
+**Scheduling it.** Windows Task Scheduler runs it once a day at a quiet hour;
+04:30 local time is 01:30 or 02:30 UTC from Athens, so the UTC day the
+session is named after is the local one. The task runs as the owner, only
+while the owner is signed in, from the repository's own copy of the script.
+Run the same command by hand once first. `--codex-home` names a folder that
+holds only a Codex login (`set CODEX_HOME=<that folder>` then `codex login`,
+in one cmd window): the benchmark refuses a `CODEX_HOME` holding `hooks.json`
+or `AGENTS.md`, which a machine whose own Codex is governed has. All on one
+line, 261 characters at most after `/TR`:
+
+    schtasks /Create /TN "Threefold\Daily live agent" /SC DAILY /ST 04:30 /F /TR "cmd /c python <repository>\scripts\daily_live_agent.py --endpoint https://<public stack>/ --codex-home <Codex login folder> >> <a folder outside the repository>\daily-live.txt 2>&1"
+
+To see it, start it now, stop a run in progress, pause it and resume it, or
+remove it:
+
+    schtasks /Query /TN "Threefold\Daily live agent" /V /FO LIST
+    schtasks /Run /TN "Threefold\Daily live agent"
+    schtasks /End /TN "Threefold\Daily live agent"
+    schtasks /Change /TN "Threefold\Daily live agent" /DISABLE
+    schtasks /Change /TN "Threefold\Daily live agent" /ENABLE
+    schtasks /Delete /TN "Threefold\Daily live agent" /F
 
 **When the service says no.** A run the service stops, a usage limit or an
 overload, is recorded as `cut_short:usage_limit` or `cut_short:overloaded`,
