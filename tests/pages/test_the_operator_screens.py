@@ -245,7 +245,8 @@ def test_the_strip_leaves_out_what_halts_or_misfires_on_purpose(tmp_path: Path) 
     assert reviews.index("Acme-Ledger") < reviews.index("Acme-Sandbox-0a1b2c3d"), "The operator's own projects lead a visitor's sandbox"
     assert "1 rule turned noisy" in noisy and "LOOP" in noisy and "python-domain-stays-pure" not in noisy
     assert 'data-slot="noisy"' in out["operator"] and re.search(r'data-tone="warn" data-slot="noisy"', out["operator"]), "A rule that only watched is flagged in the would-refuse colour"
-    assert "It only watched, so it refused nothing." in noisy
+    assert "None of its false alarms was refused: it only watched those calls." in noisy
+    assert "refused nothing" not in noisy and "before it enforces" not in noisy, "A rule that refused other calls, or enforces now, is not told otherwise"
     assert "Left out: 2 false alarms in visitors' sandboxes, where the walkthrough asks for one." in noisy
     assert "1 session halted" in halted and "fleet-ledger-codex-1" in halted
     assert "probe-20260926a" not in halted and "sim-0a1b2c3d" not in halted, "The probes and the demo's scenarios halt on purpose"
@@ -830,6 +831,55 @@ def test_a_call_reads_as_an_incident_card(tmp_path: Path) -> None:
     approved = out["approved"]
     assert "Approved: nothing flagged it" in approved and "None: nothing flagged this call" in approved
     assert "Suggested fix" not in approved and "Was the rule right?" not in approved
+
+
+def test_the_incident_card_speaks_of_whoever_sent_the_call(tmp_path: Path) -> None:
+    out = ops(
+        r"""
+  const page = row(1, { agent: 'page', origin: 'page', session_id: 'sim-review-1', hook_mode: 'unknown', status: 'BLOCKED_BOUNDARY_VIOLATION',
+    observed_rules: [], observed_rule: '', reason: 'The domain imports infrastructure.', project_name: 'Acme-Demo' });
+  answer = contract({ '/api/decision': { status: 200, body: { decision: page, session: null, rule: null } } });
+  await visit('#/call?timestamp=t&verdict_id=VERDICT-1');
+  out.page = text(view().split('class="tf-ops-incident"')[1].split('</article>')[0]);
+  const observed = Object.assign({}, DECISION, { rule: Object.assign({}, DECISION.rule, { mode: 'enforce' }) });
+  answer = contract({ '/api/decision': { status: 200, body: observed } });
+  await visit('#/call?timestamp=t&verdict_id=VERDICT-1&n=2');
+  out.observed = view();
+""",
+        tmp_path,
+    )
+    page = out["page"]
+    assert "Page through its page" not in page and "through its page" not in page
+    assert "What the page sent" in page and "A visitor, pressing a button on a page here" in page
+    assert "the page showed why" in page and "the agent was told why" not in page, "A page call was not sent by an agent"
+    assert "Hook mode" not in page, "A page call has no hook"
+    assert "A refusal" in page and "An incident" not in page
+    observed = out["observed"]
+    assert "A flagged call" in observed and "An incident" not in observed
+    rule = observed.split("What decided.", 1)[1]
+    assert 'data-acted="observe"' in rule and "Observed this call" in rule, "The rule card says how the rule acted on this call"
+    assert "Written to enforce; it only watched because the project was in Observe." in re.sub(r"<[^>]+>", "", rule)
+    assert 'tf-chip-purple">enforce<' not in observed, "No enforce chip under a call the rule only watched"
+
+
+def test_a_count_the_service_did_not_inflect_reads_as_a_reader_would(tmp_path: Path) -> None:
+    out = ops(
+        KEYS
+        + r"""
+  const rules = [{ rule_key: 'LOOP', kind: 'gate', mode_now: 'observe', would_refuse: 3, correct: 1, false_alarms: 1, unreviewed: 1, last_seen: NOW, state: 'noisy', recommendation: '1 false alarm(s): keep it observing.' },
+    { rule_key: 'BUDGET', kind: 'gate', mode_now: 'observe', would_refuse: 3, correct: 1, false_alarms: 2, unreviewed: 0, last_seen: NOW, state: 'noisy', recommendation: '2 false alarm(s): keep it observing.' }];
+  answer = contract({ '/api/projects/Acme-Billing': { status: 200, body: detailBody('observe', rules) }, '/api/decisions': { status: 200, body: { items: [row(1)], next_cursor: null } } });
+  await visit('#/projects/Acme-Billing');
+  out.project = text(view());
+  await visit('#/review');
+  press('u'); await tick();
+  out.toast = el('toast-root').innerHTML;
+""",
+        tmp_path,
+    )
+    assert "1 false alarm: keep it observing." in out["project"] and "2 false alarms: keep it observing." in out["project"]
+    assert "(s)" not in out["project"]
+    assert "Nothing to undo" in out["toast"], "U with nothing to take back says so on screen"
 
 
 def test_connect_waits_with_a_radar_and_turns_into_a_success_card(tmp_path: Path) -> None:

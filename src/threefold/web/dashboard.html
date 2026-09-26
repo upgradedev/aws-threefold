@@ -508,6 +508,11 @@
     // A message the service wrote, without the full stop it may end in, so a
     // sentence built around it does not end in two.
     function trimStop(text) { return String(text || '').replace(/[.\s]+$/, ''); }
+    // The service writes a count it does not inflect as "1 false alarm(s)";
+    // the page says it the way a reader would, before it is escaped.
+    function inflect(text) {
+      return String(text || '').replace(/\b(\d+) ([A-Za-z][A-Za-z-]*(?: [A-Za-z][A-Za-z-]*)?)\(s\)/g, (m, n, word) => n + ' ' + word + (n === '1' ? '' : 's'));
+    }
 
     // Self-correction, as the overview and a project's page both word it. It
     // counts only an agent's refusals, from a hook or CI, of a call to a file:
@@ -1039,17 +1044,20 @@
       // How loud the slot is follows what the false alarms cost. A rule that
       // refused a call marked a false alarm stopped work it should not have:
       // that is the refused colour. One whose false alarms were all calls it
-      // only watched refused nothing; its flags were would-refuse calls, so
-      // it takes their colour, and the note says it refused nothing.
+      // only watched stopped none of them; they were would-refuse calls, so
+      // it takes their colour. The note speaks of those false alarms only:
+      // the same rule may have refused other calls, rightly, in the window,
+      // and may be enforcing now, so it is not told it refused nothing, nor
+      // that it has yet to enforce.
       const bit = list.filter(g => g.refused > 0);
       return attSlot({
         slot: 'noisy', tone: bit.length ? 'danger' : 'warn', icon: 'alert', kicker,
         title: html`${plural(list.length, 'rule')} turned noisy`,
-        body: html`<ul class="tf-ops-att-list">${list.slice(0, 3).map(g => html`<li><a href="${projectHref(g.project)}" title="${g.refused ? 'Open the project: it refused calls marked false alarm; go back to Observe, or refine the rule' : 'Open the project: keep the rule observing, or refine it, before it enforces'}"><span class="tf-ops-att-what"><span class="font-mono text-gray-200">${g.rule}</span> <span class="text-gray-500">in</span> <span class="font-mono">${T.projectName(g.project)}</span></span><span class="tf-ops-att-n">${plural(g.count, 'false alarm')}${g.refused ? html` <span class="text-rose-300">· ${num(g.refused)} refused</span>` : ''}</span></a></li>`)}</ul>
+        body: html`<ul class="tf-ops-att-list">${list.slice(0, 3).map(g => html`<li><a href="${projectHref(g.project)}" title="${g.refused ? 'Open the project: it refused calls marked false alarm; go back to Observe, or refine the rule' : 'Open the project: refine the rule before it refuses a call like these'}"><span class="tf-ops-att-what"><span class="font-mono text-gray-200">${g.rule}</span> <span class="text-gray-500">in</span> <span class="font-mono">${T.projectName(g.project)}</span></span><span class="tf-ops-att-n">${plural(g.count, 'false alarm')}${g.refused ? html` <span class="text-rose-300">· ${num(g.refused)} refused</span>` : ''}</span></a></li>`)}</ul>
           ${list.length > 3 ? html`<p class="tf-ops-att-note">and ${plural(list.length - 3, 'more rule')}.</p>` : ''}
           <p class="tf-ops-att-note">${bit.length
             ? html`${bit.length === list.length ? (list.length === 1 ? 'It' : 'Each') : plural(bit.length, 'of them', 'of them')} refused a call marked false alarm: go back to Observe, or refine the rule.`
-            : list.length === 1 ? 'It only watched, so it refused nothing. Refine it before it enforces.' : 'They only watched, so they refused nothing. Refine each before it enforces.'}</p>${apart}${partial}`,
+            : list.length === 1 ? 'None of its false alarms was refused: it only watched those calls. Refine it before it refuses one like them.' : 'None of their false alarms was refused: they only watched those calls. Refine each before it refuses one like them.'}</p>${apart}${partial}`,
         foot: html`<a class="tf-btn tf-btn-sm" href="${callsHref({ review: 'false_alarm', days })}">The calls marked false alarm</a>`
       });
     }
@@ -1712,7 +1720,7 @@
         </div>
         <div class="min-w-0">${bar}${words}</div>
         <div class="min-w-0">
-          <p class="tf-ops-rule-say">${r.recommendation || STATES[r.state] && STATES[r.state].says || ''}</p>
+          <p class="tf-ops-rule-say">${inflect(r.recommendation) || STATES[r.state] && STATES[r.state].says || ''}</p>
           ${r.unreviewed ? html`<p class="tf-ops-rule-links"><a class="tf-link" href="${reviewHref({ project: name, rule: r.rule_key })}">Label ${plural(r.unreviewed, 'call')}</a></p>` : ''}
         </div>
       </li>`;
@@ -1885,7 +1893,7 @@
               <input type="checkbox" class="mt-0.5 accent-purple-500" ${i === 0 ? raw('id="dialog-first"') : ''} data-change="promote-toggle" data-rule="${r.rule_key}" ${chosen.has(r.rule_key) ? raw('checked') : ''} />
               <span class="min-w-0 flex-1">
                 <span class="flex flex-wrap items-center gap-2"><span class="font-mono text-xs text-white tf-break">${r.rule_key}</span>${stateChip(r.state)}</span>
-                <span class="block text-xs text-gray-400 mt-1">${num(r.would_refuse)} flagged · ${num(r.correct)} correct · ${num(r.false_alarms)} false alarm${r.false_alarms === 1 ? '' : 's'} · ${num(r.unreviewed)} unreviewed${r.recommendation ? html` — ${r.recommendation}` : ''}</span>
+                <span class="block text-xs text-gray-400 mt-1">${num(r.would_refuse)} flagged · ${num(r.correct)} correct · ${num(r.false_alarms)} false alarm${r.false_alarms === 1 ? '' : 's'} · ${num(r.unreviewed)} unreviewed${r.recommendation ? html` — ${inflect(r.recommendation)}` : ''}</span>
               </span>
             </label>
           </li>`)}</ul>
@@ -2484,7 +2492,9 @@
 
       function undoLast() {
         const last = state.saved.pop();
-        if (!last) { announce('Nothing to undo.'); return; }
+        // Said on screen as well as to a screen reader: a key that did
+        // nothing visible reads as a key that did not work.
+        if (!last) { toast('Nothing to undo: no label set on this visit is left to take back.'); return; }
         return undo(last.rows);
       }
 
@@ -2910,11 +2920,44 @@
         observed: 'It ran, and a rule in Observe would have refused it',
         approved: 'Approved: nothing flagged it'
       };
-      const SAID = {
-        refused: 'The call was stopped before it ran, and the agent was told why.',
-        observed: 'Recorded, not refused: the rule that flagged it is observing. A label decides whether it should enforce.',
-        approved: 'Every gate passed it, and it ran.'
-      };
+      // Who sent the call decides who was told: an agent through its hook, a
+      // check in CI, or a visitor pressing a button on a page here, whose
+      // calls always enforce whatever the project's stage.
+      function sender(row) {
+        if (row.origin === 'page' || row.agent === 'page') return { kind: 'page', ask: 'What the page sent', who: 'A visitor, pressing a button on a page here', told: 'the page showed why' };
+        if (row.origin === 'ci') return { kind: 'ci', ask: 'What the check tried', who: agentLabel(row.agent) + ', in CI', told: 'the check printed why' };
+        return { kind: 'hook', ask: 'What the agent tried', who: agentLabel(row.agent) + (row.origin === 'hook' ? ' through its hook' : ''), told: 'the agent was told why' };
+      }
+      // Why a flagged call ran: a test call is never refused, a project in
+      // Observe refuses nothing, and a project in Enforce can keep a rule
+      // observing.
+      function whyItRan(row) {
+        if (row.dry_run === true) return 'a test call is never refused';
+        if (row.stage === 'enforce') return 'the project keeps this rule observing';
+        return 'the project was in Observe';
+      }
+      function said(outcome, row, from) {
+        if (outcome === 'refused') return 'The call was stopped before it ran, and ' + from.told + '.';
+        if (outcome === 'observed') return 'Recorded, not refused: ' + whyItRan(row) + '. A label decides whether the rule should enforce.';
+        return 'Every gate passed it, and it ran.';
+      }
+      const KICKERS = { refused: 'A refusal', observed: 'A flagged call', approved: 'A call' };
+
+      // How the rule acted on this call, which is what the card above says,
+      // and then the mode its definition names, when that differs: a rule
+      // written to enforce only watches a call from a project in Observe.
+      function ruleActed(rule, outcome, row) {
+        const acted = outcome === 'refused' ? 'enforce' : outcome === 'observed' ? 'observe' : '';
+        const written = rule.mode === 'observe' || rule.mode === 'enforce' ? rule.mode : 'enforce';
+        const chip = acted === 'observe'
+          ? html`<span class="tf-chip tf-chip-amber" data-acted="observe">${T.icon('eye', 13)}Observed this call</span>`
+          : acted === 'enforce'
+            ? html`<span class="tf-chip tf-chip-purple" data-acted="enforce">${T.icon('shield', 13)}Refused this call</span>`
+            : html`<span class="tf-chip tf-chip-gray">Written to ${written}</span>`;
+        const differs = acted && acted !== written
+          ? html`<span class="text-gray-400">Written to ${written}${acted === 'observe' ? html`; it only watched because ${whyItRan(row)}` : sender(row).kind === 'page' ? '; a call from a page here always enforces' : ''}.</span>` : '';
+        return html`<p class="flex flex-wrap items-center gap-x-2 gap-y-1">${chip}${differs}</p>`;
+      }
 
       function draw() {
         const row = state.data.decision || {};
@@ -2927,30 +2970,31 @@
         const rows = FIELD_ORDER.filter(([key]) => hasFix || !FIX_FIELDS[key]).map(([key, label]) => [key, label, row[key]])
           .concat(Object.keys(row).filter(k => !known[k]).sort().map(k => [k, k, row[k]]));
         const key = ruleKeyOf(row);
+        const from = sender(row);
 
         const incident = html`<article class="tf-ops-incident" data-outcome="${outcome}" aria-labelledby="incident-title">
           <div class="flex flex-wrap items-start justify-between gap-3">
             <div class="min-w-0">
-              <span class="tf-ops-att-kicker">${outcome === 'approved' ? 'A call' : 'An incident'} · ${dateTime(row.timestamp)}</span>
+              <span class="tf-ops-att-kicker">${KICKERS[outcome]} · ${dateTime(row.timestamp)}</span>
               <h2 id="incident-title" class="tf-ops-hero-title">${HEADLINES[outcome]}</h2>
             </div>
             ${outcomeChip(row)}
           </div>
           <ol class="tf-ops-flow tf-ops-flow-${hasFix ? 'four' : 'three'}">
             <li>
-              <span class="tf-ops-flow-q">${T.icon('terminal', 14)}What the agent tried</span>
+              <span class="tf-ops-flow-q">${T.icon(from.kind === 'page' ? 'play' : 'terminal', 14)}${from.ask}</span>
               <span class="tf-ops-flow-a"><code>${row.tool_name || 'a call'}</code> <code class="text-gray-400">${targetOf(row)}</code></span>
-              <span class="tf-ops-flow-sub">${agentLabel(row.agent)}${row.origin ? ' through its ' + row.origin : ''}${row.action_type ? ' · ' + row.action_type : ''}${row.project_name ? html` · in <span class="font-mono">${T.projectName(row.project_name)}</span>` : ''}</span>
+              <span class="tf-ops-flow-sub">${from.who}${row.action_type ? ' · ' + row.action_type : ''}${row.project_name ? html` · in <span class="font-mono">${T.projectName(row.project_name)}</span>` : ''}</span>
             </li>
             <li>
               <span class="tf-ops-flow-q">${T.icon('shield', 14)}What Threefold said</span>
               <span class="tf-ops-flow-a">${reasonOf(row) || OUTCOMES[outcome].label}</span>
-              <span class="tf-ops-flow-sub">${SAID[outcome]}</span>
+              <span class="tf-ops-flow-sub">${said(outcome, row, from)}</span>
             </li>
             <li>
               <span class="tf-ops-flow-q">${T.icon('layers', 14)}The rule</span>
               <span class="tf-ops-flow-a">${outcome === 'approved' ? 'None: nothing flagged this call' : html`<code>${key}</code>`}</span>
-              <span class="tf-ops-flow-sub">${outcome === 'approved' ? '' : rule ? (rule.description || 'A layering rule of this project') : (GATE_KEYS[key] || 'A built-in gate')}${row.stage ? ' · project stage ' + row.stage : ''}</span>
+              <span class="tf-ops-flow-sub">${outcome === 'approved' ? '' : rule ? (rule.description || 'A layering rule of this project') : (GATE_KEYS[key] || 'A built-in gate')}${row.stage && from.kind !== 'page' ? ' · project stage ' + row.stage : ''}</span>
             </li>
             ${hasFix ? html`<li>
               <span class="tf-ops-flow-q">${T.icon('sparkles', 14)}Suggested fix</span>
@@ -2962,7 +3006,7 @@
           <p class="tf-ops-facts">
             <span>When <b>${timeAgo(row.timestamp)}</b></span>
             ${row.session_id ? html`<span>Session <b class="font-mono">${row.session_id}</b></span>` : ''}
-            ${row.hook_mode ? html`<span>Hook mode <b>${row.hook_mode}</b></span>` : ''}
+            ${row.hook_mode && from.kind === 'hook' ? html`<span title="${HOOK_MODES[row.hook_mode] || row.hook_mode}">Hook mode <b>${row.hook_mode}</b></span>` : ''}
             ${row.developer_id ? html`<span>Developer <b class="font-mono">${row.developer_id}</b></span>` : ''}
             <span>Verdict <b class="font-mono">${row.verdict_id || verdict}</b></span>
           </p>
@@ -2977,7 +3021,7 @@
           ? html`<div class="space-y-3 text-xs">
               <p class="font-mono text-white">${rule.id || key}</p>
               ${rule.description ? html`<p class="text-gray-300">${rule.description}</p>` : ''}
-              <p><span class="tf-chip ${rule.mode === 'observe' ? 'tf-chip-amber' : 'tf-chip-purple'}">${rule.mode || 'enforce'}</span></p>
+              ${ruleActed(rule, outcome, row)}
               ${[['Applies to files matching', rule.when_path_matches], ['May not import', rule.forbid_imports], ['May import anyway', rule.allow_imports]].map(([label, list]) =>
                 Array.isArray(list) && list.length ? html`<div><p class="tf-label">${label}</p><div class="flex flex-wrap gap-1">${list.map(v => html`<span class="tf-chip tf-chip-gray font-mono">${v}</span>`)}</div></div>` : '')}
               <a class="tf-link" href="${T.pageHref('rules.html' + query({ project: T.PROJECT_PATTERN.test(row.project_name || '') ? row.project_name : '' }))}">Read or try this project's rules</a>
