@@ -26,15 +26,19 @@
   <link rel="stylesheet" href="assets/threefold.css" />
   <script src="assets/threefold.js"></script>
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
-
     /* The first screen's own pieces. Everything they stand on (tokens, cards,
-       chips, buttons, tiles, motion) is assets/threefold.css. */
+       chips, buttons, tiles, motion, the fonts) is assets/threefold.css. */
     .hidden { display: none !important; }
     .tf-nobr { white-space: nowrap; }
     body { min-height: 100vh; display: flex; flex-direction: column; }
-    .tf-landing { gap: 72px; }
-    @media (min-width: 768px) { .tf-landing { gap: 112px; padding-top: var(--tf-space-6); } }
+    .tf-landing { gap: 72px; padding-top: 20px; }
+    /* The proof strip sits close under the hero, so its figures share the
+       first screen with the promise; every later section keeps the full gap. */
+    .tf-landing > #proof { margin-top: -32px; }
+    @media (min-width: 768px) {
+      .tf-landing { gap: 112px; padding-top: var(--tf-space-3); }
+      .tf-landing > #proof { margin-top: -68px; }
+    }
     .tf-landing > section { scroll-margin-top: calc(var(--tf-header-h) + 16px); min-width: 0; }
 
     .tf-sec-head { display: flex; flex-direction: column; gap: var(--tf-space-1h); max-width: 48rem; margin-bottom: var(--tf-space-4); }
@@ -44,15 +48,20 @@
     .tf-sec-row .tf-sec-head { margin-bottom: 0; }
 
     /* ------------------------------------------------------------ the hero */
-    .tf-hero { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--tf-space-5); align-items: center; }
-    /* Top-aligned, and the demonstration holds its room from the first frame, so
-       nothing beside it moves while the verdict lands. */
+    .tf-hero { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; align-items: start;
+      grid-template-areas: "copy" "demo" "scope"; }
+    .tf-hero-copy { grid-area: copy; }
+    .tf-hero > .tf-demo { grid-area: demo; }
+    .tf-hero > .tf-hero-scope { grid-area: scope; }
+    /* Side by side from a desk's width, top-aligned. The row keeps the room the
+       demonstration takes once its verdict has landed, so nothing under the hero
+       moves when it does; the card itself is only as tall as what it holds. */
     @media (min-width: 1024px) {
-      .tf-hero { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--tf-space-8); align-items: start; }
-      .tf-hero-copy { padding-top: var(--tf-space-3); }
-      .tf-demo-body { min-height: 31.75rem; box-sizing: border-box; }
-      .tf-demo-foot p { min-height: 2.25rem; }
+      .tf-hero { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: var(--tf-space-8); row-gap: var(--tf-space-3);
+        grid-template-areas: "copy demo" "scope demo"; grid-template-rows: auto 1fr; min-height: 37.25rem; }
+      .tf-hero-copy { padding-top: var(--tf-space-2); }
     }
+    @media (min-width: 1280px) { .tf-hero { min-height: 34.5rem; } }
     .tf-hero::before {
       /* Inside the hero's own width: a glow that reached past it would give a
          phone's page a sideways scroll. */
@@ -69,23 +78,26 @@
           radial-gradient(closest-side at 76% 50%, rgba(8, 145, 178, 0.1), transparent);
       }
     }
-    .tf-hero-copy { min-width: 0; display: flex; flex-direction: column; gap: var(--tf-space-3); }
+    /* On a phone the copy is set tight, so the proposed write and its verdict
+       land on the first screen with the promise, the sentence and the actions. */
+    .tf-hero-copy { min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+    @media (min-width: 640px) { .tf-hero-copy { gap: var(--tf-space-3); } }
     .tf-hero-copy .tf-eyebrow { margin: 0; }
     .tf-hero-title {
-      margin: 0; font-size: 2.375rem; line-height: 1.08; font-weight: 700; letter-spacing: -0.04em; color: var(--tf-text);
+      margin: 0; font-size: 2.125rem; line-height: 1.08; font-weight: 700; letter-spacing: -0.04em; color: var(--tf-text);
       overflow-wrap: break-word; text-wrap: balance;
     }
     @media (min-width: 640px) { .tf-hero-title { font-size: 3.25rem; } }
-    @media (min-width: 1280px) { .tf-hero-title { font-size: 3.75rem; } }
+    @media (min-width: 1280px) { .tf-hero-title { font-size: 3.625rem; } }
     .tf-hero-title em {
       font-style: normal; color: var(--tf-accent-text);
       background: linear-gradient(92deg, #ddd6fe 0%, #a78bfa 48%, #67e8f9 100%); -webkit-background-clip: text; background-clip: text;
       -webkit-text-fill-color: transparent;
     }
-    .tf-hero-lede { margin: 0; max-width: 36rem; font-size: 1rem; line-height: 1.6; color: var(--tf-text-2); overflow-wrap: break-word; }
+    .tf-hero-lede { margin: 0; max-width: 34rem; font-size: 0.9375rem; line-height: 1.5; color: var(--tf-text-2); overflow-wrap: break-word; text-wrap: pretty; }
     @media (min-width: 640px) { .tf-hero-lede { font-size: 1.0625rem; line-height: 1.65; } }
-    .tf-hero-actions { display: flex; flex-direction: column; align-items: stretch; gap: var(--tf-space-1h); }
-    @media (min-width: 640px) { .tf-hero-actions { flex-direction: row; flex-wrap: wrap; align-items: center; } }
+    .tf-hero-actions { display: flex; flex-direction: column; align-items: stretch; gap: var(--tf-space-1); }
+    @media (min-width: 640px) { .tf-hero-actions { flex-direction: row; flex-wrap: wrap; align-items: center; gap: var(--tf-space-1h); } }
     /* A label that does not fit wraps inside its button rather than pushing a
        phone's page sideways. */
     .tf-hero-actions .tf-btn { white-space: normal; height: auto; min-height: 44px; padding-top: 10px; padding-bottom: 10px; line-height: 1.25; text-align: center; }
@@ -105,14 +117,17 @@
       background: linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0) 140px), var(--tf-surface-1);
       border: 1px solid var(--tf-hairline-strong); box-shadow: var(--tf-shadow-3);
     }
-    .tf-demo-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 12px 16px; border-bottom: 1px solid var(--tf-hairline); background: var(--tf-inset); }
+    .tf-demo-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 10px 14px; border-bottom: 1px solid var(--tf-hairline); background: var(--tf-inset); }
+    @media (min-width: 640px) { .tf-demo-bar { padding: 11px 16px; } }
     .tf-demo-dots { display: inline-flex; gap: 6px; }
     .tf-demo-dots i { display: block; width: 10px; height: 10px; border-radius: 99px; background: var(--tf-hairline-strong); }
     .tf-demo-title { margin-right: auto; font: 500 0.75rem/1rem var(--tf-font-sans); color: var(--tf-text-3); }
-    .tf-demo-body { display: flex; flex-direction: column; gap: 14px; padding: 16px; }
-    @media (min-width: 640px) { .tf-demo-body { padding: 20px; } }
+    .tf-demo-body { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px 14px; }
+    @media (min-width: 640px) { .tf-demo-body { gap: 12px; padding: 18px 20px; } }
     .tf-demo-call { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-height: 22px; font-size: 0.75rem; line-height: 1rem; color: var(--tf-text-3); }
     .tf-demo-call code { font: 500 0.75rem/1rem var(--tf-font-mono); color: var(--tf-text); overflow-wrap: anywhere; }
+    /* On a phone the call keeps to one line: the tool and the file it writes. */
+    @media (max-width: 419px) { .tf-demo-project { display: none; } }
     .tf-diff {
       margin: 0; padding: 10px 0; list-style: none; min-height: 88px; box-sizing: border-box; border-radius: var(--tf-radius-md);
       background: var(--tf-ink-0); border: 1px solid var(--tf-hairline); font: 400 0.8125rem/1.75 var(--tf-font-mono);
@@ -150,7 +165,8 @@
     .tf-demo-fix-files .tf-micro { margin-left: 2px; }
     .tf-demo-fix-none { background: var(--tf-surface-2); border-color: var(--tf-hairline); }
     .tf-demo-fix-none .tf-demo-fix-title { color: var(--tf-text-2); }
-    .tf-demo-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; padding: 12px 16px; border-top: 1px solid var(--tf-hairline); background: var(--tf-inset); font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-3); }
+    .tf-demo-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; padding: 10px 14px; border-top: 1px solid var(--tf-hairline); background: var(--tf-inset); font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-3); }
+    @media (min-width: 640px) { .tf-demo-foot { padding: 12px 16px; } }
     .tf-demo-foot p { margin: 0; flex: 1 1 16rem; min-width: 0; overflow-wrap: anywhere; }
 
     @keyframes tf-type { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: none; } }
@@ -390,20 +406,19 @@
          this section is written into the page: the demonstration is drawn from
          a live answer of this stack when it answers, labelled live, and from the
          recorded run below when it does not, labelled recorded. The line under
-         the actions says which agents a refusal has been measured to stop,
-         because the sentence names three and the evidence covers them unevenly. -->
+         the demonstration says which agents a refusal has been measured to stop,
+         because the sentence names three and the evidence covers them unevenly;
+         on a desk it sits under the actions, beside the demonstration. -->
     <section id="what-threefold-is" class="tf-hero" aria-labelledby="hero-promise">
       <div class="tf-hero-copy">
         <p class="tf-eyebrow"><span data-tf-icon="shield"></span>Threefold · governance for coding agents</p>
         <h1 id="hero-promise" class="tf-hero-title">Stop bad agent writes <em>before they reach your code.</em></h1>
-        <p id="hero-sentence" class="tf-hero-lede">A hook asks Threefold on AWS before Claude Code, Codex or Antigravity writes a file or runs a command; deterministic gates refuse leaked credentials, architecture violations, loops and runaway spend, and every project watches in Observe before it enforces.</p>
+        <p id="hero-sentence" class="tf-hero-lede">Deterministic gates on AWS judge each write and command from Claude Code, Codex or Antigravity, and your repos observe before they enforce.</p>
         <div id="hero-actions" class="tf-hero-actions">
           <a id="hero-try" href="dashboard.html#/try" class="tf-btn tf-btn-primary tf-btn-lg"><span data-tf-icon="play"></span>Watch it stop a bad write — 60 s</a>
           <a id="hero-dashboard" href="dashboard.html#/overview" class="tf-btn tf-btn-lg"><span data-tf-icon="grid"></span>Open the live dashboard</a>
           <a id="hero-connect" href="dashboard.html#/connect" class="tf-hero-link">Connect your repository<span data-tf-icon="arrowright"></span></a>
         </div>
-        <p class="tf-hero-scope"><span data-tf-icon="info"></span><span id="hero-scope">That a refusal stops the write has been measured for Claude Code and Antigravity, and for Codex
-          once, over its patch tool; the other routes Codex could write through are not measured.</span></p>
       </div>
 
       <figure id="hero-demo" class="tf-demo" data-motion="off" aria-labelledby="hero-demo-title">
@@ -427,6 +442,9 @@
           <button type="button" id="hero-replay" class="tf-link-btn" hidden><span data-tf-icon="refresh" data-tf-size="14"></span>Replay</button>
         </figcaption>
       </figure>
+
+      <p class="tf-hero-scope"><span data-tf-icon="info"></span><span id="hero-scope">That a refusal stops the write has been measured for Claude Code and Antigravity, and for Codex
+        once, over its patch tool; the other routes Codex could write through are not measured.</span></p>
     </section>
 
     <!-- THE PROOF STRIP. Every figure is read as the page loads: the counts from

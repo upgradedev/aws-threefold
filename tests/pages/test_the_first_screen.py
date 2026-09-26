@@ -32,9 +32,8 @@ from _browser import ROOT, page_source, run
 
 PROMISE = "Stop bad agent writes before they reach your code."
 SENTENCE = (
-    "A hook asks Threefold on AWS before Claude Code, Codex or Antigravity writes a file or runs a command; "
-    "deterministic gates refuse leaked credentials, architecture violations, loops and runaway spend, and every "
-    "project watches in Observe before it enforces."
+    "Deterministic gates on AWS judge each write and command from Claude Code, Codex or Antigravity, and your "
+    "repos observe before they enforce."
 )
 SCOPE = (
     "That a refusal stops the write has been measured for Claude Code and Antigravity, and for Codex once, over "
