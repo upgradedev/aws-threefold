@@ -20,6 +20,7 @@ import ast
 import collections
 import datetime
 import inspect
+import logging
 import re
 from typing import Any, Dict, List
 
@@ -622,6 +623,22 @@ def test_a_tick_with_time_to_spare_runs_whole() -> None:
     assert summary["ok"] is True and summary["cut_short"] is False
     assert demo_fleet.MIN_CALLS <= summary["calls"] <= demo_fleet.MAX_CALLS
     assert set(summary) >= {"tick", "calls", "planned", "verdicts", "labelled", "actions", "stages", "seconds"}
+
+
+def test_every_tick_leaves_one_line_in_the_function_s_log(caplog) -> None:
+    """The line an operator reads to see ticks run, emitted even where the root logger is left at WARNING."""
+    root = logging.getLogger()
+    kept = root.level
+    root.setLevel(logging.WARNING)
+    try:
+        assert logging.getLogger("threefold.fleet").isEnabledFor(logging.INFO)
+        caplog.handler.setLevel(logging.NOTSET)
+        demo_fleet.run_scheduled_tick(_fresh_evaluator(), _Context(15000))
+    finally:
+        root.setLevel(kept)
+    lines = [record for record in caplog.records if record.name == "threefold.fleet" and record.levelno == logging.INFO]
+    assert len(lines) == 1 and lines[0].getMessage().startswith("Demo fleet tick: {")
+    assert '"seconds"' in lines[0].getMessage() and '"calls"' in lines[0].getMessage()
 
 
 def test_a_failing_tick_is_answered_not_raised(monkeypatch) -> None:

@@ -64,6 +64,10 @@ from threefold.application.dtos import ToolCallRequestDTO
 from threefold.application.rule_keys import NONE, kind_of, rule_key, stored_rule_key, stored_rule_keys
 
 logger = logging.getLogger("threefold.fleet")
+# Set here, as the handler sets its own: the Lambda runtime leaves the root
+# logger at WARNING, and the tick's one INFO line is how an operator sees that
+# ticks run and how long they take against the real table.
+logger.setLevel(logging.INFO)
 
 FLEET_EVENT_KEY = "threefold_fleet"
 TICK_SECONDS = 15 * 60
