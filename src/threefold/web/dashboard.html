@@ -37,6 +37,8 @@
     .tf-ops-h2 { margin: 0; display: flex; align-items: center; gap: 8px; font: 600 1rem/1.5rem var(--tf-font-sans); letter-spacing: -0.01em; color: var(--tf-text); }
     .tf-ops-h2 .tf-icon { width: 18px; height: 18px; color: var(--tf-accent-text); }
     .tf-ops-sub { margin: 2px 0 0; font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-3); }
+    .tf-ops-fresh { display: flex; align-items: center; gap: 8px; margin: -8px 0 var(--tf-space-2); font-size: var(--tf-fs-micro); line-height: 1rem; color: var(--tf-text-3); font-variant-numeric: tabular-nums; }
+    .tf-ops-live { width: 6px; height: 6px; flex-shrink: 0; border-radius: 50%; background: var(--tf-approved); box-shadow: 0 0 0 3px rgba(14, 165, 114, 0.18); }
     .tf-ops-count { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 20px; padding: 0 6px; border-radius: var(--tf-radius-pill); font: 600 0.6875rem/1 var(--tf-font-sans); background: var(--tf-surface-3); color: var(--tf-text); font-variant-numeric: tabular-nums; }
 
     /* Where the numbers come from, on the public demo. */
@@ -427,6 +429,8 @@
       enforce: 'enforces on the machine, whatever the stage',
       unknown: 'an older hook that does not report its mode'
     };
+    // A hook mode in a few words, beside its chip; HOOK_MODES says it whole.
+    const HOOK_MODE_WORDS = { managed: 'follows the stage', observe: 'never refused here', enforce: 'always enforces', unknown: 'an older hook' };
     const GATE_KEYS = {
       LOOP: 'The same call repeating',
       PROTECTED_PATH: 'A write to a protected path, such as hook settings or .git/hooks',
@@ -863,6 +867,13 @@
       unknown: 'a call that did not say which agent sent it'
     };
 
+    // What each origin of a call is, said on hover beside its count.
+    const ORIGIN_WORDS = {
+      hook: 'hook: a coding agent being governed',
+      page: 'page: a visitor pressing a button here',
+      ci: 'ci: a pipeline or a pre-commit check'
+    };
+
     // Where a project's calls come from, on a stack that says so. A stack from
     // before the field says only whether a project is a visitor's sandbox.
     const SOURCES = {
@@ -979,7 +990,7 @@
         body: html`<ul class="tf-ops-att-list">${rows.slice(0, 3).map(p => html`<li><a href="${reviewHref({ project: p.project, days })}"><span class="tf-ops-att-what font-mono">${T.projectName(p.project)}</span><span class="tf-ops-att-n">${num(p.needs_review)}</span></a></li>`)}</ul>
           ${rows.length > 3 ? html`<p class="tf-ops-att-note">and ${plural(rows.length - 3, 'more project')}.</p>` : ''}
           ${inSandboxes ? html`<p class="tf-ops-att-note">${num(inSandboxes)} of them ${inSandboxes === 1 ? 'is' : 'are'} in visitors' sandboxes${visitor ? ', which anyone may label' : ', which drop out of these figures within a day'}.</p>` : ''}
-          ${visitor ? html`<p class="tf-ops-att-note">The other projects' labels are the operator's. Your own sandbox takes a minute, and you label, promote and watch its rule hold.</p>` : ''}`,
+          ${visitor ? html`<p class="tf-ops-att-note">The other projects' labels are the operator's.</p>` : ''}`,
         foot: visitor
           ? html`<a class="tf-btn tf-btn-primary tf-btn-sm" href="#/try">Try it with your own sandbox${T.icon('arrowright', 14)}</a><a class="tf-btn tf-btn-quiet tf-btn-sm" href="${reviewHref({ days })}">See the queue</a>`
           : html`<a class="tf-btn tf-btn-primary tf-btn-sm" href="${reviewHref({ days })}">Start reviewing${T.icon('arrowright', 14)}</a><span class="tf-micro tf-ops-kbd-hint inline-flex items-center gap-1">${T.kbd('J')}${T.kbd('K')} move, ${T.kbd('C')}${T.kbd('F')} label</span>`
@@ -1065,7 +1076,7 @@
       return html`<section aria-labelledby="attention-title">
         <div class="tf-ops-head"><div>
           <h2 id="attention-title" class="tf-ops-h2">${T.icon('bolt', 18)}Needs your attention</h2>
-          <p class="tf-ops-sub">What to act on: calls waiting for a label and rules a false alarm made noisy in ${windowWords(days)}, and every session the circuit breaker holds halted now.</p>
+          <p class="tf-ops-sub">Labels and false alarms from ${windowWords(days)}; halted sessions as they stand now.</p>
         </div></div>
         <div class="tf-ops-attention">${reviewSlot(data, days, who)}${noisySlot(att, days)}${haltedSlot(att, who)}</div>
       </section>`;
@@ -1223,7 +1234,7 @@
             <p class="tf-label">Not coding agents</p>
             <ul class="space-y-1.5">${others.map(a => html`<li class="text-xs"><a class="tf-link-row flex-wrap gap-x-2" href="${callsHref({ agent: a.agent, days })}"><span class="text-gray-200">${agentLabel(a.agent)}</span><span class="font-mono text-gray-400">${plural(a.calls, 'call')}</span><span class="text-gray-500">${CALLER_KINDS[a.kind] || CALLER_KINDS.unknown}</span></a></li>`)}</ul>
           </div>` : '';
-        return card(kinded ? 'Coding agents' : 'By agent', kinded ? 'Calls each coding agent sent in this window. Other callers are named apart below.' : 'Calls each agent sent in this window.', html`${bars}${apart}`, 'min-w-0');
+        return card(kinded ? 'Coding agents' : 'By agent', null, html`${bars}${apart}`, 'min-w-0');
       }
 
       function draw() {
@@ -1235,7 +1246,9 @@
         const byRule = Array.isArray(data.by_rule) ? data.by_rule : [];
         const byProject = Array.isArray(data.by_project) ? data.by_project : [];
         const head = pageTitle('Overview', sub, actions);
-        const fresh = html`<p id="freshness" class="text-[11px] text-gray-500 -mt-3 mb-4">Read at ${T.clockTime(loadedAt)} from daily rollups${data.generated_at ? ' generated ' + timeAgo(data.generated_at) : ''}, so the counts are exact however busy the ledger is. Refreshes every 30 seconds while this tab is open.</p>`;
+        // When the numbers were read, in a few words; how they are kept exact
+        // is a hover away rather than a line of its own.
+        const fresh = html`<p id="freshness" class="tf-ops-fresh" title="Counted from daily rollups${data.generated_at ? ' generated ' + timeAgo(data.generated_at) : ''}, so they are exact however busy the ledger is. Refreshed every 30 seconds while this tab is open."><span class="tf-ops-live" aria-hidden="true"></span>Updated ${T.clockTime(loadedAt)} · refreshes every 30 s</p>`;
 
         if (!t.calls) {
           ctx.render(html`${head}${fresh}${overviewEmpty(days)}`);
@@ -1287,8 +1300,7 @@
         const origins = byOrigin.length
           ? html`<div class="mt-5 pt-4 border-t border-gray-800">
               <p class="tf-label">Where calls came from</p>
-              <ul class="flex flex-wrap gap-1.5">${byOrigin.map(o => html`<li class="tf-chip tf-chip-gray"><span class="text-gray-400">${o.origin}</span><span class="font-mono">${num(o.calls)}</span></li>`)}</ul>
-              <p class="text-[11px] text-gray-500 mt-2">hook is an agent being governed, page a visitor pressing a button here, ci a pipeline.</p>
+              <ul class="flex flex-wrap gap-1.5">${byOrigin.map(o => html`<li class="tf-chip tf-chip-gray" title="${ORIGIN_WORDS[o.origin] || o.origin}"><span class="text-gray-400">${o.origin}</span><span class="font-mono">${num(o.calls)}</span></li>`)}</ul>
             </div>`
           : '';
 
@@ -1318,13 +1330,13 @@
             <div class="space-y-4">
               <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
                 ${card('Calls per day', dailyWords(series), html`<div id="daily-chart">${dailyChart()}</div>`, 'lg:col-span-2 min-w-0')}
-                ${card('Outcome', 'Every call ends approved, would refuse (ran, flagged by an observing rule) or refused.', html`${outcome}${origins}`, 'min-w-0')}
+                ${card('Outcome', null, html`${outcome}${origins}`, 'min-w-0')}
               </div>
               <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                ${card('By rule', 'What decided, refused and would refuse. A layering rule by its id, a gate by its key. A call two rules would have refused counts under each, so these do not add up to the tiles.', ruleBars, 'min-w-0')}
+                ${card('By rule', 'A call two rules flagged counts under each, so these add up to more than the tiles.', ruleBars, 'min-w-0')}
                 ${agentsCard(byAgent)}
               </div>
-              ${card('By project', 'Stage, and what each project\'s rules did. Open a project for its readiness and the Promote button.', projectsTable(byProject, days, true, att.noisy && !att.noisy.error ? falseAlarmsByProject(att.noisy) : null), 'min-w-0')}
+              ${card('By project', 'Open a project to promote it.', projectsTable(byProject, days, true, att.noisy && !att.noisy.error ? falseAlarmsByProject(att.noisy) : null), 'min-w-0')}
             </div>
           </div>`);
         if (firstPaint) {
@@ -1769,15 +1781,15 @@
           <div class="space-y-6">
             ${stageHero(name, stage, config, readiness, days)}
             ${statTiles}
-            ${card('Readiness, rule by rule', 'Noisy if anything it flagged was a false alarm; else Needs review while anything is unlabelled; else Ready if it flagged anything; else Quiet. What needs a decision comes first.', html`${readinessList(name, rules, days)}${T.PROJECT_PATTERN.test(name) ? html`<p class="text-xs mt-4"><a class="tf-link" data-link="draft-rule" href="${T.pageHref('rules.html' + query({ project: name }) + '#draft')}">Draft a rule for this project</a> <span class="text-gray-500">from a sentence, with Amazon Bedrock; it starts in Observe beside the rules above.</span></p>` : ''}`)}
+            ${card('Readiness, rule by rule', 'What needs a decision comes first. One false alarm makes a rule Noisy.', html`${readinessList(name, rules, days)}${T.PROJECT_PATTERN.test(name) ? html`<p class="text-xs mt-4"><a class="tf-link" data-link="draft-rule" href="${T.pageHref('rules.html' + query({ project: name }) + '#draft')}">Draft a rule for this project</a> <span class="text-gray-500">from a sentence, with Amazon Bedrock; it starts in Observe beside the rules above.</span></p>` : ''}`)}
             <div class="grid grid-cols-1 lg:grid-cols-5 gap-4">
-              ${card('Recent calls', recent && recent.length ? 'The newest first. Open one for everything the ledger holds.' : null, html`${recentBody}${recent && recent.length ? html`<p class="mt-3"><a class="tf-link text-xs" href="${callsHref({ project: name, days })}">All calls from ${shown}</a></p>` : ''}`, 'lg:col-span-3 min-w-0')}
+              ${card('Recent calls', null, html`${recentBody}${recent && recent.length ? html`<p class="mt-3"><a class="tf-link text-xs" href="${callsHref({ project: name, days })}">All calls from ${shown}</a></p>` : ''}`, 'lg:col-span-3 min-w-0')}
               <div class="lg:col-span-2 space-y-4 min-w-0">
-                ${card('Agents and their hook mode', recent && recent.length ? 'From the latest ' + recent.length + ' calls.' : null, agentsPanel(recent, stage))}
-                ${card('Setup', 'Connect another checkout or machine to this project.', setupPanel(name))}
+                ${card('Agents', recent && recent.length ? 'From the latest ' + recent.length + ' calls.' : null, agentsPanel(recent, stage))}
+                ${card('Connect another machine', null, setupPanel(name))}
               </div>
             </div>
-            ${config && Array.isArray(config.history) && config.history.length ? card('Stage history', 'The last changes to this project\'s configuration, newest first.', historyList(config.history)) : ''}
+            ${config && Array.isArray(config.history) && config.history.length ? card('Stage history', 'Newest first.', historyList(config.history)) : ''}
           </div>`);
       }
 
@@ -1800,8 +1812,7 @@
               <span class="text-sm text-white inline-flex items-center gap-2">${T.icon('terminal', 16)}${agentLabel(agent)}</span>
               <span class="text-[11px] text-gray-500">${plural(info.calls, 'call')} · last ${timeAgo(info.last)}</span>
             </div>
-            <div class="flex flex-wrap gap-1">${modes.map(m => html`<span class="tf-chip ${m === 'observe' ? 'tf-chip-amber' : m === 'managed' ? 'tf-chip-emerald' : 'tf-chip-gray'}" title="${HOOK_MODES[m] || m}">${m}</span>`)}</div>
-            <p class="text-[11px] text-gray-400">${modes.map(m => HOOK_MODES[m] || m).join('; ')}.</p>
+            <div class="flex flex-wrap items-center gap-x-2 gap-y-1">${modes.map(m => html`<span class="tf-chip ${m === 'observe' ? 'tf-chip-amber' : m === 'managed' ? 'tf-chip-emerald' : 'tf-chip-gray'}" title="${HOOK_MODES[m] || m}">${m}</span><span class="text-xs text-gray-400">${HOOK_MODE_WORDS[m] || HOOK_MODES[m] || m}</span>`)}</div>
             ${capped ? html`<p class="text-[11px] text-amber-300" role="note">This project is in Enforce, but this agent's hook is capped to observe on its machine, so its calls are never refused. On that machine, run <span class="font-mono">python threefold.py connect --mode managed</span>.</p>` : ''}
           </li>`;
         })}</ul>`;
@@ -1917,7 +1928,7 @@
       return html`<div class="space-y-3">
         <div><p class="tf-label">Windows, PowerShell</p>${T.commandBlock(cmd.powershell, 'PowerShell connect command')}</div>
         <div><p class="tf-label">macOS or Linux</p>${T.commandBlock(cmd.posix, 'macOS and Linux connect command')}</div>
-        <p class="text-[11px] text-gray-500">Run it at the root of the repository. It detects the agents on the machine, starts in Observe, and ends by sending one harmless call you will see above. <a class="tf-link" href="#/connect">The guided version</a> waits for that call with you.</p>
+        <p class="text-xs text-gray-400">At the root of the repository. <a class="tf-link" href="#/connect">The guided version</a> waits for its first call with you.</p>
       </div>`;
     }
 
@@ -1986,7 +1997,7 @@
       const project = T.PROJECT_PATTERN.test(ctx.params.project || '') ? ctx.params.project : '';
       const rule = /^[A-Za-z0-9_.:-]{1,80}$/.test(ctx.params.rule || '') ? ctx.params.rule : '';
       const days = pickDays(ctx.params.days, 30);
-      const sub = 'Calls a rule in Observe would have refused and nobody has labelled. Correct if the rule was right to flag it, False alarm if the call should run. A rule becomes Ready when everything it flagged is correct.';
+      const sub = 'Calls a rule in Observe would have refused. Correct if the rule was right; False alarm if the call should run.';
       // `order` is this visit's group order. It is fixed when the queue is
       // first drawn, so a label never moves the group being worked, and a
       // group first seen later (Load more, an undo) joins at the end. `at` is
@@ -2135,7 +2146,6 @@
         return html`<div class="tf-ops-keys mb-4 hidden md:flex" role="note" aria-label="Keyboard">
           <span class="text-gray-300 font-semibold">${T.icon('command', 14)}Keyboard</span>
           ${REVIEW_KEYS.map(([key, what]) => html`<span>${T.kbd(key)}${what}</span>`)}
-          <span class="text-gray-500">Buttons work too; a group's note goes with the labels set in it.</span>
         </div>`;
       }
 
@@ -2620,7 +2630,7 @@
           ${chips}
           <p id="calls-error" class="text-xs text-rose-300 mb-2" role="alert"></p>
           ${state.items.length
-            ? card(html`<span data-metric="rows">${num(state.items.length)}</span> ${state.items.length === 1 ? 'call' : 'calls'} shown${state.cursor ? ', more beyond' : ''}`, f.day ? 'Filtered to ' + shortDay(f.day) + ' in this page.' : 'Newest first. Open a call for everything the ledger holds about it.', callsList(state.items, { project: !f.project }))
+            ? card(html`<span data-metric="rows">${num(state.items.length)}</span> ${state.items.length === 1 ? 'call' : 'calls'} shown${state.cursor ? ', more beyond' : ''}`, f.day ? 'Filtered to ' + shortDay(f.day) + ' in this page.' : null, callsList(state.items, { project: !f.project }))
             : state.cursor
               // Nothing matched, and the ledger still holds older rows: the read
               // stopped on its page budget before it got that far. Saying "none
