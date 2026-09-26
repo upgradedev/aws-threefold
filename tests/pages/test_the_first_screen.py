@@ -332,7 +332,8 @@ def test_replay_plays_the_answer_again_and_sends_nothing(tmp_path: Path) -> None
     assert out["askedBefore"] == 1 and out["askedAfter"] == 1, "Replay sends no second call"
     during = out["during"]
     assert during["phase"] == "waiting" and during["verdictHidden"] is True and during["landed"] == "pending"
-    assert during["waiting"] and during["words"] == "Playing this stack’s answer again; nothing is sent",         "While it plays again it says so, and never that it is asking"
+    assert during["waiting"] and during["words"] == "Playing this stack’s answer again; nothing is sent", \
+        "While it plays again it says so, and never that it is asking"
     after = out["after"]
     assert after["phase"] == "landed" and "Refused before it was written" in after["verdict"] and not after["waiting"]
     assert re.search(r"Live · \d+ ms", _text(after["source"])), "The same answer, with the round trip it took the first time"
@@ -477,7 +478,8 @@ def test_the_hero_asks_the_stack_once_and_shows_its_live_answer(tmp_path: Path) 
     fix = out["fix"]
     assert not out["fixHidden"] and "Checked fix" in _text(fix) and "3 of 3 gate checks passed" in fix
     summary = _text(re.search(r'<p class="tf-demo-fix-summary"[^>]*>(.*?)</p>', fix, re.S).group(1))
-    assert summary == "Move boto3 out of the domain behind UserPort; adapter: src/infrastructure/user_adapter.py.",         "The service's summary, without a second 'Checked fix:' under a title that already says it"
+    assert summary == "Move boto3 out of the domain behind UserPort; adapter: src/infrastructure/user_adapter.py.", \
+        "The service's summary, without a second 'Checked fix:' under a title that already says it"
     assert 'title="Checked fix: move boto3 out of the domain behind UserPort;' in fix, "The service's own words on hover"
     note = re.search(r'<p class="tf-demo-fix-note" title="([^"]*)">(.*?)</p>', fix, re.S)
     assert note and note.group(1) == "src/domain/user.py; src/infrastructure/user_adapter.py (new)", "Each file, and which is new"
@@ -783,7 +785,8 @@ def test_the_counts_are_read_from_the_overview_at_load_and_say_what_they_are_mad
     assert 'href="https://example.test/prod/dashboard.html#/calls?days=7&amp;kind=refused"' in out["live"], "Each tile opens its rows"
     assert "totals." not in out["live"], "A reader is shown words, not the API's field names"
     subs = [_text(s) for s in re.findall(r'<span class="tf-tile-sub">(.*?)</span>', out["live"], re.S)]
-    assert subs == ["in the last 7 days", "before they ran", "recorded while a project observes"],         "Each sub-line says what its number means, and the window is named once"
+    assert subs == ["in the last 7 days", "before they ran", "recorded while a project observes"], \
+        "Each sub-line says what its number means, and the window is named once"
     terms = [_text(t) for t in re.findall(r'<span class="tf-tile-term">(.*?)</span>', out["live"], re.S)]
     assert terms == ["Refused", "Would refuse"], "Plain words first, then the dashboard's own term for the same calls"
     assert "Open the refused calls" in out["live"] and "Open the would-refuse calls" in out["live"], "Each link says which rows it opens, in the dashboard's words"
@@ -828,10 +831,12 @@ def test_without_sources_the_sandboxes_are_still_told_apart(tmp_path: Path) -> N
     out = _load(tmp_path, overview="{ status: 200, body: " + _overview(mismatched) + " }")
     where = _text(out["where"])
     assert "900" not in where and "1,284" not in where and "120" not in where, "Parts that do not add up to the 1,284 calls give no figure"
-    assert "Where they come from: a synthetic Acme fleet run through the real gates, visitors’ sandboxes" in where,         "A fleet the stack reports is named in words even then: synthetic calls are never left unlabelled"
+    assert "Where they come from: a synthetic Acme fleet run through the real gates, visitors’ sandboxes" in where, \
+        "A fleet the stack reports is named in words even then: synthetic calls are never left unlabelled"
     nothing = "sources: { fleet: { calls: 0 }, sandbox: { calls: 0 }, other: { calls: 0 } }"
     out = _load(tmp_path, overview="{ status: 200, body: " + _overview(nothing) + " }")
-    assert "synthetic Acme fleet" not in _text(out["where"]) and "probes, visitors’ sandboxes, page demos" in _text(out["where"]),         "Parts that add up to nothing are not used, and no fleet is claimed"
+    assert "synthetic Acme fleet" not in _text(out["where"]) and "probes, visitors’ sandboxes, page demos" in _text(out["where"]), \
+        "Parts that add up to nothing are not used, and no fleet is claimed"
 
 
 def test_the_counts_are_read_without_a_key_even_when_one_is_typed(tmp_path: Path) -> None:
@@ -854,7 +859,8 @@ def test_a_sparse_window_says_what_it_holds_instead_of_drawing_a_flat_line(tmp_p
     out = _load(tmp_path, overview="{ status: 200, body: " + _overview(one_day) + " }")
     assert "tf-spark" not in out["live"] and "all on 21 Sep" in out["live"]
     subs = [_text(sub) for sub in re.findall(r'<span class="tf-tile-sub">(.*?)</span>', out["live"], re.S)]
-    assert subs == ["in the last 7 days, all on 21 Sep", "before they ran", "recorded while a project observes"],         "The day is named once, on the first tile, when every call fell on it"
+    assert subs == ["in the last 7 days, all on 21 Sep", "before they ran", "recorded while a project observes"], \
+        "The day is named once, on the first tile, when every call fell on it"
     two_days = "series: [{ day: '2026-09-20', approved: 3, observed: 1, refused: 2 }, { day: '2026-09-21', approved: 5, observed: 2, refused: 1 }]"
     out = _load(tmp_path, overview="{ status: 200, body: " + _overview(two_days) + " }")
     assert out["live"].count("tf-spark") == 3, "Two days with a count make a trend"
@@ -940,12 +946,14 @@ def test_the_benchmark_is_pooled_from_the_snapshot_this_stack_serves(tmp_path: P
     assert f"{want['series']} series, {want['runs']:,} {real} of Claude Code and Codex." in bench
     if want["landed"] == 0:
         assert f"No rule-breaking write landed under Threefold in any of the {want['series']} series." in bench
-    assert "governed violation" not in bench.replace("The benchmark calls these governed violations.", ""),         "One plain term on the card; the benchmark's own term is named once, under the chart"
+    assert "governed violation" not in bench.replace("The benchmark calls these governed violations.", ""), \
+        "One plain term on the card; the benchmark's own term is named once, under the chart"
     for key in ("none", "prompt"):
         assert f"{want['sums'][key]['k']} of {want['sums'][key]['n']}" in bench
     none = want["sums"]["none"]
     assert (f"The price: the acceptance tests passed in {tf['done']} of those {tf['done_n']} runs under Threefold, "
-            f"against {none['done']} of {none['done_n']} with no guidance") in bench,         "The price is stated with the result, and read against what the agents finished with no guidance"
+            f"against {none['done']} of {none['done_n']} with no guidance") in bench, \
+        "The price is stated with the result, and read against what the agents finished with no guidance"
     assert 'href="https://example.test/prod/dashboard.html#/proof"' in out["bench"]
 
 

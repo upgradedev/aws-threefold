@@ -103,7 +103,8 @@ def test_the_demo_refusal_panels_show_the_fix_the_service_sent(tmp_path: Path) -
     assert out["boundaryShown"]
     assert "Checked by Threefold: passes the same gates" in boundary
     assert "<p title=\"Checked fix: move boto3 out of the domain behind AcmeOrderPort;" in boundary, "The service's own words, on hover"
-    assert ">Move boto3 out of the domain" in boundary and "Create the adapter outside the domain." in boundary,         "Under a chip that says it was checked, the summary does not open with 'Checked fix:' again"
+    assert ">Move boto3 out of the domain" in boundary and "Create the adapter outside the domain." in boundary, \
+        "Under a chip that says it was checked, the summary does not open with 'Checked fix:' again"
     assert "<pre" in boundary and "<code>class AcmeOrderPort(Protocol):" in boundary, "The proposed file is shown as code"
     assert "src/infrastructure/acme_order_adapter.py" in boundary and "a new file" in boundary
     assert "A starting point, never applied automatically." in boundary
@@ -116,6 +117,33 @@ def test_the_demo_refusal_panels_show_the_fix_the_service_sent(tmp_path: Path) -
     assert "Use $AWS_ACCESS_KEY_ID" in out["secret"] and "Checked by Threefold" in out["secret"]
     assert not out["noFixShown"] and out["noFix"] == "", "A refusal without a fix shows no panel"
     assert not out["offlineShown"], "The offline panels invent no fix"
+
+
+def test_an_unchecked_fix_keeps_its_own_words_and_a_checked_one_is_not_said_twice(tmp_path: Path) -> None:
+    """Only a title or chip that already says what kind of fix it is takes that phrase off the summary."""
+    out = _page(
+        "index.html",
+        r"""
+  const suggested = fix({ validated: false, checks: [], summary: 'Suggested fix: keep the import in the adapter.' });
+  answer = api({
+    '/status': { status: 200, body: { service: 'Threefold', status: 'HEALTHY' } },
+    'POST /evaluate-tool-call': { status: 200, body: refusal({ suggested_fix: suggested }) }
+  });
+  await checkApiHealth();
+  await simulateBoundary(); await tick();
+  out.panel = el('fix-box').innerHTML;
+  out.checkedUnder = fixSummaryUnder('Checked fix: move it.', 'checked');
+  out.suggestedUnderChecked = fixSummaryUnder('Suggested fix: move it.', 'checked');
+  out.suggestedUnder = fixSummaryUnder('Proposed fix: move it.', 'suggested');
+  out.checkedUnderSuggested = fixSummaryUnder('Checked fix: move it.', 'suggested');
+""",
+        tmp_path,
+    )
+    assert "Checked by Threefold" not in out["panel"], "No chip for an unchecked fix"
+    assert ">Suggested fix: keep the import in the adapter.</p>" in out["panel"], "With no chip, the service's own words are shown whole"
+    assert out["checkedUnder"] == "Move it." and out["suggestedUnder"] == "Move it."
+    assert out["suggestedUnderChecked"] == "Suggested fix: move it." and out["checkedUnderSuggested"] == "Checked fix: move it.", \
+        "A phrase the title does not say is left where the service put it"
 
 
 def test_the_demo_escapes_every_part_of_the_fix(tmp_path: Path) -> None:

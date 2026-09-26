@@ -1182,8 +1182,10 @@
           ? '<p><span class="tf-chip tf-chip-emerald tf-chip-dot">Checked by Threefold: passes the same gates</span></p>'
           : '') +
         // Under a chip that already says it was checked, a leading "Checked
-        // fix:" is not said twice; the service's own words stay on hover.
-        `<p title="${escapeHtml(fix.summary)}">${escapeHtml(heroFixSummary(fix.summary))}</p>` +
+        // fix:" is not said twice; an unchecked fix has no chip, so its own
+        // words, "Suggested fix:" and all, are left as the service wrote them.
+        // The service's own words stay on hover either way.
+        `<p title="${escapeHtml(fix.summary)}">${escapeHtml(checked ? fixSummaryUnder(fix.summary, 'checked') : fix.summary)}</p>` +
         (steps.length
           ? '<ol>' + steps.map(s => `<li>${escapeHtml(s)}</li>`).join('') + '</ol>'
           : '') +
@@ -2072,11 +2074,14 @@
         <p class="tf-demo-ruleline">${plain.rule ? h`<span>rule <b>${plain.rule}</b></span>` : ''}<span class="tf-demo-status"${ghost ? '' : h` title="The status the service returned"`}>${answer.status}</span></p>`;
     }
 
-    // The service's summary under a title that already says it was checked, so
-    // a leading "Checked fix:" is not said twice. Nothing else is changed.
-    function heroFixSummary(summary) {
+    // The service's summary under a title that already says what kind of fix
+    // it is, so the title's words are not said twice: under "Checked fix" a
+    // leading "Checked fix:", and under "A suggested fix, not checked" a
+    // leading "Suggested fix:" or "Proposed fix:". Nothing else is changed.
+    function fixSummaryUnder(summary, title) {
       const text = String(summary).trim();
-      const rest = text.replace(/^(?:checked|suggested|proposed)?\s*fix\s*:\s*/i, '');
+      const said = title === 'checked' ? /^checked\s+fix\s*:\s*/i : /^(?:suggested|proposed)\s+fix\s*:\s*/i;
+      const rest = text.replace(said, '');
       return rest ? rest.charAt(0).toUpperCase() + rest.slice(1) : text;
     }
 
@@ -2106,7 +2111,7 @@
       return {
         tone: fix.validated === true ? 'checked' : 'none',
         markup: h`<p class="tf-demo-fix-title">${title}</p>
-          <p class="tf-demo-fix-summary" title="${fix.summary}">${heroFixSummary(fix.summary)}</p>
+          <p class="tf-demo-fix-summary" title="${fix.summary}">${fixSummaryUnder(fix.summary, fix.validated === true ? 'checked' : 'suggested')}</p>
           <p class="tf-demo-fix-note"${files ? h` title="${files}"` : ''}>${note}</p>`
       };
     }
