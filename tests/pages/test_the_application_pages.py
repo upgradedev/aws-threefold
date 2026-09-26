@@ -1420,6 +1420,124 @@ def test_the_walkthrough_reads_readiness_only_after_every_label_is_saved(tmp_pat
     assert out["readsAfter"] == out["readsBefore"] + 1 and out["step"] == 4
 
 
+REPLAY = r"""
+const P = 'Acme-Sandbox-0a1b2c3d';
+const obs = (i, rule, target, extra) => row(i, Object.assign({ project_name: P, rule_key: rule, observed_rules: [rule], observed_rule: rule, target, observed_target: target }, extra || {}));
+const observed = [
+  obs(1, 'python-domain-stays-pure', 'src/acme/domain/order.py', { observed_reason: "Clean Architecture violation: Layering rule 'python-domain-stays-pure' refuses this write: A Python file under domain/ may not import infrastructure or a driver. 'src/acme/domain/order.py' imports 'boto3', which matches 'boto3'" }),
+  obs(2, 'PROTECTED_PATH', 'cat', { agent: 'codex', tool_name: 'shell', action_type: 'COMMAND_EXEC', observed_target: '', observed_reason: "Command 'cat .env' reaches a protected path or credential store" })
+];
+const sent = { evaluate: [], promote: [] };
+answer = api({
+  'POST /api/sandbox': { status: 200, body: { project: P, calls_seeded: 12 } },
+  ['/api/projects/' + P]: { status: 200, body: { project: P, config: { stage: 'observe', sandbox: true }, readiness: { rules: [
+    { rule_key: 'python-domain-stays-pure', kind: 'layering', state: 'ready', would_refuse: 1, correct: 1, false_alarms: 0, unreviewed: 0 },
+    { rule_key: 'PROTECTED_PATH', kind: 'gate', state: 'ready', would_refuse: 1, correct: 1, false_alarms: 0, unreviewed: 0 },
+    { rule_key: 'dotnet-domain-stays-pure', kind: 'layering', state: 'quiet', would_refuse: 0, correct: 0, false_alarms: 0, unreviewed: 0 },
+    { rule_key: 'LOOP', kind: 'gate', state: 'quiet', would_refuse: 0, correct: 0, false_alarms: 0, unreviewed: 0 }] } } },
+  '/api/decisions': { status: 200, body: { items: observed, next_cursor: null } },
+  ['POST /api/projects/' + P + '/reviews']: { status: 200, body: { updated: 1, skipped: [] } },
+  ['POST /api/projects/' + P + '/promote']: (u, i, body) => { sent.promote.push(body.enforce); return { status: 200, body: { project: P, config: { stage: 'enforce', observe_rules: [] } } }; },
+  '/api/decision': { status: 200, body: { decision: observed[0], session: null, rule: { id: 'python-domain-stays-pure', forbid_imports: ['boto3'] } } },
+  '/rules': { status: 200, body: { rules: [{ id: 'dotnet-domain-stays-pure', when_path_matches: ['**/Domain/**/*.cs'], forbid_imports: ['**.Infrastructure.**', 'System.Data'] }] } },
+  'POST /evaluate-tool-call': (u, i, body) => { sent.evaluate.push(body); return { status: 200, body: { status: 'BLOCKED_BOUNDARY_VIOLATION', reason: 'Refused.', project_stage: 'enforce' } }; }
+});
+async function toStepFour(keep) {
+  await visit('#/try');
+  await click('try-restart'); await tick();
+  await click('try-create'); await tick();
+  await click('try-show'); await tick();
+  await click('try-review'); await tick();
+  await click('try-label', { 'data-verdict': 'VERDICT-1', 'data-label': 'correct' });
+  await click('try-label', { 'data-verdict': 'VERDICT-2', 'data-label': 'correct' });
+  await tick();
+  await click('try-readiness'); await tick();
+  for (const key of ['python-domain-stays-pure', 'PROTECTED_PATH', 'dotnet-domain-stays-pure', 'LOOP']) {
+    await click('try-toggle', { 'data-rule': key, checked: keep.indexOf(key) !== -1 });
+  }
+}
+"""
+
+
+def test_the_walkthrough_sends_a_gate_s_call_as_the_call_it_flagged(tmp_path: Path) -> None:
+    """A protected path's command is sent again as that command, never rebuilt as a write.
+
+    The replay once took whatever call was marked correct under a rule in
+    force and wrote an import into a file named after its target. For the
+    command `cat .env` that was a write to a file called `cat`, which the
+    service approved, and the climax said the rule "may not be in force".
+    """
+    out = dash(
+        REPLAY
+        + r"""
+  await toStepFour(['PROTECTED_PATH']);
+  out.button = text(view());
+  await click('try-promote'); await tick();
+  await click('try-next'); await tick();
+  out.send = text(view());
+  await click('try-send'); await tick();
+  out.sent = sent.evaluate.pop();
+""",
+        tmp_path,
+    )
+    assert "Promote with 1 rule" in out["button"]
+    assert out["sent"]["tool_name"] == "Bash" and out["sent"]["action_type"] == "COMMAND_EXEC"
+    assert out["sent"]["arguments"] == {"command": "cat .env"}, "The command the gate flagged is the command sent again"
+    assert "Terminal" in out["send"] and "cat .env" in out["send"] and "Earlier, in Observe" in out["send"]
+    assert "the same command" in out["send"]
+
+
+def test_the_walkthrough_builds_a_quiet_rule_s_write_from_the_rule_and_sends_nothing_a_gate_would_approve(tmp_path: Path) -> None:
+    """With no flagged call under a rule in force, the call to send comes from the rule, or is not sent.
+
+    A quiet layering rule says which files it watches and what they may not
+    import, so the write is built from that. A gate that one call cannot trip
+    (a loop, a budget) is never stood in for by a call it would approve, and
+    Enforce with no rule in force is never offered.
+    """
+    out = dash(
+        REPLAY
+        + r"""
+  await toStepFour(['dotnet-domain-stays-pure']);
+  await click('try-promote'); await tick();
+  await click('try-next'); await tick();
+  out.quietSend = text(view());
+  await click('try-send'); await tick();
+  out.quietSent = sent.evaluate.pop();
+
+  await toStepFour(['LOOP']);
+  await click('try-promote'); await tick();
+  await click('try-next'); await tick();
+  out.gateOnly = text(view());
+  const before = sent.evaluate.length;
+  await click('try-finish'); await tick();
+  out.gateDone = text(view());
+  out.gateSent = sent.evaluate.length - before;
+
+  await toStepFour([]);
+  out.none = view();
+  const promotes = sent.promote.length;
+  await click('try-promote'); await tick();
+  out.nonePromoted = sent.promote.length - promotes;
+  out.noneError = text(view());
+""",
+        tmp_path,
+    )
+    sent = out["quietSent"]
+    assert sent["tool_name"] == "Write" and sent["arguments"] == {"file_path": "src/Domain/Order.cs", "content": "using System.Data;\n"}
+    assert "built from the rule itself" in out["quietSend"]
+    assert "No single call can show these rules" in out["gateOnly"] and "LOOP" in out["gateOnly"]
+    assert out["gateSent"] == 0, "Nothing is sent for a gate one call cannot show"
+    assert "No call was sent" in out["gateDone"]
+    assert re.search(r'id="try-primary"[^>]*data-action="try-promote"[^>]*disabled', out["none"]), "Promote with no rule is not offered"
+    assert "Promote with 0 rules" in text_of(out["none"]) and "Check at least one rule to promote" in text_of(out["none"])
+    assert out["nonePromoted"] == 0 and "Check at least one rule to promote" in out["noneError"]
+
+
+def text_of(markup: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", markup))
+
+
 def test_a_resumed_sandbox_that_was_promoted_reads_as_enforce_on_every_step(tmp_path: Path) -> None:
     """A visitor who comes back to a sandbox they promoted is shown the stage the service keeps.
 

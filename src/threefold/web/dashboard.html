@@ -2476,6 +2476,52 @@
       return { sentence: m[1], imports: m[2] + (m[3] ? '' : '…') };
     }
 
+    // The command a gate's call ran. For a command the ledger keeps only the
+    // program as its target; the whole command is in the reason.
+    function tryCommand(row) {
+      const m = /Command '(.*)' reaches /.exec(String(reasonOf(row) || row.reason || ''));
+      return m ? m[1] : '';
+    }
+
+    // The import a layering reason names, and whether the service's cut at
+    // 240 characters fell inside it.
+    function tryImportOf(row) {
+      const m = /' imports '([^']*)('?)/.exec(String(reasonOf(row) || ''));
+      return m && m[1] ? { name: m[1], cut: !m[2] } : null;
+    }
+
+    // The package a rule forbids that an import, whole or cut, falls under:
+    // the longest one named in full that the import starts with.
+    function tryPackageFor(name, forbid) {
+      const plain = (forbid || []).filter(p => typeof p === 'string' && p && !/[*]/.test(p));
+      const hits = plain.filter(p => name === p || name.indexOf(p + '.') === 0 || name.indexOf(p + '/') === 0);
+      return hits.sort((a, b) => b.length - a.length)[0] || '';
+    }
+
+    // Whether a flagged call can be sent again as one call of the same kind:
+    // a layering rule's write, or a protected path's command or file.
+    function tryReplayable(row) {
+      const key = ruleKeyOf(row);
+      if (key === 'PROTECTED_PATH') return !!(row.action_type === 'COMMAND_EXEC' ? tryCommand(row) : targetOf(row));
+      if (tryIsGate(key)) return false;
+      return row.action_type !== 'COMMAND_EXEC';
+    }
+
+    // A file a rule's path pattern covers: every `**` a step over no folder,
+    // under src/ when the pattern starts with one, and every `*` a name.
+    function tryPathFromGlob(glob) {
+      const text = String(glob || '');
+      if (!text || /[\[\]{}\\]/.test(text)) return '';
+      const segs = text.split('/').filter(s => s && s !== '**');
+      if (!segs.length) return '';
+      const last = segs[segs.length - 1];
+      const ext = (last.match(/\.([A-Za-z0-9]+)$/) || [])[1];
+      if (!ext) return '';
+      const capital = ['java', 'cs', 'kt', 'scala'].indexOf(ext.toLowerCase()) !== -1;
+      const named = segs.map((s, i) => s.replace(/\*+/g, i === segs.length - 1 ? (capital ? 'Order' : 'order') : 'acme').replace(/\?/g, 'x'));
+      return (text.indexOf('**') === 0 ? 'src/' : '') + named.join('/');
+    }
+
     function tryTally(rows) {
       const t = { approved: 0, observed: 0, refused: 0 };
       (rows || []).forEach(r => { t[outcomeOf(r)] += 1; });
@@ -2499,6 +2545,17 @@
       return words.slice(0, -1).join(', ') + ' and ' + words[words.length - 1];
     }
 
+    // The same list of markup, each part kept as markup.
+    function tryListHtml(items) {
+      return items.map((item, i) => html`${i === 0 ? '' : i === items.length - 1 ? ' and ' : ', '}${item}`);
+    }
+
+    // What a call touched, as a reader would name it: a command whole, as
+    // its reason carries it, and a file by its path.
+    function tryTarget(row) {
+      return (row.action_type === 'COMMAND_EXEC' && tryCommand(row)) || targetOf(row) || row.tool_name || '';
+    }
+
     // The agents that sent a list of calls, named, in the order of the lanes.
     function tryAgentsOf(rows) {
       return Array.from(new Set((rows || []).map(r => r.agent))).sort((a, b) => tryAgentRank(a) - tryAgentRank(b)).map(agentLabel);
@@ -2508,8 +2565,8 @@
       ensureTryStyle();
       const state = {
         step: 1, project: '', stage: null, seeded: null, calls: null, callsError: null, readiness: null, before: null, observed: [], labels: {}, cursor: 0,
-        selected: null, promoted: null, observing: null, result: null, replay: null, error: null, busy: false, who: null, play: {}, focusId: null,
-        saves: []
+        selected: null, promoted: null, observing: null, result: null, replay: null, planned: false, error: null, busy: false, who: null, play: {}, focusId: null,
+        saves: [], rulesDef: null
       };
       try {
         const saved = JSON.parse(localStorage.getItem(TRY_STORAGE) || 'null');
@@ -2536,7 +2593,7 @@
         if (!config || (config.stage !== 'observe' && config.stage !== 'enforce')) return;
         state.stage = config.stage;
         if (state.stage === 'observe') {
-          if (state.promoted && state.promoted.earlier) { state.promoted = null; state.observing = null; state.replay = null; }
+          if (state.promoted && state.promoted.earlier) { state.promoted = null; state.observing = null; state.replay = null; state.planned = false; }
           return;
         }
         if (state.promoted && !state.promoted.earlier) return;
@@ -2910,39 +2967,49 @@
               ${rules.length ? '' : emptyNote('The service returned no rules for this project.')}
             </div>`,
           actions: p
-            ? primary('try-next', 'Send the same kind of call again')
-            : primary('try-promote', 'Promote with ' + plural(chosen, 'rule'), 'Promoting…')
+            ? primary('try-next', 'Send the same kind of call again', 'Planning the call…')
+            : html`${primary('try-promote', 'Promote with ' + plural(chosen, 'rule'), 'Promoting…', chosen === 0)}${chosen === 0 ? html`<p class="tf-try-hint">Check at least one rule to promote: with none in force, Enforce would refuse nothing.</p>` : ''}`
         };
       }
 
       function editor(plan, tone) {
         const args = plan && plan.arguments ? plan.arguments : {};
-        const lines = String(args.content || '').replace(/\n$/, '').split('\n');
+        const command = plan.action_type === 'COMMAND_EXEC';
+        const read = plan.action_type === 'FILE_READ';
+        const lines = command ? [String(args.command || '')] : read ? ['Read ' + String(args.file_path || '')] : String(args.content || '').replace(/\n$/, '').split('\n');
+        const bad = line => command || read || /^\s*(import|from|using)\b/.test(line);
+        const what = command ? 'command' : read ? 'read' : 'write';
         const note = tone === 'refused'
-          ? 'Refused before it ran: a hook would have stopped the write here.'
+          ? 'Refused before it ran: a hook would have stopped the ' + what + ' here.'
           : tone === 'approved'
-            ? 'This write was answered with an approval.'
-            : plan.from === 'flagged'
-              ? html`Built from a call <span class="tf-mono">${plan.rule}</span> flagged, on the file it flagged.`
-              : plan.from === 'sample'
-                ? 'No call you labelled falls under a rule now in force, so this is a sample write.'
-                : html`Built from a call you marked correct under <span class="tf-mono">${plan.rule}</span>.`;
-        return html`<figure class="tf-try-editor" data-tone="${tone || 'pending'}">
-          <figcaption class="tf-try-editor-tab">${T.icon('code', 14)}<span class="tf-break">${args.file_path || ''}</span><span class="tf-try-editor-meta">${plan.tool_name} · Claude Code · hook</span></figcaption>
-          <pre class="tf-try-code"><code>${lines.map((line, n) => html`<span class="tf-try-line"${/^\s*(import|from|using)\b/.test(line) ? raw(' data-bad') : ''}><span class="tf-try-ln" aria-hidden="true">${n + 1}</span>${line}</span>`)}</code></pre>
+            ? 'This ' + what + ' was answered with an approval.'
+            : plan.from === 'rule'
+              ? html`No call in the sandbox fell under <span class="tf-mono">${plan.rule}</span>, so this write is built from the rule itself: a file it watches, and a package it forbids.`
+              : plan.from === 'flagged'
+                ? html`Built from a call <span class="tf-mono">${plan.rule}</span> flagged: ${command ? 'the same command' : read ? 'the same file' : 'the file it flagged, and the import it caught'}.`
+                : html`Built from a call you marked correct under <span class="tf-mono">${plan.rule}</span>: ${command ? 'the same command' : read ? 'the same file' : 'the file it flagged, and the import it caught'}.`;
+        return html`<figure class="tf-try-editor" data-tone="${tone || 'pending'}" data-kind="${what}">
+          <figcaption class="tf-try-editor-tab">${T.icon(command ? 'terminal' : read ? 'book' : 'code', 14)}<span class="tf-break">${command ? 'Terminal' : (args.file_path || '')}</span><span class="tf-try-editor-meta">${plan.tool_name} · Claude Code · hook</span></figcaption>
+          <pre class="tf-try-code"><code>${lines.map((line, n) => html`<span class="tf-try-line"${bad(line) ? raw(' data-bad') : ''}><span class="tf-try-ln" aria-hidden="true">${command ? '$' : n + 1}</span>${line}</span>`)}</code></pre>
           <p class="tf-try-editor-note">${note}</p>
         </figure>`;
       }
 
+      // The flagged call the replay was built from, as step 2 showed it.
       function thenCard(plan) {
-        const args = plan && plan.arguments ? plan.arguments : {};
-        const row = state.observed.find(r => ruleKeyOf(r) === plan.rule && targetOf(r) === args.file_path);
-        if (!row) return '';
+        const row = plan && plan.verdict_id ? state.observed.find(r => r.verdict_id === plan.verdict_id) : null;
+        if (!row) {
+          if (!plan || plan.from !== 'rule') return '';
+          return html`<div class="tf-try-then" data-from="rule">
+            <p class="tf-try-then-label">Earlier, in Observe</p>
+            <p class="tf-try-then-none">No call in the sandbox fell under <span class="tf-mono">${plan.rule}</span>, so there is no earlier call to set beside this one. The write is built from the rule itself.</p>
+          </div>`;
+        }
         const l = state.labels[row.verdict_id];
         return html`<div class="tf-try-then">
           <p class="tf-try-then-label">Earlier, in Observe</p>
           <p class="tf-try-card-agent">${tryAvatar(row.agent, true)}${agentLabel(row.agent)} · <span class="tf-mono">${row.tool_name}</span></p>
-          <p class="tf-try-file tf-break" style="margin:0">${targetOf(row)}</p>
+          <p class="tf-try-file tf-break tf-try-then-file">${tryTarget(row)}</p>
           <p class="tf-try-summary">${T.statusChip('observed')}<span class="tf-try-muted">It ran, and was recorded.</span></p>
           ${l ? html`<p class="tf-try-summary"><span class="tf-try-muted">You marked it</span>${reviewChip(l)}</p>` : ''}
         </div>`;
@@ -2950,6 +3017,16 @@
 
       function screenSend(play) {
         const plan = state.replay;
+        const p = state.promoted;
+        if (!plan && p) {
+          return {
+            kicker: 'Step 5 of 5',
+            title: 'No single call can show these rules',
+            sentence: html`The project is in Enforce, and ${tryListHtml(p.enforce.map(key => html`<span class="tf-mono tf-try-strong">${key}</span>`))} ${p.enforce.length === 1 ? 'is' : 'are'} in force. ${p.enforce.length === 1 ? 'It is a gate' : 'They are gates'} that one call cannot trip: a loop needs the same call repeated, a budget a session's spend, and an unreadable write a layering rule in force over its path. Nothing is sent rather than a call they would approve.`,
+            visual: html`${projectBar()}${T.emptyState({ icon: 'shield', text: 'Start again and keep a layering rule checked on step 4 to watch one refuse a write.' })}`,
+            actions: html`${primary('try-finish', 'See what just happened')}<button type="button" class="tf-btn tf-btn-quiet" data-action="try-restart">${T.icon('refresh', 16)}Start again</button>`
+          };
+        }
         const earlier = plan ? thenCard(plan) : '';
         return {
           kicker: 'Step 5 of 5',
@@ -3061,7 +3138,7 @@
           label: 'the same kind of call, in Enforce',
           text: r.status
             ? 'Answered ' + r.status + (fix ? (fix.validated === true ? ', with a fix checked by Threefold' : ', with a fix the gates did not validate') : '') + (r.explanation_source === 'bedrock' ? ' and a sentence from Amazon Bedrock' : '') + '.'
-            : 'No answer was recorded.',
+            : state.planned && !state.replay ? 'No call was sent: no rule in force can be shown by a single call.' : 'No answer was recorded.',
           source: 'POST /evaluate-tool-call'
         });
         return facts;
@@ -3206,40 +3283,109 @@
 
       // The ledger keeps no arguments, so the call is rebuilt: the file the
       // rule watched, and an import the rule forbids, written the way that
-      // file's language writes one.
-      function importLine(path, name) {
+      // file's language writes one. A package a rule names, rather than an
+      // import a call made, is written as a wildcard where the language
+      // needs one.
+      function importLine(path, name, isPackage) {
         const ext = (String(path).match(/\.([A-Za-z0-9]+)$/) || [])[1] || '';
         const lower = ext.toLowerCase();
-        if (lower === 'java' || lower === 'kt' || lower === 'scala') return 'import ' + name + ';\n';
+        if (lower === 'java' || lower === 'kt' || lower === 'scala') return 'import ' + name + (isPackage ? '.*' : '') + ';\n';
         if (lower === 'cs') return 'using ' + name + ';\n';
         if (['ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs'].indexOf(lower) !== -1) return "import client from '" + name + "';\n";
         if (lower === 'go') return 'import "' + name + '"\n';
         return 'import ' + name + '\n';
       }
 
-      // A call marked correct under a rule now in force, preferring a layering
-      // rule's (a write the replay can rebuild) over a gate's.
+      // Every rule of the sandbox, by id, read once. A failed read is an
+      // empty set: what is built from it then says less, never something else.
+      function ruleDefinitions() {
+        if (state.rulesDef) return Promise.resolve(state.rulesDef);
+        return T.api('/rules' + query({ project: state.project })).then(set => {
+          const byId = {};
+          (set && Array.isArray(set.rules) ? set.rules : []).forEach(r => { if (r && typeof r.id === 'string') byId[r.id] = r; });
+          state.rulesDef = byId;
+          return byId;
+        }, () => ({}));
+      }
+
+      function ruleOfRow(row) {
+        const key = ruleKeyOf(row);
+        return T.api('/api/decision' + query({ timestamp: row.timestamp, verdict_id: row.verdict_id })).then(d => d && d.rule, () => null)
+          .then(rule => rule || ruleDefinitions().then(defs => defs[key] || null));
+      }
+
+      // The import to write again: the one the flagged call made when its
+      // reason carries it whole; else the package it matched, which the rule
+      // names; else the first package the rule forbids by name.
+      function importToSend(row, rule) {
+        const forbid = rule && Array.isArray(rule.forbid_imports) ? rule.forbid_imports.filter(n => typeof n === 'string' && n) : [];
+        const seen = row ? tryImportOf(row) : null;
+        if (seen && !seen.cut) return { name: seen.name, isPackage: false };
+        const matched = seen ? tryPackageFor(seen.name, forbid) : '';
+        if (matched) return { name: matched, isPackage: true };
+        const plain = forbid.find(n => !/[*]/.test(n)) || (forbid.length ? String(forbid[0]).replace(/\*+\.?/g, '').replace(/^[./]+|[./]+$/g, '') : '');
+        return plain ? { name: plain, isPackage: true } : null;
+      }
+
+      function writePlan(base, path, rule, row) {
+        const imp = importToSend(row, rule);
+        return Object.assign(base, { kind: 'write', tool_name: 'Write', action_type: 'FILE_WRITE',
+          arguments: { file_path: path, content: imp ? importLine(path, imp.name, imp.isPackage) : '# Acme sandbox\n' } });
+      }
+
+      // The call a flagged row made, rebuilt as the same kind of call: a
+      // gate's command as that command, a gate's file as a call to that file,
+      // and a layering rule's write as a write to the file it flagged.
+      function planFromRow(row, from) {
+        const key = ruleKeyOf(row);
+        const base = { rule: key, from, verdict_id: row.verdict_id };
+        if (tryIsGate(key)) {
+          const command = row.action_type === 'COMMAND_EXEC' ? tryCommand(row) : '';
+          if (command) return Promise.resolve(Object.assign(base, { kind: 'command', tool_name: 'Bash', action_type: 'COMMAND_EXEC', arguments: { command } }));
+          const path = targetOf(row);
+          return Promise.resolve(Object.assign(base, row.action_type === 'FILE_READ'
+            ? { kind: 'read', tool_name: 'Read', action_type: 'FILE_READ', arguments: { file_path: path } }
+            : { kind: 'write', tool_name: 'Write', action_type: 'FILE_WRITE', arguments: { file_path: path, content: '# Acme sandbox\n' } }));
+        }
+        return ruleOfRow(row).then(rule => writePlan(base, targetOf(row) || 'src/domain/acme_order.py', rule, row));
+      }
+
+      // A write a layering rule refuses, built from the rule alone: a file
+      // its path pattern covers, and a package it forbids.
+      function planFromRule(rule) {
+        if (!rule || typeof rule.id !== 'string') return null;
+        const globs = Array.isArray(rule.when_path_matches) ? rule.when_path_matches : [];
+        for (const glob of globs) {
+          const path = tryPathFromGlob(glob);
+          const imp = path ? importToSend(null, rule) : null;
+          if (path && imp) return writePlan({ rule: rule.id, from: 'rule', verdict_id: null }, path, rule, null);
+        }
+        return null;
+      }
+
+      // What to send again under the rules now in force: a call marked
+      // correct, then any call flagged, preferring a layering rule's (a write
+      // with the import it caught) over a gate's; then, when no call in the
+      // sandbox fell under a rule in force, a write built from a layering
+      // rule's definition. A gate that one call cannot show (a loop, a budget,
+      // an unreadable write) is never stood in for by a call it would approve:
+      // the answer is then no call at all, and step 5 says why.
       function planReplay(enforce) {
         const inForce = r => enforce.indexOf(ruleKeyOf(r)) !== -1;
         const newestFirst = (a, b) => String(b.timestamp).localeCompare(String(a.timestamp));
-        const candidates = state.observed.filter(r => state.labels[r.verdict_id] === 'correct' && inForce(r)).sort(newestFirst);
-        const layered = candidates.filter(r => !tryIsGate(ruleKeyOf(r)));
-        const picked = layered[0] || candidates[0] || null;
-        const row = picked || state.observed.slice().sort(newestFirst).find(inForce) || null;
-        if (!row) return Promise.resolve(null);
-        const key = ruleKeyOf(row);
-        const path = targetOf(row) || 'src/domain/acme_order.py';
-        const fromDecision = T.api('/api/decision' + query({ timestamp: row.timestamp, verdict_id: row.verdict_id })).then(d => d && d.rule, () => null);
-        return fromDecision.then(rule => rule || T.api('/rules' + query({ project: state.project })).then(set => {
-          return (set && Array.isArray(set.rules) ? set.rules : []).find(r => r.id === key) || null;
-        }, () => null)).then(rule => {
-          let content = '# Acme sandbox\n';
-          if (rule && Array.isArray(rule.forbid_imports) && rule.forbid_imports.length) {
-            const plain = rule.forbid_imports.find(n => typeof n === 'string' && !/[*]/.test(n)) ||
-              String(rule.forbid_imports[0]).replace(/\*+\.?/g, '').replace(/^\.+|\.+$/g, '') || 'boto3';
-            content = importLine(path, plain);
+        const usable = state.observed.filter(r => inForce(r) && tryReplayable(r)).sort(newestFirst);
+        const correct = usable.filter(r => state.labels[r.verdict_id] === 'correct');
+        const layered = rows => rows.filter(r => !tryIsGate(ruleKeyOf(r)));
+        const row = layered(correct)[0] || correct[0] || layered(usable)[0] || usable[0] || null;
+        if (row) return planFromRow(row, state.labels[row.verdict_id] === 'correct' ? 'correct' : 'flagged');
+        const layering = enforce.filter(key => !tryIsGate(key));
+        if (!layering.length) return Promise.resolve(null);
+        return ruleDefinitions().then(defs => {
+          for (const key of layering) {
+            const plan = planFromRule(defs[key]);
+            if (plan) return plan;
           }
-          return { rule: key, from: picked ? 'correct' : 'flagged', tool_name: 'Write', action_type: 'FILE_WRITE', arguments: { file_path: path, content } };
+          return null;
         });
       }
 
@@ -3406,6 +3552,12 @@
           const all = readinessRules().map(r => r.rule_key);
           const chosen = selected();
           const enforce = all.filter(key => chosen.has(key));
+          if (!enforce.length || state.promoted) {
+            // Enforce with no rule in force would refuse nothing, and step 5 would prove nothing.
+            state.error = state.promoted ? null : 'Check at least one rule to promote.';
+            draw();
+            return;
+          }
           state.observing = all.filter(key => !chosen.has(key));
           state.busy = true; state.error = null; draw();
           return T.api('/api/projects/' + encodeURIComponent(state.project) + '/promote', { method: 'POST', body: { enforce } })
@@ -3418,7 +3570,8 @@
             .then(plan => {
               if (!ctx.alive()) return;
               state.busy = false;
-              state.replay = plan || { rule: enforce[0] || '', from: 'sample', tool_name: 'Write', action_type: 'FILE_WRITE', arguments: { file_path: 'src/domain/acme_order.py', content: 'import boto3\n' } };
+              state.replay = plan || null;
+              state.planned = true;
               state.play = { promote: true };
               state.focusId = 'try-primary';
               draw();
@@ -3427,12 +3580,13 @@
         'try-next': () => {
           state.error = null;
           // A sandbox promoted on an earlier visit has no call planned yet.
-          if (state.replay || !state.promoted) { enter(5); draw(); return; }
+          if (state.planned || !state.promoted) { enter(5); draw(); return; }
           state.busy = true; draw();
           return planReplay(state.promoted.enforce).then(plan => {
             if (!ctx.alive()) return;
             state.busy = false;
-            state.replay = plan;
+            state.replay = plan || null;
+            state.planned = true;
             enter(5);
             draw();
           }, err => { if (ctx.alive()) fail(err, 'plan'); });
@@ -3477,7 +3631,7 @@
           try { localStorage.removeItem(TRY_STORAGE); } catch (err) { /* nothing stored */ }
           Object.assign(state, {
             step: 1, project: '', stage: null, seeded: null, calls: null, callsError: null, readiness: null, before: null, observed: [], labels: {}, cursor: 0,
-            selected: null, promoted: null, observing: null, result: null, replay: null, error: null, busy: false, resume: null, saves: []
+            selected: null, promoted: null, observing: null, result: null, replay: null, planned: false, error: null, busy: false, resume: null, saves: [], rulesDef: null
           });
           enter(1);
           draw();
