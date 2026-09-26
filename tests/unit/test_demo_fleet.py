@@ -774,7 +774,7 @@ def test_a_tick_delivered_twice_sends_its_batch_once(monkeypatch) -> None:
     rows = len(_rows(evaluator))
     assert first["ok"] is True and first["calls"] == rows >= demo_fleet.MIN_CALLS
     second = demo_fleet.run_scheduled_tick(evaluator, _Context(15000))["threefold_fleet"]
-    assert second == {"ok": True, "tick": demo_fleet.bucket_of(moment), "skipped": "not claimed"}
+    assert second == {"ok": True, "tick": demo_fleet.bucket_of(moment), "skipped": "claimed already"}
     assert len(_rows(evaluator)) == rows, "Nothing was sent the second time"
     monkeypatch.setattr(demo_fleet, "_now", lambda: moment + datetime.timedelta(minutes=15))
     third = demo_fleet.run_scheduled_tick(evaluator, _Context(15000))["threefold_fleet"]
@@ -785,7 +785,7 @@ def test_a_tick_whose_bucket_cannot_be_claimed_sends_nothing(monkeypatch) -> Non
     evaluator = _fresh_evaluator()
     monkeypatch.setattr(evaluator.session_repo, "claim_once", lambda name, ttl: False)
     answer = demo_fleet.run_scheduled_tick(evaluator, _Context(15000))["threefold_fleet"]
-    assert answer["skipped"] == "not claimed" and not _rows(evaluator)
+    assert answer["skipped"] == "claimed already" and not _rows(evaluator)
 
 
 class _ClaimTable:
@@ -823,6 +823,13 @@ def test_the_store_grants_a_claim_once_across_containers() -> None:
     assert 0 < put["Item"]["ttl"] - int(datetime.datetime.now(UTC).timestamp()) <= demo_fleet.CLAIM_TTL_SECONDS
 
 
-def test_a_store_that_cannot_be_reached_grants_no_claim() -> None:
-    """Skipping a quarter hour is cheaper than risking it twice."""
-    assert _repo_on(_ClaimTable(down=True)).claim_once("fleet-tick-1", 60) is False
+def test_a_store_that_cannot_take_the_claim_fails_the_tick_before_it_sends_anything() -> None:
+    """Skipping a quarter hour is cheaper than risking it twice, and an outage is told apart from a repeat."""
+    repo = _repo_on(_ClaimTable(down=True))
+    with pytest.raises(ConnectionError):
+        repo.claim_once("fleet-tick-1", 60)
+    evaluator = GovernanceEvaluator(session_repo=repo)
+    sent = []
+    evaluator.evaluate_tool_call = lambda request: sent.append(request)
+    assert demo_fleet.run_scheduled_tick(evaluator, _Context(15000)) == {"threefold_fleet": {"ok": False}}
+    assert not sent

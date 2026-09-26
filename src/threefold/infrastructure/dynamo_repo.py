@@ -647,9 +647,9 @@ class DynamoDBSessionRepository:
     def claim_once(self, name: str, ttl_seconds: int) -> bool:
         """True for the first caller to claim `name`, on any container; False for every later one.
 
-        A store that cannot be reached also answers False: a run that cannot
-        be claimed is skipped, which costs one quiet interval, rather than
-        risked twice.
+        A store that cannot be reached raises, so the caller can tell an
+        outage from a second delivery; either way the run is not done, which
+        costs one quiet interval rather than risking it twice.
         """
         item = {
             "PK": f"{RUN_CLAIM_PREFIX}{name}",
@@ -663,9 +663,9 @@ class DynamoDBSessionRepository:
                 return True
             except Exception as exc:
                 code = ((getattr(exc, "response", None) or {}).get("Error") or {}).get("Code", "")
-                if type(exc).__name__ != "ConditionalCheckFailedException" and code != "ConditionalCheckFailedException":
-                    logger.warning("Could not claim %s, so it is skipped: %s", name, exc)
-                return False
+                if type(exc).__name__ == "ConditionalCheckFailedException" or code == "ConditionalCheckFailedException":
+                    return False
+                raise
         key = f"{item['PK']}#CLAIM"
         if key in self._memory_store:
             return False

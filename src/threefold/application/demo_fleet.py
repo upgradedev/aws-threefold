@@ -1185,9 +1185,10 @@ def run_scheduled_tick(evaluator: Any, context: Any = None) -> Dict[str, Any]:
     at least once, and Lambda retries an asynchronous invocation that fails or
     times out unless the stack turns that off (it does, DemoFleetInvokeConfig).
     So the tick first claims its fifteen-minute bucket with a conditional
-    write; a second delivery finds it taken and sends nothing, and a store
-    that cannot be claimed skips the tick. It also stops sending well before
-    the deadline, and any failure is logged and answered rather than raised.
+    write; a second delivery finds it taken and sends nothing (`skipped`), and
+    a store that cannot take the claim fails the tick (`ok` false, logged as
+    an error) before anything is sent. It also stops sending well before the
+    deadline, and any failure is logged and answered rather than raised.
     """
     started = time.monotonic()
     remaining = getattr(context, "get_remaining_time_in_millis", None)
@@ -1200,8 +1201,8 @@ def run_scheduled_tick(evaluator: Any, context: Any = None) -> Dict[str, Any]:
     try:
         claim = getattr(evaluator.session_repo, "claim_once", None)
         if claim is not None and not claim(f"fleet-tick-{bucket}", CLAIM_TTL_SECONDS):
-            logger.info("Demo fleet tick %d not claimed (run already, or the store refused); nothing sent", bucket)
-            return {FLEET_EVENT_KEY: {"ok": True, "tick": bucket, "skipped": "not claimed"}}
+            logger.info("Demo fleet tick %d was claimed already; nothing sent", bucket)
+            return {FLEET_EVENT_KEY: {"ok": True, "tick": bucket, "skipped": "claimed already"}}
         summary = run_tick(evaluator, now=now, stop_at=started + budget)
     except Exception:
         logger.exception("The demo fleet's tick failed; nothing is retried")
