@@ -1200,8 +1200,8 @@ def run_scheduled_tick(evaluator: Any, context: Any = None) -> Dict[str, Any]:
     try:
         claim = getattr(evaluator.session_repo, "claim_once", None)
         if claim is not None and not claim(f"fleet-tick-{bucket}", CLAIM_TTL_SECONDS):
-            logger.info("Demo fleet tick %d was claimed already; nothing sent", bucket)
-            return {FLEET_EVENT_KEY: {"ok": True, "tick": bucket, "skipped": "claimed already"}}
+            logger.info("Demo fleet tick %d not claimed (run already, or the store refused); nothing sent", bucket)
+            return {FLEET_EVENT_KEY: {"ok": True, "tick": bucket, "skipped": "not claimed"}}
         summary = run_tick(evaluator, now=now, stop_at=started + budget)
     except Exception:
         logger.exception("The demo fleet's tick failed; nothing is retried")

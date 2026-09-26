@@ -774,7 +774,7 @@ def test_a_tick_delivered_twice_sends_its_batch_once(monkeypatch) -> None:
     rows = len(_rows(evaluator))
     assert first["ok"] is True and first["calls"] == rows >= demo_fleet.MIN_CALLS
     second = demo_fleet.run_scheduled_tick(evaluator, _Context(15000))["threefold_fleet"]
-    assert second == {"ok": True, "tick": demo_fleet.bucket_of(moment), "skipped": "claimed already"}
+    assert second == {"ok": True, "tick": demo_fleet.bucket_of(moment), "skipped": "not claimed"}
     assert len(_rows(evaluator)) == rows, "Nothing was sent the second time"
     monkeypatch.setattr(demo_fleet, "_now", lambda: moment + datetime.timedelta(minutes=15))
     third = demo_fleet.run_scheduled_tick(evaluator, _Context(15000))["threefold_fleet"]
@@ -785,7 +785,7 @@ def test_a_tick_whose_bucket_cannot_be_claimed_sends_nothing(monkeypatch) -> Non
     evaluator = _fresh_evaluator()
     monkeypatch.setattr(evaluator.session_repo, "claim_once", lambda name, ttl: False)
     answer = demo_fleet.run_scheduled_tick(evaluator, _Context(15000))["threefold_fleet"]
-    assert answer["skipped"] == "claimed already" and not _rows(evaluator)
+    assert answer["skipped"] == "not claimed" and not _rows(evaluator)
 
 
 class _ClaimTable:
