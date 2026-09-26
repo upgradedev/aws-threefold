@@ -266,9 +266,10 @@ people read. What changes:
   tripped the session (`halted_from_outside`: the kill switch, open to anyone
   where reads are public, or calls the run did not send). One thing stays
   out of reach: calls a stranger sends under the run's own project and
-  session, while the agent works, no more of them than the calls the hook
-  kept on the machine (held back, or refused before sending), cannot be told
-  apart from the run's own.
+  session while the agent works, no more of them than the times the hook ran
+  and sent nothing (a call it held back or refused on the machine, or a tool
+  it does not forward), cannot be told apart from the run's own, and neither
+  can a halt they cause.
 - The endpoint must be https; plain http is accepted only on this machine,
   for a stand-in (`fake_threefold.py`).
 - The row records `ledger_source: "remote"`, `threefold_endpoint`,
