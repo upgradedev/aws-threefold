@@ -583,30 +583,30 @@
       <div class="tf-sec-head">
         <p class="tf-eyebrow"><span data-tf-icon="layers"></span>How it works</p>
         <h2 id="how-title" class="tf-h2">The agent asks, Threefold decides, you see everything</h2>
-        <p class="tf-sec-lede">Deterministic code decides every verdict. Amazon Bedrock only explains one in a sentence, and every answer says which of the two you are reading.</p>
+        <p class="tf-sec-lede">Plain code decides every verdict. Amazon Bedrock never does: it explains verdicts and drafts rules for you to review.</p>
       </div>
       <ol class="tf-steps">
         <li class="tf-card tf-step-card">
           <div class="tf-step-top"><span class="tf-step-icon"><span data-tf-icon="terminal"></span></span><span class="tf-step-kicker">Step one</span></div>
           <h3>The hook asks</h3>
-          <p>Before the agent writes a file or runs a command, a small hook sends that tool call to Threefold. The same hook serves Claude Code, Codex and Antigravity, and a credential is refused on the machine and never sent.</p>
+          <p>Before each write or command, one hook sends the tool call to Threefold. A credential is refused on the machine, never sent.</p>
         </li>
         <li class="tf-card tf-step-card">
           <div class="tf-step-top"><span class="tf-step-icon"><span data-tf-icon="shield"></span></span><span class="tf-step-kicker">Step two</span></div>
           <h3>Threefold judges, on AWS</h3>
-          <p>Gates written as plain code decide: a credential in the arguments, a domain file importing infrastructure, the same call repeating, a spend ceiling. A refusal comes back with its reason and a fix the same gates have checked.</p>
+          <p>Plain-code gates catch credentials, layering breaks, loops and runaway spend. A refusal carries its reason, and a checked fix where one can be made.</p>
         </li>
         <li class="tf-card tf-step-card">
           <div class="tf-step-top"><span class="tf-step-icon"><span data-tf-icon="chart"></span></span><span class="tf-step-kicker">Step three</span></div>
           <h3>The dashboard shows</h3>
-          <p>Every verdict lands in a ledger. The dashboard shows what was stopped, what would have been, and which rules have earned the right to refuse.</p>
+          <p>Every verdict lands in a ledger: what was stopped, what would have been, and which rules have earned the right to refuse.</p>
         </li>
       </ol>
 
       <figure class="tf-card tf-diagram">
         <svg class="tf-diagram-wide" viewBox="0 0 960 150" role="img" aria-labelledby="flow-wide-title flow-wide-desc">
           <title id="flow-wide-title">How a tool call travels</title>
-          <desc id="flow-wide-desc">The coding agent asks the hook before each call; the hook sends the call to Threefold on AWS; Threefold sends the verdict back, and the hook denies the call with a fix or lets it run; every verdict goes to the ledger the dashboard reads.</desc>
+          <desc id="flow-wide-desc">The coding agent asks the hook before each call; the hook sends the call to Threefold on AWS; Threefold sends the verdict back, and the hook either denies the call with its reason, and a checked fix where one can be made, or lets it run; every verdict goes to the ledger the dashboard reads.</desc>
           <defs>
             <marker id="fw-head" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="dg-head" d="M0 0L10 5L0 10z"/></marker>
             <marker id="fw-head-accent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="dg-head-accent" d="M0 0L10 5L0 10z"/></marker>
@@ -638,13 +638,13 @@
           <path class="dg-edge dg-edge-accent dg-edge-back" d="M512 102H450" marker-end="url(#fw-head-accent)"/>
           <text class="dg-label dg-label-accent" x="478" y="122" text-anchor="middle">verdict</text>
           <path class="dg-edge dg-edge-back" d="M264 102H201" marker-end="url(#fw-head)"/>
-          <text class="dg-label" x="231" y="122" text-anchor="middle">deny + fix</text>
+          <text class="dg-label" x="231" y="122" text-anchor="middle">deny + why</text>
           <path class="dg-edge" d="M712 82H774" marker-end="url(#fw-head)"/>
           <text class="dg-label" x="744" y="72" text-anchor="middle">ledger</text>
         </svg>
         <svg class="tf-diagram-narrow" viewBox="0 0 340 470" role="img" aria-labelledby="flow-narrow-title flow-narrow-desc">
           <title id="flow-narrow-title">How a tool call travels</title>
-          <desc id="flow-narrow-desc">The coding agent asks the hook before each call; the hook sends the call to Threefold on AWS; Threefold sends the verdict back, and the hook denies the call with a fix or lets it run; every verdict goes to the ledger the dashboard reads.</desc>
+          <desc id="flow-narrow-desc">The coding agent asks the hook before each call; the hook sends the call to Threefold on AWS; Threefold sends the verdict back, and the hook either denies the call with its reason, and a checked fix where one can be made, or lets it run; every verdict goes to the ledger the dashboard reads.</desc>
           <defs>
             <marker id="fn-head" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="dg-head" d="M0 0L10 5L0 10z"/></marker>
             <marker id="fn-head-accent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="dg-head-accent" d="M0 0L10 5L0 10z"/></marker>
@@ -664,7 +664,7 @@
           <path class="dg-edge" d="M120 73V121" marker-end="url(#fn-head)"/>
           <text class="dg-label" x="112" y="102" text-anchor="end">asks first</text>
           <path class="dg-edge dg-edge-back" d="M220 125V77" marker-end="url(#fn-head)"/>
-          <text class="dg-label" x="228" y="102">deny + fix</text>
+          <text class="dg-label" x="228" y="102">deny + why</text>
           <path class="dg-edge dg-edge-accent" d="M120 197V245" marker-end="url(#fn-head-accent)"/>
           <text class="dg-label dg-label-accent" x="112" y="226" text-anchor="end">the call</text>
           <path class="dg-edge dg-edge-accent dg-edge-back" d="M220 249V201" marker-end="url(#fn-head-accent)"/>
@@ -672,7 +672,7 @@
           <path class="dg-edge" d="M170 321V369" marker-end="url(#fn-head)"/>
           <text class="dg-label" x="178" y="350">ledger</text>
         </svg>
-        <figcaption>A refused call is never run: the agent gets the reason and a checked fix instead, and an allowed call runs as it would have anyway. Nothing waits on a model: Bedrock is asked only when a page wants a verdict explained.</figcaption>
+        <figcaption>A refused call never runs: the agent gets the reason, and a checked fix where one can be made. No verdict waits on a model.</figcaption>
       </figure>
 
       <div class="tf-card tf-rollout" id="rollout">
@@ -727,7 +727,7 @@
       <figure class="tf-card tf-diagram" id="architecture">
         <svg class="tf-diagram-wide" viewBox="0 0 960 250" role="img" aria-labelledby="aws-wide-title aws-wide-desc">
           <title id="aws-wide-title">The AWS services Threefold runs on</title>
-          <desc id="aws-wide-desc">Browsers and hooks reach CloudFront with AWS WAF, which serves the pages and forwards API calls to API Gateway; API Gateway invokes one AWS Lambda function that runs the gates; it records verdicts in Amazon DynamoDB, asks Amazon Bedrock only to explain a verdict, and is invoked on a schedule by Amazon EventBridge Scheduler to run the synthetic demo fleet.</desc>
+          <desc id="aws-wide-desc">Browsers and hooks reach CloudFront with AWS WAF, which serves the pages and forwards API calls to API Gateway; API Gateway invokes one AWS Lambda function that runs the gates; it records verdicts in Amazon DynamoDB, asks Amazon Bedrock for page explanations and rule drafts, never for a verdict, and is invoked on a schedule by Amazon EventBridge Scheduler to run the synthetic demo fleet.</desc>
           <defs>
             <marker id="aw-head" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="dg-head" d="M0 0L10 5L0 10z"/></marker>
             <marker id="aw-head-accent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="dg-head-accent" d="M0 0L10 5L0 10z"/></marker>
@@ -760,11 +760,11 @@
           <path class="dg-edge" d="M562 198H650V100" marker-end="url(#aw-head)"/>
           <text class="dg-label" x="642" y="152" text-anchor="end">on a schedule</text>
           <path class="dg-edge dg-edge-back" d="M720 96V198H791" marker-end="url(#aw-head)"/>
-          <text class="dg-label" x="728" y="152">to explain</text>
+          <text class="dg-label" x="728" y="152">explain, draft</text>
         </svg>
         <svg class="tf-diagram-narrow" viewBox="0 0 340 556" role="img" aria-labelledby="aws-narrow-title aws-narrow-desc">
           <title id="aws-narrow-title">The AWS services Threefold runs on</title>
-          <desc id="aws-narrow-desc">Browsers and hooks reach CloudFront with AWS WAF, which serves the pages and forwards API calls to API Gateway; API Gateway invokes one AWS Lambda function that runs the gates; it records verdicts in Amazon DynamoDB, asks Amazon Bedrock only to explain a verdict, and is invoked on a schedule by Amazon EventBridge Scheduler to run the synthetic demo fleet.</desc>
+          <desc id="aws-narrow-desc">Browsers and hooks reach CloudFront with AWS WAF, which serves the pages and forwards API calls to API Gateway; API Gateway invokes one AWS Lambda function that runs the gates; it records verdicts in Amazon DynamoDB, asks Amazon Bedrock for page explanations and rule drafts, never for a verdict, and is invoked on a schedule by Amazon EventBridge Scheduler to run the synthetic demo fleet.</desc>
           <defs>
             <marker id="an-head" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="dg-head" d="M0 0L10 5L0 10z"/></marker>
             <marker id="an-head-accent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="dg-head-accent" d="M0 0L10 5L0 10z"/></marker>
@@ -786,7 +786,7 @@
           <text class="dg-sub" x="81" y="435" text-anchor="middle">the ledger</text>
           <rect class="dg-node" x="179" y="387" width="160" height="64" rx="14"/>
           <text class="dg-title" x="259" y="415" text-anchor="middle">Amazon Bedrock</text>
-          <text class="dg-sub" x="259" y="435" text-anchor="middle">explains only</text>
+          <text class="dg-sub" x="259" y="435" text-anchor="middle">explains, drafts</text>
           <rect class="dg-node" x="30" y="491" width="280" height="64" rx="14"/>
           <text class="dg-title" x="170" y="519" text-anchor="middle">EventBridge Scheduler</text>
           <text class="dg-sub" x="170" y="539" text-anchor="middle">runs the synthetic demo fleet</text>
@@ -835,7 +835,7 @@
         <button type="button" id="scenario-boundary" class="tf-scenario" aria-pressed="false" onclick="simulateBoundary()">
           <span class="tf-scenario-top"><span class="tf-scenario-kicker"><span class="tf-scenario-num" aria-hidden="true">3</span><span class="tf-sr-only">Scenario 3: </span>Architecture</span><span data-tf-icon="layers"></span></span>
           <span class="tf-scenario-name">The AWS SDK in the domain</span>
-          <span class="tf-scenario-text">A domain file importing boto3 is refused, with a checked fix.</span>
+          <span class="tf-scenario-text">A domain file importing boto3 is refused before it is written.</span>
         </button>
         <button type="button" id="scenario-compliant" class="tf-scenario" aria-pressed="false" onclick="simulateCompliant()">
           <span class="tf-scenario-top"><span class="tf-scenario-kicker"><span class="tf-scenario-num" aria-hidden="true">4</span><span class="tf-sr-only">Scenario 4: </span>Certificate</span><span data-tf-icon="check"></span></span>
@@ -2005,7 +2005,7 @@
     function heroFixHtml(answer, refused) {
       const h = T.html;
       if (answer.source !== 'live') {
-        return { tone: 'none', markup: h`<p class="tf-demo-fix-title">${T.icon('info', 16)}<span>No fix in a replay</span></p><p class="tf-demo-fix-summary">A live answer carries a checked fix with every refusal; this recording kept only the verdict and its reason.</p><p class="tf-demo-fix-note"><a class="tf-link" href="#scenario-boundary">Scenario 3 below</a> asks the stack again</p>` };
+        return { tone: 'none', markup: h`<p class="tf-demo-fix-title">${T.icon('info', 16)}<span>No fix in a replay</span></p><p class="tf-demo-fix-summary">This recording kept only the verdict and its reason; a live answer adds a checked fix where one can be made.</p><p class="tf-demo-fix-note"><a class="tf-link" href="#scenario-boundary">Scenario 3 below</a> asks the stack again</p>` };
       }
       if (!refused) return null;
       const fix = answer.fix;

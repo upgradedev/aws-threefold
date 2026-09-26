@@ -381,6 +381,33 @@ def test_each_agent_is_described_in_the_words_of_the_evidence_it_links() -> None
     assert "shell route is not measured" in _text(agents[2])
 
 
+def test_the_page_promises_a_fix_only_where_one_can_be_made() -> None:
+    """The fix proposer has refusals it proposes nothing for, and fixes it cannot check.
+
+    Scenario 1's loop fix comes back unchecked, and a refusal may bring no fix
+    at all, so no sentence on the page may say a checked fix comes with every
+    refusal; each one that names a checked fix says it comes where one can be made.
+    """
+    body = page_source("index.html")
+    words = " ".join(html.unescape(body).split()).lower()
+    assert "every refusal" not in words and "with each refusal" not in words
+    for found in re.finditer(r"\ba checked fix\b", words):
+        assert words[found.end():].startswith(" where one can be made"), \
+            f"An unqualified promise of a checked fix: …{words[max(0, found.start() - 80):found.end() + 40]}…"
+    assert "fix in a replay" in words, "A replay says it carries no fix"
+
+
+def test_bedrock_is_named_for_both_things_it_does_and_for_no_verdict() -> None:
+    """docs/ARCHITECTURE.md: the function asks Bedrock for "page explanations and rule drafts only"."""
+    body = page_source("index.html")
+    assert "page explanations and rule drafts only" in (ROOT / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
+    words = " ".join(html.unescape(body).split())
+    assert "only to explain" not in words and "explains only" not in words and "asked only when" not in words
+    for ident in ("aws-wide-desc", "aws-narrow-desc"):
+        desc = re.search(rf'<desc id="{ident}">(.*?)</desc>', body, re.S).group(1)
+        assert "page explanations and rule drafts, never for a verdict" in desc, ident
+
+
 def test_the_architecture_strip_names_the_services_and_links_the_long_version() -> None:
     section = _section("built-on-aws")
     for drawing in re.findall(r"<svg class=\"tf-diagram-(?:wide|narrow)\".*?</svg>", section, re.S):
