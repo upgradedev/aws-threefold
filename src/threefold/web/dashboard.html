@@ -20,6 +20,226 @@
     body { font-family: 'Inter', sans-serif; background-color: #0a0d18; color: #f3f4f6; }
     .font-mono { font-family: 'JetBrains Mono', monospace; }
   </style>
+  <style>
+    /* OPS: the operator's screens (every route but #/try). Components built on
+       the design system's tokens in assets/threefold.css; nothing here holds a
+       colour or a size of its own that a token already names. A background on
+       a button is declared for button.x as well, for Tailwind's preflight. */
+
+    .tf-ops-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: var(--tf-space-1h) var(--tf-space-2); margin-bottom: var(--tf-space-1h); }
+    .tf-ops-head > :first-child { min-width: 0; flex: 1 1 22rem; }
+    .tf-ops-h2 { margin: 0; display: flex; align-items: center; gap: 8px; font: 600 1rem/1.5rem var(--tf-font-sans); letter-spacing: -0.01em; color: var(--tf-text); }
+    .tf-ops-h2 .tf-icon { width: 18px; height: 18px; color: var(--tf-accent-text); }
+    .tf-ops-sub { margin: 2px 0 0; font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-3); }
+    .tf-ops-count { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 20px; padding: 0 6px; border-radius: var(--tf-radius-pill); font: 600 0.6875rem/1 var(--tf-font-sans); background: var(--tf-surface-3); color: var(--tf-text); font-variant-numeric: tabular-nums; }
+
+    /* Where the numbers come from, on the public demo. */
+    .tf-ops-source { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 20px; padding: 12px 16px; margin-bottom: var(--tf-space-2); border-radius: var(--tf-radius-md); background: var(--tf-info-soft); border: 1px solid var(--tf-info-line); font-size: var(--tf-fs-small); line-height: var(--tf-lh-small); color: var(--tf-text-2); }
+    .tf-ops-source > .tf-icon { width: 18px; height: 18px; color: var(--tf-info-text); flex-shrink: 0; }
+    .tf-ops-source p { margin: 0; flex: 1 1 26rem; min-width: 0; }
+    .tf-ops-source strong { color: var(--tf-text); font-weight: 600; }
+    .tf-ops-share { flex: 0 1 15rem; min-width: 11rem; }
+    .tf-ops-share-bar { display: flex; gap: 2px; height: 8px; border-radius: 4px; overflow: hidden; background: var(--tf-track); }
+    .tf-ops-share-bar > span { display: block; height: 100%; min-width: 3px; }
+    .tf-ops-share-bar > span:last-child { border-radius: 0 4px 4px 0; }
+    .tf-ops-share .tf-legend { margin-top: 8px; font-size: var(--tf-fs-micro); }
+
+    /* Needs your attention: three slots, each either something to do or clear. */
+    .tf-ops-attention { display: grid; grid-template-columns: 1fr; gap: var(--tf-space-1h); }
+    @media (min-width: 900px) { .tf-ops-attention { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+    .tf-ops-att { position: relative; display: flex; flex-direction: column; gap: 10px; padding: 16px 16px 14px; min-width: 0; border-radius: var(--tf-radius-lg); background: var(--tf-surface-1); border: 1px solid var(--tf-hairline); box-shadow: var(--tf-shadow-1); }
+    .tf-ops-att::before { content: ''; position: absolute; left: 0; top: 14px; bottom: 14px; width: 3px; border-radius: 0 3px 3px 0; background: var(--tf-hairline-strong); }
+    .tf-ops-att[data-tone="warn"] { border-color: var(--tf-observed-line); }
+    .tf-ops-att[data-tone="warn"]::before { background: var(--tf-observed); }
+    .tf-ops-att[data-tone="danger"] { border-color: var(--tf-refused-line); }
+    .tf-ops-att[data-tone="danger"]::before { background: var(--tf-refused); }
+    .tf-ops-att[data-tone="info"] { border-color: var(--tf-info-line); }
+    .tf-ops-att[data-tone="info"]::before { background: var(--tf-info); }
+    .tf-ops-att[data-tone="ok"] { background: transparent; box-shadow: none; }
+    .tf-ops-att[data-tone="ok"]::before { background: var(--tf-approved); opacity: 0.55; }
+    .tf-ops-att-head { display: flex; align-items: flex-start; gap: 10px; }
+    .tf-ops-att-icon { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; flex-shrink: 0; border-radius: 9px; background: var(--tf-surface-2); border: 1px solid var(--tf-hairline-strong); color: var(--tf-text-2); }
+    .tf-ops-att-icon .tf-icon { width: 16px; height: 16px; }
+    .tf-ops-att[data-tone="warn"] .tf-ops-att-icon { background: var(--tf-observed-soft); border-color: var(--tf-observed-line); color: var(--tf-observed-text); }
+    .tf-ops-att[data-tone="danger"] .tf-ops-att-icon { background: var(--tf-refused-soft); border-color: var(--tf-refused-line); color: var(--tf-refused-text); }
+    .tf-ops-att[data-tone="info"] .tf-ops-att-icon { background: var(--tf-info-soft); border-color: var(--tf-info-line); color: var(--tf-info-text); }
+    .tf-ops-att[data-tone="ok"] .tf-ops-att-icon { background: var(--tf-approved-soft); border-color: var(--tf-approved-line); color: var(--tf-approved-text); }
+    .tf-ops-att-kicker { display: block; font: 600 var(--tf-fs-micro)/1rem var(--tf-font-sans); letter-spacing: var(--tf-track-caps); text-transform: uppercase; color: var(--tf-text-3); }
+    .tf-ops-att-title { margin: 2px 0 0; font: 600 0.9375rem/1.375rem var(--tf-font-sans); letter-spacing: -0.01em; color: var(--tf-text); }
+    .tf-ops-att[data-tone="ok"] .tf-ops-att-title { font-weight: 500; color: var(--tf-text-2); }
+    .tf-ops-att-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+    .tf-ops-att-list a { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 5px 8px; margin: 0 -8px; border-radius: var(--tf-radius-sm); color: var(--tf-text-2); text-decoration: none; font-size: 0.75rem; line-height: 1.125rem; }
+    .tf-ops-att-list a:hover { background: var(--tf-surface-2); color: var(--tf-text); }
+    .tf-ops-att-list .tf-ops-att-what { min-width: 0; overflow-wrap: anywhere; }
+    .tf-ops-att-list .tf-ops-att-n { flex-shrink: 0; font-family: var(--tf-font-mono); font-variant-numeric: tabular-nums; color: var(--tf-text); }
+    .tf-ops-att-note { margin: 0; font-size: var(--tf-fs-micro); line-height: 1rem; color: var(--tf-text-3); }
+    .tf-ops-att-foot { margin-top: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-top: 4px; }
+
+    /* The tiles: the first carries the busiest story and spans two columns. */
+    .tf-ops-tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--tf-space-1h); }
+    @media (min-width: 768px) { .tf-ops-tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+    .tf-ops-tiles .tf-tile { height: 100%; }
+    .tf-ops-tile-wide { grid-column: span 2; }
+    .tf-ops-tile-wide .tf-tile-value { font-size: 2.5rem; line-height: 2.75rem; }
+    .tf-ops-tile .tf-tile-label .tf-icon { color: var(--tf-text-3); }
+    .tf-ops-tile .tf-tile-sub { overflow-wrap: anywhere; }
+
+    /* A small meter: how much of what a project's rules flagged has a label. */
+    .tf-ops-meter { display: flex; align-items: center; gap: 8px; min-width: 7rem; }
+    .tf-ops-meter-track { flex: 1 1 auto; height: 6px; min-width: 3rem; border-radius: 3px; background: rgba(139, 92, 246, 0.16); overflow: hidden; }
+    .tf-ops-meter-fill { display: block; height: 100%; border-radius: 0 3px 3px 0; background: var(--tf-accent); }
+    .tf-ops-meter[data-state="done"] .tf-ops-meter-track { background: rgba(14, 165, 114, 0.18); }
+    .tf-ops-meter[data-state="done"] .tf-ops-meter-fill { background: var(--tf-approved); }
+    .tf-ops-meter[data-state="none"] .tf-ops-meter-track { background: var(--tf-track); }
+    .tf-ops-meter-words { flex-shrink: 0; font-size: var(--tf-fs-micro); line-height: 1rem; color: var(--tf-text-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+    /* Where a project's calls come from: identity, so a dot in a categorical hue beside a word. */
+    .tf-ops-src { gap: 6px; }
+    .tf-ops-src::before { content: ''; width: 7px; height: 7px; border-radius: 99px; background: var(--tf-cat-other); flex-shrink: 0; }
+    .tf-ops-src[data-src="fleet"]::before { background: var(--tf-cat-1); }
+    .tf-ops-src[data-src="sandbox"]::before { background: var(--tf-cat-2); }
+
+    /* The portfolio: one row a project. */
+    .tf-ops-portfolio .tf-table td, .tf-ops-portfolio .tf-table tbody th { vertical-align: middle; }
+    .tf-ops-portfolio .tf-table tbody tr[data-row-href] { cursor: pointer; }
+    .tf-ops-pname { display: flex; flex-direction: column; gap: 4px; min-width: 12rem; }
+    .tf-ops-pmeta { font-size: var(--tf-fs-micro); line-height: 1rem; color: var(--tf-text-3); overflow-wrap: anywhere; }
+    .tf-ops-pcard { display: flex; flex-direction: column; gap: 10px; padding: 14px; border-radius: var(--tf-radius-md); background: var(--tf-inset); border: 1px solid var(--tf-hairline); }
+    .tf-ops-pnums { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; text-align: center; }
+    .tf-ops-pnums a { display: block; padding: 6px 2px; border-radius: var(--tf-radius); background: var(--tf-surface-1); border: 1px solid var(--tf-hairline); text-decoration: none; }
+    .tf-ops-pnums a:hover { border-color: var(--tf-hairline-strong); background: var(--tf-surface-2); }
+    .tf-ops-pnums b { display: block; font: 600 0.9375rem/1.25rem var(--tf-font-mono); font-variant-numeric: tabular-nums; }
+    .tf-ops-pnums small { display: block; font-size: 0.625rem; line-height: 0.875rem; color: var(--tf-text-3); }
+
+    /* A project's stage: where it is on the way from Observe to Enforce. */
+    .tf-ops-hero { position: relative; overflow: hidden; padding: var(--tf-space-3); border-radius: var(--tf-radius-xl); border: 1px solid var(--tf-hairline-strong); background: radial-gradient(640px 220px at 0% 0%, var(--tf-observed-soft), transparent 70%), var(--tf-surface-1); box-shadow: var(--tf-shadow-2); }
+    .tf-ops-hero[data-stage="enforce"] { background: radial-gradient(640px 220px at 0% 0%, rgba(139, 92, 246, 0.2), transparent 70%), var(--tf-surface-1); border-color: var(--tf-accent-line); }
+    .tf-ops-hero-grid { display: grid; grid-template-columns: 1fr; gap: var(--tf-space-3); align-items: start; }
+    @media (min-width: 1024px) { .tf-ops-hero-grid { grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); } }
+    .tf-ops-hero-title { margin: 6px 0 0; font: 650 1.375rem/1.875rem var(--tf-font-sans); letter-spacing: -0.02em; color: var(--tf-text); }
+    @media (min-width: 768px) { .tf-ops-hero-title { font-size: 1.625rem; line-height: 2.125rem; } }
+    .tf-ops-hero-text { margin: 8px 0 0; max-width: 62ch; font-size: var(--tf-fs-small); line-height: 1.375rem; color: var(--tf-text-2); }
+    .tf-ops-hero-fine { margin: 8px 0 0; max-width: 62ch; font-size: var(--tf-fs-micro); line-height: 1rem; color: var(--tf-text-3); }
+    .tf-ops-hero-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: var(--tf-space-2); }
+    .tf-ops-track { display: flex; align-items: center; gap: 8px; }
+    .tf-ops-step { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px; border-radius: var(--tf-radius-pill); border: 1px solid var(--tf-hairline-strong); background: var(--tf-inset); font: 600 0.75rem/1 var(--tf-font-sans); color: var(--tf-text-3); }
+    .tf-ops-step .tf-icon { width: 14px; height: 14px; }
+    .tf-ops-step[data-on="observe"] { background: var(--tf-observed-soft); border-color: var(--tf-observed-line); color: var(--tf-observed-text); }
+    .tf-ops-step[data-on="enforce"] { background: var(--tf-accent-soft); border-color: var(--tf-accent-line); color: var(--tf-accent-text); }
+    .tf-ops-track-line { flex: 0 1 48px; min-width: 16px; height: 1px; background: var(--tf-hairline-strong); }
+    .tf-ops-hero-side { display: flex; flex-direction: column; gap: 10px; padding: 16px; border-radius: var(--tf-radius-md); background: rgba(8, 11, 21, 0.6); border: 1px solid var(--tf-hairline); }
+    .tf-ops-hero-side .tf-ops-att-kicker { margin-bottom: 2px; }
+    .tf-ops-tally { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+    .tf-ops-tally > div { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: var(--tf-radius); background: var(--tf-surface-1); border: 1px solid var(--tf-hairline); }
+    .tf-ops-tally b { font: 650 1.125rem/1.5rem var(--tf-font-sans); color: var(--tf-text); }
+    .tf-ops-tally small { font-size: var(--tf-fs-micro); line-height: 1rem; color: var(--tf-text-3); }
+
+    /* Readiness, rule by rule. */
+    .tf-ops-rules { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+    .tf-ops-rule { display: grid; grid-template-columns: 1fr; gap: 10px 20px; padding: 14px 16px; border-radius: var(--tf-radius-md); background: var(--tf-inset); border: 1px solid var(--tf-hairline); }
+    @media (min-width: 900px) { .tf-ops-rule { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1.2fr); align-items: center; } }
+    .tf-ops-rule[data-state="noisy"] { border-color: var(--tf-refused-line); }
+    .tf-ops-rule[data-state="needs_review"] { border-color: var(--tf-info-line); }
+    .tf-ops-rule[data-state="ready"] { border-color: var(--tf-approved-line); }
+    .tf-ops-rule-name { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+    .tf-ops-rule-name .tf-ops-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+    .tf-ops-rule-key { font: 500 0.8125rem/1.25rem var(--tf-font-mono); color: var(--tf-text); overflow-wrap: anywhere; }
+    .tf-ops-rule-what { font-size: var(--tf-fs-micro); line-height: 1rem; color: var(--tf-text-3); }
+    .tf-ops-rule-say { font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-2); }
+    .tf-ops-rule-links { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 4px; font-size: var(--tf-fs-micro); }
+    .tf-ops-stack { display: flex; gap: 2px; height: 8px; border-radius: 4px; background: var(--tf-track); overflow: hidden; }
+    .tf-ops-stack > a, .tf-ops-stack > span { display: block; height: 100%; min-width: 3px; }
+    .tf-ops-stack > :last-child { border-radius: 0 4px 4px 0; }
+    .tf-ops-stack-words { display: flex; flex-wrap: wrap; gap: 2px 10px; margin-top: 6px; font-size: var(--tf-fs-micro); line-height: 1rem; color: var(--tf-text-3); font-variant-numeric: tabular-nums; }
+    .tf-ops-stack-words i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; vertical-align: -0.05em; font-style: normal; }
+
+    /* Review: a keyboard-first queue. */
+    .tf-ops-keys { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding: 10px 14px; border-radius: var(--tf-radius-md); background: var(--tf-inset); border: 1px solid var(--tf-hairline); font-size: 0.75rem; line-height: 1rem; color: var(--tf-text-3); }
+    .tf-ops-keys > span { display: inline-flex; align-items: center; gap: 6px; }
+    .tf-ops-progress { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+    .tf-ops-progress .tf-ops-meter { flex: 1 1 14rem; max-width: 26rem; }
+    .tf-ops-queue { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+    .tf-ops-qrow { position: relative; display: flex; flex-direction: column; gap: 10px; padding: 12px 12px 12px 16px; margin: 0 -8px; border-radius: var(--tf-radius-md); border: 1px solid transparent; outline: none; transition: background-color var(--tf-dur-1), border-color var(--tf-dur-1); }
+    @media (min-width: 768px) { .tf-ops-qrow { flex-direction: row; align-items: flex-start; } }
+    .tf-ops-qrow + .tf-ops-qrow { margin-top: 2px; }
+    .tf-ops-qrow:hover { background: rgba(26, 34, 56, 0.45); }
+    .tf-ops-qrow[data-current="true"] { background: var(--tf-accent-soft); border-color: var(--tf-accent-line); }
+    .tf-ops-qrow[data-current="true"]::before { content: ''; position: absolute; left: 4px; top: 12px; bottom: 12px; width: 3px; border-radius: 3px; background: var(--tf-accent); }
+    .tf-ops-qrow:focus-visible { border-color: var(--tf-focus); }
+    .tf-ops-qrow-body { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 4px; }
+    .tf-ops-qrow-actions { display: flex; gap: 8px; flex-shrink: 0; }
+    .tf-ops-qrow-actions .tf-kbd { margin-left: 2px; }
+    .tf-ops-group-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 10px 16px; }
+    .tf-ops-group-title { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font: 600 0.875rem/1.375rem var(--tf-font-sans); color: var(--tf-text); }
+
+    /* A call, as an incident card: what was tried, what was said, the rule, the fix. */
+    .tf-ops-incident { padding: var(--tf-space-3); border-radius: var(--tf-radius-xl); border: 1px solid var(--tf-hairline-strong); background: var(--tf-surface-1); box-shadow: var(--tf-shadow-2); }
+    .tf-ops-incident[data-outcome="refused"] { border-color: var(--tf-refused-line); background: radial-gradient(560px 200px at 0% 0%, var(--tf-refused-soft), transparent 70%), var(--tf-surface-1); }
+    .tf-ops-incident[data-outcome="observed"] { border-color: var(--tf-observed-line); background: radial-gradient(560px 200px at 0% 0%, var(--tf-observed-soft), transparent 70%), var(--tf-surface-1); }
+    .tf-ops-incident[data-outcome="approved"] { border-color: var(--tf-approved-line); background: radial-gradient(560px 200px at 0% 0%, var(--tf-approved-soft), transparent 70%), var(--tf-surface-1); }
+    .tf-ops-flow { list-style: none; margin: var(--tf-space-3) 0 0; padding: 0; display: grid; grid-template-columns: 1fr; gap: 10px; }
+    @media (min-width: 900px) { .tf-ops-flow { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+    .tf-ops-flow > li { position: relative; display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 14px; border-radius: var(--tf-radius-md); background: rgba(8, 11, 21, 0.62); border: 1px solid var(--tf-hairline); }
+    .tf-ops-flow-q { display: flex; align-items: center; gap: 6px; font: 600 var(--tf-fs-micro)/1rem var(--tf-font-sans); letter-spacing: var(--tf-track-caps); text-transform: uppercase; color: var(--tf-text-3); }
+    .tf-ops-flow-q .tf-icon { width: 14px; height: 14px; }
+    .tf-ops-flow-a { font-size: var(--tf-fs-small); line-height: 1.375rem; color: var(--tf-text); overflow-wrap: anywhere; }
+    .tf-ops-flow-a code { font: 500 0.78rem/1.25rem var(--tf-font-mono); }
+    .tf-ops-flow-sub { font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-3); overflow-wrap: anywhere; }
+    .tf-ops-facts { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: var(--tf-space-2) 0 0; font-size: var(--tf-fs-micro); line-height: 1rem; color: var(--tf-text-3); }
+    .tf-ops-facts b { font-weight: 500; color: var(--tf-text-2); }
+
+    /* Connect: the wait, as a calm radar, and the arrival. */
+    .tf-ops-radar { position: relative; width: 112px; height: 112px; flex-shrink: 0; border-radius: 50%; background: radial-gradient(circle, rgba(139, 92, 246, 0.12) 0%, rgba(139, 92, 246, 0.03) 60%, transparent 70%); }
+    .tf-ops-radar-ring { position: absolute; inset: 0; margin: auto; width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--tf-accent-line); animation: tf-ping 3.2s var(--tf-ease-out) infinite; opacity: 0; }
+    .tf-ops-radar-ring:nth-child(2) { animation-delay: 1.07s; }
+    .tf-ops-radar-ring:nth-child(3) { animation-delay: 2.13s; }
+    .tf-ops-radar-sweep { position: absolute; inset: 8px; border-radius: 50%; background: conic-gradient(from 0deg, rgba(139, 92, 246, 0) 0deg, rgba(139, 92, 246, 0) 290deg, rgba(139, 92, 246, 0.28) 360deg); animation: tf-spin 4s linear infinite; }
+    .tf-ops-radar-grid { position: absolute; inset: 8px; border-radius: 50%; border: 1px solid var(--tf-hairline-strong); box-shadow: inset 0 0 0 22px transparent, inset 0 0 0 23px var(--tf-hairline); }
+    .tf-ops-radar-core { position: absolute; inset: 0; margin: auto; width: 12px; height: 12px; border-radius: 50%; background: var(--tf-accent); box-shadow: 0 0 0 4px rgba(139, 92, 246, 0.2); }
+    .tf-ops-wait { display: flex; flex-wrap: wrap; align-items: center; gap: var(--tf-space-3); }
+    .tf-ops-wait > div:last-child { flex: 1 1 18rem; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+    .tf-ops-arrived { display: flex; align-items: flex-start; gap: 14px; padding: 16px; border-radius: var(--tf-radius-md); background: var(--tf-approved-soft); border: 1px solid var(--tf-approved-line); }
+    .tf-ops-arrived-mark { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; flex-shrink: 0; border-radius: 50%; background: var(--tf-approved); color: #fff; box-shadow: 0 0 0 6px rgba(14, 165, 114, 0.16); }
+    .tf-ops-arrived-mark .tf-icon { width: 22px; height: 22px; }
+    .tf-ops-steps { list-style: none; margin: 0 0 var(--tf-space-3); padding: 0; display: flex; flex-wrap: wrap; gap: 8px 20px; }
+    .tf-ops-steps li { display: inline-flex; align-items: center; gap: 8px; font: 500 0.8125rem/1.25rem var(--tf-font-sans); color: var(--tf-text-3); }
+    .tf-ops-steps li[data-state="current"] { color: var(--tf-text); }
+    .tf-ops-steps li[data-state="done"] { color: var(--tf-text-2); }
+    .tf-ops-steps .tf-step-num { width: 24px; height: 24px; font-size: 0.6875rem; }
+
+    /* Sign-in: the brand, and what is and is not kept. */
+    .tf-ops-signin { max-width: 44rem; margin: 0 auto; }
+    .tf-ops-signin-card { padding: var(--tf-space-4) var(--tf-space-3); border-radius: var(--tf-radius-xl); border: 1px solid var(--tf-hairline-strong); background: radial-gradient(520px 220px at 50% -40px, rgba(139, 92, 246, 0.22), transparent 70%), var(--tf-surface-1); box-shadow: var(--tf-shadow-3); }
+    @media (min-width: 768px) { .tf-ops-signin-card { padding: var(--tf-space-5) var(--tf-space-5); } }
+    .tf-ops-mark { display: inline-flex; align-items: center; justify-content: center; width: 52px; height: 52px; border-radius: 15px; color: #fff; background: radial-gradient(120% 120% at 20% 0%, #a78bfa 0%, #7c3aed 45%, #5b21b6 100%); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 14px 34px -10px rgba(124, 58, 237, 0.8); }
+    .tf-ops-mark .tf-icon { width: 26px; height: 26px; }
+    .tf-ops-promise { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: 1fr; gap: 8px; }
+    @media (min-width: 640px) { .tf-ops-promise { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+    .tf-ops-promise li { display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: var(--tf-radius-md); background: rgba(8, 11, 21, 0.6); border: 1px solid var(--tf-hairline); font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-2); }
+    .tf-ops-promise li .tf-icon { width: 16px; height: 16px; color: var(--tf-approved-text); }
+    .tf-ops-promise li b { font-weight: 600; color: var(--tf-text); }
+
+    /* Proof: six series side by side on one scale. */
+    .tf-ops-multiples { display: grid; grid-template-columns: 1fr; gap: 12px; }
+    @media (min-width: 768px) { .tf-ops-multiples { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    @media (min-width: 1200px) { .tf-ops-multiples { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+    .tf-ops-multiple { display: flex; flex-direction: column; gap: 12px; padding: 14px 16px 16px; border-radius: var(--tf-radius-md); background: var(--tf-inset); border: 1px solid var(--tf-hairline); min-width: 0; }
+    .tf-ops-multiple-title { margin: 0; font: 600 0.8125rem/1.25rem var(--tf-font-sans); color: var(--tf-text); }
+    .tf-ops-multiple-sub { display: block; font: 400 var(--tf-fs-micro)/1rem var(--tf-font-sans); color: var(--tf-text-3); }
+    .tf-ops-multiple .tf-hbars { gap: 10px; }
+    .tf-ops-multiple .tf-hbar-head > :first-child { font-family: var(--tf-font-sans); color: var(--tf-text-2); }
+    .tf-ops-scale { display: flex; justify-content: space-between; margin-top: -4px; font-size: 0.625rem; line-height: 0.875rem; color: var(--tf-text-3); font-variant-numeric: tabular-nums; }
+    .tf-ops-verdict { display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px; border-radius: var(--tf-radius-md); background: var(--tf-accent-soft); border: 1px solid var(--tf-accent-line); }
+    .tf-ops-verdict .tf-icon { width: 20px; height: 20px; color: var(--tf-accent-text); flex-shrink: 0; margin-top: 2px; }
+    .tf-ops-verdict p { margin: 0; font-size: 0.9375rem; line-height: 1.375rem; color: var(--tf-text); }
+
+    @media (prefers-reduced-motion: reduce) {
+      .tf-ops-radar-ring, .tf-ops-radar-sweep { animation: none !important; }
+      .tf-ops-radar-ring { opacity: 0.5; }
+      .tf-ops-radar-ring:nth-child(2) { transform: scale(1.8); opacity: 0.3; }
+      .tf-ops-radar-ring:nth-child(3) { transform: scale(2.6); opacity: 0.15; }
+    }
+  </style>
   <script src="assets/threefold.js"></script>
 </head>
 <body class="min-h-screen flex flex-col overflow-x-hidden">
@@ -522,29 +742,218 @@
       </div>`;
     }
 
+    // A tile: the plain words first, the value, what it means, the precise term
+    // quieter, and the rows behind it. The value is the API's, drawn through
+    // num(); data-tf-count lets the shared layer replay the climb once a load.
     function tile(t) {
-      return html`<a href="${t.href}" class="tf-card tf-card-link tf-tile" aria-label="${t.label}: ${num(t.value)}. ${t.sub}. ${t.opens || 'Open the rows behind it'}">
-        <span class="tf-tile-label">${t.label}</span>
-        <span class="flex items-end justify-between gap-2 min-w-0">
-          <span class="tf-tile-value" data-metric="${t.metric}" title="${typeof t.value === 'number' ? t.value.toLocaleString('en-US') : ''}">${num(t.value)}</span>
-          ${t.spark ? html`<span class="hidden sm:inline-flex" aria-hidden="true">${t.spark}</span>` : ''}
-        </span>
+      const shown = num(t.value);
+      const counted = typeof t.value === 'number' && isFinite(t.value);
+      return html`<a href="${t.href}" class="tf-card tf-card-link tf-tile tf-ops-tile${t.wide ? ' tf-ops-tile-wide' : ''}" aria-label="${t.label}: ${shown}. ${t.sub}. ${t.opens || 'Open the rows behind it'}">
+        <span class="tf-tile-label">${t.icon ? T.icon(t.icon, 16) : ''}${t.label}</span>
+        <span class="tf-tile-row"><span class="tf-tile-value" data-metric="${t.metric}"${counted ? html` data-tf-count="${t.value}"` : ''} title="${counted ? t.value.toLocaleString('en-US') : ''}">${shown}</span>${t.spark ? html`<span class="tf-tile-spark" aria-hidden="true">${t.spark}</span>` : ''}</span>
         <span class="tf-tile-sub">${t.sub}</span>
+        ${t.term ? html`<span class="tf-tile-term">${t.term}</span>` : ''}
+        <span class="tf-tile-more" aria-hidden="true">${t.more || 'See the calls'}${T.icon('arrowright', 14)}</span>
       </a>`;
+    }
+
+    // What each kind of caller is, for the callers that are not coding agents.
+    const CALLER_KINDS = {
+      page: 'a visitor pressing a button on a page here',
+      ci: 'a pipeline or a pre-commit check',
+      unknown: 'a call that did not say which agent sent it'
+    };
+
+    // Where a project's calls come from, on a stack that says so. A stack from
+    // before the field says only whether a project is a visitor's sandbox.
+    const SOURCES = {
+      fleet: { label: 'Fleet', says: 'The synthetic Acme fleet: scheduled agents whose calls run through the real gates' },
+      sandbox: { label: 'Sandbox', says: 'A visitor\'s sandbox, seeded with synthetic calls by the walkthrough' },
+      other: { label: 'Other', says: 'Neither the fleet nor a sandbox: the service\'s own probes, the demo page, or a connected repository' }
+    };
+    function sourceOf(p) {
+      if (p && Object.prototype.hasOwnProperty.call(SOURCES, p.source)) return p.source;
+      if (p && (p.sandbox === true || /^Acme-Sandbox-[0-9a-f]{8}$/.test(String(p.project || '')))) return 'sandbox';
+      return '';
+    }
+    function sourceBadge(p) {
+      const src = sourceOf(p);
+      if (!src) return '';
+      return html`<span class="tf-chip tf-chip-gray tf-ops-src" data-src="${src}" title="${SOURCES[src].says}">${SOURCES[src].label}</span>`;
+    }
+
+    // How much of what a project's rules flagged has a label: a rule is Ready
+    // only once every call it flagged is marked, so this is the road to Ready.
+    function labelledMeter(would, waiting) {
+      if (typeof would !== 'number' || typeof waiting !== 'number') return html`<span class="text-gray-500">—</span>`;
+      if (would <= 0) {
+        return html`<span class="tf-ops-meter" data-state="none" title="No rule flagged a call in this window"><span class="tf-ops-meter-track"></span><span class="tf-ops-meter-words">nothing flagged</span></span>`;
+      }
+      const done = Math.max(0, Math.min(would, would - waiting));
+      const width = Math.round((done / would) * 1000) / 10;
+      return html`<span class="tf-ops-meter" data-state="${done === would ? 'done' : 'part'}" role="img" aria-label="${num(done)} of ${num(would)} flagged calls labelled" title="${num(done)} of ${num(would)} flagged calls labelled; a rule becomes Ready when every call it flagged is marked correct"><span class="tf-ops-meter-track"><span class="tf-ops-meter-fill" style="width:${width}%"></span></span><span class="tf-ops-meter-words">${num(done)}/${num(would)} labelled</span></span>`;
+    }
+
+    // One slot of the attention strip: something to do, or plainly nothing.
+    function attSlot(o) {
+      return html`<article class="tf-ops-att" data-tone="${o.tone || ''}" data-slot="${o.slot}">
+        <div class="tf-ops-att-head">
+          <span class="tf-ops-att-icon" aria-hidden="true">${T.icon(o.icon, 16)}</span>
+          <div class="min-w-0"><span class="tf-ops-att-kicker">${o.kicker}</span><h3 class="tf-ops-att-title">${o.title}</h3></div>
+        </div>
+        ${o.body || ''}
+        ${o.foot ? html`<div class="tf-ops-att-foot">${o.foot}</div>` : ''}
+      </article>`;
+    }
+
+    function attLoading(slot, kicker, icon) {
+      return attSlot({ slot, kicker, icon, title: html`<span class="sr-only">Reading</span><span class="tf-skeleton tf-skeleton-line" style="width:70%;margin-top:6px" aria-hidden="true"></span>`,
+        body: html`<span class="tf-skeleton tf-skeleton-line" style="width:90%" aria-hidden="true"></span>` });
+    }
+
+    function attUnread(slot, kicker, icon, what, err) {
+      return attSlot({ slot, kicker, icon, title: what + ' could not be read',
+        body: html`<p class="tf-ops-att-note">${T.isAuthError(err) ? 'This needs the operator: sign in with python threefold.py open.' : (err && err.message ? err.message : 'The service did not answer') + '. Nothing is shown rather than a guess.'}</p>` });
+    }
+
+    function reviewSlot(data, days) {
+      const t = data.totals || {};
+      const waiting = typeof t.needs_review === 'number' ? t.needs_review : 0;
+      if (!waiting) {
+        return attSlot({ slot: 'reviews', tone: 'ok', icon: 'check', kicker: 'Reviews', title: 'Nothing waits for a label',
+          body: html`<p class="tf-ops-att-note">Every call a rule in Observe flagged in ${windowWords(days)} has a label.</p>` });
+      }
+      const rows = (Array.isArray(data.by_project) ? data.by_project : []).filter(p => (p.needs_review || 0) > 0)
+        .sort((a, b) => (b.needs_review || 0) - (a.needs_review || 0) || String(a.project).localeCompare(String(b.project)));
+      const split = data.sandbox_split && data.sandbox_split.sandbox;
+      const inSandboxes = split && typeof split.needs_review === 'number' && split.needs_review > 0 ? split.needs_review : 0;
+      return attSlot({
+        slot: 'reviews', tone: 'info', icon: 'inbox', kicker: 'Reviews',
+        title: html`${plural(waiting, 'call')} ${waiting === 1 ? 'waits' : 'wait'} for your label`,
+        body: html`<ul class="tf-ops-att-list">${rows.slice(0, 3).map(p => html`<li><a href="${reviewHref({ project: p.project, days })}"><span class="tf-ops-att-what font-mono">${T.projectName(p.project)}</span><span class="tf-ops-att-n">${num(p.needs_review)}</span></a></li>`)}</ul>
+          ${rows.length > 3 ? html`<p class="tf-ops-att-note">and ${plural(rows.length - 3, 'more project')}.</p>` : ''}
+          ${inSandboxes ? html`<p class="tf-ops-att-note">${num(inSandboxes)} of them are in visitors' sandboxes.</p>` : ''}`,
+        foot: html`<a class="tf-btn tf-btn-primary tf-btn-sm" href="${reviewHref({ days })}">Start reviewing${T.icon('arrowright', 14)}</a><span class="tf-micro inline-flex items-center gap-1">${T.kbd('J')}${T.kbd('K')} move, ${T.kbd('C')}${T.kbd('F')} label</span>`
+      });
+    }
+
+    function noisySlot(att, days) {
+      const kicker = 'Rules';
+      if (!att.noisy) return attLoading('noisy', kicker, 'alert');
+      if (att.noisy.error) return attUnread('noisy', kicker, 'alert', 'False alarms', att.noisy.error);
+      const groups = {};
+      const order = [];
+      att.noisy.rows.forEach(row => {
+        const project = String(row.project_name || '');
+        const rule = ruleKeyOf(row);
+        const key = project + '\u0000' + rule;
+        if (!groups[key]) { groups[key] = { project, rule, count: 0 }; order.push(key); }
+        groups[key].count += 1;
+      });
+      const list = order.map(k => groups[k]).sort((a, b) => b.count - a.count || a.rule.localeCompare(b.rule));
+      const partial = att.noisy.partial ? html`<p class="tf-ops-att-note">Counted over the newest ${plural(att.noisy.rows.length, 'false alarm')}; the ledger holds more.</p>` : '';
+      if (!list.length) {
+        return attSlot({ slot: 'noisy', tone: 'ok', icon: 'check', kicker, title: 'No rule turned noisy',
+          body: html`<p class="tf-ops-att-note">No call was marked a false alarm in ${windowWords(days)}.</p>` });
+      }
+      return attSlot({
+        slot: 'noisy', tone: 'danger', icon: 'alert', kicker,
+        title: html`${plural(list.length, 'rule')} turned noisy`,
+        body: html`<ul class="tf-ops-att-list">${list.slice(0, 3).map(g => html`<li><a href="${projectHref(g.project)}" title="Open the project: keep the rule observing, or refine it, before it enforces"><span class="tf-ops-att-what"><span class="font-mono text-gray-200">${g.rule}</span> <span class="text-gray-500">in</span> <span class="font-mono">${T.projectName(g.project)}</span></span><span class="tf-ops-att-n">${plural(g.count, 'false alarm')}</span></a></li>`)}</ul>
+          ${list.length > 3 ? html`<p class="tf-ops-att-note">and ${plural(list.length - 3, 'more rule')}.</p>` : ''}
+          <p class="tf-ops-att-note">A false alarm makes a rule Noisy: keep it observing, or refine it, before it enforces.</p>${partial}`,
+        foot: html`<a class="tf-btn tf-btn-sm" href="${callsHref({ review: 'false_alarm', days })}">The calls marked false alarm</a>`
+      });
+    }
+
+    function haltedSlot(att) {
+      const kicker = 'Sessions';
+      if (!att.sessions) return attLoading('halted', kicker, 'stop');
+      if (att.sessions.error) return attUnread('halted', kicker, 'stop', 'Sessions', att.sessions.error);
+      // The demo page's scenarios halt their own sim- sessions on purpose; they
+      // show the breaker working, and nobody has to act on them.
+      const halted = att.sessions.rows.filter(s => s && s.is_tripped === true && !/^sim-/.test(String(s.session_id || '')));
+      if (!halted.length) {
+        return attSlot({ slot: 'halted', tone: 'ok', icon: 'check', kicker, title: 'No session is halted',
+          body: html`<p class="tf-ops-att-note">The circuit breaker has stopped no agent session. The demo page's own scenario sessions are left out.</p>` });
+      }
+      return attSlot({
+        slot: 'halted', tone: 'warn', icon: 'stop', kicker,
+        title: html`${plural(halted.length, 'session')} halted`,
+        body: html`<ul class="tf-ops-att-list">${halted.slice(0, 3).map(s => html`<li><a href="${T.pageHref('sessions.html' + query({ session: s.session_id }))}" title="${s.trip_reason || 'Halted'}"><span class="tf-ops-att-what"><span class="font-mono text-gray-200">${s.session_id}</span>${s.project_name ? html` <span class="text-gray-500">in</span> <span class="font-mono">${T.projectName(s.project_name)}</span>` : ''}</span><span class="tf-ops-att-n">${timeAgo(s.created_at)}</span></a></li>`)}</ul>
+          ${halted.length > 3 ? html`<p class="tf-ops-att-note">and ${plural(halted.length - 3, 'more session')}.</p>` : ''}
+          <p class="tf-ops-att-note">Every later call in a halted session is refused until an operator resumes it.</p>`,
+        foot: html`<a class="tf-btn tf-btn-sm" href="${T.pageHref('sessions.html')}">Open Sessions</a>`
+      });
+    }
+
+    function attentionStrip(data, days, att) {
+      return html`<section aria-labelledby="attention-title">
+        <div class="tf-ops-head"><div>
+          <h2 id="attention-title" class="tf-ops-h2">${T.icon('bolt', 18)}Needs your attention</h2>
+          <p class="tf-ops-sub">What to act on in ${windowWords(days)}: the queue, rules a false alarm made noisy, and sessions the circuit breaker halted.</p>
+        </div></div>
+        <div class="tf-ops-attention">${reviewSlot(data, days)}${noisySlot(att, days)}${haltedSlot(att)}</div>
+      </section>`;
+    }
+
+    // On the public demo, the one sentence that says what the numbers are made
+    // of, from `sources` where the stack reports it and from `sandbox_split`
+    // where it predates that field. Nothing is said on a private stack.
+    function sourceNote(data, who) {
+      if (!who || who.reads_public !== true) return '';
+      const count = part => (part && typeof part.calls === 'number' ? part.calls : null);
+      let sentence;
+      let parts = [];
+      const s = data.sources && typeof data.sources === 'object' ? data.sources : null;
+      const split = data.sandbox_split && typeof data.sandbox_split === 'object' ? data.sandbox_split : null;
+      if (s) {
+        const fleet = s.fleet || {};
+        sentence = html`Everything on this public demo is synthetic. <strong>${num(count(s.fleet))}</strong> of these calls come from the Acme fleet, ${typeof fleet.projects === 'number' ? plural(fleet.projects, 'synthetic project') : 'synthetic projects'} whose agents run through the real gates on a schedule; <strong>${num(count(s.sandbox))}</strong> from visitors' sandboxes; and <strong>${num(count(s.other))}</strong> from the service's own probes and the demo page.`;
+        parts = [
+          { label: 'Acme fleet', value: count(s.fleet), color: T.CATEGORICAL[0] },
+          { label: 'Sandboxes', value: count(s.sandbox), color: T.CATEGORICAL[1] },
+          { label: 'Probes and demo page', value: count(s.other), color: T.CATEGORICAL_OTHER }
+        ];
+      } else if (split) {
+        sentence = html`Everything on this public demo is synthetic: <strong>${num(count(split.sandbox))}</strong> of these calls come from visitors' sandboxes, and the other <strong>${num(count(split.elsewhere))}</strong> from the synthetic Acme fleet and the service's own probes.`;
+        parts = [
+          { label: 'Sandboxes', value: count(split.sandbox), color: T.CATEGORICAL[1] },
+          { label: 'Fleet and probes', value: count(split.elsewhere), color: T.CATEGORICAL_OTHER }
+        ];
+      } else {
+        sentence = html`Everything on this public demo is synthetic: the Acme fleet, visitors' sandboxes and the service's own probes.`;
+      }
+      const drawn = parts.filter(p => typeof p.value === 'number' && p.value > 0);
+      const bar = drawn.length ? html`<div class="tf-ops-share">
+          <div class="tf-ops-share-bar" role="img" aria-label="${parts.map(p => p.label + ' ' + num(p.value)).join(', ')}">${drawn.map(p => html`<span style="flex-grow:${p.value};background:${p.color}" data-tf-tip="${p.label}" data-tf-tip-value="${num(p.value)}" data-tf-tip-color="${p.color}"></span>`)}</div>
+          ${T.legend(parts.map(p => ({ label: p.label, color: p.color })))}
+        </div>` : '';
+      return html`<div class="tf-ops-source" data-sources="${s ? 'sources' : split ? 'sandbox_split' : 'none'}">${T.icon('info', 18)}<p>${sentence}</p>${bar}</div>`;
     }
 
     function viewOverview(ctx) {
       const days = pickDays(ctx.params.days, 7);
       let data = null;
       let loadedAt = 0;
+      let who = null;
+      let firstPaint = true;
+      // The attention strip's own reads, kept between redraws so a refresh
+      // does not flash them: false alarms from the ledger, halted sessions.
+      const att = { noisy: null, sessions: null };
+      let attStarted = false;
       const actions = pageTitleActions(days);
-      ctx.render(loadingView('Overview', 'What Threefold judged across every project in ' + windowWords(days) + '.', ['tiles', 'chart', 'table']));
+      const sub = 'What Threefold judged across every project in ' + windowWords(days) + '.';
+      ctx.render(loadingView('Overview', sub, ['tiles', 'chart', 'table']));
 
       function load(quiet) {
         return T.api('/api/overview' + query({ days })).then(body => {
           if (!ctx.alive()) return;
           data = body || {};
           loadedAt = Date.now();
+          // The strip's own reads start once the overview itself was read: a
+          // stack that refused the overview would refuse them too.
+          if (!attStarted) { attStarted = true; loadAttention(); }
           draw();
           if (quiet) announce('Overview refreshed');
         }, err => {
@@ -560,6 +969,24 @@
         });
       }
 
+      // Read once a visit and on Refresh, never on the timer: the session list
+      // is a scan of the table, and the false alarms change only when someone
+      // labels a call.
+      function loadAttention() {
+        att.noisy = null;
+        att.sessions = null;
+        const noisy = T.api('/api/decisions' + query({ review: 'false_alarm', days, limit: 200 })).then(body => {
+          // Only rows the ledger says were marked false alarm: a stack that did
+          // not filter would otherwise have every call counted as one.
+          const rows = body && Array.isArray(body.items) ? body.items : [];
+          att.noisy = { rows: rows.filter(r => r && r.review === 'false_alarm'), partial: !!(body && body.next_cursor) };
+        }, err => { att.noisy = { error: err }; });
+        const sessions = T.api('/api/sessions' + query({ limit: 200 })).then(body => {
+          att.sessions = { rows: body && Array.isArray(body.sessions) ? body.sessions : [] };
+        }, err => { att.sessions = { error: err }; });
+        [noisy, sessions].forEach(p => p.then(() => { if (ctx.alive() && data) draw(); }));
+      }
+
       function chartWidth() {
         const el = document.getElementById('daily-chart');
         const w = el && el.clientWidth;
@@ -571,7 +998,7 @@
         if (!series.length) return emptyNote('No days to draw in this window.');
         return T.stackedBars(series, {
           width: chartWidth(),
-          height: 210,
+          height: 220,
           title: 'Calls per day, ' + windowWords(days),
           desc: 'Stacked columns, one per day: refused at the base, then would refuse, then approved.',
           keys: [
@@ -583,6 +1010,36 @@
         });
       }
 
+      // A window with few busy days still reads as intended: it says what the
+      // window holds rather than leaving a reader to wonder at the gaps.
+      function dailyWords(series) {
+        const busy = series.filter(r => (r.approved || 0) + (r.observed || 0) + (r.refused || 0) > 0);
+        if (series.length <= 1) return 'Click a segment to open the calls behind it.';
+        if (busy.length === 1) return 'Every call in this window arrived on ' + shortDay(busy[0].day) + '; the other days hold none. Click a segment to open its calls.';
+        if (busy.length < series.length) return 'Calls arrived on ' + busy.length + ' of the ' + series.length + ' days in this window; a day without a column had none. Click a segment to open its calls.';
+        return 'Click a segment to open the calls behind it.';
+      }
+
+      function agentsCard(byAgent) {
+        const kinded = byAgent.some(a => typeof a.kind === 'string');
+        const coding = byAgent.filter(a => (a.calls || 0) > 0 && (!kinded || a.kind === 'coding_agent')).sort((a, b) => (b.calls || 0) - (a.calls || 0));
+        const others = kinded ? byAgent.filter(a => (a.calls || 0) > 0 && a.kind !== 'coding_agent') : [];
+        const bars = coding.length
+          ? T.hbars(coding.map(a => ({
+              label: agentLabel(a.agent), href: callsHref({ agent: a.agent, days }),
+              segments: [{ value: a.calls, label: 'calls', color: C.accent, href: callsHref({ agent: a.agent, days }) }],
+              sublabel: typeof a.calls_in_sandboxes === 'number' && a.calls_in_sandboxes > 0
+                ? (a.calls_in_sandboxes === a.calls ? 'every one of them in visitors\' sandboxes' : num(a.calls_in_sandboxes) + ' of them in visitors\' sandboxes')
+                : ''
+            })), { title: 'Coding agents' })
+          : emptyNote(kinded ? 'No coding agent sent a call in this window.' : 'No agent reported itself in this window.');
+        const apart = others.length ? html`<div class="mt-5 pt-4 border-t border-gray-800">
+            <p class="tf-label">Not coding agents</p>
+            <ul class="space-y-1.5">${others.map(a => html`<li class="text-xs"><a class="tf-link-row flex-wrap gap-x-2" href="${callsHref({ agent: a.agent, days })}"><span class="text-gray-200">${agentLabel(a.agent)}</span><span class="font-mono text-gray-400">${plural(a.calls, 'call')}</span><span class="text-gray-500">${CALLER_KINDS[a.kind] || CALLER_KINDS.unknown}</span></a></li>`)}</ul>
+          </div>` : '';
+        return card(kinded ? 'Coding agents' : 'By agent', kinded ? 'Calls each coding agent sent in this window. Other callers are named apart below.' : 'Calls each agent sent in this window.', html`${bars}${apart}`, 'min-w-0');
+      }
+
       function draw() {
         const t = data.totals || {};
         const stages = data.stages || {};
@@ -591,7 +1048,7 @@
         const byOrigin = Array.isArray(data.by_origin) ? data.by_origin : [];
         const byRule = Array.isArray(data.by_rule) ? data.by_rule : [];
         const byProject = Array.isArray(data.by_project) ? data.by_project : [];
-        const head = pageTitle('Overview', 'What Threefold judged across every project in ' + windowWords(days) + '.', actions);
+        const head = pageTitle('Overview', sub, actions);
         const fresh = html`<p id="freshness" class="text-[11px] text-gray-500 -mt-3 mb-4">Read at ${T.clockTime(loadedAt)} from daily rollups${data.generated_at ? ' generated ' + timeAgo(data.generated_at) : ''}, so the counts are exact however busy the ledger is. Refreshes every 30 seconds while this tab is open.</p>`;
 
         if (!t.calls) {
@@ -600,30 +1057,37 @@
         }
 
         const perDay = series.map(r => (r.approved || 0) + (r.observed || 0) + (r.refused || 0));
-        const topAgents = byAgent.slice().sort((a, b) => (b.calls || 0) - (a.calls || 0)).slice(0, 3).map(a => agentLabel(a.agent));
+        const dayLabels = series.map(r => shortDay(r.day));
+        const kinded = byAgent.some(a => typeof a.kind === 'string');
+        const codingCount = typeof t.coding_agents === 'number' ? t.coding_agents : null;
+        const coding = byAgent.filter(a => (a.calls || 0) > 0 && (!kinded || a.kind === 'coding_agent')).sort((a, b) => (b.calls || 0) - (a.calls || 0));
+        const others = kinded ? byAgent.filter(a => (a.calls || 0) > 0 && a.kind !== 'coding_agent') : [];
+        const agentWords = (coding.length ? coding.slice(0, 3).map(a => agentLabel(a.agent)).join(', ') : 'none in this window') +
+          (others.length ? ' · not agents: ' + others.map(a => agentLabel(a.agent) + ' (' + plural(a.calls, 'call') + ')').join(', ') : '');
         const tiles = [
-          { label: 'Calls governed', metric: 'calls', value: t.calls, href: callsHref({ days }),
-            sub: num(t.approved) + ' approved', spark: T.sparkline(perDay, { label: 'Calls per day', color: C.accent }) },
-          { label: 'Refused', metric: 'refused', value: t.refused, href: callsHref({ kind: 'refused', days }),
-            sub: t.refused ? pct(t.refused / t.calls) + ' of calls, stopped before they ran' : 'nothing was refused in this window',
-            spark: T.sparkline(series.map(r => r.refused || 0), { label: 'Refused per day', color: C.refused }) },
+          { label: 'Calls judged', metric: 'calls', value: t.calls, href: callsHref({ days }), icon: 'layers', wide: true,
+            sub: num(t.approved) + ' approved, ' + num(t.refused) + ' stopped and ' + num(t.would_refuse) + ' flagged in ' + windowWords(days),
+            spark: T.sparkline(perDay, { label: 'Calls per day', color: C.accent, labels: dayLabels, width: 168, height: 40 }) },
+          { label: 'Stopped before they ran', metric: 'refused', value: t.refused, href: callsHref({ kind: 'refused', days }), icon: 'stop', term: 'refused',
+            sub: t.refused ? pct(t.refused / t.calls) + ' of calls, refused by a rule in force' : 'nothing was refused in this window',
+            spark: T.sparkline(series.map(r => r.refused || 0), { label: 'Refused per day', color: C.refused, labels: dayLabels }) },
+          { label: 'Would have been stopped', metric: 'would_refuse', value: t.would_refuse, href: callsHref({ kind: 'observed', days }), icon: 'eye', term: 'would refuse',
+            sub: t.would_refuse ? 'they ran; a rule in Observe flagged them' : 'no observing rule flagged a call',
+            spark: T.sparkline(series.map(r => r.observed || 0), { label: 'Would refuse per day', color: C.observed, labels: dayLabels }) },
           // Read from the ledger rather than the rollups: whether a refused
           // agent then did the same thing acceptably is a question about the
           // order of its calls. The calls listing cannot filter by origin, so
           // the link opens every refusal, and the label says so.
-          { label: 'Self-corrected', metric: 'self_corrected',
+          { label: 'Self-corrected', metric: 'self_corrected', icon: 'refresh', term: 'refused, then done right',
             value: selfCorrectionShown(data.self_correction) ? data.self_correction.self_corrected : null,
             href: callsHref({ kind: 'refused', days }), sub: selfCorrectionWords(data.self_correction),
-            opens: SELF_CORRECTION_SCOPE + ' Opens every refused call in this window' },
-          { label: 'Would refuse', metric: 'would_refuse', value: t.would_refuse, href: callsHref({ kind: 'observed', days }),
-            sub: t.would_refuse ? 'ran; a rule in Observe would have stopped them' : 'no observing rule flagged a call',
-            spark: T.sparkline(series.map(r => r.observed || 0), { label: 'Would refuse per day', color: C.observed }) },
-          { label: 'Needs review', metric: 'needs_review', value: t.needs_review, href: callsHref({ kind: 'observed', review: 'unreviewed', days }),
-            sub: t.needs_review ? 'label them so rules can become Ready' : 'every flagged call has a label' },
-          { label: 'Projects', metric: 'projects', value: t.projects, href: '#/projects',
+            opens: SELF_CORRECTION_SCOPE + ' Opens every refused call in this window', more: 'See the refusals' },
+          { label: 'Waiting for your label', metric: 'needs_review', value: t.needs_review, href: callsHref({ kind: 'observed', review: 'unreviewed', days }), icon: 'inbox', term: 'needs review',
+            sub: t.needs_review ? 'label them so their rules can become Ready' : 'every flagged call has a label' },
+          { label: 'Projects', metric: 'projects', value: t.projects, href: '#/projects', icon: 'folder', more: 'See the projects',
             sub: num(stages.observe) + ' in Observe · ' + num(stages.enforce) + ' in Enforce' },
-          { label: 'Agents', metric: 'agents', value: t.agents, href: callsHref({ days }),
-            sub: topAgents.length ? topAgents.join(', ') : 'none reported' }
+          { label: codingCount !== null ? 'Coding agents' : 'Agents', metric: codingCount !== null ? 'coding_agents' : 'agents',
+            value: codingCount !== null ? codingCount : t.agents, href: callsHref({ days }), icon: 'terminal', sub: agentWords }
         ];
 
         const outcome = T.donut([
@@ -653,31 +1117,34 @@
             })), { title: 'By rule', keys: [{ label: 'Refused', color: C.refused }, { label: 'Would refuse', color: C.observed }] })
           : emptyNote('No rule refused or flagged a call in this window.', html`Every call passed every gate. <a class="tf-link" href="${callsHref({ days })}">See the calls</a>.`);
 
-        const agents = byAgent.filter(a => (a.calls || 0) > 0).sort((a, b) => (b.calls || 0) - (a.calls || 0));
-        const agentBars = agents.length
-          ? T.hbars(agents.map(a => ({
-              label: agentLabel(a.agent), href: callsHref({ agent: a.agent, days }),
-              segments: [{ value: a.calls, label: 'calls', color: C.accent, href: callsHref({ agent: a.agent, days }) }]
-            })), { title: 'By agent' })
-          : emptyNote('No agent reported itself in this window.');
-
-        ctx.render(html`${head}${fresh}
-          <div class="space-y-4">
-            <div class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3">${tiles.map(tile)}</div>
-            ${t.needs_review ? html`<a href="${reviewHref()}" class="tf-card tf-card-link flex flex-wrap items-center justify-between gap-3 px-5 py-3 border-sky-900/60">
-                <span class="text-sm text-sky-200"><strong class="text-white">${plural(t.needs_review, 'call')}</strong> a rule would have refused ${t.needs_review === 1 ? 'is' : 'are'} waiting for a label${t.false_alarms ? html`<span class="text-gray-400"> · ${plural(t.false_alarms, 'false alarm')} marked so far</span>` : ''}.</span>
-                <span class="tf-btn tf-btn-sm">Open the review queue ${raw(T.ICONS.arrow)}</span>
-              </a>` : ''}
-            <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-              ${card('Calls per day', 'Click a segment to open the calls behind it.', html`<div id="daily-chart">${dailyChart()}</div>`, 'lg:col-span-2 min-w-0')}
-              ${card('Outcome', 'Every call ends approved, would refuse (ran, flagged by an observing rule) or refused.', html`${outcome}${origins}`, 'min-w-0')}
+        ctx.render(html`${head}${fresh}${sourceNote(data, who)}
+          <div class="space-y-8">
+            ${attentionStrip(data, days, att)}
+            <section aria-labelledby="numbers-title">
+              <div class="tf-ops-head"><div>
+                <h2 id="numbers-title" class="tf-ops-h2">${T.icon('chart', 18)}The numbers</h2>
+                <p class="tf-ops-sub">Every tile opens the calls behind it.</p>
+              </div></div>
+              <div class="tf-ops-tiles">${tiles.map(tile)}</div>
+            </section>
+            <div class="space-y-4">
+              <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                ${card('Calls per day', dailyWords(series), html`<div id="daily-chart">${dailyChart()}</div>`, 'lg:col-span-2 min-w-0')}
+                ${card('Outcome', 'Every call ends approved, would refuse (ran, flagged by an observing rule) or refused.', html`${outcome}${origins}`, 'min-w-0')}
+              </div>
+              <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                ${card('By rule', 'What decided, refused and would refuse. A layering rule by its id, a gate by its key. A call two rules would have refused counts under each, so these do not add up to the tiles.', ruleBars, 'min-w-0')}
+                ${agentsCard(byAgent)}
+              </div>
+              ${card('By project', 'Stage, and what each project\'s rules did. Open a project for its readiness and the Promote button.', projectsTable(byProject, days, true), 'min-w-0')}
             </div>
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              ${card('By rule', 'What decided, refused and would refuse. A layering rule by its id, a gate by its key. A call two rules would have refused counts under each, so these do not add up to the tiles.', ruleBars, 'min-w-0')}
-              ${card('By agent', 'Calls each agent sent in this window.', agentBars, 'min-w-0')}
-            </div>
-            ${card('By project', 'Stage, and what each project\'s rules did. Open a project for its readiness and the Promote button.', projectsTable(byProject, days, true), 'min-w-0')}
           </div>`);
+        if (firstPaint) {
+          firstPaint = false;
+          const view = document.getElementById('view');
+          if (view && typeof view.querySelectorAll === 'function') T.reveal(view.querySelectorAll('.tf-ops-att, .tf-ops-tile'), { stagger: 35 });
+          T.animateNumbers(view);
+        }
       }
 
       let resizeTimer = null;
@@ -702,7 +1169,11 @@
         if (typeof window.removeEventListener === 'function') window.removeEventListener('resize', onResize);
         if (typeof document.removeEventListener === 'function') document.removeEventListener('visibilitychange', onVisible);
       });
-      ctx.actions({ refresh: () => load(true) });
+      ctx.actions({ refresh: () => { if (attStarted) loadAttention(); return load(true); } });
+      T.whoami().then(answer => {
+        who = answer;
+        if (ctx.alive() && data && answer && answer.reads_public === true) draw();
+      });
       return load(false);
     }
 
@@ -736,49 +1207,59 @@
       </div>`;
     }
 
-    // A project table, shared by the overview and the projects screen. Every
-    // number opens the calls behind it.
+    // A project table, shared by the overview and the projects screen: a row a
+    // project, its stage and where its calls come from, what its rules did,
+    // how much of it waits for a label, and how far its labels have come.
+    // Every number opens the calls behind it.
     function projectsTable(rows, days, compact) {
       if (!rows.length) {
         return emptyNote('No project sent a call in this window.', html`<a class="tf-link" href="#/connect">Connect a repository</a> and its first call appears here.`);
       }
       const sorted = rows.slice().sort((a, b) => (b.needs_review || 0) - (a.needs_review || 0) || (b.calls || 0) - (a.calls || 0));
       const numLink = (value, params, tone) => html`<a href="${callsHref(Object.assign({ days }, params))}" class="tf-num-link ${value ? tone : 'text-gray-500'}">${num(value)}</a>`;
-      const desktop = html`<div class="hidden md:block tf-scroll-x">
+      const meta = p => compact
+        ? html`last seen ${timeAgo(p.last_seen)}`
+        : html`${Array.isArray(p.agents) && p.agents.length ? p.agents.map(agentLabel).join(', ') : 'no agent yet'} · hooks ${chipWords(p.hook_modes)} · last seen ${timeAgo(p.last_seen)}`;
+      const desktop = html`<div class="hidden md:block tf-scroll-x tf-ops-portfolio">
         <table class="tf-table">
           <thead><tr>
             <th scope="col">Project</th><th scope="col">Stage</th>
-            <th scope="col" class="num">Calls</th><th scope="col" class="num">Refused</th>
-            <th scope="col" class="num">Would refuse</th><th scope="col" class="num">Needs review</th>
-            ${compact ? '' : html`<th scope="col">Agents</th><th scope="col">Hook modes</th>`}
-            <th scope="col">Last seen</th>
+            <th scope="col" class="num">Calls</th><th scope="col" class="num">Stopped</th>
+            <th scope="col" class="num">Would stop</th><th scope="col" class="num">Waiting</th>
+            <th scope="col">Labelled</th>
           </tr></thead>
-          <tbody>${sorted.map(p => html`<tr>
-            <th scope="row" class="font-normal"><a href="${projectHref(p.project)}" class="tf-link-quiet font-mono tf-break">${T.projectName(p.project)}</a></th>
+          <tbody>${sorted.map(p => html`<tr data-row-href="${projectHref(p.project)}">
+            <th scope="row" class="font-normal"><span class="tf-ops-pname">
+              <span class="flex flex-wrap items-center gap-2"><a href="${projectHref(p.project)}" class="tf-link-quiet font-mono tf-break">${T.projectName(p.project)}</a>${sourceBadge(p)}</span>
+              <span class="tf-ops-pmeta">${meta(p)}</span>
+            </span></th>
             <td>${stageChip(p.stage, p.configured)}</td>
             <td class="num">${numLink(p.calls, { project: p.project }, 'text-gray-200')}</td>
             <td class="num">${numLink(p.refused, { project: p.project, kind: 'refused' }, 'text-rose-300')}</td>
             <td class="num">${numLink(p.would_refuse, { project: p.project, kind: 'observed' }, 'text-amber-300')}</td>
             <td class="num">${p.needs_review ? html`<a href="${reviewHref({ project: p.project })}" class="tf-num-link text-sky-300">${num(p.needs_review)}</a>` : html`<span class="text-gray-500">${num(p.needs_review)}</span>`}</td>
-            ${compact ? '' : html`<td>${chipList(p.agents, agentLabel)}</td><td>${chipList(p.hook_modes)}</td>`}
-            <td class="text-gray-400 whitespace-nowrap">${timeAgo(p.last_seen)}</td>
+            <td>${labelledMeter(p.would_refuse, p.needs_review)}</td>
           </tr>`)}</tbody>
         </table>
       </div>`;
-      const mobile = html`<ul class="md:hidden space-y-2">${sorted.map(p => html`<li class="tf-card-quiet p-3 space-y-2">
+      const mobile = html`<ul class="md:hidden space-y-2">${sorted.map(p => html`<li class="tf-ops-pcard">
         <div class="flex items-start justify-between gap-2">
-          <a href="${projectHref(p.project)}" class="tf-link-quiet font-mono text-sm tf-break">${T.projectName(p.project)}</a>
+          <span class="min-w-0 flex flex-col gap-1"><a href="${projectHref(p.project)}" class="tf-link-quiet font-mono text-sm tf-break">${T.projectName(p.project)}</a><span class="flex flex-wrap gap-1">${sourceBadge(p)}</span></span>
           ${stageChip(p.stage, p.configured)}
         </div>
-        <div class="grid grid-cols-4 gap-1 text-center">
-          ${[['Calls', p.calls, {}, 'text-gray-200'], ['Refused', p.refused, { kind: 'refused' }, 'text-rose-300'], ['Would', p.would_refuse, { kind: 'observed' }, 'text-amber-300']].map(([label, value, params, tone]) =>
-            html`<a href="${callsHref(Object.assign({ days, project: p.project }, params))}" class="rounded-lg bg-gray-900 py-1.5"><span class="block font-mono text-sm ${value ? tone : 'text-gray-500'}">${num(value)}</span><span class="block text-[10px] text-gray-500">${label}</span></a>`)}
-          <a href="${reviewHref({ project: p.project })}" class="rounded-lg bg-gray-900 py-1.5"><span class="block font-mono text-sm ${p.needs_review ? 'text-sky-300' : 'text-gray-500'}">${num(p.needs_review)}</span><span class="block text-[10px] text-gray-500">Review</span></a>
+        <div class="tf-ops-pnums">
+          ${[['Calls', p.calls, {}, 'text-gray-200'], ['Stopped', p.refused, { kind: 'refused' }, 'text-rose-300'], ['Would stop', p.would_refuse, { kind: 'observed' }, 'text-amber-300']].map(([label, value, params, tone]) =>
+            html`<a href="${callsHref(Object.assign({ days, project: p.project }, params))}"><b class="${value ? tone : 'text-gray-500'}">${num(value)}</b><small>${label}</small></a>`)}
+          <a href="${reviewHref({ project: p.project })}"><b class="${p.needs_review ? 'text-sky-300' : 'text-gray-500'}">${num(p.needs_review)}</b><small>Waiting</small></a>
         </div>
-        ${compact ? '' : html`<div class="flex flex-wrap gap-1">${chipList(p.agents, agentLabel)} ${chipList(p.hook_modes)}</div>`}
-        <p class="text-[11px] text-gray-500">Last seen ${timeAgo(p.last_seen)}</p>
+        ${labelledMeter(p.would_refuse, p.needs_review)}
+        <p class="tf-ops-pmeta">${meta(p)}</p>
       </li>`)}</ul>`;
       return html`${desktop}${mobile}`;
+    }
+
+    function chipWords(values) {
+      return Array.isArray(values) && values.length ? values.join(', ') : 'not reported';
     }
 
     function chipList(values, label) {
@@ -789,16 +1270,23 @@
     // ---------------------------------------------------------- projects
 
     function viewProjects(ctx) {
-      const sub = 'Every project seen in the last 7 days, configured or not. A project with no configuration follows the stack\'s default stage.';
+      const sub = 'Every project seen in the last 7 days, configured or not: its stage, what its rules did, what waits for a label, and how far its labels have come.';
       ctx.render(loadingView('Projects', sub, ['table']));
       return T.api('/api/projects').then(body => {
         if (!ctx.alive()) return;
         const rows = (body && Array.isArray(body.projects)) ? body.projects : [];
         const observe = rows.filter(p => p.stage === 'observe').length;
         const enforce = rows.filter(p => p.stage === 'enforce').length;
-        ctx.render(html`${pageTitle('Projects', sub, html`<a href="#/connect" class="tf-btn tf-btn-primary">Connect a repository</a>`)}
-          ${rows.length ? html`<p class="text-xs text-gray-400 mb-4"><span data-metric="projects">${num(rows.length)}</span> project${rows.length === 1 ? '' : 's'} · ${num(observe)} in Observe · ${num(enforce)} in Enforce</p>` : ''}
-          ${card('All projects', 'Numbers cover the last 7 days and open the calls behind them.', projectsTable(rows, 7, false))}`);
+        const waiting = sum(rows, 'needs_review');
+        const summary = rows.length ? html`<div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+            <div class="tf-card tf-tile"><span class="tf-tile-label">${T.icon('folder', 16)}Projects</span><span class="tf-tile-value" data-metric="projects">${num(rows.length)}</span><span class="tf-tile-sub">seen in the last 7 days</span></div>
+            <div class="tf-card tf-tile"><span class="tf-tile-label">${T.icon('eye', 16)}In Observe</span><span class="tf-tile-value">${num(observe)}</span><span class="tf-tile-sub">judged and recorded, nothing refused</span></div>
+            <div class="tf-card tf-tile"><span class="tf-tile-label">${T.icon('shield', 16)}In Enforce</span><span class="tf-tile-value">${num(enforce)}</span><span class="tf-tile-sub">the rules in force refuse</span></div>
+            <a class="tf-card tf-card-link tf-tile" href="${reviewHref()}"><span class="tf-tile-label">${T.icon('inbox', 16)}Waiting for a label</span><span class="tf-tile-value">${num(waiting)}</span><span class="tf-tile-sub">${waiting ? 'across ' + plural(rows.filter(p => (p.needs_review || 0) > 0).length, 'project') : 'nothing to review'}</span></a>
+          </div>` : '';
+        ctx.render(html`${pageTitle('Projects', sub, html`<a href="#/connect" class="tf-btn tf-btn-primary">${T.icon('plug', 16)}Connect a repository</a>`)}
+          ${summary}
+          ${card('The portfolio', 'Sorted by what waits for a label, then by calls. Numbers cover the last 7 days and open the calls behind them; a row opens its project.', projectsTable(rows, 7, false))}`);
       }, err => {
         if (ctx.alive()) ctx.render(html`${pageTitle('Projects', sub)}${failure(err, 'the project list')}`);
       });
