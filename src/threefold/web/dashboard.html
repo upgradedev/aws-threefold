@@ -245,6 +245,19 @@
     .tf-ops-arrived { display: flex; align-items: flex-start; gap: 14px; padding: 16px; border-radius: var(--tf-radius-md); background: var(--tf-approved-soft); border: 1px solid var(--tf-approved-line); }
     .tf-ops-arrived-mark { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; flex-shrink: 0; border-radius: 50%; background: var(--tf-approved); color: #fff; box-shadow: 0 0 0 6px rgba(14, 165, 114, 0.16); }
     .tf-ops-arrived-mark .tf-icon { width: 22px; height: 22px; }
+    .tf-ops-connect-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--tf-space-2); align-items: start; }
+    @media (min-width: 1024px) {
+      .tf-ops-connect-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 25rem); }
+      .tf-ops-connect-grid > li { grid-column: 1; }
+      .tf-ops-connect-grid > .tf-ops-connect-live { grid-column: 2; grid-row: 1 / span 2; position: sticky; top: 76px; }
+      .tf-ops-connect-live .tf-ops-wait { flex-direction: column; align-items: center; text-align: center; gap: var(--tf-space-2); padding: var(--tf-space-1) 0; }
+      .tf-ops-connect-live .tf-ops-wait > div:last-child { flex: 0 1 auto; align-items: center; }
+      .tf-ops-connect-live .tf-ops-radar { width: 148px; height: 148px; }
+      .tf-ops-connect-live > .tf-step-num { display: none; }
+    }
+    /* The two shells side by side at every width, each taking half. */
+    .tf-ops-connect .tf-tabs { display: flex; }
+    .tf-ops-connect .tf-tab { flex: 1 1 0; justify-content: center; white-space: nowrap; }
     .tf-ops-steps { list-style: none; margin: 0 0 var(--tf-space-3); padding: 0; display: flex; flex-wrap: wrap; gap: 8px 20px; }
     .tf-ops-steps li { display: inline-flex; align-items: center; gap: 8px; font: 500 0.8125rem/1.25rem var(--tf-font-sans); color: var(--tf-text-3); }
     .tf-ops-steps li[data-state="current"] { color: var(--tf-text); }
@@ -2955,7 +2968,7 @@
     // ------------------------------------------------------------ connect
 
     const OS_TABS = [
-      { os: 'powershell', label: 'Windows · PowerShell', command: 'PowerShell connect command' },
+      { os: 'powershell', label: 'PowerShell', command: 'PowerShell connect command' },
       { os: 'posix', label: 'macOS / Linux', command: 'macOS and Linux connect command' }
     ];
 
@@ -2995,12 +3008,15 @@
       function draw() {
         const ok = nameOk();
         const steps = ['Name the project', 'Run one command', 'See the first call'];
-        ctx.render(html`<div class="max-w-3xl tf-ops-connect">${pageTitle('Connect a repository', 'One command installs the hook for the agents on the machine and starts the project in Observe, so nothing is refused while you watch what would be.', html`<a class="tf-btn tf-btn-quiet tf-btn-sm" href="${T.pageHref('connect.html')}">Every detail, by hand</a>`)}
+        // Full width: the steps on the left, and at desktop width the first
+        // call's panel beside them, where the wait and the arrival are seen
+        // while the command is copied and run.
+        ctx.render(html`<div class="tf-ops-connect">${pageTitle('Connect a repository', html`One command installs the hook for the agents on the machine and starts the project in Observe, so nothing is refused while you watch what would be. <a class="tf-link whitespace-nowrap" href="${T.pageHref('connect.html')}">Every detail, by hand</a>`)}
           <ol class="tf-ops-steps" aria-label="Where you are">${steps.map((label, i) => {
             const s = stepState(i + 1);
             return html`<li data-state="${s}"${s === 'current' ? raw(' aria-current="step"') : ''}><span class="tf-step-num" data-state="${s}">${s === 'done' ? T.icon('check', 13) : i + 1}</span>${label}</li>`;
           })}</ol>
-          <ol class="space-y-4" aria-label="Connect in three steps">
+          <ol class="tf-ops-connect-grid" aria-label="Connect in three steps">
             <li class="tf-card p-5 tf-step" aria-current="${stepState(1) === 'current' ? 'step' : 'false'}">
               <span class="tf-step-num" data-state="${stepState(1)}">1</span>
               <div class="flex-1 min-w-0 space-y-2">
@@ -3030,7 +3046,7 @@
                 </details>
               </div>
             </li>
-            <li class="tf-card p-5 tf-step">
+            <li class="tf-card p-5 tf-step tf-ops-connect-live">
               <span class="tf-step-num" data-state="${stepState(3)}">3</span>
               <div class="flex-1 min-w-0 space-y-3" id="connect-wait">${waitPanel()}</div>
             </li>
@@ -3051,7 +3067,7 @@
             </div>
             <div class="tf-callout tf-callout-warn">${T.icon('eye', 18)}<div class="tf-callout-body">
               <p class="tf-callout-title">You are in Observe</p>
-              <p>What the hooks in this repository send is judged and recorded, and not refused. A call carrying a credential is still refused on the machine and never sent, and a call the hook holds back is neither sent nor recorded. Keep working as usual. What the rules would have refused shows up for review; when a rule's record reads right, promote the project and that rule starts refusing.</p>
+              <p>Nothing your agents send from here is refused, except a call carrying a credential, which the hook stops on the machine and never sends. What a rule would have refused waits for your review; when its record reads right, promote the project and that rule starts refusing.</p>
             </div></div>
             <div class="flex flex-wrap gap-2">
               <a class="tf-btn tf-btn-primary" href="${projectHref(state.name)}">Open ${T.projectName(state.name)}${T.icon('arrowright', 14)}</a>
