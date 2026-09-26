@@ -1450,17 +1450,17 @@
         <ol class="grid grid-cols-1 md:grid-cols-3 gap-3">
           <li class="tf-card-quiet p-4 space-y-2">
             <p class="text-xs font-semibold text-purple-300">Connect a repository</p>
-            <p class="text-[11px] text-gray-400">One command. It starts in Observe, so nothing your agents do is refused while you watch.</p>
+            <p class="text-xs text-gray-400">One command. It starts in Observe, so nothing your agents do is refused while you watch.</p>
             <a href="#/connect" class="tf-btn tf-btn-primary tf-btn-sm">Connect ${raw(T.ICONS.arrow)}</a>
           </li>
           <li class="tf-card-quiet p-4 space-y-2">
             <p class="text-xs font-semibold text-purple-300">Try it in a minute</p>
-            <p class="text-[11px] text-gray-400">On the public demo: a sandbox project seeded with calls from three agents, reviewed and promoted by you.</p>
+            <p class="text-xs text-gray-400">On the public demo: a sandbox project seeded with calls from three agents, reviewed and promoted by you.</p>
             <a href="#/try" class="tf-btn tf-btn-sm">Start the walkthrough</a>
           </li>
           <li class="tf-card-quiet p-4 space-y-2">
             <p class="text-xs font-semibold text-purple-300">${days < 30 ? 'Look further back' : 'Watch a refusal now'}</p>
-            <p class="text-[11px] text-gray-400">${days < 30 ? 'Calls older than this window are still in the ledger.' : 'The demo page runs the circuit breaker against the live service.'}</p>
+            <p class="text-xs text-gray-400">${days < 30 ? 'Calls older than this window are still in the ledger.' : 'The demo page runs the circuit breaker against the live service.'}</p>
             ${days < 30 ? html`<a href="#/overview?days=30" class="tf-btn tf-btn-sm">Show 30 days</a>` : html`<a href="${T.pageHref('index.html')}" class="tf-btn tf-btn-sm">Open the demo</a>`}
           </li>
         </ol>
@@ -1637,7 +1637,7 @@
           ${rules.length
             ? html`<div class="tf-ops-tally">${tally.map(([key, value, label, tone]) => html`<div><b class="${value ? tone : 'text-gray-500'}">${num(value)}</b><small>${label}</small></div>`)}</div>`
             : html`<p class="text-xs text-gray-400">No rule has judged a call from this project in the window.</p>`}
-          <p class="text-[11px] text-gray-500" data-note="false-alarm-rate">${reviewed > 0 && typeof summary.false_alarm_rate === 'number'
+          <p class="text-xs text-gray-500" data-note="false-alarm-rate">${reviewed > 0 && typeof summary.false_alarm_rate === 'number'
             ? html`False-alarm rate ${pct(summary.false_alarm_rate)} over ${plural(reviewed, 'labelled call')}.`
             : 'No flagged call is labelled yet, so there is no false-alarm rate.'}</p>
         </aside>`;
@@ -1822,7 +1822,7 @@
               <span class="text-[11px] text-gray-500">${plural(info.calls, 'call')} · last ${timeAgo(info.last)}</span>
             </div>
             <div class="flex flex-wrap items-center gap-x-2 gap-y-1">${modes.map(m => html`<span class="tf-chip ${m === 'observe' ? 'tf-chip-amber' : m === 'managed' ? 'tf-chip-emerald' : 'tf-chip-gray'}" title="${HOOK_MODES[m] || m}">${m}</span><span class="text-xs text-gray-400">${HOOK_MODE_WORDS[m] || HOOK_MODES[m] || m}</span>`)}</div>
-            ${capped ? html`<p class="text-[11px] text-amber-300" role="note">This project is in Enforce, but this agent's hook is capped to observe on its machine, so its calls are never refused. On that machine, run <span class="font-mono">python threefold.py connect --mode managed</span>.</p>` : ''}
+            ${capped ? html`<p class="text-xs text-amber-300" role="note">This project is in Enforce, but this agent's hook is capped to observe on its machine, so its calls are never refused. On that machine, run <span class="font-mono">python threefold.py connect --mode managed</span>.</p>` : ''}
           </li>`;
         })}</ul>`;
       }
@@ -1847,7 +1847,7 @@
               <input type="checkbox" class="mt-0.5 accent-purple-500" ${i === 0 ? raw('id="dialog-first"') : ''} data-change="promote-toggle" data-rule="${r.rule_key}" ${chosen.has(r.rule_key) ? raw('checked') : ''} />
               <span class="min-w-0 flex-1">
                 <span class="flex flex-wrap items-center gap-2"><span class="font-mono text-xs text-white tf-break">${r.rule_key}</span>${stateChip(r.state)}</span>
-                <span class="block text-[11px] text-gray-400 mt-1">${num(r.would_refuse)} flagged · ${num(r.correct)} correct · ${num(r.false_alarms)} false alarm${r.false_alarms === 1 ? '' : 's'} · ${num(r.unreviewed)} unreviewed${r.recommendation ? html` — ${r.recommendation}` : ''}</span>
+                <span class="block text-xs text-gray-400 mt-1">${num(r.would_refuse)} flagged · ${num(r.correct)} correct · ${num(r.false_alarms)} false alarm${r.false_alarms === 1 ? '' : 's'} · ${num(r.unreviewed)} unreviewed${r.recommendation ? html` — ${r.recommendation}` : ''}</span>
               </span>
             </label>
           </li>`)}</ul>
@@ -2254,7 +2254,7 @@
               return html`<li id="qrow-${index}" class="tf-ops-qrow" tabindex="-1" data-current="${on ? 'true' : 'false'}" data-action="queue-pick" data-row="${rowKey(row)}"${on ? raw(' aria-current="true"') : ''}>
               <div class="tf-ops-qrow-body">
                 <p class="text-xs"><span class="font-mono text-gray-200">${row.tool_name}</span> <span class="font-mono text-gray-400 tf-break">${targetOf(row)}</span></p>
-                <p class="text-[11px] text-gray-300 tf-break">${reasonOf(row)}</p>
+                <p class="text-xs text-gray-300 tf-break">${reasonOf(row)}</p>
                 <p class="text-[11px] text-gray-500">${agentLabel(row.agent)} · <span title="${dateTime(row.timestamp)}">${timeAgo(row.timestamp)}</span> · <a class="tf-link" href="${callHref(row)}">details</a></p>
               </div>
               ${rowActions(row, g, on)}
@@ -2933,7 +2933,7 @@
         const fields = html`<dl class="grid grid-cols-1 sm:grid-cols-[12rem_1fr] gap-x-4 text-xs">${rows.map(([k, label, value]) => html`
           <dt class="text-gray-500 pt-2 sm:py-2 sm:border-b border-gray-800/60">${label}</dt>
           <dd class="font-mono text-gray-200 pb-2 sm:py-2 border-b border-gray-800/60 tf-break">${fieldValue(k, value)}</dd>`)}</dl>
-          <p class="text-[11px] text-gray-500 mt-3">The arguments of a call are never stored: this is the whole record, enough to know what was decided and why, and not enough to rebuild what was written.</p>`;
+          <p class="text-xs text-gray-500 mt-3">The arguments of a call are never stored: this is the whole record, enough to know what was decided and why, and not enough to rebuild what was written.</p>`;
 
         const ruleBody = rule
           ? html`<div class="space-y-3 text-xs">
@@ -2945,7 +2945,7 @@
               <a class="tf-link" href="${T.pageHref('rules.html' + query({ project: T.PROJECT_PATTERN.test(row.project_name || '') ? row.project_name : '' }))}">Read or try this project's rules</a>
             </div>`
           : html`<p class="text-xs text-gray-300"><span class="font-mono text-white">${key}</span> — ${GATE_KEYS[key] || 'a built-in gate'}.</p>
-              <p class="text-[11px] text-gray-500 mt-2">A gate is part of the service, not a layering rule a project writes, so it has no definition to show.</p>`;
+              <p class="text-xs text-gray-500 mt-2">A gate is part of the service, not a layering rule a project writes, so it has no definition to show.</p>`;
 
         const sessionBody = session
           ? html`<dl class="grid grid-cols-2 gap-2 text-xs">
@@ -3082,7 +3082,7 @@
                 <p class="text-xs text-gray-400">This name is all that identifies the repository to the stack, so use an alias, never the real name. It starts with <span class="font-mono">Acme-</span>, then up to 40 letters, digits or dashes.</p>
                 <label class="block max-w-sm"><span class="sr-only">Project name</span>
                   <input id="connect-name" type="text" class="tf-input w-full font-mono" value="${state.name}" maxlength="45" autocomplete="off" spellcheck="false" aria-describedby="connect-name-problem" /></label>
-                <p id="connect-name-problem" class="text-[11px] ${ok ? 'text-gray-500' : 'text-rose-300'}" role="${ok ? 'note' : 'alert'}">${ok ? 'A name outside this pattern would be counted as unlabelled.' : 'That name will be stored as unlabelled. Use Acme- and letters, digits or dashes.'}</p>
+                <p id="connect-name-problem" class="text-xs ${ok ? 'text-gray-500' : 'text-rose-300'}" role="${ok ? 'note' : 'alert'}">${ok ? 'A name outside this pattern would be counted as unlabelled.' : 'That name will be stored as unlabelled. Use Acme- and letters, digits or dashes.'}</p>
               </div>
             </li>
             <li class="tf-card p-5 tf-step">
@@ -3091,8 +3091,8 @@
                 <h2 class="text-sm font-semibold text-white">Run one command at the root of the repository</h2>
                 ${ok ? html`<div id="connect-command" class="space-y-3">${commandTabs()}</div>`
                   : html`<p class="text-xs text-rose-300">Fix the name above and the command appears here.</p>`}
-                <p class="text-[11px] text-gray-400">It downloads one standard-library Python file from this stack, installs the hook for Claude Code, Codex and Antigravity where they are installed, keeps its files out of git, and finishes by sending one harmless call and opening this project here.</p>
-                <details class="tf-disclosure text-[11px] text-gray-400">
+                <p class="text-xs text-gray-400">It downloads one standard-library Python file from this stack, installs the hook for Claude Code, Codex and Antigravity where they are installed, keeps its files out of git, and finishes by sending one harmless call and opening this project here.</p>
+                <details class="tf-disclosure text-xs text-gray-400">
                   <summary>${T.icon('shield', 16)}For the careful: check the file before you run it</summary>
                   <div class="tf-disclosure-body">
                     <p>Download it first with the part of the command before the <span class="font-mono">;</span> or <span class="font-mono">&amp;&amp;</span>, then compare its SHA-256 with the one this stack publishes in <a class="tf-link" href="${T.STACK_URL}dist/manifest.json">dist/manifest.json</a>:</p>
@@ -3120,7 +3120,7 @@
               <div class="min-w-0 space-y-1">
                 <h2 class="text-base font-semibold text-white">Connected</h2>
                 <p class="text-sm text-emerald-200"><strong class="text-white">${agentLabel(row.agent)}</strong> reached the stack from <span class="font-mono">${T.projectName(state.name)}</span> ${timeAgo(row.timestamp)}.</p>
-                <p class="text-[11px] text-gray-300"><span class="font-mono">${row.tool_name}</span> ${targetOf(row)} · ${OUTCOMES[outcomeOf(row)].label.toLowerCase()} · hook mode ${row.hook_mode || 'unknown'}${row.stage ? ' · stage ' + row.stage : ''}</p>
+                <p class="text-xs text-gray-300"><span class="font-mono">${row.tool_name}</span> ${targetOf(row)} · ${OUTCOMES[outcomeOf(row)].label.toLowerCase()} · hook mode ${row.hook_mode || 'unknown'}${row.stage ? ' · stage ' + row.stage : ''}</p>
               </div>
             </div>
             <div class="tf-callout tf-callout-warn">${T.icon('eye', 18)}<div class="tf-callout-body">
@@ -3141,9 +3141,9 @@
             <div>
               <h2 class="text-sm font-semibold text-white">Waiting for the first call</h2>
               <p class="text-xs text-gray-300" role="status">${state.waiting ? html`Watching for a call from <span class="font-mono text-white">${T.projectName(state.name)}</span>, every 3 seconds while this tab is open.` : 'Paused while this tab is hidden.'}</p>
-              ${state.before ? html`<p class="text-[11px] text-gray-500">${T.projectName(state.name)} has sent calls before (the last ${timeAgo(state.before.timestamp)}), so this waits for a new one.</p>` : ''}
-              ${state.pollError ? html`<p class="text-[11px] text-rose-300">The last check failed: ${state.pollError.message}. Still trying.</p>` : ''}
-              <p class="text-[11px] text-gray-500">Nothing arriving? The command prints whether its test call was recorded. <a class="tf-link" href="${T.pageHref('connect.html')}">The connect page</a> covers each agent's details.</p>
+              ${state.before ? html`<p class="text-xs text-gray-500">${T.projectName(state.name)} has sent calls before (the last ${timeAgo(state.before.timestamp)}), so this waits for a new one.</p>` : ''}
+              ${state.pollError ? html`<p class="text-xs text-rose-300">The last check failed: ${state.pollError.message}. Still trying.</p>` : ''}
+              <p class="text-xs text-gray-500">Nothing arriving? The command prints whether its test call was recorded. <a class="tf-link" href="${T.pageHref('connect.html')}">The connect page</a> covers each agent's details.</p>
             </div>
           </div>`;
       }
@@ -3234,7 +3234,7 @@
         const ok = nameOk();
         const problem = document.getElementById('connect-name-problem');
         if (problem) {
-          problem.className = 'text-[11px] ' + (ok ? 'text-gray-500' : 'text-rose-300');
+          problem.className = 'text-xs ' + (ok ? 'text-gray-500' : 'text-rose-300');
           problem.textContent = ok ? 'A name outside this pattern would be counted as unlabelled.' : 'That name will be stored as unlabelled. Use Acme- and letters, digits or dashes.';
         }
         const commandEl = document.getElementById('connect-command');
@@ -3278,7 +3278,7 @@
     // and an unused link signs in whoever opens it first.
     const SIGNIN_PROMISES = [
       ['lock', 'No password', 'Nothing to type or remember here: the command on your machine does the asking.'],
-      ['key', 'No key in the browser', 'The command sends the key to the stack, never to this page. This browser keeps only a session, which ends on its own.'],
+      ['key', 'No key in the browser', 'The command sends the key to the stack, never to this page. The browser gets a session that ends on its own; a key pasted here earlier is removed.'],
       ['clock', 'A link works once', 'Whoever opens it first is signed in, so treat it like the key. Once used, or after a short while, it opens nothing.']
     ];
 
@@ -3314,7 +3314,7 @@
             <p class="text-xs text-gray-400">It asks the stack for a one-time link and opens it in this browser.</p>
           </div>
           <ul class="tf-ops-promise">${SIGNIN_PROMISES.map(([icon, head, words]) => html`<li>${T.icon(icon, 16)}<b>${head}</b><span>${words}</span></li>`)}</ul>
-          <p class="text-[11px] text-gray-500 text-center">No <span class="font-mono">threefold.py</span> yet? <a class="tf-link" href="#/connect">Connect a repository</a> first. On the public demo, reading needs no sign-in at all.</p>`));
+          <p class="text-xs text-gray-500 text-center">No <span class="font-mono">threefold.py</span> yet? <a class="tf-link" href="#/connect">Connect a repository</a> first. On the public demo, reading needs no sign-in at all.</p>`));
         return;
       }
 
@@ -3344,7 +3344,7 @@
               <div class="space-y-3" role="alert" data-state="signin-refused">
                 <p class="text-xs text-gray-300">Ask for a fresh one on the machine that holds the operator key:</p>
                 ${T.commandBlock('python threefold.py open', 'Sign-in command')}
-                <p class="text-[11px] text-gray-500">If you opened this link twice, the first tab may already be signed in.</p>
+                <p class="text-xs text-gray-500">If you opened this link twice, the first tab may already be signed in.</p>
               </div>`));
             return;
           }
@@ -3362,7 +3362,7 @@
         return html`<div class="space-y-3" role="alert" data-state="signin-failed">
           ${lead}
           ${T.commandBlock('python threefold.py open', 'Sign-in command')}
-          <p class="text-[11px] text-gray-500 text-center"><a class="tf-link" href="#/overview">Go to the overview</a>. On the public demo, reading needs no sign-in at all.</p>
+          <p class="text-xs text-gray-500 text-center"><a class="tf-link" href="#/overview">Go to the overview</a>. On the public demo, reading needs no sign-in at all.</p>
         </div>`;
       }
       ctx.actions({ 'signin-retry': () => attempt() });
@@ -3762,7 +3762,7 @@
             <td>${cell(b, 'threefold', 'completion')}</td>
           </tr>`)}</tbody>
         </table></div>
-        <p class="text-[11px] text-gray-500 mt-2">In the pressure series the developer's own prompt asks for the forbidden shortcut. Where Threefold's tests-passed rate is lower, the agent stopped and reported rather than land the violation.</p>`, 'min-w-0');
+        <p class="text-xs text-gray-500 mt-2">In the pressure series the developer's own prompt asks for the forbidden shortcut. Where Threefold's tests-passed rate is lower, the agent stopped and reported rather than land the violation.</p>`, 'min-w-0');
     }
 
     // The proof's lead: how often a governed violation landed, per series and
@@ -3815,7 +3815,7 @@
         <div class="tf-ops-verdict mb-4">${T.icon('shield', 20)}<p>${verdict}</p></div>
         <div class="mb-3">${T.legend(legendKeys)}</div>
         <div class="tf-ops-multiples">${multiples}</div>
-        <p class="text-[11px] text-gray-500 mt-3">Each bar is k of n runs of one series under one condition; the table below gives every figure with its 95% interval, and each series' own card follows it.</p>`, 'min-w-0');
+        <p class="text-xs text-gray-500 mt-3">Each bar is k of n runs of one series under one condition; the table below gives every figure with its 95% interval, and each series' own card follows it.</p>`, 'min-w-0');
     }
 
     function benchmarkCards(proof) {
@@ -3917,8 +3917,8 @@
         <div class="mt-4 pt-3 border-t border-gray-800">
           <p class="tf-label">Evidence</p>
           ${items.length ? html`<ul class="space-y-1.5" data-proof="evidence">${items.map(evidenceItem)}</ul>` : notMeasured('The snapshot names no evidence file.')}
-          ${items.length && !linked ? html`<p class="text-[11px] text-gray-500 mt-2">Each is a file in the Threefold repository, at the path shown.</p>` : ''}
-          <p class="text-[11px] text-gray-500 mt-2">The live figures on this stack are read from <a class="tf-link" href="${T.specHref('GET', '/api/overview')}">GET /api/overview</a>, and this snapshot from <a class="tf-link" href="${T.specHref('GET', '/proof.json')}">GET /proof.json</a>.</p>
+          ${items.length && !linked ? html`<p class="text-xs text-gray-500 mt-2">Each is a file in the Threefold repository, at the path shown.</p>` : ''}
+          <p class="text-xs text-gray-500 mt-2">The live figures on this stack are read from <a class="tf-link" href="${T.specHref('GET', '/api/overview')}">GET /api/overview</a>, and this snapshot from <a class="tf-link" href="${T.specHref('GET', '/proof.json')}">GET /proof.json</a>.</p>
         </div>`, 'min-w-0');
     }
 
