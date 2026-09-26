@@ -638,10 +638,17 @@ def test_an_enforcing_rule_that_turns_noisy_goes_back_to_observing(monkeypatch) 
     moment = datetime.datetime.now(UTC)
     demo_fleet._sweep(evaluator, moment, summary, min_age=datetime.timedelta(0))
     assert summary.labelled["false_alarm"] == 1 and summary.false_alarms_in == {"Acme-Payments"}
+    promoted = evaluator.project_config("Acme-Payments", fresh=True)
     action = demo_fleet._observe_noisy(evaluator, "Acme-Payments", moment)
     assert action == {"action": "observe_noisy", "project": "Acme-Payments", "observe": [demo_fleet.NOISY_RULE]}
     config = evaluator.project_config("Acme-Payments", fresh=True)
     assert config["stage"] == stages.ENFORCE and demo_fleet.NOISY_RULE in config["observe_rules"]
+    assert config["promoted_at"] == promoted["promoted_at"], "Not a promotion: the cooldown still counts from the real one"
+    assert [entry["action"] for entry in config["history"]] == ["promote", "observe_noisy"]
+    entry = config["history"][-1]
+    assert entry["by"] == "fleet" and entry["at"] == moment.isoformat()
+    assert entry["observe"] == [demo_fleet.NOISY_RULE] and demo_fleet.NOISY_RULE not in entry["enforce"]
+    assert set(entry["enforce"]) == set(first["enforce"]) - {demo_fleet.NOISY_RULE}
     _seed(evaluator, "Acme-Payments", [NOISY_CALL])
     same = [row for row in _rows(evaluator) if row["target"] == NOISY_CALL[2]["file_path"]]
     assert [row["status"] for row in same] == ["BLOCKED_BOUNDARY_VIOLATION", "APPROVED"], (

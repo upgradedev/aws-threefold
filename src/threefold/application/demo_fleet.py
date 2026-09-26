@@ -136,6 +136,9 @@ SEND_SHARE = 0.6
 CLAIM_TTL_SECONDS = 24 * 3600
 
 NOISY_RULE = "python-domain-stays-pure"
+# The history entry, and the summary's action, for an enforcing rule that raised
+# a false alarm and was put back to observing while the project kept enforcing.
+OBSERVE_NOISY = "observe_noisy"
 NOTES = {
     "correct": "Fleet operator: the rule caught what it is meant to catch.",
     "false_alarm": "Fleet operator: tests/domain is test code, not the domain layer; the rule's path is too wide.",
@@ -1269,15 +1272,32 @@ def _demote(evaluator: Any, name: str, now: datetime.datetime) -> Dict[str, Any]
 
 
 def _observe_noisy(evaluator: Any, name: str, now: datetime.datetime) -> Optional[Dict[str, Any]]:
-    """An enforcing rule with a false alarm goes back to observing; the others keep enforcing."""
+    """An enforcing rule with a false alarm goes back to observing; the others keep enforcing.
+
+    Not a promotion, and not recorded as one: the stage stays enforce and
+    `promoted_at` keeps the moment the project was promoted, so the cooldown
+    before a demotion still counts from then. The project's history gains
+    an entry of its own, OBSERVE_NOISY, in the shape a promotion's has: the
+    rules that still enforce and the ones that now observe.
+    """
     rows = _readiness_rows(evaluator, name)
     noisy = [row["rule_key"] for row in rows if row["state"] == "noisy" and row["mode_now"] == stages.ENFORCE]
     if not noisy:
         return None
-    enforce = [row["rule_key"] for row in rows if row["mode_now"] == stages.ENFORCE and row["rule_key"] not in noisy]
     config = _stored_config(evaluator, name)
-    evaluator.save_project_config(name, stages.promoted(config, now.isoformat(), REVIEWER, enforce, _keys(evaluator, name)))
-    return {"action": "observe_noisy", "project": name, "observe": noisy}
+    keys = _keys(evaluator, name)
+    observing = list(dict.fromkeys(list((config or {}).get("observe_rules") or []) + noisy))
+    changed = stages.updated(config, now.isoformat(), observe_rules=observing)
+    entry = {
+        "at": now.isoformat(),
+        "action": OBSERVE_NOISY,
+        "by": REVIEWER,
+        "enforce": [key for key in keys if key not in observing],
+        "observe": [key for key in keys if key in observing],
+    }
+    changed["history"] = (list(changed.get("history") or []) + [entry])[-stages.HISTORY_KEPT:]
+    evaluator.save_project_config(name, changed)
+    return {"action": OBSERVE_NOISY, "project": name, "observe": noisy}
 
 
 # ---------------------------------------------------------------- the schedule's entry point
