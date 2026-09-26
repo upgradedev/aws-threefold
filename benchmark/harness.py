@@ -14,14 +14,18 @@ running elsewhere, a remote endpoint (RemoteThreefold): nothing is started, the
 hook in the task repository names that endpoint, a project `Acme-Live-<task>`
 and a session `live-<task>-<date>`, and what the run left in that Threefold's
 ledger is read back through its public API (GET /api/decisions) instead of
-from a local server. That is how a daily real agent puts its session on the
-public demo's ledger (scripts/daily_live_agent.py). The endpoint must be https,
-or http to this machine for a stand-in. The agent's side of the run is
-unchanged; the hook's is not, because what it sends lands on a ledger others
-read: it runs with the machine's own home, which it shortens to `~` in every
-command it sends, and with the owner's never-send list carried into the run,
-exactly as it runs on the owner's own repositories (machine_home,
-carry_never_send).
+from a local server. The stack keeps a session by its name alone, so a name
+anyone has used is never taken (GET sessions/<id> and the ledger, under any
+project), and a session someone used while the agent worked is found after
+the run, which then does not count (session_problem). That is how a daily
+real agent puts its session on the public demo's ledger
+(scripts/daily_live_agent.py). The endpoint must be https, or http to this
+machine for a stand-in. The agent's side of the run is unchanged; the hook's
+is not, because what it sends lands on a ledger others read: it runs with the
+machine's own home, which it shortens to `~` in every command it sends, and
+with the owner's never-send list carried into the run for as long as the
+agent works, exactly as it runs on the owner's own repositories
+(machine_home, carry_never_send, forget_never_send).
 
 The agent is Claude Code (`claude -p`) or Codex (`codex exec`, see
 codex_agent.py). For Codex the prompt condition writes the rules to AGENTS.md
@@ -643,8 +647,12 @@ _DAY_SHAPE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 # A DNS name as a resolver takes it: ASCII labels of letters, digits and inner hyphens, dot-separated.
 _HOST_NAME = re.compile(r"^(?=.{1,253}\.?$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*\.?$")
 # How many session names a live run tries (`live-<task>-<date>`, then `-a2`, `-a3`, ...) before it gives up:
-# a session that already holds rows on the remote ledger is never reused, so no run counts another's calls.
+# a session the remote Threefold already knows, under any project, is never reused (RemoteServer.unused).
 MAX_SESSION_TRIES = 10
+# The rule keys whose refusal halts a session (the loop and the cost gates), and the key of every call a halted
+# session then refuses. A halt with no earlier trip of the run's own was put there from outside the run.
+TRIP_KEYS = frozenset({"LOOP", "BUDGET"})
+HALT_KEY = "HALTED_SESSION"
 # The file the hook reads the owner's never-send terms from, in THREEFOLD_HOME (the hook's NEVER_SEND_NAME).
 NEVER_SEND_NAME = "never_send.txt"
 # How much of the owner's never-send list is carried into a live run: more than the hook reads (256 KB), so a
@@ -807,7 +815,28 @@ def summarise_decisions(rows: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
         "would_refuse_by_rule_key": dict(Counter(str(row.get("rule_key")) for row in flagged)),
         "stages": dict(Counter(str(row.get("stage") or "unknown") for row in rows)),
         "sessions": len({str(row.get("session_id")) for row in rows}),
+        "halted_from_outside": halted_from_outside(rows),
     }
+
+
+def halted_from_outside(rows: Sequence[Mapping[str, Any]]) -> bool:
+    """Whether a run's session was halted before any call of the run's own tripped it.
+
+    A session halts when the loop or the cost gate refuses a call in it, and
+    every call after that is refused with the key HALTED_SESSION. A halted
+    call that comes first, in the order the ledger recorded them, was halted
+    by something that is not in these rows: the kill switch (open to anyone on
+    a stack whose reads are public), or calls this run did not send. Under
+    Observe no call of the run's own halts the session, so a trip key judged
+    there does not count as the run's own trip.
+    """
+    for row in sorted(rows, key=lambda item: str(item.get("timestamp") or "")):
+        key = str(row.get("rule_key") or "")
+        if key == HALT_KEY:
+            return True
+        if key in TRIP_KEYS and str(row.get("stage") or "") != "observe":
+            return False
+    return False
 
 
 class RemoteServer:
@@ -816,9 +845,12 @@ class RemoteServer:
     It has LocalServer's shape, so a run treats both alike: `start` only checks
     that the endpoint answers GET status (no agent is started against an
     endpoint that is down), and `ledger` reads GET /api/decisions for this
-    run's project and session alone, page by page, as the public pages do.
-    Every request is built from the endpoint given, and a redirect is never
-    followed.
+    run's session, page by page, as the public pages do. The session is read
+    whole, whatever project a row names: the stack keeps a session's loop
+    history, halt and spend by its name alone, so a row under another project
+    shares them with this run, and is counted apart (`other_projects`) rather
+    than dropped. Every request is built from the endpoint given, and a
+    redirect is never followed.
     """
 
     def __init__(self, endpoint: str, project: str, session: str, wait_s: float = 5.0, rereads: int = 3,
@@ -844,46 +876,101 @@ class RemoteServer:
         return remote_json(self.endpoint + "status", timeout=15.0)[0] == 200
 
     def decisions_url(self, cursor: Optional[str] = None) -> str:
-        query = {"project": self.project, "session": self.session, "days": str(LEDGER_DAYS),
-                 "limit": str(LEDGER_PAGE_LIMIT)}
+        """GET api/decisions for this run's session, under every project: no `project` filter, on purpose."""
+        query = {"session": self.session, "days": str(LEDGER_DAYS), "limit": str(LEDGER_PAGE_LIMIT)}
         if cursor:
             query["cursor"] = cursor
         return self.endpoint + "api/decisions?" + urllib.parse.urlencode(query)
 
+    def session_url(self) -> str:
+        return self.endpoint + "sessions/" + urllib.parse.quote(self.session, safe="")
+
+    def project_url(self) -> str:
+        return self.endpoint + "api/projects/" + urllib.parse.quote(self.project, safe="")
+
     def _read(self) -> Dict[str, Any]:
         rows: List[Mapping[str, Any]] = []
+        other = 0
         cursor: Optional[str] = None
+        page = 0
         for page in range(1, MAX_LEDGER_PAGES + 1):
             status, document = remote_json(self.decisions_url(cursor))
             items = document.get("items") if isinstance(document, dict) else None
             if status != 200 or not isinstance(items, list):
                 return {"source": "remote", "reachable": False, "status": status,
                         "project": self.project, "session": self.session}
-            # Filtered here too: only this run's rows count, whatever a server sends.
-            rows += [item for item in items if isinstance(item, dict) and item.get("session_id") == self.session
-                     and item.get("project_name") == self.project]
+            # Filtered here too: only this session's rows are read, whatever a server sends, and only this run's
+            # project's are counted as its calls. The others are counted, never named: a stranger chose the name.
+            mine = [item for item in items if isinstance(item, dict) and item.get("session_id") == self.session]
+            own = [item for item in mine if item.get("project_name") == self.project]
+            rows += own
+            other += len(mine) - len(own)
             cursor = document.get("next_cursor")
             if not cursor or not isinstance(cursor, str):
-                return {"source": "remote", "reachable": True, "complete": True, "pages": page,
-                        "project": self.project, "session": self.session, **summarise_decisions(rows)}
-        return {"source": "remote", "reachable": True, "complete": False, "pages": MAX_LEDGER_PAGES,
-                "project": self.project, "session": self.session, **summarise_decisions(rows)}
+                break
+        complete = not cursor or not isinstance(cursor, str)
+        return {"source": "remote", "reachable": True, "complete": complete, "pages": page,
+                "project": self.project, "session": self.session, **summarise_decisions(rows),
+                "other_projects": other}
+
+    def seen(self) -> bool:
+        """Whether the remote Threefold already keeps a session by this run's session name, or RuntimeError.
+
+        GET sessions/<id> answers 404 for a name it has never seen and the
+        session's record otherwise, whoever made it and however long ago: by
+        calls under any project, or by the kill switch, which freezes a session
+        without writing a ledger row.
+        """
+        status, document = remote_json(self.session_url())
+        if status == 404:
+            return False
+        if status == 200 and isinstance(document, dict) and document.get("session_id") == self.session:
+            return True
+        answer = "an answer that is not a session" if status == 200 else (status or "nothing")
+        raise RuntimeError(f"the remote Threefold answered GET sessions/<the run's session> with {answer}, "
+                           "so no agent was started")
 
     def unused(self) -> bool:
-        """Whether this run's session holds no row yet on the remote ledger, or RuntimeError when that cannot be read.
+        """Whether nobody has used this run's session name on the remote Threefold, or RuntimeError when that cannot be read.
 
-        Asked before an agent starts: a run whose ledger cannot be read back
-        measures nothing, and a session that already holds rows (an earlier
-        run of the same day, or anyone's calls under that name) would have
-        them counted as this run's, and would hand this run its loop history
-        and its spend.
+        Asked before an agent starts. The stack keeps a session's loop
+        history, its halt and its spend by the session's name alone, whatever
+        project a call names, so a name is unused only when the stack has no
+        session by it (GET sessions/<id> answers 404) and its ledger holds no
+        row in that session under any project. Otherwise the run would be
+        judged on someone else's record: an earlier run of the same day, a
+        visitor's calls under another project, or a session frozen with the
+        kill switch before the run began. A run whose ledger cannot be read
+        back measures nothing, so a read that fails starts no agent.
+
+        What this cannot see is a call made in the session after the check,
+        while the agent works. The read after the run looks for that (the
+        ledger's `other_projects` and `halted_from_outside`, and the hook's own
+        count of calls, governance_problem) and says the run did not measure
+        Threefold when it finds it.
         """
+        if self.seen():
+            return False
         found = self._read()
         if not found.get("reachable"):
             status = found.get("status")
             answer = "an answer that is not a ledger" if status == 200 else (status or "nothing")
             raise RuntimeError(f"the remote Threefold answered GET api/decisions with {answer}, so no agent was started")
-        return not found.get("decisions") and found.get("complete") is not False
+        return not found.get("decisions") and not found.get("other_projects") and found.get("complete") is not False
+
+    def project_stage(self) -> Optional[str]:
+        """The stage the remote Threefold holds this run's project in (its own, or the stack's default), or None.
+
+        Read from GET api/projects/<project>, the project page's own read. Asked
+        only after a run whose ledger holds no call of its own: the rows say
+        which stage each call was judged under, and with no row this is the one
+        witness left of whether the stack would have enforced anything.
+        """
+        status, document = remote_json(self.project_url())
+        readiness = document.get("readiness") if status == 200 and isinstance(document, dict) else None
+        summary = readiness.get("summary") if isinstance(readiness, dict) else None
+        stage = summary.get("stage") if isinstance(summary, dict) else None
+        return stage if stage in ("observe", "enforce") else None
 
     def ledger(self, wait_for_rows: bool = False) -> Dict[str, Any]:
         """What the remote ledger holds for this run. With wait_for_rows, an empty answer is read again after a pause."""
@@ -952,20 +1039,34 @@ def carry_never_send(owner_home: Path, run_home: Path) -> str:
     return "copied"
 
 
+def forget_never_send(run_home: Path) -> None:
+    """Removes the copy carry_never_send made, once the hook has no more calls to judge.
+
+    The run's folders stay behind for a reader, and the next run on this
+    machine may be an agent with no sandbox: the owner's terms stay only where
+    the owner keeps them.
+    """
+    try:
+        (Path(run_home) / NEVER_SEND_NAME).unlink()
+    except FileNotFoundError:
+        pass
+
+
 def claim_unused_session(server: RemoteServer, remote: RemoteThreefold, task: Task, rep: int, attempt: int) -> str:
-    """The first of the run's session names that holds no row on the remote ledger; the server is left on it.
+    """The first of the run's session names nobody has used on the remote Threefold (unused); the server is left on it.
 
     `live-<task>-<date>` first (with `-r<rep>` and `-a<attempt>` as the run
     has them), then the next attempts' names, so a second run on the same day
-    (a retry, or a results file deleted to run again) is a session of its own.
+    (a retry, or a results file deleted to run again) is a session of its own,
+    and so is a run whose first name someone else's calls got to first.
     """
     for offset in range(MAX_SESSION_TRIES):
         server.session = remote.session(task, rep, attempt + offset)
         if server.unused():
             return server.session
     raise RuntimeError(f"the sessions {remote.session(task, rep, attempt)} to "
-                       f"{remote.session(task, rep, attempt + MAX_SESSION_TRIES - 1)} all hold rows on the remote ledger "
-                       "already, so no agent was started")
+                       f"{remote.session(task, rep, attempt + MAX_SESSION_TRIES - 1)} are all in use on the remote "
+                       "Threefold already, so no agent was started")
 
 
 def read_threefold_config(repo: Path) -> Optional[Dict[str, Any]]:
@@ -1721,9 +1822,14 @@ def governance_problem(condition: str, row: Mapping[str, Any]) -> Optional[str]:
     the rules the operator picked, STATE.md's Promote contract): a call such a
     rule flags is recorded under the stage `enforce` but lets the call
     through, so any would-refuse in the run's rows means a rule watched where
-    the run needed it to enforce. And the repository's .threefold.json must
-    still name the endpoint and project the run was given when the agent
-    stops, or some calls may have gone elsewhere.
+    the run needed it to enforce. Its session must have been its own
+    (session_problem). And the repository's .threefold.json must still name
+    the endpoint and project the run was given when the agent stops, or some
+    calls may have gone elsewhere.
+
+    The order matters to the daily live run: a stage problem alone reads as a
+    day that went its course, so every failure of the run itself is named
+    before it.
     """
     if not uses_threefold(condition):
         return None
@@ -1737,6 +1843,9 @@ def governance_problem(condition: str, row: Mapping[str, Any]) -> Optional[str]:
     if remote and ledger.get("complete") is False:
         return (f"the remote ledger was not read to the end ({ledger.get('pages')} pages), so this run's decisions "
                 "are not all known")
+    shared = session_problem(row) if remote else None
+    if shared:
+        return shared
     if remote and row.get("threefold_config_intact") is False:
         return ("the repository's .threefold.json no longer named the endpoint and project the run was given when "
                 "the agent stopped")
@@ -1755,6 +1864,39 @@ def governance_problem(condition: str, row: Mapping[str, Any]) -> Optional[str]:
     return None
 
 
+def session_problem(row: Mapping[str, Any]) -> Optional[str]:
+    """Why a remote run's session was not the run's own, from what the read after the run found in it, or None.
+
+    The stack keeps a session's loop history, its halt and its spend by the
+    session's name alone. The name was unused when the run began
+    (RemoteServer.unused), and a session name is public, so this asks whether
+    anyone used it while the agent worked: calls in the session under another
+    project, more calls under the run's project than the hook was run (each
+    run of the hook sends one call at most), or a halt that no call of the
+    run's own tripped (the kill switch, or calls it did not send). Any of them
+    means the stack judged some of this run's calls on a record that was not
+    the run's, so the run measured nothing about the rules.
+    """
+    if row.get("ledger_source") != "remote":
+        return None
+    ledger = row.get("ledger") or {}
+    session = ledger.get("session") or row.get("threefold_session")
+    other = int(ledger.get("other_projects") or 0)
+    if other:
+        return (f"the remote ledger holds {other} call(s) in this run's session {session} under another project; the "
+                "stack keeps a session's loop history, halt and spend by its name alone, so this run was not judged "
+                "on its own calls")
+    decisions, sent = int(ledger.get("decisions") or 0), row.get("hook_calls")
+    if sent is not None and decisions > int(sent):
+        return (f"the remote ledger holds {decisions} call(s) under this run's project and session {session}, and the "
+                f"hook ran {sent} time(s), one call at most each: calls this run did not send were judged in its "
+                "session")
+    if ledger.get("halted_from_outside"):
+        return (f"this run's session {session} was halted before any call of its own tripped it (the kill switch, or "
+                "calls it did not send), so its refusals after that were the halt's, not its rules'")
+    return None
+
+
 def stage_problem(row: Mapping[str, Any]) -> Optional[str]:
     """Why a remote run measured Threefold watching, not enforcing, from the stage the stack judged it under, or None.
 
@@ -1763,16 +1905,23 @@ def stage_problem(row: Mapping[str, Any]) -> Optional[str]:
     way again until someone promotes the project there (see
     scripts/daily_live_agent.py). Every other reason a remote run falls short
     is a failure of the run itself.
+
+    The rows say which stage each call was judged under. A run with no row
+    of its own is judged by the stage the hook last saw in a response, or,
+    when it made no call the stack answered, by the stage the stack reports
+    for the project (RemoteServer.project_stage).
     """
     if row.get("ledger_source") != "remote":
         return None
     ledger = row.get("ledger") or {}
     observed = int((ledger.get("stages") or {}).get("observe") or 0)
-    if observed or (not ledger.get("decisions") and row.get("project_stage_cached") == "observe"):
-        counted = f"{observed} of this run's {ledger.get('decisions')} call(s)" if observed else "this run's calls"
-        return (f"the remote Threefold judged {counted} in Observe (the project {ledger.get('project')} is not "
-                "promoted there), so it recorded what it would have refused and refused nothing: this run did "
-                "not measure Threefold enforcing")
+    if observed:
+        return (f"the remote Threefold judged {observed} of this run's {ledger.get('decisions')} call(s) in Observe "
+                f"(the project {ledger.get('project')} is not promoted there), so it recorded what it would have "
+                "refused and refused nothing: this run did not measure Threefold enforcing")
+    if not ledger.get("decisions") and "observe" in (row.get("project_stage_cached"), row.get("project_stage_remote")):
+        return (f"the remote Threefold holds the project {ledger.get('project')} in Observe and its ledger holds no "
+                "call of this run's, so it would have refused nothing: this run did not measure Threefold enforcing")
     watched = int(ledger.get("would_refuse") or 0)
     if watched:
         rules = sorted(ledger.get("would_refuse_by_rule_key") or {}) or ["a rule"]
@@ -2273,6 +2422,8 @@ def run_one(task: Task, condition: str, rep: int, plan: RunPlan, base_env: Optio
         code, timed_out, seconds = run_agent(
             command, task.prompt(), repo, env, options.timeout_s, run_dir / "transcript.jsonl", run_dir / "agent-stderr.txt"
         )
+        if remote is not None:
+            forget_never_send(run_dir / "threefold-home")
         row.update({"agent_exit_code": code, "agent_timed_out": timed_out, "wall_seconds": round(seconds, 1)})
         row.update(agent_metrics(read_agent_transcript(options, run_dir, condition), sanitise, timed_out, options.timeout_s))
         explain_ending(row, run_dir / "agent-stderr.txt", sanitise)
@@ -2280,7 +2431,12 @@ def run_one(task: Task, condition: str, rep: int, plan: RunPlan, base_env: Optio
             row["server_healthy_after"] = server.healthy()
             row["threefold_config_intact"] = _names(read_threefold_config(repo), remote.endpoint, project)
             row["project_stage_cached"] = cached_stage(run_dir)
+            # How many times the agent ran the hook, from the wrapper's own log: each run sends one call at most,
+            # so a ledger holding more under this run's project and session holds calls this run did not send.
+            row["hook_calls"] = int(codex_agent.read_hook_log(run_dir / HOOK_LOG_NAME).get("calls") or 0)
             row["ledger"] = server.ledger(wait_for_rows=governed_calls(row, options.agent) > 0)
+            row["project_stage_remote"] = (server.project_stage() if row["ledger"].get("reachable")
+                                           and not row["ledger"].get("decisions") else None)
         elif server is not None:
             row["server_healthy_after"] = server.healthy()
             row["ledger"] = server.ledger()
@@ -2293,6 +2449,11 @@ def run_one(task: Task, condition: str, rep: int, plan: RunPlan, base_env: Optio
     finally:
         if server is not None:
             server.stop()
+        if remote is not None:
+            try:
+                forget_never_send(run_dir / "threefold-home")
+            except OSError:
+                pass  # removed after the agent stopped already, or said there as the run's harness error
 
     if repo.exists():
         try:

@@ -227,7 +227,9 @@ people read. What changes:
   `--basetemp ~\AppData\Local\Temp\bt` and `cat ~/.gitconfig`. `THREEFOLD_HOME`
   stays the run's own, and the owner's never-send list (`never_send.txt` in
   `THREEFOLD_HOME`, or `~/.threefold`) is copied into it byte for byte before
-  the agent starts, so a call holding one of those terms is never sent.
+  the agent starts, so a call holding one of those terms is never sent, and
+  removed as soon as the agent stops: the run's folders stay behind, and the
+  next agent on the machine may have no sandbox.
   Nothing else of that folder is read: its `config.json` can name a key file,
   and that key must never reach another stack. A list that is there but
   cannot be read stops the run before an agent starts. The row records
@@ -239,22 +241,44 @@ people read. What changes:
   repetition or attempt). The per-run wrapper sends every call under that
   session name instead of the agent's own id, so the run's calls can be found
   on the remote ledger and read back.
-- Before the agent starts, the endpoint must answer `GET status`, and the
-  remote ledger is read for the run's session: a session that already holds
-  rows (an earlier run the same day, or anyone's calls under that name) is
-  never reused, since its rows would be counted as this run's and its loop
-  history and spend would carry over, so the next attempt's name (`-a2`, ...,
-  up to ten) is taken instead. If either read fails, no agent is started.
-  After the agent stops, the run's decisions are read back
-  from `GET /api/decisions?project=Acme-Live-<task>&session=live-<task>-<date>&days=2`,
-  page by page, with no redirect followed, instead of the local ledger.
+- **The session is the run's own.** The stack keeps a session's loop
+  history, its halt and its spend by the session's name alone, whatever
+  project a call names, and the name `live-<task>-<date>` is public. So before
+  the agent starts, the endpoint must answer `GET status`, the stack must keep
+  no session by that name (`GET sessions/<session>` answers 404; this also
+  sees a session frozen with the kill switch, which writes no ledger row, and
+  one used any number of days before), and its ledger must hold no row in
+  that session under any project
+  (`GET /api/decisions?session=live-<task>-<date>&days=2`, with no `project`
+  filter). A name that fails either check is someone's (an earlier run the
+  same day, or a visitor's calls) and the next attempt's name (`-a2`, ...,
+  up to ten) is taken instead. If a read fails, no agent is started.
+- A name that was unused when the agent started can still be used while it
+  works, and no check before the run can see that. The read after the run
+  looks for it: the session is read whole, page by page, with no redirect
+  followed, instead of the local ledger; rows under the run's project are the
+  run's decisions, and rows under any other project are counted in
+  `other_projects` (never named: a stranger chose the name). The run does not
+  count, and its `governance_problem` says why, when the session holds calls
+  under another project, when it holds more calls under the run's project
+  than the hook was run (`hook_calls`, from the wrapper's log: one call at
+  most each time), or when a call was halted before any call of the run's own
+  tripped the session (`halted_from_outside`: the kill switch, open to anyone
+  where reads are public, or calls the run did not send). One thing stays
+  out of reach: calls a stranger sends under the run's own project and
+  session while the agent works, no more of them than the times the hook ran
+  and sent nothing (a call it held back or refused on the machine, or a tool
+  it does not forward), cannot be told apart from the run's own, and neither
+  can a halt they cause.
 - The endpoint must be https; plain http is accepted only on this machine,
   for a stand-in (`fake_threefold.py`).
 - The row records `ledger_source: "remote"`, `threefold_endpoint`,
   `threefold_project`, `threefold_session`, `project_stage_cached` (the stage
-  the hook last saw in a response) and `threefold_config_intact` (whether
-  `.threefold.json` still named that endpoint and project when the agent
-  stopped). Its `ledger` counts `refused` (a `BLOCKED*` verdict) apart from
+  the hook last saw in a response), `project_stage_remote` (the stage the
+  stack reports for the project, `GET /api/projects/<project>`, read only
+  when the ledger holds no call of the run's), `hook_calls` and
+  `threefold_config_intact` (whether `.threefold.json` still named that
+  endpoint and project when the agent stopped). Its `ledger` counts `refused` (a `BLOCKED*` verdict) apart from
   `would_refuse` (a call that ran although a rule would have refused it) and
   gives the stage each call was judged under in `stages`.
 - A remote stack decides by the project's stage there. The public stack's
@@ -288,13 +312,17 @@ round every twelve days. It runs the `threefold` condition once, writes the
 row to `results/live/<date>-<agent>.jsonl` and prints one line: how the run
 ended, what the remote ledger holds for its session (refused and would refuse
 apart, and the stage they were judged under) and whether the row counts. The
-benchmark's own output goes to `daily-live.log` in the run's work root, not to
-the terminal; the dry run prints the command with the token file shown as
-`<token file>` and the Codex home (`--codex-home`) not at all, only that it is
-set. It refuses an endpoint that is not https or holds anything but visible
-ASCII (there is no default), `--date` outside a dry run, and a work root
-inside the repository or its workspace, before anything is created; after the
-run it checks the row names the endpoint, project and session it planned.
+benchmark runs in the script's own process, and its output goes to
+`daily-live.log` in the run's work root, not to the terminal. The token file
+and the Codex home (`--codex-home`) are the owner's and are never printed:
+the log writes their paths, and the benchmark's defaults for them, as
+`<token file>` and `<Codex home>`, and the dry run shows the benchmark's
+arguments the same way. The line is one line, whatever an error message in
+it carried. It refuses an endpoint that is not https or holds anything but
+visible ASCII (there is no default), `--date` outside a dry run, and a work
+root inside the repository or its workspace, before anything is created;
+after the run it checks the row names the endpoint, project and session it
+planned.
 
 A day's row decides both the exit code and whether the day is run again, the
 same way for a new row and one already recorded:
@@ -302,24 +330,33 @@ same way for a new row and one already recorded:
 | Exit | The day's last row | Started again the same day |
 |---|---|---|
 | 0 | went its course and is the run planned: it counts, or only the project's stage on the stack keeps it from counting (the line says which) | does nothing |
-| 1 | no row, a row that is not the run planned, or a run that did not go as planned: a harness error, an agent that never ran, a Threefold that stopped answering or could not be read, a hook that failed | runs the day again as the benchmark's resume (the next attempt, in a session of its own), up to three rows a day; a row that is not the run planned is never run again |
+| 1 | no row, a row that is not the run planned, or a run that did not go as planned: a harness error, an agent that never ran, a Threefold that stopped answering or could not be read, a hook that failed, a session someone else used while the agent worked | runs the day again as the benchmark's resume (the next attempt, in a session of its own), up to three rows a day; a row that is not the run planned is never run again |
 | 2 | refused before running | |
 | 3 | the benchmark stopped: a usage limit that outlasted its retry, or a login that stopped working | runs the day again, once the login works |
 
 These rows are single runs on a public stack, never a matrix: they are
 reported apart, if at all.
 
-**Scheduling it.** Windows Task Scheduler runs it once a day at a quiet hour;
-04:30 local time is 01:30 or 02:30 UTC from Athens, so the UTC day the
-session is named after is the local one. The task runs as the owner, only
-while the owner is signed in, from the repository's own copy of the script.
-Run the same command by hand once first. `--codex-home` names a folder that
-holds only a Codex login (`set CODEX_HOME=<that folder>` then `codex login`,
-in one cmd window): the benchmark refuses a `CODEX_HOME` holding `hooks.json`
-or `AGENTS.md`, which a machine whose own Codex is governed has. All on one
-line, 261 characters at most after `/TR`:
+**Scheduling it.** Windows Task Scheduler runs it once a day at a quiet hour,
+04:30 local time: in a time zone less than four and a half hours ahead of
+UTC, the UTC day the session is named after is then the local one. The task
+runs as the owner, only while the owner is signed in, from the repository's
+own copy of the script. `--codex-home` names a folder that holds only a Codex
+login (`set CODEX_HOME=<that folder>` then `codex login`, in one cmd window):
+the benchmark refuses a `CODEX_HOME` holding `hooks.json` or `AGENTS.md`,
+which a machine whose own Codex is governed has.
 
-    schtasks /Create /TN "Threefold\Daily live agent" /SC DAILY /ST 04:30 /F /TR "cmd /c python <repository>\scripts\daily_live_agent.py --endpoint https://<public stack>/ --codex-home <Codex login folder> >> <a folder outside the repository>\daily-live.txt 2>&1"
+A scheduled task does not see the `PATH` a signed-in shell has, so it names
+python.exe in full (`python -c "import sys; print(sys.executable)"` prints
+it), and `/TR` takes 261 characters at most, which that full command
+outgrows. So the task runs a one-line wrapper, `daily-live.cmd`, kept in a
+folder outside the repository whose path has no space in it, `<folder>`:
+
+    "<full path to python.exe>" "<repository>\scripts\daily_live_agent.py" --endpoint https://<public stack>/ --codex-home "<Codex login folder>" >> "<folder>\daily-live.txt" 2>&1
+
+Run the wrapper by hand once first, then create the task:
+
+    schtasks /Create /TN "Threefold\Daily live agent" /SC DAILY /ST 04:30 /F /TR <folder>\daily-live.cmd
 
 To see it, start it now, stop a run in progress, pause it and resume it, or
 remove it:

@@ -19,13 +19,15 @@ second day through the six standard tasks, so each task is done by both agents
 on consecutive days and all twelve pairs come round every twelve days.
 
 The row goes to benchmark/results/live/<date>-<agent>.jsonl and one line is
-printed. The benchmark's own output (which names the token file's path) goes
-to daily-live.log in the run's work root, outside the repository, not to the
-terminal. A day whose row went its course is not run again, whether or not
-the row counts; a day whose run did not go as planned (a harness error, an
-agent that never ran, a Threefold that stopped answering) is run again when
-the script is started again that day, as the next attempt in a session of its
-own, up to three rows a day.
+printed. The benchmark's own output goes to daily-live.log in the run's work
+root, outside the repository, not to the terminal, with the token file's path
+written `<token file>` and the Codex home's `<Codex home>`: both are the
+owner's, and neither is printed anywhere. A day whose row went its course is
+not run again, whether or not the row counts; a day whose run did not go as
+planned (a harness error, an agent that never ran, a Threefold that stopped
+answering, a session someone else used while the agent worked) is run again
+when the script is started again that day, as the next attempt in a session
+of its own, up to three rows a day.
 
 What it refuses, before anything is created:
 - an endpoint that is not https, that carries a user name, a password, a
@@ -52,15 +54,22 @@ Exit codes, the same for a new row and for one already recorded today:
 2 refused before running;
 3 the benchmark stopped (a usage limit or a login that stopped working).
 
-Scheduling it with Windows Task Scheduler, once a day at 04:30 local time
-(01:30 or 02:30 UTC from Athens, so the UTC day is the local one), as the
-owner and only while the owner is signed in; run it once by hand first, and
-point --codex-home at a folder that holds only a Codex login (the benchmark
-refuses a CODEX_HOME holding hooks.json or AGENTS.md). All on one line:
+Scheduling it with Windows Task Scheduler, once a day at a quiet hour, 04:30
+local time (in a time zone less than four and a half hours ahead of UTC, the
+UTC day that names the session is then the local one), as the owner and only
+while the owner is signed in; run it once by hand first, and point
+--codex-home at a folder that holds only a Codex login (the benchmark refuses
+a CODEX_HOME holding hooks.json or AGENTS.md). A scheduled task does not see
+the PATH a shell has, and /TR takes 261 characters at most, so the task runs
+a wrapper, <folder>\\daily-live.cmd, in a folder outside the repository with
+no space in its path, holding this one line:
 
-    schtasks /Create /TN "Threefold\\Daily live agent" /SC DAILY /ST 04:30 /F /TR "cmd /c python
-        <repository>\\scripts\\daily_live_agent.py --endpoint https://<public stack>/ --codex-home
-        <Codex login folder> >> <a folder outside the repository>\\daily-live.txt 2>&1"
+    "<full path to python.exe>" "<repository>\\scripts\\daily_live_agent.py" --endpoint https://<public stack>/
+        --codex-home "<Codex login folder>" >> "<folder>\\daily-live.txt" 2>&1
+
+and the task is created with:
+
+    schtasks /Create /TN "Threefold\\Daily live agent" /SC DAILY /ST 04:30 /F /TR <folder>\\daily-live.cmd
 
 To see it, start it now, stop a run in progress, pause it, or remove it:
 
@@ -75,7 +84,9 @@ from __future__ import annotations
 import argparse
 import contextlib
 import datetime
+import io
 import os
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -85,7 +96,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from benchmark import harness, report, run, task_library  # noqa: E402
+from benchmark import credentials, harness, report, run, task_library  # noqa: E402
 
 # The first day of the rotation: day 0 is Claude Code on the first standard task.
 ROTATION_START = datetime.date(2026, 9, 27)
@@ -93,9 +104,10 @@ AGENTS = ("claude-code", "codex")
 LIVE_RESULTS_DIR = harness.BENCHMARK_DIR / "results" / "live"
 CONDITION = "threefold"
 LOG_NAME = "daily-live.log"
-# How a path that must not be printed is shown in the command a dry run prints.
+# How a path that must not be printed is shown: in the command a dry run prints, and in the log.
 TOKEN_FILE_SHOWN = "<token file>"
-CODEX_HOME_SHOWN = "with CODEX_HOME set to the Codex home given"
+CODEX_HOME_SHOWN = "<Codex home>"
+CODEX_HOME_SET = "with CODEX_HOME set to the Codex home given"
 # How many runs one day may have: a run that did not go as planned (a harness error, an agent that never ran, a
 # Threefold that stopped answering) is run again when the script is started again that day, up to this many rows.
 MAX_RUNS_PER_DAY = 3
@@ -174,11 +186,11 @@ def run_arguments(pick: Pick, endpoint: str, results_dir: Path, work_root: Path,
 
 
 def shown_command(arguments: Sequence[str], codex_home: bool = False) -> str:
-    """The command a dry run prints: the token file's path is not printed, and neither is the Codex home.
+    """The benchmark's arguments as a dry run and the log show them: no token file path, and no Codex home.
 
-    The run is made in this process, with CODEX_HOME set for it alone, so the
-    Codex home is said in words after the command rather than as a shell's
-    variable prefix, which cmd and PowerShell would not take.
+    The run is made in this process, by benchmark/run.py's main with these
+    arguments and CODEX_HOME set for it alone, not by a command a shell
+    runs: the line names the script and says the Codex home in words.
     """
     shown: List[str] = []
     hide_next = False
@@ -189,8 +201,85 @@ def shown_command(arguments: Sequence[str], codex_home: bool = False) -> str:
             continue
         hide_next = item == "--token-file"
         shown.append(f'"{item}"' if " " in item else item)
-    command = " ".join(["python", "benchmark/run.py", *shown])
-    return command + (f" ({CODEX_HOME_SHOWN})" if codex_home else "")
+    command = " ".join(["benchmark/run.py", *shown])
+    return command + (f" ({CODEX_HOME_SET})" if codex_home else "")
+
+
+def _spellings(path: Path) -> List[str]:
+    """A path as output may spell it: as given, absolute, resolved, and each with forward slashes."""
+    forms = {str(path), os.path.abspath(path)}
+    with contextlib.suppress(OSError, RuntimeError):
+        forms.add(str(Path(path).resolve()))
+    forms |= {form.replace("\\", "/") for form in forms}
+    # A drive or a root alone names nothing of the owner's, and would blank every path in the log.
+    return [form for form in forms if len(form.strip("\\/:")) > 2]
+
+
+def owner_paths(token_file: Optional[Path], codex_home: Optional[Path]) -> Dict[str, List[str]]:
+    """The owner's paths the log must not hold, by the words it holds instead.
+
+    The token file given, and the benchmark's default one (run.py names the
+    file it reads); the Codex home given, and the one the benchmark reads
+    without it (CODEX_HOME, or ~/.codex).
+    """
+    tokens = [Path(token_file)] if token_file is not None else []
+    homes = [Path(codex_home)] if codex_home is not None else []
+    tokens.append(Path(credentials.DEFAULT_TOKEN_FILE))
+    homes.append(run.codex_home())
+    return {TOKEN_FILE_SHOWN: sorted({form for path in tokens for form in _spellings(path)}),
+            CODEX_HOME_SHOWN: sorted({form for path in homes for form in _spellings(path)})}
+
+
+class Redacted(io.TextIOBase):
+    """Writes whole lines to another stream with the owner's paths replaced by words, and the rest when closed.
+
+    A line is held until it ends, so a path written in two pieces is still
+    found. On Windows a path is matched whatever its case, as the file system
+    matches it. The longest spelling is tried first, so a file inside a
+    folder that is also hidden is hidden as the file.
+    """
+
+    def __init__(self, stream: Any, paths: Mapping[str, Sequence[str]]) -> None:
+        super().__init__()
+        self._stream = stream
+        self._pending = ""
+        self._folded = os.name == "nt"
+        self._words: Dict[str, str] = {}
+        for word, forms in paths.items():
+            for form in forms:
+                self._words.setdefault(self._key(form), word)
+        alternatives = sorted(self._words, key=len, reverse=True)
+        self._pattern = (re.compile("|".join(re.escape(form) for form in alternatives),
+                                    re.IGNORECASE if self._folded else 0) if alternatives else None)
+
+    def _key(self, text: str) -> str:
+        return text.casefold() if self._folded else text
+
+    def writable(self) -> bool:
+        return True
+
+    def _clean(self, text: str) -> str:
+        if self._pattern is None:
+            return text
+        return self._pattern.sub(lambda found: self._words.get(self._key(found.group(0)), TOKEN_FILE_SHOWN), text)
+
+    def write(self, text: str) -> int:
+        self._pending += text
+        if "\n" in self._pending:
+            done, self._pending = self._pending.rsplit("\n", 1)
+            self._stream.write(self._clean(done + "\n"))
+        return len(text)
+
+    def flush(self) -> None:
+        self._stream.flush()
+
+    def close(self) -> None:
+        if not self.closed:
+            if self._pending:
+                self._stream.write(self._clean(self._pending))
+                self._pending = ""
+            self._stream.flush()
+        super().close()
 
 
 def read_rows(path: Path) -> List[Dict[str, Any]]:
@@ -298,8 +387,9 @@ def run_live(pick: Pick, endpoint: str, results_dir: Path = LIVE_RESULTS_DIR, wo
         arguments[arguments.index("--run-id")] = "--resume"
     work_root.mkdir(parents=True, exist_ok=True)
     log = work_root / LOG_NAME
-    with open(log, "a", encoding="utf-8") as handle, contextlib.redirect_stdout(handle), \
-            contextlib.redirect_stderr(handle), \
+    with open(log, "a", encoding="utf-8") as handle, \
+            contextlib.closing(Redacted(handle, owner_paths(token_file, codex_home))) as redacted, \
+            contextlib.redirect_stdout(redacted), contextlib.redirect_stderr(redacted), \
             _environment("CODEX_HOME", str(codex_home) if codex_home and pick.agent == "codex" else None):
         print(f"--- {harness.utc_now()} {shown_command(arguments, bool(codex_home and pick.agent == 'codex'))}")
         try:
@@ -330,7 +420,7 @@ def summary_line(pick: Pick, row: Optional[Mapping[str, Any]], note: str = "", r
     """
     head = f"live {pick.date} {pick.agent} on {pick.task}"
     if row is None:
-        return f"{head}: no row. {note}".strip()
+        return _one_line(f"{head}: no row. {note}")
     if row.get("harness_error"):
         outcome = f"harness error: {row['harness_error']}"
     elif not row.get("agent_ran"):
@@ -361,7 +451,12 @@ def summary_line(pick: Pick, row: Optional[Mapping[str, Any]], note: str = "", r
         except ValueError:
             shown = Path(results).name
         line += f"; row in {shown}"
-    return line + (f". {note}" if note else "")
+    return _one_line(line + (f". {note}" if note else ""))
+
+
+def _one_line(text: str) -> str:
+    """The text on one line, whatever an error or a reason in it carried: a scheduled task's output is read by line."""
+    return " ".join(text.split())
 
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
@@ -412,7 +507,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             arguments[arguments.index("--run-id")] = "--resume"
         print(f"live {pick.date}: {pick.agent} on {pick.task}, project {pick.project}, session {pick.session} "
               f"(or the next free -a<n>), against {endpoint}")
-        print("would run: " + shown_command(arguments, bool(args.codex_home and pick.agent == "codex")))
+        print("would run, in this process: "
+              + shown_command(arguments, bool(args.codex_home and pick.agent == "codex")))
         if again:
             print(f"(today already has {len(earlier)} row(s) in {results.name} and the last did not go as planned, so "
                   "a real run would run the day again)")
