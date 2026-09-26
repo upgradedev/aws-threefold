@@ -193,8 +193,8 @@
     .tf-demo-ruleline { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; margin: 0; font: 500 0.6875rem/1rem var(--tf-font-mono); color: var(--tf-text-3); overflow-wrap: anywhere; }
     .tf-demo-ruleline b { font-weight: 500; color: var(--tf-accent-text); }
     /* The fix in three rows of known height: a title on one line, the service's
-       summary in at most --tf-demo-fix-lines lines (all of it on hover, and in
-       full in the scenarios below), and one quiet line about the files. */
+       summary in at most --tf-demo-fix-lines lines (all of it on hover on a
+       desk, and in full in Scenario 3 below), and one quiet line about the files. */
     .tf-demo-fix { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: var(--tf-radius-md); background: var(--tf-approved-soft); border: 1px solid var(--tf-approved-line); font-size: 0.8125rem; line-height: 1.25rem; color: var(--tf-text-2); }
     @media (min-width: 640px) { .tf-demo-fix { padding: 12px 14px; } }
     .tf-demo-fix p { margin: 0; min-width: 0; }
@@ -1729,8 +1729,9 @@
     // a verdict is plain code, and a page view should not spend a Bedrock call.
     // It is sent under a new sim- session like every scenario, so it is recorded
     // in the stack's ledger as a page call, and a page call is always enforced.
-    // It is sent only once the counts under the hero have been read, so the
-    // strip never counts the visit that is looking at it.
+    // It is sent once the counts under the hero have been read, or once
+    // HERO_COUNTS_WAIT_MS has passed, whichever comes first: when the counts
+    // come back within that, the strip does not count the visit looking at it.
     //
     // A live answer is kept in this browser for HERO_KEEP_MS, and a visit in
     // that time shows it again, with its age, instead of asking again: every
@@ -1936,17 +1937,16 @@
     }
 
     // The longest caption the demonstration can end with, set unseen in the
-    // caption's cell so the cell never grows when the verdict lands.
+    // caption's cell so the cell never grows when the verdict lands. Every
+    // kind heroRecordedCaption knows is here, with the longest figures each can
+    // carry, because in some font any of them may be the longest.
+    const HERO_RECORDED_KINDS = ['timeout', 'private', 'limited', 'http', 'unreadable', 'network'];
     function heroCaptionRoom() {
       const oldest = Date.now() - (HERO_KEEP_MS - 60000);
       const all = [
         heroCaption({ source: 'live' }),
-        heroCaption({ source: 'live', kept: true, at: oldest }),
-        heroCaption({ source: 'recorded', why: { kind: 'private', http: 403 } }),
-        heroCaption({ source: 'recorded', why: { kind: 'timeout' } }),
-        heroCaption({ source: 'recorded', why: { kind: 'unreadable', http: 200 } }),
-        heroCaption({ source: 'recorded', why: { kind: 'http', http: 503 } })
-      ];
+        heroCaption({ source: 'live', kept: true, at: oldest })
+      ].concat(HERO_RECORDED_KINDS.map(kind => heroCaption({ source: 'recorded', why: { kind: kind, http: 503 } })));
       return all.reduce((a, b) => (b.length > a.length ? b : a), '');
     }
 
@@ -2107,8 +2107,10 @@
 
     // countsRead is the proof strip's read of GET /api/overview: the hero's call
     // goes once that has been answered, or after HERO_COUNTS_WAIT_MS if it is
-    // slow, so the counts a visitor sees never include their own visit. The
-    // lines arrive meanwhile; the wait adds nothing to the moment itself.
+    // slow, so counts that come back within that never include this visit;
+    // slower ones may, and the strip says the demos on this page are among
+    // what it counts. The lines arrive meanwhile; the wait adds nothing to the
+    // moment itself.
     async function runHeroDemo(countsRead) {
       const card = document.getElementById('hero-demo');
       hero.motion = heroCanAnimate();
@@ -2175,8 +2177,8 @@
     // probes. They show the stack at work, not how widely Threefold is used. A
     // count is a whole number or it is not shown, and a window that counted no
     // call says so rather than drawing a row of zeros. Neither read ever
-    // rejects. The hero sends its own call only once the counts have been read,
-    // so a visit never counts itself.
+    // rejects. The hero sends its own call once the counts have been read, or
+    // after HERO_COUNTS_WAIT_MS, so counts read within that never include it.
 
     const PROOF_DAYS = 7;
 
@@ -2441,8 +2443,8 @@
     }
 
     // On load: the navigation and the links first, then the service and the two
-    // reads, and the hero's one call once the counts have been read, so the
-    // strip under it never counts this visit.
+    // reads, and the hero's one call once the counts have been read (or after
+    // HERO_COUNTS_WAIT_MS), so counts read in that time do not include this visit.
     linkHero();
     renderContractStrip();
     checkApiHealth();

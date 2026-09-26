@@ -522,8 +522,12 @@ def test_a_kept_answer_is_escaped_like_any_answer(tmp_path: Path) -> None:
     assert out["fix"].count("&lt;img") >= 2 and out["reason"].count("&lt;img") >= 3
 
 
-def test_the_hero_asks_only_once_the_counts_are_read_so_a_visit_never_counts_itself(tmp_path: Path) -> None:
-    """The hero's call is a refused page call in the ledger; sent alongside the read, the strip could count it."""
+def test_the_hero_asks_once_the_counts_are_read_so_counts_read_in_time_never_include_the_visit(tmp_path: Path) -> None:
+    """The hero's call is a refused page call in the ledger; sent alongside the read, the strip could count it.
+
+    The hero waits for the read for HERO_COUNTS_WAIT_MS at most (the next test),
+    so this holds for counts that come back within that.
+    """
     out = run(
         "index.html",
         r"""
@@ -949,3 +953,23 @@ def test_the_status_round_trip_is_the_browsers_record_of_it_when_it_keeps_one(tm
     )
     out = _load(tmp_path, before=record, scenario="  out.badge = el('statusRouteBadge').innerHTML;\n")
     assert _text(out["badge"]) == "live · /status 200 HEALTHY · 176 ms"
+
+
+def test_the_caption_keeps_room_for_every_caption_it_can_end_with(tmp_path: Path) -> None:
+    """The caption's cell is as tall as its longest caption from the start, so it never grows when the verdict lands."""
+    out = run(
+        "index.html",
+        r"""
+  out.room = el('hero-caption-room').textContent;
+  out.captions = [heroCaption({ source: 'live' }), heroCaption({ source: 'live', kept: true, at: Date.now() - 59 * 60000 })]
+    .concat(['timeout', 'private', 'limited', 'http', 'unreadable', 'network'].map(k => heroCaption({ source: 'recorded', why: { kind: k, http: 503 } })));
+  out.kinds = HERO_RECORDED_KINDS;
+""",
+        tmp_path,
+        before=DEMO_DOM,
+    )
+    assert out["kinds"] == ["timeout", "private", "limited", "http", "unreadable", "network"]
+    assert len(out["room"]) == max(len(c) for c in out["captions"]), "The room is the longest caption there is"
+    script = page_source("index.html")
+    handled = set(re.findall(r"if \(kind === '(\w+)'\) return", script)) | {"network"}
+    assert handled == set(out["kinds"]), "A kind of recorded caption the room does not know of"
