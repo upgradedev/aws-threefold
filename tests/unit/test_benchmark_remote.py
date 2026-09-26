@@ -84,10 +84,27 @@ def test_an_endpoint_is_https_or_this_machine_and_keeps_its_path(given, expected
     ("https://threefold.acme.test/pro d/", "spaces"),
     ("https://threefold.acme.test:port/", "port"),
     ("", "spaces"),
+    # Invisible, look-alike and encoded: each would reach a host other than the one the owner reads.
+    ("https://threefold.acme.test/​", "invisible"),
+    ("https://threefold.acmе.test/", "invisible"),
+    ("https://threefold.acme.test /", "invisible"),
+    ("https://threefold.acme.test%40elsewhere.test/", "plain host name"),
+    ("https://threefold.acme.test%2F/", "plain host name"),
+    ("https://threefold_acme.test/", "plain host name"),
+    ("https://-threefold.acme.test/", "plain host name"),
 ])
 def test_an_endpoint_that_is_not_one_is_refused(given, words):
     with pytest.raises(ValueError, match=words):
         harness.remote_endpoint(given)
+
+
+@pytest.mark.parametrize("given, expected", [
+    ("https://xn--threefld-e1a.acme.test/", "https://xn--threefld-e1a.acme.test/"),
+    ("https://192.0.2.10:8443/prod", "https://192.0.2.10:8443/prod/"),
+    ("http://[::1]:8123/", "http://[::1]:8123/"),
+])
+def test_an_ascii_host_an_address_and_a_punycode_name_are_taken(given, expected):
+    assert harness.remote_endpoint(given) == expected
 
 
 def test_plain_http_to_this_machine_is_only_for_a_stand_in():

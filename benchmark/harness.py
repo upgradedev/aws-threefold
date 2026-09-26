@@ -54,6 +54,7 @@ import base64
 import datetime
 import hashlib
 import importlib.util
+import ipaddress
 import json
 import os
 import platform
@@ -634,6 +635,8 @@ LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 # `unlabelled`, and a live run's project must be readable on the public pages.
 PROJECT_PATTERN = re.compile(r"^Acme-[A-Za-z0-9-]{1,40}$")
 _DAY_SHAPE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+# A DNS name as a resolver takes it: ASCII labels of letters, digits and inner hyphens, dot-separated.
+_HOST_NAME = re.compile(r"^(?=.{1,253}\.?$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*\.?$")
 # How much of one answer from a remote Threefold is read, and how many pages
 # of its ledger: bounded, so a server that never stops answering cannot hold
 # a run, and a read that stops at the bound says it is incomplete.
@@ -644,17 +647,30 @@ LEDGER_PAGE_LIMIT = 200
 LEDGER_DAYS = 2
 
 
+def _plain_host(host: str) -> bool:
+    """A DNS name in ASCII (an internationalised one in its xn-- form) or an IP address, and nothing else."""
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        return bool(_HOST_NAME.match(host))
+
+
 def remote_endpoint(url: Any, allow_loopback_http: bool = True) -> str:
     """The base URL of a remote Threefold, checked and ending with a slash, or ValueError.
 
     https to any host, or http to this machine only (a stand-in for tests).
-    No user name or password, query or fragment, and nothing but printable
-    characters. The path is kept, so an API URL with its stage (`/prod/`)
-    stays one.
+    No user name or password, query or fragment. Every character is a
+    visible ASCII one: no space, control, invisible or look-alike character
+    gets through, so the host the owner reads is the host the hook calls
+    (an internationalised host is written in its xn-- form), and the host is
+    a plain name or address, with nothing percent-encoded in it. The path is
+    kept, so an API URL with its stage (`/prod/`) stays one.
     """
     text = str(url or "").strip()
-    if not text or any(character.isspace() or ord(character) < 32 or ord(character) == 127 for character in text):
-        raise ValueError("the endpoint must be a URL with no spaces or control characters")
+    if not text or any(not 33 <= ord(character) <= 126 for character in text):
+        raise ValueError("the endpoint must be a URL of visible ASCII characters, with no spaces, control or invisible "
+                         "characters (a host outside ASCII is written in its xn-- form)")
     parts = urllib.parse.urlsplit(text)
     scheme = parts.scheme.lower()
     if scheme not in ("https", "http"):
@@ -666,6 +682,8 @@ def remote_endpoint(url: Any, allow_loopback_http: bool = True) -> str:
     host = (parts.hostname or "").lower()
     if not host:
         raise ValueError("the endpoint has no host")
+    if "%" in parts.netloc or not _plain_host(host):
+        raise ValueError("the endpoint's host must be a plain host name or IP address, with nothing encoded in it")
     try:
         parts.port
     except ValueError:

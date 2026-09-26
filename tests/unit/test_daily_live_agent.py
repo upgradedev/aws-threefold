@@ -95,6 +95,7 @@ def test_an_https_endpoint_is_taken_with_its_path(given, expected):
     "http://threefold.acme.test/", "http://127.0.0.1:8123/", "http://localhost/", "ftp://threefold.acme.test/",
     "https://owner:secret@threefold.acme.test/", "https://threefold.acme.test/?stage=prod",
     "https://threefold.acme.test/#x", "https:///", "threefold.acme.test", "",
+    "https://threefold.acme.test/​", "https://threefold.acmе.test/", "https://threefold.acme.test%40elsewhere.test/",
 ])
 def test_anything_but_a_plain_https_endpoint_is_refused(given):
     with pytest.raises(daily.Refused):

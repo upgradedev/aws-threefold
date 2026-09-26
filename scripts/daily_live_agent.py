@@ -24,8 +24,10 @@ to daily-live.log in the run's work root, outside the repository, not to the
 terminal. A day that already has a row is not run again.
 
 What it refuses, before anything is created:
-- an endpoint that is not https, or that carries a user name, a password, a
-  query or a fragment; there is no default endpoint;
+- an endpoint that is not https, that carries a user name, a password, a
+  query or a fragment, or that holds anything but visible ASCII (an invisible
+  or look-alike character, a percent-encoded host); there is no default
+  endpoint;
 - a work root inside this repository, its workspace or ~/.threefold: the hook
   runs only in the task repository the benchmark copies there;
 - `--date` for a real run: a session is named after the day it ran.
