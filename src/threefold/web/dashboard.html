@@ -28,6 +28,12 @@
 
     .tf-ops-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: var(--tf-space-1h) var(--tf-space-2); margin-bottom: var(--tf-space-1h); }
     .tf-ops-head > :first-child { min-width: 0; flex: 1 1 22rem; }
+    /* A screen's title takes the focus when the screen opens, so a screen
+       reader starts there and Tab moves on from it. It is a heading, not a
+       control, so it draws no focus ring: the design system's ring on
+       [tabindex] would otherwise frame the headline of every screen. */
+    #view-title:focus, #view-title:focus-visible { outline: none; }
+
     .tf-ops-h2 { margin: 0; display: flex; align-items: center; gap: 8px; font: 600 1rem/1.5rem var(--tf-font-sans); letter-spacing: -0.01em; color: var(--tf-text); }
     .tf-ops-h2 .tf-icon { width: 18px; height: 18px; color: var(--tf-accent-text); }
     .tf-ops-sub { margin: 2px 0 0; font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-3); }
@@ -242,6 +248,7 @@
     .tf-ops-promise li { display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: var(--tf-radius-md); background: rgba(8, 11, 21, 0.6); border: 1px solid var(--tf-hairline); font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-2); }
     .tf-ops-promise li .tf-icon { width: 16px; height: 16px; color: var(--tf-approved-text); }
     .tf-ops-promise li b { font-weight: 600; color: var(--tf-text); }
+    .tf-ops-signin-why { margin: 0; text-align: center; font-size: var(--tf-fs-small); line-height: var(--tf-lh-small); color: var(--tf-text-2); }
 
     /* Proof: six series side by side on one scale. */
     .tf-ops-multiples { display: grid; grid-template-columns: 1fr; gap: 12px; }
@@ -2016,8 +2023,11 @@
         // a note keeps the field; one working the queue gets the row back.
         if (typing) { refocus(document.getElementById(typing)); return; }
         if (!focusLost()) return;
-        // Until the reader works the queue, the screen's title keeps the focus
-        // the route gave it; from then on, the row the keyboard is on does.
+        // The route focused the title of the loading screen, which this draw
+        // replaced. Until the reader works the queue, the new title takes the
+        // focus, so Tab and a screen reader start from the top of the queue
+        // rather than the top of the page; once they do, the row the keyboard
+        // is on takes it. The title draws no ring (see #view-title above).
         if (state.engaged) focusCurrent(false, false); else focusTitle();
       }
 
@@ -2207,6 +2217,10 @@
         const run = { j: () => move(1), k: () => move(-1), c: () => labelCurrent('correct'), f: () => labelCurrent('false_alarm'), u: () => undoLast() }[key];
         if (!run || String(event.key).length !== 1) return;
         if (typeof event.preventDefault === 'function') event.preventDefault();
+        // A held key repeats. Held J or K walks the queue, which is what a
+        // held arrow does; a held C, F or U would label, or undo, one call
+        // per repeat, so only the first press of those counts.
+        if (event.repeat === true && key !== 'j' && key !== 'k') return;
         state.engaged = true;
         return run();
       };
@@ -3002,11 +3016,14 @@
     }
 
     // What signing in keeps and what it never does, said where the reader
-    // decides whether to trust it.
+    // decides whether to trust it. Each is what the code does: the command
+    // sends the key to the stack in a header to ask for the link, the page
+    // trades the link for a session and removes a key pasted here earlier,
+    // and an unused link signs in whoever opens it first.
     const SIGNIN_PROMISES = [
       ['lock', 'No password', 'Nothing to type or remember here: the command on your machine does the asking.'],
-      ['key', 'The key stays home', 'The operator key never leaves the machine. This browser keeps a sign-in session that ends on its own.'],
-      ['clock', 'A link works once', 'For a short while only, so it cannot be opened again, forwarded or shared.']
+      ['key', 'No key in the browser', 'The command sends the key to the stack, never to this page. This browser keeps only a session, which ends on its own.'],
+      ['clock', 'A link works once', 'Whoever opens it first is signed in, so treat it like the key. Once used, or after a short while, it opens nothing.']
     ];
 
     function signinFrame(title, sub, body) {
@@ -3038,7 +3055,7 @@
           <div class="space-y-3">
             <p class="text-xs font-semibold text-gray-200">On the machine that holds the operator key, in the folder where you ran connect:</p>
             ${T.commandBlock('python threefold.py open', 'Sign-in command')}
-            <p class="text-xs text-gray-400">It asks the stack for a one-time link and opens it here. The link works once, for a short while; the browser keeps a sign-in session, never the key.</p>
+            <p class="text-xs text-gray-400">It asks the stack for a one-time link and opens it in this browser.</p>
           </div>
           <ul class="tf-ops-promise">${SIGNIN_PROMISES.map(([icon, head, words]) => html`<li>${T.icon(icon, 16)}<b>${head}</b><span>${words}</span></li>`)}</ul>
           <p class="text-[11px] text-gray-500 text-center">No <span class="font-mono">threefold.py</span> yet? <a class="tf-link" href="#/connect">Connect a repository</a> first. On the public demo, reading needs no sign-in at all.</p>`));
@@ -3049,7 +3066,9 @@
         ctx.render(signinFrame('Signing you in…', 'Trading the one-time link for a sign-in session. This takes a moment.', html`<div class="space-y-3" aria-busy="true"><div class="tf-skeleton h-4 w-2/3 mx-auto"></div><div class="tf-skeleton h-4 w-1/2 mx-auto"></div></div>`));
         return T.api('/api/auth/sessions', { method: 'POST', body: { code } }).then(body => {
           if (!body || typeof body.token !== 'string' || !body.token) {
-            if (ctx.alive()) ctx.render(html`${pageTitle('The sign-in could not be completed', null)}${T.errorHtml({ kind: 'http', message: 'The stack answered without a session' }, 'the sign-in', null)}`);
+            // The stack took the link and gave no session back, so the link
+            // is spent: a retry would only be refused. A fresh one is the way.
+            if (ctx.alive()) ctx.render(signinFrame('The sign-in could not be completed', 'The stack took the link but answered without a session, so this browser is not signed in.', freshLink(html`<p class="tf-ops-signin-why">The link is spent now. Ask for a fresh one on the machine that holds the operator key:</p>`)));
             return;
           }
           // The code is spent the moment the stack answers, so the session is
@@ -3073,8 +3092,22 @@
               </div>`));
             return;
           }
-          ctx.render(html`${pageTitle('The sign-in did not complete', null)}${T.errorHtml(err, 'the sign-in', 'signin-retry')}`);
+          // The stack did not answer, or answered with an error of its own:
+          // the link may not have been spent, so trying it again comes first.
+          ctx.render(signinFrame('The sign-in did not complete', html`${trimStop(err && err.message ? err.message : 'The stack did not answer')}. Nothing was kept in this browser.`, freshLink(html`
+            <div class="flex flex-wrap justify-center gap-2"><button type="button" class="tf-btn tf-btn-primary" data-action="signin-retry">${T.icon('refresh', 16)}Try the link again</button></div>
+            <p class="tf-ops-signin-why">If it keeps failing, ask for a fresh link on the machine that holds the operator key:</p>`)));
         });
+      }
+
+      // A failed sign-in, in the same card as the rest: what to do next, and
+      // the command that asks for a fresh link.
+      function freshLink(lead) {
+        return html`<div class="space-y-3" role="alert" data-state="signin-failed">
+          ${lead}
+          ${T.commandBlock('python threefold.py open', 'Sign-in command')}
+          <p class="text-[11px] text-gray-500 text-center"><a class="tf-link" href="#/overview">Go to the overview</a>. On the public demo, reading needs no sign-in at all.</p>
+        </div>`;
       }
       ctx.actions({ 'signin-retry': () => attempt() });
       return attempt();

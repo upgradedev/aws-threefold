@@ -347,6 +347,34 @@ def test_the_queue_is_worked_from_the_keyboard(tmp_path: Path) -> None:
     assert out["gone"], "The keys leave with the screen"
 
 
+def test_a_held_key_labels_one_call_not_one_per_repeat(tmp_path: Path) -> None:
+    out = ops(
+        KEYS
+        + r"""
+  const sent = [];
+  answer = contract({
+    '/api/decisions': { status: 200, body: { items: [row(1), row(2), row(3), row(4)], next_cursor: null } },
+    'POST /api/projects/Acme-Billing/reviews': (u, i, body) => { sent.push(body.items.map(x => x.verdict_id + ':' + x.label).join(',')); return { status: 200, body: { updated: body.items.length, skipped: [] } }; }
+  });
+  await visit('#/review');
+  press('c'); await tick();
+  out.repeats = [press('c', { repeat: true }), press('f', { repeat: true }), press('c', { repeat: true })].map(e => e.prevented);
+  await tick();
+  out.afterHeld = sent.slice();
+  press('u'); await tick();
+  press('u', { repeat: true }); await tick();
+  out.afterUndo = sent.slice();
+  press('j'); press('j', { repeat: true });
+  out.walked = currentRow();
+""",
+        tmp_path,
+    )
+    assert out["afterHeld"] == ["VERDICT-1:correct"], "Holding C labels the call the key went down on, and no other"
+    assert out["repeats"] == [True, True, True], "A repeat is still the queue's key, so the page does not scroll or type"
+    assert out["afterUndo"] == ["VERDICT-1:correct", "VERDICT-1:clear"], "Holding U takes back one label"
+    assert out["walked"] == "VERDICT-3", "A held J still walks the queue, as a held arrow would"
+
+
 QUEUE = r"""
 function flagged(i, project) {
   return row(i, { project_name: project, rule_key: 'python-domain-stays-pure', observed_rule: 'python-domain-stays-pure',
@@ -620,3 +648,46 @@ def test_connect_waits_with_a_radar_and_turns_into_a_success_card(tmp_path: Path
     assert "tf-ops-arrived" in connected and "tf-ops-radar" not in connected
     done = connected.split('class="tf-ops-steps"', 1)[1].split("</ol>", 1)[0]
     assert done.count('<li data-state="done"') == 3, "Every step is done once the first call lands"
+
+
+# --------------------------------------------------------------------- sign-in
+
+
+def test_sign_in_promises_only_what_the_code_does_and_fails_inside_its_card(tmp_path: Path) -> None:
+    out = ops(
+        r"""
+  answer = contract();
+  await visit('#/signin');
+  out.command = view();
+  answer = contract({ 'POST /api/auth/sessions': { status: 200, body: {} } });
+  await visit('#/signin?code=code-one');
+  await tick();
+  out.noSession = view();
+  answer = contract({ 'POST /api/auth/sessions': { status: 500, body: { detail: 'The table is unavailable.' } } });
+  await visit('#/signin?code=code-two');
+  await tick();
+  out.failed = view();
+""",
+        tmp_path,
+    )
+    words = re.sub(r"<[^>]+>", " ", out["command"])
+    # The command sends the key to the stack to mint the link, and a hook on
+    # a private stack sends it too, so the page never says the key stays home;
+    # an unused link signs in whoever opens it, so it is not called unshareable.
+    assert "never leaves the machine" not in words and "forwarded" not in words
+    assert "The command sends the key to the stack, never to this page." in words
+    assert "Whoever opens it first is signed in, so treat it like the key." in words
+    for failure, title in ((out["noSession"], "The sign-in could not be completed"), (out["failed"], "The sign-in did not complete")):
+        assert "tf-ops-signin-card" in failure and title in failure, "A failed sign-in stays in the branded card"
+        assert 'data-state="signin-failed"' in failure and "python threefold.py open" in failure
+    assert "The table is unavailable" in out["failed"] and 'data-action="signin-retry"' in out["failed"], "An error that may have left the link unspent offers to try it again"
+    assert 'data-action="signin-retry"' not in out["noSession"], "A link the stack took is spent, so no retry is offered"
+
+
+def test_a_screen_title_takes_the_focus_without_drawing_a_ring() -> None:
+    from _browser import page_source
+
+    styles = page_source("dashboard.html").split("</style>")
+    assert any("#view-title:focus, #view-title:focus-visible { outline: none; }" in block for block in styles), (
+        "The title the router focuses is a heading, not a control: no ring frames it"
+    )
