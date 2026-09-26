@@ -8,8 +8,9 @@ exactly the event the handler recognises, read out of the template and handed
 to the handler's own check; the interval is the fleet's tick; the flexible
 window is off, written so YAML cannot read it as a boolean; nothing retries a
 tick, neither the scheduler nor Lambda's own handling of the asynchronous
-invocation; and the role may invoke this function and nothing else, assumed
-only by the scheduler for this account.
+invocation; the role may invoke this function and nothing else, assumed only
+by the scheduler for this account; and the function is told, as DEMO_FLEET,
+whether its stack runs the fleet at all.
 
 Read as text, as the other template tests read it, because CloudFormation's
 short tags would need a loader of their own. Nothing calls AWS.
@@ -49,6 +50,15 @@ def test_the_parameter_is_off_unless_the_owner_turns_it_on() -> None:
     assert re.search(r"^    Type: String$", parameter, re.M)
     assert re.search(r"^    Default: 'false'$", parameter, re.M), "An update of an existing stack must change nothing"
     assert re.search(r"^    AllowedValues: \['true', 'false'\]$", parameter, re.M)
+
+
+def test_the_function_is_told_whether_its_stack_runs_the_fleet() -> None:
+    """Under the name the code reads: the six fleet names are synthetic there only, and a tick runs there only."""
+    variables = re.search(r"^      Variables:\n(.*?)^Resources:", TEMPLATE, re.S | re.M)
+    assert variables, "The template declares no function environment"
+    assert re.search(
+        rf"^        {re.escape(demo_fleet.rollups.DEMO_FLEET_ENV)}: !Ref DemoFleet$", variables.group(1), re.M
+    ), "declared under one name and read under another, a private stack would count its Acme-Payments as synthetic"
 
 
 def test_the_condition_is_the_parameter_being_true() -> None:

@@ -103,6 +103,12 @@ class Day:
         self.last_tick = MONDAY + datetime.timedelta(minutes=15 * (len(summaries) - 1))
 
 
+@pytest.fixture(autouse=True)
+def a_stack_that_runs_the_fleet(monkeypatch):
+    """Every test here is on a stack whose DemoFleet is true, unless it says otherwise."""
+    monkeypatch.setenv(rollups.DEMO_FLEET_ENV, "true")
+
+
 @pytest.fixture(scope="module")
 def a_day() -> Day:
     """Ninety-six ticks, one simulated Monday, on a store of its own.
@@ -111,6 +117,7 @@ def a_day() -> Day:
     in this module runs on it.
     """
     with pytest.MonkeyPatch.context() as patch:
+        patch.setenv(rollups.DEMO_FLEET_ENV, "true")
         clock = SimulatedClock(MONDAY)
         clock.install(patch)
         evaluator = _fresh_evaluator()
@@ -850,6 +857,21 @@ def test_a_tick_delivered_twice_sends_its_batch_once(monkeypatch) -> None:
     monkeypatch.setattr(demo_fleet, "_now", lambda: moment + datetime.timedelta(minutes=15))
     third = demo_fleet.run_scheduled_tick(evaluator, _Context(15000))["threefold_fleet"]
     assert third["ok"] is True and third["calls"] >= demo_fleet.MIN_CALLS, "The next quarter hour is a tick of its own"
+
+
+@pytest.mark.parametrize("value", [None, "false", ""])
+def test_a_stack_that_does_not_run_the_fleet_writes_nothing_for_its_event(value, monkeypatch) -> None:
+    """A private stack's function invoked with the tick's event: answered, and not even the claim is written."""
+    if value is None:
+        monkeypatch.delenv(rollups.DEMO_FLEET_ENV, raising=False)
+    else:
+        monkeypatch.setenv(rollups.DEMO_FLEET_ENV, value)
+    evaluator = _fresh_evaluator()
+    sent = []
+    evaluator.evaluate_tool_call = lambda request: sent.append(request)
+    answer = demo_fleet.run_scheduled_tick(evaluator, _Context(15000))
+    assert answer == {"threefold_fleet": {"ok": False, "skipped": "DemoFleet is not true on this stack"}}
+    assert not sent and not evaluator.session_repo._memory_store, "Nothing at all was written"
 
 
 def test_a_tick_whose_bucket_cannot_be_claimed_sends_nothing(monkeypatch) -> None:

@@ -42,6 +42,19 @@ What it is not:
   table with a conditional write, so an event delivered twice, or retried after
   a failure or a timeout, finds the bucket taken and sends nothing; the stack
   also turns Lambda's own retries of the asynchronous invocation off.
+- Not anywhere else. The template tells the function whether its stack runs
+  the fleet (DEMO_FLEET, from the DemoFleet parameter). Where it does not, the
+  tick's event is answered and nothing is written, and the six project names
+  are counted as `other`, because there a team may have named its own
+  repository Acme-Payments.
+
+Turning it off (DemoFleet back to false) deletes the schedule; what the fleet
+wrote stays until it expires: ledger rows and sessions after thirty days,
+rollups after thirty-five. Its six project configurations never expire, as no
+real project's does, so they stay in the projects listing, with no calls,
+until someone deletes the items `CONFIG#project#<name>` / `METADATA` and
+`CONFIG#projects` / `<name>` for each of the six. With the setting off, the
+fleet's remaining rows are counted as `other`.
 
 Deterministic per tick: everything a tick decides (which sessions work, what
 each call is, which would-refuse calls are labelled now, whether an operator
@@ -1320,7 +1333,15 @@ def run_scheduled_tick(evaluator: Any, context: Any = None) -> Dict[str, Any]:
     an error) before anything is sent. It stops well before the deadline,
     with a share of its time kept for the operator (SEND_SHARE), and any
     failure is logged and answered rather than raised.
+
+    Only a stack whose DemoFleet parameter is true runs a tick. Anywhere else,
+    a private stack carrying real use above all, the event is answered and
+    nothing is written, whoever invoked the function with it: synthetic calls
+    there would be counted as that stack's own (rollups.source_of).
     """
+    if not rollups.fleet_runs_here():
+        logger.warning("A demo fleet tick reached a stack whose DemoFleet is not true; nothing sent")
+        return {FLEET_EVENT_KEY: {"ok": False, "skipped": "DemoFleet is not true on this stack"}}
     started = time.monotonic()
     remaining = getattr(context, "get_remaining_time_in_millis", None)
     try:
