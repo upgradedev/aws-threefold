@@ -536,13 +536,12 @@
           </div>
         </div>
         <figcaption class="tf-demo-foot">
-          <p class="tf-demo-caption"><span id="hero-caption">Asking this stack through POST /evaluate-tool-call, exactly as a hook asks it.</span><span id="hero-caption-room" class="tf-demo-room" aria-hidden="true"></span></p>
+          <p class="tf-demo-caption"><span id="hero-caption">Asking this stack through <span class="tf-nobr">POST /evaluate-tool-call</span>, the route every hook calls.</span><span id="hero-caption-room" class="tf-demo-room" aria-hidden="true"></span></p>
           <button type="button" id="hero-replay" class="tf-link-btn" hidden><span data-tf-icon="refresh" data-tf-size="14"></span>Replay</button>
         </figcaption>
       </figure>
 
-      <p class="tf-hero-scope"><span data-tf-icon="info"></span><span id="hero-scope">That a refusal stops the write has been measured for Claude Code and Antigravity, and for Codex
-        once, over its patch tool; the other routes Codex could write through are not measured.</span></p>
+      <p class="tf-hero-scope"><span data-tf-icon="info"></span><span id="hero-scope">A refusal is measured to stop the write in Claude Code and Antigravity, and in Codex once, over its patch tool only.</span></p>
     </section>
 
     <!-- THE PROOF STRIP. Every figure is read as the page loads: the counts from
@@ -679,20 +678,20 @@
       <div class="tf-card tf-rollout" id="rollout">
         <div class="tf-rollout-head">
           <h3>Two stages, so nothing breaks</h3>
-          <p>Every project starts by watching. A rule refuses only after you have seen what it would have stopped and promoted it, and one click takes it back.</p>
+          <p>Every project starts by watching. A rule refuses only once you have seen what it would stop and promoted it; one click takes it back.</p>
         </div>
         <ol class="tf-track">
           <li class="tf-stage tf-stage-observe">
             <span class="tf-stage-name"><span data-tf-icon="eye"></span>Observe</span>
-            <p>Every call is judged and recorded, and the service refuses none of them yet. What a rule would have stopped is kept for review.</p>
+            <p>Every call is judged and recorded; none is refused yet. What a rule would have stopped waits for review.</p>
           </li>
           <li class="tf-stage tf-stage-review">
             <span class="tf-stage-name"><span data-tf-icon="inbox"></span>Review</span>
-            <p>You mark each would-refuse correct or a false alarm. A rule whose every flag was correct reads Ready.</p>
+            <p>Mark each would-refuse correct or a false alarm. A rule whose every flag was correct reads Ready.</p>
           </li>
           <li class="tf-stage tf-stage-enforce">
             <span class="tf-stage-name"><span data-tf-icon="shield"></span>Enforce</span>
-            <p>Promote the ready rules and they refuse. The rules you leave out keep observing.</p>
+            <p>Promote the ready rules and they refuse. The rest keep observing.</p>
           </li>
         </ol>
         <p class="tf-demote"><span class="tf-demote-line" aria-hidden="true"></span><span data-tf-icon="refresh"></span><span><strong>Demote</strong> is one click back to Observe, whenever a rule misbehaves.</span></p>
@@ -715,7 +714,7 @@
           <p class="tf-agent-src">Measured on the file system, 2026-09-23 · <a class="tf-link" href="https://github.com/upgradedev/aws-threefold/blob/main/docs/evidence/ENFORCEMENT_2026-09-23.md">the evidence</a></p>
         </li>
       </ul>
-      <p class="tf-agents-note">Each was measured on one Windows machine by what was on the disk afterwards, not by what the agent said, because two open bug reports say a hook's deny can be ignored.</p>
+      <p class="tf-agents-note">Measured on one Windows machine by what was on disk afterwards, not by what the agent said: two open bug reports say a deny can be ignored.</p>
     </section>
 
     <!-- BUILT ON AWS. The deployed pieces, as ARCHITECTURE.md draws them. -->
@@ -799,7 +798,7 @@
           <path class="dg-edge" d="M170 491V351" marker-end="url(#an-head)"/>
         </svg>
         <div class="tf-aws-foot">
-          <p>The edge runs in <span class="tf-nobr">us-east-1</span> and the service in <span class="tf-nobr">eu-west-1</span>. EventBridge Scheduler runs only on the public demo stack, where it feeds the synthetic Acme fleet through the same gates.</p>
+          <p>Edge in <span class="tf-nobr">us-east-1</span>, service in <span class="tf-nobr">eu-west-1</span>. The scheduler runs only on the public demo, where it feeds the synthetic Acme fleet.</p>
           <a class="tf-btn tf-btn-sm" href="https://github.com/upgradedev/aws-threefold/blob/main/docs/ARCHITECTURE.md"><span data-tf-icon="book"></span>The architecture, in depth<span data-tf-icon="external"></span></a>
         </div>
       </figure>
@@ -1929,12 +1928,20 @@
     // came from, and for a live one what became of it in the ledger.
     function heroCaption(answer) {
       if (answer.source === 'live' && answer.kept) {
-        return 'Judged by this stack ' + heroAgo(answer.at) + ' through POST /evaluate-tool-call and shown again, not asked again: a reload within ' + heroKeepWords() + ' of it adds no call to its ledger.';
+        return 'Judged by this stack ' + heroAgo(answer.at) + ' and shown again, so a reload adds no call to its ledger.';
       }
       if (answer.source === 'live') {
-        return 'Judged just now by this stack through POST /evaluate-tool-call, and kept in its ledger as a page call, which is always enforced. A reload within ' + heroKeepWords() + ' shows it again.';
+        return 'Judged just now by this stack through POST /evaluate-tool-call, the route every hook calls.';
       }
       return heroRecordedCaption(answer.why);
+    }
+
+    // A caption as markup: the route and the date are kept whole, so a phone
+    // never breaks them at a hyphen. Every other word is escaped text.
+    function heroCaptionHtml(text) {
+      const h = T.html;
+      const parts = String(text).split(/(POST \/evaluate-tool-call|\d{4}-\d{2}-\d{2})/);
+      return h`${parts.map((part, i) => (i % 2 ? h`<span class="tf-nobr">${part}</span>` : part))}`;
     }
 
     // The longest caption the demonstration can end with, set unseen in the
@@ -1954,13 +1961,13 @@
     // Why the recorded run is showing, in one sentence that is true of what
     // this stack did: it is never said to be unreachable when it answered.
     function heroRecordedCaption(why) {
-      const run = 'so this is a real run recorded against the live API on ' + RECORDED.recorded_at + ', replayed here.';
+      const run = 'so this replays the live API’s answer from ' + RECORDED.recorded_at + '.';
       const kind = why && why.kind;
       const http = why && why.http;
       if (kind === 'timeout') return 'This stack did not answer within ' + Math.round(HERO_TIMEOUT_MS / 1000) + ' seconds, ' + run;
-      if (kind === 'private') return 'This stack judges only its operator’s calls (it answered HTTP ' + http + '), ' + run;
-      if (kind === 'limited') return 'This stack is limiting calls from this browser for now (HTTP 429), ' + run;
-      if (kind === 'http') return 'This stack answered HTTP ' + http + ' instead of a verdict, ' + run;
+      if (kind === 'private') return 'This stack judges only its operator’s calls (HTTP ' + http + '), ' + run;
+      if (kind === 'limited') return 'This stack is limiting this browser’s calls (HTTP 429), ' + run;
+      if (kind === 'http') return 'This stack answered HTTP ' + http + ', not a verdict, ' + run;
       if (kind === 'unreadable') return 'This stack answered, but not with a verdict this page can read, ' + run;
       return 'This stack could not be reached, ' + run;
     }
@@ -2061,7 +2068,7 @@
         source.setAttribute('title', 'A recorded answer, replayed in this browser');
         T.setHtml(source, h`${T.icon('clock', 13)}Recorded ${RECORDED.recorded_at}, replayed${unheard ? ' offline' : ''}`);
       }
-      caption.textContent = heroCaption(answer);
+      T.setHtml(caption, heroCaptionHtml(heroCaption(answer)));
     }
 
     function landHero(answer) {
@@ -2131,7 +2138,7 @@
       hero.motion = heroCanAnimate();
       if (card) card.setAttribute('data-motion', hero.motion ? 'on' : 'off');
       const room = document.getElementById('hero-caption-room');
-      if (room) room.textContent = heroCaptionRoom();
+      if (room && T) T.setHtml(room, heroCaptionHtml(heroCaptionRoom()));
       const replay = document.getElementById('hero-replay');
       if (replay) replay.hidden = !hero.motion;
       drawHeroCall();
@@ -2315,7 +2322,9 @@
         return { spark: spark, sub: meaning };
       };
       const judged = trend('calls', 'Calls judged per day', T.COLORS.accent, calls, 'in ' + span);
-      const stopped = trend('refused', 'Calls stopped per day', T.COLORS.refused, refused, 'before they ran');
+      const ownDemos = demoRefusals(data, refused);
+      const stopped = trend('refused', 'Calls stopped per day', T.COLORS.refused, refused,
+        ownDemos ? 'before they ran; ' + formatCount(ownDemos) + (ownDemos === 1 ? ' was this page’s demo' : ' were this page’s demos') + ' (' + DEMO_PROJECT + ')' : 'before they ran');
       const observed = trend('observed', 'Calls that would have been stopped, per day', T.COLORS.observed, wouldRefuse, 'recorded while a project observes');
       const href = params => T.pageHref('dashboard.html#/calls' + T.query(Object.assign({ days: days }, params)));
       T.setHtml(strip, h`
@@ -2335,7 +2344,7 @@
     // figures are not used; a fleet among them is still named in words.
     function sourcesSentence(data, calls) {
       const h = T.html;
-      const end = ' They show the stack at work, not how widely Threefold is used.';
+      const lead = h`<strong>Where they come from:</strong>`;
       const s = data.sources && typeof data.sources === 'object' ? data.sources : null;
       const part = (v) => v && typeof v === 'object' ? wholeNumber(v.calls) : null;
       const fleet = s ? part(s.fleet) : null;
@@ -2343,22 +2352,34 @@
       const other = s ? part(s.other) : null;
       if (fleet !== null && sandbox !== null && other !== null && calls > 0 && fleet + sandbox + other === calls) {
         const pieces = [];
-        if (fleet) pieces.push(formatCount(fleet) + ' from a synthetic Acme fleet that sends its calls through the real gates');
-        if (sandbox) pieces.push(formatCount(sandbox) + ' from sandboxes visitors started');
-        if (other) pieces.push(formatCount(other) + ' from the service’s own probes, the demos on this page and anyone else calling its open API');
-        return h`<strong>Where they come from:</strong> of ${plural(calls, 'call', 'calls')} on this stack, ${pieces.join('; ')}.${end}`;
+        if (fleet) pieces.push(formatCount(fleet) + ' from a synthetic Acme fleet run through the real gates');
+        if (sandbox) pieces.push(formatCount(sandbox) + ' from visitors’ sandboxes');
+        if (other) pieces.push(formatCount(other) + ' from probes, page demos and other callers of its open API');
+        return h`${lead} ${pieces.join(', ')}.`;
       }
       // A fleet the stack reports is always named, even when its parts cannot
       // be given as figures: synthetic calls are never left unlabelled.
       if (fleet !== null && fleet > 0) {
-        return h`<strong>Where they come from:</strong> this stack's own traffic, including a synthetic Acme fleet that sends its calls through the real gates, the sandboxes visitors start, the service's own probes, the demos on this page and anyone else calling its open API.${end}`;
+        return h`${lead} a synthetic Acme fleet run through the real gates, visitors’ sandboxes, probes, page demos and other callers of its open API.`;
       }
       const split = data.sandbox_split && typeof data.sandbox_split === 'object' ? data.sandbox_split : null;
       const inSandboxes = split ? part(split.sandbox) : null;
       if (inSandboxes !== null && inSandboxes > 0 && inSandboxes <= calls) {
-        return h`<strong>Where they come from:</strong> this stack's own traffic. ${formatCount(inSandboxes)} of the ${plural(calls, 'call', 'calls')} came from sandboxes visitors started; the rest from the service's own probes, the demos on this page and anyone else calling its open API.${end}`;
+        return h`${lead} ${formatCount(inSandboxes)} of the ${plural(calls, 'call', 'calls')} from visitors’ sandboxes, the rest from probes, page demos and other callers of its open API.`;
       }
-      return h`<strong>Where they come from:</strong> this stack's own traffic: the service's own probes, the sandboxes visitors start, the demos on this page and anyone else calling its open API.${end}`;
+      return h`${lead} probes, visitors’ sandboxes, page demos and other callers of this stack’s open API.`;
+    }
+
+    // How many of the refusals counted were this page's own demonstrations:
+    // the hero's call and Scenario 3 are sent to DEMO_PROJECT, so its row in
+    // by_project says so exactly. The tile's number is left as the stack
+    // counts it, because it opens the very rows it counts; the share is said
+    // under it instead. Nothing is said when the stack gives no such row.
+    function demoRefusals(data, refused) {
+      const rows = Array.isArray(data.by_project) ? data.by_project : [];
+      const row = rows.find(r => r && typeof r === 'object' && r.project === DEMO_PROJECT);
+      const n = row ? wholeNumber(row.refused) : null;
+      return n !== null && n > 0 && n <= refused ? n : 0;
     }
 
     // The benchmark, pooled from the snapshot the dashboard's #/proof shows

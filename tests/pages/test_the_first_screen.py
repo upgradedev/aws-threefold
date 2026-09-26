@@ -35,10 +35,7 @@ SENTENCE = (
     "Deterministic gates on AWS judge each write and command from Claude Code, Codex or Antigravity, and your "
     "repos observe before they enforce."
 )
-SCOPE = (
-    "That a refusal stops the write has been measured for Claude Code and Antigravity, and for Codex once, over "
-    "its patch tool; the other routes Codex could write through are not measured."
-)
+SCOPE = "A refusal is measured to stop the write in Claude Code and Antigravity, and in Codex once, over its patch tool only."
 ACTIONS = [
     ("hero-try", "dashboard.html#/try", "Watch it stop a bad write — 60 s"),
     ("hero-dashboard", "dashboard.html#/overview", "Open the live dashboard"),
@@ -127,6 +124,14 @@ def _overview(extra: str = "", **totals) -> str:
 
 def _load(tmp_path: Path, overview: str = "'network'", hero: str = "'network'", proof: str = "'network'", before: str = "", scenario: str = "") -> dict:
     """The page loaded against a stack whose three reads answer as given (a reply, or 'network')."""
+    out = _run_loaded(tmp_path, overview, hero, proof, before, scenario)
+    # The caption is markup, so a phone never breaks the route or the date at
+    # a hyphen; what is compared is what a reader reads.
+    out["caption"] = _read(out["caption"])
+    return out
+
+
+def _run_loaded(tmp_path: Path, overview: str, hero: str, proof: str, before: str, scenario: str) -> dict:
     return run(
         "index.html",
         r"""
@@ -139,7 +144,8 @@ def _load(tmp_path: Path, overview: str = "'network'", hero: str = "'network'", 
   out.proofAsked = calls.filter(c => c.url.indexOf('/proof.json') !== -1).map(c => ({ url: c.url, method: c.method, headers: c.headers }));
   out.heroAsked = calls.filter(c => c.url.indexOf('/evaluate-tool-call') !== -1).map(c => ({ url: c.url, method: c.method, headers: c.headers, body: c.body }));
   out.source = el('hero-source').innerHTML;
-  out.caption = el('hero-caption').textContent;
+  out.caption = el('hero-caption').innerHTML;
+  out.captionMarkup = el('hero-caption').innerHTML;
   out.diff = el('hero-diff').innerHTML;
   out.call = el('hero-call').innerHTML;
   out.verdict = el('hero-verdict').innerHTML;
@@ -456,10 +462,9 @@ def test_the_hero_asks_the_stack_once_and_shows_its_live_answer(tmp_path: Path) 
     assert (body["agent"], body["origin"], body["explain"]) == ("page", "page", False), "A page call that spends no model call"
 
     assert "Live" in out["source"] and re.search(r"Live · \d+ ms", _text(out["source"])), "The round trip, in milliseconds under a second"
-    assert out["caption"] == (
-        "Judged just now by this stack through POST /evaluate-tool-call, and kept in its ledger as a page call, "
-        "which is always enforced. A reload within an hour shows it again."
-    ), "A page call is enforced where a hook's call on an observing project would only be recorded, so it is not called a hook's"
+    assert out["caption"] == "Judged just now by this stack through POST /evaluate-tool-call, the route every hook calls.", \
+        "The route a hook calls, never 'as a hook': a page call is enforced where a hook's on an observing project is only recorded"
+    assert '<span class="tf-nobr">POST /evaluate-tool-call</span>' in out["captionMarkup"], "The route is never broken at a hyphen"
     assert "import boto3" in out["diff"] and "class User:" in out["diff"] and "src/domain/user.py" in out["call"]
     assert not out["verdictHidden"] and out["waitingHidden"]
     assert "Refused before it was written" in out["verdict"]
@@ -515,10 +520,7 @@ def test_a_visit_within_the_hour_shows_the_kept_answer_and_asks_nothing(tmp_path
     out = _load(tmp_path, overview="{ status: 200, body: " + _overview() + " }", before=_kept(12))
     assert out["heroAsked"] == [], "A reload adds no refused page call to the ledger"
     assert _text(out["source"]) == "Live · 12 min ago", "The chip says when the answer was given, not a round trip that did not happen now"
-    assert out["caption"] == (
-        "Judged by this stack 12 minutes ago through POST /evaluate-tool-call and shown again, not asked again: "
-        "a reload within an hour of it adds no call to its ledger."
-    )
+    assert out["caption"] == "Judged by this stack 12 minutes ago and shown again, so a reload adds no call to its ledger."
     assert out["dataSource"] == "live" and out["landed"] == "refused" and out["flagged"] == [True, False, False]
     assert _read(out["reason"]) == PLAIN_REASON + " " + RULE_LINE
     assert "3 of 3 gate checks passed" in out["fix"] and "src/infrastructure/user_adapter.py (new)" in out["fix"]
@@ -621,7 +623,7 @@ def test_a_stack_that_does_not_answer_in_time_gives_way_to_the_recorded_run(tmp_
   out.slowShown = !el('hero-waiting').hidden;
   await new Promise(r => setTimeout(r, 3600));
   await tick();
-  out.caption = el('hero-caption').textContent;
+  out.caption = el('hero-caption').innerHTML;
   out.dataSource = el('hero-demo').getAttribute('data-source');
   out.verdict = el('hero-verdict').innerHTML;
   out.aborted = !!(signal && signal.aborted);
@@ -638,9 +640,8 @@ def test_a_stack_that_does_not_answer_in_time_gives_way_to_the_recorded_run(tmp_
     )
     assert out["slowShown"] and out["slow"] == "Still waiting for this stack; the recorded run stands in after 4 s", \
         "A wait past a second and a half says what it is waiting for, and for how long"
-    assert out["caption"] == (
-        "This stack did not answer within 4 seconds, so this is a real run recorded against the live API on 2026-09-25, replayed here."
-    )
+    assert _read(out["caption"]) == "This stack did not answer within 4 seconds, so this replays the live API’s answer from 2026-09-25."
+    assert '<span class="tf-nobr">2026-09-25</span>' in out["caption"], "The date is never broken at a hyphen"
     assert out["dataSource"] == "recorded" and "Refused before it was written" in out["verdict"]
     assert out["aborted"], "The call that lost the race is cancelled"
     assert out["kept"] is None
@@ -648,16 +649,16 @@ def test_a_stack_that_does_not_answer_in_time_gives_way_to_the_recorded_run(tmp_
 
 def test_the_hero_replays_the_recorded_run_and_says_truly_why(tmp_path: Path) -> None:
     """The caption says what this stack did: never 'not contacted' when it answered."""
-    run_ = "so this is a real run recorded against the live API on 2026-09-25, replayed here."
+    run_ = "so this replays the live API’s answer from 2026-09-25."
     cases = {
         "unreachable": ("'network'", "This stack could not be reached, " + run_),
-        "an error": ("{ status: 500, body: { title: 'Internal' } }", "This stack answered HTTP 500 instead of a verdict, " + run_),
+        "an error": ("{ status: 500, body: { title: 'Internal' } }", "This stack answered HTTP 500, not a verdict, " + run_),
         "a private stack": ("{ status: 401, body: { title: 'Unauthorized' } }",
-                            "This stack judges only its operator’s calls (it answered HTTP 401), " + run_),
+                            "This stack judges only its operator’s calls (HTTP 401), " + run_),
         "a forbidden call": ("{ status: 403, body: { title: 'Forbidden' } }",
-                             "This stack judges only its operator’s calls (it answered HTTP 403), " + run_),
+                             "This stack judges only its operator’s calls (HTTP 403), " + run_),
         "a rate limit": ("{ status: 429, body: { title: 'Too Many Requests' } }",
-                         "This stack is limiting calls from this browser for now (HTTP 429), " + run_),
+                         "This stack is limiting this browser’s calls (HTTP 429), " + run_),
         "not a verdict": ("{ status: 200, body: { status: 7 } }",
                           "This stack answered, but not with a verdict this page can read, " + run_),
     }
@@ -732,14 +733,14 @@ def test_a_kept_answer_is_labelled_as_one_before_its_verdict_lands(tmp_path: Pat
         tmp_path,
         before="const REDUCE = false;\n" + MOTION + _kept(12),
         scenario=r"""
-  out.early = { source: el('hero-source').innerHTML, caption: el('hero-caption').textContent,
+  out.early = { source: el('hero-source').innerHTML, caption: el('hero-caption').innerHTML,
     waiting: el('hero-waiting-text').textContent, landed: el('hero-demo').getAttribute('data-verdict') };
 """,
     )
     early = out["early"]
     assert early["landed"] is None, "Measured before the verdict lands"
     assert _text(early["source"]) == "Live · 12 min ago" and "Asking" not in early["source"]
-    assert early["caption"].startswith("Judged by this stack 12 minutes ago") and "Asking" not in early["caption"]
+    assert _read(early["caption"]).startswith("Judged by this stack 12 minutes ago") and "Asking" not in early["caption"]
     assert early["waiting"] == "Showing the answer this stack gave 12 minutes ago"
     assert out["heroAsked"] == []
 
@@ -786,20 +787,39 @@ def test_the_counts_are_read_from_the_overview_at_load_and_say_what_they_are_mad
     assert terms == ["Refused", "Would refuse"], "Plain words first, then the dashboard's own term for the same calls"
     assert "Open the refused calls" in out["live"] and "Open the would-refuse calls" in out["live"], "Each link says which rows it opens, in the dashboard's words"
     assert not out["whereHidden"]
-    assert _text(out["where"]) == (
-        "Where they come from: of 1,284 calls on this stack, 1,102 from a synthetic Acme fleet that sends "
-        "its calls through the real gates; 120 from sandboxes visitors started; 62 from the service’s own probes, "
-        "the demos on this page and anyone else calling its open API. They show the stack at work, not how widely "
-        "Threefold is used."
-    )
+    assert _read(out["where"]) == (
+        "Where they come from: 1,102 from a synthetic Acme fleet run through the real gates, 120 from visitors’ "
+        "sandboxes, 62 from probes, page demos and other callers of its open API."
+    ), "One clause, where a reader first meets the numbers, and the fleet called synthetic"
+
+
+def test_the_stopped_tile_says_how_many_of_its_refusals_were_this_pages_demos(tmp_path: Path) -> None:
+    """The hero's call and Scenario 3 are refused into Acme-Core, one per visit, and the tile opens those very rows.
+
+    So the number stays the stack's own count, which is what its link lists,
+    and the line under it says exactly how many of them this page sent, from
+    the project's own row in by_project.
+    """
+    def stopped_sub(by_project: str) -> str:
+        out = _load(tmp_path, overview="{ status: 200, body: " + _overview("by_project: " + by_project, refused=14).replace("by_project: [], ", "", 1) + " }")
+        subs = [_text(s) for s in re.findall(r'<span class="tf-tile-sub">(.*?)</span>', out["live"], re.S)]
+        assert _metrics(out["live"])["refused"] == "14", "The tile's number is the count its rows list"
+        return subs[1]
+
+    rows = "[{ project: 'Acme-Payments', calls: 900, refused: 4 }, { project: 'Acme-Core', calls: 12, refused: 10 }]"
+    assert stopped_sub(rows) == "before they ran; 10 were this page’s demos (Acme-Core)"
+    assert stopped_sub("[{ project: 'Acme-Core', calls: 3, refused: 1 }]") == "before they ran; 1 was this page’s demo (Acme-Core)"
+    for none in ("[{ project: 'Acme-Payments', calls: 900, refused: 14 }]", "[{ project: 'Acme-Core', calls: 4, refused: 0 }]",
+                 "[{ project: 'Acme-Core', calls: 40, refused: 40 }]", "[{ project: 'Acme-Core', refused: '<img src=x>' }]", "'many'"):
+        assert stopped_sub(none) == "before they ran", f"{none}: no share that is not a count within the tile's own"
 
 
 def test_without_sources_the_sandboxes_are_still_told_apart(tmp_path: Path) -> None:
     split = "sandbox_split: { sandbox: { calls: 24, projects: 2 }, elsewhere: { calls: 1260, projects: 10 } }"
     out = _load(tmp_path, overview="{ status: 200, body: " + _overview(split) + " }")
-    assert "24 of the 1,284 calls came from sandboxes visitors started" in _text(out["where"])
+    assert "24 of the 1,284 calls from visitors’ sandboxes, the rest from probes" in _text(out["where"])
     out = _load(tmp_path, overview="{ status: 200, body: " + _overview() + " }")
-    assert "this stack's own traffic: the service's own probes, the sandboxes visitors start" in _text(out["where"])
+    assert _read(out["where"]) == "Where they come from: probes, visitors’ sandboxes, page demos and other callers of this stack’s open API."
     hostile = "sources: { fleet: { calls: '<img src=x onerror=alert(1)>' }, sandbox: { calls: 1 }, other: { calls: 1 } }"
     out = _load(tmp_path, overview="{ status: 200, body: " + _overview(hostile) + " }")
     assert "<img" not in out["where"] and "synthetic Acme fleet" not in out["where"], "A source that is not a count is not used"
@@ -807,10 +827,10 @@ def test_without_sources_the_sandboxes_are_still_told_apart(tmp_path: Path) -> N
     out = _load(tmp_path, overview="{ status: 200, body: " + _overview(mismatched) + " }")
     where = _text(out["where"])
     assert "900" not in where and "1,284" not in where and "120" not in where, "Parts that do not add up to the 1,284 calls give no figure"
-    assert "this stack's own traffic, including a synthetic Acme fleet that sends its calls through the real gates" in where,         "A fleet the stack reports is named in words even then: synthetic calls are never left unlabelled"
+    assert "Where they come from: a synthetic Acme fleet run through the real gates, visitors’ sandboxes" in where,         "A fleet the stack reports is named in words even then: synthetic calls are never left unlabelled"
     nothing = "sources: { fleet: { calls: 0 }, sandbox: { calls: 0 }, other: { calls: 0 } }"
     out = _load(tmp_path, overview="{ status: 200, body: " + _overview(nothing) + " }")
-    assert "synthetic Acme fleet" not in _text(out["where"]) and "this stack's own traffic" in _text(out["where"]),         "Parts that add up to nothing are not used, and no fleet is claimed"
+    assert "synthetic Acme fleet" not in _text(out["where"]) and "probes, visitors’ sandboxes, page demos" in _text(out["where"]),         "Parts that add up to nothing are not used, and no fleet is claimed"
 
 
 def test_the_counts_are_read_without_a_key_even_when_one_is_typed(tmp_path: Path) -> None:
@@ -824,7 +844,7 @@ def test_the_counts_are_read_without_a_key_even_when_one_is_typed(tmp_path: Path
 def test_one_of_each_reads_in_the_singular(tmp_path: Path) -> None:
     split = "sandbox_split: { sandbox: { calls: 1, projects: 1 }, elsewhere: { calls: 0, projects: 0 } }"
     out = _load(tmp_path, overview="{ status: 200, body: " + _overview(split, calls=1, refused=0, would_refuse=1, projects=1) + " }")
-    assert "1 of the 1 call came from sandboxes" in _text(out["where"])
+    assert "1 of the 1 call from visitors’ sandboxes" in _text(out["where"])
     assert "none in the last 7 days" in _text(out["live"]), "A count of nothing says so in words"
 
 
@@ -1079,7 +1099,7 @@ def test_the_caption_keeps_room_for_every_caption_it_can_end_with(tmp_path: Path
     out = run(
         "index.html",
         r"""
-  out.room = el('hero-caption-room').textContent;
+  out.room = el('hero-caption-room').innerHTML;
   out.captions = [heroCaption({ source: 'live' }), heroCaption({ source: 'live', kept: true, at: Date.now() - 59 * 60000 })]
     .concat(['timeout', 'private', 'limited', 'http', 'unreadable', 'network'].map(k => heroCaption({ source: 'recorded', why: { kind: k, http: 503 } })));
   out.kinds = HERO_RECORDED_KINDS;
@@ -1088,7 +1108,7 @@ def test_the_caption_keeps_room_for_every_caption_it_can_end_with(tmp_path: Path
         before=DEMO_DOM,
     )
     assert out["kinds"] == ["timeout", "private", "limited", "http", "unreadable", "network"]
-    assert len(out["room"]) == max(len(c) for c in out["captions"]), "The room is the longest caption there is"
+    assert _read(out["room"]) == max(out["captions"], key=len), "The room is the longest caption there is"
     script = page_source("index.html")
     handled = set(re.findall(r"if \(kind === '(\w+)'\) return", script)) | {"network"}
     assert handled == set(out["kinds"]), "A kind of recorded caption the room does not know of"
