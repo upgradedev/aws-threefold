@@ -109,6 +109,14 @@
     .tf-ops-meter[data-state="none"] .tf-ops-meter-track { background: var(--tf-track); }
     .tf-ops-meter-words { flex-shrink: 0; font-size: var(--tf-fs-micro); line-height: 1rem; color: var(--tf-text-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
 
+    /* A project's readiness in the portfolio: its state, and its flagged calls split by label. */
+    .tf-ops-ready { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-width: 12rem; }
+    .tf-ops-ready > .tf-chip { flex-shrink: 0; }
+    .tf-ops-ready-bar { display: flex; gap: 2px; flex: 1 1 4rem; min-width: 4rem; max-width: 9rem; height: 6px; border-radius: 3px; overflow: hidden; background: var(--tf-track); }
+    .tf-ops-ready-bar > span { display: block; height: 100%; min-width: 3px; }
+    .tf-ops-ready-bar > span:last-child { border-radius: 0 3px 3px 0; }
+    .tf-ops-pcard .tf-ops-ready-bar { max-width: none; }
+
     /* Where a project's calls come from: identity, so a dot in a categorical hue beside a word. */
     .tf-ops-src { gap: 6px; }
     .tf-ops-src::before { content: ''; width: 7px; height: 7px; border-radius: 99px; background: var(--tf-cat-other); flex-shrink: 0; }
@@ -844,16 +852,54 @@
       return html`<span class="tf-chip tf-chip-gray tf-ops-src" data-src="${src}" title="${SOURCES[src].says}">${SOURCES[src].label}</span>`;
     }
 
-    // How much of what a project's rules flagged has a label: a rule is Ready
-    // only once every call it flagged is marked, so this is the road to Ready.
-    function labelledMeter(would, waiting) {
+    // The false alarms of a window, by project, from one read of the ledger
+    // (GET /api/decisions?review=false_alarm). A project row counts what its
+    // rules flagged and what still waits, not what was labelled wrong, and a
+    // single false alarm is what makes a rule Noisy, so readiness needs this
+    // read beside the rows. `complete` says the read reached the end of the
+    // window: only then does a project with none count as having none.
+    function falseAlarmsByProject(read) {
+      if (!read || !Array.isArray(read.rows)) return null;
+      const byProject = {};
+      read.rows.forEach(row => {
+        const name = String(row.project_name || '');
+        const seen = byProject[name] || (byProject[name] = { any: 0, observed: 0 });
+        seen.any += 1;
+        if (outcomeOf(row) === 'observed') seen.observed += 1;
+      });
+      return { byProject, complete: read.partial !== true };
+    }
+
+    // A project's readiness, as its page states it for each rule, drawn small
+    // for the portfolio: the calls its rules flagged, split by their label
+    // (correct, false alarm, not labelled), and the state that follows. Any
+    // false alarm makes it Noisy; else anything unlabelled needs review; else
+    // it is Ready if it flagged anything and Quiet if not. Approved green is
+    // drawn only where the false alarms were read to the end of the window:
+    // a labelled call that may be a false alarm is drawn neutral, never Ready.
+    function readinessCell(p, fa) {
+      const would = p.would_refuse;
+      const waiting = p.needs_review;
       if (typeof would !== 'number' || typeof waiting !== 'number') return html`<span class="text-gray-500">—</span>`;
+      const seen = (fa && fa.byProject[p.project]) || { any: 0, observed: 0 };
+      const known = !!fa && (fa.complete || seen.any > 0);
+      const flagged = would + (typeof p.refused === 'number' ? p.refused : 0);
+      const state = seen.any > 0 ? 'noisy' : waiting > 0 ? 'needs_review' : flagged <= 0 ? 'quiet' : known ? 'ready' : '';
+      const chip = state ? stateChip(state) : html`<span class="tf-chip tf-chip-gray" title="The false alarms of this window could not all be read, so Ready is not claimed">Labelled</span>`;
       if (would <= 0) {
-        return html`<span class="tf-ops-meter" data-state="none" title="No rule flagged a call in this window"><span class="tf-ops-meter-track"></span><span class="tf-ops-meter-words">nothing flagged</span></span>`;
+        return html`<span class="tf-ops-ready" data-state="${state || 'unknown'}">${chip}<span class="tf-ops-ready-bar" aria-hidden="true"></span><span class="tf-ops-meter-words">${flagged > 0 ? 'nothing to label' : 'nothing flagged'}</span></span>`;
       }
       const done = Math.max(0, Math.min(would, would - waiting));
-      const width = Math.round((done / would) * 1000) / 10;
-      return html`<span class="tf-ops-meter" data-state="${done === would ? 'done' : 'part'}" role="img" aria-label="${num(done)} of ${num(would)} flagged calls labelled" title="${num(done)} of ${num(would)} flagged calls labelled; a rule becomes Ready when every call it flagged is marked correct"><span class="tf-ops-meter-track"><span class="tf-ops-meter-fill" style="width:${width}%"></span></span><span class="tf-ops-meter-words">${num(done)}/${num(would)} labelled</span></span>`;
+      const wrong = Math.min(done, seen.observed);
+      const parts = [
+        { part: 'correct', value: known ? done - wrong : 0, color: C.approved, label: 'correct' },
+        { part: 'labelled', value: known ? 0 : done - wrong, color: C.accent, label: 'labelled' },
+        { part: 'false_alarm', value: wrong, color: C.refused, label: wrong === 1 ? 'false alarm' : 'false alarms' },
+        // Not labelled yet is the bar still to fill: the empty track.
+        { part: 'unlabelled', value: waiting, color: 'transparent', label: 'not labelled' }
+      ].filter(x => x.value > 0);
+      const said = parts.map(x => num(x.value) + ' ' + x.label).join(', ');
+      return html`<span class="tf-ops-ready" data-state="${state || 'unknown'}" title="${said}, of ${num(would)} flagged">${chip}<span class="tf-ops-ready-bar" role="img" aria-label="${num(done)} of ${num(would)} flagged calls labelled">${parts.map(x => html`<span data-part="${x.part}" style="flex-grow:${x.value};background:${x.color}"></span>`)}</span><span class="tf-ops-meter-words">${num(done)}/${num(would)} labelled${wrong ? html` · <span class="text-rose-300">${plural(wrong, 'false alarm')}</span>` : ''}</span></span>`;
     }
 
     // One slot of the attention strip: something to do, or plainly nothing.
@@ -1249,7 +1295,7 @@
                 ${card('By rule', 'What decided, refused and would refuse. A layering rule by its id, a gate by its key. A call two rules would have refused counts under each, so these do not add up to the tiles.', ruleBars, 'min-w-0')}
                 ${agentsCard(byAgent)}
               </div>
-              ${card('By project', 'Stage, and what each project\'s rules did. Open a project for its readiness and the Promote button.', projectsTable(byProject, days, true), 'min-w-0')}
+              ${card('By project', 'Stage, and what each project\'s rules did. Open a project for its readiness and the Promote button.', projectsTable(byProject, days, true, att.noisy && !att.noisy.error ? falseAlarmsByProject(att.noisy) : null), 'min-w-0')}
             </div>
           </div>`);
         if (firstPaint) {
@@ -1373,9 +1419,10 @@
 
     // A project table, shared by the overview and the projects screen: a row a
     // project, its stage and where its calls come from, what its rules did,
-    // how much of it waits for a label, and how far its labels have come.
-    // Every number opens the calls behind it.
-    function projectsTable(rows, days, compact) {
+    // how much of it waits for a label, and its readiness. `fa` is the
+    // window's false alarms by project (falseAlarmsByProject), or null while
+    // they are unread. Every number opens the calls behind it.
+    function projectsTable(rows, days, compact, fa) {
       if (!rows.length) {
         return emptyNote('No project sent a call in this window.', html`<a class="tf-link" href="#/connect">Connect a repository</a> and its first call appears here.`);
       }
@@ -1390,7 +1437,7 @@
             <th scope="col">Project</th><th scope="col">Stage</th>
             <th scope="col" class="num">Calls</th><th scope="col" class="num">Refused</th>
             <th scope="col" class="num">Would refuse</th><th scope="col" class="num">Waiting</th>
-            <th scope="col">Labelled</th>
+            <th scope="col">Readiness</th>
           </tr></thead>
           <tbody>${sorted.map(p => html`<tr data-row-href="${projectHref(p.project)}">
             <th scope="row" class="font-normal"><span class="tf-ops-pname">
@@ -1402,7 +1449,7 @@
             <td class="num">${numLink(p.refused, { project: p.project, kind: 'refused' }, 'text-rose-300')}</td>
             <td class="num">${numLink(p.would_refuse, { project: p.project, kind: 'observed' }, 'text-amber-300')}</td>
             <td class="num">${p.needs_review ? html`<a href="${reviewHref({ project: p.project })}" class="tf-num-link text-sky-300">${num(p.needs_review)}</a>` : html`<span class="text-gray-500">${num(p.needs_review)}</span>`}</td>
-            <td>${labelledMeter(p.would_refuse, p.needs_review)}</td>
+            <td>${readinessCell(p, fa)}</td>
           </tr>`)}</tbody>
         </table>
       </div>`;
@@ -1416,7 +1463,7 @@
             html`<a href="${callsHref(Object.assign({ days, project: p.project }, params))}"><b class="${value ? tone : 'text-gray-500'}">${num(value)}</b><small>${label}</small></a>`)}
           <a href="${reviewHref({ project: p.project })}"><b class="${p.needs_review ? 'text-sky-300' : 'text-gray-500'}">${num(p.needs_review)}</b><small>Waiting</small></a>
         </div>
-        ${labelledMeter(p.would_refuse, p.needs_review)}
+        ${readinessCell(p, fa)}
         <p class="tf-ops-pmeta">${meta(p)}</p>
       </li>`)}</ul>`;
       return html`${desktop}${mobile}`;
@@ -1434,9 +1481,16 @@
     // ---------------------------------------------------------- projects
 
     function viewProjects(ctx) {
-      const sub = 'Every project seen in the last 7 days, configured or not: its stage, what its rules did, what waits for a label, and how far its labels have come.';
+      const sub = 'Every project seen in the last 7 days, configured or not: its stage, what its rules did, and how ready it is to enforce.';
       ctx.render(loadingView('Projects', sub, ['table']));
-      return T.api('/api/projects').then(body => {
+      // The window's false alarms, read beside the list: one is what makes a
+      // project's rule Noisy, and the rows do not count them. A read that
+      // fails leaves readiness unclaimed rather than the list unread.
+      const alarms = T.api('/api/decisions' + query({ review: 'false_alarm', days: 7, limit: 200 })).then(body => {
+        const rows = body && Array.isArray(body.items) ? body.items.filter(r => r && r.review === 'false_alarm') : [];
+        return falseAlarmsByProject({ rows, partial: !!(body && body.next_cursor) });
+      }, () => null);
+      return Promise.all([T.api('/api/projects'), alarms]).then(([body, fa]) => {
         if (!ctx.alive()) return;
         const rows = (body && Array.isArray(body.projects)) ? body.projects : [];
         const observe = rows.filter(p => p.stage === 'observe').length;
@@ -1455,7 +1509,7 @@
         }
         ctx.render(html`${pageTitle('Projects', sub, html`<a href="#/connect" class="tf-btn tf-btn-primary">${T.icon('plug', 16)}Connect a repository</a>`)}
           ${summary}
-          ${card('The portfolio', 'Sorted by what waits for a label, then by calls. Numbers cover the last 7 days and open the calls behind them; a row opens its project.', projectsTable(rows, 7, false))}`);
+          ${card('The portfolio', 'Most waiting first. A row opens its project, and a number the calls behind it.', projectsTable(rows, 7, false, fa))}`);
       }, err => {
         if (ctx.alive()) ctx.render(html`${pageTitle('Projects', sub)}${failure(err, 'the project list')}`);
       });
@@ -1576,8 +1630,16 @@
       </li>`;
     }
 
-    // The colour of a flagged call nobody has labelled: neutral, never a status.
-    const UNLABELLED = '#818ba5';
+    // The colour of a flagged call nobody has labelled: neutral, never a
+    // status. It is the design system's --tf-text-4, read from the stylesheet,
+    // and resolved to its value because a tooltip keys only a literal colour.
+    const UNLABELLED = (() => {
+      try {
+        const value = getComputedStyle(document.documentElement).getPropertyValue('--tf-text-4').trim();
+        if (/^#[0-9a-fA-F]{3,8}$/.test(value)) return value;
+      } catch (err) { /* the fallback below */ }
+      return '#818ba5';
+    })();
 
     function readinessList(name, rules, days) {
       if (!rules.length) return emptyNote('No rule readiness yet.', 'Readiness appears once this project has sent calls in the window.');

@@ -4,7 +4,7 @@ The overview leads with what an operator acts on today (the review queue, the
 rules a false alarm made noisy, the sessions the circuit breaker halted), says
 on the public demo what its numbers are made of, and counts the coding agents
 apart from every other caller. The projects screen reads as a portfolio: each
-project's stage, where its calls come from, and how far its labels have come.
+project's stage, where its calls come from, and how ready it is to enforce.
 Run under Node with the stub browser in _browser.py, with answers shaped as the
 contracts in STATE.md fix them.
 
@@ -304,9 +304,45 @@ def test_the_projects_screen_reads_as_a_portfolio(tmp_path: Path) -> None:
     assert out["metrics"]["projects"] == "3"
     assert 'data-src="fleet"' in page and 'data-src="sandbox"' in page and 'data-src="other"' in page
     assert ">Fleet<" in page and ">Sandbox<" in page and ">Other<" in page
-    assert "7/10 labelled" in page and "4/4 labelled" in page and "nothing flagged" in page
+    # Acme-Probe's rules refused 7 calls and flagged none to watch: its rules
+    # did act, so it is not "nothing flagged", and there is nothing to label.
+    assert "7/10 labelled" in page and "4/4 labelled" in page and "nothing to label" in page
     assert 'aria-label="7 of 10 flagged calls labelled"' in page
     assert 'data-row-href="#/projects/Acme-Payments"' in page, "A row opens its project"
+
+
+def test_a_projects_readiness_is_green_only_when_no_false_alarm_can_hide(tmp_path: Path) -> None:
+    out = ops(
+        r"""
+  const list = [
+    Object.assign({}, PROJECTS.projects[1], { project: 'Acme-Checkout', source: 'fleet', refused: 0, would_refuse: 2, needs_review: 0 }),
+    Object.assign({}, PROJECTS.projects[1], { project: 'Acme-Payments', source: 'fleet', refused: 0, would_refuse: 5, needs_review: 0 }),
+    Object.assign({}, PROJECTS.projects[1], { project: 'Acme-Search', source: 'fleet', refused: 0, would_refuse: 0, needs_review: 0 })
+  ];
+  const cell = name => view().split('data-row-href="#/projects/' + name + '"')[1].split('</tr>')[0];
+  answer = contract({ '/api/projects': { status: 200, body: { projects: list } },
+    '/api/decisions': { status: 200, body: { items: [falseAlarm(1, 'Acme-Checkout', 'python-domain-stays-pure')], next_cursor: null } } });
+  await visit('#/projects');
+  out.read = calls.map(c => c.url).filter(u => u.indexOf('review=false_alarm') !== -1);
+  out.checkout = cell('Acme-Checkout'); out.payments = cell('Acme-Payments'); out.search = cell('Acme-Search');
+  answer = contract({ '/api/projects': { status: 200, body: { projects: list } },
+    '/api/decisions': { status: 200, body: { items: [], next_cursor: 'more' } } });
+  await visit('#/overview');
+  await visit('#/projects');
+  out.partial = cell('Acme-Payments');
+""",
+        tmp_path,
+    )
+    assert out["read"] == ["https://example.test/prod/api/decisions?review=false_alarm&days=7&limit=200"]
+    checkout = out["checkout"]
+    assert 'data-state="noisy"' in checkout and ">Noisy<" in checkout, "One false alarm makes the project Noisy, however much is labelled"
+    assert 'data-part="false_alarm"' in checkout and "2/2 labelled" in checkout and "1 false alarm" in checkout
+    payments = out["payments"]
+    assert 'data-state="ready"' in payments and 'data-part="correct"' in payments, "Read to the end with none, every label is correct: Ready"
+    assert 'data-state="quiet"' in out["search"] and "nothing flagged" in out["search"]
+    partial = out["partial"]
+    assert 'data-part="correct"' not in partial and 'data-state="ready"' not in partial, "A read that stopped short claims no Ready"
+    assert 'data-part="labelled"' in partial and "5/5 labelled" in partial
 
 
 # -------------------------------------------------------------------- project
