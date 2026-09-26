@@ -2482,11 +2482,16 @@
       return t;
     }
 
-    // Oldest first. The ledger lists newest first, so the list is turned over
-    // before it is sorted: two calls recorded in the same instant keep the
-    // order they were recorded in.
+    // Oldest first. Two calls stamped in the same instant (a coarse clock
+    // does that) come in the order the sandbox sends its agents, which is the
+    // order of the lanes.
+    function tryAgentRank(agent) {
+      const i = TRY_AGENTS.indexOf(agent);
+      return i === -1 ? TRY_AGENTS.length : i;
+    }
     function tryChronological(rows) {
-      return (rows || []).slice().reverse().sort((a, b) => String(a.timestamp).localeCompare(String(b.timestamp)));
+      return (rows || []).slice().reverse().sort((a, b) =>
+        String(a.timestamp).localeCompare(String(b.timestamp)) || tryAgentRank(a.agent) - tryAgentRank(b.agent));
     }
 
     function tryList(words) {
@@ -2989,8 +2994,7 @@
         const calls = Array.isArray(state.calls) ? state.calls : null;
         const seeded = typeof state.seeded === 'number' ? state.seeded : (calls ? calls.length : null);
         const flagged = state.observed.length;
-        const rank = a => { const i = TRY_AGENTS.indexOf(a); return i === -1 ? TRY_AGENTS.length : i; };
-        const agents = calls ? Array.from(new Set(calls.map(r => r.agent))).sort((a, b) => rank(a) - rank(b)).map(agentLabel) : [];
+        const agents = calls ? Array.from(new Set(calls.map(r => r.agent))).sort((a, b) => tryAgentRank(a) - tryAgentRank(b)).map(agentLabel) : [];
         const refusedFirst = calls ? tryTally(calls).refused : 0;
         facts.push(seeded !== null
           ? {
