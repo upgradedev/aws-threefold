@@ -2203,7 +2203,8 @@
 @media (max-width: 479px) { .tf-try-switch-opt small { display: none; } }
 
 .tf-try-flip { display: inline-grid; vertical-align: middle; }
-.tf-try-flip > * { grid-area: 1 / 1; }
+.tf-try-flip > * { grid-area: 1 / 1; justify-self: end; }
+.tf-try-rules-quiet .tf-try-flip > *, .tf-try-project .tf-try-flip > * { justify-self: start; }
 .tf-try-was { display: none; }
 
 .tf-try-lanes { display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr); }
@@ -2545,7 +2546,7 @@
   .tf-try-flipping > .tf-try-now { animation: tf-try-now 520ms var(--tf-ease-spring) both; animation-delay: calc(var(--tf-try-i, 0) * 160ms + 620ms); }
   .tf-try-play .tf-try-bar-seg { animation: tf-try-grow 560ms var(--tf-ease-out) both; animation-delay: calc(var(--tf-try-i, 0) * 160ms + 300ms); }
   .tf-try-ring .tf-try-now .tf-chip { animation: tf-try-ring 1100ms var(--tf-ease-out) 900ms 1 both; }
-  .tf-try-switching .tf-try-switch-knob { animation: tf-try-slide 760ms var(--tf-ease-spring) 200ms both; }
+  .tf-try-switching .tf-try-switch-knob { animation: tf-try-slide 760ms var(--tf-ease-out) 200ms both; }
   .tf-try-play .tf-try-verdict-banner { animation: tf-try-slam 560ms var(--tf-ease-out) both, tf-try-glow 1200ms var(--tf-ease-out) 300ms 1; }
   .tf-try-play .tf-try-verdict-icon { animation: tf-try-pop 620ms var(--tf-ease-spring) 180ms both; }
   .tf-try-play .tf-try-climax-compare, .tf-try-play .tf-try-climax-grid { animation: tf-try-rise 480ms var(--tf-ease-out) both; }
