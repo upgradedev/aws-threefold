@@ -257,6 +257,8 @@
     .tf-ops-arrived { display: flex; align-items: flex-start; gap: 14px; padding: 16px; border-radius: var(--tf-radius-md); background: var(--tf-approved-soft); border: 1px solid var(--tf-approved-line); }
     .tf-ops-arrived-mark { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; flex-shrink: 0; border-radius: 50%; background: var(--tf-approved); color: #fff; box-shadow: 0 0 0 6px rgba(14, 165, 114, 0.16); }
     .tf-ops-arrived-mark .tf-icon { width: 22px; height: 22px; }
+    .tf-ops-callout-enforce { background: var(--tf-accent-soft); border-color: var(--tf-accent-line); }
+    .tf-ops-callout-enforce > .tf-icon, .tf-ops-callout-enforce .tf-callout-title { color: var(--tf-accent-text); }
     .tf-ops-connect-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--tf-space-2); align-items: start; }
     @media (min-width: 1024px) {
       .tf-ops-connect-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 25rem); }
@@ -3075,7 +3077,7 @@
       const state = {
         name: T.PROJECT_PATTERN.test(ctx.params.project || '') ? ctx.params.project : 'Acme-Billing',
         os: /Win/i.test((window.navigator && (window.navigator.userAgent || window.navigator.platform)) || '') ? 'powershell' : 'posix',
-        sha: null, shaError: null, waiting: false, found: null, before: null, pollError: null, startedAt: Date.now(), timer: null
+        sha: null, shaError: null, waiting: false, found: null, stage: null, before: null, pollError: null, startedAt: Date.now(), timer: null
       };
 
       function nameOk() { return T.PROJECT_PATTERN.test(state.name); }
@@ -3105,7 +3107,7 @@
         // Full width: the steps on the left, and at desktop width the first
         // call's panel beside them, where the wait and the arrival are seen
         // while the command is copied and run.
-        ctx.render(html`<div class="tf-ops-connect">${pageTitle('Connect a repository', html`One command installs the hook for the agents on the machine and starts the project in Observe, so nothing is refused while you watch what would be. <a class="tf-link whitespace-nowrap" href="${T.pageHref('connect.html')}">Every detail, by hand</a>`)}
+        ctx.render(html`<div class="tf-ops-connect">${pageTitle('Connect a repository', html`One command installs the hook for the agents on the machine. A new project starts in Observe, so nothing is refused while you watch what would be. <a class="tf-link whitespace-nowrap" href="${T.pageHref('connect.html')}">Every detail, by hand</a>`)}
           <ol class="tf-ops-steps" aria-label="Where you are">${steps.map((label, i) => {
             const s = stepState(i + 1);
             return html`<li data-state="${s}"${s === 'current' ? raw(' aria-current="step"') : ''}><span class="tf-step-num" data-state="${s}">${s === 'done' ? T.icon('check', 13) : i + 1}</span>${label}</li>`;
@@ -3151,18 +3153,19 @@
         if (!nameOk()) return html`<h2 class="text-sm font-semibold text-white">See the first call</h2><p class="text-xs text-gray-500">Once the name is right.</p>`;
         if (state.found) {
           const row = state.found;
+          // The installer's first call is a dry run, which the ledger records
+          // under Observe whatever the project's stage, so for a dry run the
+          // line says what it was rather than the stage it was recorded under.
+          const how = row.dry_run === true ? ' · a test call, recorded and never refused' : row.stage ? ' · recorded under ' + row.stage : '';
           return html`<div class="tf-ops-arrived" role="status">
               <span class="tf-ops-arrived-mark" aria-hidden="true">${T.icon('check', 22)}</span>
               <div class="min-w-0 space-y-1">
                 <h2 class="text-base font-semibold text-white">Connected</h2>
                 <p class="text-sm text-emerald-200"><strong class="text-white">${agentLabel(row.agent)}</strong> reached the stack from <span class="font-mono">${T.projectName(state.name)}</span> ${timeAgo(row.timestamp)}.</p>
-                <p class="text-xs text-gray-300"><span class="font-mono">${row.tool_name}</span> ${targetOf(row)} · ${OUTCOMES[outcomeOf(row)].label.toLowerCase()} · hook mode ${row.hook_mode || 'unknown'}${row.stage ? ' · stage ' + row.stage : ''}</p>
+                <p class="text-xs text-gray-300"><span class="font-mono">${row.tool_name}</span> ${targetOf(row)} · ${OUTCOMES[outcomeOf(row)].label.toLowerCase()} · hook mode ${row.hook_mode || 'unknown'}${how}</p>
               </div>
             </div>
-            <div class="tf-callout tf-callout-warn">${T.icon('eye', 18)}<div class="tf-callout-body">
-              <p class="tf-callout-title">You are in Observe</p>
-              <p>Nothing your agents send from here is refused, except a call carrying a credential, which the hook stops on the machine and never sends. What a rule would have refused waits for your review; when its record reads right, promote the project and that rule starts refusing.</p>
-            </div></div>
+            ${stageCallout()}
             <div class="flex flex-wrap gap-2">
               <a class="tf-btn tf-btn-primary" href="${projectHref(state.name)}">Open ${T.projectName(state.name)}${T.icon('arrowright', 14)}</a>
               <a class="tf-btn" href="#/review">The review queue</a>
@@ -3182,6 +3185,54 @@
               <p class="text-xs text-gray-500">Nothing arriving? The command prints whether its test call was recorded. <a class="tf-link" href="${T.pageHref('connect.html')}">The connect page</a> covers each agent's details.</p>
             </div>
           </div>`;
+      }
+
+      // What the first call means for the agents from here on, from the
+      // project's own stage on the stack rather than from the call, which
+      // for the installer's dry run always reads Observe. Until the stage is
+      // read, and when it cannot be, the card claims neither stage.
+      function stageCallout() {
+        const s = state.stage;
+        if (!s || s.reading) {
+          return html`<div class="tf-callout" data-stage="reading">${T.icon('clock', 18)}<div class="tf-callout-body"><p>Reading the stage of <span class="font-mono">${T.projectName(state.name)}</span>…</p></div></div>`;
+        }
+        if (s.stage === 'enforce') {
+          return html`<div class="tf-callout tf-ops-callout-enforce" data-stage="enforce">${T.icon('shield', 18)}<div class="tf-callout-body">
+              <p class="tf-callout-title">This project is in Enforce</p>
+              <p>${s.enforcing ? html`${plural(s.enforcing, 'rule')} ${s.enforcing === 1 ? 'refuses' : 'refuse'}` : 'The rules in force refuse'} a call from here that breaks ${s.enforcing === 1 ? 'it' : 'them'} before it runs, and the agent is told why.${s.observing ? html` ${plural(s.observing, 'rule')} still ${s.observing === 1 ? 'observes' : 'observe'}: what ${s.observing === 1 ? 'it' : 'they'} would refuse waits for your review.` : ''} To watch before anything is refused, take the project back to Observe on its page.</p>
+            </div></div>`;
+        }
+        if (s.stage === 'observe') {
+          return html`<div class="tf-callout tf-callout-warn" data-stage="observe">${T.icon('eye', 18)}<div class="tf-callout-body">
+              <p class="tf-callout-title">You are in Observe</p>
+              <p>Nothing your agents send from here is refused, except a call carrying a credential, which the hook stops on the machine and never sends. What a rule would have refused waits for your review; when its record reads right, promote the project and that rule starts refusing.</p>
+            </div></div>`;
+        }
+        return html`<div class="tf-callout" data-stage="unknown">${T.icon('info', 18)}<div class="tf-callout-body">
+            <p>The stage of <span class="font-mono">${T.projectName(state.name)}</span> could not be read${s.error ? html` (${trimStop(s.error)})` : ''}. Its page says whether its rules refuse or only observe.</p>
+          </div></div>`;
+      }
+
+      // Read once, when the first call lands. An answer for a name the reader
+      // has since changed is dropped, as the watch drops its own.
+      function readStage() {
+        const asked = state.name;
+        state.stage = { reading: true };
+        return T.api('/api/projects/' + encodeURIComponent(asked)).then(body => {
+          if (!ctx.alive() || asked !== state.name || !state.found) return;
+          const d = body || {};
+          const summary = (d.readiness && d.readiness.summary) || {};
+          const rules = d.readiness && Array.isArray(d.readiness.rules) ? d.readiness.rules : [];
+          const stage = summary.stage || (d.config && d.config.stage) || '';
+          state.stage = {
+            stage: stage === 'enforce' || stage === 'observe' ? stage : '',
+            enforcing: rules.filter(r => r && r.mode_now === 'enforce').length,
+            observing: rules.filter(r => r && r.mode_now === 'observe').length
+          };
+        }, err => {
+          if (!ctx.alive() || asked !== state.name || !state.found) return;
+          state.stage = { stage: '', error: err && err.message ? err.message : '' };
+        });
       }
 
       // Redrawn only when what it says changes, so a copy button inside it is
@@ -3212,11 +3263,17 @@
             } else {
               state.found = row;
               stop();
-              draw();
-              const mark = document.getElementById('view');
-              if (mark && typeof mark.querySelector === 'function') T.pulse(mark.querySelector('.tf-ops-arrived-mark'), 'ok');
-              announce('Connected: ' + agentLabel(row.agent) + ' reached the stack.');
-              return;
+              // The card turns green at once, and says what follows for the
+              // agents once the project's stage is read; the whole screen is
+              // drawn then, with every step done, and the mark pulses once.
+              redrawWait();
+              return readStage().then(() => {
+                if (!ctx.alive() || state.found !== row) return;
+                draw();
+                const mark = document.getElementById('view');
+                if (mark && typeof mark.querySelector === 'function') T.pulse(mark.querySelector('.tf-ops-arrived-mark'), 'ok');
+                announce('Connected: ' + agentLabel(row.agent) + ' reached the stack' + (state.stage && state.stage.stage ? ', and the project is in ' + STAGES[state.stage.stage].label : '') + '.');
+              });
             }
           }
           redrawWait();
@@ -3265,6 +3322,7 @@
         if (!target || target.id !== 'connect-name') return;
         state.name = String(target.value || '').trim();
         state.found = null;
+        state.stage = null;
         state.before = null;
         state.startedAt = Date.now();
         const ok = nameOk();

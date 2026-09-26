@@ -859,6 +859,42 @@ def test_connect_waits_with_a_radar_and_turns_into_a_success_card(tmp_path: Path
     assert done.count('<li data-state="done"') == 3, "Every step is done once the first call lands"
 
 
+def test_the_success_card_says_the_projects_own_stage_not_the_dry_runs(tmp_path: Path) -> None:
+    out = ops(
+        r"""
+  const first = () => ({ items: [row(1, { agent: 'codex', dry_run: true, stage: 'observe', tool_name: 'Read', target: 'README.md', observed_rules: [], observed_rule: '', rule_key: 'NONE', timestamp: new Date(Date.now() + 1000).toISOString() })], next_cursor: null });
+  let decisions = { items: [], next_cursor: null };
+  const stage = held();
+  answer = contract({
+    '/api/decisions': () => ({ status: 200, body: decisions }),
+    '/api/projects/Acme-Billing': () => stage.promise
+  });
+  await visit('#/connect');
+  decisions = first();
+  await runIntervals();
+  out.reading = text(el('connect-wait').innerHTML);
+  stage.release({ status: 200, body: detailBody('enforce', [RULES[0], Object.assign({}, RULES[1], { mode_now: 'enforce' }), RULES[2]]) });
+  await tick();
+  out.enforce = text(view());
+  answer = contract({ '/api/decisions': () => ({ status: 200, body: decisions }), '/api/projects/Acme-Billing': 'network' });
+  decisions = { items: [], next_cursor: null };
+  await visit('#/overview');
+  await visit('#/connect');
+  decisions = first();
+  await runIntervals();
+  out.failed = text(view());
+""",
+        tmp_path,
+    )
+    assert "Reading the stage of Acme-Billing" in out["reading"] and "You are in Observe" not in out["reading"], "Nothing is claimed before the stage is read"
+    enforce = out["enforce"]
+    assert "This project is in Enforce" in enforce and "1 rule refuses a call from here" in enforce and "2 rules still observe" in enforce
+    assert "You are in Observe" not in enforce and "Nothing your agents send from here is refused" not in enforce
+    assert "a test call, recorded and never refused" in enforce and "stage observe" not in enforce, "The dry run's own Observe is not the project's stage"
+    failed = out["failed"]
+    assert "could not be read" in failed and "You are in Observe" not in failed and "in Enforce" not in failed
+
+
 # --------------------------------------------------------------------- sign-in
 
 
