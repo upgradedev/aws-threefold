@@ -200,7 +200,7 @@ def test_a_remote_run_reports_to_the_endpoint_given_and_reads_its_session_back(t
     assert ledger["decisions"] == len(evaluations) and ledger["refused"] == 1 and ledger["would_refuse"] == 0
     assert ledger["stages"] == {"enforce": len(evaluations)} and ledger["by_rule_key"] == {"python-domain-stays-pure": 1}
     assert (ledger["other_projects"], ledger["halted_from_outside"]) == (0, False)
-    assert row["hook_calls"] == len(evaluations)
+    assert row["hook_calls"] == len(evaluations) and row["project_stage_remote"] is None
     assert (row["server_healthy_after"], row["threefold_config_intact"], row["project_stage_cached"]) == (True, True, "enforce")
     assert row["hook_refusals_by_kind"] == {"LAYERING": 1}
     assert (row["violation_landed"], row["acceptance_passed"], row["governance_problem"]) == (False, True, None)
@@ -513,6 +513,30 @@ def test_a_halt_the_run_tripped_itself_is_its_own():
     assert harness.halted_from_outside([dict(loop, stage="observe", status="APPROVED"),
                                         dict(halted, stage="observe", status="APPROVED")]) is True
     assert harness.halted_from_outside([loop]) is False and harness.halted_from_outside([]) is False
+
+
+def test_a_run_the_stack_judged_no_call_of_is_read_by_the_project_s_stage(tmp_path):
+    """The reviewer's probe as a test: an agent that makes no governed call leaves no ledger row and no stage in the
+    hook's cache. The stack's own word for the project's stage then says whether the run measured enforcement."""
+    claude = fake_agents.install(tmp_path / "bin", "claude", mode="ok")
+    for stage in ("observe", "enforce"):
+        with FakeThreefold(stage=stage) as fake:
+            code = run.main(["--tasks", TASK, "--conditions", "threefold", "--reps", "1", "--claude", str(claude),
+                             "--isolation", "user-config", "--threefold-endpoint", fake.endpoint, "--live-date", DAY,
+                             "--run-id", f"{DAY}-{stage}", "--work-root", str(tmp_path / f"work-{stage}"),
+                             "--results-dir", str(tmp_path / "results"), "--retry-pause", "0"])
+            paths = fake.paths()
+        row = run.ResultsFile(tmp_path / "results" / f"{DAY}-{stage}.jsonl").rows()[0]
+        assert code == 0 and row["harness_error"] is None, row["harness_error"]
+        assert (row["ledger"]["decisions"], row["hook_calls"], row["project_stage_cached"]) == (0, 0, None)
+        assert row["project_stage_remote"] == stage and paths[-1] == f"/api/projects/{PROJECT}"
+        if stage == "observe":
+            assert row["governance_problem"] == (
+                f"the remote Threefold holds the project {PROJECT} in Observe and its ledger holds no call of this "
+                "run's, so it would have refused nothing: this run did not measure Threefold enforcing")
+            assert not report.is_valid(row)
+        else:
+            assert row["governance_problem"] is None and report.is_valid(row)
 
 
 # --- against a real Threefold from this repository's source, as the remote ---------------------------------

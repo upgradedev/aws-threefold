@@ -16,6 +16,7 @@ service uses:
     GET  /sessions/<id>        the session's record once a call named it or it
                                was frozen (`freeze`), 404 before; a frozen
                                session's calls are refused as HALTED_SESSION
+    GET  /api/projects/<name>  the project's stage, as readiness.summary.stage
 
 and 404 to anything else. Every request is kept, so a test can say exactly
 what a run sent and where. The judge is not Threefold's: the suite checks the
@@ -185,6 +186,10 @@ class FakeThreefold:
                         self._send(404, {"title": "No Such Session"})
                     else:
                         self._send(200, found)
+                elif path.startswith("/api/projects/") and path.count("/") == 3:
+                    name = unquote(path[len("/api/projects/"):])
+                    self._send(200, {"project": name, "config": None,
+                                     "readiness": {"summary": {"stage": fake.stage}, "rules": []}})
                 else:
                     self._send(404, {"title": "Not Found"})
 
