@@ -1461,7 +1461,7 @@ def test_a_held_key_labels_one_call_and_a_failed_label_keeps_the_keyboard_on_the
   press('c'); await tick();
   press('c', { repeat: true }); press('c', { repeat: true }); await tick();
   out.afterHold = reviews.length;
-  out.receipt = text(view());
+  out.receipt = text(view().replace(/<wbr>/g, ''));
   press('c'); await tick();
   refuse = true;
   press('f'); await tick();
