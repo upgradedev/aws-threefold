@@ -265,7 +265,10 @@ def test_a_claude_code_day_in_observe_is_recorded_as_would_refuse_and_not_counte
     runs = [call for call in fake_agents.calls(fake_bin["dir"], "claude") if "-p" in call["argv"]]
     assert len(runs) == 1 and runs[0]["token_set"] is True and runs[0]["token_in_argv"] is False
     assert TOKEN not in (results / f"{DAY}-claude-code.jsonl").read_text(encoding="utf-8")
-    assert TOKEN not in (tmp_path / "work" / daily.LOG_NAME).read_text(encoding="utf-8")
+    log = (tmp_path / "work" / daily.LOG_NAME).read_text(encoding="utf-8")
+    assert TOKEN not in log and "token file: <token file> (the token goes to the agent process only)" in log
+    for spelling in {str(token_file), str(token_file).replace("\\", "/"), str(token_file).upper()}:
+        assert spelling not in log, "the token file's path reached the log"
 
     # The run went its course; only the stage on the stack keeps it from counting, and a second run today would be
     # judged the same way. So it is not run again, and the day reads as done.
@@ -308,6 +311,54 @@ def test_a_day_that_failed_says_so_again_and_is_run_again_as_the_next_attempt(tm
     again = daily.run_live(pick, fake.endpoint, results_dir=results, work_root=tmp_path / "work", codex=str(fake_bin["codex"]))
     assert again[0] == 0 and again[1] == row and again[2].startswith("already recorded today")
     assert len([call for call in fake_agents.calls(fake_bin["dir"], "codex") if call["argv"][:1] == ["exec"]]) == 1
+
+
+def test_a_codex_home_the_benchmark_refuses_is_never_named_in_the_log(tmp_path, fake_bin):
+    """The reviewer's probe as a test: a Codex home holding hooks.json is refused by the benchmark, whose refusal names
+    the folder and the files in it. The log says `<Codex home>` instead; the terminal line and the row say neither."""
+    owner_codex = tmp_path / "Owner-Private-Codex-Home"
+    owner_codex.mkdir()
+    (owner_codex / "hooks.json").write_text("{}", encoding="utf-8")
+    pick = daily.Pick(DAY, "codex", TASK)
+    code, row, note = daily.run_live(pick, "https://threefold.acme.test/", results_dir=tmp_path / "results",
+                                     work_root=tmp_path / "work", codex_home=owner_codex, codex=str(fake_bin["codex"]))
+    assert (code, row) == (2, None) and "no row was recorded (benchmark exit 2)" in note
+    log = (tmp_path / "work" / daily.LOG_NAME).read_text(encoding="utf-8")
+    assert "refused: Codex would read these into every run" in log
+    assert "CODEX_HOME (<Codex home>): <Codex home>" in log and "hooks.json" in log
+    for spelling in (str(owner_codex), str(owner_codex).replace("\\", "/"), str(owner_codex).lower()):
+        assert spelling not in log, "the Codex home reached the log"
+    line = daily.summary_line(pick, row, note)
+    assert "Owner-Private-Codex-Home".casefold() not in line.casefold() and "\n" not in line
+
+
+def test_the_log_hides_a_path_written_in_pieces_and_in_any_case():
+    written = []
+
+    class Sink:
+        def write(self, text):
+            written.append(text)
+
+        def flush(self):
+            pass
+
+    home = Path("C:/Users/acme-owner/codex-login") if os.name == "nt" else Path("/home/acme-owner/codex-login")
+    paths = {daily.CODEX_HOME_SHOWN: daily._spellings(home),
+             daily.TOKEN_FILE_SHOWN: daily._spellings(home / "token.txt")}
+    redacted = daily.Redacted(Sink(), paths)
+    text = str(home / "token.txt")
+    print("reading", text[:6], end="", file=redacted)
+    print(text[6:], "and", str(home), file=redacted)
+    assert "".join(written) == "reading <token file> and <Codex home>\n"
+    redacted.write("unfinished " + str(home).replace("\\", "/"))
+    assert "".join(written).count("unfinished") == 0, "a line is held until it ends"
+    redacted.close()
+    assert "".join(written).endswith("unfinished <Codex home>")
+    if os.name == "nt":
+        again = daily.Redacted(Sink(), paths)
+        again.write(str(home).upper() + "\n")
+        assert written[-1] == "<Codex home>\n"
+    assert daily._spellings(Path("C:/")) == [] or os.name != "nt"
 
 
 def test_a_day_is_run_at_most_three_times(tmp_path, monkeypatch):

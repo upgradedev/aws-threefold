@@ -19,13 +19,14 @@ second day through the six standard tasks, so each task is done by both agents
 on consecutive days and all twelve pairs come round every twelve days.
 
 The row goes to benchmark/results/live/<date>-<agent>.jsonl and one line is
-printed. The benchmark's own output (which names the token file's path) goes
-to daily-live.log in the run's work root, outside the repository, not to the
-terminal. A day whose row went its course is not run again, whether or not
-the row counts; a day whose run did not go as planned (a harness error, an
-agent that never ran, a Threefold that stopped answering) is run again when
-the script is started again that day, as the next attempt in a session of its
-own, up to three rows a day.
+printed. The benchmark's own output goes to daily-live.log in the run's work
+root, outside the repository, not to the terminal, with the token file's path
+written `<token file>` and the Codex home's `<Codex home>`: both are the
+owner's, and neither is printed anywhere. A day whose row went its course is
+not run again, whether or not the row counts; a day whose run did not go as
+planned (a harness error, an agent that never ran, a Threefold that stopped
+answering) is run again when the script is started again that day, as the
+next attempt in a session of its own, up to three rows a day.
 
 What it refuses, before anything is created:
 - an endpoint that is not https, that carries a user name, a password, a
@@ -75,7 +76,9 @@ from __future__ import annotations
 import argparse
 import contextlib
 import datetime
+import io
 import os
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -85,7 +88,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from benchmark import harness, report, run, task_library  # noqa: E402
+from benchmark import credentials, harness, report, run, task_library  # noqa: E402
 
 # The first day of the rotation: day 0 is Claude Code on the first standard task.
 ROTATION_START = datetime.date(2026, 9, 27)
@@ -93,9 +96,10 @@ AGENTS = ("claude-code", "codex")
 LIVE_RESULTS_DIR = harness.BENCHMARK_DIR / "results" / "live"
 CONDITION = "threefold"
 LOG_NAME = "daily-live.log"
-# How a path that must not be printed is shown in the command a dry run prints.
+# How a path that must not be printed is shown: in the command a dry run prints, and in the log.
 TOKEN_FILE_SHOWN = "<token file>"
-CODEX_HOME_SHOWN = "with CODEX_HOME set to the Codex home given"
+CODEX_HOME_SHOWN = "<Codex home>"
+CODEX_HOME_SET = "with CODEX_HOME set to the Codex home given"
 # How many runs one day may have: a run that did not go as planned (a harness error, an agent that never ran, a
 # Threefold that stopped answering) is run again when the script is started again that day, up to this many rows.
 MAX_RUNS_PER_DAY = 3
@@ -190,7 +194,84 @@ def shown_command(arguments: Sequence[str], codex_home: bool = False) -> str:
         hide_next = item == "--token-file"
         shown.append(f'"{item}"' if " " in item else item)
     command = " ".join(["python", "benchmark/run.py", *shown])
-    return command + (f" ({CODEX_HOME_SHOWN})" if codex_home else "")
+    return command + (f" ({CODEX_HOME_SET})" if codex_home else "")
+
+
+def _spellings(path: Path) -> List[str]:
+    """A path as output may spell it: as given, absolute, resolved, and each with forward slashes."""
+    forms = {str(path), os.path.abspath(path)}
+    with contextlib.suppress(OSError, RuntimeError):
+        forms.add(str(Path(path).resolve()))
+    forms |= {form.replace("\\", "/") for form in forms}
+    # A drive or a root alone names nothing of the owner's, and would blank every path in the log.
+    return [form for form in forms if len(form.strip("\\/:")) > 2]
+
+
+def owner_paths(token_file: Optional[Path], codex_home: Optional[Path]) -> Dict[str, List[str]]:
+    """The owner's paths the log must not hold, by the words it holds instead.
+
+    The token file given, and the benchmark's default one (run.py names the
+    file it reads); the Codex home given, and the one the benchmark reads
+    without it (CODEX_HOME, or ~/.codex).
+    """
+    tokens = [Path(token_file)] if token_file is not None else []
+    homes = [Path(codex_home)] if codex_home is not None else []
+    tokens.append(Path(credentials.DEFAULT_TOKEN_FILE))
+    homes.append(run.codex_home())
+    return {TOKEN_FILE_SHOWN: sorted({form for path in tokens for form in _spellings(path)}),
+            CODEX_HOME_SHOWN: sorted({form for path in homes for form in _spellings(path)})}
+
+
+class Redacted(io.TextIOBase):
+    """Writes whole lines to another stream with the owner's paths replaced by words, and the rest when closed.
+
+    A line is held until it ends, so a path written in two pieces is still
+    found. On Windows a path is matched whatever its case, as the file system
+    matches it. The longest spelling is tried first, so a file inside a
+    folder that is also hidden is hidden as the file.
+    """
+
+    def __init__(self, stream: Any, paths: Mapping[str, Sequence[str]]) -> None:
+        super().__init__()
+        self._stream = stream
+        self._pending = ""
+        self._folded = os.name == "nt"
+        self._words: Dict[str, str] = {}
+        for word, forms in paths.items():
+            for form in forms:
+                self._words.setdefault(self._key(form), word)
+        alternatives = sorted(self._words, key=len, reverse=True)
+        self._pattern = (re.compile("|".join(re.escape(form) for form in alternatives),
+                                    re.IGNORECASE if self._folded else 0) if alternatives else None)
+
+    def _key(self, text: str) -> str:
+        return text.casefold() if self._folded else text
+
+    def writable(self) -> bool:
+        return True
+
+    def _clean(self, text: str) -> str:
+        if self._pattern is None:
+            return text
+        return self._pattern.sub(lambda found: self._words.get(self._key(found.group(0)), TOKEN_FILE_SHOWN), text)
+
+    def write(self, text: str) -> int:
+        self._pending += text
+        if "\n" in self._pending:
+            done, self._pending = self._pending.rsplit("\n", 1)
+            self._stream.write(self._clean(done + "\n"))
+        return len(text)
+
+    def flush(self) -> None:
+        self._stream.flush()
+
+    def close(self) -> None:
+        if not self.closed:
+            if self._pending:
+                self._stream.write(self._clean(self._pending))
+                self._pending = ""
+            self._stream.flush()
+        super().close()
 
 
 def read_rows(path: Path) -> List[Dict[str, Any]]:
@@ -298,8 +379,9 @@ def run_live(pick: Pick, endpoint: str, results_dir: Path = LIVE_RESULTS_DIR, wo
         arguments[arguments.index("--run-id")] = "--resume"
     work_root.mkdir(parents=True, exist_ok=True)
     log = work_root / LOG_NAME
-    with open(log, "a", encoding="utf-8") as handle, contextlib.redirect_stdout(handle), \
-            contextlib.redirect_stderr(handle), \
+    with open(log, "a", encoding="utf-8") as handle, \
+            contextlib.closing(Redacted(handle, owner_paths(token_file, codex_home))) as redacted, \
+            contextlib.redirect_stdout(redacted), contextlib.redirect_stderr(redacted), \
             _environment("CODEX_HOME", str(codex_home) if codex_home and pick.agent == "codex" else None):
         print(f"--- {harness.utc_now()} {shown_command(arguments, bool(codex_home and pick.agent == 'codex'))}")
         try:
