@@ -834,7 +834,8 @@ def test_the_proof_page_leads_with_the_violation_rates_on_one_scale(tmp_path: Pa
     series = COMMITTED["benchmarks"]
     chart = page.split("Did a violation land?", 1)[1].split('data-proof="series"', 1)[0]
     assert page.index("Did a violation land?") < page.index('data-proof="series"'), "The chart leads, the table follows"
-    assert chart.count('class="tf-ops-multiple"') == len(series), "One small chart a series, never pooled"
+    assert chart.count("<figure") == 1, "Every series in one figure, so the conditions are compared at a glance"
+    assert chart.count("data-proof-row") == len(series), "One row a series, never pooled"
     assert "0%" in chart and "100%" in chart, "Every series is drawn on the same 0 to 100% scale"
     for section in series:
         for condition in section["conditions"]:
@@ -847,6 +848,16 @@ def test_the_proof_page_leads_with_the_violation_rates_on_one_scale(tmp_path: Pa
     assert "Rules in CLAUDE.md or AGENTS.md" in chart and "rules in CLAUDE.md<" not in chart, "The chart does not name Claude Code's file for Codex"
     assert "data-metric" not in chart and "data-series=" not in chart and 'data-proof="provenance"' not in chart
     assert 'class="tf-legend"' in chart, "Three conditions carry a legend as well as their own labels"
+    # What enforcing cost sits in the verdict, beside what it bought, family by family.
+    cost = re.sub(r"<[^>]+>", "", chart.split('data-proof="cost"', 1)[1].split("</p>", 1)[0])
+    families: dict = {}
+    for section in series:
+        done = next(c for c in section["conditions"] if c["condition"] == "threefold")["completion"]
+        k, n = families.get(section["family"], (0, 0))
+        families[section["family"]] = (k + done["k"], n + done["n"])
+    for k, n in families.values():
+        assert (f"every run of the" in cost and f"({k}/{n})" in cost) if k == n else f"{k} of {n} runs" in cost
+    assert chart.index('data-proof="cost"') < chart.index("data-proof-row"), "The cost is read before the chart, not only in the table"
     assert "Did a violation land?" not in out["pilot"], "A pilot proves the harness, not a rate, so it is not charted"
 
 

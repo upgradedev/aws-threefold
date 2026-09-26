@@ -323,25 +323,47 @@
     .tf-ops-promise li b { font-weight: 600; color: var(--tf-text); }
     .tf-ops-signin-why { margin: 0; text-align: center; font-size: var(--tf-fs-small); line-height: var(--tf-lh-small); color: var(--tf-text-2); }
 
-    /* Proof: six series side by side on one scale. */
-    .tf-ops-multiples { display: grid; grid-template-columns: 1fr; gap: 12px; }
-    @media (min-width: 768px) { .tf-ops-multiples { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-    @media (min-width: 1200px) { .tf-ops-multiples { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-    .tf-ops-multiple { display: flex; flex-direction: column; gap: 12px; padding: 14px 16px 16px; border-radius: var(--tf-radius-md); background: var(--tf-inset); border: 1px solid var(--tf-hairline); min-width: 0; }
-    .tf-ops-multiple-title { margin: 0; font: 600 0.8125rem/1.25rem var(--tf-font-sans); color: var(--tf-text); }
-    .tf-ops-multiple-sub { display: block; font: 400 0.75rem/1rem var(--tf-font-sans); color: var(--tf-text-3); }
-    .tf-ops-multiple .tf-hbars { gap: 10px; }
-    .tf-ops-multiple .tf-hbar-head > :first-child { font-family: var(--tf-font-sans); color: var(--tf-text-2); }
-    /* Every bar starts at a tick on its baseline, so a measured zero reads
-       as none rather than missing. */
-    .tf-ops-multiple .tf-hbar { position: relative; }
-    .tf-ops-multiple .tf-hbar::before { content: ''; position: absolute; left: 0; top: -2px; width: 2px; height: 12px; border-radius: 1px; background: var(--tf-text-3); }
-    /* A condition's name is read, not cut: it wraps on a narrow screen. */
-    .tf-ops-multiple .tf-hbar-head > :first-child { white-space: normal; overflow: visible; text-overflow: clip; }
-    .tf-ops-scale { display: flex; justify-content: space-between; margin-top: -4px; font-size: 0.75rem; line-height: 1rem; color: var(--tf-text-3); font-variant-numeric: tabular-nums; }
+    /* Proof: every series on one scale, in one figure. A row a series, a
+       lane a condition; the gridlines, the ticks and the tip labels share
+       one geometry: the track is the lane less a gutter the labels sit in. */
+    .tf-ops-vchart { --tf-ops-vgut: 64px; margin: 0; min-width: 0; }
+    @media (min-width: 768px) { .tf-ops-vchart { --tf-ops-vgut: 84px; } }
+    .tf-ops-vrow, .tf-ops-vaxis { display: grid; grid-template-columns: minmax(0, 1fr) 4.25rem; gap: 6px 14px; align-items: center; }
+    @media (min-width: 768px) { .tf-ops-vrow, .tf-ops-vaxis { grid-template-columns: 13.5rem minmax(0, 1fr) 7.5rem; gap: 6px 20px; } }
+    .tf-ops-vrow { padding: 10px 0; border-top: 1px solid var(--tf-hairline); }
+    .tf-ops-vname { grid-column: 1 / -1; min-width: 0; display: flex; flex-direction: column; font-size: 0.8125rem; line-height: 1.25rem; color: var(--tf-text); }
+    .tf-ops-vname small { font: 400 0.75rem/1rem var(--tf-font-mono); color: var(--tf-text-3); overflow-wrap: anywhere; }
+    @media (min-width: 768px) { .tf-ops-vname { grid-column: auto; } }
+    .tf-ops-vaxis { padding-bottom: 6px; font-size: 0.75rem; line-height: 1rem; color: var(--tf-text-3); }
+    .tf-ops-vaxis > .tf-ops-vspacer { display: none; }
+    @media (min-width: 768px) { .tf-ops-vaxis > .tf-ops-vspacer { display: block; } }
+    .tf-ops-vticks { position: relative; height: 16px; margin-right: var(--tf-ops-vgut); font-variant-numeric: tabular-nums; }
+    .tf-ops-vticks > span { position: absolute; top: 0; transform: translateX(-50%); white-space: nowrap; }
+    .tf-ops-vticks > span:first-child { transform: none; }
+    /* A phone's track is short: the quarter ticks keep their gridlines and drop their labels. */
+    @media (max-width: 767px) { .tf-ops-vticks > span:nth-child(2), .tf-ops-vticks > span:nth-child(4) { display: none; } }
+    .tf-ops-vpasshead { text-align: right; line-height: 1rem; }
+    .tf-ops-vbars { position: relative; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+    .tf-ops-vbars::before { content: ''; position: absolute; top: -10px; bottom: -10px; left: 0; right: var(--tf-ops-vgut); border-right: 1px solid var(--tf-hairline); background: repeating-linear-gradient(to right, var(--tf-hairline) 0 1px, transparent 1px 25%); pointer-events: none; }
+    .tf-ops-vlane { position: relative; display: flex; align-items: center; height: 16px; border-radius: 3px; outline: none; }
+    .tf-ops-vlane:focus-visible { box-shadow: 0 0 0 2px var(--tf-focus); }
+    .tf-ops-vtrack { position: relative; display: flex; align-items: center; height: 100%; flex: 0 0 calc(100% - var(--tf-ops-vgut)); }
+    /* Every lane starts at a tick on its baseline, so a measured zero reads as none rather than missing. */
+    .tf-ops-vtrack::before { content: ''; position: absolute; left: 0; top: 3px; bottom: 3px; width: 2px; border-radius: 1px; background: var(--tf-text-3); }
+    .tf-ops-vfill { display: block; height: 8px; width: calc(var(--v) * 100%); border-radius: 0 4px 4px 0; background: var(--c); }
+    .tf-ops-vlane:hover .tf-ops-vfill, .tf-ops-vlane:focus-visible .tf-ops-vfill { filter: brightness(1.18); }
+    .tf-ops-vval { position: absolute; left: calc((100% - var(--tf-ops-vgut)) * var(--v) + 8px); white-space: nowrap; font-size: 0.75rem; line-height: 1rem; color: var(--tf-text-2); font-variant-numeric: tabular-nums; }
+    .tf-ops-vval small { font-size: 0.75rem; color: var(--tf-text-3); }
+    .tf-ops-vpass { text-align: right; display: flex; flex-direction: column; font: 600 0.9375rem/1.25rem var(--tf-font-sans); color: var(--tf-text); font-variant-numeric: tabular-nums; }
+    .tf-ops-vpass small { font: 400 0.75rem/1rem var(--tf-font-sans); color: var(--tf-text-3); }
+    .tf-ops-vpass .tf-icon { display: inline-block; width: 14px; height: 14px; margin-right: 4px; vertical-align: -2px; color: var(--tf-observed-text); }
+    .tf-ops-vgroup { margin: 16px 0 2px; font: 600 0.8125rem/1.25rem var(--tf-font-sans); color: var(--tf-text-2); }
+    .tf-ops-vgroup:first-of-type { margin-top: 4px; }
+    .tf-ops-vgroup small { font-weight: 400; color: var(--tf-text-3); }
     .tf-ops-verdict { display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px; border-radius: var(--tf-radius-md); background: var(--tf-accent-soft); border: 1px solid var(--tf-accent-line); }
     .tf-ops-verdict .tf-icon { width: 20px; height: 20px; color: var(--tf-accent-text); flex-shrink: 0; margin-top: 2px; }
     .tf-ops-verdict p { margin: 0; font-size: 0.9375rem; line-height: 1.375rem; color: var(--tf-text); }
+    .tf-ops-verdict p + p { margin-top: 6px; font-size: var(--tf-fs-small); line-height: 1.25rem; color: var(--tf-text-2); }
 
     @media (prefers-reduced-motion: reduce) {
       .tf-ops-radar-ring, .tf-ops-radar-sweep { animation: none !important; }
@@ -4046,8 +4068,12 @@
     }
 
     // The proof's lead: how often a governed violation landed, per series and
-    // condition, every series on the same 0 to 100% scale. One small chart a
-    // series, never pooled, with each bar named where it is drawn; the table
+    // condition, every series in one figure on one 0 to 100% scale, so the
+    // Threefold lane of every series is read at a glance against the others.
+    // A row a series, never pooled; a lane a condition, named by the legend
+    // and its colour, with its rate at the tip and k of n beside it. The
+    // tests-passed rate with Threefold enforcing, which is what enforcing
+    // cost, is a column of figures of its own, not a second axis. The table
     // after it holds every figure with its interval. A pilot series is left
     // out: it proves the harness, not a rate.
     const CONDITION_ORDER = ['none', 'prompt', 'threefold'];
@@ -4078,24 +4104,75 @@
         const c = shown.map(b => conditionOf(b, name)).find(Boolean);
         return { label: conditionName(c, name), color: CONDITION_COLORS[name] };
       });
-      const multiples = shown.map(b => {
-        const parts = String(b.label || (Array.isArray(b.models) ? b.models.join(', ') : 'Series')).split(' · ');
-        const rows = CONDITION_ORDER.map(name => conditionOf(b, name)).filter(c => c && measured(c.violation)).map(c => ({
-          label: conditionName(c, c.condition),
-          value: html`${pct(c.violation.rate)} <span class="text-gray-500">· ${num(c.violation.k)}/${num(c.violation.n)}</span>`,
-          segments: [{ value: Math.round(c.violation.rate * 1000) / 10, label: '% of runs a violation landed', color: CONDITION_COLORS[c.condition] || T.CATEGORICAL_OTHER }]
-        }));
-        return html`<figure class="tf-ops-multiple">
-          <figcaption class="tf-ops-multiple-title">${parts[0]}${parts.length > 1 ? html`<span class="tf-ops-multiple-sub">${parts.slice(1).join(' · ')}</span>` : ''}</figcaption>
-          ${T.hbars(rows, { max: 100, title: 'Violation landed, ' + (b.label || 'series') })}
-          <div class="tf-ops-scale" aria-hidden="true"><span>0%</span><span>50%</span><span>100%</span></div>
-        </figure>`;
+      const partsOf = b => String(b.label || (Array.isArray(b.models) ? b.models.join(', ') : 'Series')).split(' · ');
+      // The series by family, in the snapshot's order: the family is named
+      // once above its rows, and each row by what differs, agent and model.
+      const families = [];
+      shown.forEach(b => {
+        const parts = partsOf(b);
+        const key = b.family || parts[0];
+        let f = families.find(x => x.key === key);
+        if (!f) families.push(f = { key, name: parts[0], series: [] });
+        f.series.push(b);
       });
-      return card('Did a violation land?', 'The share of runs in which the benchmark\'s own checkers found a governed violation in what the agent left behind, per series, on one scale from 0 to 100%. An empty bar is none.', html`
-        <div class="tf-ops-verdict mb-4">${T.icon('shield', 20)}<p>${verdict}</p></div>
+      // What enforcing cost, from the same snapshot: the tests passed with
+      // Threefold enforcing, family by family.
+      const lower = t => t.charAt(0).toLowerCase() + t.slice(1);
+      const costs = families.map(f => {
+        const done = f.series.map(b => conditionOf(b, 'threefold')).filter(c => c && measured(c.completion)).map(c => c.completion);
+        if (!done.length) return null;
+        const k = done.reduce((n, st) => n + st.k, 0);
+        const n = done.reduce((m, st) => m + st.n, 0);
+        const rates = done.map(st => st.rate);
+        const low = Math.min.apply(null, rates);
+        const high = Math.max.apply(null, rates);
+        return { name: f.name, k, n, all: k === n, spread: low === high ? pct(low) : pct(low).replace('%', '') + '–' + pct(high) };
+      }).filter(Boolean);
+      const short = costs.some(c => !c.all);
+      const cost = costs.length
+        ? html`What it cost: with Threefold enforcing, the tests passed in ${costs.map((c, i) => html`${i ? ', and in ' : ''}${c.all ? html`every run of the ${lower(c.name)} (<strong>${num(c.k)}/${num(c.n)}</strong>)` : html`<strong>${num(c.k)} of ${num(c.n)}</strong> runs of the ${lower(c.name)} (${c.spread} a series)`}`)}${short ? ': where they did not, the agent stopped and reported rather than land the violation' : ''}.`
+        : '';
+      const ticks = [0, 25, 50, 75, 100];
+      const lane = (b, name) => {
+        const c = conditionOf(b, name);
+        if (!c || !measured(c.violation)) return '';
+        const v = c.violation;
+        const color = CONDITION_COLORS[name] || T.CATEGORICAL_OTHER;
+        const said = conditionName(c, name) + ': ' + pct(v.rate) + ', ' + num(v.k) + ' of ' + num(v.n) + ' runs';
+        return html`<div class="tf-ops-vlane" tabindex="0" role="img" aria-label="${partsOf(b).join(', ')}. ${said}" data-tf-tip="${partsOf(b).slice(1).join(' · ') || partsOf(b)[0]} · ${conditionName(c, name)}" data-tf-tip-value="${pct(v.rate)} · ${num(v.k)}/${num(v.n)} runs" data-tf-tip-color="${color}" style="--v:${Math.max(0, Math.min(1, v.rate))};--c:${color}">
+          <span class="tf-ops-vtrack"><span class="tf-ops-vfill"></span></span>
+          <span class="tf-ops-vval" aria-hidden="true">${pct(v.rate)} <small>${num(v.k)}/${num(v.n)}</small></span>
+        </div>`;
+      };
+      const passCell = b => {
+        const c = conditionOf(b, 'threefold');
+        if (!c || !measured(c.completion)) return html`<span class="tf-ops-vpass"><small>not measured</small></span>`;
+        const st = c.completion;
+        // A run whose tests did not pass is what enforcing cost: marked with
+        // an icon, the figure itself in the text's own colour.
+        return html`<span class="tf-ops-vpass" data-short="${st.k < st.n ? 'true' : 'false'}"${st.k < st.n ? raw(' title="Some runs stopped and reported rather than land the violation"') : ''}><span>${st.k < st.n ? T.icon('alert', 14) : ''}${pct(st.rate)}</span><small>${num(st.k)}/${num(st.n)} runs</small></span>`;
+      };
+      const figure = html`<figure class="tf-ops-vchart" aria-label="Violation landed, per series and condition, on one scale from 0 to 100%">
+          <div class="tf-ops-vaxis" aria-hidden="true">
+            <span class="tf-ops-vspacer"></span>
+            <span class="tf-ops-vticks">${ticks.map(t => html`<span style="left:${t}%">${t}%</span>`)}</span>
+            <span class="tf-ops-vpasshead">Tests passed, Threefold</span>
+          </div>
+          ${families.map(f => html`<p class="tf-ops-vgroup">${f.name}</p>
+            ${f.series.map(b => {
+              const parts = partsOf(b);
+              return html`<div class="tf-ops-vrow" data-proof-row>
+                <span class="tf-ops-vname">${parts[1] || parts[0]}${parts.length > 2 ? html`<small>${parts.slice(2).join(' · ')}</small>` : ''}</span>
+                <div class="tf-ops-vbars">${CONDITION_ORDER.map(name => lane(b, name))}</div>
+                ${passCell(b)}
+              </div>`;
+            })}`)}
+        </figure>`;
+      return card('Did a violation land?', 'The share of runs in which the benchmark\'s own checkers found a governed violation in what the agent left behind, every series on one scale from 0 to 100%. A lane at its baseline tick is none.', html`
+        <div class="tf-ops-verdict mb-4">${T.icon('shield', 20)}<div class="min-w-0"><p>${verdict}</p>${cost ? html`<p data-proof="cost">${cost}</p>` : ''}</div></div>
         <div class="mb-3">${T.legend(legendKeys)}</div>
-        <div class="tf-ops-multiples">${multiples}</div>
-        <p class="text-xs text-gray-500 mt-3">Each bar is k of n runs of one series under one condition; the table below gives every figure with its 95% interval, and each series' own card follows it.</p>`, 'min-w-0');
+        ${figure}
+        <p class="text-xs text-gray-500 mt-3">Each lane is k of n runs of one series under one condition; the table below gives every figure with its 95% interval, and each series' own card follows it.</p>`, 'min-w-0');
     }
 
     function benchmarkCards(proof) {
