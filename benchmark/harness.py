@@ -9,6 +9,15 @@ A run is one task under one condition, in a fresh copy of the task's template:
                        repository's own source for this run alone
     prompt+threefold   both (not in the default matrix)
 
+The Threefold conditions can instead report to a Threefold that is already
+running elsewhere, a remote endpoint (RemoteThreefold): nothing is started, the
+hook in the task repository names that endpoint, a project `Acme-Live-<task>`
+and a session `live-<task>-<date>`, and what the run left in that Threefold's
+ledger is read back through its public API (GET /api/decisions) instead of
+from a local server. That is how a daily real agent puts its session on the
+public demo's ledger (scripts/daily_live_agent.py). The endpoint must be https,
+or http to this machine for a stand-in; nothing else about a run changes.
+
 The agent is Claude Code (`claude -p`) or Codex (`codex exec`, see
 codex_agent.py). For Codex the prompt condition writes the rules to AGENTS.md
 and the Threefold condition registers the hook in `.codex/hooks.json`, both
@@ -58,6 +67,7 @@ import tempfile
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections import Counter
 from dataclasses import dataclass, field
@@ -615,6 +625,256 @@ class LocalServer:
             self._log = None
 
 
+# --- a remote Threefold --------------------------------------------------------------
+
+# Where a stand-in for a remote Threefold may listen over plain http: this
+# machine and nowhere else. An agent's calls never cross a network unencrypted.
+LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+# The stack's default AllowedProjectPattern: a name outside it is stored as
+# `unlabelled`, and a live run's project must be readable on the public pages.
+PROJECT_PATTERN = re.compile(r"^Acme-[A-Za-z0-9-]{1,40}$")
+_DAY_SHAPE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+# How much of one answer from a remote Threefold is read, and how many pages
+# of its ledger: bounded, so a server that never stops answering cannot hold
+# a run, and a read that stops at the bound says it is incomplete.
+MAX_REMOTE_BYTES = 8 * 1024 * 1024
+MAX_LEDGER_PAGES = 20
+LEDGER_PAGE_LIMIT = 200
+# A run near midnight UTC writes on two days; the session name makes the read exact whatever the window.
+LEDGER_DAYS = 2
+
+
+def remote_endpoint(url: Any, allow_loopback_http: bool = True) -> str:
+    """The base URL of a remote Threefold, checked and ending with a slash, or ValueError.
+
+    https to any host, or http to this machine only (a stand-in for tests).
+    No user name or password, query or fragment, and nothing but printable
+    characters. The path is kept, so an API URL with its stage (`/prod/`)
+    stays one.
+    """
+    text = str(url or "").strip()
+    if not text or any(character.isspace() or ord(character) < 32 or ord(character) == 127 for character in text):
+        raise ValueError("the endpoint must be a URL with no spaces or control characters")
+    parts = urllib.parse.urlsplit(text)
+    scheme = parts.scheme.lower()
+    if scheme not in ("https", "http"):
+        raise ValueError("the endpoint must be an https URL")
+    if "@" in parts.netloc:
+        raise ValueError("the endpoint must not carry a user name or password")
+    if parts.query or parts.fragment or "?" in text or "#" in text:
+        raise ValueError("the endpoint must not carry a query or a fragment")
+    host = (parts.hostname or "").lower()
+    if not host:
+        raise ValueError("the endpoint has no host")
+    try:
+        parts.port
+    except ValueError:
+        raise ValueError("the endpoint's port is not a number") from None
+    if scheme == "http" and not (allow_loopback_http and host in LOOPBACK_HOSTS):
+        raise ValueError("the endpoint must be https (plain http is accepted only for a stand-in on this machine)"
+                         if allow_loopback_http else "the endpoint must be https")
+    path = parts.path or "/"
+    if not path.endswith("/"):
+        path += "/"
+    return urllib.parse.urlunsplit((scheme, parts.netloc.lower(), path, "", ""))
+
+
+def live_project(task_id: str) -> str:
+    """The project a live run reports as, `Acme-Live-<task>`, or ValueError when the stack would not show that name."""
+    name = f"Acme-Live-{task_id}"
+    if not PROJECT_PATTERN.match(name):
+        raise ValueError(f"{name} does not fit the stack's project pattern {PROJECT_PATTERN.pattern}")
+    return name
+
+
+@dataclass(frozen=True)
+class RemoteThreefold:
+    """A Threefold already running elsewhere, which the Threefold conditions report to instead of a local server.
+
+    `date` is the UTC day the run belongs to, YYYY-MM-DD, and names its
+    session. `ledger_wait_s` is how long to wait before reading the ledger
+    again when a run's governed calls are not in it yet: the store behind a
+    public stack may answer a read made a moment after a write without it.
+    """
+
+    endpoint: str
+    date: str
+    ledger_wait_s: float = 5.0
+    ledger_rereads: int = 3
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "endpoint", remote_endpoint(self.endpoint))
+        if not _DAY_SHAPE.match(str(self.date)):
+            raise ValueError("the date must be YYYY-MM-DD")
+        datetime.date.fromisoformat(self.date)
+
+    def project(self, task: Task) -> str:
+        return live_project(task.id)
+
+    def session(self, task: Task, rep: int = 1, attempt: int = 1) -> str:
+        """`live-<task>-<date>`; a later repetition or attempt is a session of its own, so no two runs share one."""
+        name = f"live-{task.id}-{self.date}"
+        if rep > 1:
+            name += f"-r{rep}"
+        if attempt > 1:
+            name += f"-a{attempt}"
+        return name
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Answers a redirect with its own status instead of following it: a read goes to the endpoint given or nowhere."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: D401 - urllib's signature
+        return None
+
+
+def _remote_opener(url: str) -> urllib.request.OpenerDirector:
+    handlers: List[Any] = [_NoRedirect()]
+    if (urllib.parse.urlsplit(url).hostname or "").lower() in LOOPBACK_HOSTS:
+        handlers.append(urllib.request.ProxyHandler({}))
+    return urllib.request.build_opener(*handlers)
+
+
+def remote_json(url: str, timeout: float = 15.0) -> Tuple[int, Any]:
+    """GET a JSON answer from a remote Threefold, never following a redirect, with the size read bounded."""
+    try:
+        with _remote_opener(url).open(url, timeout=timeout) as response:
+            raw = response.read(MAX_REMOTE_BYTES + 1)
+            if len(raw) > MAX_REMOTE_BYTES:
+                return response.status, None
+            return response.status, json.loads(raw.decode("utf-8") or "null")
+    except urllib.error.HTTPError as error:
+        return error.code, None
+    except (urllib.error.URLError, OSError, ValueError):
+        return 0, None
+
+
+def _is_refusal(row: Mapping[str, Any]) -> bool:
+    return str(row.get("status") or "").upper().startswith("BLOCKED")
+
+
+def summarise_decisions(rows: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
+    """What a run's rows in a ledger add up to, in the local ledger's terms plus what only a remote one can say.
+
+    A refusal is a row whose status is BLOCKED*; a call that ran although a
+    rule would have refused it (the stage was Observe, or the rule observes)
+    is `would_refuse`, never counted as a refusal. `stages` is the stage each
+    call was judged under, as the ledger recorded it.
+    """
+    refused = [row for row in rows if _is_refusal(row)]
+    flagged = [row for row in rows if not _is_refusal(row) and str(row.get("rule_key") or "NONE") != "NONE"]
+    return {
+        "decisions": len(rows),
+        "refused": len(refused),
+        "would_refuse": len(flagged),
+        "approved": len(rows) - len(refused) - len(flagged),
+        "by_category": dict(Counter(str(row.get("category") or "OTHER") for row in refused)),
+        "by_rule": dict(Counter(str(row.get("rule") or "UNKNOWN") for row in refused)),
+        "by_rule_key": dict(Counter(str(row.get("rule_key")) for row in refused + flagged)),
+        "stages": dict(Counter(str(row.get("stage") or "unknown") for row in rows)),
+        "sessions": len({str(row.get("session_id")) for row in rows}),
+    }
+
+
+class RemoteServer:
+    """The remote Threefold a run's hook reports to. Nothing is started or stopped; its ledger is read back over its API.
+
+    It has LocalServer's shape, so a run treats both alike: `start` only checks
+    that the endpoint answers GET status (no agent is started against an
+    endpoint that is down), and `ledger` reads GET /api/decisions for this
+    run's project and session alone, page by page, as the public pages do.
+    Every request is built from the endpoint given, and a redirect is never
+    followed.
+    """
+
+    def __init__(self, endpoint: str, project: str, session: str, wait_s: float = 5.0, rereads: int = 3,
+                 sleep: Any = time.sleep) -> None:
+        self._endpoint = remote_endpoint(endpoint)
+        self.project = project
+        self.session = session
+        self.wait_s = wait_s
+        self.rereads = rereads
+        self._sleep = sleep
+
+    @property
+    def endpoint(self) -> str:
+        return self._endpoint
+
+    def start(self, base: Optional[Mapping[str, str]] = None, wait_s: float = 30.0) -> None:
+        status, _ = remote_json(self.endpoint + "status", timeout=min(wait_s, 20.0))
+        if status != 200:
+            raise RuntimeError(f"the remote Threefold at {self.endpoint} answered GET status with "
+                               f"{status or 'nothing'}, so no agent was started")
+
+    def healthy(self) -> bool:
+        return remote_json(self.endpoint + "status", timeout=15.0)[0] == 200
+
+    def decisions_url(self, cursor: Optional[str] = None) -> str:
+        query = {"project": self.project, "session": self.session, "days": str(LEDGER_DAYS),
+                 "limit": str(LEDGER_PAGE_LIMIT)}
+        if cursor:
+            query["cursor"] = cursor
+        return self.endpoint + "api/decisions?" + urllib.parse.urlencode(query)
+
+    def _read(self) -> Dict[str, Any]:
+        rows: List[Mapping[str, Any]] = []
+        cursor: Optional[str] = None
+        for page in range(1, MAX_LEDGER_PAGES + 1):
+            status, document = remote_json(self.decisions_url(cursor))
+            items = document.get("items") if isinstance(document, dict) else None
+            if status != 200 or not isinstance(items, list):
+                return {"source": "remote", "reachable": False, "status": status,
+                        "project": self.project, "session": self.session}
+            # Filtered here too: only this run's rows count, whatever a server sends.
+            rows += [item for item in items if isinstance(item, dict) and item.get("session_id") == self.session
+                     and item.get("project_name") == self.project]
+            cursor = document.get("next_cursor")
+            if not cursor or not isinstance(cursor, str):
+                return {"source": "remote", "reachable": True, "complete": True, "pages": page,
+                        "project": self.project, "session": self.session, **summarise_decisions(rows)}
+        return {"source": "remote", "reachable": True, "complete": False, "pages": MAX_LEDGER_PAGES,
+                "project": self.project, "session": self.session, **summarise_decisions(rows)}
+
+    def ledger(self, wait_for_rows: bool = False) -> Dict[str, Any]:
+        """What the remote ledger holds for this run. With wait_for_rows, an empty answer is read again after a pause."""
+        found = self._read()
+        for _ in range(self.rereads if wait_for_rows else 0):
+            if not found.get("reachable") or found.get("decisions"):
+                break
+            self._sleep(self.wait_s)
+            found = self._read()
+        return found
+
+    def stop(self) -> None:
+        """Nothing to stop: the remote Threefold is not this run's."""
+
+
+def read_threefold_config(repo: Path) -> Optional[Dict[str, Any]]:
+    """The task repository's .threefold.json, or None when it is missing or not a JSON object."""
+    try:
+        document = json.loads((Path(repo) / ".threefold.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return document if isinstance(document, dict) else None
+
+
+def cached_stage(run_dir: Path) -> Optional[str]:
+    """The project stage the hook last saw in a response, from its cache in the run's THREEFOLD_HOME, or None.
+
+    A second witness beside the ledger's rows: it survives a ledger that could
+    not be read. The run's THREEFOLD_HOME holds one project's cache at most.
+    """
+    stages = set()
+    for path in sorted((Path(run_dir) / "threefold-home" / "stage").glob("*.json")):
+        try:
+            document = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(document, dict) and document.get("stage") in ("observe", "enforce"):
+            stages.add(document["stage"])
+    return "/".join(sorted(stages)) or None
+
+
 # --- preparing a repository --------------------------------------------------------
 
 def git(repo: Path, *args: str, env: Optional[Mapping[str, str]] = None) -> subprocess.CompletedProcess:
@@ -676,8 +936,13 @@ def copy_hook(work_root: Path) -> Path:
 HOOK_LOG_NAME = "hook-calls.jsonl"
 
 
-def write_hook_wrapper(run_dir: Path, hook: Path, agent: str = "claude-code") -> Path:
-    """The per-run wrapper the agent runs as its hook: the hook's state kept inside the run, and each call logged."""
+def write_hook_wrapper(run_dir: Path, hook: Path, agent: str = "claude-code", session: Optional[str] = None) -> Path:
+    """The per-run wrapper the agent runs as its hook: the hook's state kept inside the run, and each call logged.
+
+    With `session`, every call is sent under that session name instead of the
+    agent's own session id: a live run's calls then sit on a remote ledger as
+    `live-<task>-<date>`, which a reader can find and the run can read back.
+    """
     run_bin = Path(run_dir) / "bin"
     run_bin.mkdir(parents=True, exist_ok=True)
     for folder in ("threefold-home", "home"):
@@ -691,13 +956,15 @@ def write_hook_wrapper(run_dir: Path, hook: Path, agent: str = "claude-code") ->
         token_env=TOKEN_ENV,
         log=forward(Path(run_dir) / HOOK_LOG_NAME),
         kinds=json.dumps([[kind, list(phrases)] for kind, phrases in REFUSAL_KINDS]),
+        session=json.dumps(session or ""),
     ), encoding="utf-8")
     return wrapper
 
 
 def install_hook(task: Task, repo: Path, run_dir: Path, work_root: Path, endpoint: str, python: str = sys.executable,
-                 agent: str = "claude-code") -> Dict[str, str]:
-    """Installs the hook the way the installer would, pointed at this run's local server.
+                 agent: str = "claude-code", project: Optional[str] = None,
+                 session: Optional[str] = None) -> Dict[str, str]:
+    """Installs the hook the way the installer would, pointed at this run's local server or its remote Threefold.
 
     The hook file is copied once into the work root and run from there, never
     from this repository. Each run gets a small wrapper that pins the hook's
@@ -709,9 +976,13 @@ def install_hook(task: Task, repo: Path, run_dir: Path, work_root: Path, endpoin
     and matcher from its AGENT_SETTINGS, the entry shape of its plan_install,
     and its dump_json. Only the command differs, for both agents: it runs the
     per-run wrapper instead of the owner's installed copy.
+
+    `project` replaces the benchmark's own project name (`Acme-Bench-<task>`)
+    and `session` the agent's session id, for a run that reports to a remote
+    Threefold.
     """
     hook_copy = copy_hook(work_root)
-    wrapper = write_hook_wrapper(run_dir, hook_copy, agent)
+    wrapper = write_hook_wrapper(run_dir, hook_copy, agent, session)
     command = f"{quoted(python)} {quoted(wrapper)}"
     if agent == "codex":
         relative = CODEX_HOOK_FILE
@@ -730,7 +1001,7 @@ def install_hook(task: Task, repo: Path, run_dir: Path, work_root: Path, endpoin
     target = Path(repo) / relative
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(text, encoding="utf-8")
-    config = {"project": task.project_name, "endpoint": endpoint, "mode": "enforce"}
+    config = {"project": project or task.project_name, "endpoint": endpoint, "mode": "enforce"}
     (Path(repo) / ".threefold.json").write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
     exclude = Path(repo) / ".git" / "info" / "exclude"
     exclude.parent.mkdir(parents=True, exist_ok=True)
@@ -755,6 +1026,10 @@ let the call through unjudged, and whether it crashed. Codex prints no hook
 events of its own, so for Codex this log is the evidence that the hook ran,
 and the record of a refusal that never reached the server, such as a
 credential refused on the machine.
+
+When the run names a session (a run reporting to a remote Threefold), the
+call the agent hands over is sent under that session instead of the agent's
+own id; anything that is not a JSON object is passed on untouched.
 """
 import io
 import json
@@ -771,6 +1046,19 @@ os.environ["HOME"] = os.environ["USERPROFILE"] = "{home}"
 os.environ["THREEFOLD_TIMEOUT"] = "10"
 sys.argv = ["{hook}", "--agent", "{agent}"]
 _KINDS = {kinds}
+_SESSION = {session}
+if _SESSION:
+    _raw = sys.stdin.buffer.read()
+    try:
+        _call = json.loads(_raw.decode("utf-8"))
+    except ValueError:
+        _call = None
+    if isinstance(_call, dict):
+        _call["session_id"] = _SESSION
+        if "conversationId" in _call:
+            _call["conversationId"] = _SESSION
+        _raw = json.dumps(_call).encode("utf-8")
+    sys.stdin = io.TextIOWrapper(io.BytesIO(_raw), encoding="utf-8")
 
 
 def _refused(printed):
@@ -1227,6 +1515,13 @@ GOVERNED_TOOLS = frozenset({"Write", "Edit", "MultiEdit", "NotebookEdit", "Bash"
 GOVERNED_BY_AGENT = {"claude-code": GOVERNED_TOOLS, "scripted": GOVERNED_TOOLS, "codex": codex_agent.GOVERNED_ITEMS}
 
 
+def governed_calls(metrics: Mapping[str, Any], agent: str = "claude-code") -> int:
+    """How many of the agent's calls the hook governs, counted by the agent's own names (a floor for Codex)."""
+    tool_uses = metrics.get("tool_uses") or {}
+    governed_names = GOVERNED_BY_AGENT.get(normalise_agent(agent), GOVERNED_TOOLS)
+    return sum(count for name, count in tool_uses.items() if name in governed_names)
+
+
 def hook_check(condition: str, metrics: Mapping[str, Any], ledger: Optional[Mapping[str, Any]],
                agent: str = "claude-code") -> Dict[str, Any]:
     """Whether the Threefold hook demonstrably ran in a run that should have had it.
@@ -1261,9 +1556,7 @@ def hook_check(condition: str, metrics: Mapping[str, Any], ledger: Optional[Mapp
     """
     if not uses_threefold(condition):
         return {"hook_fired": None, "hook_missing": False, "governed_calls": None, "governance_observed": None}
-    tool_uses = metrics.get("tool_uses") or {}
-    governed_names = GOVERNED_BY_AGENT.get(normalise_agent(agent), GOVERNED_TOOLS)
-    governed = sum(count for name, count in tool_uses.items() if name in governed_names)
+    governed = governed_calls(metrics, agent)
     decisions = int((ledger or {}).get("decisions") or 0)
     observed = decisions > 0 or int(metrics.get("hook_refusals") or 0) > 0
     fired = observed or sum((metrics.get("hook_events") or {}).values()) > 0
@@ -1278,22 +1571,45 @@ def governance_problem(condition: str, row: Mapping[str, Any]) -> Optional[str]:
     crashes, it prints nothing and the call goes ahead. A run where that
     happened is partly a run with no guidance, so it cannot stand for
     Threefold enforcing.
+
+    A run against a remote Threefold has two more ways to fall short. The
+    remote stack decides by the project's stage, and a project it holds in
+    Observe has every call recorded and none refused: such a run measured
+    Threefold watching, not enforcing, whatever the hook was told. And the
+    repository's .threefold.json must still name the endpoint and project the
+    run was given when the agent stops, or some calls may have gone elsewhere.
     """
     if not uses_threefold(condition):
         return None
     ledger = row.get("ledger") or {}
+    remote = row.get("ledger_source") == "remote"
+    server = "the remote Threefold" if remote else "the local Threefold server"
     if row.get("server_healthy_after") is False:
-        return "the local Threefold server was not answering when the agent stopped"
+        return f"{server} was not answering when the agent stopped"
     if not ledger.get("reachable"):
-        return "the local Threefold server's ledger could not be read when the agent stopped"
+        return f"{server}'s ledger could not be read when the agent stopped"
+    if remote and ledger.get("complete") is False:
+        return (f"the remote ledger was not read to the end ({ledger.get('pages')} pages), so this run's decisions "
+                "are not all known")
+    if remote and row.get("threefold_config_intact") is False:
+        return ("the repository's .threefold.json no longer named the endpoint and project the run was given when "
+                "the agent stopped")
     if int(row.get("hook_unjudged") or 0):
-        return (f"the hook could not reach the local server for {row['hook_unjudged']} call(s) and let them through "
+        where = "the remote Threefold" if remote else "the local server"
+        return (f"the hook could not reach {where} for {row['hook_unjudged']} call(s) and let them through "
                 "(it fails open)")
     if int(row.get("hook_errors") or 0):
         return f"the hook failed {row['hook_errors']} time(s), letting those calls through"
+    if remote:
+        observed = int((ledger.get("stages") or {}).get("observe") or 0)
+        if observed or (not ledger.get("decisions") and row.get("project_stage_cached") == "observe"):
+            counted = f"{observed} of this run's {ledger.get('decisions')} call(s)" if observed else "this run's calls"
+            return (f"the remote Threefold judged {counted} in Observe (the project {ledger.get('project')} is not "
+                    "promoted there), so it recorded what it would have refused and refused nothing: this run did "
+                    "not measure Threefold enforcing")
     if int(row.get("governed_calls") or 0) and not row.get("governance_observed") and row.get("hook_fired"):
         return (f"the hook ran on the agent's {row['governed_calls']} governed call(s), but no decision reached the "
-                "ledger and nothing was refused")
+                f"{'remote ' if remote else ''}ledger and nothing was refused")
     return None
 
 
@@ -1631,6 +1947,9 @@ class RunPlan:
     # The Claude Code login token (credentials.Credential), or None for the
     # machine's login. Never printed: its repr hides the token.
     credential: Any = field(default=None, repr=False)
+    # A Threefold running elsewhere for the Threefold conditions to report to,
+    # or None for a local server started for each run.
+    remote: Optional[RemoteThreefold] = None
 
     @property
     def auth(self) -> str:
@@ -1681,6 +2000,11 @@ def recorded_model(options: AgentOptions) -> str:
     if options.agent == "codex":
         return options.model or "codex-default"
     return options.model or DEFAULT_MODEL
+
+
+def _names(config: Optional[Mapping[str, Any]], endpoint: str, project: Optional[str]) -> bool:
+    """Whether a .threefold.json names exactly this endpoint and project."""
+    return bool(config) and config.get("endpoint") == endpoint and config.get("project") == project
 
 
 def read_agent_transcript(options: AgentOptions, run_dir: Path, condition: str) -> Dict[str, Any]:
@@ -1736,19 +2060,35 @@ def run_one(task: Task, condition: str, rep: int, plan: RunPlan, base_env: Optio
     if options.agent == "codex":
         # Codex has no turn or budget cap of its own; the harness's timeout is the only limit.
         row["harness"].update({"max_turns": None, "budget_usd": None, "codex_sandbox": options.codex_sandbox})
-    server: Optional[LocalServer] = None
+    remote = plan.remote if uses_threefold(condition) else None
+    project = session = None
+    if uses_threefold(condition):
+        # Which Threefold judged the run, and where its ledger was read: a remote one is named, a local one is
+        # this run's own and gone when it ends.
+        row["ledger_source"] = "remote" if remote else "local"
+    server: Any = None
     started = time.monotonic()
     try:
+        if remote is not None:
+            project, session = remote.project(task), remote.session(task, rep, attempt)
+            row.update({"threefold_endpoint": remote.endpoint, "threefold_project": project,
+                        "threefold_session": session})
         run_dir.mkdir(parents=True, exist_ok=False)
         prepare_repository(task, condition, repo, options.agent)
         env = agent_environment(base_env, run_dir, options.isolation, credential, options.agent, options.codex_home)
         if uses_threefold(condition):
-            server = LocalServer(run_dir, python=options.python)
+            if remote is not None:
+                server = RemoteServer(remote.endpoint, project, session, remote.ledger_wait_s, remote.ledger_rereads)
+            else:
+                server = LocalServer(run_dir, python=options.python)
             server.start(base_env)
             installed = install_hook(task, repo, run_dir, plan.work_root, server.endpoint, python=options.python,
-                                     agent="codex" if options.agent == "codex" else "claude-code")
+                                     agent="codex" if options.agent == "codex" else "claude-code",
+                                     project=project, session=session)
             row["hook_sha256"] = installed["hook_sha256"]
             row["hook_file"] = installed["hook_file"]
+            if remote is not None and not _names(read_threefold_config(repo), remote.endpoint, project):
+                raise RuntimeError("the repository's .threefold.json does not name the endpoint and project given")
         settings_file = write_agent_settings(run_dir, plan.home, private_files) if options.agent != "codex" else None
         command = build_agent_command(options, task, settings_file, plan.home, repo=repo, private_files=private_files)
         code, timed_out, seconds = run_agent(
@@ -1757,7 +2097,12 @@ def run_one(task: Task, condition: str, rep: int, plan: RunPlan, base_env: Optio
         row.update({"agent_exit_code": code, "agent_timed_out": timed_out, "wall_seconds": round(seconds, 1)})
         row.update(agent_metrics(read_agent_transcript(options, run_dir, condition), sanitise, timed_out, options.timeout_s))
         explain_ending(row, run_dir / "agent-stderr.txt", sanitise)
-        if server is not None:
+        if remote is not None:
+            row["server_healthy_after"] = server.healthy()
+            row["threefold_config_intact"] = _names(read_threefold_config(repo), remote.endpoint, project)
+            row["project_stage_cached"] = cached_stage(run_dir)
+            row["ledger"] = server.ledger(wait_for_rows=governed_calls(row, options.agent) > 0)
+        elif server is not None:
             row["server_healthy_after"] = server.healthy()
             row["ledger"] = server.ledger()
         else:

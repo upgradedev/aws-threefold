@@ -188,11 +188,39 @@ def _governance_problem(row: Mapping[str, Any]) -> Optional[str]:
                 f"{AGENT_LABELS.get(agent_of(row), 'the agent')} did not load it, so this run did not measure Threefold")
     if row.get("governance_problem"):
         return str(row["governance_problem"])
+    server = "the remote Threefold" if row.get("ledger_source") == "remote" else "the local Threefold server"
     if row.get("server_healthy_after") is False:
-        return "the local Threefold server was not answering when the agent stopped"
+        return f"{server} was not answering when the agent stopped"
     if isinstance(row.get("ledger"), dict) and row["ledger"].get("reachable") is False:
-        return "the local Threefold server's ledger could not be read when the agent stopped"
+        return f"{server}'s ledger could not be read when the agent stopped"
     return None
+
+
+def ledger_source(row: Mapping[str, Any]) -> str:
+    """Where a Threefold row's ledger was: `remote` for a run against a Threefold already running, `local` otherwise."""
+    return "remote" if row.get("ledger_source") == "remote" else "local"
+
+
+def mixed_ledger_problem(rows: Sequence[Mapping[str, Any]]) -> Optional[str]:
+    """Why these rows must not make one report, or None: one agent's Threefold rows of one family from two places.
+
+    A run against a remote Threefold (a daily live run on the public stack) is
+    judged by whatever stage that stack holds its project in, and is one run
+    on one day; the matrix's Threefold rows come from a local server started
+    for each run, in enforce. The two measure different things, so one agent's
+    rates of one family never pool them. The scripted stand-in never enters a
+    rate, so its rows do not matter here.
+    """
+    sources: Dict[Tuple[str, str], Counter] = {}
+    for row in latest_rows(rows)[0]:
+        if not is_scripted(row) and _uses_threefold(row):
+            sources.setdefault((agent_of(row), family_of(row)), Counter())[ledger_source(row)] += 1
+    mixed = [f"the {AGENT_LABELS.get(agent, agent)}{'' if family == 'standard' else f' {family}-family'} Threefold rows "
+             f"hold {counts['remote']} run(s) against a remote Threefold and {counts['local']} against a local server"
+             for (agent, family), counts in sources.items() if len(counts) > 1]
+    if not mixed:
+        return None
+    return "; ".join(mixed) + ". Report the live rows (benchmark/results/live/) and the matrix's separately"
 
 
 def is_valid(row: Mapping[str, Any]) -> bool:
@@ -1032,9 +1060,11 @@ def build_summary(rows: Sequence[Mapping[str, Any]], sources: Sequence[str],
     own rows and sits in its own block. Rates are fractions from 0 to 1, None
     where there is nothing to divide by; every field is described in
     benchmark/README.md. Rows that mix one agent's pilot with its other runs
-    of the same family are refused (mixed_pilot_problem).
+    of the same family are refused (mixed_pilot_problem), and so are one
+    agent's Threefold rows of one family from a remote Threefold and a local
+    server together (mixed_ledger_problem).
     """
-    problem = mixed_pilot_problem(rows)
+    problem = mixed_pilot_problem(rows) or mixed_ledger_problem(rows)
     if problem:
         raise ValueError(problem)
     summary = aggregate(rows)
@@ -1070,7 +1100,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                         help="default: <first results file without .jsonl>-summary.json, beside it")
     args = parser.parse_args(argv)
     rows = load_rows(args.results)
-    problem = mixed_pilot_problem(rows)
+    problem = mixed_pilot_problem(rows) or mixed_ledger_problem(rows)
     if problem:
         print(f"refused: {problem}.", file=sys.stderr)
         return 2
