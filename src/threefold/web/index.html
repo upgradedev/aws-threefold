@@ -44,7 +44,7 @@
 
     .tf-sec-head { display: flex; flex-direction: column; gap: var(--tf-space-1h); max-width: 48rem; margin-bottom: var(--tf-space-4); }
     .tf-sec-head .tf-eyebrow { margin: 0; }
-    .tf-sec-lede { margin: 0; font-size: var(--tf-fs-lede); line-height: var(--tf-lh-lede); color: var(--tf-text-2); }
+    .tf-sec-lede { margin: 0; font-size: var(--tf-fs-lede); line-height: var(--tf-lh-lede); color: var(--tf-text-2); text-wrap: pretty; }
     .tf-sec-row { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: var(--tf-space-2); margin-bottom: var(--tf-space-4); }
     .tf-sec-row .tf-sec-head { margin-bottom: 0; }
 
@@ -141,6 +141,7 @@
       /* The recorded label says more than the title, and there is room for one;
          the title still names the figure for a screen reader. */
       .tf-demo[data-source="recorded"] .tf-demo-title { display: none; }
+      .tf-demo[data-source="recorded"] .tf-demo-bar > .tf-chip { margin-left: 0; }
     }
     .tf-demo-body { display: flex; flex-direction: column; gap: var(--tf-demo-gap); padding: 12px 14px 14px; }
     @media (min-width: 640px) { .tf-demo-body { padding: 18px 20px; } }
@@ -2272,10 +2273,14 @@
     // From a replay, the one way on: Scenario 3 sends the same call. The
     // stack is checked again first, because the scenarios ask it only when
     // the last check found it answering, and a replay means it did not; the
-    // result panel then comes into view under the header, and focus goes to
-    // the scenario's own button, so the keyboard carries on from there.
+    // result panel is then brought under the header at once, as a link's
+    // target is, since a glide down the whole page is too far to follow, and
+    // focus goes to the scenario's own button, so the keyboard carries on
+    // from there.
     async function askAgainInScenario() {
       await checkApiHealth();
+      const panel = document.getElementById('result-panel');
+      if (panel && typeof panel.scrollIntoView === 'function') panel.scrollIntoView({ block: 'start' });
       const button = document.getElementById('scenario-boundary');
       if (button && typeof button.focus === 'function') {
         try { button.focus({ preventScroll: true }); } catch (err) { /* focus is a courtesy */ }

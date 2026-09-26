@@ -722,8 +722,8 @@ def test_asking_again_from_a_replay_checks_the_stack_and_runs_scenario_three(tmp
     assert out["asked"][:2] == ["GET /status", "POST /evaluate-tool-call"], "The stack is checked, then asked"
     assert out["prevented"] and out["focused"] == {"preventScroll": True}, "Focus moves to Scenario 3 without a jump of its own"
     assert out["pressed"] == "true" and out["tag"] == "BLOCKED_BOUNDARY_VIOLATION" and "Move boto3 out of the domain" in out["scenarioFix"]
-    assert out["scrolled"] == [{"behavior": "auto", "block": "start"}] or out["scrolled"] == [{"behavior": "smooth", "block": "start"}], \
-        "The result comes into view"
+    assert out["scrolled"] and out["scrolled"][0] == {"block": "start"}, \
+        "The result is brought under the header at once, as a link's target is: a glide down the whole page is too far to follow"
     assert out["otherClickPrevented"] is False, "Any other click in the fix box is left alone"
     style = _style()
     assert ".tf-landing > section, .tf-scenario { scroll-margin-top: calc(var(--tf-header-h) + 16px); }" in style, \
