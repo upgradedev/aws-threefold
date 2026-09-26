@@ -3,16 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Threefold — Autonomous Coding Agent Governance & Cost Circuit-Breaker</title>
-  <!-- Tailwind CSS via CDN, pinned to an exact version: an unpinned major is a
-       script that can change under a page that did not change, and it runs on the
-       same origin as the operator key this browser may hold. No integrity hash: the
-       Play CDN answers with no Access-Control-Allow-Origin header, so a browser
-       would refuse a script carrying one and the page would lose every style. -->
-  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
-  <!-- The layer every page shares: the navigation, the sign-in and the API base. -->
-  <link rel="stylesheet" href="assets/threefold.css" />
-  <script src="assets/threefold.js"></script>
+  <title>Threefold — Stop bad agent writes before they reach your code</title>
+  <meta name="description" content="Threefold governs Claude Code, Codex and Antigravity: a hook asks before every write or command, deterministic gates on AWS decide, and every project observes before it enforces." />
   <script>
       // The server rewrites __THREEFOLD_BASE_PATH__ to the API Gateway stage prefix
       // when it serves this page, so the base is exact rather than guessed from the
@@ -27,361 +19,818 @@
       const PAGE_BASE = SERVED_BASE_PATH.indexOf("THREEFOLD_BASE_PATH") !== -1
         ? ""
         : location.origin + SERVED_BASE_PATH + "/";
+  </script>
+  <!-- The layer every page shares: the design system, the shell, the sign-in
+       and the API base. This page needs nothing else: no utility framework, so
+       every piece below reads the design system's tokens. -->
+  <link rel="stylesheet" href="assets/threefold.css" />
+  <script src="assets/threefold.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
-    tailwind.config = {
-      darkMode: 'class',
-      theme: {
-        extend: {
-          colors: {
-            brand: {
-              50: '#f5f3ff',
-              500: '#8b5cf6',
-              900: '#4c1d95',
-              dark: '#0a0d18',
-              card: '#111528',
-              border: '#1e243d'
-            }
-          }
-        }
+    /* The first screen's own pieces. Everything they stand on (tokens, cards,
+       chips, buttons, tiles, motion) is assets/threefold.css. */
+    .hidden { display: none !important; }
+    .tf-nobr { white-space: nowrap; }
+    body { min-height: 100vh; display: flex; flex-direction: column; }
+    .tf-landing { gap: 72px; }
+    @media (min-width: 768px) { .tf-landing { gap: 112px; padding-top: var(--tf-space-6); } }
+    .tf-landing > section { scroll-margin-top: calc(var(--tf-header-h) + 16px); min-width: 0; }
+
+    .tf-sec-head { display: flex; flex-direction: column; gap: var(--tf-space-1h); max-width: 48rem; margin-bottom: var(--tf-space-4); }
+    .tf-sec-head .tf-eyebrow { margin: 0; }
+    .tf-sec-lede { margin: 0; font-size: var(--tf-fs-lede); line-height: var(--tf-lh-lede); color: var(--tf-text-2); }
+    .tf-sec-row { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: var(--tf-space-2); margin-bottom: var(--tf-space-4); }
+    .tf-sec-row .tf-sec-head { margin-bottom: 0; }
+
+    /* ------------------------------------------------------------ the hero */
+    .tf-hero { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--tf-space-5); align-items: center; }
+    @media (min-width: 1024px) { .tf-hero { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--tf-space-8); } }
+    .tf-hero::before {
+      /* Inside the hero's own width: a glow that reached past it would give a
+         phone's page a sideways scroll. */
+      content: ''; position: absolute; z-index: -1; pointer-events: none; left: 0; right: 0; top: -120px; height: 640px;
+      /* closest-side: each glow has faded out before it meets an edge of the box. */
+      background:
+        radial-gradient(closest-side at 50% 42%, rgba(124, 58, 237, 0.2), transparent),
+        radial-gradient(closest-side at 50% 70%, rgba(8, 145, 178, 0.08), transparent);
+    }
+    @media (min-width: 1024px) {
+      .tf-hero::before {
+        background:
+          radial-gradient(closest-side at 26% 42%, rgba(124, 58, 237, 0.2), transparent),
+          radial-gradient(closest-side at 76% 50%, rgba(8, 145, 178, 0.1), transparent);
       }
     }
-  </script>
-  <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
-    body { font-family: 'Inter', sans-serif; background-color: #0a0d18; color: #f3f4f6; }
-    .font-mono { font-family: 'JetBrains Mono', monospace; }
-    .glow-purple { box-shadow: 0 0 25px -5px rgba(139, 92, 246, 0.35); }
-    .glow-red { box-shadow: 0 0 25px -5px rgba(239, 68, 68, 0.45); }
-    .glow-green { box-shadow: 0 0 25px -5px rgba(34, 197, 94, 0.35); }
+    .tf-hero-copy { min-width: 0; display: flex; flex-direction: column; gap: var(--tf-space-3); }
+    .tf-hero-copy .tf-eyebrow { margin: 0; }
+    .tf-hero-title {
+      margin: 0; font-size: 2.375rem; line-height: 1.08; font-weight: 700; letter-spacing: -0.04em; color: var(--tf-text);
+      overflow-wrap: break-word; text-wrap: balance;
+    }
+    @media (min-width: 640px) { .tf-hero-title { font-size: 3.25rem; } }
+    @media (min-width: 1280px) { .tf-hero-title { font-size: 3.75rem; } }
+    .tf-hero-title em {
+      font-style: normal; color: var(--tf-accent-text);
+      background: linear-gradient(92deg, #ddd6fe 0%, #a78bfa 48%, #67e8f9 100%); -webkit-background-clip: text; background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .tf-hero-lede { margin: 0; max-width: 36rem; font-size: 1rem; line-height: 1.6; color: var(--tf-text-2); overflow-wrap: break-word; }
+    @media (min-width: 640px) { .tf-hero-lede { font-size: 1.0625rem; line-height: 1.65; } }
+    .tf-hero-actions { display: flex; flex-direction: column; align-items: stretch; gap: var(--tf-space-1h); }
+    @media (min-width: 640px) { .tf-hero-actions { flex-direction: row; flex-wrap: wrap; align-items: center; } }
+    /* A label that does not fit wraps inside its button rather than pushing a
+       phone's page sideways. */
+    .tf-hero-actions .tf-btn { white-space: normal; height: auto; min-height: 44px; padding-top: 10px; padding-bottom: 10px; line-height: 1.25; text-align: center; }
+    .tf-hero-link {
+      display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; padding: 0 6px; border-radius: var(--tf-radius);
+      font: 500 var(--tf-fs-small)/1.25 var(--tf-font-sans); color: var(--tf-text-2);
+      text-decoration: underline; text-decoration-color: var(--tf-hairline-strong); text-underline-offset: 4px;
+    }
+    .tf-hero-link:hover { color: var(--tf-text); text-decoration-color: currentColor; }
+    .tf-hero-link .tf-icon { width: 14px; height: 14px; }
+    .tf-hero-scope { display: flex; gap: 8px; margin: 0; max-width: 36rem; font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-3); overflow-wrap: break-word; }
+    .tf-hero-scope .tf-icon { width: 14px; height: 14px; margin-top: 2px; }
+
+    /* The living demonstration: one proposed write, the verdict landing on it. */
+    .tf-demo {
+      position: relative; margin: 0; min-width: 0; overflow: hidden; border-radius: var(--tf-radius-xl);
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0) 140px), var(--tf-surface-1);
+      border: 1px solid var(--tf-hairline-strong); box-shadow: var(--tf-shadow-3);
+    }
+    .tf-demo-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 12px 16px; border-bottom: 1px solid var(--tf-hairline); background: var(--tf-inset); }
+    .tf-demo-dots { display: inline-flex; gap: 6px; }
+    .tf-demo-dots i { display: block; width: 10px; height: 10px; border-radius: 99px; background: var(--tf-hairline-strong); }
+    .tf-demo-title { margin-right: auto; font: 500 0.75rem/1rem var(--tf-font-sans); color: var(--tf-text-3); }
+    .tf-demo-body { display: flex; flex-direction: column; gap: 14px; padding: 16px; }
+    @media (min-width: 640px) { .tf-demo-body { padding: 20px; } }
+    .tf-demo-call { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-height: 22px; font-size: 0.75rem; line-height: 1rem; color: var(--tf-text-3); }
+    .tf-demo-call code { font: 500 0.75rem/1rem var(--tf-font-mono); color: var(--tf-text); overflow-wrap: anywhere; }
+    .tf-diff {
+      margin: 0; padding: 10px 0; list-style: none; min-height: 88px; box-sizing: border-box; border-radius: var(--tf-radius-md);
+      background: var(--tf-ink-0); border: 1px solid var(--tf-hairline); font: 400 0.8125rem/1.75 var(--tf-font-mono);
+    }
+    .tf-diff-line { position: relative; display: grid; grid-template-columns: 2.5rem 1.25rem minmax(0, 1fr) auto; align-items: center; padding-right: 12px; transition: background-color 400ms var(--tf-ease-out), box-shadow 400ms var(--tf-ease-out); }
+    .tf-diff-num { padding-right: 12px; text-align: right; color: var(--tf-text-decor); user-select: none; }
+    .tf-diff-sign { color: var(--tf-info-text); user-select: none; }
+    .tf-diff-code { white-space: pre-wrap; overflow-wrap: anywhere; color: #dde1ea; }
+    .tf-diff-tag { display: none; margin-left: 8px; padding: 0 6px; border-radius: var(--tf-radius-xs); font: 600 0.625rem/1rem var(--tf-font-sans); letter-spacing: var(--tf-track-caps); text-transform: uppercase; color: var(--tf-refused-text); background: var(--tf-refused-soft); }
+    .tf-demo[data-verdict="refused"] .tf-diff-line.is-flagged { background: var(--tf-refused-soft); box-shadow: inset 2px 0 0 var(--tf-refused); }
+    .tf-demo[data-verdict="refused"] .tf-diff-line.is-flagged .tf-diff-sign { color: var(--tf-refused-text); }
+    .tf-demo[data-verdict="refused"] .tf-diff-line.is-flagged .tf-diff-tag { display: inline-block; }
+    .tf-demo-verdict { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; min-height: 40px; }
+    .tf-stamp {
+      display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 10px; border: 1px solid var(--tf-hairline-strong);
+      font: 650 0.9375rem/1.25rem var(--tf-font-sans); letter-spacing: -0.01em; color: var(--tf-text); background: var(--tf-surface-2);
+    }
+    .tf-stamp .tf-icon { width: 18px; height: 18px; }
+    .tf-stamp-refused { color: var(--tf-refused-text); background: var(--tf-refused-soft); border-color: var(--tf-refused-line); }
+    .tf-stamp-approved { color: var(--tf-approved-text); background: var(--tf-approved-soft); border-color: var(--tf-approved-line); }
+    .tf-demo-reason { margin: 0; padding-left: 12px; border-left: 2px solid var(--tf-refused-line); font-size: 0.8125rem; line-height: 1.3125rem; color: var(--tf-text-2); overflow-wrap: anywhere; }
+    .tf-demo-reason-approved { border-left-color: var(--tf-approved-line); }
+    .tf-demo-fix { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: var(--tf-radius-md); background: var(--tf-approved-soft); border: 1px solid var(--tf-approved-line); font-size: 0.8125rem; line-height: 1.25rem; color: var(--tf-text-2); }
+    .tf-demo-fix p { margin: 0; }
+    .tf-demo-fix-title { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; font-weight: 600; color: var(--tf-approved-text); }
+    .tf-demo-fix-title .tf-icon { width: 16px; height: 16px; }
+    .tf-demo-fix-files { display: flex; flex-wrap: wrap; gap: 6px; }
+    .tf-demo-fix-files code { padding: 1px 6px; border-radius: var(--tf-radius-xs); background: var(--tf-inset); border: 1px solid var(--tf-hairline); font: 400 0.6875rem/1.125rem var(--tf-font-mono); color: var(--tf-text-2); overflow-wrap: anywhere; }
+    .tf-demo-fix-none { background: var(--tf-surface-2); border-color: var(--tf-hairline); }
+    .tf-demo-fix-none .tf-demo-fix-title { color: var(--tf-text-2); }
+    .tf-demo-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; padding: 12px 16px; border-top: 1px solid var(--tf-hairline); background: var(--tf-inset); font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-3); }
+    .tf-demo-foot p { margin: 0; flex: 1 1 16rem; min-width: 0; overflow-wrap: anywhere; }
+
+    @keyframes tf-type { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: none; } }
+    @keyframes tf-stamp-in { 0% { opacity: 0; transform: scale(1.35); } 55% { opacity: 1; transform: scale(0.96); } 100% { opacity: 1; transform: none; } }
+    .tf-demo[data-motion="on"] .tf-diff-line { animation: tf-type 280ms var(--tf-ease-out) both; animation-delay: calc(var(--i, 0) * 130ms + 140ms); }
+    .tf-demo[data-motion="on"] .tf-stamp { animation: tf-stamp-in 460ms var(--tf-ease-out) both; }
+    .tf-demo[data-motion="on"] .tf-demo-rule { animation: tf-rise 320ms var(--tf-ease-out) 160ms both; }
+    .tf-demo[data-motion="on"] .tf-demo-reason { animation: tf-rise 320ms var(--tf-ease-out) 260ms both; }
+    .tf-demo[data-motion="on"] .tf-demo-fix { animation: tf-rise 360ms var(--tf-ease-out) 480ms both; }
+
+    /* ------------------------------------------------------- the proof strip */
+    .tf-proof-grid { display: flex; flex-direction: column; gap: var(--tf-space-2); }
+    .tf-proof-live { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--tf-space-2); }
+    @media (min-width: 640px) { .tf-proof-live { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+    .tf-proof-live > .tf-state, .tf-proof-live > .tf-proof-note { grid-column: 1 / -1; }
+    .tf-proof-note { display: flex; flex-direction: column; justify-content: center; gap: 8px; padding: 20px; }
+    .tf-proof-note p { margin: 0; }
+    .tf-proof-where { display: flex; gap: 10px; margin: var(--tf-space-2) 0 0; max-width: 64rem; font-size: 0.8125rem; line-height: 1.3125rem; color: var(--tf-text-3); }
+    .tf-proof-where .tf-icon { width: 16px; height: 16px; margin-top: 2px; color: var(--tf-info-text); }
+    .tf-proof-where strong { color: var(--tf-text-2); font-weight: 600; }
+    .tf-proof-links { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: var(--tf-space-1h) 0 0; font-size: 0.75rem; color: var(--tf-text-3); }
+    .tf-bench { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; padding: 18px 18px 16px; min-width: 0; }
+    @media (min-width: 900px) { .tf-bench { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 48px; align-items: center; padding: 24px; } }
+    .tf-bench-main, .tf-bench-chart { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+    .tf-bench-chart .tf-pane-label { margin: 0; }
+    .tf-bench-head { display: flex; align-items: flex-start; gap: 6px; font: 500 var(--tf-fs-small)/1.25rem var(--tf-font-sans); color: var(--tf-text-2); }
+    .tf-bench-head .tf-icon { width: 16px; height: 16px; margin-top: 2px; color: var(--tf-text-3); }
+    .tf-bench-value { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+    .tf-bench-big { font: 650 2rem/2.25rem var(--tf-font-sans); letter-spacing: -0.03em; color: var(--tf-text); }
+    .tf-bench-big.tf-good { color: var(--tf-approved-text); }
+    .tf-bench-of { font-size: 0.8125rem; line-height: 1.25rem; color: var(--tf-text-2); }
+    .tf-bench p { margin: 0; font-size: 0.8125rem; line-height: 1.25rem; color: var(--tf-text-2); }
+    .tf-bench .tf-bench-price { font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-3); }
+    .tf-bench .tf-hbars { gap: 10px; }
+    .tf-bench .tf-hbar-head > :first-child { font-family: var(--tf-font-sans); color: var(--tf-text-2); }
+    .tf-bench-more { align-self: flex-start; font-size: 0.8125rem; line-height: 1.25rem; }
+
+    /* ------------------------------------------------------- how it works */
+    .tf-steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--tf-space-2); }
+    @media (min-width: 768px) { .tf-steps { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+    .tf-step-card { display: flex; flex-direction: column; gap: 10px; padding: 20px; min-width: 0; }
+    .tf-step-top { display: flex; align-items: center; gap: 12px; }
+    .tf-step-icon { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; flex-shrink: 0; border-radius: 12px; background: var(--tf-accent-soft); border: 1px solid rgba(139, 92, 246, 0.3); color: var(--tf-accent-text); }
+    .tf-step-icon .tf-icon { width: 20px; height: 20px; }
+    .tf-step-kicker { font: 600 var(--tf-fs-micro)/1rem var(--tf-font-sans); letter-spacing: var(--tf-track-caps); text-transform: uppercase; color: var(--tf-text-3); }
+    .tf-step-card h3 { margin: 0; font: 600 1.0625rem/1.5rem var(--tf-font-sans); letter-spacing: -0.01em; color: var(--tf-text); }
+    .tf-step-card p { margin: 0; font-size: var(--tf-fs-small); line-height: 1.375rem; color: var(--tf-text-2); }
+
+    .tf-diagram { margin: var(--tf-space-2) 0 0; padding: 20px 16px 16px; }
+    @media (min-width: 640px) { .tf-diagram { padding: 28px 24px 20px; } }
+    .tf-diagram svg { display: block; width: 100%; height: auto; margin: 0 auto; overflow: visible; }
+    /* One diagram, drawn for the width it has: across on a desk, down on a phone. */
+    .tf-diagram svg.tf-diagram-wide { display: none; }
+    .tf-diagram svg.tf-diagram-narrow { max-width: 420px; }
+    @media (min-width: 1024px) {
+      .tf-diagram svg.tf-diagram-wide { display: block; max-width: 1040px; }
+      .tf-diagram svg.tf-diagram-narrow { display: none; }
+    }
+    .tf-diagram figcaption { margin: 16px auto 0; max-width: 60rem; text-align: center; font-size: 0.8125rem; line-height: 1.25rem; color: var(--tf-text-3); }
+    .dg-node { fill: var(--tf-surface-2); stroke: var(--tf-hairline-strong); stroke-width: 1; }
+    .dg-node-accent { fill: rgba(139, 92, 246, 0.12); stroke: var(--tf-accent-line); }
+    .dg-node-quiet { fill: var(--tf-inset); stroke: var(--tf-hairline-strong); stroke-dasharray: 4 3; }
+    .dg-title { fill: var(--tf-text); font: 600 14px var(--tf-font-sans); letter-spacing: -0.01em; }
+    .dg-sub { fill: var(--tf-text-3); font: 400 12px var(--tf-font-sans); }
+    .dg-edge { fill: none; stroke: #6b7594; stroke-width: 1.5; }
+    .dg-edge-accent { stroke: var(--tf-accent); }
+    .dg-edge-back { stroke-dasharray: 5 4; }
+    .dg-head { fill: #6b7594; }
+    .dg-head-accent { fill: var(--tf-accent); }
+    .dg-label { fill: var(--tf-text-2); font: 500 11.5px var(--tf-font-sans); }
+    .dg-label-accent { fill: var(--tf-accent-text); }
+
+    /* The two-stage rollout: three stops and the way back. */
+    .tf-rollout { margin-top: var(--tf-space-3); padding: 20px 16px; }
+    @media (min-width: 640px) { .tf-rollout { padding: 24px; } }
+    .tf-rollout-head { display: flex; flex-direction: column; gap: 4px; margin-bottom: 20px; }
+    .tf-rollout-head h3 { margin: 0; font: 600 1.0625rem/1.5rem var(--tf-font-sans); letter-spacing: -0.01em; color: var(--tf-text); }
+    .tf-rollout-head p { margin: 0; max-width: 60rem; font-size: var(--tf-fs-small); line-height: 1.375rem; color: var(--tf-text-2); }
+    .tf-track { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 28px; }
+    @media (min-width: 900px) { .tf-track { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 44px; } }
+    .tf-stage { position: relative; display: flex; flex-direction: column; gap: 6px; padding: 14px 16px; border-radius: var(--tf-radius-md); background: var(--tf-inset); border: 1px solid var(--tf-hairline-strong); }
+    .tf-stage-name { display: flex; align-items: center; gap: 8px; font: 600 0.9375rem/1.375rem var(--tf-font-sans); color: var(--tf-text); }
+    .tf-stage-name .tf-icon { width: 18px; height: 18px; }
+    .tf-stage p { margin: 0; font-size: 0.8125rem; line-height: 1.25rem; color: var(--tf-text-2); }
+    .tf-stage-observe .tf-stage-name .tf-icon { color: var(--tf-observed-text); }
+    .tf-stage-review .tf-stage-name .tf-icon { color: var(--tf-info-text); }
+    .tf-stage-enforce { border-color: var(--tf-accent-line); background: rgba(139, 92, 246, 0.08); }
+    .tf-stage-enforce .tf-stage-name .tf-icon { color: var(--tf-accent-text); }
+    /* The arrow from one stop to the next: down on a phone, across on a desk. */
+    .tf-stage:not(:last-child)::after {
+      content: ''; position: absolute; left: 50%; bottom: -22px; width: 10px; height: 10px; margin-left: -5px;
+      border-right: 1.5px solid var(--tf-text-3); border-bottom: 1.5px solid var(--tf-text-3); transform: rotate(45deg);
+    }
+    @media (min-width: 900px) {
+      .tf-stage:not(:last-child)::after { left: auto; right: -29px; top: 50%; bottom: auto; margin: -5px 0 0; transform: rotate(-45deg); }
+    }
+    .tf-demote { display: flex; align-items: center; gap: 10px; margin: 18px 0 0; font-size: 0.8125rem; line-height: 1.25rem; color: var(--tf-text-2); }
+    .tf-demote .tf-icon { width: 16px; height: 16px; color: var(--tf-accent-text); flex-shrink: 0; }
+    .tf-demote-line { display: none; }
+    @media (min-width: 900px) {
+      .tf-demote { position: relative; justify-content: center; margin: 0 calc(16.66% - 8px); padding-top: 26px; }
+      .tf-demote-line {
+        display: block; position: absolute; left: 0; right: 0; top: 0; height: 16px;
+        border: 1.5px dashed var(--tf-accent-line); border-top: 0; border-radius: 0 0 14px 14px;
+      }
+      .tf-demote-line::before {
+        content: ''; position: absolute; left: -6px; top: -2px; width: 0; height: 0;
+        border-left: 5.5px solid transparent; border-right: 5.5px solid transparent; border-bottom: 8px solid var(--tf-accent);
+      }
+    }
+
+    /* The three agents and what has been measured of each. */
+    .tf-agents { list-style: none; margin: var(--tf-space-3) 0 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--tf-space-2); }
+    @media (min-width: 900px) { .tf-agents { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+    .tf-agent { display: flex; flex-direction: column; gap: 10px; padding: 18px; min-width: 0; }
+    .tf-agent-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+    .tf-agent-name { font: 600 1rem/1.5rem var(--tf-font-sans); letter-spacing: -0.01em; color: var(--tf-text); }
+    .tf-agent blockquote { margin: 0; padding-left: 12px; border-left: 2px solid var(--tf-hairline-strong); font-size: 0.8125rem; line-height: 1.3125rem; color: var(--tf-text-2); overflow-wrap: anywhere; }
+    .tf-agent-src { margin: auto 0 0; font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-3); overflow-wrap: anywhere; }
+    .tf-agents-note { margin: var(--tf-space-1h) 0 0; max-width: 64rem; font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-3); }
+
+    /* ------------------------------------------------------- built on AWS */
+    .tf-aws-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; margin-top: 16px; }
+    .tf-aws-foot p { margin: 0; max-width: 52rem; font-size: 0.8125rem; line-height: 1.25rem; color: var(--tf-text-3); }
+
+    /* ------------------------------------------------------ watch the gates */
+    .tf-scenarios { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .tf-scenarios > :last-child { grid-column: 1 / -1; }
+    @media (min-width: 1100px) { .tf-scenarios { grid-template-columns: repeat(5, minmax(0, 1fr)); } .tf-scenarios > :last-child { grid-column: auto; } }
+    @media (max-width: 639px) { .tf-scenario-text, .tf-scenario-route { display: none; } }
+    .tf-scenario, button.tf-scenario {
+      position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0; padding: 14px 14px 12px; text-align: left;
+      border-radius: var(--tf-radius-md); border: 1px solid var(--tf-hairline); background: var(--tf-surface-1); color: var(--tf-text-2); cursor: pointer;
+      font: inherit; transition: border-color var(--tf-dur-2) var(--tf-ease-out), background-color var(--tf-dur-2), transform var(--tf-dur-2) var(--tf-ease-out);
+    }
+    .tf-scenario:hover, button.tf-scenario:hover { border-color: var(--tf-accent-line); background: var(--tf-surface-2); transform: translateY(-1px); }
+    .tf-scenario[aria-pressed="true"], button.tf-scenario[aria-pressed="true"] { border-color: var(--tf-accent); background: rgba(139, 92, 246, 0.1); box-shadow: 0 0 0 3px var(--tf-accent-soft); }
+    .tf-scenario-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; }
+    .tf-scenario-kicker { font: 600 var(--tf-fs-micro)/1rem var(--tf-font-sans); letter-spacing: var(--tf-track-caps); text-transform: uppercase; color: var(--tf-text-3); }
+    .tf-scenario-top .tf-icon { width: 18px; height: 18px; color: var(--tf-accent-text); }
+    .tf-scenario-name { font: 600 0.875rem/1.25rem var(--tf-font-sans); color: var(--tf-text); }
+    .tf-scenario-text { font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-3); }
+    .tf-scenario-route { margin-top: 2px; font: 500 0.6875rem/1rem var(--tf-font-mono); color: var(--tf-accent-text); overflow-wrap: anywhere; }
+
+    .tf-result { margin-top: var(--tf-space-2); overflow: hidden; scroll-margin-top: calc(var(--tf-header-h) + 12px); }
+    .tf-result-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; padding: 16px 18px; border-bottom: 1px solid var(--tf-hairline); }
+    .tf-result-head h3 { margin: 2px 0 0; font: 600 1rem/1.5rem var(--tf-font-sans); letter-spacing: -0.01em; color: var(--tf-text); }
+    .tf-result-status { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+    .tf-result-status .tf-chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+    .tf-result-grid { display: grid; grid-template-columns: minmax(0, 1fr); }
+    @media (min-width: 1024px) { .tf-result-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+    .tf-result-pane { display: flex; flex-direction: column; gap: 14px; padding: 16px 18px 18px; min-width: 0; }
+    .tf-result-pane + .tf-result-pane { border-top: 1px solid var(--tf-hairline); }
+    @media (min-width: 1024px) { .tf-result-pane + .tf-result-pane { border-top: 0; border-left: 1px solid var(--tf-hairline); } }
+    .tf-terminal-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .tf-terminal-bar span:first-child { font: 500 0.75rem/1rem var(--tf-font-mono); color: var(--tf-text-3); }
+    .tf-terminal {
+      height: 12rem; overflow-y: auto; padding: 12px 14px; border-radius: var(--tf-radius-md); background: var(--tf-ink-0); border: 1px solid var(--tf-hairline);
+      font: 400 0.75rem/1.25rem var(--tf-font-mono); color: var(--tf-text-2);
+    }
+    @media (min-width: 640px) { .tf-terminal { height: 18rem; } }
+    .tf-log { margin: 0 0 6px; overflow-wrap: anywhere; }
+    .tf-log-muted { color: var(--tf-text-3); }
+    .tf-log-agent { color: var(--tf-info-text); }
+    .tf-log-ok { color: var(--tf-approved-text); }
+    .tf-log-bad { color: var(--tf-refused-text); }
+    .tf-log-warn { color: var(--tf-observed-text); }
+    .tf-log-accent { color: var(--tf-accent-text); }
+    .tf-log-strong { font-weight: 600; }
+    .tf-pane-label { margin: 0 0 6px; font: 600 var(--tf-fs-micro)/1rem var(--tf-font-sans); letter-spacing: var(--tf-track-caps); text-transform: uppercase; color: var(--tf-text-3); }
+    .tf-invariants { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
+    @media (min-width: 480px) { .tf-invariants { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    .tf-invariant { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; border-radius: var(--tf-radius); background: var(--tf-inset); border: 1px solid var(--tf-hairline); font-size: 0.75rem; line-height: 1rem; color: var(--tf-text-2); }
+    .tf-inv-value { font: 600 0.6875rem/1rem var(--tf-font-mono); color: var(--tf-text-3); white-space: nowrap; }
+    .tf-explain { padding: 12px 14px; border-radius: var(--tf-radius-md); background: var(--tf-accent-soft); border: 1px solid rgba(139, 92, 246, 0.28); font-size: 0.8125rem; line-height: 1.3125rem; color: var(--tf-text-2); overflow-wrap: anywhere; }
+    .tf-explain strong { color: var(--tf-accent-text); font-weight: 600; }
+    .tf-fix { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: var(--tf-radius-md); background: var(--tf-inset); border: 1px solid var(--tf-hairline); font-size: 0.8125rem; line-height: 1.25rem; color: var(--tf-text-2); overflow-wrap: anywhere; }
+    .tf-fix p, .tf-fix ol { margin: 0; }
+    .tf-fix ol { padding-left: 20px; color: var(--tf-text-3); }
+    .tf-fix-path { font: 400 0.6875rem/1rem var(--tf-font-mono); color: var(--tf-text-3); }
+    .tf-fix pre { margin: 0; padding: 8px 10px; border-radius: var(--tf-radius); background: var(--tf-ink-0); border: 1px solid var(--tf-hairline); font: 400 0.6875rem/1.125rem var(--tf-font-mono); color: #dde1ea; white-space: pre; overflow-x: auto; }
+    .tf-cert { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border-radius: var(--tf-radius-md); background: var(--tf-approved-soft); border: 1px solid var(--tf-approved-line); }
+    .tf-cert p { margin: 0; font: 400 0.75rem/1.125rem var(--tf-font-mono); color: var(--tf-text-2); overflow-wrap: anywhere; }
+    .tf-cert .tf-cert-note { font-family: var(--tf-font-sans); font-size: 0.6875rem; color: var(--tf-text-3); padding-top: 6px; border-top: 1px solid var(--tf-approved-line); }
+    .tf-cert-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font: 600 0.8125rem/1.25rem var(--tf-font-sans); color: var(--tf-approved-text); }
+    .tf-session-stats { display: flex; flex-wrap: wrap; gap: 6px 20px; font-size: 0.75rem; line-height: 1rem; color: var(--tf-text-3); }
+    .tf-session-stats b { font: 600 0.8125rem/1rem var(--tf-font-mono); color: var(--tf-text); }
+    .tf-contract { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: var(--tf-space-2); font-size: 0.75rem; color: var(--tf-text-3); }
+    .tf-connection { margin-top: var(--tf-space-2); }
+    .tf-connection-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+    @media (min-width: 768px) { .tf-connection-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    .tf-connection .tf-input { width: 100%; }
+
+    /* ----------------------------------------------------------- the footer */
+    .tf-landing-foot { margin-top: var(--tf-space-8); padding: var(--tf-space-4) 0; }
+    .tf-landing-foot .tf-container { align-items: flex-start; }
+    .tf-foot-brand { display: flex; flex-direction: column; gap: 10px; }
+    .tf-foot-brand p { margin: 0; font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-3); }
+    .tf-foot-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+    .tf-foot-links { display: flex; flex-wrap: wrap; gap: 8px 20px; font-size: 0.8125rem; }
+    .tf-foot-links a { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; }
+    .tf-foot-links .tf-icon { width: 14px; height: 14px; }
+
+    @media (prefers-reduced-motion: reduce) {
+      .tf-demo, .tf-demo *, .tf-scenario { animation: none !important; transition: none !important; }
+      .tf-scenario:hover { transform: none; }
+    }
   </style>
 </head>
-<body class="min-h-screen flex flex-col">
+<body>
+  <a class="tf-skip" href="#main">Skip to content</a>
 
-  <!-- TOP HEADER -->
-  <header class="border-b border-gray-800 bg-gray-950/80 backdrop-blur sticky top-0 z-50">
-    <div class="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-4">
-      <div class="flex items-center gap-3">
-        <div class="w-10 h-10 rounded-lg bg-gradient-to-br from-indigo-500 via-purple-600 to-pink-600 flex items-center justify-center font-bold text-white text-xl shadow-lg shadow-purple-500/20">
-          🔍
-        </div>
-        <div>
-          <div class="flex items-center gap-2">
-            <h1 class="text-lg font-bold tracking-tight text-white">Threefold</h1>
-            <span class="px-2 py-0.5 rounded text-xs font-semibold bg-purple-950 text-purple-400 border border-purple-800">
-              #workplace-efficiency
-            </span>
-            <span class="px-2 py-0.5 rounded text-xs font-semibold bg-blue-950 text-blue-400 border border-blue-800">
-              #community
-            </span>
-          </div>
-          <p class="text-xs text-gray-400">Autonomous Coding Agent Governance & Cost Circuit-Breaker · AWS Zero to Shipped</p>
-        </div>
-      </div>
-
-      <!-- Circuit Breaker Status Indicator, and the shared navigation. The links in
-           #page-nav are what a reader gets when the shared layer does not load. -->
-      <div class="flex flex-wrap items-center justify-end gap-3">
-        <div id="cb-indicator" class="flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium bg-emerald-950/80 text-emerald-400 border border-emerald-800">
-          <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-          CIRCUIT BREAKER: ARMED
-        </div>
-        <div id="page-nav" class="flex flex-wrap items-center gap-2">
-        <a href="dashboard.html#/overview" class="text-xs px-3 py-1.5 rounded-md bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700 transition">
-          Dashboard ↗
-        </a>
-        <a href="rules.html" class="text-xs px-3 py-1.5 rounded-md bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700 transition">
-          Architecture Rules ↗
-        </a>
-        <a href="sessions.html" class="text-xs px-3 py-1.5 rounded-md bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700 transition">
-          Sessions ↗
-        </a>
-        <a href="settings.html" class="text-xs px-3 py-1.5 rounded-md bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700 transition">
-          Policy ↗
-        </a>
-        <a href="connect.html" class="text-xs px-3 py-1.5 rounded-md bg-emerald-950 hover:bg-emerald-900 text-emerald-300 border border-emerald-800 transition">
-          Connect an agent ↗
-        </a>
-        <a href="swagger.html" class="text-xs px-3 py-1.5 rounded-md bg-purple-950 hover:bg-purple-900 text-purple-300 border border-purple-800 transition">
-          OpenAPI 3.1 ↗
-        </a>
-        </div>
+  <header class="tf-header">
+    <div class="tf-container tf-header-inner">
+      <a class="tf-brand" href="dashboard.html#/overview" data-tf-page="dashboard.html#/overview" aria-label="Threefold, the overview">
+        <span class="tf-brand-mark" aria-hidden="true" data-tf-icon="shield" data-tf-size="18"></span>
+        <span class="tf-brand-text"><span class="tf-brand-name">Threefold</span><span class="tf-brand-sub">Agent governance</span></span>
+      </a>
+      <div id="page-nav" class="tf-nav-mount">
+        <!-- Without script, the pages this one links to are still reachable. -->
+        <nav aria-label="Threefold" class="tf-nav-fallback">
+          <a href="dashboard.html#/overview">Overview</a>
+          <a href="rules.html">Rules</a>
+          <a href="sessions.html">Sessions</a>
+          <a href="dashboard.html#/connect">Connect</a>
+          <a href="swagger.html">API</a>
+        </nav>
       </div>
     </div>
-  <!-- LIVE API CONNECTION & STATUS BAR
-       A first-time reader used to meet an endpoint field, a prefilled key and
-       three operator buttons before meeting the product. What stays in the open
-       is the one thing that tells a visitor whether what they are about to press
-       is real; the controls are one click away, for whoever wants them. -->
-  <div class="bg-gray-950/90 border-b border-gray-800 px-4 py-2 text-xs">
-    <details id="connection-panel" class="group">
-      <summary class="flex flex-wrap items-center gap-3 cursor-pointer list-none marker:content-none">
-        <span id="apiConnectionStatus" class="px-2 py-0.5 rounded text-[11px] font-mono bg-amber-950 text-amber-400 border border-amber-800 flex items-center gap-1.5">
-          <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span> STANDALONE CLIENT
-        </span>
-        <span class="text-gray-400 group-open:hidden">Connection and operator controls</span>
-        <span class="text-gray-400 hidden group-open:inline">Connection and operator controls</span>
-        <span class="text-gray-600 group-open:hidden">▸</span>
-        <span class="text-gray-600 hidden group-open:inline">▾</span>
-      </summary>
+  </header>
 
-      <div class="flex flex-wrap items-center justify-between gap-3 pt-2 mt-2 border-t border-gray-800">
-        <div class="flex items-center gap-2 flex-wrap">
-          <span class="text-gray-400 font-medium">Sidecar REST:</span>
-          <input id="apiBaseInput" type="text" value="" class="bg-gray-900 border border-gray-700 rounded px-2 py-0.5 text-xs text-purple-300 font-mono w-44 focus:outline-none focus:border-purple-500" />
-          <span class="text-gray-400 font-medium ml-1">API Key:</span>
-          <input id="apiKeyInput" type="password" value="" placeholder="not needed for the demo" class="bg-gray-900 border border-gray-700 rounded px-2 py-0.5 text-xs text-sky-300 font-mono w-44 focus:outline-none focus:border-sky-500" />
-          <button id="btnCheckConnection" onclick="checkApiHealth()" class="px-2 py-0.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs border border-gray-700">Check</button>
-          <button id="btnExportCert" onclick="downloadCert()" class="px-2 py-0.5 rounded bg-purple-950 hover:bg-purple-900 text-purple-300 text-xs border border-purple-800 font-semibold">📥 Export Governance Cert</button>
-          <button id="btnEmergencyFreeze" onclick="triggerManualFreeze()" disabled
-                  title="Run a scenario first, so there is a session of your own to freeze."
-                  class="px-2 py-0.5 rounded bg-rose-950 hover:bg-rose-900 text-rose-300 text-xs border border-rose-800 font-semibold disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-rose-950">🚨 Freeze Session</button>
-          <!-- This badge used to read READY in the markup whatever the service was
-               doing. It now starts unknown and is set from the answer /status
-               actually gave, by checkApiHealth below. -->
-          <span id="statusRouteBadge" class="px-2 py-0.5 rounded text-[11px] font-mono bg-gray-900 text-gray-400 border border-gray-700 flex items-center gap-1.5">
-            <span class="w-1.5 h-1.5 rounded-full bg-gray-500"></span> CHECKING /status…
-          </span>
+  <main id="main" class="tf-main tf-landing" tabindex="-1">
+    <!-- THE FIRST TEN SECONDS. What Threefold is in one line, one sentence of how,
+         the three things to do next, and beside them the product's core moment:
+         an agent's proposed write refused before it is written. No number in
+         this section is written into the page: the demonstration is drawn from
+         a live answer of this stack when it answers, labelled live, and from the
+         recorded run below when it does not, labelled recorded. The line under
+         the actions says which agents a refusal has been measured to stop,
+         because the sentence names three and the evidence covers them unevenly. -->
+    <section id="what-threefold-is" class="tf-hero" aria-labelledby="hero-promise">
+      <div class="tf-hero-copy">
+        <p class="tf-eyebrow"><span data-tf-icon="shield"></span>Threefold · governance for coding agents</p>
+        <h1 id="hero-promise" class="tf-hero-title">Stop bad agent writes <em>before they reach your code.</em></h1>
+        <p id="hero-sentence" class="tf-hero-lede">A hook asks Threefold on AWS before Claude Code, Codex or Antigravity writes a file or runs a command; deterministic gates refuse leaked credentials, architecture violations, loops and runaway spend, and every project watches in Observe before it enforces.</p>
+        <div id="hero-actions" class="tf-hero-actions">
+          <a id="hero-try" href="dashboard.html#/try" class="tf-btn tf-btn-primary tf-btn-lg"><span data-tf-icon="play"></span>Watch it stop a bad write — 60 s</a>
+          <a id="hero-dashboard" href="dashboard.html#/overview" class="tf-btn tf-btn-lg"><span data-tf-icon="grid"></span>Open the live dashboard</a>
+          <a id="hero-connect" href="dashboard.html#/connect" class="tf-hero-link">Connect your repository<span data-tf-icon="arrowright"></span></a>
         </div>
-        <div class="text-gray-400 text-[11px] hidden md:block">
-          🛡️ <strong class="text-purple-400">2026 AI Lens:</strong> Zero-Trust API Guard · Real-time Circuit Breaker · CloudWatch EMF
-        </div>
+        <p class="tf-hero-scope"><span data-tf-icon="info"></span><span id="hero-scope">That a refusal stops the write has been measured for Claude Code and Antigravity, and for Codex
+          once, over its patch tool; the other routes Codex could write through are not measured.</span></p>
       </div>
-    </details>
-  </div>
-  <main class="flex-1 max-w-7xl mx-auto px-4 py-6 w-full space-y-6">
 
-    <!-- WHAT THIS IS, AND WHAT TO DO FIRST. One sentence of what Threefold does,
-         then the three things a first-time reader can do in one click: walk the
-         two-stage rollout on a sandbox of their own, open the dashboard, connect a
-         repository. The scenarios below stay the zero-setup demo of the circuit
-         breaker and the certificate. No number on this card is written into the
-         page: the line under the actions is filled from /api/overview when the
-         stack answers an anonymous read, and stays hidden when it does not. The
-         paragraph under it says which agents a refusal has been measured to stop,
-         because the sentence names three and the evidence covers two. -->
-    <section id="what-threefold-is" class="p-4 sm:p-6 rounded-2xl bg-gradient-to-br from-gray-900 via-gray-900 to-purple-950/30 border border-gray-800">
-      <div class="max-w-4xl space-y-4">
-        <h2 id="hero-sentence" class="text-lg sm:text-xl md:text-2xl font-bold text-white leading-snug break-words">
-          Threefold governs Claude Code, Codex and Antigravity: it refuses architecture violations and leaked credentials before
-          they are written, halts loops and runaway cost, and rolls out in two stages so nothing breaks.
-        </h2>
-        <div id="hero-actions" class="flex flex-col sm:flex-row sm:flex-wrap gap-2">
-          <a id="hero-try" href="dashboard.html#/try"
-             class="text-center text-sm font-semibold px-4 py-2.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white shadow-lg shadow-purple-500/20 transition">
-            Try the two-stage rollout (60 s)
-          </a>
-          <a id="hero-dashboard" href="dashboard.html#/overview"
-             class="text-center text-sm font-semibold px-4 py-2.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-100 border border-gray-700 transition">
-            Open the dashboard
-          </a>
-          <a id="hero-connect" href="dashboard.html#/connect"
-             class="text-center text-sm font-semibold px-4 py-2.5 rounded-lg bg-emerald-950 hover:bg-emerald-900 text-emerald-300 border border-emerald-800 transition">
-            Connect a repository
-          </a>
+      <figure id="hero-demo" class="tf-demo" data-motion="off" aria-labelledby="hero-demo-title">
+        <div class="tf-demo-bar">
+          <span class="tf-demo-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span id="hero-demo-title" class="tf-demo-title">An agent proposes a write</span>
+          <span id="hero-source" class="tf-chip tf-chip-gray"><span class="tf-waiting-dot" aria-hidden="true"></span>Asking the stack</span>
         </div>
-        <p id="hero-live" class="hidden text-xs text-gray-400 break-words" aria-live="polite"></p>
-        <p class="text-xs sm:text-sm text-gray-400">
-          An agent asks to write a file or run a command, and Threefold answers yes or no before the tool call happens.
-          <span id="hero-scope">That a refusal stops the write has been measured for Claude Code and Antigravity, and for Codex
-          once, over its patch tool; the other routes Codex could write through are not measured.</span> Four
-          deterministic gates decide: a credential in the arguments, a domain file importing infrastructure, the same call
-          repeating, a spend ceiling. Amazon Bedrock never decides; it only explains the verdict in a sentence, and every response
-          names which of the two you are reading. Or press a scenario below to watch the gates refuse, with no account.
-        </p>
-      </div>
+        <div class="tf-demo-body">
+          <div id="hero-call" class="tf-demo-call"></div>
+          <ol id="hero-diff" class="tf-diff" aria-label="The file the agent proposes to write"></ol>
+          <div id="hero-outcome" aria-live="polite">
+            <div id="hero-waiting" class="tf-waiting"><span class="tf-waiting-dot" aria-hidden="true"></span>Asking Threefold whether it may be written</div>
+            <div id="hero-verdict" class="tf-demo-verdict" hidden></div>
+          </div>
+          <p id="hero-reason" class="tf-demo-reason" hidden></p>
+          <div id="hero-fix" class="tf-demo-fix" hidden></div>
+        </div>
+        <figcaption class="tf-demo-foot">
+          <p id="hero-caption">Asking this stack to judge the call, as a hook would.</p>
+          <button type="button" id="hero-replay" class="tf-link-btn" hidden><span data-tf-icon="refresh" data-tf-size="14"></span>Replay</button>
+        </figcaption>
+      </figure>
     </section>
 
-    <!-- KPI STRIP -->
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-      <div class="p-4 rounded-xl bg-gray-900 border border-gray-800">
-        <p class="text-xs font-medium text-gray-400 uppercase tracking-wider">Session Budget</p>
-        <p class="text-2xl font-bold text-white mt-1">$10.00</p>
-        <p class="text-xs text-emerald-400 mt-1">Hard cap allocated</p>
+    <!-- THE PROOF STRIP. Every figure is read as the page loads: the counts from
+         GET /api/overview, without a key, and the benchmark from GET /proof.json.
+         One clause says where the counts come from, once, where a reader first
+         meets them. Where nothing is measured, the strip says so. -->
+    <section id="proof" aria-labelledby="proof-title">
+      <div class="tf-sec-head">
+        <p class="tf-eyebrow"><span data-tf-icon="chart"></span>Proof</p>
+        <h2 id="proof-title" class="tf-h2">At work on this stack, and measured in a benchmark</h2>
       </div>
-      <div class="p-4 rounded-xl bg-gray-900 border border-gray-800">
-        <p class="text-xs font-medium text-gray-400 uppercase tracking-wider">Current Session Spend</p>
-        <p id="kpi-spend" class="text-2xl font-bold text-emerald-400 mt-1">$0.0000</p>
-        <p id="kpi-tokens" class="text-xs text-gray-400 mt-1">0 tokens consumed</p>
-      </div>
-      <div class="p-4 rounded-xl bg-gray-900 border border-gray-800">
-        <p class="text-xs font-medium text-gray-400 uppercase tracking-wider">Loop Thrashing Risk</p>
-        <p id="kpi-loop" class="text-2xl font-bold text-emerald-400 mt-1">0% (Safe)</p>
-        <p class="text-xs text-gray-400 mt-1">N-gram signature monitor</p>
-      </div>
-      <div class="p-4 rounded-xl bg-gray-900 border border-gray-800">
-        <p class="text-xs font-medium text-gray-400 uppercase tracking-wider">Active Invariants</p>
-        <p class="text-2xl font-bold text-purple-400 mt-1">4 / 4</p>
-        <p class="text-xs text-gray-400 mt-1">Zero secrets, clean boundaries</p>
-      </div>
-    </div>
-
-    <!-- 4 GUIDED JOURNEYS PANEL -->
-    <div class="p-6 rounded-2xl bg-gray-900 border border-gray-800 space-y-4">
-      <div class="flex items-center justify-between">
-        <div>
-          <h2 class="text-base font-semibold text-white">Guided Agent Scenarios (Zero-Setup Live Demo)</h2>
-          <p class="text-xs text-gray-400">Four scenarios, and the universal adapter below them. Each one calls the live service and shows what came back</p>
+      <div class="tf-proof-grid">
+        <div id="proof-live" class="tf-proof-live" aria-busy="true">
+          <div class="tf-card tf-tile" aria-hidden="true"><span class="tf-skeleton tf-skeleton-line" style="width:55%"></span><span class="tf-skeleton" style="height:32px;width:40%"></span><span class="tf-skeleton tf-skeleton-line" style="width:70%"></span></div>
+          <div class="tf-card tf-tile" aria-hidden="true"><span class="tf-skeleton tf-skeleton-line" style="width:45%"></span><span class="tf-skeleton" style="height:32px;width:30%"></span><span class="tf-skeleton tf-skeleton-line" style="width:65%"></span></div>
+          <div class="tf-card tf-tile" aria-hidden="true"><span class="tf-skeleton tf-skeleton-line" style="width:60%"></span><span class="tf-skeleton" style="height:32px;width:35%"></span><span class="tf-skeleton tf-skeleton-line" style="width:75%"></span></div>
         </div>
-        <button onclick="resetDemo()" class="text-xs text-gray-400 hover:text-white underline">Reset State</button>
+        <div id="proof-bench" class="tf-card tf-bench" aria-busy="true">
+          <span class="tf-skeleton tf-skeleton-line" style="width:70%" aria-hidden="true"></span>
+          <span class="tf-skeleton" style="height:32px;width:40%" aria-hidden="true"></span>
+          <span class="tf-skeleton tf-skeleton-line" style="width:90%" aria-hidden="true"></span>
+          <span class="tf-skeleton tf-skeleton-line" style="width:80%" aria-hidden="true"></span>
+        </div>
+      </div>
+      <p id="proof-where" class="tf-proof-where" hidden></p>
+      <p class="tf-proof-links">Read as this page loaded, from
+        <a class="tf-spec-link" href="swagger.html#/default/get_api_overview" data-tf-page="swagger.html#/default/get_api_overview" title="Open this operation in the published OpenAPI document">GET /api/overview</a>
+        and
+        <a class="tf-spec-link" href="swagger.html#/default/get_proof_json" data-tf-page="swagger.html#/default/get_proof_json" title="Open this operation in the published OpenAPI document">GET /proof.json</a>
+      </p>
+    </section>
+
+    <!-- HOW IT WORKS. The three steps, the flow they make, the two-stage rollout,
+         and the three agents with what has been measured of each, in the words of
+         the evidence that measured it. -->
+    <section id="how-it-works" aria-labelledby="how-title">
+      <div class="tf-sec-head">
+        <p class="tf-eyebrow"><span data-tf-icon="layers"></span>How it works</p>
+        <h2 id="how-title" class="tf-h2">The agent asks, Threefold decides, you see everything</h2>
+        <p class="tf-sec-lede">Deterministic code decides every verdict. Amazon Bedrock only explains one in a sentence, and every answer says which of the two you are reading.</p>
+      </div>
+      <ol class="tf-steps">
+        <li class="tf-card tf-step-card">
+          <div class="tf-step-top"><span class="tf-step-icon"><span data-tf-icon="terminal"></span></span><span class="tf-step-kicker">Step one</span></div>
+          <h3>The hook asks</h3>
+          <p>Before the agent writes a file or runs a command, a small hook sends that tool call to Threefold. The same hook serves Claude Code, Codex and Antigravity, and a credential is refused on the machine and never sent.</p>
+        </li>
+        <li class="tf-card tf-step-card">
+          <div class="tf-step-top"><span class="tf-step-icon"><span data-tf-icon="shield"></span></span><span class="tf-step-kicker">Step two</span></div>
+          <h3>Threefold judges, on AWS</h3>
+          <p>Gates written as plain code decide: a credential in the arguments, a domain file importing infrastructure, the same call repeating, a spend ceiling. A refusal comes back with its reason and a fix the same gates have checked.</p>
+        </li>
+        <li class="tf-card tf-step-card">
+          <div class="tf-step-top"><span class="tf-step-icon"><span data-tf-icon="chart"></span></span><span class="tf-step-kicker">Step three</span></div>
+          <h3>The dashboard shows</h3>
+          <p>Every verdict lands in a ledger. The dashboard shows what was stopped, what would have been, and which rules have earned the right to refuse.</p>
+        </li>
+      </ol>
+
+      <figure class="tf-card tf-diagram">
+        <svg class="tf-diagram-wide" viewBox="0 0 960 150" role="img" aria-labelledby="flow-wide-title flow-wide-desc">
+          <title id="flow-wide-title">How a tool call travels</title>
+          <desc id="flow-wide-desc">The coding agent asks the hook before each call; the hook sends the call to Threefold on AWS; Threefold sends the verdict back, and the hook denies the call with a fix or lets it run; every verdict goes to the ledger the dashboard reads.</desc>
+          <defs>
+            <marker id="fw-head" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="dg-head" d="M0 0L10 5L0 10z"/></marker>
+            <marker id="fw-head-accent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="dg-head-accent" d="M0 0L10 5L0 10z"/></marker>
+          </defs>
+          <rect class="dg-node" x="1" y="30" width="196" height="104" rx="14"/>
+          <text class="dg-title" x="99" y="70" text-anchor="middle">Coding agent</text>
+          <text class="dg-sub" x="99" y="92" text-anchor="middle">Claude Code · Codex</text>
+          <text class="dg-sub" x="99" y="110" text-anchor="middle">Antigravity</text>
+
+          <rect class="dg-node" x="264" y="30" width="182" height="104" rx="14"/>
+          <text class="dg-title" x="355" y="70" text-anchor="middle">The hook</text>
+          <text class="dg-sub" x="355" y="92" text-anchor="middle">on your machine;</text>
+          <text class="dg-sub" x="355" y="110" text-anchor="middle">credentials stay there</text>
+
+          <rect class="dg-node dg-node-accent" x="512" y="30" width="200" height="104" rx="14"/>
+          <text class="dg-title" x="612" y="70" text-anchor="middle">Threefold, on AWS</text>
+          <text class="dg-sub" x="612" y="92" text-anchor="middle">deterministic gates</text>
+          <text class="dg-sub" x="612" y="110" text-anchor="middle">decide; Bedrock explains</text>
+
+          <rect class="dg-node" x="778" y="30" width="181" height="104" rx="14"/>
+          <text class="dg-title" x="868" y="70" text-anchor="middle">The dashboard</text>
+          <text class="dg-sub" x="868" y="92" text-anchor="middle">every verdict, in a</text>
+          <text class="dg-sub" x="868" y="110" text-anchor="middle">ledger you review</text>
+
+          <path class="dg-edge" d="M197 66H260" marker-end="url(#fw-head)"/>
+          <text class="dg-label" x="230" y="56" text-anchor="middle">asks first</text>
+          <path class="dg-edge dg-edge-accent" d="M446 66H508" marker-end="url(#fw-head-accent)"/>
+          <text class="dg-label dg-label-accent" x="478" y="56" text-anchor="middle">the call</text>
+          <path class="dg-edge dg-edge-accent dg-edge-back" d="M512 102H450" marker-end="url(#fw-head-accent)"/>
+          <text class="dg-label dg-label-accent" x="478" y="122" text-anchor="middle">verdict</text>
+          <path class="dg-edge dg-edge-back" d="M264 102H201" marker-end="url(#fw-head)"/>
+          <text class="dg-label" x="231" y="122" text-anchor="middle">deny + fix</text>
+          <path class="dg-edge" d="M712 82H774" marker-end="url(#fw-head)"/>
+          <text class="dg-label" x="744" y="72" text-anchor="middle">ledger</text>
+        </svg>
+        <svg class="tf-diagram-narrow" viewBox="0 0 340 470" role="img" aria-labelledby="flow-narrow-title flow-narrow-desc">
+          <title id="flow-narrow-title">How a tool call travels</title>
+          <desc id="flow-narrow-desc">The coding agent asks the hook before each call; the hook sends the call to Threefold on AWS; Threefold sends the verdict back, and the hook denies the call with a fix or lets it run; every verdict goes to the ledger the dashboard reads.</desc>
+          <defs>
+            <marker id="fn-head" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="dg-head" d="M0 0L10 5L0 10z"/></marker>
+            <marker id="fn-head-accent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="dg-head-accent" d="M0 0L10 5L0 10z"/></marker>
+          </defs>
+          <rect class="dg-node" x="30" y="1" width="280" height="72" rx="14"/>
+          <text class="dg-title" x="170" y="31" text-anchor="middle">Coding agent</text>
+          <text class="dg-sub" x="170" y="53" text-anchor="middle">Claude Code · Codex · Antigravity</text>
+          <rect class="dg-node" x="30" y="125" width="280" height="72" rx="14"/>
+          <text class="dg-title" x="170" y="155" text-anchor="middle">The hook, on your machine</text>
+          <text class="dg-sub" x="170" y="177" text-anchor="middle">credentials stay there</text>
+          <rect class="dg-node dg-node-accent" x="30" y="249" width="280" height="72" rx="14"/>
+          <text class="dg-title" x="170" y="279" text-anchor="middle">Threefold, on AWS</text>
+          <text class="dg-sub" x="170" y="301" text-anchor="middle">gates decide; Bedrock explains</text>
+          <rect class="dg-node" x="30" y="373" width="280" height="72" rx="14"/>
+          <text class="dg-title" x="170" y="403" text-anchor="middle">The dashboard</text>
+          <text class="dg-sub" x="170" y="425" text-anchor="middle">every verdict, in a ledger you review</text>
+          <path class="dg-edge" d="M120 73V121" marker-end="url(#fn-head)"/>
+          <text class="dg-label" x="112" y="102" text-anchor="end">asks first</text>
+          <path class="dg-edge dg-edge-back" d="M220 125V77" marker-end="url(#fn-head)"/>
+          <text class="dg-label" x="228" y="102">deny + fix</text>
+          <path class="dg-edge dg-edge-accent" d="M120 197V245" marker-end="url(#fn-head-accent)"/>
+          <text class="dg-label dg-label-accent" x="112" y="226" text-anchor="end">the call</text>
+          <path class="dg-edge dg-edge-accent dg-edge-back" d="M220 249V201" marker-end="url(#fn-head-accent)"/>
+          <text class="dg-label dg-label-accent" x="228" y="226">verdict</text>
+          <path class="dg-edge" d="M170 321V369" marker-end="url(#fn-head)"/>
+          <text class="dg-label" x="178" y="350">ledger</text>
+        </svg>
+        <figcaption>A refused call is never run: the agent gets the reason and a checked fix instead, and an allowed call runs as it would have anyway. Nothing waits on a model: Bedrock is asked only when a page wants a verdict explained.</figcaption>
+      </figure>
+
+      <div class="tf-card tf-rollout" id="rollout">
+        <div class="tf-rollout-head">
+          <h3>Two stages, so nothing breaks</h3>
+          <p>Every project starts by watching. A rule refuses only after you have seen what it would have stopped and promoted it, and one click takes it back.</p>
+        </div>
+        <ol class="tf-track">
+          <li class="tf-stage tf-stage-observe">
+            <span class="tf-stage-name"><span data-tf-icon="eye"></span>Observe</span>
+            <p>Every call is judged and recorded; nothing is refused. What a rule would have stopped is kept for review.</p>
+          </li>
+          <li class="tf-stage tf-stage-review">
+            <span class="tf-stage-name"><span data-tf-icon="inbox"></span>Review</span>
+            <p>You mark each would-refuse correct or a false alarm. A rule whose every flag was correct reads Ready.</p>
+          </li>
+          <li class="tf-stage tf-stage-enforce">
+            <span class="tf-stage-name"><span data-tf-icon="shield"></span>Enforce</span>
+            <p>Promote the ready rules and they refuse. The rules you leave out keep observing.</p>
+          </li>
+        </ol>
+        <p class="tf-demote"><span class="tf-demote-line" aria-hidden="true"></span><span data-tf-icon="refresh"></span><span><strong>Demote</strong> is one click back to Observe, whenever a rule misbehaves.</span></p>
       </div>
 
-      <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
-        <!-- Scenario 1 -->
-        <button onclick="simulateLoop()" class="p-4 rounded-xl bg-gray-950 border border-gray-800 hover:border-purple-500 text-left transition group">
-          <div class="flex items-center justify-between mb-2">
-            <span class="text-xs font-bold text-purple-400">Scenario 1</span>
-            <span class="text-base">🔄</span>
-          </div>
-          <p class="text-sm font-semibold text-white group-hover:text-purple-300">Runaway Tool Loop</p>
-          <p class="text-xs text-gray-400 mt-1">Agent caught in recursive edit thrashing. Circuit breaker trips in 3 iterations.</p>
-        </button>
+      <ul class="tf-agents" id="agents" aria-label="The three agents and what has been measured of each">
+        <li class="tf-card tf-agent">
+          <div class="tf-agent-head"><span class="tf-agent-name">Claude Code</span><span class="tf-chip tf-chip-emerald"><span data-tf-icon="check" data-tf-size="13"></span>Measured: the write is stopped</span></div>
+          <blockquote>A deny from the hook “stops the write in Claude Code 2.1.220 on this platform, over both the file tool and the shell.”</blockquote>
+          <p class="tf-agent-src">Measured on the file system, 2026-09-21 · <a class="tf-link" href="https://github.com/upgradedev/aws-threefold/blob/main/docs/evidence/ENFORCEMENT_2026-09-21.md">the evidence</a></p>
+        </li>
+        <li class="tf-card tf-agent">
+          <div class="tf-agent-head"><span class="tf-agent-name">Antigravity</span><span class="tf-chip tf-chip-emerald"><span data-tf-icon="check" data-tf-size="13"></span>Measured: the write is stopped</span></div>
+          <blockquote>The deny stops the write “in the Antigravity desktop app over <code>write_to_file</code>”: the file was not created.</blockquote>
+          <p class="tf-agent-src">Measured on the file system, 2026-09-21 · <a class="tf-link" href="https://github.com/upgradedev/aws-threefold/blob/main/docs/evidence/ENFORCEMENT_2026-09-21.md">the evidence</a></p>
+        </li>
+        <li class="tf-card tf-agent">
+          <div class="tf-agent-head"><span class="tf-agent-name">Codex</span><span class="tf-chip tf-chip-amber"><span data-tf-icon="alert" data-tf-size="13"></span>Measured once, over its patch tool</span></div>
+          <blockquote>In one run “the real hook refused it”, and the governed file “had the same sha256 afterwards as before.” Codex CLI 0.155.0; its shell route is not measured.</blockquote>
+          <p class="tf-agent-src">Measured on the file system, 2026-09-23 · <a class="tf-link" href="https://github.com/upgradedev/aws-threefold/blob/main/docs/evidence/ENFORCEMENT_2026-09-23.md">the evidence</a></p>
+        </li>
+      </ul>
+      <p class="tf-agents-note">Each was measured on one Windows machine by what was on the disk afterwards, not by what the agent said, because two open bug reports say a hook's deny can be ignored.</p>
+    </section>
 
-        <!-- Scenario 2 -->
-        <button onclick="simulateSecret()" class="p-4 rounded-xl bg-gray-950 border border-gray-800 hover:border-red-500 text-left transition group">
-          <div class="flex items-center justify-between mb-2">
-            <span class="text-xs font-bold text-red-400">Scenario 2</span>
-            <span class="text-base">🔑</span>
-          </div>
-          <p class="text-sm font-semibold text-white group-hover:text-red-300">Secret Leak Intercept</p>
-          <p class="text-xs text-gray-400 mt-1">Agent attempts to pass AWS credentials in arguments. Blocked at perimeter.</p>
-        </button>
+    <!-- BUILT ON AWS. The deployed pieces, as ARCHITECTURE.md draws them. -->
+    <section id="built-on-aws" aria-labelledby="aws-title">
+      <div class="tf-sec-head">
+        <p class="tf-eyebrow"><span data-tf-icon="layers"></span>Built on AWS</p>
+        <h2 id="aws-title" class="tf-h2">Serverless from the edge to the ledger</h2>
+        <p class="tf-sec-lede">One function behind an edge that filters and throttles, one table for every verdict, and a model that explains but never decides.</p>
+      </div>
+      <figure class="tf-card tf-diagram" id="architecture">
+        <svg class="tf-diagram-wide" viewBox="0 0 960 250" role="img" aria-labelledby="aws-wide-title aws-wide-desc">
+          <title id="aws-wide-title">The AWS services Threefold runs on</title>
+          <desc id="aws-wide-desc">Browsers and hooks reach CloudFront with AWS WAF, which serves the pages and forwards API calls to API Gateway; API Gateway invokes one AWS Lambda function that runs the gates; it records verdicts in Amazon DynamoDB, asks Amazon Bedrock only to explain a verdict, and is invoked on a schedule by Amazon EventBridge Scheduler to run the synthetic demo fleet.</desc>
+          <defs>
+            <marker id="aw-head" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="dg-head" d="M0 0L10 5L0 10z"/></marker>
+            <marker id="aw-head-accent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="dg-head-accent" d="M0 0L10 5L0 10z"/></marker>
+          </defs>
+          <rect class="dg-node dg-node-quiet" x="1" y="20" width="164" height="76" rx="14"/>
+          <text class="dg-title" x="83" y="52" text-anchor="middle">Browsers, hooks</text>
+          <text class="dg-sub" x="83" y="74" text-anchor="middle">pages and tool calls</text>
+          <rect class="dg-node" x="199" y="20" width="164" height="76" rx="14"/>
+          <text class="dg-title" x="281" y="52" text-anchor="middle">CloudFront + WAF</text>
+          <text class="dg-sub" x="281" y="74" text-anchor="middle">pages, rate limits</text>
+          <rect class="dg-node" x="398" y="20" width="164" height="76" rx="14"/>
+          <text class="dg-title" x="480" y="52" text-anchor="middle">API Gateway</text>
+          <text class="dg-sub" x="480" y="74" text-anchor="middle">HTTP API, throttled</text>
+          <rect class="dg-node dg-node-accent" x="597" y="20" width="164" height="76" rx="14"/>
+          <text class="dg-title" x="679" y="52" text-anchor="middle">AWS Lambda</text>
+          <text class="dg-sub" x="679" y="74" text-anchor="middle">the gates, one function</text>
+          <rect class="dg-node" x="795" y="20" width="164" height="76" rx="14"/>
+          <text class="dg-title" x="877" y="52" text-anchor="middle">DynamoDB</text>
+          <text class="dg-sub" x="877" y="74" text-anchor="middle">ledger, sessions, rollups</text>
+          <rect class="dg-node" x="362" y="160" width="200" height="76" rx="14"/>
+          <text class="dg-title" x="462" y="192" text-anchor="middle">EventBridge Scheduler</text>
+          <text class="dg-sub" x="462" y="214" text-anchor="middle">the synthetic demo fleet</text>
+          <rect class="dg-node" x="795" y="160" width="164" height="76" rx="14"/>
+          <text class="dg-title" x="877" y="192" text-anchor="middle">Amazon Bedrock</text>
+          <text class="dg-sub" x="877" y="214" text-anchor="middle">explains, never decides</text>
+          <path class="dg-edge" d="M165 58H195" marker-end="url(#aw-head)"/>
+          <path class="dg-edge" d="M363 58H394" marker-end="url(#aw-head)"/>
+          <path class="dg-edge dg-edge-accent" d="M562 58H593" marker-end="url(#aw-head-accent)"/>
+          <path class="dg-edge" d="M761 58H791" marker-end="url(#aw-head)"/>
+          <path class="dg-edge" d="M562 198H650V100" marker-end="url(#aw-head)"/>
+          <text class="dg-label" x="642" y="152" text-anchor="end">on a schedule</text>
+          <path class="dg-edge dg-edge-back" d="M720 96V198H791" marker-end="url(#aw-head)"/>
+          <text class="dg-label" x="728" y="152">to explain</text>
+        </svg>
+        <svg class="tf-diagram-narrow" viewBox="0 0 340 556" role="img" aria-labelledby="aws-narrow-title aws-narrow-desc">
+          <title id="aws-narrow-title">The AWS services Threefold runs on</title>
+          <desc id="aws-narrow-desc">Browsers and hooks reach CloudFront with AWS WAF, which serves the pages and forwards API calls to API Gateway; API Gateway invokes one AWS Lambda function that runs the gates; it records verdicts in Amazon DynamoDB, asks Amazon Bedrock only to explain a verdict, and is invoked on a schedule by Amazon EventBridge Scheduler to run the synthetic demo fleet.</desc>
+          <defs>
+            <marker id="an-head" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="dg-head" d="M0 0L10 5L0 10z"/></marker>
+            <marker id="an-head-accent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="dg-head-accent" d="M0 0L10 5L0 10z"/></marker>
+          </defs>
+          <rect class="dg-node dg-node-quiet" x="30" y="1" width="280" height="64" rx="14"/>
+          <text class="dg-title" x="170" y="29" text-anchor="middle">Browsers, hooks</text>
+          <text class="dg-sub" x="170" y="49" text-anchor="middle">pages and tool calls</text>
+          <rect class="dg-node" x="30" y="95" width="280" height="64" rx="14"/>
+          <text class="dg-title" x="170" y="123" text-anchor="middle">CloudFront + WAF</text>
+          <text class="dg-sub" x="170" y="143" text-anchor="middle">pages, rate limits</text>
+          <rect class="dg-node" x="30" y="189" width="280" height="64" rx="14"/>
+          <text class="dg-title" x="170" y="217" text-anchor="middle">API Gateway</text>
+          <text class="dg-sub" x="170" y="237" text-anchor="middle">HTTP API, throttled</text>
+          <rect class="dg-node dg-node-accent" x="30" y="283" width="280" height="64" rx="14"/>
+          <text class="dg-title" x="170" y="311" text-anchor="middle">AWS Lambda</text>
+          <text class="dg-sub" x="170" y="331" text-anchor="middle">the gates, one function</text>
+          <rect class="dg-node" x="1" y="387" width="160" height="64" rx="14"/>
+          <text class="dg-title" x="81" y="415" text-anchor="middle">DynamoDB</text>
+          <text class="dg-sub" x="81" y="435" text-anchor="middle">the ledger</text>
+          <rect class="dg-node" x="179" y="387" width="160" height="64" rx="14"/>
+          <text class="dg-title" x="259" y="415" text-anchor="middle">Amazon Bedrock</text>
+          <text class="dg-sub" x="259" y="435" text-anchor="middle">explains, never decides</text>
+          <rect class="dg-node" x="30" y="491" width="280" height="64" rx="14"/>
+          <text class="dg-title" x="170" y="519" text-anchor="middle">EventBridge Scheduler</text>
+          <text class="dg-sub" x="170" y="539" text-anchor="middle">runs the synthetic demo fleet</text>
+          <path class="dg-edge" d="M170 65V91" marker-end="url(#an-head)"/>
+          <path class="dg-edge" d="M170 159V185" marker-end="url(#an-head)"/>
+          <path class="dg-edge dg-edge-accent" d="M170 253V279" marker-end="url(#an-head-accent)"/>
+          <path class="dg-edge" d="M90 347V383" marker-end="url(#an-head)"/>
+          <path class="dg-edge dg-edge-back" d="M250 347V383" marker-end="url(#an-head)"/>
+          <path class="dg-edge" d="M170 491V351" marker-end="url(#an-head)"/>
+        </svg>
+        <div class="tf-aws-foot">
+          <p>The edge runs in <span class="tf-nobr">us-east-1</span> and the service in <span class="tf-nobr">eu-west-1</span>. EventBridge Scheduler runs only on the public demo stack, where it feeds the synthetic Acme fleet through the same gates.</p>
+          <a class="tf-btn tf-btn-sm" href="https://github.com/upgradedev/aws-threefold/blob/main/docs/ARCHITECTURE.md"><span data-tf-icon="book"></span>The architecture, in depth<span data-tf-icon="external"></span></a>
+        </div>
+      </figure>
+    </section>
 
-        <!-- Scenario 3 -->
-        <button onclick="simulateBoundary()" class="p-4 rounded-xl bg-gray-950 border border-gray-800 hover:border-amber-500 text-left transition group">
-          <div class="flex items-center justify-between mb-2">
-            <span class="text-xs font-bold text-amber-400">Scenario 3</span>
-            <span class="text-base">🛡️</span>
-          </div>
-          <p class="text-sm font-semibold text-white group-hover:text-amber-300">Clean Architecture Drift</p>
-          <p class="text-xs text-gray-400 mt-1">Agent attempts to import AWS SDK in pure domain layer. Blocked.</p>
-        </button>
+    <!-- WATCH THE GATES. The zero-setup demo of CLAUDE.md rule 6: four scenarios
+         and the universal adapter, one picker and one result panel. Each calls
+         the live service and shows what came back; when the service cannot be
+         reached, the first four replay a recorded run, labelled as one. -->
+    <section id="watch-the-gates" aria-labelledby="gates-title">
+      <div class="tf-sec-row">
+        <div class="tf-sec-head">
+          <p class="tf-eyebrow"><span data-tf-icon="play"></span>Watch the gates</p>
+          <h2 id="gates-title" class="tf-h2">Watch the gates refuse, with no account</h2>
+          <p class="tf-sec-lede">Four scenarios and the universal adapter. Each calls the live service and shows what came back.</p>
+        </div>
+        <div class="tf-actions">
+          <span id="apiConnectionStatus" class="tf-chip tf-chip-gray tf-chip-dot" role="status">Checking the service</span>
+          <button type="button" onclick="resetDemo()" class="tf-btn tf-btn-sm tf-btn-quiet"><span data-tf-icon="refresh" data-tf-size="14"></span>Reset</button>
+        </div>
+      </div>
 
-        <!-- Scenario 4 -->
-        <button onclick="simulateCompliant()" class="p-4 rounded-xl bg-gray-950 border border-gray-800 hover:border-emerald-500 text-left transition group">
-          <div class="flex items-center justify-between mb-2">
-            <span class="text-xs font-bold text-emerald-400">Scenario 4</span>
-            <span class="text-base">📜</span>
-          </div>
-          <p class="text-sm font-semibold text-white group-hover:text-emerald-300">Compliant Run & Cert</p>
-          <p class="text-xs text-gray-400 mt-1">Linear execution within budget. Issues a SHA-256 fingerprinted Governance Certificate.</p>
+      <div class="tf-scenarios" role="group" aria-label="Scenarios">
+        <button type="button" id="scenario-loop" class="tf-scenario" aria-pressed="false" onclick="simulateLoop()">
+          <span class="tf-scenario-top"><span class="tf-scenario-kicker">Loop</span><span data-tf-icon="refresh"></span></span>
+          <span class="tf-scenario-name">Runaway tool loop</span>
+          <span class="tf-scenario-text">The same edit, again and again: the circuit breaker refuses the third and halts the session.</span>
         </button>
+        <button type="button" id="scenario-secret" class="tf-scenario" aria-pressed="false" onclick="simulateSecret()">
+          <span class="tf-scenario-top"><span class="tf-scenario-kicker">Credential</span><span data-tf-icon="key"></span></span>
+          <span class="tf-scenario-name">A secret in the arguments</span>
+          <span class="tf-scenario-text">An AWS key passed in a command is refused before it leaves.</span>
+        </button>
+        <button type="button" id="scenario-boundary" class="tf-scenario" aria-pressed="false" onclick="simulateBoundary()">
+          <span class="tf-scenario-top"><span class="tf-scenario-kicker">Architecture</span><span data-tf-icon="layers"></span></span>
+          <span class="tf-scenario-name">The AWS SDK in the domain</span>
+          <span class="tf-scenario-text">A domain file importing boto3 is refused, with a checked fix.</span>
+        </button>
+        <button type="button" id="scenario-compliant" class="tf-scenario" aria-pressed="false" onclick="simulateCompliant()">
+          <span class="tf-scenario-top"><span class="tf-scenario-kicker">Certificate</span><span data-tf-icon="check"></span></span>
+          <span class="tf-scenario-name">A compliant run, certified</span>
+          <span class="tf-scenario-text">Ordinary calls pass, and the service certifies its own verdicts.</span>
+        </button>
+        <button type="button" id="scenario-adapter" class="tf-scenario" aria-pressed="false" onclick="simulateUniversalAdapter()">
+          <span class="tf-scenario-top"><span class="tf-scenario-kicker">Adapter</span><span data-tf-icon="code"></span></span>
+          <span class="tf-scenario-name">Universal adapter</span>
+          <span class="tf-scenario-text">A native Anthropic tool_use payload, judged with no glue code.</span>
+          <span class="tf-scenario-route">POST /adapter/universal-tool-call</span>
+        </button>
+      </div>
 
-        <!-- Scenario 5: Universal Adapter -->
-        <button onclick="simulateUniversalAdapter()" class="p-4 rounded-xl bg-gray-950 border border-gray-800 hover:border-cyan-500 text-left transition group col-span-2 md:col-span-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
+      <div class="tf-card tf-result" id="result-panel">
+        <div class="tf-result-head">
           <div>
-            <div class="flex items-center gap-2 mb-1">
-              <span class="text-xs font-bold text-cyan-400">Production Feature</span>
-              <span class="text-xs px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 font-mono">POST /adapter/universal-tool-call</span>
-            </div>
-            <p class="text-sm font-semibold text-white group-hover:text-cyan-300">Universal Multi-Agent Adapter (OpenAI & Anthropic formats)</p>
-            <p class="text-xs text-gray-400 mt-0.5">Evaluates native JSON payloads from any coding agent (OpenAI function_call, Anthropic tool_use) with zero glue code.</p>
+            <p class="tf-pane-label">Result</p>
+            <h3 id="result-title">Pick a scenario above</h3>
           </div>
-          <span class="text-xs font-semibold px-3 py-1.5 rounded-lg bg-cyan-950 hover:bg-cyan-900 text-cyan-300 border border-cyan-800 transition whitespace-nowrap">Test Adapter ⚡</span>
-        </button>
+          <div class="tf-result-status">
+            <span id="verdict-tag" class="tf-chip tf-chip-lg tf-chip-gray tf-mono">Awaiting input</span>
+            <span id="cb-indicator" class="tf-chip tf-chip-lg tf-chip-dot tf-chip-emerald">Circuit breaker: armed</span>
+          </div>
+        </div>
+        <div class="tf-result-grid">
+          <div class="tf-result-pane">
+            <div class="tf-terminal-bar"><span>agent-telemetry-stream</span><span id="terminal-badge" class="tf-chip tf-chip-gray">Idle</span></div>
+            <div id="terminal-log" class="tf-terminal" role="log" aria-label="What the agent sent and what came back">
+              <p class="tf-log tf-log-muted">// Ready. Pick a scenario above to send its calls.</p>
+            </div>
+          </div>
+          <div class="tf-result-pane">
+            <div>
+              <p class="tf-pane-label">Deterministic gates</p>
+              <div class="tf-invariants" id="invariants-list">
+                <div class="tf-invariant"><span>No secret in the call</span><span id="inv-secrets" class="tf-inv-value">--</span></div>
+                <div class="tf-invariant"><span>Clean architecture boundary</span><span id="inv-boundary" class="tf-inv-value">--</span></div>
+                <div class="tf-invariant"><span>No loop</span><span id="inv-loop" class="tf-inv-value">--</span></div>
+                <div class="tf-invariant"><span>Cost circuit breaker</span><span id="inv-cost" class="tf-inv-value">--</span></div>
+              </div>
+            </div>
+            <div>
+              <p class="tf-pane-label">Why, in a sentence</p>
+              <div id="bedrock-box" class="tf-explain">Waiting for a scenario: its verdict is explained here, with the name of whatever wrote the sentence.</div>
+            </div>
+            <div id="fix-container" class="hidden">
+              <p class="tf-pane-label">Suggested fix</p>
+              <div id="fix-box" class="tf-fix"></div>
+            </div>
+            <div id="cert-container" class="tf-cert hidden">
+              <div class="tf-cert-head">
+                <span>Governance certificate</span>
+                <button type="button" onclick="downloadCert()" class="tf-btn tf-btn-sm tf-btn-good"><span data-tf-icon="download" data-tf-size="14"></span>Export JSON</button>
+              </div>
+              <p id="cert-id">CERT-TF-...</p>
+              <p id="cert-hash">SHA256: ...</p>
+              <p id="cert-signature">Signature: ...</p>
+              <p id="cert-origin" class="tf-cert-note"></p>
+              <p class="tf-cert-note">
+                The fingerprint is an unkeyed SHA-256 of the payload. It detects corruption and casual edits, not an adversary:
+                anyone who changes the payload can recompute the hash. Where the stack holds a signing key the same bytes carry
+                a KMS signature, shown above; nothing in CI requires one before a merge.
+              </p>
+            </div>
+            <div class="tf-session-stats" aria-label="The last scenario's session">
+              <span>Session spend <b id="kpi-spend">—</b></span>
+              <span id="kpi-tokens">no session yet</span>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- Every operation the buttons above call, linked to its entry in the
            published contract rather than to the front page of the document. -->
-      <div class="border-t border-gray-800 pt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-gray-500">
-        <span class="text-gray-400">What these buttons call, in the contract:</span>
-        <span id="contract-strip" class="flex flex-wrap items-center gap-x-2 gap-y-1"></span>
-      </div>
-    </div>
-
-    <!-- TERMINAL & VERDICT DISPLAY -->
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-
-      <!-- Real-Time Agent Stream & Interception -->
-      <div class="rounded-2xl bg-gray-900 border border-gray-800 p-5 flex flex-col space-y-3">
-        <div class="flex items-center justify-between border-b border-gray-800 pb-3">
-          <div class="flex items-center gap-2">
-            <span class="w-3 h-3 rounded-full bg-red-500"></span>
-            <span class="w-3 h-3 rounded-full bg-yellow-500"></span>
-            <span class="w-3 h-3 rounded-full bg-green-500"></span>
-            <span class="text-xs font-mono text-gray-400 ml-2">agent-telemetry-stream</span>
-          </div>
-          <span id="terminal-badge" class="text-xs px-2 py-0.5 rounded bg-gray-800 text-gray-300">Idle</span>
-        </div>
-        <div id="terminal-log" class="font-mono text-xs text-gray-300 bg-gray-950 p-4 rounded-xl h-64 overflow-y-auto space-y-2 border border-gray-800">
-          <p class="text-gray-500">// Ready. Select a scenario above to simulate coding agent actions.</p>
-        </div>
+      <div class="tf-contract">
+        <span>What these buttons call, in the contract:</span>
+        <span id="contract-strip" class="tf-actions"></span>
       </div>
 
-      <!-- Gatekeeper Verdict & Bedrock Commentary -->
-      <div class="rounded-2xl bg-gray-900 border border-gray-800 p-5 flex flex-col space-y-4">
-        <div class="flex items-center justify-between border-b border-gray-800 pb-3">
-          <h3 class="text-sm font-semibold text-white flex items-center gap-2">
-            <span>Deterministic Gatekeeper & Bedrock Review</span>
-          </h3>
-          <span id="verdict-tag" class="text-xs px-2.5 py-1 rounded-full font-semibold bg-gray-800 text-gray-400">
-            Awaiting Input
-          </span>
-        </div>
-
-        <div class="space-y-3">
-          <div>
-            <p class="text-xs font-medium text-gray-400 uppercase">Deterministic Safety Invariants</p>
-            <div class="grid grid-cols-2 gap-2 mt-2" id="invariants-list">
-              <div class="p-2 rounded bg-gray-950 border border-gray-800 text-xs flex items-center justify-between">
-                <span class="text-gray-400">Secret Leakage Free</span>
-                <span id="inv-secrets" class="text-gray-500 font-mono">--</span>
-              </div>
-              <div class="p-2 rounded bg-gray-950 border border-gray-800 text-xs flex items-center justify-between">
-                <span class="text-gray-400">Clean Architecture Boundary</span>
-                <span id="inv-boundary" class="text-gray-500 font-mono">--</span>
-              </div>
-              <div class="p-2 rounded bg-gray-950 border border-gray-800 text-xs flex items-center justify-between">
-                <span class="text-gray-400">Loop Thrashing Free</span>
-                <span id="inv-loop" class="text-gray-500 font-mono">--</span>
-              </div>
-              <div class="p-2 rounded bg-gray-950 border border-gray-800 text-xs flex items-center justify-between">
-                <span class="text-gray-400">Cost Circuit Breaker</span>
-                <span id="inv-cost" class="text-gray-500 font-mono">--</span>
-              </div>
-            </div>
+      <!-- Where the scenarios send, and the two operator controls. A first-time
+           reader meets the product before these; they are one click away. -->
+      <details id="connection-panel" class="tf-disclosure tf-connection">
+        <summary><span data-tf-icon="settings"></span>Connection and operator controls <span id="statusRouteBadge" class="tf-chip tf-chip-gray tf-mono">checking /status</span></summary>
+        <div class="tf-disclosure-body">
+          <div class="tf-connection-grid">
+            <label class="tf-field">
+              <span class="tf-label">Service endpoint</span>
+              <input id="apiBaseInput" type="text" value="" class="tf-input tf-mono" spellcheck="false" placeholder="this stack" />
+            </label>
+            <label class="tf-field">
+              <span class="tf-label">API key, only if the stack enforces one</span>
+              <input id="apiKeyInput" type="password" value="" placeholder="not needed for the demo" class="tf-input tf-mono" autocomplete="off" />
+            </label>
           </div>
-
-          <div>
-            <p class="text-xs font-medium text-gray-400 uppercase">Amazon Bedrock Architectural Commentary</p>
-            <div id="bedrock-box" class="mt-1 p-3 rounded-xl bg-purple-950/20 border border-purple-900/40 text-xs text-purple-200">
-              Awaiting agent action to evaluate architectural trade-offs and safety implications.
-            </div>
-          </div>
-
-          <div id="fix-container" class="hidden">
-            <p class="text-xs font-medium text-gray-400 uppercase">Suggested Fix</p>
-            <div id="fix-box" class="mt-1 p-3 rounded-xl bg-gray-950 border border-gray-800 text-xs text-gray-300 space-y-2"></div>
-          </div>
-
-          <div id="cert-container" class="hidden p-3 rounded-xl bg-emerald-950/20 border border-emerald-900/40 space-y-2">
-            <div class="flex items-center justify-between">
-              <span class="text-xs font-semibold text-emerald-400">Governance Certificate</span>
-              <button onclick="downloadCert()" class="text-xs px-2 py-1 bg-emerald-800 hover:bg-emerald-700 text-white rounded">
-                Export JSON ↗
-              </button>
-            </div>
-            <p id="cert-id" class="text-xs font-mono text-emerald-300">CERT-TF-...</p>
-            <p id="cert-hash" class="text-xs font-mono text-gray-400 truncate">SHA256: ...</p>
-            <p id="cert-signature" class="text-xs font-mono text-gray-400 truncate">Signature: ...</p>
-            <p id="cert-origin" class="text-[11px] text-gray-400"></p>
-            <p class="text-[11px] text-gray-500 border-t border-emerald-900/40 pt-2">
-              The fingerprint is an unkeyed SHA-256 of the payload. It detects corruption and casual edits, not an adversary:
-              anyone who changes the payload can recompute the hash. Where the stack holds a signing key the same bytes carry
-              a KMS signature, shown above; nothing in CI requires one before a merge.
-            </p>
+          <div class="tf-actions">
+            <button type="button" id="btnCheckConnection" onclick="checkApiHealth()" class="tf-btn tf-btn-sm"><span data-tf-icon="refresh" data-tf-size="14"></span>Check</button>
+            <button type="button" id="btnExportCert" onclick="downloadCert()" class="tf-btn tf-btn-sm"><span data-tf-icon="download" data-tf-size="14"></span>Export governance certificate</button>
+            <button type="button" id="btnEmergencyFreeze" onclick="triggerManualFreeze()" disabled
+                    title="Run a scenario first, so there is a session of your own to freeze."
+                    class="tf-btn tf-btn-sm tf-btn-danger"><span data-tf-icon="stop" data-tf-size="14"></span>Freeze session</button>
           </div>
         </div>
-      </div>
-
-    </div>
-
+      </details>
+    </section>
   </main>
 
-  <footer class="border-t border-gray-800 py-4 text-center text-xs text-gray-500">
-    Threefold · AWS Zero to Shipped Hackathon 2026 · Built with Amazon Bedrock & AWS Serverless
+  <footer class="tf-footer tf-landing-foot">
+    <div class="tf-container">
+      <div class="tf-foot-brand">
+        <p>Threefold · built for AWS Zero to Shipped, with Amazon Bedrock and AWS serverless.</p>
+        <div class="tf-foot-tags" aria-label="Hackathon tags">
+          <span class="tf-chip tf-chip-purple">#workplace-efficiency</span>
+          <span class="tf-chip tf-chip-sky">#community</span>
+        </div>
+      </div>
+      <nav class="tf-foot-links" aria-label="About Threefold">
+        <a href="dashboard.html#/proof" data-tf-page="dashboard.html#/proof"><span data-tf-icon="flask"></span>Proof</a>
+        <a href="swagger.html" data-tf-page="swagger.html"><span data-tf-icon="book"></span>API</a>
+        <a href="https://github.com/upgradedev/aws-threefold/blob/main/docs/ARCHITECTURE.md"><span data-tf-icon="layers"></span>Architecture</a>
+        <a href="https://github.com/upgradedev/aws-threefold"><span data-tf-icon="git"></span>Repository</a>
+      </nav>
+    </div>
   </footer>
 
   <script>
+    const T = window.Threefold || null;
     let currentCertData = null;
     let liveBackendActive = false;
     // The session the last scenario ran under, so the freeze button acts on a
@@ -447,6 +896,7 @@
             : "Deterministic explanation";
       document.getElementById('bedrock-box').innerHTML =
         `<strong>${label}:</strong> ${escapeHtml(text)}`;
+      document.getElementById('terminal-badge').innerText = 'Live answer';
     }
 
     // One real run of each scenario, recorded against the live API and replayed
@@ -494,9 +944,23 @@
       }
     };
 
+    // The boundary write: the call the hero asks this stack about as the page
+    // loads, and the call Scenario 3 sends. It is the call RECORDED.boundary was
+    // recorded from, so a replay shows the very call it answers.
+    const BOUNDARY_CALL = {
+      tool_name: "write_to_file",
+      action_type: "FILE_WRITE",
+      arguments: {
+        TargetFile: "src/domain/user.py",
+        CodeContent: "import boto3\nclass User:\n  pass"
+      }
+    };
+    const DEMO_PROJECT = "Acme-Core";
+
     function renderRecordedExplanation(text) {
       document.getElementById('bedrock-box').innerHTML =
         `<strong>Recorded ${RECORDED.recorded_at}, replayed offline, no model was reached now:</strong> ${escapeHtml(text)}`;
+      document.getElementById('terminal-badge').innerText = 'Recorded replay';
     }
 
     // The fix the service sent with a refusal: what to send instead. Only a
@@ -518,17 +982,17 @@
       const writes = Array.isArray(fix.writes) ? fix.writes.filter(w => w && typeof w.path === 'string' && typeof w.content === 'string') : [];
       box.innerHTML =
         (checked
-          ? '<p><span class="px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-950 text-emerald-300 border border-emerald-800">Checked by Threefold: passes the same gates</span></p>'
+          ? '<p><span class="tf-chip tf-chip-emerald tf-chip-dot">Checked by Threefold: passes the same gates</span></p>'
           : '') +
-        `<p class="text-gray-200">${escapeHtml(fix.summary)}</p>` +
+        `<p>${escapeHtml(fix.summary)}</p>` +
         (steps.length
-          ? '<ol class="list-decimal pl-5 space-y-1 text-gray-400">' + steps.map(s => `<li>${escapeHtml(s)}</li>`).join('') + '</ol>'
+          ? '<ol>' + steps.map(s => `<li>${escapeHtml(s)}</li>`).join('') + '</ol>'
           : '') +
         writes.map(w =>
-          `<p class="font-mono text-[11px] text-gray-400 pt-1">${escapeHtml(w.path)}${w.new_file === true ? ' · a new file: if it exists, add to it' : ''}${typeof w.old_string === 'string' ? ' · an Edit: in place of the text replaced' : ''}${w.partial === true ? ' · add with an Edit where the command put it' : ''}</p>` +
-          `<pre class="p-2 rounded bg-gray-900 border border-gray-800 text-[11px] font-mono text-gray-300 overflow-x-auto whitespace-pre"><code>${escapeHtml(w.content)}</code></pre>`
+          `<p class="tf-fix-path">${escapeHtml(w.path)}${w.new_file === true ? ' · a new file: if it exists, add to it' : ''}${typeof w.old_string === 'string' ? ' · an Edit: in place of the text replaced' : ''}${w.partial === true ? ' · add with an Edit where the command put it' : ''}</p>` +
+          `<pre><code>${escapeHtml(w.content)}</code></pre>`
         ).join('') +
-        '<p class="text-[11px] text-gray-500">A starting point, never applied automatically.</p>';
+        '<p class="tf-fix-path">A starting point, never applied automatically.</p>';
       container.classList.remove('hidden');
     }
 
@@ -557,20 +1021,15 @@
     function setStatusRouteBadge(tone, text) {
       const badge = document.getElementById("statusRouteBadge");
       if (!badge) return;
-      const tones = {
-        live: ["bg-emerald-950 text-emerald-400 border-emerald-800", "bg-emerald-400"],
-        unreachable: ["bg-red-950 text-red-400 border-red-800", "bg-red-400"],
-        checking: ["bg-gray-900 text-gray-400 border-gray-700", "bg-gray-500"]
-      };
-      const [box, dot] = tones[tone] || tones.checking;
-      badge.className = "px-2 py-0.5 rounded text-[11px] font-mono border flex items-center gap-1.5 " + box;
-      badge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full ' + dot + '"></span> ' + escapeHtml(text);
+      const tones = { live: "tf-chip-emerald", unreachable: "tf-chip-rose", checking: "tf-chip-gray" };
+      badge.className = "tf-chip tf-mono " + (tones[tone] || tones.checking);
+      badge.innerHTML = escapeHtml(text);
     }
 
     async function checkApiHealth() {
       const base = getApiBase();
       const statusBadge = document.getElementById("apiConnectionStatus");
-      setStatusRouteBadge("checking", "CHECKING /status…");
+      setStatusRouteBadge("checking", "checking /status");
       let problem = "no answer";
       try {
         const t0 = performance.now();
@@ -583,35 +1042,97 @@
           problem = "HTTP " + res.status + ", not JSON";
           const data = await res.json();
           liveBackendActive = true;
-          statusBadge.className = "px-2 py-0.5 rounded text-[11px] font-mono bg-emerald-950 text-emerald-400 border border-emerald-800 flex items-center gap-1.5";
-          statusBadge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> LIVE API CONNECTED (${escapeHtml(data.service)})`;
-          setStatusRouteBadge("live", `LIVE · /status ${res.status} ${data.status || ""} · ${latency} ms`);
+          statusBadge.className = "tf-chip tf-chip-emerald tf-chip-dot";
+          statusBadge.innerHTML = `Live: ${escapeHtml(data.service)} answers`;
+          setStatusRouteBadge("live", `live · /status ${res.status} ${data.status || ""} · ${latency} ms`);
           return true;
         }
         problem = "HTTP " + res.status;
       } catch (err) {}
       liveBackendActive = false;
-      statusBadge.className = "px-2 py-0.5 rounded text-[11px] font-mono bg-amber-950 text-amber-400 border border-amber-800 flex items-center gap-1.5";
-      statusBadge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span> STANDALONE CLIENT (OFFLINE)`;
-      setStatusRouteBadge("unreachable", `UNREACHABLE · /status ${problem}`);
+      statusBadge.className = "tf-chip tf-chip-amber tf-chip-dot";
+      statusBadge.innerHTML = `Offline: recorded runs replay`;
+      setStatusRouteBadge("unreachable", `unreachable · /status ${problem}`);
       return false;
     }
 
-    function resetDemo() {
-      document.getElementById('kpi-spend').innerText = '$0.0000';
-      document.getElementById('kpi-tokens').innerText = '0 tokens consumed';
-      document.getElementById('kpi-loop').innerText = '0% (Safe)';
-      document.getElementById('cb-indicator').className = "flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium bg-emerald-950/80 text-emerald-400 border border-emerald-800";
-      document.getElementById('cb-indicator').innerHTML = '<span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> CIRCUIT BREAKER: ARMED';
+    // The picker and the one result panel. A scenario marks itself chosen when
+    // it runs, and Reset clears the choice with everything else.
+    const SCENARIOS = [
+      ['loop', 'Runaway tool loop'],
+      ['secret', 'A secret in the arguments'],
+      ['boundary', 'The AWS SDK in the domain'],
+      ['compliant', 'A compliant run, certified'],
+      ['adapter', 'Universal adapter']
+    ];
+
+    function markScenario(id) {
+      SCENARIOS.forEach(([key]) => {
+        const button = document.getElementById('scenario-' + key);
+        if (button) button.setAttribute('aria-pressed', key === id ? 'true' : 'false');
+      });
+      const found = SCENARIOS.find(s => s[0] === id);
+      document.getElementById('result-title').textContent = found ? found[1] : 'Pick a scenario above';
+      if (found) bringResultIntoView();
+    }
+
+    // On a phone the result panel sits under five cards, so the one pressed
+    // brings it up; where the panel is already on screen nothing moves.
+    function bringResultIntoView() {
+      const panel = document.getElementById('result-panel');
+      if (!panel || typeof panel.getBoundingClientRect !== 'function' || typeof panel.scrollIntoView !== 'function') return;
+      const box = panel.getBoundingClientRect();
+      const tall = window.innerHeight || 0;
+      if (box.top >= 0 && box.top < tall * 0.6) return;
+      panel.scrollIntoView({ behavior: T && T.reducedMotion() ? 'auto' : 'smooth', block: 'start' });
+    }
+
+    // The verdict as the service named it, in a chip whose colour is its status
+    // and whose words are the status itself.
+    function setVerdictTag(text, tone) {
+      const tag = document.getElementById('verdict-tag');
+      const tones = { refused: 'tf-chip-rose', approved: 'tf-chip-emerald' };
+      tag.className = 'tf-chip tf-chip-lg tf-mono ' + (tones[tone] || 'tf-chip-gray');
+      tag.innerText = text;
+    }
+
+    function setBreaker(state) {
+      const chips = {
+        armed: ['tf-chip-emerald', 'Circuit breaker: armed'],
+        tripped: ['tf-chip-rose', 'Circuit breaker: tripped'],
+        frozen: ['tf-chip-rose', 'Circuit breaker: tripped (manual freeze)']
+      };
+      const [tone, words] = chips[state] || chips.armed;
+      const el = document.getElementById('cb-indicator');
+      el.className = 'tf-chip tf-chip-lg tf-chip-dot ' + tone;
+      el.innerHTML = escapeHtml(words);
+    }
+
+    function setInvariant(id, text, tone) {
+      const el = document.getElementById(id);
+      el.innerText = text;
+      el.className = 'tf-inv-value' + (tone === 'pass' ? ' tf-good' : tone === 'fail' ? ' tf-bad' : '');
+    }
+
+    function setInvariants(failing, label) {
+      [['inv-secrets', 'secret', 'Secret'], ['inv-boundary', 'boundary', 'Layer'], ['inv-loop', 'loop', 'Loop'], ['inv-cost', 'cost', 'Cost']].forEach(([id, key, word]) => {
+        if (key === failing) setInvariant(id, 'FAIL (' + (label || word) + ')', 'fail');
+        else setInvariant(id, 'PASS', failing === 'none' ? 'pass' : null);
+      });
+    }
+
+    // Everything back to where it started. A scenario starts from here too, and
+    // then writes its own first line into the empty terminal.
+    function resetDemo(forScenario) {
+      markScenario(null);
+      document.getElementById('kpi-spend').innerText = '—';
+      document.getElementById('kpi-tokens').innerText = 'no session yet';
+      setBreaker('armed');
       document.getElementById('terminal-badge').innerText = 'Idle';
-      document.getElementById('terminal-log').innerHTML = '<p class="text-gray-500">// Reset complete. Ready.</p>';
-      document.getElementById('verdict-tag').className = 'text-xs px-2.5 py-1 rounded-full font-semibold bg-gray-800 text-gray-400';
-      document.getElementById('verdict-tag').innerText = 'Awaiting Input';
-      document.getElementById('inv-secrets').innerText = '--';
-      document.getElementById('inv-boundary').innerText = '--';
-      document.getElementById('inv-loop').innerText = '--';
-      document.getElementById('inv-cost').innerText = '--';
-      document.getElementById('bedrock-box').innerText = 'Awaiting agent action to evaluate architectural trade-offs and safety implications.';
+      document.getElementById('terminal-log').innerHTML = forScenario === true ? '' : '<p class="tf-log tf-log-muted">// Reset. Pick a scenario above to send its calls.</p>';
+      setVerdictTag('Awaiting input', null);
+      ['inv-secrets', 'inv-boundary', 'inv-loop', 'inv-cost'].forEach(id => setInvariant(id, '--', null));
+      document.getElementById('bedrock-box').innerText = 'Waiting for a scenario: its verdict is explained here, with the name of whatever wrote the sentence.';
       renderFix(null);
       document.getElementById('cert-container').classList.add('hidden');
       document.getElementById('cert-origin').innerText = '';
@@ -631,10 +1152,12 @@
       }[m]));
     }
 
-    function logTerminal(msg, color = 'text-gray-300', isHtml = false) {
+    // One line of the terminal. `tone` names its colour: agent, ok, bad, warn,
+    // muted or accent, and "strong" may follow.
+    function logTerminal(msg, tone = 'plain', isHtml = false) {
       const log = document.getElementById('terminal-log');
       const p = document.createElement('p');
-      p.className = color;
+      p.className = 'tf-log ' + String(tone).split(/\s+/).filter(Boolean).map(t => 'tf-log-' + t).join(' ');
       if (isHtml) {
         p.innerHTML = msg;
       } else {
@@ -645,9 +1168,10 @@
     }
 
     async function simulateLoop() {
-      resetDemo();
-      document.getElementById('terminal-badge').innerText = 'Calling Backend...';
-      logTerminal('⚡ [Live Agent Stream] Dispatching iterative calls to Threefold backend...', 'text-purple-400');
+      resetDemo(true);
+      markScenario('loop');
+      document.getElementById('terminal-badge').innerText = 'Calling the service';
+      logTerminal('› Sending the same edit_file call three times, in one new session…', 'accent');
 
       if (liveBackendActive) {
         try {
@@ -662,22 +1186,13 @@
             const data = await res.json();
             // The service names this session itself, one per request.
             setLastSession(data.session_id);
-            logTerminal(`⚡ [Live HTTP Response] HTTP 200 in ${latency}ms: status=${data.status}`, 'text-emerald-400');
-            logTerminal(`🚨 [CIRCUIT BREAKER TRIPPED] ${data.reason}`, 'text-red-400 font-bold');
-            logTerminal(`🛑 Session tripped: ${data.session_tripped}. Execution locked in DynamoDB.`, 'text-red-300');
+            logTerminal(`← HTTP 200 in ${latency} ms: status=${data.status}`, 'ok');
+            logTerminal(`✕ Circuit breaker tripped: ${data.reason}`, 'bad strong');
+            logTerminal(`■ Session tripped: ${data.session_tripped}. Execution locked in DynamoDB.`, 'bad');
 
-            document.getElementById('cb-indicator').className = "flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium bg-red-950/80 text-red-400 border border-red-800 glow-red";
-            document.getElementById('cb-indicator').innerHTML = '<span class="w-2 h-2 rounded-full bg-red-400 animate-ping"></span> CIRCUIT BREAKER: TRIPPED';
-            document.getElementById('kpi-loop').innerText = '100% (TRIPPED)';
-            document.getElementById('kpi-loop').className = 'text-2xl font-bold text-red-400 mt-1';
-            document.getElementById('verdict-tag').className = 'text-xs px-2.5 py-1 rounded-full font-semibold bg-red-950 text-red-400 border border-red-800';
-            document.getElementById('verdict-tag').innerText = data.status;
-
-            document.getElementById('inv-secrets').innerText = 'PASS';
-            document.getElementById('inv-boundary').innerText = 'PASS';
-            document.getElementById('inv-loop').innerText = 'FAIL (Loop)';
-            document.getElementById('inv-loop').className = 'text-red-400 font-bold font-mono';
-            document.getElementById('inv-cost').innerText = 'PASS';
+            setBreaker('tripped');
+            setVerdictTag(data.status, 'refused');
+            setInvariants('loop');
 
             renderExplanation(data);
             renderFix(data);
@@ -691,34 +1206,26 @@
       // Offline replay of the recorded POST /simulate-loop run: the same
       // edit_file call evaluated three times, refused on the third.
       const loop = RECORDED.loop;
-      logTerminal('⚡ [Agent Request 1] tool: edit_file(path="src/service.py", instruction="fix typo")', 'text-blue-400');
-      logTerminal('✓ [Gatekeeper] Call 1 permitted.', 'text-gray-400');
-      logTerminal('⚡ [Agent Request 2] tool: edit_file(path="src/service.py", instruction="fix typo")', 'text-blue-400');
-      logTerminal('✓ [Gatekeeper] Call 2 permitted.', 'text-gray-400');
-      logTerminal('⚡ [Agent Request 3] tool: edit_file(path="src/service.py", instruction="fix typo")', 'text-blue-400');
-      logTerminal(`🚨 [CIRCUIT BREAKER TRIPPED] ${loop.reason}`, 'text-red-400 font-bold');
-      logTerminal(`🛑 Session tripped: ${loop.session_tripped}. Recorded session ${loop.session_id}, cost $${loop.current_session_cost_usd.toFixed(4)} (recorded ${RECORDED.recorded_at}, replayed offline).`, 'text-red-300');
+      logTerminal('› Agent request 1: edit_file(path="src/service.py", instruction="fix typo")', 'agent');
+      logTerminal('✓ Call 1 permitted.', 'muted');
+      logTerminal('› Agent request 2: edit_file(path="src/service.py", instruction="fix typo")', 'agent');
+      logTerminal('✓ Call 2 permitted.', 'muted');
+      logTerminal('› Agent request 3: edit_file(path="src/service.py", instruction="fix typo")', 'agent');
+      logTerminal(`✕ Circuit breaker tripped: ${loop.reason}`, 'bad strong');
+      logTerminal(`■ Session tripped: ${loop.session_tripped}. Recorded session ${loop.session_id}, cost $${loop.current_session_cost_usd.toFixed(4)} (recorded ${RECORDED.recorded_at}, replayed offline).`, 'bad');
 
-      document.getElementById('cb-indicator').className = "flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium bg-red-950/80 text-red-400 border border-red-800 glow-red";
-      document.getElementById('cb-indicator').innerHTML = '<span class="w-2 h-2 rounded-full bg-red-400 animate-ping"></span> CIRCUIT BREAKER: TRIPPED';
-      document.getElementById('kpi-loop').innerText = '100% (TRIPPED)';
-      document.getElementById('kpi-loop').className = 'text-2xl font-bold text-red-400 mt-1';
-      document.getElementById('verdict-tag').className = 'text-xs px-2.5 py-1 rounded-full font-semibold bg-red-950 text-red-400 border border-red-800';
-      document.getElementById('verdict-tag').innerText = loop.status;
-
-      document.getElementById('inv-secrets').innerText = 'PASS';
-      document.getElementById('inv-boundary').innerText = 'PASS';
-      document.getElementById('inv-loop').innerText = 'FAIL (Loop)';
-      document.getElementById('inv-loop').className = 'text-red-400 font-bold font-mono';
-      document.getElementById('inv-cost').innerText = 'PASS';
+      setBreaker('tripped');
+      setVerdictTag(loop.status, 'refused');
+      setInvariants('loop');
 
       renderRecordedExplanation(`${loop.reason} Recorded session cost $${loop.current_session_cost_usd.toFixed(4)}.`);
     }
 
     async function simulateSecret() {
-      resetDemo();
-      document.getElementById('terminal-badge').innerText = 'Scanning...';
-      logTerminal('⚡ [Agent Request] tool: run_command(command="export AWS_SECRET_ACCESS_KEY=AKIAIOSFODNN7EXAMPLE")', 'text-blue-400');
+      resetDemo(true);
+      markScenario('secret');
+      document.getElementById('terminal-badge').innerText = 'Scanning';
+      logTerminal('› Agent request: run_command(command="export AWS_SECRET_ACCESS_KEY=AKIAIOSFODNN7EXAMPLE")', 'agent');
 
       if (liveBackendActive) {
         try {
@@ -732,18 +1239,12 @@
           if (res.ok) {
             const data = await res.json();
             setLastSession(data.session_id);
-            logTerminal(`⚡ [Live HTTP Response] HTTP 200 in ${latency}ms: status=${data.status}`, 'text-emerald-400');
-            logTerminal(`🚨 [PRE-INVOCATION REJECTION] ${data.reason}`, 'text-red-400 font-bold');
-            logTerminal(`🛑 Credential quarantined before transmission. Proof: ${data.proof_hash.slice(0, 16)}...`, 'text-red-300');
+            logTerminal(`← HTTP 200 in ${latency} ms: status=${data.status}`, 'ok');
+            logTerminal(`✕ Refused before it ran: ${data.reason}`, 'bad strong');
+            logTerminal(`■ Credential quarantined before transmission. Proof: ${String(data.proof_hash || '').slice(0, 16)}...`, 'bad');
 
-            document.getElementById('verdict-tag').className = 'text-xs px-2.5 py-1 rounded-full font-semibold bg-red-950 text-red-400 border border-red-800';
-            document.getElementById('verdict-tag').innerText = data.status;
-
-            document.getElementById('inv-secrets').innerText = 'FAIL (Secret)';
-            document.getElementById('inv-secrets').className = 'text-red-400 font-bold font-mono';
-            document.getElementById('inv-boundary').innerText = 'PASS';
-            document.getElementById('inv-loop').innerText = 'PASS';
-            document.getElementById('inv-cost').innerText = 'PASS';
+            setVerdictTag(data.status, 'refused');
+            setInvariants('secret');
 
             renderExplanation(data);
             renderFix(data);
@@ -756,25 +1257,20 @@
 
       // Offline replay of the recorded POST /simulate-secret run.
       const leak = RECORDED.secret;
-      logTerminal(`🚨 [PRE-INVOCATION REJECTION] ${leak.reason}`, 'text-red-400 font-bold');
-      logTerminal(`🛑 Credential quarantined before transmission. Recorded proof: ${leak.proof_hash.slice(0, 16)}... (recorded ${RECORDED.recorded_at}, replayed offline).`, 'text-red-300');
+      logTerminal(`✕ Refused before it ran: ${leak.reason}`, 'bad strong');
+      logTerminal(`■ Credential quarantined before transmission. Recorded proof: ${leak.proof_hash.slice(0, 16)}... (recorded ${RECORDED.recorded_at}, replayed offline).`, 'bad');
 
-      document.getElementById('verdict-tag').className = 'text-xs px-2.5 py-1 rounded-full font-semibold bg-red-950 text-red-400 border border-red-800';
-      document.getElementById('verdict-tag').innerText = leak.status;
-
-      document.getElementById('inv-secrets').innerText = 'FAIL (Secret)';
-      document.getElementById('inv-secrets').className = 'text-red-400 font-bold font-mono';
-      document.getElementById('inv-boundary').innerText = 'PASS';
-      document.getElementById('inv-loop').innerText = 'PASS';
-      document.getElementById('inv-cost').innerText = 'PASS';
+      setVerdictTag(leak.status, 'refused');
+      setInvariants('secret');
 
       renderRecordedExplanation(`${leak.reason} The recorded run quarantined it before transmission.`);
     }
 
     async function simulateBoundary() {
-      resetDemo();
-      document.getElementById('terminal-badge').innerText = 'Checking Boundaries...';
-      logTerminal('⚡ [Agent Request] tool: write_to_file(path="src/domain/user.py", content="import boto3\\n...")', 'text-blue-400');
+      resetDemo(true);
+      markScenario('boundary');
+      document.getElementById('terminal-badge').innerText = 'Checking the layers';
+      logTerminal('› Agent request: write_to_file(path="src/domain/user.py", content="import boto3\\n...")', 'agent');
 
       if (liveBackendActive) {
         try {
@@ -787,29 +1283,17 @@
             headers: authHeaders({ "Content-Type": "application/json" }),
             body: JSON.stringify(Object.assign({
               session_id: sessionId,
-              project_name: "Acme-Core",
-              tool_name: "write_to_file",
-              action_type: "FILE_WRITE",
-              arguments: {
-                TargetFile: "src/domain/user.py",
-                CodeContent: "import boto3\nclass User:\n  pass"
-              }
-            }, PAGE_CALLER))
+              project_name: DEMO_PROJECT
+            }, BOUNDARY_CALL, PAGE_CALLER))
           });
           const latency = (performance.now() - t0).toFixed(1);
           if (res.ok) {
             const data = await res.json();
-            logTerminal(`⚡ [Live HTTP Response] HTTP 200 in ${latency}ms: status=${data.status}`, 'text-amber-400');
-            logTerminal(`🚨 [ARCHITECTURAL GATEWAY] ${data.reason}`, 'text-amber-400 font-bold');
+            logTerminal(`← HTTP 200 in ${latency} ms: status=${data.status}`, 'ok');
+            logTerminal(`✕ Refused before it was written: ${data.reason}`, 'bad strong');
 
-            document.getElementById('verdict-tag').className = 'text-xs px-2.5 py-1 rounded-full font-semibold bg-amber-950 text-amber-400 border border-amber-800';
-            document.getElementById('verdict-tag').innerText = data.status;
-
-            document.getElementById('inv-secrets').innerText = 'PASS';
-            document.getElementById('inv-boundary').innerText = 'FAIL (Layer)';
-            document.getElementById('inv-boundary').className = 'text-amber-400 font-bold font-mono';
-            document.getElementById('inv-loop').innerText = 'PASS';
-            document.getElementById('inv-cost').innerText = 'PASS';
+            setVerdictTag(data.status, 'refused');
+            setInvariants('boundary');
 
             renderExplanation(data);
             renderFix(data);
@@ -822,25 +1306,20 @@
 
       // Offline replay of the recorded boundary write.
       const wall = RECORDED.boundary;
-      logTerminal(`🚨 [ARCHITECTURAL GATEWAY] ${wall.reason}`, 'text-amber-400 font-bold');
-      logTerminal(`🛑 Operation denied to prevent architectural drift (recorded ${RECORDED.recorded_at}, replayed offline).`, 'text-amber-300');
+      logTerminal(`✕ Refused before it was written: ${wall.reason}`, 'bad strong');
+      logTerminal(`■ Operation denied to prevent architectural drift (recorded ${RECORDED.recorded_at}, replayed offline).`, 'bad');
 
-      document.getElementById('verdict-tag').className = 'text-xs px-2.5 py-1 rounded-full font-semibold bg-amber-950 text-amber-400 border border-amber-800';
-      document.getElementById('verdict-tag').innerText = wall.status;
-
-      document.getElementById('inv-secrets').innerText = 'PASS';
-      document.getElementById('inv-boundary').innerText = 'FAIL (Layer)';
-      document.getElementById('inv-boundary').className = 'text-amber-400 font-bold font-mono';
-      document.getElementById('inv-loop').innerText = 'PASS';
-      document.getElementById('inv-cost').innerText = 'PASS';
+      setVerdictTag(wall.status, 'refused');
+      setInvariants('boundary');
 
       renderRecordedExplanation(wall.reason);
     }
 
     async function simulateCompliant() {
-      resetDemo();
-      document.getElementById('terminal-badge').innerText = 'Executing Linear Plan...';
-      logTerminal('⚡ [Live Execution] Sending 4 compliant development steps to backend...', 'text-purple-400');
+      resetDemo(true);
+      markScenario('compliant');
+      document.getElementById('terminal-badge').innerText = 'Running a linear plan';
+      logTerminal('› Sending four ordinary development steps, in one new session…', 'accent');
 
       const steps = [
         { tool: "view_file", type: "FILE_READ", args: { AbsolutePath: "/src/service.py" } },
@@ -848,9 +1327,6 @@
         { tool: "replace_file_content", type: "FILE_WRITE", args: { TargetFile: "/src/service.py", Instruction: "add check" } },
         { tool: "run_command", type: "COMMAND_EXEC", args: { CommandLine: "pytest tests/unit" } }
       ];
-
-      let totalCost = 0.0384;
-      let totalTokens = 6400;
 
       if (liveBackendActive) {
         try {
@@ -866,7 +1342,7 @@
               headers: authHeaders({ "Content-Type": "application/json" }),
               body: JSON.stringify(Object.assign({
                 session_id: sessId,
-                project_name: "Acme-Core",
+                project_name: DEMO_PROJECT,
                 tool_name: s.tool,
                 action_type: s.type,
                 arguments: s.args,
@@ -876,7 +1352,7 @@
             });
             const data = await res.json();
             lastEvaluation = data;
-            logTerminal(`⚡ [Step ${i+1}/4] ${s.tool} -> ${data.status} (Cost: $${data.current_session_cost_usd.toFixed(4)})`, 'text-emerald-400');
+            logTerminal(`✓ Step ${i + 1}/4 ${s.tool} → ${data.status} (cost $${data.current_session_cost_usd.toFixed(4)})`, 'ok');
           }
 
           // Ask the service for a certificate over the four verdicts just issued.
@@ -893,23 +1369,15 @@
           if (certRes.ok) {
             const certData = await certRes.json();
             currentCertData = certData;
-            totalCost = certData.total_cost_usd;
-            totalTokens = certData.total_tokens;
 
-            logTerminal(`🎉 All 4 steps compliant. The service returned Certificate ${certData.certificate_id}, computed from the four verdicts above.`, 'text-emerald-300 font-bold');
+            logTerminal(`✓ All 4 steps compliant. The service returned certificate ${certData.certificate_id}, computed from the four verdicts above.`, 'ok strong');
             document.getElementById('cert-origin').innerHTML =
-              '<span class="text-emerald-400">Issued by the live service</span> for the four calls above. The session behind it is in DynamoDB; the certificate itself is returned, not archived.';
+              '<span class="tf-good">Issued by the live service</span> for the four calls above. The session behind it is in DynamoDB; the certificate itself is returned, not archived.';
 
-            document.getElementById('kpi-spend').innerText = `$${totalCost.toFixed(4)}`;
-            document.getElementById('kpi-tokens').innerText = `${totalTokens} tokens consumed`;
-            document.getElementById('verdict-tag').className = 'text-xs px-2.5 py-1 rounded-full font-semibold bg-emerald-950 text-emerald-400 border border-emerald-800';
-            document.getElementById('verdict-tag').innerText = 'APPROVED (COMPLIANT)';
-
-            ['inv-secrets','inv-boundary','inv-loop','inv-cost'].forEach(id => {
-              const el = document.getElementById(id);
-              el.innerText = 'PASS';
-              el.className = 'text-emerald-400 font-bold font-mono';
-            });
+            document.getElementById('kpi-spend').innerText = `$${certData.total_cost_usd.toFixed(4)}`;
+            document.getElementById('kpi-tokens').innerText = `${certData.total_tokens} tokens consumed`;
+            setVerdictTag('APPROVED (COMPLIANT)', 'approved');
+            setInvariants('none');
 
             renderExplanation(lastEvaluation);
 
@@ -934,20 +1402,14 @@
       const run = RECORDED.compliant;
       const cert = run.certificate;
       run.steps.forEach((s, i) => {
-        logTerminal(`⚡ [Step ${i + 1}/4] ${s.tool} -> ${s.status} (Cost: $${s.current_session_cost_usd.toFixed(4)})`, 'text-emerald-400');
+        logTerminal(`✓ Step ${i + 1}/4 ${s.tool} → ${s.status} (cost $${s.current_session_cost_usd.toFixed(4)})`, 'ok');
       });
-      logTerminal(`🎉 Recorded run complete: Certificate ${cert.certificate_id}, ${cert.evaluations_count} recorded verdicts (recorded ${RECORDED.recorded_at}, replayed offline).`, 'text-amber-300 font-bold');
+      logTerminal(`✓ Recorded run complete: certificate ${cert.certificate_id}, ${cert.evaluations_count} recorded verdicts (recorded ${RECORDED.recorded_at}, replayed offline).`, 'warn strong');
 
       document.getElementById('kpi-spend').innerText = `$${cert.total_cost_usd.toFixed(4)}`;
       document.getElementById('kpi-tokens').innerText = `${cert.total_tokens} tokens consumed`;
-      document.getElementById('verdict-tag').className = 'text-xs px-2.5 py-1 rounded-full font-semibold bg-emerald-950 text-emerald-400 border border-emerald-800';
-      document.getElementById('verdict-tag').innerText = 'APPROVED (COMPLIANT)';
-
-      ['inv-secrets','inv-boundary','inv-loop','inv-cost'].forEach(id => {
-        const el = document.getElementById(id);
-        el.innerText = 'PASS';
-        el.className = 'text-emerald-400 font-bold font-mono';
-      });
+      setVerdictTag('APPROVED (COMPLIANT)', 'approved');
+      setInvariants('none');
 
       renderRecordedExplanation(`Four approved calls, $${cert.total_cost_usd.toFixed(4)} for ${cert.total_tokens} tokens.`);
 
@@ -956,7 +1418,7 @@
         disclaimer: `REPLAYED OFFLINE. Recorded from a live evaluation on ${RECORDED.recorded_at} and replayed without contacting the service. This document describes the recorded session ${run.session_id}, not a run just made.`,
         certificate_id: cert.certificate_id,
         session_id: run.session_id,
-        project_name: "Acme-Core",
+        project_name: DEMO_PROJECT,
         verdict_status: cert.verdict_status,
         total_cost_usd: cert.total_cost_usd,
         total_tokens: cert.total_tokens,
@@ -971,15 +1433,16 @@
       document.getElementById('cert-hash').innerText = 'SHA256: ' + cert.sha256_fingerprint;
       document.getElementById('cert-signature').innerText = 'KMS signature by ' + cert.signing_key_id + ': ' + cert.signature.slice(0, 32) + '... (recorded, replayed offline)';
       document.getElementById('cert-origin').innerHTML =
-        `<span class="text-amber-400 font-semibold">Recorded ${RECORDED.recorded_at}, replayed offline.</span> The service was not reached for this run. Every value here came from the recorded evaluation, and the exported file says so on its face.`;
+        `<span class="tf-warn-text">Recorded ${RECORDED.recorded_at}, replayed offline.</span> The service was not reached for this run. Every value here came from the recorded evaluation, and the exported file says so on its face.`;
       document.getElementById('cert-container').classList.remove('hidden');
     }
 
     async function simulateUniversalAdapter() {
-      resetDemo();
-      document.getElementById('terminal-badge').innerText = 'Testing Universal Adapter...';
-      logTerminal('⚡ [Universal Adapter] Ingesting native Anthropic tool_use payload...', 'text-cyan-400');
-      logTerminal('   Payload: {"type": "tool_use", "name": "edit_file", "input": {"TargetFile": "src/core.py"}}', 'text-gray-400 font-mono');
+      resetDemo(true);
+      markScenario('adapter');
+      document.getElementById('terminal-badge').innerText = 'Testing the adapter';
+      logTerminal('› Universal adapter: a native Anthropic tool_use payload…', 'accent');
+      logTerminal('  {"type": "tool_use", "name": "edit_file", "input": {"TargetFile": "src/core.py"}}', 'muted');
 
       if (liveBackendActive) {
         try {
@@ -1000,19 +1463,13 @@
           const latency = (performance.now() - t0).toFixed(1);
           if (res.ok) {
             const data = await res.json();
-            logTerminal(`✓ [Universal Adapter Success] HTTP 200 in ${latency}ms`, 'text-emerald-400 font-bold');
-            logTerminal(`⚡ Detected Tool: ${data.detected_tool_name} | Mapped Action: ${data.detected_action_type}`, 'text-cyan-300');
-            logTerminal(`🛡️ Evaluation Verdict: ${data.evaluation.status} (Cost: $${data.evaluation.current_session_cost_usd.toFixed(4)})`, 'text-emerald-400');
-            logTerminal(`📜 SHA-256 Proof Hash: ${data.evaluation.proof_hash.slice(0, 24)}...`, 'text-gray-400 font-mono');
+            logTerminal(`← HTTP 200 in ${latency} ms`, 'ok strong');
+            logTerminal(`  Detected tool: ${data.detected_tool_name} · mapped action: ${data.detected_action_type}`, 'agent');
+            logTerminal(`✓ Verdict: ${data.evaluation.status} (cost $${data.evaluation.current_session_cost_usd.toFixed(4)})`, 'ok');
+            logTerminal(`  SHA-256 proof hash: ${String(data.evaluation.proof_hash || '').slice(0, 24)}...`, 'muted');
 
-            document.getElementById('verdict-tag').className = 'text-xs px-2.5 py-1 rounded-full font-semibold bg-emerald-950 text-emerald-400 border border-emerald-800';
-            document.getElementById('verdict-tag').innerText = 'UNIVERSAL_ADAPTER_APPROVED';
-
-            ['inv-secrets','inv-boundary','inv-loop','inv-cost'].forEach(id => {
-              const el = document.getElementById(id);
-              el.innerText = 'PASS';
-              el.className = 'text-emerald-400 font-bold font-mono';
-            });
+            setVerdictTag('UNIVERSAL_ADAPTER_APPROVED', 'approved');
+            setInvariants('none');
 
             renderExplanation(data.evaluation);
             return;
@@ -1022,7 +1479,8 @@
         }
       }
 
-      logTerminal('✓ [Universal Adapter Emulated] Tool mapped to internal Clean Architecture validator.', 'text-cyan-300');
+      logTerminal('  The service is not reachable, so nothing was judged: the adapter has no recorded run to replay.', 'warn');
+      document.getElementById('terminal-badge').innerText = 'Not reached';
     }
 
     // The freeze used to target session-default, one id every visitor shared. A
@@ -1034,11 +1492,11 @@
     async function triggerManualFreeze() {
       const target = lastSessionId;
       if (!target) {
-        alert("Nothing to freeze yet.\n\nRun a scenario below first. The freeze acts on the session that scenario ran under, and pressing it before one has run would create an empty session only to lock it.");
+        alert("Nothing to freeze yet.\n\nRun a scenario first. The freeze acts on the session that scenario ran under, and pressing it before one has run would create an empty session only to lock it.");
         return;
       }
-      if (!confirm("🚨 ENTERPRISE KILL-SWITCH: Manually terminate and lock session " + target + "?\n\n" +
-        "This is the session the last scenario on this page ran under.")) return;
+      if (!confirm("Freeze session " + target + "?\n\n" +
+        "This is the session the last scenario on this page ran under. A frozen session refuses every later call, and nothing undoes it.")) return;
       try {
         const apiBase = getApiBase();
         const res = await fetch(`${apiBase}/sessions/${encodeURIComponent(target)}/terminate`, {
@@ -1053,10 +1511,9 @@
           })
         });
         const data = await res.json();
-        alert(`SESSION FROZEN: Status: ${data.status}\nSession ID: ${data.session_id}\nLocked: ${data.is_tripped}`);
-        logTerminal(`🚨 ENTERPRISE KILL-SWITCH TRIGGERED by ${data.operator}: ${data.reason}`, 'text-rose-400 font-bold');
-        document.getElementById('cb-indicator').className = 'flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium bg-red-950/80 text-red-400 border border-red-800';
-        document.getElementById('cb-indicator').innerHTML = '<span class="w-2 h-2 rounded-full bg-red-400 animate-pulse"></span> CIRCUIT BREAKER: TRIPPED (MANUAL FREEZE)';
+        alert(`Session frozen. Status: ${data.status}\nSession ID: ${data.session_id}\nLocked: ${data.is_tripped}`);
+        logTerminal(`■ Kill switch pressed by ${data.operator}: ${data.reason}`, 'bad strong');
+        setBreaker('frozen');
       } catch (err) {
         alert("Freeze error: " + err.message);
       }
@@ -1073,8 +1530,8 @@
       downloadAnchor.remove();
     }
 
-    // Every operation this page calls, with the anchor Swagger UI derives from a
-    // method and a path when a spec declares no operationIds. A reader following
+    // Every operation the scenarios call, with the anchor Swagger UI derives from
+    // a method and a path when a spec declares no operationIds. A reader following
     // one of these lands on the operation rather than on the document's cover.
     const CONTRACT_OPERATIONS = [
       { label: 'GET /status', anchor: '#/default/get_status' },
@@ -1094,23 +1551,211 @@
       const dashboard = document.getElementById('hero-dashboard');
       if (dashboard) dashboard.href = PAGE_BASE + 'dashboard.html#/overview';
       // The shared navigation replaces the header's own links when it loaded.
-      if (window.Threefold) Threefold.mountNav(document.getElementById('page-nav'), { active: 'demo' });
+      if (T) T.mountNav(document.getElementById('page-nav'), { active: 'demo' });
     }
 
-    // The one line of numbers on the first card, read from the stack at load and
-    // never written into the page. It says what the stack itself answered: the
-    // window it counted, and how many calls it judged, refused and would have
-    // refused, across how many projects. It is read without a key, even when one
-    // has been typed, so it only ever shows a stack whose reads are open, which
-    // is the public demo stack, and it says so: those counts are the project's
-    // own probes and tests, the scenarios on this page, visitors' sandboxes and
-    // anyone else calling the open API, so they show the stack is live, not how
-    // widely Threefold is used. It stays hidden when the stack does not answer,
-    // when its reads need a key (a private stack), when the answer is not the
-    // contract's shape, and when it counted no call at all, because a row of
-    // zeros would read as "nothing is governed" rather than "nothing to count".
-    // Never rejects: it runs beside the demo, which must not wait for it or fail
-    // with it.
+    function renderContractStrip() {
+      document.getElementById('contract-strip').innerHTML = CONTRACT_OPERATIONS.map(op =>
+        '<a href="' + PAGE_BASE + 'swagger.html' + op.anchor + '" ' +
+        'title="Open this operation in the published OpenAPI document" class="tf-spec-link">' +
+        escapeHtml(op.label) + '</a>'
+      ).join('');
+    }
+
+    // ------------------------------------------------------------ the hero
+    //
+    // The product's core moment, once, as the page loads: the boundary write is
+    // drawn as the agent proposes it, this stack is asked about it exactly as a
+    // hook asks, and the verdict lands on the line it refuses. The answer is the
+    // stack's own when it gives one, labelled live, with its reason and the fix
+    // it checked; otherwise RECORDED.boundary is replayed, labelled recorded, and
+    // shows no fix, because a recording kept none. The call asks for no model
+    // sentence (explain false): a verdict is plain code, and a page view should
+    // not spend a Bedrock call. It is sent under a new sim- session like every
+    // scenario, so it is recorded in the public ledger as a page call.
+
+    const HERO_MIN_MS = 1000;
+    const HERO_TIMEOUT_MS = 6000;
+    const hero = { answer: null, motion: false };
+
+    function heroCanAnimate() {
+      return !!T && !T.reducedMotion() && typeof window.requestAnimationFrame === 'function';
+    }
+
+    function wait(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
+    function drawHeroCall() {
+      const args = BOUNDARY_CALL.arguments;
+      const call = document.getElementById('hero-call');
+      const diff = document.getElementById('hero-diff');
+      if (!T || !call || !diff) return;
+      T.setHtml(call, T.html`<span class="tf-chip tf-chip-gray">${T.icon('code', 13)}${BOUNDARY_CALL.tool_name}</span><code>${args.TargetFile}</code><span>in ${DEMO_PROJECT}</span>`);
+      const lines = String(args.CodeContent).split('\n');
+      T.setHtml(diff, T.html`${lines.map((line, i) => T.html`<li class="tf-diff-line" id="hero-line-${i}" style="--i:${i}"><span class="tf-diff-num" aria-hidden="true">${i + 1}</span><span class="tf-diff-sign" aria-hidden="true">+</span><code class="tf-diff-code">${line}</code><span class="tf-diff-tag">not written</span></li>`)}`);
+    }
+
+    function heroShowWaiting(on) {
+      const waiting = document.getElementById('hero-waiting');
+      if (waiting) waiting.hidden = !on;
+    }
+
+    // What came back, read defensively: a verdict is a status and a reason, both
+    // strings. Anything else is not an answer this page can show as one.
+    function heroAnswerFrom(data, ms) {
+      if (!data || typeof data !== 'object' || typeof data.status !== 'string' || typeof data.reason !== 'string') return null;
+      return { source: 'live', status: data.status, reason: data.reason, fix: data.suggested_fix, ms: ms };
+    }
+
+    async function askHero() {
+      let timer = null;
+      try {
+        const base = getApiBase();
+        const t0 = performance.now();
+        const answered = fetch(`${base}/evaluate-tool-call`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(Object.assign({
+            session_id: newSessionId(),
+            project_name: DEMO_PROJECT
+          }, BOUNDARY_CALL, { agent: 'page', origin: 'page', explain: false, developer: 'anonymous', developer_id: 'anonymous' }))
+        });
+        const late = new Promise(resolve => { timer = setTimeout(() => resolve(null), HERO_TIMEOUT_MS); });
+        const res = await Promise.race([answered, late]);
+        if (res && res.ok) {
+          const data = await res.json();
+          const answer = heroAnswerFrom(data, Math.round(performance.now() - t0));
+          if (answer) return answer;
+        }
+      } catch (err) {
+        // The replay below stands in; the page does not depend on the stack.
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+      return { source: 'recorded', status: RECORDED.boundary.status, reason: RECORDED.boundary.reason, fix: null, ms: null };
+    }
+
+    function heroFixHtml(answer) {
+      const h = T.html;
+      if (answer.source !== 'live') {
+        return { tone: 'none', markup: h`<p class="tf-demo-fix-title">${T.icon('info', 16)}No fix in a replay</p><p>A live answer carries a checked fix with every refusal. This recording kept only the verdict and its reason.</p>` };
+      }
+      const fix = answer.fix;
+      if (!fix || typeof fix !== 'object' || typeof fix.summary !== 'string') {
+        return { tone: 'none', markup: h`<p class="tf-demo-fix-title">${T.icon('info', 16)}No fix came with this answer</p>` };
+      }
+      const checks = Array.isArray(fix.checks) ? fix.checks.filter(c => c && typeof c === 'object' && typeof c.passed === 'boolean') : [];
+      const passed = checks.filter(c => c.passed).length;
+      const writes = Array.isArray(fix.writes) ? fix.writes.filter(w => w && typeof w.path === 'string') : [];
+      const title = fix.validated === true
+        ? h`${T.icon('check', 16)}Checked by Threefold${checks.length ? h`<span class="tf-chip tf-chip-emerald">${passed} of ${checks.length} gate checks passed</span>` : ''}`
+        : h`${T.icon('info', 16)}A suggested fix, not checked`;
+      return {
+        tone: fix.validated === true ? 'checked' : 'none',
+        markup: h`<p class="tf-demo-fix-title">${title}</p>
+          <p>${fix.summary}</p>
+          ${writes.length ? h`<div class="tf-demo-fix-files">${writes.map(w => h`<code>${w.path}${w.new_file === true ? ' · new' : ''}</code>`)}</div>` : ''}
+          <p class="tf-micro">A starting point, never applied automatically.</p>`
+      };
+    }
+
+    function landHero(answer) {
+      const card = document.getElementById('hero-demo');
+      const verdict = document.getElementById('hero-verdict');
+      const reason = document.getElementById('hero-reason');
+      const fixBox = document.getElementById('hero-fix');
+      const source = document.getElementById('hero-source');
+      const caption = document.getElementById('hero-caption');
+      if (!T || !card || !verdict) return;
+      const h = T.html;
+      const refused = /^BLOCKED/.test(answer.status);
+      const approved = /^APPROVED/.test(answer.status);
+      const words = refused ? 'Refused before it was written' : approved ? 'Approved: the write would go ahead' : 'Answered';
+      const rule = (/rule '([^']{1,80})'/.exec(answer.reason) || [])[1];
+      heroShowWaiting(false);
+      card.setAttribute('data-verdict', refused ? 'refused' : approved ? 'approved' : 'other');
+      T.setHtml(verdict, h`<span id="hero-stamp" class="tf-stamp ${refused ? 'tf-stamp-refused' : approved ? 'tf-stamp-approved' : ''}">${T.icon(refused ? 'stop' : approved ? 'check' : 'info', 18)}${words}</span>
+        <span class="tf-demo-rule tf-chip tf-chip-gray tf-mono" title="The status the service returned">${answer.status}</span>
+        ${rule ? h`<span class="tf-demo-rule tf-chip tf-chip-purple tf-mono" title="The rule that decided">${rule}</span>` : ''}`);
+      verdict.hidden = false;
+      reason.className = 'tf-demo-reason' + (refused ? '' : ' tf-demo-reason-approved');
+      reason.textContent = answer.reason;
+      reason.hidden = false;
+      // The line the verdict is about: the one importing the module the reason names.
+      const module = (/imports '([A-Za-z0-9_.]{1,80})'/.exec(answer.reason) || [])[1];
+      String(BOUNDARY_CALL.arguments.CodeContent).split('\n').forEach((line, i) => {
+        const node = document.getElementById('hero-line-' + i);
+        if (!node || !node.classList) return;
+        const hit = !!module && new RegExp('^\\s*(?:import|from)\\s+' + module.replace(/\./g, '\\.') + '\\b').test(line);
+        node.classList.toggle('is-flagged', hit);
+      });
+      const fix = heroFixHtml(answer);
+      fixBox.className = 'tf-demo-fix' + (fix.tone === 'checked' ? '' : ' tf-demo-fix-none');
+      T.setHtml(fixBox, fix.markup);
+      fixBox.hidden = false;
+      if (answer.source === 'live') {
+        source.className = 'tf-chip tf-chip-emerald';
+        T.setHtml(source, h`${T.icon('bolt', 13)}Live${typeof answer.ms === 'number' ? h` · ${answer.ms} ms` : ''}`);
+        caption.textContent = 'Judged just now by this stack: POST /evaluate-tool-call, sent from this page as a hook would send it. It is in the public ledger as a page call.';
+      } else {
+        source.className = 'tf-chip tf-chip-amber';
+        T.setHtml(source, h`${T.icon('clock', 13)}Recorded ${RECORDED.recorded_at}, replayed offline`);
+        caption.textContent = 'This stack did not answer, so this is one real run recorded against the live API on ' + RECORDED.recorded_at + ', replayed without contacting it.';
+      }
+      const replay = document.getElementById('hero-replay');
+      if (replay) replay.hidden = !hero.motion;
+      if (hero.motion) T.pulse(document.getElementById('hero-stamp'), refused ? 'danger' : approved ? 'ok' : null);
+    }
+
+    function hideHeroVerdict() {
+      ['hero-verdict', 'hero-reason', 'hero-fix'].forEach(id => { const node = document.getElementById(id); if (node) node.hidden = true; });
+      const card = document.getElementById('hero-demo');
+      if (card) card.removeAttribute('data-verdict');
+    }
+
+    async function runHeroDemo() {
+      const card = document.getElementById('hero-demo');
+      hero.motion = heroCanAnimate();
+      if (card) card.setAttribute('data-motion', hero.motion ? 'on' : 'off');
+      drawHeroCall();
+      heroShowWaiting(true);
+      const started = Date.now();
+      const answer = await askHero();
+      // The lines finish arriving before the verdict lands on them; with motion
+      // off nothing waits.
+      if (hero.motion) {
+        const left = HERO_MIN_MS - (Date.now() - started);
+        if (left > 0) await wait(left);
+      }
+      hero.answer = answer;
+      landHero(answer);
+      return answer;
+    }
+
+    // Plays the moment again from the answer already given: no second call.
+    async function replayHero() {
+      if (!hero.answer || !hero.motion) return;
+      const card = document.getElementById('hero-demo');
+      hideHeroVerdict();
+      if (card) { card.setAttribute('data-motion', 'off'); void card.offsetWidth; card.setAttribute('data-motion', 'on'); }
+      drawHeroCall();
+      heroShowWaiting(true);
+      await wait(HERO_MIN_MS);
+      landHero(hero.answer);
+    }
+
+    // ---------------------------------------------------------- the proof strip
+    //
+    // The counts are read from GET /api/overview at load, without a key even when
+    // one has been typed, so they only ever show a stack whose reads are open,
+    // which is the public demo, and they say what they are made of: the synthetic
+    // Acme fleet, visitors' sandboxes, this page's own demos and the service's
+    // probes. They show the stack at work, not how widely Threefold is used. A
+    // count is a whole number or it is not shown, and a window that counted no
+    // call says so rather than drawing a row of zeros. Neither read is waited on
+    // by the demo, and neither ever rejects.
+
+    const PROOF_DAYS = 7;
+
     function wholeNumber(value) {
       // A count is a whole number or it is not shown: 2.5 is refused, not rounded.
       return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : null;
@@ -1120,57 +1765,238 @@
       return String(value).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
     }
 
+    function plural(n, one, many) { return formatCount(n) + ' ' + (n === 1 ? one : many); }
+
+    function proofState(target, icon, title, text, action) {
+      const h = T.html;
+      T.setHtml(target, h`<div class="tf-card tf-proof-note" data-state="${icon === 'lock' ? 'private' : 'none'}">
+        <p class="tf-panel-title">${T.icon(icon, 18)}${title}</p>
+        <p class="tf-small">${text}</p>
+        ${action || ''}
+      </div>`);
+    }
+
     async function loadLiveTotals() {
-      const line = document.getElementById('hero-live');
-      if (!line) return;
-      line.classList.add('hidden');
-      line.innerHTML = '';
+      const strip = document.getElementById('proof-live');
+      const where = document.getElementById('proof-where');
+      if (!strip || !T) return;
+      let reply;
       try {
-        const res = await fetch(`${getApiBase()}/api/overview?days=7`, {
+        const base = getApiBase();
+        const res = await fetch(`${base}/api/overview?days=${PROOF_DAYS}`, {
           method: 'GET',
           headers: { 'Accept': 'application/json' }
         });
-        if (!res || !res.ok) return;
-        const data = await res.json();
-        const totals = data && typeof data === 'object' ? data.totals : null;
-        if (!totals || typeof totals !== 'object') return;
-        const days = wholeNumber(data.window_days);
-        const calls = wholeNumber(totals.calls);
-        const refused = wholeNumber(totals.refused);
-        const wouldRefuse = wholeNumber(totals.would_refuse);
-        const projects = wholeNumber(totals.projects);
-        if (!days || !calls || refused === null || wouldRefuse === null || projects === null) return;
-        const plural = (n, one, many) => formatCount(n) + ' ' + (n === 1 ? one : many);
-        line.innerHTML =
-          '<span class="text-gray-300 font-semibold">This public demo stack, last ' + escapeHtml(plural(days, 'day', 'days')) + ':</span> ' +
-          escapeHtml(plural(calls, 'tool call', 'tool calls')) + ' judged, ' +
-          escapeHtml(formatCount(refused)) + ' refused, ' +
-          escapeHtml(formatCount(wouldRefuse)) + ' that would have been refused while observing, across ' +
-          escapeHtml(plural(projects, 'project', 'projects')) + '. ' +
-          'They are this project\'s own probes and tests, the scenarios on this page, the sandboxes visitors start ' +
-          '(each walkthrough adds one) and anyone else calling its open API, so they show that the stack is live, ' +
-          'not how widely Threefold is used. ' +
-          '<a href="' + PAGE_BASE + 'dashboard.html#/overview" class="text-purple-300 hover:text-purple-200 underline">See them on the dashboard</a>.';
-        line.classList.remove('hidden');
+        reply = { status: res.status, ok: !!res.ok, body: res.ok ? await res.json() : null };
       } catch (err) {
-        // The line stays hidden; the demo does not depend on it.
+        reply = { status: 0, ok: false, body: null };
       }
+      renderLiveTotals(strip, where, reply);
+      strip.setAttribute('aria-busy', 'false');
     }
 
-    function renderContractStrip() {
-      document.getElementById('contract-strip').innerHTML = CONTRACT_OPERATIONS.map(op =>
-        '<a href="' + PAGE_BASE + 'swagger.html' + op.anchor + '" ' +
-        'title="Open this operation in the published OpenAPI document" ' +
-        'class="font-mono px-1.5 py-0.5 rounded bg-gray-950 border border-gray-800 text-purple-300 hover:text-purple-200 hover:border-purple-700 transition">' +
-        escapeHtml(op.label) + ' ↗</a>'
-      ).join('');
+    function renderLiveTotals(strip, where, reply) {
+      const h = T.html;
+      where.hidden = true;
+      if (!reply.ok) {
+        if (reply.status === 401 || reply.status === 403) {
+          proofState(strip, 'lock', 'This stack keeps its figures private',
+            'Its ledger is read only by its operator, so no count is shown here.',
+            h`<a class="tf-link" href="${T.pageHref('dashboard.html#/overview')}">Sign in on the dashboard</a>`);
+        } else {
+          proofState(strip, 'info', 'No live figures',
+            reply.status ? 'The stack answered HTTP ' + reply.status + ' instead of its figures, so no count is shown rather than one invented.'
+              : 'The stack did not answer, so no count is shown rather than one invented.');
+        }
+        return;
+      }
+      const data = reply.body && typeof reply.body === 'object' ? reply.body : null;
+      const totals = data && data.totals && typeof data.totals === 'object' ? data.totals : null;
+      const days = data ? wholeNumber(data.window_days) : null;
+      const calls = totals ? wholeNumber(totals.calls) : null;
+      const refused = totals ? wholeNumber(totals.refused) : null;
+      const wouldRefuse = totals ? wholeNumber(totals.would_refuse) : null;
+      if (!days || calls === null || refused === null || wouldRefuse === null) {
+        proofState(strip, 'info', 'No live figures', 'The stack answered, but not with figures this page can read, so none is shown.');
+        return;
+      }
+      if (calls === 0) {
+        proofState(strip, 'sparkles', 'Nothing judged here yet',
+          'This stack has judged no call in the last ' + plural(days, 'day', 'days') + ', so there is nothing to count yet.',
+          h`<a class="tf-link" href="${T.pageHref('dashboard.html#/try')}">Be the first: watch it stop a bad write</a>`);
+        return;
+      }
+      const rows = Array.isArray(data.series) ? data.series.filter(r => r && typeof r === 'object' && typeof r.day === 'string') : [];
+      const daily = key => rows.map(r => key === 'calls'
+        ? ['approved', 'observed', 'refused'].reduce((s, k) => s + (wholeNumber(r[k]) || 0), 0)
+        : (wholeNumber(r[key]) || 0));
+      const span = 'the last ' + plural(days, 'day', 'days');
+      // A trend line only where there is a trend: two days or more with a count.
+      // Otherwise the sub-line says what the window holds.
+      const trend = (key, label, color, total, meaning) => {
+        const values = daily(key);
+        const active = values.filter(v => v > 0).length;
+        if (total === 0) return { spark: null, sub: 'none in ' + span };
+        const lead = meaning ? meaning + ', ' : '';
+        if (active >= 2) return { spark: T.sparkline(values, { label: label, labels: rows.map(r => T.shortDay(r.day)), color: color }), sub: lead + 'in ' + span };
+        if (active === 1) return { spark: null, sub: lead + 'all on ' + T.shortDay(rows[values.findIndex(v => v > 0)].day) + ', in ' + span };
+        return { spark: null, sub: lead + 'in ' + span };
+      };
+      const judged = trend('calls', 'Calls judged per day', T.COLORS.accent, calls, '');
+      const stopped = trend('refused', 'Calls stopped per day', T.COLORS.refused, refused, 'refused before they ran');
+      const observed = trend('observed', 'Calls that would have been stopped, per day', T.COLORS.observed, wouldRefuse, 'recorded while a project observes');
+      const href = params => T.pageHref('dashboard.html#/calls' + T.query(Object.assign({ days: days }, params)));
+      T.setHtml(strip, h`
+        ${T.statTile({ label: 'Calls judged', metric: 'calls', value: calls, icon: 'shield', sub: judged.sub, term: 'totals.calls', spark: judged.spark, href: href({}), opens: 'Open the calls' })}
+        ${T.statTile({ label: 'Stopped', metric: 'refused', value: refused, icon: 'stop', sub: stopped.sub, term: 'totals.refused', spark: stopped.spark, href: href({ kind: 'refused' }), opens: 'Open what was stopped' })}
+        ${T.statTile({ label: 'Would have been stopped', metric: 'would_refuse', value: wouldRefuse, icon: 'eye', sub: observed.sub, term: 'totals.would_refuse', spark: observed.spark, href: href({ kind: 'observed' }), opens: 'Open what was observed' })}`);
+      T.animateNumbers(strip);
+      T.setHtml(where, h`${T.icon('info', 16)}<span>${sourcesSentence(data, calls)}</span>`);
+      where.hidden = false;
     }
 
-    // On Load: check if live API is available
+    // Where the counts come from, in one sentence: by source when the stack says
+    // (sources, from the fleet's contract), by sandbox when it says only that
+    // (sandbox_split), and in words alone when it says neither.
+    function sourcesSentence(data, calls) {
+      const h = T.html;
+      const end = ' They show the stack at work, not how widely Threefold is used.';
+      const s = data.sources && typeof data.sources === 'object' ? data.sources : null;
+      const part = (v) => v && typeof v === 'object' ? wholeNumber(v.calls) : null;
+      if (s && part(s.fleet) !== null && part(s.sandbox) !== null && part(s.other) !== null) {
+        const pieces = [];
+        if (part(s.fleet)) pieces.push(formatCount(part(s.fleet)) + ' from a synthetic Acme fleet that sends its calls through the real gates');
+        if (part(s.sandbox)) pieces.push(formatCount(part(s.sandbox)) + ' from sandboxes visitors started');
+        if (part(s.other)) pieces.push(formatCount(part(s.other)) + ' from the service’s own probes, the demos on this page and anyone else calling its open API');
+        return h`<strong>Where they come from:</strong> of ${plural(calls, 'call', 'calls')} on this public demo stack, ${pieces.join('; ')}.${end}`;
+      }
+      const split = data.sandbox_split && typeof data.sandbox_split === 'object' ? data.sandbox_split : null;
+      const inSandboxes = split ? part(split.sandbox) : null;
+      if (inSandboxes !== null && inSandboxes > 0) {
+        return h`<strong>Where they come from:</strong> this public demo stack's own traffic. ${formatCount(inSandboxes)} of the ${plural(calls, 'call', 'calls')} came from sandboxes visitors started; the rest from the service's own probes, the demos on this page and anyone else calling its open API.${end}`;
+      }
+      return h`<strong>Where they come from:</strong> this public demo stack's own traffic: the service's own probes, the sandboxes visitors start, the demos on this page and anyone else calling its open API.${end}`;
+    }
+
+    // The benchmark, pooled from the snapshot the dashboard's #/proof shows
+    // series by series. Each series is counted only when it is real (not a
+    // pilot) and carries all three conditions as whole counts; everything shown
+    // is a sum of what the snapshot holds.
+    const CONDITIONS = [
+      { key: 'none', label: 'No guidance' },
+      { key: 'prompt', label: 'Rules in CLAUDE.md or AGENTS.md' },
+      { key: 'threefold', label: 'Threefold enforcing' }
+    ];
+
+    function benchmarkTotals(proof) {
+      const list = proof && Array.isArray(proof.benchmarks) ? proof.benchmarks : [];
+      const sums = {};
+      CONDITIONS.forEach(c => { sums[c.key] = { k: 0, n: 0, done: 0, doneN: 0 }; });
+      let series = 0;
+      let landed = 0;
+      const agents = [];
+      list.forEach(b => {
+        if (!b || typeof b !== 'object' || b.pilot === true || !Array.isArray(b.conditions)) return;
+        const found = {};
+        b.conditions.forEach(c => { if (c && typeof c === 'object' && typeof c.condition === 'string') found[c.condition] = c; });
+        const counts = CONDITIONS.map(c => {
+          const row = found[c.key];
+          const v = row && row.violation && typeof row.violation === 'object' ? row.violation : null;
+          const done = row && row.completion && typeof row.completion === 'object' ? row.completion : null;
+          const k = v ? wholeNumber(v.k) : null;
+          const n = v ? wholeNumber(v.n) : null;
+          const dk = done ? wholeNumber(done.k) : null;
+          const dn = done ? wholeNumber(done.n) : null;
+          return k !== null && n && k <= n ? { key: c.key, k, n, dk, dn } : null;
+        });
+        if (counts.some(c => c === null)) return;
+        series += 1;
+        counts.forEach(c => {
+          const sum = sums[c.key];
+          sum.k += c.k; sum.n += c.n;
+          if (c.dk !== null && c.dn && c.dk <= c.dn) { sum.done += c.dk; sum.doneN += c.dn; }
+        });
+        if (counts[2].k > 0) landed += 1;
+        if (typeof b.agent === 'string' && b.agent && agents.indexOf(b.agent) === -1) agents.push(b.agent);
+      });
+      const runs = CONDITIONS.reduce((s, c) => s + sums[c.key].n, 0);
+      return { series, runs, landed, agents, sums };
+    }
+
+    async function loadBenchmark() {
+      const card = document.getElementById('proof-bench');
+      if (!card || !T) return;
+      let reply;
+      try {
+        const base = getApiBase();
+        const res = await fetch(`${base}/proof.json`, { method: 'GET', headers: { 'Accept': 'application/json' } });
+        reply = { status: res.status, ok: !!res.ok, body: res.ok ? await res.json() : null };
+      } catch (err) {
+        reply = { status: 0, ok: false, body: null };
+      }
+      renderBenchmark(card, reply);
+      card.setAttribute('aria-busy', 'false');
+    }
+
+    function renderBenchmark(card, reply) {
+      const h = T.html;
+      const head = h`<p class="tf-bench-head">${T.icon('flask', 16)}The benchmark</p>`;
+      const say = (text) => T.setHtml(card, h`<div class="tf-bench-main">${head}<p>${text}</p><a class="tf-link tf-bench-more" href="${T.pageHref('dashboard.html#/proof')}">What has been measured</a></div>`);
+      if (!reply.ok) {
+        if (reply.status === 404) say('No benchmark snapshot is deployed on this stack, so no result is shown.');
+        else if (reply.status === 401 || reply.status === 403) say('This stack keeps its benchmark snapshot private, so no result is shown.');
+        else say('The benchmark snapshot could not be read, so no result is shown rather than one invented.');
+        return;
+      }
+      const totals = benchmarkTotals(reply.body && typeof reply.body === 'object' ? reply.body : null);
+      if (!totals.series) {
+        say('The snapshot holds no complete series, so no result is shown.');
+        return;
+      }
+      const tf = totals.sums.threefold;
+      const agents = totals.agents.length > 1
+        ? totals.agents.slice(0, -1).join(', ') + ' and ' + totals.agents[totals.agents.length - 1]
+        : (totals.agents[0] || 'coding agents');
+      const verdictLine = totals.landed === 0
+        ? 'No governed violation landed under Threefold in any of the ' + plural(totals.series, 'series', 'series') + '.'
+        : 'A governed violation landed under Threefold in ' + formatCount(totals.landed) + ' of the ' + plural(totals.series, 'series', 'series') + '.';
+      const max = Math.max.apply(null, CONDITIONS.map(c => totals.sums[c.key].n));
+      const bars = T.hbars(CONDITIONS.map(c => {
+        const sum = totals.sums[c.key];
+        const isTf = c.key === 'threefold';
+        return {
+          label: c.label,
+          value: isTf && sum.k === 0 ? h`<span class="tf-good">${T.icon('check', 13)} ${sum.k} of ${sum.n}</span>` : h`${sum.k} of ${sum.n}`,
+          segments: [{ value: sum.k, label: 'runs in which a governed violation landed', color: isTf ? T.COLORS.accent : '#818ba5' }]
+        };
+      }), { max: max, title: 'Runs in which a governed violation landed, by condition' });
+      T.setHtml(card, h`<div class="tf-bench-main">${head}
+          <div class="tf-bench-value">
+            <span class="tf-bench-big${tf.k === 0 ? ' tf-good' : ''}" data-metric="bench-threefold">${tf.k} of ${tf.n}</span>
+            <span class="tf-bench-of">governed runs in which a rule-breaking write landed under Threefold</span>
+          </div>
+          <p data-bench="headline">${plural(totals.series, 'series', 'series')}, ${plural(totals.runs, 'real run', 'real runs')} of ${agents}. ${verdictLine}</p>
+          ${tf.doneN ? h`<p class="tf-bench-price" data-bench="price">The acceptance tests passed in ${tf.done} of those ${tf.doneN} governed runs: a refused agent sometimes stops instead of finishing.</p>` : ''}
+          <a class="tf-link tf-bench-more" href="${T.pageHref('dashboard.html#/proof')}">Each series, apart, with its evidence</a>
+        </div>
+        <div class="tf-bench-chart">
+          <p class="tf-pane-label">Runs in which a governed violation landed, all series together</p>
+          ${bars}
+        </div>`);
+    }
+
+    // On load: the navigation and the links first, then the service, the hero's
+    // one call and the two reads, none of which waits for another.
     linkHero();
     renderContractStrip();
     checkApiHealth();
+    runHeroDemo();
     loadLiveTotals();
+    loadBenchmark();
+    (function () {
+      const replay = document.getElementById('hero-replay');
+      if (replay && typeof replay.addEventListener === 'function') replay.addEventListener('click', replayHero);
+    })();
   </script>
 </body>
 </html>
