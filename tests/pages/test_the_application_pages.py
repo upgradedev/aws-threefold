@@ -1632,7 +1632,8 @@ def test_the_walkthrough_sends_a_gate_s_call_as_the_call_it_flagged(tmp_path: Pa
         tmp_path,
     )
     assert "Promote with 1 rule" in out["button"]
-    assert out["sent"]["tool_name"] == "Bash" and out["sent"]["action_type"] == "COMMAND_EXEC"
+    assert out["sent"]["action_type"] == "COMMAND_EXEC"
+    assert out["sent"]["agent"] == "codex" and out["sent"]["tool_name"] == "shell", "The command goes again from the agent and tool that ran it"
     assert out["sent"]["arguments"] == {"command": "cat .env"}, "The command the gate flagged is the command sent again"
     assert "Terminal" in out["send"] and "cat .env" in out["send"] and "Earlier, in Observe" in out["send"]
     assert "the same command" in out["send"]
@@ -1685,13 +1686,16 @@ def test_the_walkthrough_builds_a_quiet_rule_s_write_from_the_rule_and_sends_not
     assert out["nonePromoted"] == 0 and "Check at least one rule to promote" in out["noneError"]
 
 
-def test_the_replay_prefers_claude_code_s_call_and_says_so_when_another_agent_made_it(tmp_path: Path) -> None:
-    """Step 5 sends its call as Claude Code's hook would, so it prefers a call Claude Code made.
+def test_the_replay_sends_the_call_as_the_agent_and_tool_that_made_it(tmp_path: Path) -> None:
+    """Step 5 sends a flagged call again from the agent and with the tool that made it.
 
-    On the default run no such call is in force (Claude Code's only flagged
-    call is under the rule the false alarm makes noisy), and the screen once
-    set Antigravity's write_to_file beside Claude Code's Write as if they were
-    one call. When the agents differ, every place that compares them says so.
+    On the default run Claude Code's only flagged call is under the rule the
+    false alarm makes noisy, so the call sent again is another agent's. It
+    once went as Claude Code's Write whatever agent had made it, and the
+    judged moment spent its words on the swap ("Agent Antigravity → Claude
+    Code", "whichever agent sends the call") instead of showing the same call,
+    now refused. Now only the stage differs, and every place that compares
+    the two calls says so.
     """
     out = dash(
         r"""
@@ -1722,7 +1726,7 @@ def test_the_replay_prefers_claude_code_s_call_and_says_so_when_another_agent_ma
     '/rules': { status: 200, body: { rules: [] } },
     'POST /evaluate-tool-call': (u, i, body) => { sent.push(body); return { status: 200, body: { status: 'BLOCKED_BOUNDARY_VIOLATION', reason: 'Refused.', project_stage: 'enforce' } }; }
   });
-  async function run(claudeLabel, sameInstant) {
+  async function run(alarmFrom, sameInstant) {
     Object.keys(labels).forEach(k => delete labels[k]);
     if (sameInstant) observed.forEach(r => { r.timestamp = NOW; });
     await visit('#/try');
@@ -1731,7 +1735,7 @@ def test_the_replay_prefers_claude_code_s_call_and_says_so_when_another_agent_ma
     await click('try-show'); await tick();
     await click('try-review'); await tick();
     for (const r of Dash.tryState.observed.slice()) {
-      await click('try-label', { 'data-verdict': r.verdict_id, 'data-label': r.agent === 'claude-code' ? claudeLabel : 'correct' });
+      await click('try-label', { 'data-verdict': r.verdict_id, 'data-label': r.agent === alarmFrom ? 'false_alarm' : 'correct' });
     }
     await tick();
     await click('try-readiness'); await tick();
@@ -1741,30 +1745,32 @@ def test_the_replay_prefers_claude_code_s_call_and_says_so_when_another_agent_ma
     await click('try-send'); await tick();
     return { send, climax: text(view()), sent: sent[sent.length - 1] };
   }
-  out.claude = await run('correct');
-  out.other = await run('false_alarm');
-  out.tie = await run('false_alarm', true);
+  out.web = await run('claude-code');
+  out.java = await run('antigravity');
+  out.tie = await run('claude-code', true);
 """,
         tmp_path,
     )
-    claude, other = out["claude"], out["other"]
-    # Claude Code's call is in force and the newest is Antigravity's: Claude Code's is sent again.
-    assert claude["sent"]["arguments"]["file_path"] == "src/acme/domain/order.py" and claude["sent"]["agent"] == "claude-code"
-    assert "Now, in Enforce · sent as a hook would" in claude["send"] and "Agent Claude Code, again" in claude["send"]
-    assert "from Claude Code" not in claude["send"]
-    # Claude Code's rule is noisy and keeps observing: the newest call in force is Antigravity's, sent as Claude Code's.
-    assert other["sent"]["arguments"] == {"file_path": "src/web/domain/cart.ts", "content": "import client from 'axios';\n"}
-    assert other["sent"]["agent"] == "claude-code" and other["sent"]["tool_name"] == "Write", "What is sent does not change"
-    send = other["send"]
-    assert "The same write Antigravity made in Observe, sent this time by Claude Code as its hook would" in send
-    assert "now in Enforce. This time the rule in force refuses it" in send
-    assert "Now, in Enforce · the same write, from Claude Code" in send
-    assert "Antigravity sent it then and Claude Code sends it now" in send
-    assert "File the same" in send and "Import the same" in send and "Agent Antigravity → Claude Code" in send and "Stage Observe → Enforce" in send
-    assert "The write Antigravity made in Observe is refused in Enforce when Claude Code sends it" in other["climax"]
-    assert "Now, in Enforce · refused, from Claude Code" in other["climax"]
+    # Claude Code's rule is noisy: the newest call in force is Antigravity's, and it goes as Antigravity's.
+    web = out["web"]
+    assert web["sent"]["agent"] == "antigravity" and web["sent"]["tool_name"] == "write_to_file"
+    assert web["sent"]["arguments"] == {"file_path": "src/web/domain/cart.ts", "content": "import axios from 'axios';\n"}
+    send = web["send"]
+    assert "Send the same call again" in send
+    assert "Same agent, same file, same import, and your sandbox is now in Enforce. This time the rule in force refuses it." in send
+    assert "Now, in Enforce · as Antigravity's hook sends it" in send and "write_to_file · Antigravity · hook" in send
+    assert "Agent the same" in send and "File the same" in send and "Import the same" in send and "Stage Observe → Enforce" in send
+    assert "The write that ran in Observe is refused in Enforce: same agent, same file, same import, a new stage." in web["climax"]
+    for swap in ("Claude Code sends", "from Claude Code", "whichever agent", "→ Claude Code"):
+        assert swap not in send and swap not in web["climax"], f"Step 5 still tells of a swap of agents: {swap!r}"
+    # With Antigravity's call a false alarm, the newest call in force is Codex's, sent with Codex's own tool.
+    java = out["java"]
+    assert java["sent"]["agent"] == "codex" and java["sent"]["tool_name"] == "apply_patch"
+    assert java["sent"]["arguments"] == {"file_path": "src/main/java/com/acme/domain/Order.java", "content": "import javax.persistence.Entity;\n"}
+    assert "apply_patch · Codex · hook" in java["send"]
     # A coarse clock stamps the sandbox's calls in one instant: the later lane was sent later, so every run replays the same call.
     assert out["tie"]["sent"]["arguments"]["file_path"] == "src/web/domain/cart.ts", "Calls stamped together are not told apart the way they were sent"
+    assert out["tie"]["sent"]["agent"] == "antigravity"
 
 
 def test_the_rule_as_written_stands_beside_the_call_it_judged_on_steps_three_and_five(tmp_path: Path) -> None:
@@ -1817,10 +1823,12 @@ def test_the_rule_as_written_stands_beside_the_call_it_judged_on_steps_three_and
     # The next card is the test module: the same pattern covers it, which is the false alarm to spot.
     assert "tests/domain/test_order_totals.py" in text_of(second)
     assert re.search(hit + re.escape("**/domain/**/*.py") + "<", second, re.S) and re.search(hit + "fastapi<", second, re.S)
-    # Step 5: the rule now in force, in its own words, beside the call about to be sent.
+    # Step 5: the rule now in force, in its own words, beside the call about to be sent: the
+    # newest call marked correct, the test module, whose import falls under fastapi.
     words = text_of(send)
     assert "Now in force python-domain-stays-pure" in words and "A Python file under domain/ may not import infrastructure or a driver." in words
-    assert re.search(hit + "boto3<", send, re.S), "The package the import falls under is not marked"
+    assert "tests/domain/test_order_totals.py" in words
+    assert re.search(hit + "fastapi<", send, re.S), "The package the import falls under is not marked"
 
     unreadable = walk("const READABLE = false;\n" + scenario, tmp_path)
     for name in ("first", "send"):

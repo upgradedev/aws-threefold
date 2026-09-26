@@ -2081,8 +2081,10 @@
     const TRY_MONOGRAMS = { 'claude-code': 'CC', codex: 'CX', antigravity: 'AG' };
     const TRY_TOOL_ICONS = { FILE_READ: 'book', FILE_WRITE: 'code', COMMAND_EXEC: 'terminal' };
     const TRY_STYLE_ID = 'tf-try-style';
-    // Step 5 sends its call as this agent's hook would.
-    const TRY_SENDER = 'claude-code';
+    // Step 5 sends a flagged call again as the agent and the tool that made
+    // it, so only the stage differs. A write built from a rule alone, with no
+    // call of the sandbox's behind it, goes as Claude Code's Write.
+    const TRY_RULE_SENDER = { agent: 'claude-code', tool_name: 'Write' };
 
     // The walkthrough's own styles, kept beside the only route that uses them
     // and added to the page once, when the route is first opened. Built on the
@@ -2392,7 +2394,10 @@
 .tf-try-rule-counts { color: var(--tf-text-2); }
 
 .tf-try-compare { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); align-items: start; }
-@media (min-width: 960px) { .tf-try-compare { grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); } }
+@media (min-width: 960px) {
+  .tf-try-compare { grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); }
+  .tf-try-compare > .tf-try-then-col { order: -1; }
+}
 .tf-try-then { display: flex; flex-direction: column; gap: 12px; padding: 16px; background: var(--tf-inset); border: 1px solid var(--tf-hairline); border-radius: var(--tf-radius-md); box-shadow: inset 3px 0 0 var(--tf-observed); }
 .tf-try-now-col { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .tf-try-then-col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
@@ -3251,28 +3256,34 @@
         return plan && plan.verdict_id ? state.observed.find(r => r.verdict_id === plan.verdict_id) || null : null;
       }
 
-      // That call, when another agent than the one sending it again made it.
-      function otherSender(plan) {
-        const row = earlierRow(plan);
-        return row && row.agent !== TRY_SENDER ? row : null;
-      }
-
       function planWhat(plan) { return plan.action_type === 'COMMAND_EXEC' ? 'command' : plan.action_type === 'FILE_READ' ? 'read' : 'write'; }
 
-      // What is the same and what changed between the call that ran in
-      // Observe and the one about to be sent, each read from the two calls.
+      // What is the same between the call that ran in Observe and the one
+      // sent again, read from the two calls: its parts, each once.
+      function sameParts(plan) {
+        const row = earlierRow(plan);
+        if (!row) return [];
+        const what = planWhat(plan);
+        const parts = [];
+        if (row.agent === planAgent(plan)) parts.push({ k: 'Agent', words: 'same agent' });
+        if (what === 'command') parts.push({ k: 'Command', words: 'same command' });
+        else if (plan.arguments && plan.arguments.file_path === targetOf(row)) parts.push({ k: 'File', words: 'same file' });
+        const imp = what === 'write' ? tryImportOf(row) : null;
+        if (imp) parts.push({ k: 'Import', words: imp.cut ? 'an import from the same package' : 'same import', v: imp.cut ? 'from the same package' : 'the same' });
+        return parts;
+      }
+
+      // Those parts in words: "same agent, same file, same import".
+      function sameWords(plan) { return sameParts(plan).map(part => part.words).join(', '); }
+
+      // What is the same and what changed, as tiles: every part of the call
+      // the same, and the stage moved.
       function delta(plan) {
         const row = earlierRow(plan);
         if (!row) return '';
-        const what = planWhat(plan);
         const items = [];
-        if (what === 'command') items.push({ k: 'Command', v: 'the same', kind: 'same' });
-        else if (plan.arguments && plan.arguments.file_path === targetOf(row)) items.push({ k: 'File', v: 'the same', kind: 'same' });
-        const imp = what === 'write' ? tryImportOf(row) : null;
-        if (imp) items.push({ k: 'Import', v: imp.cut ? 'from the same package' : 'the same', kind: 'same' });
-        items.push(row.agent === TRY_SENDER
-          ? { k: 'Agent', v: agentLabel(TRY_SENDER) + ', again', kind: 'same' }
-          : { k: 'Agent', v: agentLabel(row.agent) + ' → ' + agentLabel(TRY_SENDER), kind: 'changed' });
+        if (row.agent !== planAgent(plan)) items.push({ k: 'Agent', v: agentLabel(row.agent) + ' → ' + agentLabel(planAgent(plan)), kind: 'changed' });
+        sameParts(plan).forEach(part => items.push({ k: part.k, v: part.v || 'the same', kind: 'same' }));
         items.push({ k: 'Stage', v: 'Observe → Enforce', kind: 'stage' });
         return html`<dl class="tf-try-delta" aria-label="Between the call in Observe and this one">${items.map(i => html`<div data-kind="${i.kind}"><dt>${i.k}</dt><dd>${i.kind === 'changed' ? '' : T.icon(i.kind === 'stage' ? 'shield' : 'check', 14)}<span>${i.v}</span></dd></div>`)}</dl>`;
       }
@@ -3284,9 +3295,10 @@
         const lines = command ? [String(args.command || '')] : read ? ['Read ' + String(args.file_path || '')] : String(args.content || '').replace(/\n$/, '').split('\n');
         const bad = line => command || read || /^\s*(import|from|using)\b/.test(line);
         const what = planWhat(plan);
-        const same = command ? 'the same command' : read ? 'the same file' : 'the file it flagged, and the import it caught';
-        const other = otherSender(plan);
-        const byWhom = other ? html` ${agentLabel(other.agent)} sent it then and ${agentLabel(TRY_SENDER)} sends it now: a rule judges what a call does, whichever agent sends it.` : '';
+        const row = earlierRow(plan);
+        const imp = row && what === 'write' ? tryImportOf(row) : null;
+        const same = command ? 'the same command' : read ? 'the same file'
+          : 'the file it flagged, and ' + (!imp ? 'a package the rule forbids' : imp.cut ? 'the package its import fell under' : 'the import it caught');
         const note = tone === 'refused'
           ? 'Refused before it ran: a hook would have stopped the ' + what + ' here.'
           : tone === 'approved'
@@ -3294,10 +3306,10 @@
             : plan.from === 'rule'
               ? html`No call in the sandbox fell under <span class="tf-mono">${plan.rule}</span>, so this write is built from the rule itself: a file it watches, and a package it forbids.`
               : plan.from === 'flagged'
-                ? html`Built from a call <span class="tf-mono">${plan.rule}</span> flagged: ${same}.${byWhom}`
-                : html`Built from a call you marked correct under <span class="tf-mono">${plan.rule}</span>: ${same}.${byWhom}`;
+                ? html`Built from a call <span class="tf-mono">${plan.rule}</span> flagged: ${same}.`
+                : html`Built from a call you marked correct under <span class="tf-mono">${plan.rule}</span>: ${same}.`;
         return html`<figure class="tf-try-editor" data-tone="${tone || 'pending'}" data-kind="${what}">
-          <figcaption class="tf-try-editor-tab">${T.icon(command ? 'terminal' : read ? 'book' : 'code', 14)}<span class="tf-try-editor-path">${command ? 'Terminal' : tryPath(args.file_path || '')}</span><span class="tf-try-editor-meta">${plan.tool_name} · ${agentLabel(TRY_SENDER)} · hook</span></figcaption>
+          <figcaption class="tf-try-editor-tab">${T.icon(command ? 'terminal' : read ? 'book' : 'code', 14)}<span class="tf-try-editor-path">${command ? 'Terminal' : tryPath(args.file_path || '')}</span><span class="tf-try-editor-meta">${plan.tool_name} · ${agentLabel(planAgent(plan))} · hook</span></figcaption>
           <pre class="tf-try-code"><code>${lines.map((line, n) => html`<span class="tf-try-line"${bad(line) ? raw(' data-bad') : ''}><span class="tf-try-ln" aria-hidden="true">${command ? '$' : n + 1}</span>${line}</span>`)}</code></pre>
           <p class="tf-try-editor-note">${note}</p>
         </figure>`;
@@ -3318,8 +3330,7 @@
           <p class="tf-try-then-label">Earlier, in Observe</p>
           <p class="tf-try-card-agent">${tryAvatar(row.agent, true)}${agentLabel(row.agent)} · <span class="tf-mono">${row.tool_name}</span></p>
           <p class="tf-try-file tf-try-then-file">${tryPath(tryTarget(row))}</p>
-          <p class="tf-try-summary">${T.statusChip('observed')}<span class="tf-try-muted">It ran, and was recorded.</span></p>
-          ${l ? html`<p class="tf-try-summary"><span class="tf-try-muted">You marked it</span>${reviewChip(l)}</p>` : ''}
+          <p class="tf-try-summary">${T.statusChip('observed')}<span class="tf-try-muted">It ran, and was recorded.</span>${l ? html`<span class="tf-try-muted">You marked it</span>${reviewChip(l)}` : ''}</p>
         </div>`;
       }
 
@@ -3330,26 +3341,24 @@
           return {
             kicker: 'Step 5 of 5',
             title: 'No single call can show these rules',
-            sentence: html`The project is in Enforce, and ${tryListHtml(p.enforce.map(key => html`<span class="tf-mono tf-try-strong">${key}</span>`))} ${p.enforce.length === 1 ? 'is' : 'are'} in force. ${p.enforce.length === 1 ? 'It is a gate' : 'They are gates'} that one call cannot trip: a loop needs the same call repeated, a budget a session's spend, and an unreadable write a layering rule in force over its path. Nothing is sent rather than a call they would approve.`,
-            visual: html`${projectBar()}${T.emptyState({ icon: 'shield', text: 'Start again and keep a layering rule checked on step 4 to watch one refuse a write.' })}`,
+            sentence: html`${tryListHtml(p.enforce.map(key => html`<span class="tf-mono tf-try-strong">${key}</span>`))} ${p.enforce.length === 1 ? 'is a gate' : 'are gates'} one call cannot trip, so nothing is sent rather than a call ${p.enforce.length === 1 ? 'it' : 'they'} would approve.`,
+            visual: html`${projectBar()}${T.emptyState({ icon: 'shield', text: 'A loop needs the same call repeated, a budget a session\'s spend, and an unreadable write a layering rule in force over its path. Start again and keep a layering rule checked on step 4 to watch one refuse a write.' })}`,
             actions: html`${primary('try-finish', 'See what just happened')}<button type="button" class="tf-btn tf-btn-quiet" data-action="try-restart">${T.icon('refresh', 16)}Start again</button>`
           };
         }
-        const earlier = plan ? thenCard(plan) : '';
-        // A call another agent made goes again as Claude Code's, and the
-        // screen says so rather than letting two agents pass for one.
-        const other = plan ? otherSender(plan) : null;
-        const what = plan ? planWhat(plan) : 'call';
+        const same = plan ? sameWords(plan) : '';
+        // The call about to be sent comes first, so a phone shows it above
+        // the fold; on a desk the call from Observe sits to its left.
         return {
           kicker: 'Step 5 of 5',
-          title: 'Send the same kind of call again',
-          sentence: other
-            ? 'The same ' + what + ' ' + agentLabel(other.agent) + (what === 'command' ? ' ran' : ' made') + ' in Observe, sent this time by ' + agentLabel(TRY_SENDER) + ' as its hook would, to your sandbox, now in Enforce. This time the rule in force refuses it, whichever agent sends it, and Amazon Bedrock explains why.'
-            : 'As a hook would: origin hook, agent Claude Code, to your sandbox, now in Enforce. This time the rule in force refuses it, and Amazon Bedrock explains why.',
+          title: same ? 'Send the same call again' : 'Send the same kind of call again',
+          sentence: same
+            ? same.charAt(0).toUpperCase() + same.slice(1) + ', and your sandbox is now in Enforce. This time the rule in force refuses it.'
+            : 'A write the rule forbids, to your sandbox, now in Enforce. This time the rule in force refuses it.',
           visual: plan
-            ? html`${projectBar()}<div class="tf-try-compare">
-                <div class="tf-try-then-col">${earlier}${delta(plan)}</div>
-                <div class="tf-try-now-col"><p class="tf-try-then-label">${other ? 'Now, in Enforce · the same ' + what + ', from ' + agentLabel(TRY_SENDER) : 'Now, in Enforce · sent as a hook would'}</p>${editor(plan, 'pending')}${plan.action_type === 'FILE_WRITE' ? ruleBox(plan.rule, (plan.arguments || {}).file_path, plan.imports || '', { title: 'Now in force', stage: 'enforce', describe: true }) : ''}</div>
+            ? html`${projectBar()}<div class="tf-try-compare tf-try-compare-send">
+                <div class="tf-try-now-col"><p class="tf-try-then-label">Now, in Enforce · as ${agentLabel(planAgent(plan))}'s hook sends it</p>${editor(plan, 'pending')}${plan.action_type === 'FILE_WRITE' ? ruleBox(plan.rule, (plan.arguments || {}).file_path, plan.imports || '', { title: 'Now in force', stage: 'enforce', describe: true }) : ''}</div>
+                <div class="tf-try-then-col">${thenCard(plan)}${delta(plan)}</div>
               </div>`
             : emptyNote('There is no call to send yet: promote the project first.'),
           actions: plan ? primary('try-send', 'Send it', 'Sending…') : primary('try-restart', 'Start again')
@@ -3410,23 +3419,20 @@
         const sourceNote = r.explanation_source === 'deterministic_fallback'
           ? 'Amazon Bedrock was asked and did not answer, so this sentence is the service\'s own. The deterministic gate made the verdict either way.'
           : 'It explains the verdict for the person reading; the deterministic gate made it.';
-        const observing = Array.isArray(state.observing) ? state.observing : [];
         // Plain words first: the rule's reason as a reader would say it. The
         // precise terms (the rule, the verdict, the stage) come second.
         const why = r.reason ? tryWhy({ status: r.status || 'APPROVED', reason: r.reason, rule_key: plan && plan.rule }, state.rulesDef) : null;
-        const earlier = plan ? thenCard(plan) : '';
-        const other = plan ? otherSender(plan) : null;
         const what = plan ? planWhat(plan) : 'call';
-        const stillWatching = observing.length ? ', while ' + tryList(observing) + (observing.length === 1 ? ' keeps' : ' keep') + ' watching without refusing' : '';
+        const same = plan ? sameWords(plan) : '';
         return {
           tone: refused ? 'refused' : '',
           kicker: refused ? 'Step 5 of 5 · refused' : 'Step 5 of 5 · the answer',
           title: refused ? 'Refused, before it ran' : 'The service approved it',
           sentence: refused
-            ? (other
-              ? 'The ' + what + ' ' + agentLabel(other.agent) + (what === 'command' ? ' ran' : ' made') + ' in Observe is refused in Enforce when ' + agentLabel(TRY_SENDER) + ' sends it' + stillWatching + '. One rule, whichever agent sends the call.'
-              : 'The same kind of call that ran in Observe is refused in Enforce' + stillWatching + '.')
-            : 'This call was not refused' + (r.project_stage ? ' in stage ' + r.project_stage : '') + '. The rule it was built from may not be in force here; the project page shows each rule\'s mode.',
+            ? (same
+              ? 'The ' + what + ' that ran in Observe is refused in Enforce: ' + same + ', a new stage.'
+              : 'The ' + what + ' built from the rule is refused now that your sandbox is in Enforce.')
+            : 'This call was not refused' + (r.project_stage ? ' in stage ' + r.project_stage : '') + ': the rule it was built from may not be in force here.',
           visual: html`<div class="tf-try-climax${play.climax ? ' tf-try-play' : ''}">
             <div class="tf-try-verdict-banner" data-tone="${refused ? 'refused' : 'approved'}">
               <span class="tf-try-verdict-icon" aria-hidden="true">${T.icon(refused ? 'stop' : 'check', 28)}</span>
@@ -3441,8 +3447,8 @@
               </div>
             </div>
             ${plan ? html`<div class="tf-try-compare tf-try-climax-compare">
-              ${earlier}
-              <div class="tf-try-now-col"><p class="tf-try-then-label">${(refused ? 'Now, in Enforce · refused' : 'Now · approved') + (other ? ', from ' + agentLabel(TRY_SENDER) : '')}</p>${editor(plan, refused ? 'refused' : 'approved')}</div>
+              <div class="tf-try-now-col"><p class="tf-try-then-label">${refused ? 'Now, in Enforce · refused' : 'Now · approved'}</p>${editor(plan, refused ? 'refused' : 'approved')}</div>
+              <div class="tf-try-then-col">${thenCard(plan)}</div>
             </div>` : ''}
             ${r.bedrock_explanation || tryFix(r.suggested_fix) ? html`<div class="tf-try-climax-grid">
               ${r.bedrock_explanation ? html`<figure class="tf-try-quote">
@@ -3677,7 +3683,12 @@
         const lower = ext.toLowerCase();
         if (lower === 'java' || lower === 'kt' || lower === 'scala') return 'import ' + name + (isPackage ? '.*' : '') + ';\n';
         if (lower === 'cs') return 'using ' + name + ';\n';
-        if (['ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs'].indexOf(lower) !== -1) return "import client from '" + name + "';\n";
+        // A module is bound to its own name when that name is an identifier
+        // (axios), and to `client` when it is not (@nestjs/common, node-fetch).
+        if (['ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs'].indexOf(lower) !== -1) {
+          const binding = /^[A-Za-z_$][\w$]*$/.test(name) && ['default', 'class', 'function', 'import', 'export', 'new', 'delete', 'in', 'this'].indexOf(name) === -1 ? name : 'client';
+          return 'import ' + binding + " from '" + name + "';\n";
+        }
         if (lower === 'go') return 'import "' + name + '"\n';
         return 'import ' + name + '\n';
       }
@@ -3715,25 +3726,37 @@
 
       function writePlan(base, path, rule, row) {
         const imp = importToSend(row, rule);
-        return Object.assign(base, { kind: 'write', tool_name: 'Write', action_type: 'FILE_WRITE', imports: imp ? imp.name : '',
+        return Object.assign(base, { kind: 'write', action_type: 'FILE_WRITE', imports: imp ? imp.name : '',
           arguments: { file_path: path, content: imp ? importLine(path, imp.name, imp.isPackage) : '# Acme sandbox\n' } });
       }
 
-      // The call a flagged row made, rebuilt as the same kind of call: a
-      // gate's command as that command, a gate's file as a call to that file,
-      // and a layering rule's write as a write to the file it flagged.
+      // Who sends a flagged call again: the agent that made it, with the tool
+      // it used, as that agent's hook would. A row from an agent the hook
+      // contract does not name goes as Claude Code's, with the plain tool.
+      function trySender(row, plainTool) {
+        const known = row && TRY_AGENTS.indexOf(row.agent) !== -1 && typeof row.tool_name === 'string' && /^[A-Za-z_][\w.-]{0,63}$/.test(row.tool_name);
+        return known ? { agent: row.agent, tool_name: row.tool_name } : { agent: TRY_RULE_SENDER.agent, tool_name: plainTool };
+      }
+
+      // The agent a plan is sent as.
+      function planAgent(plan) { return (plan && plan.agent) || TRY_RULE_SENDER.agent; }
+
+      // The call a flagged row made, rebuilt as the same kind of call from
+      // the same agent and tool: a gate's command as that command, a gate's
+      // file as a call to that file, and a layering rule's write as a write
+      // to the file it flagged.
       function planFromRow(row, from) {
         const key = ruleKeyOf(row);
         const base = { rule: key, from, verdict_id: row.verdict_id };
         if (tryIsGate(key)) {
           const command = row.action_type === 'COMMAND_EXEC' ? tryCommand(row) : '';
-          if (command) return Promise.resolve(Object.assign(base, { kind: 'command', tool_name: 'Bash', action_type: 'COMMAND_EXEC', arguments: { command } }));
+          if (command) return Promise.resolve(Object.assign(base, trySender(row, 'Bash'), { kind: 'command', action_type: 'COMMAND_EXEC', arguments: { command } }));
           const path = targetOf(row);
           return Promise.resolve(Object.assign(base, row.action_type === 'FILE_READ'
-            ? { kind: 'read', tool_name: 'Read', action_type: 'FILE_READ', arguments: { file_path: path } }
-            : { kind: 'write', tool_name: 'Write', action_type: 'FILE_WRITE', arguments: { file_path: path, content: '# Acme sandbox\n' } }));
+            ? Object.assign(trySender(row, 'Read'), { kind: 'read', action_type: 'FILE_READ', arguments: { file_path: path } })
+            : Object.assign(trySender(row, 'Write'), { kind: 'write', action_type: 'FILE_WRITE', arguments: { file_path: path, content: '# Acme sandbox\n' } })));
         }
-        return ruleOfRow(row).then(rule => writePlan(base, targetOf(row) || 'src/domain/acme_order.py', rule, row));
+        return ruleOfRow(row).then(rule => writePlan(Object.assign(base, trySender(row, 'Write')), targetOf(row) || 'src/domain/acme_order.py', rule, row));
       }
 
       // A write a layering rule refuses, built from the rule alone: a file
@@ -3744,20 +3767,18 @@
         for (const glob of globs) {
           const path = tryPathFromGlob(glob);
           const imp = path ? importToSend(null, rule) : null;
-          if (path && imp) return writePlan({ rule: rule.id, from: 'rule', verdict_id: null }, path, rule, null);
+          if (path && imp) return writePlan(Object.assign({ rule: rule.id, from: 'rule', verdict_id: null }, TRY_RULE_SENDER), path, rule, null);
         }
         return null;
       }
 
-      // What to send again under the rules now in force: a call marked
-      // correct, then any call flagged, preferring a layering rule's (a write
-      // with the import it caught) over a gate's, and within that the one
-      // Claude Code sent, since the call goes again as Claude Code's; then,
-      // when no call in the sandbox fell under a rule in force, a write built
-      // from a layering rule's definition. A gate that one call cannot show
-      // (a loop, a budget, an unreadable write) is never stood in for by a
-      // call it would approve: the answer is then no call at all, and step 5
-      // says why.
+      // What to send again under the rules now in force: the newest call
+      // marked correct, then the newest flagged, preferring a layering rule's
+      // (a write with the import it caught) over a gate's; then, when no call
+      // in the sandbox fell under a rule in force, a write built from a
+      // layering rule's definition. A gate that one call cannot show (a loop,
+      // a budget, an unreadable write) is never stood in for by a call it
+      // would approve: the answer is then no call at all, and step 5 says why.
       function planReplay(enforce) {
         const inForce = r => enforce.indexOf(ruleKeyOf(r)) !== -1;
         // Two calls stamped in the same instant: the later lane was sent later.
@@ -3766,7 +3787,7 @@
         const correct = usable.filter(r => state.labels[r.verdict_id] === 'correct');
         const layered = rows => rows.filter(r => !tryIsGate(ruleKeyOf(r)));
         const tier = [layered(correct), correct, layered(usable), usable].find(rows => rows.length) || [];
-        const row = tier.find(r => r.agent === TRY_SENDER) || tier[0] || null;
+        const row = tier[0] || null;
         if (row) return planFromRow(row, state.labels[row.verdict_id] === 'correct' ? 'correct' : 'flagged');
         const layering = enforce.filter(key => !tryIsGate(key));
         if (!layering.length) return Promise.resolve(null);
@@ -4025,7 +4046,7 @@
               tool_name: plan.tool_name,
               action_type: plan.action_type,
               arguments: plan.arguments,
-              agent: TRY_SENDER,
+              agent: planAgent(plan),
               origin: 'hook',
               explain: true,
               hook_mode: 'managed'
