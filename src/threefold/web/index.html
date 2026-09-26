@@ -2001,11 +2001,14 @@
       // Otherwise the sub-line says what the window holds. Each sub-line is what
       // the number means, in a few words, and the window is named once, on the
       // first tile; the words a reader needs, never the API's field names.
+      // When every call fell on one day the first tile names it, and the other
+      // two, which count some of those calls, do not say it again.
+      const oneDay = daily('calls').filter(v => v > 0).length === 1;
       const trend = (key, label, color, total, meaning) => {
         const values = daily(key);
         const active = values.filter(v => v > 0).length;
         if (total === 0) return { spark: null, sub: 'none in ' + span };
-        if (active === 1) return { spark: null, sub: meaning + ', all on ' + T.shortDay(rows[values.findIndex(v => v > 0)].day) };
+        if (active === 1) return { spark: null, sub: key !== 'calls' && oneDay ? meaning : meaning + ', all on ' + T.shortDay(rows[values.findIndex(v => v > 0)].day) };
         const spark = active >= 2 ? T.sparkline(values, { label: label, labels: rows.map(r => T.shortDay(r.day)), color: color }) : null;
         return { spark: spark, sub: meaning };
       };

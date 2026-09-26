@@ -521,6 +521,8 @@ def test_a_sparse_window_says_what_it_holds_instead_of_drawing_a_flat_line(tmp_p
     one_day = "series: [{ day: '2026-09-20', approved: 0, observed: 0, refused: 0 }, { day: '2026-09-21', approved: 5, observed: 2, refused: 1 }]"
     out = _load(tmp_path, overview="{ status: 200, body: " + _overview(one_day) + " }")
     assert "tf-spark" not in out["live"] and "all on 21 Sep" in out["live"]
+    subs = [_text(sub) for sub in re.findall(r'<span class="tf-tile-sub">(.*?)</span>', out["live"], re.S)]
+    assert subs == ["in the last 7 days, all on 21 Sep", "refused before they ran", "recorded while a project observes"],         "The day is named once, on the first tile, when every call fell on it"
     two_days = "series: [{ day: '2026-09-20', approved: 3, observed: 1, refused: 2 }, { day: '2026-09-21', approved: 5, observed: 2, refused: 1 }]"
     out = _load(tmp_path, overview="{ status: 200, body: " + _overview(two_days) + " }")
     assert out["live"].count("tf-spark") == 3, "Two days with a count make a trend"
