@@ -42,11 +42,16 @@
     /* Where the numbers come from, on the public demo. */
     /* Neutral on purpose: its bar is drawn in categorical hues, and the info
        tint sits too close to the cyan one to share a figure with it. */
-    .tf-ops-source { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 20px; padding: 12px 16px; margin-bottom: var(--tf-space-2); border-radius: var(--tf-radius-md); background: var(--tf-surface-1); border: 1px solid var(--tf-hairline-strong); font-size: var(--tf-fs-small); line-height: var(--tf-lh-small); color: var(--tf-text-2); }
-    .tf-ops-source > .tf-icon { width: 18px; height: 18px; color: var(--tf-text-3); flex-shrink: 0; }
-    .tf-ops-source p { margin: 0; flex: 1 1 26rem; min-width: 0; }
+    .tf-ops-source { display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: start; gap: 10px 12px; padding: 12px 16px; margin-bottom: var(--tf-space-2); border-radius: var(--tf-radius-md); background: var(--tf-surface-1); border: 1px solid var(--tf-hairline-strong); font-size: var(--tf-fs-small); line-height: var(--tf-lh-small); color: var(--tf-text-2); }
+    .tf-ops-source > .tf-icon { width: 18px; height: 18px; margin-top: 1px; color: var(--tf-text-3); }
+    .tf-ops-source p { margin: 0; min-width: 0; }
+    .tf-ops-source > .tf-ops-share { grid-column: 1 / -1; }
+    @media (min-width: 900px) {
+      .tf-ops-source { grid-template-columns: 18px minmax(0, 1fr) 15rem; align-items: center; gap: 10px 20px; }
+      .tf-ops-source > .tf-ops-share { grid-column: auto; }
+    }
     .tf-ops-source strong { color: var(--tf-text); font-weight: 600; }
-    .tf-ops-share { flex: 0 1 15rem; min-width: 11rem; }
+    .tf-ops-share { min-width: 0; }
     .tf-ops-share-bar { display: flex; gap: 2px; height: 8px; border-radius: 4px; overflow: hidden; background: var(--tf-track); }
     .tf-ops-share-bar > span { display: block; height: 100%; min-width: 3px; }
     .tf-ops-share-bar > span:last-child { border-radius: 0 4px 4px 0; }
@@ -208,6 +213,9 @@
     .tf-ops-group-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 10px 16px; }
     .tf-ops-group-title { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font: 600 0.875rem/1.375rem var(--tf-font-sans); color: var(--tf-text); }
     section[data-open="false"] .tf-ops-qrow-body { opacity: 0.78; }
+    .tf-ops-note-add { display: inline-flex; align-items: center; gap: 6px; padding: 2px 0; border: 0; background: none; cursor: pointer; font-size: var(--tf-fs-micro); line-height: 1rem; color: var(--tf-text-3); }
+    button.tf-ops-note-add { background: none; }
+    .tf-ops-note-add:hover { color: var(--tf-text); }
     /* Signed out on the public demo: which groups a visitor may label. */
     .tf-ops-visitor { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px 14px; padding: 12px 16px; border-radius: var(--tf-radius-md); background: var(--tf-info-soft); border: 1px solid var(--tf-info-line); }
     .tf-ops-visitor > .tf-icon { width: 18px; height: 18px; margin-top: 1px; color: var(--tf-info-text); flex-shrink: 0; }
@@ -293,9 +301,12 @@
     .tf-ops-multiple-sub { display: block; font: 400 var(--tf-fs-micro)/1rem var(--tf-font-sans); color: var(--tf-text-3); }
     .tf-ops-multiple .tf-hbars { gap: 10px; }
     .tf-ops-multiple .tf-hbar-head > :first-child { font-family: var(--tf-font-sans); color: var(--tf-text-2); }
-    /* A measured zero is a tick at the baseline, so it reads as none rather than missing. */
-    .tf-ops-multiple .tf-hbar-fill[style="width:0%"] { position: relative; }
-    .tf-ops-multiple .tf-hbar-fill[style="width:0%"]::after { content: ''; position: absolute; left: 0; top: -2px; width: 3px; height: 12px; border-radius: 2px; background: var(--tf-text-3); }
+    /* Every bar starts at a tick on its baseline, so a measured zero reads
+       as none rather than missing. */
+    .tf-ops-multiple .tf-hbar { position: relative; }
+    .tf-ops-multiple .tf-hbar::before { content: ''; position: absolute; left: 0; top: -2px; width: 2px; height: 12px; border-radius: 1px; background: var(--tf-text-3); }
+    /* A condition's name is read, not cut: it wraps on a narrow screen. */
+    .tf-ops-multiple .tf-hbar-head > :first-child { white-space: normal; overflow: visible; text-overflow: clip; }
     .tf-ops-scale { display: flex; justify-content: space-between; margin-top: -4px; font-size: 0.625rem; line-height: 0.875rem; color: var(--tf-text-3); font-variant-numeric: tabular-nums; }
     .tf-ops-verdict { display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px; border-radius: var(--tf-radius-md); background: var(--tf-accent-soft); border: 1px solid var(--tf-accent-line); }
     .tf-ops-verdict .tf-icon { width: 20px; height: 20px; color: var(--tf-accent-text); flex-shrink: 0; margin-top: 2px; }
@@ -1088,7 +1099,7 @@
       } else if (split) {
         clauses = [
           some(split.sandbox) && html`<strong>${num(count(split.sandbox))}</strong> from visitors' sandboxes`,
-          some(split.elsewhere) && html`${some(split.sandbox) ? 'the other ' : ''}<strong>${num(count(split.elsewhere))}</strong> from everything else: the service's own probes, the demo page and, where it runs, the synthetic Acme fleet`
+          some(split.elsewhere) && html`${some(split.sandbox) ? 'the other ' : ''}<strong>${num(count(split.elsewhere))}</strong> from everything else: the synthetic Acme fleet where it runs, the service's own probes, the demo page, or a repository connected to this stack`
         ];
         parts = [
           { label: 'Sandboxes', value: count(split.sandbox), color: T.CATEGORICAL[1] },
@@ -1098,7 +1109,7 @@
       const said = clauses.filter(Boolean);
       const sentence = said.length
         ? html`Where these calls come from, on this public demo: ${said.map((c, i) => html`${i ? '; ' : ''}${c}`)}.`
-        : html`On this public demo, calls come from visitors' sandboxes, the service's own probes, the demo page and, where it runs, the synthetic Acme fleet.`;
+        : html`On this public demo, calls come from the synthetic Acme fleet where it runs, visitors' sandboxes, the service's own probes, the demo page, or a repository connected to this stack.`;
       const drawn = parts.filter(p => typeof p.value === 'number' && p.value > 0);
       const bar = drawn.length ? html`<div class="tf-ops-share">
           <div class="tf-ops-share-bar" role="img" aria-label="${parts.map(p => p.label + ' ' + num(p.value)).join(', ')}">${drawn.map(p => html`<span style="flex-grow:${p.value};background:${p.color}" data-tf-tip="${p.label}" data-tf-tip-value="${num(p.value)}" data-tf-tip-color="${p.color}"></span>`)}</div>
@@ -1950,6 +1961,10 @@
     // the keyboard: J and K move, C marks correct, F false alarm, U takes the
     // last label back. Labels show at once and come back if the service
     // refuses them.
+    // A page of the review queue: the most GET /api/decisions returns. The
+    // ledger may hand back a cursor with a page that is not full, because it
+    // reads day by day; only a full page says more calls are there.
+    const REVIEW_PAGE = 200;
     const REVIEW_KEYS = [['J', 'next'], ['K', 'previous'], ['C', 'correct'], ['F', 'false alarm'], ['U', 'undo the last label']];
 
     // The one kind of project anyone may label on the public demo: a visitor's
@@ -1981,11 +1996,11 @@
       // still labelled; `saved` the batches Undo can take back. `engaged` is
       // set once the reader works the queue, and from then on a redraw hands
       // focus back to the row the keyboard is on.
-      const state = { items: [], cursor: null, loadingMore: false, who: null, order: [], at: null, notes: {}, labelled: {}, saved: [], engaged: false };
+      const state = { items: [], cursor: null, loadingMore: false, who: null, order: [], at: null, notes: {}, noteOpen: {}, labelled: {}, saved: [], engaged: false };
       ctx.render(loadingView('Review', sub, ['table']));
 
       function fetchPage(cursor) {
-        return T.api('/api/decisions' + query({ kind: 'observed', review: 'unreviewed', days, project, rule, limit: 200, cursor }));
+        return T.api('/api/decisions' + query({ kind: 'observed', review: 'unreviewed', days, project, rule, limit: REVIEW_PAGE, cursor }));
       }
 
       // Who is reading decides which groups can be labelled here, and on the
@@ -1996,6 +2011,7 @@
           state.who = who || null;
           state.items = (body && Array.isArray(body.items)) ? body.items.filter(r => !r.review) : [];
           state.cursor = body && body.next_cursor ? body.next_cursor : null;
+          state.full = !!(body && Array.isArray(body.items) && body.items.length >= REVIEW_PAGE);
           draw();
         }, err => {
           if (ctx.alive()) ctx.render(html`${pageTitle('Review', sub)}${failure(err, 'the review queue')}`);
@@ -2090,7 +2106,7 @@
         const width = total ? Math.round((done / total) * 1000) / 10 : 0;
         const scope = [project && html`<span class="font-mono">${T.projectName(project)}</span>`, rule && html`rule <span class="font-mono">${rule}</span>`].filter(Boolean);
         return html`<div class="tf-ops-progress mb-3">
-          <p class="text-xs text-gray-400" id="review-count"><strong class="text-white" data-metric="unreviewed">${num(waiting)}</strong> call${waiting === 1 ? '' : 's'} waiting in ${plural(list.length, 'group')}${scope.length ? html` · ${scope}` : ''}${state.cursor ? ', and more beyond these' : ''}${done ? html` · <span class="text-emerald-300">${plural(done, 'call')} labelled on this visit</span>` : ''}.</p>
+          <p class="text-xs text-gray-400" id="review-count"><strong class="text-white" data-metric="unreviewed">${num(waiting)}</strong> call${waiting === 1 ? '' : 's'} waiting in ${plural(list.length, 'group')}${scope.length ? html` · ${scope}` : ''}${state.cursor && state.full ? ', and more beyond these' : ''}${done ? html` · <span class="text-emerald-300">${plural(done, 'call')} labelled on this visit</span>` : ''}.</p>
           ${done ? html`<span class="tf-ops-meter" data-state="${waiting ? 'part' : 'done'}" role="img" aria-label="${num(done)} of ${num(total)} labelled on this visit"><span class="tf-ops-meter-track"><span class="tf-ops-meter-fill" style="width:${width}%"></span></span><span class="tf-ops-meter-words">${num(done)}/${num(total)}</span></span>` : ''}
         </div>`;
       }
@@ -2130,10 +2146,24 @@
             <a class="tf-btn tf-btn-quiet tf-btn-sm" href="${signinHref()}">Sign in to label</a>
           </div>`;
         }
+        // A group of one call is labelled by its row's own buttons; a bulk
+        // button beside them would say the same thing twice.
+        if (g.items.length < 2) return '';
         return html`<div class="flex flex-wrap gap-2">
           <button type="button" class="tf-btn tf-btn-good tf-btn-sm" data-action="label-group" data-group="${g.key}" data-label="correct">${T.icon('check', 14)}All ${g.items.length} correct</button>
           <button type="button" class="tf-btn tf-btn-danger tf-btn-sm" data-action="label-group" data-group="${g.key}" data-label="false_alarm">All false alarm</button>
         </div>`;
+      }
+
+      // A group's note, optional, sent with the labels set in it. It stays a
+      // small link until the reader asks for it or has written one, so a
+      // queue of small groups is not a column of empty fields.
+      function noteField(g) {
+        if (!state.noteOpen[g.key] && !state.notes[g.key]) {
+          return html`<button type="button" class="tf-ops-note-add" data-action="note-open" data-group="${g.key}"><span aria-hidden="true">+</span>Add a note to these labels</button>`;
+        }
+        return html`<label class="block"><span class="sr-only">Note for the labels you set in this group</span>
+          <input id="note-${g.slot}" type="text" maxlength="200" class="tf-input tf-input-sm w-full md:max-w-lg" data-change="note" data-group="${g.key}" value="${state.notes[g.key] || ''}" placeholder="Optional note, sent with the labels you set in this group" /></label>`;
       }
 
       function rowActions(row, g, here) {
@@ -2198,8 +2228,7 @@
               </div>
               ${groupActions(g)}
             </div>
-            ${g.open ? html`<label class="block"><span class="sr-only">Note for the labels you set in this group</span>
-              <input id="note-${g.slot}" type="text" maxlength="200" class="tf-input tf-input-sm w-full md:max-w-lg" data-change="note" data-group="${g.key}" value="${state.notes[g.key] || ''}" placeholder="Optional note, sent with the labels you set in this group" /></label>` : ''}
+            ${g.open ? noteField(g) : ''}
             <ul class="tf-ops-queue">${g.items.map(row => {
               index += 1;
               const on = index === here;
@@ -2213,7 +2242,7 @@
             </li>`;
             })}</ul>
           </section>`)}</div>
-          ${state.cursor ? html`<div class="mt-4"><button type="button" class="tf-btn" data-action="more" ${state.loadingMore ? raw('disabled') : ''}>${state.loadingMore ? 'Loading…' : 'Load more'}</button></div>` : ''}`);
+          ${state.cursor ? html`<div class="mt-4"><button type="button" class="tf-btn" data-action="more" ${state.loadingMore ? raw('disabled') : ''}>${state.loadingMore ? 'Loading…' : state.full ? 'Load more' : 'Look further back'}</button></div>` : ''}`);
         // A redraw replaces every row, and with them the focus. A reader typing
         // a note keeps the field; one working the queue gets the row back.
         if (typing) { refocus(document.getElementById(typing)); return; }
@@ -2451,6 +2480,14 @@
           state.engaged = true;
           return label(g.items.slice(), el.getAttribute('data-label'), noteFor(g));
         },
+        'note-open': el => {
+          const key = el.getAttribute('data-group');
+          const g = groups().find(x => x.key === key);
+          if (!g) return;
+          state.noteOpen[key] = true;
+          draw();
+          refocus(document.getElementById('note-' + g.slot));
+        },
         note: el => {
           const key = el.getAttribute('data-group');
           if (key) state.notes[key] = typeof el.value === 'string' ? el.value.slice(0, 200) : '';
@@ -2475,7 +2512,9 @@
             const more = (body && Array.isArray(body.items)) ? body.items.filter(r => !r.review && !known[rowKey(r)] && !state.labelled[rowKey(r)]) : [];
             state.items = state.items.concat(more);
             state.cursor = body && body.next_cursor ? body.next_cursor : null;
+            state.full = !!(body && Array.isArray(body.items) && body.items.length >= REVIEW_PAGE);
             draw();
+            if (!more.length) announce('No more calls wait for a label' + (state.cursor ? ' in what was read; older days can still be read' : '') + '.');
           }, err => {
             if (!ctx.alive()) return;
             state.loadingMore = false;

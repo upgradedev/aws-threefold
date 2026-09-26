@@ -219,7 +219,7 @@ def test_the_public_demo_says_what_its_numbers_are_made_of(tmp_path: Path) -> No
     assert "; 41 from other callers: the service's own probes, the demo page, or a repository connected to this stack." in sources
     split = re.sub(r"<[^>]+>", "", out["split"])
     assert 'data-sources="sandbox_split"' in out["split"]
-    assert "96 from visitors' sandboxes; the other 3,251 from everything else: the service's own probes, the demo page and, where it runs, the synthetic Acme fleet." in split
+    assert "96 from visitors' sandboxes; the other 3,251 from everything else: the synthetic Acme fleet where it runs, the service's own probes, the demo page, or a repository connected to this stack." in split
     for page in (sources, split):
         # Only the fleet is synthetic by contract: the page cannot know what
         # else reached a public stack, so it does not claim the rest is.
@@ -598,6 +598,26 @@ def test_the_keyboard_gets_its_row_back_after_an_undo_and_a_rollback(tmp_path: P
     assert out["afterUndo"] == "VERDICT-1", "U puts the call back and the keyboard, and the focus, on it"
     assert out["afterRollback"] == "VERDICT-2", "A refused label comes back with the focus on it"
     assert out["error"].endswith("The calls are back in the queue.") and ".." not in out["error"]
+
+
+def test_a_note_is_asked_for_and_more_is_claimed_only_from_a_full_page(tmp_path: Path) -> None:
+    out = ops(
+        QUEUE
+        + r"""
+  answer = contract({ '/api/decisions': { status: 200, body: { items: [flagged(1, 'Acme-Checkout'), flagged(2, 'Acme-Checkout')], next_cursor: 'day-scan' } } });
+  await visit('#/review');
+  out.before = view();
+  out.count = text(el('view').innerHTML.split('id="review-count"')[1].split('</p>')[0]);
+  await click('note-open', { 'data-group': JSON.stringify(['Acme-Checkout', 'python-domain-stays-pure']) });
+  out.after = view();
+  out.focus = document.activeElement && document.activeElement.id;
+""",
+        tmp_path,
+    )
+    assert "Add a note to these labels" in out["before"] and 'id="note-0"' not in out["before"], "A note is a link until asked for"
+    assert 'id="note-0"' in out["after"] and out["focus"] == "note-0", "Asked for, the field opens with the focus in it"
+    assert "more beyond these" not in out["count"], "A cursor with a page that is not full does not say more calls wait"
+    assert "Look further back" in out["before"] and "Load more" not in out["before"]
 
 
 def test_a_visitor_is_told_which_groups_they_may_label(tmp_path: Path) -> None:
