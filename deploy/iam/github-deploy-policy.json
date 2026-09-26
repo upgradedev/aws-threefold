@@ -235,7 +235,18 @@
       "Resource": "arn:aws:budgets::308857099262:budget/threefold-prod-*"
     },
     {
-      "Sid": "OnlyTheExecutionRoleThisStackCreates",
+      "Sid": "TheFleetScheduleThisStackMayCreate",
+      "Effect": "Allow",
+      "Action": [
+        "scheduler:CreateSchedule",
+        "scheduler:GetSchedule",
+        "scheduler:UpdateSchedule",
+        "scheduler:DeleteSchedule"
+      ],
+      "Resource": "arn:aws:scheduler:eu-west-1:308857099262:schedule/default/threefold-prod-*"
+    },
+    {
+      "Sid": "OnlyTheRolesThisStackCreates",
       "Effect": "Allow",
       "Action": [
         "iam:CreateRole",

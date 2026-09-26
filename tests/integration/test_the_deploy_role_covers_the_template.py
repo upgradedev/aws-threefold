@@ -31,6 +31,14 @@ trusted:
   "AWS SAM adds the arn:aws:iam::aws:policy/AWSXrayWriteOnlyAccess policy to
   the Lambda execution role that it creates", which also carries
   AWSLambdaBasicExecutionRole from the stack's first deploy.
+- The demo fleet's schedule (only where DemoFleet is true, but the role must
+  cover it wherever it could be): the handler permissions in the
+  AWS::Scheduler::Schedule resource provider schema, which are
+  scheduler:CreateSchedule, GetSchedule, UpdateSchedule and DeleteSchedule,
+  plus iam:PassRole on create and update for the schedule's target role. The
+  Service Authorization Reference for Amazon EventBridge Scheduler gives the
+  schedule's ARN as schedule/<group>/<name>, and a schedule takes no tags.
+  Its role is a plain AWS::IAM::Role, checked with the function's.
 
 The policy is matched as IAM matches it: an action pattern is case-insensitive
 with '*' and '?', a resource pattern is case-sensitive and its '*' crosses ':'
@@ -170,6 +178,7 @@ def _deployed_types() -> List[str]:
 
 FUNCTION_ARN = f"arn:aws:lambda:{REGION}:{ACCOUNT}:function:{STACK}-ThreefoldFunction-{SUFFIX}"
 ROLE_ARN = f"arn:aws:iam::{ACCOUNT}:role/{STACK}-ThreefoldFunctionRole-{SUFFIX}"
+SCHEDULE_ROLE_ARN = f"arn:aws:iam::{ACCOUNT}:role/{STACK}-DemoFleetScheduleRole-{SUFFIX}"
 TABLE_ARN = f"arn:aws:dynamodb:{REGION}:{ACCOUNT}:table/{STACK}-ThreefoldTable-{SUFFIX}"
 BUCKET_ARN = f"arn:aws:s3:::{STACK}-evidencebucket-{SUFFIX.lower()}"
 FUNCTION_LOG_GROUP = f"arn:aws:logs:{REGION}:{ACCOUNT}:log-group:/aws/lambda/{STACK}-ThreefoldFunction-{SUFFIX}"
@@ -186,6 +195,16 @@ def _log_group_arns() -> List[str]:
 def _topic_arn() -> str:
     (name,) = _names("TopicName")
     return f"arn:aws:sns:{REGION}:{ACCOUNT}:{name}"
+
+
+def _schedule_arn() -> str:
+    """The fleet's schedule, in the default group, under the name the template gives it."""
+    block = re.search(r"^  DemoFleetSchedule:\n(.*?)(?=^  \w|^\S)", TEMPLATE, re.S | re.M)
+    assert block, "the template has no DemoFleetSchedule"
+    name = re.search(r"^      Name: !Sub '([^']+)'$", block.group(1), re.M)
+    assert name, "the schedule's name is not derived from the stack"
+    assert not re.search(r"^      GroupName:", block.group(1), re.M), "a group of its own would need its own grant"
+    return f"arn:aws:scheduler:{REGION}:{ACCOUNT}:schedule/default/{name.group(1).replace('${AWS::StackName}', STACK)}"
 
 
 def _required() -> Dict[str, List[tuple]]:
@@ -217,8 +236,13 @@ def _required() -> Dict[str, List[tuple]]:
                 "iam:DeleteRolePolicy", "iam:ListRolePolicies", "iam:ListAttachedRolePolicies", "iam:TagRole",
                 "iam:UntagRole", "iam:DeleteRole",
             ],
-            [ROLE_ARN],
+            [ROLE_ARN, SCHEDULE_ROLE_ARN],
         ),
+        "AWS::Scheduler::Schedule": each(
+            ["scheduler:CreateSchedule", "scheduler:GetSchedule", "scheduler:UpdateSchedule", "scheduler:DeleteSchedule"],
+            [_schedule_arn()],
+        )
+        + each(["iam:PassRole"], [SCHEDULE_ROLE_ARN]),
         "AWS::ApiGatewayV2::Api": each(
             ["apigateway:POST", "apigateway:GET", "apigateway:PATCH", "apigateway:PUT", "apigateway:DELETE"], [API_ARN]
         ),
@@ -434,6 +458,11 @@ def test_every_named_resource_belongs_to_this_stack_or_its_deployment() -> None:
         ("cloudwatch:DeleteDashboards", f"arn:aws:cloudwatch::{ACCOUNT}:dashboard/threefold-dogfood-operations"),
         ("budgets:ModifyBudget", f"arn:aws:budgets::{ACCOUNT}:budget/acme-team-budget"),
         ("iam:PutRolePolicy", f"arn:aws:iam::{ACCOUNT}:role/threefold-github-deploy"),
+        # The other stack's fleet schedule, and a schedule in another group.
+        ("scheduler:DeleteSchedule", f"arn:aws:scheduler:{REGION}:{ACCOUNT}:schedule/default/threefold-dogfood-demo-fleet"),
+        ("scheduler:UpdateSchedule", f"arn:aws:scheduler:{REGION}:{ACCOUNT}:schedule/acme-jobs/{STACK}-demo-fleet"),
+        ("scheduler:CreateSchedule", f"arn:aws:scheduler:us-east-1:{ACCOUNT}:schedule/default/{STACK}-demo-fleet"),
+        ("iam:PassRole", f"arn:aws:iam::{ACCOUNT}:role/threefold-dogfood-DemoFleetScheduleRole-X"),
         ("s3:PutObject", f"arn:aws:s3:::{BUCKET}/elsewhere/template.yml"),
         ("lambda:DeleteFunction", f"arn:aws:lambda:us-east-1:{ACCOUNT}:function:{STACK}-ThreefoldFunction-X"),
     ],
