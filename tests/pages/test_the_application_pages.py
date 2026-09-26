@@ -1377,6 +1377,50 @@ def test_the_walkthrough_is_labelled_by_keyboard_alone(tmp_path: Path) -> None:
     assert out["afterLeaving"] == 3, "The keys stop listening when the reader leaves the walkthrough"
 
 
+def test_a_held_key_labels_one_call_and_a_failed_label_keeps_the_keyboard_on_the_stack(tmp_path: Path) -> None:
+    """Holding C labels the call on top once, not every call left in a burst.
+
+    And a label the service does not keep is taken back with the keyboard on
+    the call, not on the way on, which is disabled until every call has one.
+    """
+    out = dash(
+        r"""
+  const P = 'Acme-Sandbox-0a1b2c3d';
+  const obs = (i, target) => row(i, { project_name: P, target, observed_target: target });
+  let refuse = false;
+  const reviews = [];
+  answer = api({
+    'POST /api/sandbox': { status: 200, body: { project: P, calls_seeded: 12 } },
+    ['/api/projects/' + P]: { status: 200, body: { project: P, config: { stage: 'observe' }, readiness: { rules: [] } } },
+    '/api/decisions': { status: 200, body: { items: [obs(1, 'src/acme/domain/a.py'), obs(2, 'src/acme/domain/b.py'), obs(3, 'src/acme/domain/c.py')], next_cursor: null } },
+    ['POST /api/projects/' + P + '/reviews']: (u, i, body) => { reviews.push(body.items[0].verdict_id); return refuse ? { status: 500, body: { detail: 'down' } } : { status: 200, body: { updated: 1, skipped: [] } }; }
+  });
+  function press(key, extra) {
+    const event = Object.assign({ key, target: el('view'), preventDefault() {} }, extra || {});
+    (docListeners.keydown || []).forEach(fn => fn(event));
+  }
+  await visit('#/try');
+  await click('try-create'); await tick();
+  await click('try-show'); await tick();
+  await click('try-review'); await tick();
+  press('c'); await tick();
+  press('c', { repeat: true }); press('c', { repeat: true }); await tick();
+  out.afterHold = reviews.length;
+  out.receipt = text(view());
+  press('c'); await tick();
+  refuse = true;
+  press('f'); await tick();
+  out.focused = document.activeElement && document.activeElement.id;
+  out.error = text(view());
+""",
+        tmp_path,
+    )
+    assert out["afterHold"] == 1, "A held key labelled more than the call on top"
+    assert "Marked Correct : src/acme/domain/c.py" in out["receipt"], "The labelled call leaves a receipt on screen"
+    assert "That did not work" in out["error"]
+    assert out["focused"] == "try-correct", "A failed label drops the keyboard on a disabled button"
+
+
 def test_the_walkthrough_reads_readiness_only_after_every_label_is_saved(tmp_path: Path) -> None:
     """A reader who labels the last call and presses on at once sees that label counted.
 

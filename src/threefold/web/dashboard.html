@@ -2288,8 +2288,27 @@
 
 .tf-try-review { display: grid; gap: 20px; grid-template-columns: minmax(0, 1fr); align-items: start; }
 @media (min-width: 1180px) { .tf-try-review { grid-template-columns: minmax(0, 1fr) 17rem; gap: 28px; } }
+.tf-try-stack-col { min-width: 0; }
+.tf-try-receipt { display: flex; align-items: center; gap: 8px; min-width: 0; height: 1.5rem; margin: 0 0 10px; font-size: 0.8125rem; line-height: 1.25rem;
+  color: var(--tf-text-3); white-space: nowrap; }
+.tf-try-receipt > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tf-try-receipt b { font-weight: 600; color: var(--tf-text); }
+.tf-try-receipt .tf-icon { flex-shrink: 0; }
+.tf-try-receipt[data-label="correct"] .tf-icon { color: var(--tf-approved-text); }
+.tf-try-receipt[data-label="false_alarm"] .tf-icon { color: var(--tf-refused-text); }
 .tf-try-stack { position: relative; min-width: 0; }
 .tf-try-stack { padding-bottom: 20px; }
+.tf-try-gone { display: none; position: absolute; z-index: 3; inset: 0; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 16px;
+  box-sizing: border-box; pointer-events: none; border-radius: var(--tf-radius-lg); background: var(--tf-surface-2); border: 1px solid var(--tf-approved-line); box-shadow: var(--tf-shadow-3); }
+.tf-try-gone[data-label="false_alarm"] { border-color: var(--tf-refused-line); }
+.tf-try-gone-stamp { display: inline-flex; align-items: center; gap: 8px; padding: 8px 16px; border-radius: 12px; font: 650 1.125rem/1.5rem var(--tf-font-sans);
+  color: var(--tf-approved-text); background: var(--tf-approved-soft); border: 1px solid var(--tf-approved-line); }
+.tf-try-gone[data-label="false_alarm"] .tf-try-gone-stamp { color: var(--tf-refused-text); background: var(--tf-refused-soft); border-color: var(--tf-refused-line); }
+.tf-try-gone-file { max-width: 100%; font: 500 0.8125rem/1.25rem var(--tf-font-mono); color: var(--tf-text-2); overflow-wrap: anywhere; text-align: center; }
+.tf-try-thumb { display: flex; flex-direction: column; gap: 10px; width: 100%; min-width: 0; }
+.tf-try-thumb-top { display: flex; align-items: center; gap: 12px; }
+.tf-try-thumb-top .tf-try-progress-text { flex-shrink: 0; }
+.tf-try-thumb-top .tf-try-progress { flex: 1; min-width: 0; }
 .tf-try-stack::before, .tf-try-stack::after { content: ''; position: absolute; border-radius: var(--tf-radius-lg); background: var(--tf-surface-2); border: 1px solid var(--tf-hairline-strong); }
 .tf-try-stack::before { left: 32px; right: 32px; bottom: 0; top: 20px; opacity: 0.45; }
 .tf-try-stack::after { left: 16px; right: 16px; bottom: 10px; top: 10px; opacity: 0.8; }
@@ -2445,6 +2464,7 @@
 @keyframes tf-try-arrive { from { opacity: 0; transform: translateY(-10px) scale(0.96); } to { opacity: 1; transform: none; } }
 @keyframes tf-try-dot { 0% { box-shadow: 0 0 0 0 rgba(139, 92, 246, 0.55); } 100% { box-shadow: 0 0 0 10px rgba(139, 92, 246, 0); } }
 @keyframes tf-try-in-next { from { opacity: 0; transform: translateX(28px) rotate(1deg); } to { opacity: 1; transform: none; } }
+@keyframes tf-try-gone { 0%, 38% { opacity: 1; transform: none; } 100% { opacity: 0; transform: translateX(-56px) rotate(-2deg); } }
 @keyframes tf-try-in-prev { from { opacity: 0; transform: translateX(-28px) rotate(-1deg); } to { opacity: 1; transform: none; } }
 @keyframes tf-try-was { 0%, 45% { opacity: 1; transform: none; } 100% { opacity: 0; transform: translateY(-8px) scale(0.9); } }
 @keyframes tf-try-now { from { opacity: 0; transform: translateY(8px) scale(0.85); } to { opacity: 1; transform: none; } }
@@ -2465,6 +2485,7 @@
   .tf-try-play .tf-try-rise { animation: tf-try-rise 420ms var(--tf-ease-out) both; animation-delay: calc(var(--tf-try-i, 0) * 80ms + 120ms); }
   .tf-try-card[data-dir="next"] { animation: tf-try-in-next 320ms var(--tf-ease-out) both; }
   .tf-try-card[data-dir="prev"] { animation: tf-try-in-prev 320ms var(--tf-ease-out) both; }
+  .tf-try-gone { display: flex; animation: tf-try-gone 860ms var(--tf-ease-out) both; }
   .tf-try-flipping > .tf-try-was { display: inline-flex; animation: tf-try-was 900ms var(--tf-ease-out) both; animation-delay: calc(var(--tf-try-i, 0) * 160ms + 200ms); }
   .tf-try-flipping > .tf-try-now { animation: tf-try-now 520ms var(--tf-ease-spring) both; animation-delay: calc(var(--tf-try-i, 0) * 160ms + 620ms); }
   .tf-try-play .tf-try-bar-seg { animation: tf-try-grow 560ms var(--tf-ease-out) both; animation-delay: calc(var(--tf-try-i, 0) * 160ms + 300ms); }
@@ -2619,7 +2640,7 @@
       const state = {
         step: 1, project: '', stage: null, seeded: null, calls: null, callsError: null, readiness: null, before: null, observed: [], labels: {}, cursor: 0,
         selected: null, promoted: null, observing: null, result: null, replay: null, planned: false, error: null, busy: false, who: null, play: {}, focusId: null,
-        saves: [], rulesDef: null
+        saves: [], rulesDef: null, lastLabel: null
       };
       try {
         const saved = JSON.parse(localStorage.getItem(TRY_STORAGE) || 'null');
@@ -2637,6 +2658,21 @@
         return c;
       }
       function readinessRules() { return (state.readiness && Array.isArray(state.readiness.rules)) ? state.readiness.rules : []; }
+
+      // Below 640px the labels move to the sticky bar (see verdicts()), and
+      // a change of width redraws step 3 so they move with it.
+      let thumbQuery = null;
+      try { thumbQuery = typeof window.matchMedia === 'function' ? window.matchMedia('(max-width: 639px)') : null; } catch (err) { thumbQuery = null; }
+      function thumb() { return !!(thumbQuery && thumbQuery.matches); }
+      function onThumb() { if (ctx.alive() && state.step === 3) draw(); }
+      if (thumbQuery) {
+        if (typeof thumbQuery.addEventListener === 'function') thumbQuery.addEventListener('change', onThumb);
+        else if (typeof thumbQuery.addListener === 'function') thumbQuery.addListener(onThumb);
+        ctx.onLeave(() => {
+          if (typeof thumbQuery.removeEventListener === 'function') thumbQuery.removeEventListener('change', onThumb);
+          else if (typeof thumbQuery.removeListener === 'function') thumbQuery.removeListener(onThumb);
+        });
+      }
 
       // The project's stage as the service keeps it. A sandbox resumed from
       // an earlier visit may have been promoted since, and then the rules it
@@ -2908,7 +2944,33 @@
         </div>`;
       }
 
-      function reviewBoard(play) {
+      // The two labels for the call on top. On a desk they sit on the card;
+      // on a phone they sit in the sticky bar at the foot of the screen, so
+      // the thumb finds them in the same place from call to call however tall
+      // the card above is.
+      function verdicts(row) {
+        const l = state.labels[row.verdict_id];
+        return html`<div class="tf-try-verdicts" role="group" aria-label="Your label for this call">
+          <button type="button" id="try-correct" class="tf-btn tf-btn-good tf-try-verdict" data-action="try-label" data-verdict="${row.verdict_id}" data-label="correct" aria-pressed="${l === 'correct' ? 'true' : 'false'}" aria-keyshortcuts="C">${T.icon('check', 20)}Correct${T.kbd('C')}</button>
+          <button type="button" id="try-false" class="tf-btn tf-btn-danger tf-try-verdict" data-action="try-label" data-verdict="${row.verdict_id}" data-label="false_alarm" aria-pressed="${l === 'false_alarm' ? 'true' : 'false'}" aria-keyshortcuts="F">${T.icon('x', 20)}False alarm${T.kbd('F')}</button>
+        </div>`;
+      }
+
+      function progressSegs(rows, i) {
+        return html`<div class="tf-try-progress" aria-hidden="true">${rows.map((r, j) => html`<span class="tf-try-seg" data-label="${state.labels[r.verdict_id] || ''}" data-current="${j === i ? 'true' : 'false'}"></span>`)}</div>`;
+      }
+
+      // The last label given, kept on screen above the stack, so the card
+      // that moved on leaves a receipt where the eye already is.
+      function receipt() {
+        const last = state.lastLabel;
+        if (!last || !REVIEWS[last.label]) {
+          return html`<p class="tf-try-receipt">${T.icon('info', 14)}<span>Label the call on top, and the next one comes up.</span></p>`;
+        }
+        return html`<p class="tf-try-receipt" data-label="${last.label}">${T.icon(last.label === 'correct' ? 'check' : 'x', 14)}<span>Marked <b>${REVIEWS[last.label].label}</b>: <span class="tf-mono">${last.target}</span></span></p>`;
+      }
+
+      function reviewBoard(play, inBar) {
         const rows = state.observed;
         const total = rows.length;
         const i = clampCursor();
@@ -2916,32 +2978,34 @@
         const l = state.labels[row.verdict_id];
         const why = tryWhy(row, state.rulesDef);
         const rest = rows.filter((r, j) => j !== i && !state.labels[r.verdict_id]).length;
+        const gone = play.gone && REVIEWS[play.gone.label] ? play.gone : null;
         return html`<div class="tf-try-review">
-          <div class="tf-try-stack" data-behind="${Math.min(2, rest)}">
-            <article class="tf-try-card" data-dir="${play.card || ''}" data-label="${l || ''}" aria-labelledby="try-card-file" aria-describedby="try-card-why">
-              <header class="tf-try-card-top">
-                <span class="tf-try-card-count">Call ${num(i + 1)} of ${num(total)}</span>
-                <span class="tf-try-card-agent">${tryAvatar(row.agent, true)}${agentLabel(row.agent)} · <span class="tf-mono">${row.tool_name}</span></span>
-              </header>
-              <p id="try-card-file" class="tf-try-card-file">${tryTarget(row)}</p>
-              <p class="tf-try-card-rule">${T.statusChip('observed')}<span class="tf-break">${ruleKeyOf(row)}</span></p>
-              <p id="try-card-why" class="tf-try-card-why">${tryWhyHtml(why)}</p>
-              <div class="tf-try-verdicts" role="group" aria-label="Your label for this call">
-                <button type="button" id="try-correct" class="tf-btn tf-btn-good tf-try-verdict" data-action="try-label" data-verdict="${row.verdict_id}" data-label="correct" aria-pressed="${l === 'correct' ? 'true' : 'false'}" aria-keyshortcuts="C">${T.icon('check', 20)}Correct${T.kbd('C')}</button>
-                <button type="button" id="try-false" class="tf-btn tf-btn-danger tf-try-verdict" data-action="try-label" data-verdict="${row.verdict_id}" data-label="false_alarm" aria-pressed="${l === 'false_alarm' ? 'true' : 'false'}" aria-keyshortcuts="F">${T.icon('x', 20)}False alarm${T.kbd('F')}</button>
-              </div>
-              <nav class="tf-try-card-nav" aria-label="Move between calls">
-                <button type="button" id="try-prev" class="tf-btn tf-btn-quiet tf-btn-sm" data-action="try-move" data-move="-1" aria-keyshortcuts="ArrowLeft"${i === 0 ? raw(' disabled') : ''}>← Previous</button>
-                ${l ? reviewChip(l) : html`<span class="tf-try-muted">No label yet</span>`}
-                <button type="button" id="try-next" class="tf-btn tf-btn-quiet tf-btn-sm" data-action="try-move" data-move="1" aria-keyshortcuts="ArrowRight"${i === total - 1 ? raw(' disabled') : ''}>Next →</button>
-              </nav>
-            </article>
+          <div class="tf-try-stack-col">
+            ${receipt()}
+            <div class="tf-try-stack" data-behind="${Math.min(2, rest)}">
+              <article class="tf-try-card" data-dir="${play.card || ''}" data-label="${l || ''}" aria-labelledby="try-card-file" aria-describedby="try-card-why">
+                <header class="tf-try-card-top">
+                  <span class="tf-try-card-count">Call ${num(i + 1)} of ${num(total)}</span>
+                  <span class="tf-try-card-agent">${tryAvatar(row.agent, true)}${agentLabel(row.agent)} · <span class="tf-mono">${row.tool_name}</span></span>
+                </header>
+                <p id="try-card-file" class="tf-try-card-file">${tryTarget(row)}</p>
+                <p class="tf-try-card-rule">${T.statusChip('observed')}<span class="tf-break">${ruleKeyOf(row)}</span></p>
+                <p id="try-card-why" class="tf-try-card-why">${tryWhyHtml(why)}</p>
+                ${inBar ? '' : verdicts(row)}
+                <nav class="tf-try-card-nav" aria-label="Move between calls">
+                  <button type="button" id="try-prev" class="tf-btn tf-btn-quiet tf-btn-sm" data-action="try-move" data-move="-1" aria-keyshortcuts="ArrowLeft"${i === 0 ? raw(' disabled') : ''}>← Previous</button>
+                  ${l ? reviewChip(l) : html`<span class="tf-try-muted">No label yet</span>`}
+                  <button type="button" id="try-next" class="tf-btn tf-btn-quiet tf-btn-sm" data-action="try-move" data-move="1" aria-keyshortcuts="ArrowRight"${i === total - 1 ? raw(' disabled') : ''}>Next →</button>
+                </nav>
+              </article>
+              ${gone ? html`<div class="tf-try-gone" data-label="${gone.label}" aria-hidden="true"><span class="tf-try-gone-stamp">${T.icon(gone.label === 'correct' ? 'check' : 'x', 18)}${REVIEWS[gone.label].label}</span><span class="tf-try-gone-file">${gone.target}</span></div>` : ''}
+            </div>
           </div>
           <div class="tf-try-side-panel">
-            <div>
+            ${inBar ? '' : html`<div>
               <p class="tf-try-progress-text">${num(labelledCount())} of ${num(total)} labelled</p>
-              <div class="tf-try-progress" aria-hidden="true">${rows.map((r, j) => html`<span class="tf-try-seg" data-label="${state.labels[r.verdict_id] || ''}" data-current="${j === i ? 'true' : 'false'}"></span>`)}</div>
-            </div>
+              ${progressSegs(rows, i)}
+            </div>`}
             <ol class="tf-try-queue" aria-label="The calls to label">
               ${rows.map((r, j) => {
                 const mark = state.labels[r.verdict_id] || '';
@@ -2959,16 +3023,22 @@
       function screenLabel(play) {
         const total = state.observed.length;
         const done = labelledCount() === total;
+        const inBar = !!(total && !done && thumb());
         return {
           kicker: 'Step 3 of 5',
           title: total && done ? 'Every call has a label' : 'Was the rule right?',
           sentence: total && done
             ? 'You marked ' + plural(labelCounts().correct, 'call') + ' correct and ' + plural(labelCounts().false_alarm, 'call') + ' a false alarm. Each rule now reads its state from those labels.'
             : 'Mark each call Correct if the rule was right, or False alarm if the call should run. One of them is a false alarm: spot it.',
-          visual: total ? reviewBoard(play) : T.emptyState({ icon: 'check', text: 'No call in the sandbox was flagged by an observing rule, so there is nothing to label. Promote anyway to see a rule refuse.' }),
+          visual: total ? reviewBoard(play, inBar) : T.emptyState({ icon: 'check', text: 'No call in the sandbox was flagged by an observing rule, so there is nothing to label. Promote anyway to see a rule refuse.' }),
           actions: done
             ? primary('try-readiness', 'See what that did', 'Reading readiness…')
-            : html`<span class="tf-try-wait">${primary('try-readiness', 'See what that did', null, true)}</span><p class="tf-try-hint">${num(labelledCount())} of ${num(total)} labelled. Label every call to continue.<span class="tf-try-keys"> Keys: ${T.kbd('C')} correct ${T.kbd('F')} false alarm ${T.kbd('←')}${T.kbd('→')} move</span></p>`
+            : inBar
+              ? html`<div class="tf-try-thumb">
+                  <div class="tf-try-thumb-top"><p class="tf-try-progress-text">${num(labelledCount())} of ${num(total)} labelled</p>${progressSegs(state.observed, clampCursor())}</div>
+                  ${verdicts(state.observed[clampCursor()])}
+                </div>`
+              : html`<span class="tf-try-wait">${primary('try-readiness', 'See what that did', null, true)}</span><p class="tf-try-hint">Label every call to continue.<span class="tf-try-keys"> Keys: ${T.kbd('C')} correct ${T.kbd('F')} false alarm ${T.kbd('←')}${T.kbd('→')} move</span></p>`
         };
       }
 
@@ -3330,7 +3400,9 @@
         state.error = T.isAuthError(err)
           ? (doing === 'create' ? 'This stack does not let visitors make a sandbox (HTTP ' + err.status + '). The walkthrough runs on the public demo.' : 'The stack refused (HTTP ' + err.status + '): a sandbox is open to anyone only on the public demo.')
           : 'That did not work: ' + String((err && err.message) || 'no answer').replace(/[.\s]+$/, '') + '. Try again.';
-        state.focusId = 'try-primary';
+        // On step 3 with calls still to label the way on is disabled, so the
+        // keyboard goes back to the call it was on.
+        state.focusId = state.step === 3 && labelledCount() < state.observed.length ? 'try-correct' : 'try-primary';
         draw();
       }
 
@@ -3480,14 +3552,16 @@
         const row = state.observed[index];
         if (!row || (value !== 'correct' && value !== 'false_alarm')) return;
         const before = state.labels[verdict];
+        const beforeLast = state.lastLabel;
         state.labels[verdict] = value;
+        state.lastLabel = { label: value, target: tryTarget(row) };
         state.error = null;
         const next = nextUnlabelled(index);
         if (next === -1) {
           state.cursor = index;
           state.focusId = 'try-primary';
         } else {
-          state.play = { card: next > index ? 'next' : 'prev' };
+          state.play = { card: next > index ? 'next' : 'prev', gone: { label: value, target: tryTarget(row) } };
           state.cursor = next;
           state.focusId = 'try-correct';
         }
@@ -3502,6 +3576,7 @@
           const skipped = answer && Array.isArray(answer.skipped) ? answer.skipped : [];
           if (skipped.length) {
             if (before) state.labels[verdict] = before; else delete state.labels[verdict];
+            state.lastLabel = beforeLast;
             state.error = 'That label was not saved: ' + (skipped[0].reason || 'skipped') + '.';
             state.cursor = index;
             draw();
@@ -3509,6 +3584,7 @@
         }, err => {
           if (!ctx.alive()) return;
           if (before) state.labels[verdict] = before; else delete state.labels[verdict];
+          state.lastLabel = beforeLast;
           state.cursor = index;
           fail(err, 'label');
         });
@@ -3542,6 +3618,8 @@
         if (typeof target.closest === 'function' && target.closest('#tf-nav, [role="dialog"]')) return;
         const key = event.key;
         const row = state.observed[clampCursor()];
+        // A held C or F labels one call, never every call left in a burst.
+        if (event.repeat && /^[cCfF]$/.test(key)) { if (typeof event.preventDefault === 'function') event.preventDefault(); return; }
         if (key === 'c' || key === 'C') label(row.verdict_id, 'correct');
         else if (key === 'f' || key === 'F') label(row.verdict_id, 'false_alarm');
         else if (key === 'ArrowRight') move(1);
@@ -3715,7 +3793,7 @@
           try { localStorage.removeItem(TRY_STORAGE); } catch (err) { /* nothing stored */ }
           Object.assign(state, {
             step: 1, project: '', stage: null, seeded: null, calls: null, callsError: null, readiness: null, before: null, observed: [], labels: {}, cursor: 0,
-            selected: null, promoted: null, observing: null, result: null, replay: null, planned: false, error: null, busy: false, resume: null, saves: [], rulesDef: null
+            selected: null, promoted: null, observing: null, result: null, replay: null, planned: false, error: null, busy: false, resume: null, saves: [], rulesDef: null, lastLabel: null
           });
           enter(1);
           draw();
