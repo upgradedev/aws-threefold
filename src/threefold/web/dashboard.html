@@ -2499,10 +2499,15 @@
       return words.slice(0, -1).join(', ') + ' and ' + words[words.length - 1];
     }
 
+    // The agents that sent a list of calls, named, in the order of the lanes.
+    function tryAgentsOf(rows) {
+      return Array.from(new Set((rows || []).map(r => r.agent))).sort((a, b) => tryAgentRank(a) - tryAgentRank(b)).map(agentLabel);
+    }
+
     function viewTry(ctx) {
       ensureTryStyle();
       const state = {
-        step: 1, project: '', seeded: null, calls: null, callsError: null, readiness: null, before: null, observed: [], labels: {}, cursor: 0,
+        step: 1, project: '', stage: null, seeded: null, calls: null, callsError: null, readiness: null, before: null, observed: [], labels: {}, cursor: 0,
         selected: null, promoted: null, observing: null, result: null, replay: null, error: null, busy: false, who: null, play: {}, focusId: null,
         saves: []
       };
@@ -2522,6 +2527,28 @@
         return c;
       }
       function readinessRules() { return (state.readiness && Array.isArray(state.readiness.rules)) ? state.readiness.rules : []; }
+
+      // The project's stage as the service keeps it. A sandbox resumed from
+      // an earlier visit may have been promoted since, and then the rules it
+      // enforces are the ones its last promotion named.
+      function applyConfig(detail) {
+        const config = detail && detail.config && typeof detail.config === 'object' ? detail.config : null;
+        if (!config || (config.stage !== 'observe' && config.stage !== 'enforce')) return;
+        state.stage = config.stage;
+        if (state.stage === 'observe') {
+          if (state.promoted && state.promoted.earlier) { state.promoted = null; state.observing = null; state.replay = null; }
+          return;
+        }
+        if (state.promoted && !state.promoted.earlier) return;
+        const observe = Array.isArray(config.observe_rules) ? config.observe_rules.map(String) : [];
+        const history = Array.isArray(config.history) ? config.history : [];
+        const last = history.filter(h => h && h.action === 'promote' && Array.isArray(h.enforce)).pop();
+        const enforce = last
+          ? last.enforce.map(String).filter(key => observe.indexOf(key) === -1)
+          : readinessRules().map(r => r.rule_key).filter(key => observe.indexOf(key) === -1);
+        state.promoted = { stage: 'enforce', enforce, observe, earlier: true };
+        state.observing = observe.slice();
+      }
       function selected() {
         if (!(state.selected instanceof Set)) state.selected = new Set(readinessRules().filter(r => r.state === 'ready' || r.state === 'quiet').map(r => r.rule_key));
         return state.selected;
@@ -2598,10 +2625,10 @@
       }
 
       function projectBar(extra, flip) {
-        const stageNow = state.promoted ? state.promoted.stage : 'observe';
+        const stageNow = state.promoted ? state.promoted.stage : state.stage;
         return html`<div class="tf-try-project">
           <span class="tf-try-project-name">${T.icon('folder', 16)}<span class="tf-break">${state.project}</span></span>
-          ${stageChipFlip('observe', stageNow, flip)}
+          ${stageNow ? stageChipFlip('observe', stageNow, flip) : ''}
           ${extra ? html`<span class="tf-try-project-end">${extra}</span>` : ''}
         </div>`;
       }
@@ -2667,10 +2694,15 @@
         const calls = Array.isArray(state.calls) ? state.calls : null;
         const t = tryTally(calls);
         const shortRead = calls && typeof state.seeded === 'number' && calls.length < state.seeded;
+        const agents = calls && !shortRead ? tryAgentsOf(calls) : [];
+        const refusedWords = !calls ? '' : ', and ' + (t.refused ? plural(t.refused, 'call') + (t.refused === 1 ? ' was' : ' were') + ' refused' : 'nothing was refused');
+        const stageWords = state.stage === 'enforce'
+          ? ': the project is in Enforce' + (state.promoted && state.promoted.earlier ? ', promoted earlier' : '')
+          : state.stage === 'observe' ? ': the project is in Observe' : '';
         return {
           kicker: 'Step 1 of 5 · done',
           title: state.seeded !== null ? plural(state.seeded, 'call') + ' arrived' : calls && calls.length ? plural(calls.length, 'call') + ' in your sandbox' : 'Your sandbox is ready',
-          sentence: html`<span class="tf-mono tf-try-strong">${state.project}</span> ${state.seeded !== null ? html`received ${plural(state.seeded, 'call')}` : 'is ready'}. Every call was judged and recorded, and ${calls && t.refused ? plural(t.refused, 'call') + (t.refused === 1 ? ' was' : ' were') + ' refused' : 'nothing was refused'}: the project is in Observe.`,
+          sentence: html`${agents.length ? html`${tryList(agents)} sent them to <span class="tf-mono tf-try-strong">${state.project}</span>.` : html`<span class="tf-mono tf-try-strong">${state.project}</span> is ready.`} Every call was judged and recorded${refusedWords}${stageWords}.`,
           visual: html`${projectBar(calls ? html`${stat('approved', t.approved, 'approved')}${stat('observed', t.observed, 'would refuse')}${stat('refused', t.refused, 'refused')}` : '')}
             ${lanes(calls, play)}
             ${legend()}
@@ -2860,11 +2892,13 @@
           .map(s => [s, rules.filter(r => r.state === s).length]).filter(([, n]) => n > 0);
         const p = state.promoted;
         const observing = p ? p.observe.filter(key => rules.some(r => r.rule_key === key)) : [];
+        const enforcing = p ? plural(p.enforce.length, 'rule') + (p.enforce.length === 1 ? ' refuses the calls that break it' : ' refuse the calls that break them') : '';
+        const keeps = observing.length ? '; ' + tryList(observing) + (observing.length === 1 ? ' keeps' : ' keep') + ' observing, recording and refusing nothing.' : '.';
         return {
-          kicker: p ? 'Step 4 of 5 · promoted' : 'Step 4 of 5',
-          title: p ? 'Now in Enforce' : 'Promote to Enforce',
+          kicker: p ? (p.earlier ? 'Step 4 of 5 · promoted earlier' : 'Step 4 of 5 · promoted') : 'Step 4 of 5',
+          title: p ? (p.earlier ? 'Already in Enforce' : 'Now in Enforce') : 'Promote to Enforce',
           sentence: p
-            ? plural(p.enforce.length, 'rule') + ' now refuse' + (p.enforce.length === 1 ? 's' : '') + ' what breaks them' + (observing.length ? '; ' + tryList(observing) + (observing.length === 1 ? ' keeps' : ' keep') + ' observing, recording and refusing nothing.' : '.')
+            ? (p.earlier ? 'This sandbox was promoted before you came back: ' + enforcing + keeps : enforcing.replace(/ refuse/, ' now refuse') + keeps)
             : 'Each rule now reads its state from your labels. Ready and Quiet rules are checked. ' + (noisy
               ? (noisy === 1 ? 'The rule with a false alarm is Noisy and stays' : 'The rules with false alarms are Noisy and stay') + ' in Observe, where it records and refuses nothing.'
               : 'No rule is Noisy: you marked every flag correct. An unchecked rule keeps observing.'),
@@ -2995,12 +3029,16 @@
         const calls = Array.isArray(state.calls) ? state.calls : null;
         const seeded = typeof state.seeded === 'number' ? state.seeded : (calls ? calls.length : null);
         const flagged = state.observed.length;
-        const agents = calls ? Array.from(new Set(calls.map(r => r.agent))).sort((a, b) => tryAgentRank(a) - tryAgentRank(b)).map(agentLabel) : [];
+        const agents = calls ? tryAgentsOf(calls) : [];
         const refusedFirst = calls ? tryTally(calls).refused : 0;
+        // A fresh sandbox's seeded calls were all judged in Observe. A resumed
+        // one's list may hold calls judged after a promotion, and says so.
+        const inEnforce = typeof state.seeded === 'number' || !calls ? 0 : calls.filter(r => r.stage === 'enforce').length;
+        const where = inEnforce ? num(seeded - inEnforce) + ' in Observe and ' + num(inEnforce) + ' in Enforce. ' : '';
         facts.push(seeded !== null
           ? {
-            figure: num(seeded), label: seeded === 1 ? 'call judged in Observe' : 'calls judged in Observe',
-            text: (agents.length ? tryList(agents) + ' sent them. ' : '') + (flagged ? plural(flagged, 'call') + ' would have been refused, and ' + (refusedFirst ? num(refusedFirst) + (refusedFirst === 1 ? ' was.' : ' were.') : 'none was.') : 'No rule flagged one' + (refusedFirst ? '.' : ', and none was refused.')),
+            figure: num(seeded), label: inEnforce ? (seeded === 1 ? 'call judged' : 'calls judged') : (seeded === 1 ? 'call judged in Observe' : 'calls judged in Observe'),
+            text: where + (agents.length ? tryList(agents) + ' sent them. ' : '') + (flagged ? plural(flagged, 'call') + ' would have been refused, and ' + (refusedFirst ? num(refusedFirst) + (refusedFirst === 1 ? ' was.' : ' were.') : 'none was.') : 'No rule flagged one' + (refusedFirst ? '.' : ', and none was refused.')),
             source: 'POST /api/sandbox · GET /api/decisions'
           }
           : { figure: num(flagged), label: 'calls flagged in Observe', text: 'Each one ran, and was recorded as a call its rule would have refused.', source: 'GET /api/decisions' });
@@ -3153,6 +3191,7 @@
           T.api('/api/decisions' + query({ project: p, kind: 'observed', days: 1, limit: 50 }))
         ]).then(([detail, list]) => {
           state.readiness = (detail && detail.readiness) || { rules: [] };
+          applyConfig(detail);
           // Each rule's state before the labels, so step 4 can show it change.
           state.before = {};
           readinessRules().forEach(r => { state.before[r.rule_key] = r.state; });
@@ -3292,6 +3331,8 @@
             const name = body && body.project ? String(body.project) : '';
             if (!/^Acme-Sandbox-[0-9a-f]{8}$/.test(name)) { fail({ message: 'the stack returned no sandbox name', kind: 'http' }, 'create'); return; }
             state.project = name;
+            // The contract makes every sandbox in Observe.
+            state.stage = 'observe';
             state.seeded = body && typeof body.calls_seeded === 'number' ? body.calls_seeded : null;
             remember();
             return loadCalls().then(() => {
@@ -3303,8 +3344,13 @@
           }, err => { if (ctx.alive()) fail(err, 'create'); });
         },
         'try-resume': () => {
-          state.project = state.resume; state.seeded = null; state.busy = true; state.error = null; draw();
-          return loadCalls().then(() => {
+          state.project = state.resume; state.seeded = null; state.stage = null; state.busy = true; state.error = null; draw();
+          // Its stage too: it may have been promoted since it was made.
+          const detail = T.api('/api/projects/' + encodeURIComponent(state.project) + query({ days: 1 })).then(d => {
+            state.readiness = (d && d.readiness) || state.readiness;
+            applyConfig(d);
+          }, () => { /* the stage is then not claimed */ });
+          return Promise.all([loadCalls(), detail]).then(() => {
             if (!ctx.alive()) return;
             state.busy = false;
             enter(1, { arrive: true });
@@ -3344,6 +3390,7 @@
             if (!ctx.alive()) return;
             state.busy = false;
             state.readiness = (detail && detail.readiness) || { rules: [] };
+            applyConfig(detail);
             state.selected = new Set(readinessRules().filter(r => r.state === 'ready' || r.state === 'quiet').map(r => r.rule_key));
             enter(4, { flip: true });
             draw();
@@ -3379,8 +3426,16 @@
         },
         'try-next': () => {
           state.error = null;
-          enter(5);
-          draw();
+          // A sandbox promoted on an earlier visit has no call planned yet.
+          if (state.replay || !state.promoted) { enter(5); draw(); return; }
+          state.busy = true; draw();
+          return planReplay(state.promoted.enforce).then(plan => {
+            if (!ctx.alive()) return;
+            state.busy = false;
+            state.replay = plan;
+            enter(5);
+            draw();
+          }, err => { if (ctx.alive()) fail(err, 'plan'); });
         },
         'try-send': () => {
           const plan = state.replay;
@@ -3421,7 +3476,7 @@
         'try-restart': () => {
           try { localStorage.removeItem(TRY_STORAGE); } catch (err) { /* nothing stored */ }
           Object.assign(state, {
-            step: 1, project: '', seeded: null, calls: null, callsError: null, readiness: null, before: null, observed: [], labels: {}, cursor: 0,
+            step: 1, project: '', stage: null, seeded: null, calls: null, callsError: null, readiness: null, before: null, observed: [], labels: {}, cursor: 0,
             selected: null, promoted: null, observing: null, result: null, replay: null, error: null, busy: false, resume: null, saves: []
           });
           enter(1);

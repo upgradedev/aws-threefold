@@ -1265,7 +1265,8 @@ def test_the_walkthrough_runs_the_rollout_from_sandbox_to_a_real_refusal(tmp_pat
     )
     assert "Make my sandbox" in out["step1"]
     assert out["sent"]["sandbox"] == {}
-    assert "Acme-Sandbox-0a1b2c3d received 12 calls" in out["step2"]
+    assert "12 calls arrived" in out["step2"] and "Acme-Sandbox-0a1b2c3d is ready" in out["step2"]
+    assert "the project is in Observe" in out["step2"]
     # The calls as they arrived, in a lane per agent, and how many of them the list held.
     for agent in ("Claude Code", "Codex", "Antigravity"):
         assert agent in out["step2"], f"The timeline has no lane for {agent}"
@@ -1417,6 +1418,67 @@ def test_the_walkthrough_reads_readiness_only_after_every_label_is_saved(tmp_pat
     assert out["readsWhileSaving"] == out["readsBefore"], "Readiness was read while a label was still being saved"
     assert out["busyWhileSaving"] is True, "The way on shows it is waiting"
     assert out["readsAfter"] == out["readsBefore"] + 1 and out["step"] == 4
+
+
+def test_a_resumed_sandbox_that_was_promoted_reads_as_enforce_on_every_step(tmp_path: Path) -> None:
+    """A visitor who comes back to a sandbox they promoted is shown the stage the service keeps.
+
+    The walkthrough once assumed Observe until it promoted the project itself,
+    so a resumed sandbox already in Enforce read "the project is in Observe",
+    offered to promote it again, and counted a call judged in Enforce among
+    the calls judged in Observe.
+    """
+    out = dash(
+        r"""
+  const P = 'Acme-Sandbox-0a1b2c3d';
+  const obs = (i, rule, target, extra) => row(i, Object.assign({ project_name: P, rule_key: rule, observed_rules: [rule], observed_rule: rule, target, observed_target: target, review: 'correct' }, extra || {}));
+  const observed = [
+    obs(2, 'python-domain-stays-pure', 'src/acme/domain/order.py'),
+    obs(3, 'PROTECTED_PATH', 'cat', { agent: 'codex', tool_name: 'shell', action_type: 'COMMAND_EXEC', observed_target: '', observed_reason: "Command 'cat .env' reaches a protected path or credential store" })
+  ];
+  const refusedLater = row(1, { project_name: P, status: 'BLOCKED_BOUNDARY_VIOLATION', stage: 'enforce', observed_rules: [], observed_rule: '', rule_key: 'python-domain-stays-pure', reason: 'The domain may not import boto3.' });
+  const sent = {};
+  store['threefold-try'] = JSON.stringify({ project: P, at: Date.now() });
+  answer = api({
+    ['/api/projects/' + P]: { status: 200, body: { project: P,
+      config: { stage: 'enforce', observe_rules: ['PROTECTED_PATH', 'LOOP'], sandbox: true,
+        history: [{ at: NOW, action: 'promote', by: 'anonymous', enforce: ['python-domain-stays-pure'], observe: ['PROTECTED_PATH', 'LOOP'] }] },
+      readiness: { summary: { stage: 'enforce' }, rules: [
+        { rule_key: 'python-domain-stays-pure', kind: 'layering', state: 'ready', mode_now: 'enforce', would_refuse: 1, correct: 1, false_alarms: 0, unreviewed: 0 },
+        { rule_key: 'PROTECTED_PATH', kind: 'gate', state: 'ready', mode_now: 'observe', would_refuse: 1, correct: 1, false_alarms: 0, unreviewed: 0 },
+        { rule_key: 'LOOP', kind: 'gate', state: 'quiet', mode_now: 'observe', would_refuse: 0, correct: 0, false_alarms: 0, unreviewed: 0 }] } } },
+    '/api/decisions': u => ({ status: 200, body: { items: u.searchParams.get('kind') === 'observed' ? observed : [refusedLater].concat(observed), next_cursor: null } }),
+    '/api/decision': { status: 200, body: { decision: observed[0], session: null, rule: { id: 'python-domain-stays-pure', forbid_imports: ['boto3'] } } },
+    'POST /evaluate-tool-call': (u, i, body) => { sent.evaluate = body; return { status: 200, body: { status: 'BLOCKED_BOUNDARY_VIOLATION', reason: 'The domain may not import boto3.', project_stage: 'enforce' } }; }
+  });
+  await visit('#/try');
+  out.offer = text(view());
+  await click('try-resume'); await tick();
+  out.step1 = text(view());
+  await click('try-show'); await tick();
+  await click('try-review'); await tick();
+  await click('try-readiness'); await tick();
+  out.step4 = text(view());
+  out.offersPromote = view().indexOf('data-action="try-promote"') !== -1;
+  await click('try-next'); await tick();
+  out.step5 = text(view());
+  await click('try-send'); await tick();
+  await click('try-finish'); await tick();
+  out.done = text(view());
+  out.sent = sent;
+""",
+        tmp_path,
+    )
+    assert "Continue with it" in out["offer"]
+    assert "the project is in Enforce, promoted earlier" in out["step1"]
+    assert "the project is in Observe" not in out["step1"], "Step 1 contradicts the stage the service keeps"
+    assert "Already in Enforce" in out["step4"] and "1 rule refuses the calls that break it" in out["step4"]
+    assert "PROTECTED_PATH and LOOP keep observing" in out["step4"]
+    assert out["offersPromote"] is False, "A project already in Enforce is not offered the promotion again"
+    assert "src/acme/domain/order.py" in out["step5"], "The call to send is planned for a promotion made on an earlier visit"
+    assert out["sent"]["evaluate"]["arguments"] == {"file_path": "src/acme/domain/order.py", "content": "import boto3\n"}
+    assert "3 calls judged 2 in Observe and 1 in Enforce" in out["done"]
+    assert "calls judged in Observe" not in out["done"], "A call judged in Enforce is not counted as judged in Observe"
 
 
 def test_the_walkthrough_escapes_every_value_the_service_sends(tmp_path: Path) -> None:
