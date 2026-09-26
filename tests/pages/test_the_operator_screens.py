@@ -208,3 +208,73 @@ def test_the_projects_screen_reads_as_a_portfolio(tmp_path: Path) -> None:
     assert "7/10 labelled" in page and "4/4 labelled" in page and "nothing flagged" in page
     assert 'aria-label="7 of 10 flagged calls labelled"' in page
     assert 'data-row-href="#/projects/Acme-Payments"' in page, "A row opens its project"
+
+
+# ---------------------------------------------------------------- review keys
+
+
+KEYS = r"""
+function press(key, extra) {
+  const event = Object.assign({ key, target: el('view'), prevented: false,
+    preventDefault() { this.prevented = true; }, stopImmediatePropagation() {} }, extra || {});
+  (docListeners.keydown || []).forEach(fn => fn(event));
+  return event;
+}
+function currentRow() {
+  const chunk = view().split('<li id="qrow-').find(part => /^\d+"[^>]*data-current="true"/.test(part)) || '';
+  return (chunk.match(/data-verdict="(VERDICT-\d+)"/) || [])[1] || null;
+}
+"""
+
+
+def test_the_queue_is_worked_from_the_keyboard(tmp_path: Path) -> None:
+    out = ops(
+        KEYS
+        + r"""
+  const sent = [];
+  const record = (u, i, body) => { sent.push(u.pathname.replace(/^\/prod/, '') + ' ' + body.items.map(x => x.verdict_id + ':' + x.label).join(',')); return { status: 200, body: { updated: body.items.length, skipped: [] } }; };
+  answer = contract({
+    '/api/decisions': { status: 200, body: { items: [
+      row(1), row(2), row(3, { project_name: 'Acme-Catalog', rule_key: 'PROTECTED_PATH', observed_rules: ['PROTECTED_PATH'], target: '.claude/settings.json', observed_target: '.claude/settings.json' })
+    ], next_cursor: null } },
+    'POST /api/projects/Acme-Billing/reviews': record,
+    'POST /api/projects/Acme-Catalog/reviews': record
+  });
+  await visit('#/review');
+  out.legend = text(view().split('aria-label="Keyboard"')[1].split('</div>')[0]);
+  out.start = currentRow();
+  out.j = [press('j').prevented, currentRow()];
+  press('c'); await tick();
+  out.afterC = currentRow();
+  out.progress = text(el('view').innerHTML.split('id="review-count"')[1].split('</p>')[0]);
+  press('f'); await tick();
+  press('k');
+  out.k = currentRow();
+  press('u'); await tick();
+  out.afterU = (view().match(/data-action="label-one"/g) || []).length / 2;
+  const before = sent.length;
+  out.typing = press('c', { target: { tagName: 'INPUT', hasAttribute: () => false } }).prevented;
+  out.modified = press('c', { ctrlKey: true }).prevented;
+  await tick();
+  out.ignored = sent.length === before;
+  await visit('#/projects');
+  press('c'); await tick();
+  out.gone = sent.length === before;
+  out.sent = sent;
+""",
+        tmp_path,
+    )
+    assert "J next" in out["legend"] and "C correct" in out["legend"] and "F false alarm" in out["legend"] and "U undo the last label" in out["legend"]
+    assert out["start"] == "VERDICT-1", "The keyboard starts on the first row of the rule with the most waiting"
+    assert out["j"] == [True, "VERDICT-2"], "J moves down and claims the key"
+    assert out["afterC"] == "VERDICT-3", "Labelled, the row leaves and the next one takes its place"
+    assert "1 call labelled on this visit" in out["progress"]
+    assert out["k"] == "VERDICT-1"
+    assert out["sent"] == [
+        "/api/projects/Acme-Billing/reviews VERDICT-2:correct",
+        "/api/projects/Acme-Catalog/reviews VERDICT-3:false_alarm",
+        "/api/projects/Acme-Catalog/reviews VERDICT-3:clear",
+    ], "C and F label the row the keyboard is on, each to its own project; U takes back the last"
+    assert out["afterU"] == 2, "The undone call is back in the queue"
+    assert out["typing"] is False and out["modified"] is False and out["ignored"], "A key typed in a field or with a modifier is left alone"
+    assert out["gone"], "The keys leave with the screen"
