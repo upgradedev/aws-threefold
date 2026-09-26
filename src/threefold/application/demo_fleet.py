@@ -10,6 +10,21 @@ followed by what an operator of those projects would do: label some of the
 calls a rule would have refused, promote a project whose rules are ready while
 the noisy rule keeps observing, and now and then demote one.
 
+Only what a real hook would send reaches the service. The hook decides two
+things on the developer's machine before anything leaves it
+(hooks/threefold_hook.py, `handle`), and the fleet decides them the same way:
+
+- A call carrying a credential shape is refused on the machine, in every mode
+  and every stage, and nothing is sent. The fleet's agents still try it now and
+  then; the attempt is held here with the same patterns the hook's copy is
+  tested against (domain.boundary_guard.SecretScanner), is never sent, and the
+  agent's next call answers the refusal. So no credential shape ever reaches
+  the ledger, the sessions or the rollups, and no CREDENTIAL row is the fleet's.
+- A write to a hook's own settings file is refused on the machine while the
+  project is known to enforce, and nothing is sent. At any other stage it is
+  sent as its path with the content left out, as the hook sends it, and the
+  service records it under the protected-path rule.
+
 What it is not:
 
 - Not history. It writes only at the moment it runs, with the evaluator's own
@@ -35,16 +50,16 @@ refused corrects itself only because it was refused.
 
 The mix is mostly ordinary work, reads, edits and test runs, approved. Beside
 it: a domain module reaching for infrastructure, now and then a shell redirect
-into a governed path, a credential shape, a protected path, and a build
-repeated until the hook's loop rule stops it. One rule is deliberately noisy:
-`python-domain-stays-pure` covers `**/domain/**/*.py`, which also matches a
+into a governed path, a credential shape (held on the machine, as above), a
+protected path, and a build repeated until the hook's loop rule stops it. One
+rule is deliberately noisy: `python-domain-stays-pure` covers `**/domain/**/*.py`, which also matches a
 test module under `tests/domain/` that drives the API with FastAPI's client.
 That is test code, not the domain layer, so the fleet's operator marks those
 calls false alarms, the rule reads noisy, and a promotion leaves it observing.
 
 Every name is synthetic, as the clean-room rule requires. The credential
-shapes are made up at run time from the PRNG, match nothing real, and never
-appear in this file.
+shapes are made up at run time from the PRNG, match nothing real, never
+appear in this file, and are never sent.
 """
 from __future__ import annotations
 
@@ -55,13 +70,14 @@ import logging
 import random
 import string
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from threefold.application import ledger, rollups
 from threefold.application import projects as stages
 from threefold.application.dtos import ToolCallRequestDTO
 from threefold.application.rule_keys import NONE, kind_of, rule_key, stored_rule_key, stored_rule_keys
+from threefold.domain.boundary_guard import SecretScanner
 
 logger = logging.getLogger("threefold.fleet")
 # Set here, as the handler sets its own: the Lambda runtime leaves the root
@@ -183,6 +199,71 @@ class Step:
     if_refused: bool = False
 
 
+# ---------------------------------------------------------------- what the hook keeps on the machine
+
+# Each agent's own hook settings, the file the protected-path episode writes.
+# The hook treats every file that decides whether the hooks run this way
+# (hooks/threefold_hook.py, is_governance_path); these are the three the
+# fleet's agents touch.
+HOOK_SETTINGS = {
+    "claude-code": ".claude/settings.json",
+    "codex": ".codex/hooks.json",
+    "antigravity": ".agents/hooks.json",
+}
+# What the hook sends in place of such a file's content when it sends the write
+# rather than refusing it (hooks/threefold_hook.py, _strip_governance_content).
+CONTENT_NOT_SENT = "content not sent: this file decides whether the agent's hooks run"
+HELD_CREDENTIAL = "credential"
+HELD_HOOK_SETTINGS = "hook_settings"
+
+
+def carries_credential(step: Step) -> bool:
+    """Whether a call holds a credential shape anywhere, keys included, as the hook reads it.
+
+    The patterns are the service's own, which a test holds the hook's copy to
+    pattern for pattern, so the fleet holds back exactly what a hook would.
+    """
+    is_clean, _ = SecretScanner.scan_arguments(dict(step.arguments))
+    return not is_clean
+
+
+def writes_hook_settings(step: Step) -> bool:
+    return step.action == "FILE_WRITE" and str(step.arguments.get("file_path") or "") in HOOK_SETTINGS.values()
+
+
+def held_on_machine(step: Step, stage_seen: Optional[str]) -> Optional[str]:
+    """Why the hook refuses this call before anything is sent, or None when it sends it.
+
+    A credential is refused on the machine in every mode and at every stage. A
+    write to the hooks' own settings is refused there while the stage the hook
+    last saw for the project is enforce, managed mode's rule; at any other
+    stage it is sent, without its content (`as_sent`).
+    """
+    if carries_credential(step):
+        return HELD_CREDENTIAL
+    if stage_seen == stages.ENFORCE and writes_hook_settings(step):
+        return HELD_HOOK_SETTINGS
+    return None
+
+
+def as_sent(step: Step) -> Step:
+    """The call as the hook sends it: a write to the hooks' own settings goes as its path alone."""
+    if not writes_hook_settings(step):
+        return step
+    arguments = dict(step.arguments, content="", note=CONTENT_NOT_SENT)
+    return Step(step.tool, step.action, arguments, step.intent, step.if_refused)
+
+
+def _surely_sent(step: Step) -> bool:
+    """A call the hook sends whatever the project's stage, unless it only answers a refusal."""
+    return not step.if_refused and not carries_credential(step) and not writes_hook_settings(step)
+
+
+def _maybe_sent(step: Step) -> bool:
+    """A call the hook may send: anything but a credential."""
+    return not carries_credential(step)
+
+
 @dataclass(frozen=True)
 class PlannedCall:
     session_id: str
@@ -219,12 +300,18 @@ class TickPlan:
 
     @property
     def fewest(self) -> int:
-        """Calls sent if nothing is refused: every call that does not answer a refusal."""
-        return sum(1 for call in self.calls if not call.step.if_refused)
+        """The fewest calls the tick can send, whatever the gates and the stages answer.
+
+        Every call that does not answer a refusal, less the ones the hook may
+        keep on the machine: a credential always, a write to the hooks' own
+        settings while the project enforces.
+        """
+        return sum(1 for call in self.calls if _surely_sent(call.step))
 
     @property
     def most(self) -> int:
-        return len(self.calls)
+        """The most calls the tick can send: every call, corrections included, but a credential."""
+        return sum(1 for call in self.calls if _maybe_sent(call.step))
 
 
 class _Tools:
@@ -498,11 +585,13 @@ def _shell_write(rng: random.Random, project: FleetProject, tools: _Tools) -> Li
 
 
 def _protected(rng: random.Random, project: FleetProject, tools: _Tools) -> List[Step]:
-    """A protected path: the environment file, a hook's own settings, a skipped hook."""
+    """A protected path: the environment file, a hook's own settings, a skipped hook.
+
+    The settings write is sent as the hook sends it (`as_sent`), or kept on the
+    machine while the project enforces (`held_on_machine`).
+    """
     module = _module(project, rng)
-    settings = {"claude-code": ".claude/settings.json", "codex": ".codex/hooks.json"}.get(
-        tools.agent, ".agents/hooks.json"
-    )
+    settings = HOOK_SETTINGS[tools.agent]
     choice = rng.randrange(3)
     if choice == 0:
         attempt = tools.run(rng.choice(("cat .env", "cat .env.local")), "protected")
@@ -529,7 +618,12 @@ def _loop(rng: random.Random, project: FleetProject, tools: _Tools) -> List[Step
 
 
 def _credential(rng: random.Random, project: FleetProject, tools: _Tools) -> List[Step]:
-    """A credential written into a file or a command; the agent then reads it from the environment."""
+    """A credential written into a file or a command; the agent then reads it from the environment.
+
+    The attempt never leaves the machine: the hook refuses it there, in every
+    mode, and sends nothing (`held_on_machine`). Only the agent's answer to
+    that refusal reaches the service.
+    """
     module = _module(project, rng)
     if rng.random() < 0.5:
         key = _secret_shape(rng, "AKIA", string.ascii_uppercase + string.digits, 16)
@@ -605,11 +699,13 @@ def _sessions(rng: random.Random) -> List[Tuple[FleetProject, str]]:
 
 
 def plan_tick(bucket: int) -> TickPlan:
-    """Every call one tick will make, drawn from the bucket alone.
+    """Every call one tick's agents will make, drawn from the bucket alone.
 
-    `fewest` (the calls sent if nothing is refused) is at least MIN_CALLS and
-    `most` (every correction sent too) at most MAX_CALLS, so a tick sends a
-    number of calls between the two bounds whatever the gates answer.
+    `fewest` (the calls sent if nothing is refused and the hook keeps every
+    call it may keep) is at least MIN_CALLS and `most` (every correction sent
+    too, and every call but a credential) at most MAX_CALLS, so a tick sends a
+    number of calls between the two bounds whatever the gates and the stages
+    answer. A credential the agents try is on top of that: it is never sent.
     """
     rng = _rng(bucket, "plan")
     target = _target(bucket, rng)
@@ -617,21 +713,22 @@ def plan_tick(bucket: int) -> TickPlan:
     kinds = [kind for kind in EPISODES]
     weights = [weight for _, _, weight in EPISODES]
     calls: List[PlannedCall] = []
-    fewest = 0
+    fewest = most = 0
     turn = 0
-    while fewest < target and len(calls) < MAX_CALLS:
+    while fewest < target and most < MAX_CALLS:
         project, agent = sessions[turn % len(sessions)]
         turn += 1
         tools = _Tools(agent)
         _, build, _ = rng.choices(kinds, weights=weights)[0]
         steps = build(rng, project, tools)
-        if len(calls) + len(steps) > MAX_CALLS:
+        if most + sum(1 for step in steps if _maybe_sent(step)) > MAX_CALLS:
             steps = _filler(rng, project, tools)
         session_id = _session_id(project, agent, bucket)
         developer = _developer(project, agent, session_id)
         for step in steps:
             calls.append(PlannedCall(session_id, project.name, agent, developer, step))
-        fewest += sum(1 for step in steps if not step.if_refused)
+        fewest += sum(1 for step in steps if _surely_sent(step))
+        most += sum(1 for step in steps if _maybe_sent(step))
     return TickPlan(bucket=bucket, target=target, calls=tuple(calls))
 
 
@@ -675,6 +772,11 @@ class TickSummary:
     calls: int = 0
     planned: int = 0
     verdicts: Dict[str, int] = field(default_factory=lambda: {"approved": 0, "observed": 0, "refused": 0})
+    # Calls the agents made that the hook refused on the machine, so were
+    # never sent: they are not in `calls`, and nothing of them is stored.
+    held_on_machine: Dict[str, int] = field(
+        default_factory=lambda: {HELD_CREDENTIAL: 0, HELD_HOOK_SETTINGS: 0}
+    )
     labelled: Dict[str, int] = field(default_factory=lambda: {"correct": 0, "false_alarm": 0})
     actions: List[Dict[str, Any]] = field(default_factory=list)
     stages: Dict[str, str] = field(default_factory=dict)
@@ -682,6 +784,11 @@ class TickSummary:
     # Projects given a false alarm this tick: the only ones whose enforcing
     # rules can have turned noisy since the last tick. Not reported.
     false_alarms_in: set = field(default_factory=set)
+    # The rows labelled this tick, by (timestamp, verdict_id). A later sweep in
+    # the same tick reads the ledger with an eventually consistent query that
+    # can still return one of them without its review; this is how it knows
+    # not to label it again. Not reported.
+    labelled_rows: set = field(default_factory=set)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -689,6 +796,7 @@ class TickSummary:
             "calls": self.calls,
             "planned": self.planned,
             "verdicts": dict(self.verdicts),
+            "held_on_machine": dict(self.held_on_machine),
             "labelled": dict(self.labelled),
             "actions": [dict(action) for action in self.actions],
             "stages": dict(sorted(self.stages.items())),
@@ -730,7 +838,11 @@ def run_tick(
     plan = plan_tick(bucket)
     summary = TickSummary(tick=bucket, planned=plan.most)
     _ensure_configured(evaluator, now)
-    outcomes = _send(evaluator, plan, summary, stop_at)
+    # The stage each project's hooks last saw: what the service named on its
+    # last answer, which is the project's stage as this tick begins, since
+    # the operator changes stages only after the tick's calls.
+    stages_seen = {name: stages.stage_of(evaluator.project_config(name)) for name in rollups.FLEET_PROJECTS}
+    outcomes = _send(evaluator, plan, summary, stop_at, stages_seen)
     stamps = [moment for moment in (_instant(outcome.timestamp) for outcome in outcomes) if moment is not None]
     operator_now = max([now] + stamps)
     if _out_of_time(stop_at):
@@ -768,16 +880,40 @@ def _key_of(result: Any) -> str:
     )
 
 
-def _send(evaluator: Any, plan: TickPlan, summary: TickSummary, stop_at: Optional[float]) -> List[_Outcome]:
+def _send(
+    evaluator: Any,
+    plan: TickPlan,
+    summary: TickSummary,
+    stop_at: Optional[float],
+    stages_seen: Optional[Dict[str, str]] = None,
+) -> List[_Outcome]:
+    """Makes the plan's calls: each one the hook would send goes through the evaluator.
+
+    A call the hook refuses on the machine is not sent and leaves nothing
+    behind but a count; the agent was refused all the same, so the call that
+    answers the refusal follows it. `stages_seen` is the stage each project's
+    hooks last saw, kept up to date from every answer as a hook keeps it.
+    """
     outcomes: List[_Outcome] = []
     refused_last: Dict[str, bool] = {}
+    seen = dict(stages_seen or {})
     for call in plan.calls:
         if call.step.if_refused and not refused_last.get(call.session_id, False):
             continue
         if _out_of_time(stop_at):
             summary.cut_short = True
             break
+        held = held_on_machine(call.step, seen.get(call.project))
+        if held is not None:
+            if not call.step.if_refused:
+                refused_last[call.session_id] = True
+            summary.held_on_machine[held] += 1
+            continue
+        call = replace(call, step=as_sent(call.step))
         result = evaluator.evaluate_tool_call(call.request())
+        stage = getattr(result, "project_stage", None)
+        if stage in (stages.OBSERVE, stages.ENFORCE):
+            seen[call.project] = stage
         outcome = _Outcome(call, str(result.verdict_id), str(result.timestamp), str(result.status), _key_of(result))
         if not call.step.if_refused:
             refused_last[call.session_id] = outcome.refused
@@ -812,6 +948,7 @@ def _label(evaluator: Any, row: Mapping[str, Any], label: str, now: datetime.dat
     )
     if before is None:
         return
+    summary.labelled_rows.add((timestamp, str(row.get("verdict_id") or "")))
     summary.labelled[label] += 1
     if label == "false_alarm":
         summary.false_alarms_in.add(project)
@@ -861,7 +998,9 @@ def _sweep(
     """Labels the fleet's unreviewed calls older than `min_age`, newest first.
 
     Reads the ledger back SWEEP_HORIZON from `now`, at most SWEEP_ROW_BUDGET
-    rows, so its cost is bounded however busy the stack is.
+    rows, so its cost is bounded however busy the stack is. A row this tick
+    has already labelled is left alone even when the read, which is
+    eventually consistent, returns it without its review.
     """
     reader = getattr(evaluator.session_repo, "read_decision_day", None)
     if reader is None:
@@ -881,7 +1020,8 @@ def _sweep(
                     continue
                 if moment < oldest:
                     return
-                if moment <= newest and _is_fleet_row(row, project) and not row.get("review"):
+                labelled = (str(row.get("timestamp") or ""), str(row.get("verdict_id") or "")) in summary.labelled_rows
+                if moment <= newest and _is_fleet_row(row, project) and not row.get("review") and not labelled:
                     label = label_for(row)
                     if label is not None:
                         _label(evaluator, row, label, now, summary)

@@ -20,6 +20,7 @@ import ast
 import collections
 import datetime
 import inspect
+import json
 import logging
 import re
 from typing import Any, Dict, List
@@ -90,6 +91,9 @@ class Day:
     def __init__(self, evaluator, summaries: List[Dict[str, Any]], clock: SimulatedClock) -> None:
         self.summaries = summaries
         self.rows = _rows(evaluator)
+        # Everything the store holds: ledger rows, sessions with their call
+        # history, rollups and configurations.
+        self.items = {key: dict(item) for key, item in evaluator.session_repo._memory_store.items()}
         self.rollups = evaluator.list_rollups(days=7)
         self.configs = {name: evaluator.project_config(name, fresh=True) for name in rollups.FLEET_PROJECTS}
         self.keys = {name: demo_fleet._keys(evaluator, name) for name in rollups.FLEET_PROJECTS}
@@ -163,7 +167,7 @@ def test_the_bucket_is_the_quarter_hour_the_moment_falls_in() -> None:
 
 
 def test_every_tick_of_a_week_sends_between_twenty_and_forty_calls() -> None:
-    """Fewest is every call that does not answer a refusal; most is every call."""
+    """Fewest is every call sent whatever is refused and whatever the hook keeps; most is every call it may send."""
     assert (demo_fleet.MIN_CALLS, demo_fleet.MAX_CALLS) == (20, 40)
     outside = [
         (bucket, plan.fewest, plan.most)
@@ -241,6 +245,10 @@ def test_the_source_holds_no_credential_shape_and_the_made_up_ones_are_caught() 
     for call in made_up:
         text = " ".join(str(value) for value in call.step.arguments.values())
         assert any(pattern.search(text) for _, pattern in SecretScanner.PATTERNS), text
+        for stage in (None, stages.OBSERVE, stages.ENFORCE):
+            assert demo_fleet.held_on_machine(call.step, stage) == demo_fleet.HELD_CREDENTIAL, "Never sent, in any stage"
+    others = [call for call in _week_calls() if call.step.intent != "credential"]
+    assert not [call for call in others if demo_fleet.carries_credential(call.step)]
 
 
 def test_the_six_projects_are_the_ones_the_overview_counts_as_the_fleet() -> None:
@@ -323,12 +331,85 @@ def test_observe_records_what_enforce_refuses(a_day: Day) -> None:
     for row in a_day.rows:
         if row["rule_key"] != "NONE":
             seen[row["rule_key"]].add((row["stage"], _kind(row)))
-    for key in ("LOOP", "PROTECTED_PATH", "CREDENTIAL"):
+    for key in ("LOOP", "PROTECTED_PATH"):
         assert ("observe", "observed") in seen[key] and ("enforce", "refused") in seen[key], (key, seen[key])
+    assert "CREDENTIAL" not in seen, "A hook refuses a credential on the machine, so none reaches the service"
     layering = {key: value for key, value in seen.items() if key.endswith("-stays-pure")}
     assert any(("observe", "observed") in value for value in layering.values())
     assert any(("enforce", "refused") in value for value in layering.values())
     assert "UNREADABLE_WRITE" in seen
+
+
+def test_a_credential_never_leaves_the_machine(a_day: Day) -> None:
+    """Every credential an agent tries is held where a hook holds it: nothing of it is sent or stored.
+
+    The hook refuses a credential before anything is sent, in every mode, so
+    no ledger row, session history, rollup or configuration may carry one.
+    """
+    stored = [key for key, item in a_day.items.items() if not SecretScanner.scan_arguments(item)[0]]
+    assert not stored, stored[:5]
+    assert not [row for row in a_day.rows if row["rule_key"] == "CREDENTIAL"]
+    tried = sum(
+        1
+        for summary in a_day.summaries
+        for call in demo_fleet.plan_tick(summary["tick"]).calls
+        if call.step.intent == "credential"
+    )
+    held = sum(summary["held_on_machine"][demo_fleet.HELD_CREDENTIAL] for summary in a_day.summaries)
+    assert tried > 0 and held == tried, (tried, held)
+
+
+def test_the_agent_answers_a_credential_held_on_the_machine(a_day: Day) -> None:
+    """Refused on the machine, the agent reads the value from the environment instead, and that is sent."""
+    answers = [
+        item for key, item in a_day.items.items()
+        if key.startswith("SESSION#") and "env('AWS_ACCESS_KEY_ID')" in str(item.get("history_json"))
+    ]
+    held = sum(summary["held_on_machine"][demo_fleet.HELD_CREDENTIAL] for summary in a_day.summaries)
+    assert answers and len(answers) <= held
+
+
+def test_a_hook_settings_write_goes_without_its_content_or_not_at_all(a_day: Day) -> None:
+    """As the hook sends it: the path alone while the project observes, nothing while it enforces."""
+    settings = set(demo_fleet.HOOK_SETTINGS.values())
+    sent = [row for row in a_day.rows if row["target"] in settings]
+    assert sent, "A settings write in an observing project reaches the service"
+    for row in sent:
+        assert (row["stage"], row["rule_key"], row["status"]) == ("observe", "PROTECTED_PATH", "APPROVED"), row
+    histories = [
+        entry
+        for key, item in a_day.items.items() if key.startswith("SESSION#")
+        for entry in json.loads(item.get("history_json") or "[]")
+        if (entry.get("arguments") or {}).get("file_path") in settings
+    ]
+    assert histories
+    for entry in histories:
+        assert entry["arguments"]["content"] == "" and entry["arguments"]["note"] == demo_fleet.CONTENT_NOT_SENT
+    held = sum(summary["held_on_machine"][demo_fleet.HELD_HOOK_SETTINGS] for summary in a_day.summaries)
+    assert held > 0, "An enforcing project's hook refuses the write on the machine"
+
+
+@pytest.mark.parametrize(
+    "step, stage, held",
+    [
+        (demo_fleet._Tools("codex").write(".codex/hooks.json", '{"hooks": {}}\n'), stages.ENFORCE, "hook_settings"),
+        (demo_fleet._Tools("codex").write(".codex/hooks.json", '{"hooks": {}}\n'), stages.OBSERVE, None),
+        (demo_fleet._Tools("codex").write(".codex/hooks.json", '{"hooks": {}}\n'), None, None),
+        (demo_fleet._Tools("claude-code").write("src/acme_payments/settings.py", "DEBUG = False\n"), stages.ENFORCE, None),
+        (demo_fleet._Tools("claude-code").run("cat .env"), stages.ENFORCE, None),
+    ],
+)
+def test_what_the_hook_keeps_on_the_machine(step, stage, held) -> None:
+    assert demo_fleet.held_on_machine(step, stage) == held
+
+
+def test_a_settings_write_the_hook_sends_carries_its_path_and_no_content() -> None:
+    step = demo_fleet._Tools("antigravity").write(".agents/hooks.json", '{"hooks": {}}\n')
+    sent = demo_fleet.as_sent(step)
+    assert sent.arguments == {"file_path": ".agents/hooks.json", "content": "", "note": demo_fleet.CONTENT_NOT_SENT}
+    assert step.arguments["content"], "The plan itself is left as it was"
+    ordinary = demo_fleet._Tools("antigravity").write("src/mobile/config.ts", "export const retries = 3;\n")
+    assert demo_fleet.as_sent(ordinary) is ordinary
 
 
 def test_the_loop_rule_stops_a_repeated_build_without_halting_the_session(a_day: Day) -> None:
@@ -420,7 +501,9 @@ def test_the_overview_counts_the_day_as_the_fleet_s(a_day: Day) -> None:
     assert {row["source"] for row in payload["by_project"]} == {"fleet"}
     assert payload["totals"]["false_alarms"] > 0 and payload["totals"]["refused"] > 0
     assert payload["stages"] == {"observe": 3, "enforce": 3}
-    assert {entry["rule_key"] for entry in payload["by_rule"]} >= {"LOOP", "PROTECTED_PATH", "CREDENTIAL", demo_fleet.NOISY_RULE}
+    by_rule = {entry["rule_key"] for entry in payload["by_rule"]}
+    assert by_rule >= {"LOOP", "PROTECTED_PATH", "UNREADABLE_WRITE", demo_fleet.NOISY_RULE}
+    assert "CREDENTIAL" not in by_rule, "The fleet's credentials are refused on the machine and never counted here"
 
 
 # ---------------------------------------------------------------- the operator, alone
@@ -565,6 +648,33 @@ def test_an_enforcing_rule_that_turns_noisy_goes_back_to_observing(monkeypatch) 
     )
 
 
+def test_a_row_labelled_this_tick_is_not_labelled_again_by_a_stale_read(monkeypatch) -> None:
+    """The ledger query is eventually consistent: it can return a row just labelled without its review."""
+    evaluator = _fresh_evaluator()
+    demo_fleet._ensure_configured(evaluator, datetime.datetime.now(UTC))
+    _seed(evaluator, "Acme-Payments", [CROSSING, NOISY_CALL])
+    repo = evaluator.session_repo
+    fresh_read, label = repo.read_decision_day, repo.label_decision
+    labels: List[str] = []
+
+    def stale_read(*args, **kwargs):
+        rows, after = fresh_read(*args, **kwargs)
+        return [{key: value for key, value in row.items() if key != "review"} for row in rows], after
+
+    def counted(*args, **kwargs):
+        labels.append(args[1])
+        return label(*args, **kwargs)
+
+    monkeypatch.setattr(repo, "read_decision_day", stale_read)
+    monkeypatch.setattr(repo, "label_decision", counted)
+    summary = demo_fleet.TickSummary(tick=0)
+    moment = datetime.datetime.now(UTC) + datetime.timedelta(seconds=1)
+    demo_fleet._sweep(evaluator, moment, summary, min_age=datetime.timedelta(0))
+    demo_fleet._sweep(evaluator, moment, summary, min_age=datetime.timedelta(0))
+    assert summary.labelled == {"correct": 1, "false_alarm": 1}
+    assert len(labels) == len(set(labels)) == 2, labels
+
+
 def test_demotion_is_one_step_back_to_observe() -> None:
     evaluator = _fresh_evaluator()
     now = datetime.datetime.now(UTC)
@@ -622,7 +732,7 @@ def test_a_tick_with_time_to_spare_runs_whole() -> None:
     summary = answer["threefold_fleet"]
     assert summary["ok"] is True and summary["cut_short"] is False
     assert demo_fleet.MIN_CALLS <= summary["calls"] <= demo_fleet.MAX_CALLS
-    assert set(summary) >= {"tick", "calls", "planned", "verdicts", "labelled", "actions", "stages", "seconds"}
+    assert set(summary) >= {"tick", "calls", "planned", "verdicts", "held_on_machine", "labelled", "actions", "stages", "seconds"}
 
 
 def test_every_tick_leaves_one_line_in_the_function_s_log(caplog) -> None:
