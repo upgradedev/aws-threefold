@@ -1513,6 +1513,64 @@ def test_the_walkthrough_reads_readiness_only_after_every_label_is_saved(tmp_pat
     assert out["readsAfter"] == out["readsBefore"] + 1 and out["step"] == 4
 
 
+def test_a_label_the_service_does_not_keep_holds_the_reader_on_the_call_it_was_for(tmp_path: Path) -> None:
+    """A save that fails while "See what that did" waits on it never moves the reader to step 4.
+
+    The wait once resolved whether the save kept the label or not, so the
+    reader landed on step 4 with that label taken back, the rail ticking step
+    3 at "4 of 5 labelled", a rule reading Needs review, one rule fewer to
+    promote, and no way back to label the call again.
+    """
+    out = dash(
+        r"""
+  const P = 'Acme-Sandbox-0a1b2c3d';
+  const rows = [row(1, { project_name: P, target: 'src/acme/domain/a.py', observed_target: 'src/acme/domain/a.py' }), row(2, { project_name: P, target: 'src/acme/domain/b.py', observed_target: 'src/acme/domain/b.py' })];
+  const hold = held();
+  let saves = 0;
+  answer = api({
+    'POST /api/sandbox': { status: 200, body: { project: P, calls_seeded: 12 } },
+    ['/api/projects/' + P]: { status: 200, body: { project: P, config: { stage: 'observe' }, readiness: { rules: [{ rule_key: 'java-domain-stays-pure', state: 'ready' }] } } },
+    '/api/decisions': { status: 200, body: { items: rows, next_cursor: null } },
+    ['POST /api/projects/' + P + '/reviews']: () => {
+      saves += 1;
+      return saves === 2 ? hold.promise.then(() => ({ status: 503, body: { detail: 'store down' } })) : { status: 200, body: { updated: 1, skipped: [] } };
+    }
+  });
+  const reads = () => calls.filter(c => c.method === 'GET' && new URL(c.url).pathname.endsWith('/api/projects/' + P)).length;
+  await visit('#/try');
+  await click('try-create'); await tick();
+  await click('try-show'); await tick();
+  await click('try-review'); await tick();
+  out.readsBefore = reads();
+  await click('try-label', { 'data-verdict': 'VERDICT-2', 'data-label': 'correct' }); await tick();
+  click('try-label', { 'data-verdict': 'VERDICT-1', 'data-label': 'correct' });
+  await tick();
+  const pressing = click('try-readiness');
+  await tick();
+  hold.release();
+  await pressing; await tick();
+  out.step = Dash.tryState.step;
+  out.busy = Dash.tryState.busy;
+  out.readsAfterFailure = reads();
+  out.cursorOn = Dash.tryState.observed[Dash.tryState.cursor].verdict_id;
+  out.focused = document.activeElement && document.activeElement.id;
+  out.failed = text(view());
+  await click('try-label', { 'data-verdict': 'VERDICT-1', 'data-label': 'correct' }); await tick();
+  await click('try-readiness'); await tick();
+  out.stepAfterRelabel = Dash.tryState.step;
+  out.readsAfterRelabel = reads();
+""",
+        tmp_path,
+    )
+    assert out["step"] == 3 and out["busy"] is False, "A label the service did not keep moved the reader on"
+    assert out["readsAfterFailure"] == out["readsBefore"], "Readiness was read with a label missing"
+    assert out["cursorOn"] == "VERDICT-1" and out["focused"] == "try-correct", "The keyboard is not back on the call to label again"
+    failed = out["failed"]
+    assert "1 of 2 labelled" in failed and "Was the rule right?" in failed
+    assert "That did not work: the label for src/acme/domain/a.py was not saved (HTTP 503: store down). Mark it again." in failed
+    assert out["stepAfterRelabel"] == 4 and out["readsAfterRelabel"] == out["readsBefore"] + 1
+
+
 REPLAY = r"""
 const P = 'Acme-Sandbox-0a1b2c3d';
 const obs = (i, rule, target, extra) => row(i, Object.assign({ project_name: P, rule_key: rule, observed_rules: [rule], observed_rule: rule, target, observed_target: target }, extra || {}));

@@ -3622,11 +3622,14 @@
         state.focusId = 'try-step-title';
       }
 
-      function fail(err, doing) {
+      function fail(err, doing, target) {
         state.busy = false;
+        const why = String((err && err.message) || 'no answer').replace(/[.\s]+$/, '');
         state.error = T.isAuthError(err)
           ? (doing === 'create' ? 'This stack does not let visitors make a sandbox (HTTP ' + err.status + '). The walkthrough runs on the public demo.' : 'The stack refused (HTTP ' + err.status + '): a sandbox is open to anyone only on the public demo.')
-          : 'That did not work: ' + String((err && err.message) || 'no answer').replace(/[.\s]+$/, '') + '. Try again.';
+          : doing === 'label' && target
+            ? 'That did not work: the label for ' + target + ' was not saved (' + why + '). Mark it again.'
+            : 'That did not work: ' + why + '. Try again.';
         // On step 3 with calls still to label the way on is disabled, so the
         // keyboard goes back to the call it was on.
         state.focusId = state.step === 3 && labelledCount() < state.observed.length ? 'try-correct' : 'try-primary';
@@ -3800,25 +3803,30 @@
         announce(REVIEWS[value].label + ': ' + tryTarget(row) + '. ' + labelledCount() + ' of ' + state.observed.length + ' labelled.');
         draw();
         // Kept until the service has answered, so readiness is never read
-        // ahead of a label the reader has already seen land.
+        // ahead of a label the reader has already seen land. It answers
+        // whether the label was kept: a label taken back holds the reader
+        // on this step, on that call, however the way on was pressed.
         const saving = T.api('/api/projects/' + encodeURIComponent(state.project) + '/reviews', {
           method: 'POST', body: { items: [{ timestamp: row.timestamp, verdict_id: row.verdict_id, label: value }] }
         }).then(answer => {
-          if (!ctx.alive()) return;
+          if (!ctx.alive()) return false;
           const skipped = answer && Array.isArray(answer.skipped) ? answer.skipped : [];
-          if (skipped.length) {
-            if (before) state.labels[verdict] = before; else delete state.labels[verdict];
-            state.lastLabel = beforeLast;
-            state.error = 'That label was not saved: ' + (skipped[0].reason || 'skipped') + '.';
-            state.cursor = index;
-            draw();
-          }
+          if (!skipped.length) return true;
+          if (before) state.labels[verdict] = before; else delete state.labels[verdict];
+          state.lastLabel = beforeLast;
+          state.busy = false;
+          state.error = 'That did not work: the label for ' + tryTarget(row) + ' was not saved (' + (skipped[0].reason || 'skipped') + '). Mark it again.';
+          state.cursor = index;
+          state.focusId = 'try-correct';
+          draw();
+          return false;
         }, err => {
-          if (!ctx.alive()) return;
+          if (!ctx.alive()) return false;
           if (before) state.labels[verdict] = before; else delete state.labels[verdict];
           state.lastLabel = beforeLast;
           state.cursor = index;
-          fail(err, 'label');
+          fail(err, 'label', tryTarget(row));
+          return false;
         });
         state.saves.push(saving);
         saving.then(() => { const at = state.saves.indexOf(saving); if (at !== -1) state.saves.splice(at, 1); });
@@ -3925,16 +3933,30 @@
         },
         'try-readiness': () => {
           state.busy = true; state.error = null; draw();
-          // Every label saved first: a rule's state is read from them.
-          return Promise.all(state.saves.slice()).then(() => T.api('/api/projects/' + encodeURIComponent(state.project) + query({ days: 1 }))).then(detail => {
+          // Every label saved first: a rule's state is read from them. A label
+          // the service did not keep holds the reader here, on the call it
+          // was for, with the save's own error; readiness is not read.
+          return Promise.all(state.saves.slice()).then(kept => {
             if (!ctx.alive()) return;
-            state.busy = false;
-            state.readiness = (detail && detail.readiness) || { rules: [] };
-            applyConfig(detail);
-            state.selected = new Set(readinessRules().filter(r => r.state === 'ready' || r.state === 'quiet').map(r => r.rule_key));
-            enter(4, { flip: true });
-            draw();
-          }, err => { if (ctx.alive()) fail(err, 'readiness'); });
+            if (kept.some(ok => ok === false) || labelledCount() < state.observed.length) {
+              state.busy = false;
+              const first = state.observed.findIndex(r => !state.labels[r.verdict_id]);
+              if (first !== -1) state.cursor = first;
+              if (!state.error) state.error = 'That did not work: a label was not saved. Mark the call again.';
+              state.focusId = 'try-correct';
+              draw();
+              return;
+            }
+            return T.api('/api/projects/' + encodeURIComponent(state.project) + query({ days: 1 })).then(detail => {
+              if (!ctx.alive()) return;
+              state.busy = false;
+              state.readiness = (detail && detail.readiness) || { rules: [] };
+              applyConfig(detail);
+              state.selected = new Set(readinessRules().filter(r => r.state === 'ready' || r.state === 'quiet').map(r => r.rule_key));
+              enter(4, { flip: true });
+              draw();
+            }, err => { if (ctx.alive()) fail(err, 'readiness'); });
+          });
         },
         'try-toggle': el => {
           const key = el.getAttribute('data-rule');
