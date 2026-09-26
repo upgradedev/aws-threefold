@@ -183,7 +183,7 @@ def _project_totals(name: str, rollups: List[Mapping[str, Any]], configs: Mappin
     config = configs.get(name)
     return {
         "project": name,
-        "stage": stages.stage_of(config),
+        "stage": stages.stage_of(config, name),
         "configured": config is not None,
         "sandbox": is_sandbox(name),
         "source": source_of(name),
@@ -379,6 +379,7 @@ def readiness(
     rollups: List[Mapping[str, Any]],
     config: Optional[Mapping[str, Any]],
     layering_rules: List[Mapping[str, Any]],
+    project: Optional[str] = None,
 ) -> Dict[str, Any]:
     """GET /api/projects/<name>: whether each rule has earned enforcement.
 
@@ -387,7 +388,7 @@ def readiness(
     towards whether it flagged anything, and a label on one counts like any
     label, so a promoted rule that turns out noisy says so.
     """
-    stage = stages.stage_of(config)
+    stage = stages.stage_of(config, project)
     rule_by_id = {str(rule.get("id")): rule for rule in layering_rules if rule.get("id")}
     rows = []
     for key in stages.project_rule_keys(layering_rules):

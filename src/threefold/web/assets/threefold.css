@@ -867,7 +867,12 @@ html.tf-lock, html.tf-lock body { overflow: hidden; }
 .tf-legend li { display: inline-flex; align-items: center; gap: 6px; }
 .tf-swatch { width: 10px; height: 10px; border-radius: 3px; display: inline-block; flex-shrink: 0; }
 .tf-swatch-line { width: 14px; height: 2px; border-radius: 2px; }
-/* The table view: read by a screen reader always, shown on request. */
+/* The table view: read by a screen reader always, shown on request. A table
+   ignores the 1px width .sr-only gives it and lays out at its content's width,
+   so on a phone the hidden table pushed the page 6px wide; its own box keeps it
+   in, and scrolls sideways once it is shown. */
+.tf-chart-table { position: relative; max-width: 100%; overflow: hidden; }
+.tf-figure[data-table="open"] .tf-chart-table { overflow-x: auto; }
 .tf-figure[data-table="open"] .tf-chart-table > table.sr-only {
   position: static; width: 100%; height: auto; margin: 12px 0 0; overflow: visible; clip: auto; white-space: normal;
   border-collapse: separate; border-spacing: 0; font-size: 0.75rem;

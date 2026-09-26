@@ -653,7 +653,7 @@ class GovernanceEvaluator:
     def stage_for(self, project: Optional[str]) -> Tuple[str, Optional[Dict[str, Any]]]:
         """The project's stage and the configuration it came from."""
         config = self.project_config(project)
-        return stages.stage_of(config), config
+        return stages.stage_of(config, project), config
 
     def _hold_config(self, project: str, config: Optional[Dict[str, Any]], read_at: float) -> None:
         self._project_configs[project] = _HeldConfig(config=config, read_at=read_at)

@@ -278,7 +278,7 @@ def _get_project(event: Dict[str, Any], path: str, name: Optional[str]) -> Dict[
     rules, _ = evaluator.rules_in_force(name if labelled else None)
     days = ledger.bounded_int(_query(event), "days", *PROJECT_DAYS)
     items = evaluator.list_rollups(days=days, project=name)
-    readiness = rollups.readiness(items, config, rules)
+    readiness = rollups.readiness(items, config, rules, name)
     readiness["summary"]["self_correction"] = _self_correction(days, name)
     return _respond(200, {"project": name, "config": config, "readiness": readiness})
 

@@ -30,6 +30,12 @@ ENFORCE = "enforce"
 STAGES = (OBSERVE, ENFORCE)
 
 DEFAULT_HOOK_STAGE_ENV = "DEFAULT_HOOK_STAGE"
+# Projects whose name matches this pattern start in Enforce instead of the
+# stack's default, until someone configures them. Empty by default, so nothing
+# changes unless a stack asks for it. The public demo uses it for the projects a
+# real coding agent reports as once a day: that stack has no operator to promote
+# them, and a real agent that could never be refused would measure nothing.
+ENFORCE_PROJECT_PATTERN_ENV = "ENFORCE_PROJECT_PATTERN"
 STAGED_ORIGINS = ("hook", "ci")
 # The dashboard's scenarios mint these. Their halt is the demo, so they keep
 # enforcing whatever origin a caller claims for them.
@@ -76,10 +82,29 @@ def stage_applies(request: Any) -> bool:
     return getattr(request, "origin", "") in STAGED_ORIGINS
 
 
-def stage_of(config: Optional[Mapping[str, Any]]) -> str:
-    """The project's stage: its own when configured, the stack's default when not."""
+def enforced_by_default(project: Optional[str]) -> bool:
+    """Whether an unconfigured project of this name starts in Enforce.
+
+    Read per call, as the default stage is. A pattern that does not compile is
+    read as no pattern at all and logged: a typo in a parameter must not turn
+    every project to Enforce, nor stop a verdict.
+    """
+    raw = (os.environ.get(ENFORCE_PROJECT_PATTERN_ENV) or "").strip()
+    if not raw or not project:
+        return False
+    try:
+        return re.fullmatch(raw, str(project)) is not None
+    except re.error:
+        logger.warning("%s is not a valid pattern and was ignored", ENFORCE_PROJECT_PATTERN_ENV)
+        return False
+
+
+def stage_of(config: Optional[Mapping[str, Any]], project: Optional[str] = None) -> str:
+    """The project's stage: its own when configured; when not, Enforce if its name asks for it, else the default."""
     if config and config.get("stage") in STAGES:
         return str(config["stage"])
+    if enforced_by_default(project):
+        return ENFORCE
     return default_hook_stage()
 
 
