@@ -274,13 +274,13 @@
     @media (min-width: 768px) { .tf-steps { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
     .tf-step-card { display: flex; flex-direction: column; gap: 10px; padding: 20px; min-width: 0; }
     .tf-step-top { display: flex; align-items: center; gap: 12px; }
-    .tf-step-icon { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; flex-shrink: 0; border-radius: 12px; background: var(--tf-accent-soft); border: 1px solid rgba(139, 92, 246, 0.3); color: var(--tf-accent-text); }
+    .tf-step-icon { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; flex-shrink: 0; border-radius: 12px; background: var(--tf-accent-soft); border: 1px solid color-mix(in srgb, var(--tf-accent) 30%, transparent); color: var(--tf-accent-text); }
     .tf-step-icon .tf-icon { width: 20px; height: 20px; }
     .tf-step-kicker { font: 600 var(--tf-fs-micro)/1rem var(--tf-font-sans); letter-spacing: var(--tf-track-caps); text-transform: uppercase; color: var(--tf-text-3); }
     .tf-step-card h3 { margin: 0; font: 600 1.0625rem/1.5rem var(--tf-font-sans); letter-spacing: -0.01em; color: var(--tf-text); }
     .tf-step-card p { margin: 0; font-size: var(--tf-fs-small); line-height: 1.375rem; color: var(--tf-text-2); }
 
-    .tf-diagram { margin: var(--tf-space-2) 0 0; padding: 20px 16px 16px; }
+    .tf-diagram { margin: var(--tf-space-2) 0 0; padding: 20px 8px 16px; }
     @media (min-width: 640px) { .tf-diagram { padding: 28px 24px 20px; } }
     .tf-diagram svg { display: block; width: 100%; height: auto; margin: 0 auto; overflow: visible; }
     /* One diagram, drawn for the width it has: across on a desk, down on a phone. */
@@ -290,16 +290,21 @@
       .tf-diagram svg.tf-diagram-wide { display: block; max-width: 1040px; }
       .tf-diagram svg.tf-diagram-narrow { display: none; }
     }
-    .tf-diagram figcaption { margin: 16px auto 0; max-width: 60rem; text-align: center; font-size: 0.8125rem; line-height: 1.25rem; color: var(--tf-text-3); }
+    .tf-diagram figcaption { margin: 16px auto 0; padding: 0 8px; max-width: 60rem; text-align: center; font-size: 0.8125rem; line-height: 1.25rem; color: var(--tf-text-3); }
+    @media (min-width: 640px) { .tf-diagram figcaption { padding: 0; } }
+    /* A narrow drawing is 340 units wide and drawn a little narrower than that
+       on a phone, so its words are set larger to land at 12 px or more. */
+    .tf-diagram-narrow .dg-title { font-size: 15px; }
+    .tf-diagram-narrow .dg-sub, .tf-diagram-narrow .dg-label { font-size: 13px; }
     .dg-node { fill: var(--tf-surface-2); stroke: var(--tf-hairline-strong); stroke-width: 1; }
-    .dg-node-accent { fill: rgba(139, 92, 246, 0.12); stroke: var(--tf-accent-line); }
+    .dg-node-accent { fill: color-mix(in srgb, var(--tf-accent) 12%, transparent); stroke: var(--tf-accent-line); }
     .dg-node-quiet { fill: var(--tf-inset); stroke: var(--tf-hairline-strong); stroke-dasharray: 4 3; }
     .dg-title { fill: var(--tf-text); font: 600 14px var(--tf-font-sans); letter-spacing: -0.01em; }
     .dg-sub { fill: var(--tf-text-3); font: 400 12px var(--tf-font-sans); }
-    .dg-edge { fill: none; stroke: #6b7594; stroke-width: 1.5; }
+    .dg-edge { fill: none; stroke: var(--tf-text-4); stroke-width: 1.5; }
     .dg-edge-accent { stroke: var(--tf-accent); }
     .dg-edge-back { stroke-dasharray: 5 4; }
-    .dg-head { fill: #6b7594; }
+    .dg-head { fill: var(--tf-text-4); }
     .dg-head-accent { fill: var(--tf-accent); }
     .dg-label { fill: var(--tf-text-2); font: 500 11.5px var(--tf-font-sans); }
     .dg-label-accent { fill: var(--tf-accent-text); }
@@ -318,7 +323,7 @@
     .tf-stage p { margin: 0; font-size: 0.8125rem; line-height: 1.25rem; color: var(--tf-text-2); }
     .tf-stage-observe .tf-stage-name .tf-icon { color: var(--tf-observed-text); }
     .tf-stage-review .tf-stage-name .tf-icon { color: var(--tf-info-text); }
-    .tf-stage-enforce { border-color: var(--tf-accent-line); background: rgba(139, 92, 246, 0.08); }
+    .tf-stage-enforce { border-color: var(--tf-accent-line); background: color-mix(in srgb, var(--tf-accent) 8%, transparent); }
     .tf-stage-enforce .tf-stage-name .tf-icon { color: var(--tf-accent-text); }
     /* The arrow from one stop to the next: down on a phone, across on a desk. */
     .tf-stage:not(:last-child)::after {
@@ -354,7 +359,8 @@
     .tf-agents-note { margin: var(--tf-space-1h) 0 0; max-width: 64rem; font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-3); }
 
     /* ------------------------------------------------------- built on AWS */
-    .tf-aws-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; margin-top: 16px; }
+    .tf-aws-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; margin-top: 16px; padding: 0 8px; }
+    @media (min-width: 640px) { .tf-aws-foot { padding: 0; } }
     .tf-aws-foot p { margin: 0; max-width: 52rem; font-size: 0.8125rem; line-height: 1.25rem; color: var(--tf-text-3); }
 
     /* ------------------------------------------------------ watch the gates */
@@ -421,13 +427,13 @@
     @media (min-width: 480px) { .tf-invariants { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
     .tf-invariant { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; border-radius: var(--tf-radius); background: var(--tf-inset); border: 1px solid var(--tf-hairline); font-size: 0.75rem; line-height: 1rem; color: var(--tf-text-2); }
     .tf-inv-value { font: 600 0.6875rem/1rem var(--tf-font-mono); color: var(--tf-text-3); white-space: nowrap; }
-    .tf-explain { padding: 12px 14px; border-radius: var(--tf-radius-md); background: var(--tf-accent-soft); border: 1px solid rgba(139, 92, 246, 0.28); font-size: 0.8125rem; line-height: 1.3125rem; color: var(--tf-text-2); overflow-wrap: anywhere; }
+    .tf-explain { padding: 12px 14px; border-radius: var(--tf-radius-md); background: var(--tf-accent-soft); border: 1px solid color-mix(in srgb, var(--tf-accent) 28%, transparent); font-size: 0.8125rem; line-height: 1.3125rem; color: var(--tf-text-2); overflow-wrap: anywhere; }
     .tf-explain strong { color: var(--tf-accent-text); font-weight: 600; }
     .tf-fix { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: var(--tf-radius-md); background: var(--tf-inset); border: 1px solid var(--tf-hairline); font-size: 0.8125rem; line-height: 1.25rem; color: var(--tf-text-2); overflow-wrap: anywhere; }
     .tf-fix p, .tf-fix ol { margin: 0; }
     .tf-fix ol { padding-left: 20px; color: var(--tf-text-3); }
     .tf-fix-path { font: 400 0.6875rem/1rem var(--tf-font-mono); color: var(--tf-text-3); }
-    .tf-fix pre { margin: 0; padding: 8px 10px; border-radius: var(--tf-radius); background: var(--tf-ink-0); border: 1px solid var(--tf-hairline); font: 400 0.6875rem/1.125rem var(--tf-font-mono); color: #dde1ea; white-space: pre; overflow-x: auto; }
+    .tf-fix pre { margin: 0; padding: 8px 10px; border-radius: var(--tf-radius); background: var(--tf-ink-0); border: 1px solid var(--tf-hairline); font: 400 0.6875rem/1.125rem var(--tf-font-mono); color: var(--tf-text); white-space: pre; overflow-x: auto; }
     .tf-cert { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border-radius: var(--tf-radius-md); background: var(--tf-approved-soft); border: 1px solid var(--tf-approved-line); }
     .tf-cert p { margin: 0; font: 400 0.75rem/1.125rem var(--tf-font-mono); color: var(--tf-text-2); overflow-wrap: anywhere; }
     .tf-cert .tf-cert-note { font-family: var(--tf-font-sans); font-size: 0.6875rem; color: var(--tf-text-3); padding-top: 6px; border-top: 1px solid var(--tf-approved-line); }
@@ -780,7 +786,7 @@
           <text class="dg-sub" x="81" y="435" text-anchor="middle">the ledger</text>
           <rect class="dg-node" x="179" y="387" width="160" height="64" rx="14"/>
           <text class="dg-title" x="259" y="415" text-anchor="middle">Amazon Bedrock</text>
-          <text class="dg-sub" x="259" y="435" text-anchor="middle">explains, never decides</text>
+          <text class="dg-sub" x="259" y="435" text-anchor="middle">explains only</text>
           <rect class="dg-node" x="30" y="491" width="280" height="64" rx="14"/>
           <text class="dg-title" x="170" y="519" text-anchor="middle">EventBridge Scheduler</text>
           <text class="dg-sub" x="170" y="539" text-anchor="middle">runs the synthetic demo fleet</text>
@@ -2406,7 +2412,7 @@
         return {
           label: c.label,
           value: isTf && sum.k === 0 ? h`<span class="tf-good">${T.icon('check', 13)} ${sum.k} of ${sum.n}</span>` : h`${sum.k} of ${sum.n}`,
-          segments: [{ value: sum.k, label: 'runs in which a rule-breaking write landed', color: isTf ? T.COLORS.accent : '#818ba5' }]
+          segments: [{ value: sum.k, label: 'runs in which a rule-breaking write landed', color: isTf ? T.COLORS.accent : T.COLORS.axis }]
         };
       }), { max: max, title: 'Runs in which a rule-breaking write landed, by condition' });
       // The price is stated with the result, and beside it what the agents

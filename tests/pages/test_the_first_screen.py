@@ -931,3 +931,11 @@ def test_a_scenario_pressed_on_a_phone_brings_its_result_into_view(tmp_path: Pat
     still = run("index.html", scenario, tmp_path,
                 before=DEMO_DOM + "globalThis.matchMedia = q => ({ matches: q.indexOf('reduce') !== -1 });\n")
     assert still["below"] == [{"behavior": "auto", "block": "start"}], "A reader who asked for less motion is taken there without a glide"
+
+
+def test_the_page_draws_only_in_the_design_systems_colours() -> None:
+    """Every colour on the first screen is a token of assets/threefold.css, or a mix of one."""
+    style = _style()
+    assert not re.findall(r"#[0-9a-fA-F]{3,8}\b|rgba?\(", style), "A colour written outside the tokens"
+    script = page_source("index.html").split("<script>", 2)[2]
+    assert not re.search(r"color:\s*'#", script), "A chart colour written outside T.COLORS"
