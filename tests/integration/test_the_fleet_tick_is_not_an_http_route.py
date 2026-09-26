@@ -78,6 +78,9 @@ PATHS = sorted(_router_paths())
 def ticks(monkeypatch) -> List[Any]:
     """Every tick that starts, recorded instead of run, on a store of the test's own."""
     started: List[Any] = []
+    # A stack that runs the fleet, so only the handler's own guard stands
+    # between an HTTP request and a tick.
+    monkeypatch.setenv(demo_fleet.rollups.DEMO_FLEET_ENV, "true")
     monkeypatch.setattr(api_handlers, "_evaluator", GovernanceEvaluator(session_repo=DynamoDBSessionRepository()))
     monkeypatch.setattr(demo_fleet, "run_tick", lambda evaluator, **kwargs: started.append(evaluator) or {"calls": 0})
     return started
@@ -222,6 +225,7 @@ def test_the_local_server_cannot_start_a_tick_either(server, ticks, method: str,
 @pytest.fixture
 def a_store(monkeypatch):
     monkeypatch.delenv("DEFAULT_HOOK_STAGE", raising=False)
+    monkeypatch.setenv(demo_fleet.rollups.DEMO_FLEET_ENV, "true")
     evaluator = GovernanceEvaluator(session_repo=DynamoDBSessionRepository())
     monkeypatch.setattr(api_handlers, "_evaluator", evaluator)
     return evaluator

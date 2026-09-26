@@ -211,6 +211,10 @@ Globals:
         PUBLIC_READS: !Ref PublicReads
         DEFAULT_HOOK_STAGE: !Ref DefaultHookStage
         ENFORCE_PROJECT_PATTERN: !Ref EnforceProjectPattern
+        # 'true' only where the schedule runs the synthetic fleet: the six
+        # fleet projects are counted as synthetic there and nowhere else, and
+        # a tick event reaching any other stack writes nothing.
+        DEMO_FLEET: !Ref DemoFleet
         # Empty unless an edge is deployed in front of this stack; the
         # middleware then ignores every header only the edge may set.
         THREEFOLD_EDGE_SECRET: !Ref EdgeOriginSecret

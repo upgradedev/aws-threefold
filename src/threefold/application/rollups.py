@@ -12,6 +12,7 @@ so are `stage:<stage>`, `hook_mode:<mode>`, `last_seen` and `last:<rule_key>`.
 from __future__ import annotations
 
 import datetime
+import os
 from collections import Counter
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
@@ -53,7 +54,10 @@ def is_sandbox(project: Any) -> bool:
 # runs on the public stack, `sandbox` a visitor's sandbox, and `other`
 # everything else: the service's own probes, the demo's page calls, and on a
 # private stack the governed repositories themselves. The fleet's projects are
-# these six names exactly; `Acme-Ledger-2` or `Acme-Payments-Internal` is other.
+# these six names exactly, and only on a stack that runs the fleet (DEMO_FLEET,
+# the template's DemoFleet parameter): elsewhere a team may call its own
+# repository Acme-Payments, as the installer's examples do, and its calls are
+# not synthetic. `Acme-Ledger-2` or `Acme-Payments-Internal` is other anywhere.
 FLEET = "fleet"
 SANDBOX = "sandbox"
 OTHER = "other"
@@ -68,11 +72,22 @@ FLEET_PROJECTS = (
 )
 
 
+# Set by the template from its DemoFleet parameter: "true" where the schedule
+# runs the fleet, "false" (or unset, as off AWS) everywhere else. Read per
+# call, as the stack's other settings are.
+DEMO_FLEET_ENV = "DEMO_FLEET"
+
+
+def fleet_runs_here() -> bool:
+    """Whether this stack runs the synthetic fleet: its DemoFleet parameter is true."""
+    return os.environ.get(DEMO_FLEET_ENV, "").strip().lower() == "true"
+
+
 def source_of(project: Any) -> str:
-    """fleet, sandbox or other: where a project's calls come from, read off its name."""
+    """fleet, sandbox or other: where a project's calls come from, read off its name and the stack."""
     if is_sandbox(project):
         return SANDBOX
-    if str(project or "") in FLEET_PROJECTS:
+    if str(project or "") in FLEET_PROJECTS and fleet_runs_here():
         return FLEET
     return OTHER
 
