@@ -2204,20 +2204,56 @@
   .tf-try-lane .tf-try-calls { flex-direction: row; flex-wrap: wrap; gap: 10px 16px; }
   .tf-try-lane .tf-try-calls::before { display: none; }
   .tf-try-lane .tf-try-call { flex: 1 1 13rem; }
-  .tf-try-lane .tf-try-ghosts { flex-direction: row; }
-  .tf-try-lane .tf-try-ghost { flex: 1 1 0; }
 }
 .tf-try-lane { min-width: 0; padding: 14px; background: var(--tf-inset); border: 1px solid var(--tf-hairline); border-radius: var(--tf-radius-md); }
 .tf-try-lane-head { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; }
 .tf-try-lane-name { font: 600 0.875rem/1.25rem var(--tf-font-sans); color: var(--tf-text); }
 .tf-try-lane-count { margin-left: auto; font: 500 0.75rem/1rem var(--tf-font-mono); color: var(--tf-text-3); }
 .tf-try-lane-empty { margin: 10px 0 0; font-size: 0.75rem; line-height: 1rem; color: var(--tf-text-3); }
-.tf-try-ghosts { display: flex; flex-direction: column; gap: 8px; }
-.tf-try-ghost { display: block; height: 40px; border-radius: 10px; border: 1px dashed rgba(138, 147, 171, 0.3); box-sizing: border-box; }
-@media (max-width: 767px) { .tf-try-ghost:nth-child(n+2) { display: none; } }
+.tf-try-lane[data-waiting] .tf-try-lane-count { font-family: var(--tf-font-sans); }
+.tf-try-ghost .tf-try-call-dot { border-style: dashed; border-color: var(--tf-hairline-strong); }
+.tf-try-ghost .tf-try-call-body { gap: 7px; padding-top: 5px; }
+.tf-try-ghost-bar { display: block; height: 6px; max-width: 100%; border-radius: 3px; background: var(--tf-surface-3); }
+@media (max-width: 639px) { .tf-try-ghost:nth-child(n+2) { display: none; } }
 .tf-try-legend { margin: 0; display: flex; flex-wrap: wrap; gap: 8px 20px; font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-3); }
 .tf-try-legend > span { display: inline-flex; align-items: center; gap: 8px; }
-.tf-try-ghost.tf-skeleton { border: 0; }
+
+.tf-try-peeks { display: flex; flex-direction: column; gap: 10px; }
+.tf-try-peeks .tf-try-group { margin: 0; }
+.tf-try-peek-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 640px) { .tf-try-peek-list { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; } }
+@media (min-width: 1180px) { .tf-try-peek-list { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.tf-try-peek { display: grid; grid-template-columns: 8.5rem minmax(0, 1fr); gap: 12px; align-items: center; min-width: 0; padding: 10px; box-sizing: border-box;
+  background: var(--tf-inset); border: 1px solid var(--tf-hairline); border-radius: var(--tf-radius-md); }
+@media (min-width: 640px) { .tf-try-peek { grid-template-columns: minmax(0, 1fr); align-items: stretch; align-content: start; gap: 12px; padding: 12px; } }
+.tf-try-peek-art { display: flex; align-items: center; justify-content: center; height: 68px; padding: 0 8px; box-sizing: border-box; overflow: hidden;
+  border-radius: 10px; background: var(--tf-surface-1); border: 1px solid var(--tf-hairline); }
+.tf-try-peek-words { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.tf-try-peek-name { display: flex; align-items: center; gap: 8px; font: 600 0.8125rem/1.25rem var(--tf-font-sans); color: var(--tf-text); }
+.tf-try-peek-n { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; flex-shrink: 0; box-sizing: border-box; border-radius: 99px;
+  font: 600 0.6875rem/1 var(--tf-font-sans); color: var(--tf-text-3); border: 1px solid var(--tf-hairline-strong); }
+.tf-try-peek-text { font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-3); }
+.tf-try-peek-flag { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; width: 100%; padding: 2px 0 2px 10px; box-sizing: border-box; box-shadow: inset 2px 0 0 var(--tf-observed); }
+.tf-try-peek-flag .tf-try-ghost-bar { height: 5px; }
+.tf-try-peek-pair { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
+.tf-try-peek-btn { display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 9px; box-sizing: border-box; border-radius: 8px; font: 600 0.6875rem/1 var(--tf-font-sans); white-space: nowrap; }
+.tf-try-peek-btn[data-tone="good"] { background: var(--tf-approved-soft); border: 1px solid var(--tf-approved-line); color: var(--tf-approved-text); }
+.tf-try-peek-btn[data-tone="bad"] { background: var(--tf-refused-soft); border: 1px solid var(--tf-refused-line); color: var(--tf-refused-text); }
+.tf-try-peek-switch { position: relative; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; max-width: 11rem; padding: 3px; box-sizing: border-box;
+  border-radius: 10px; background: var(--tf-inset); border: 1px solid var(--tf-hairline-strong); }
+.tf-try-peek-switch > span:not(.tf-try-peek-knob) { position: relative; z-index: 1; display: inline-flex; align-items: center; justify-content: center; gap: 4px; height: 26px;
+  font: 600 0.6875rem/1 var(--tf-font-sans); color: var(--tf-text-3); }
+.tf-try-peek-switch > [data-on] { color: var(--tf-text); }
+.tf-try-peek-switch > [data-on] .tf-icon { color: var(--tf-accent-text); }
+@media (max-width: 639px) { .tf-try-peek-art { padding: 0 6px; } .tf-try-peek-switch .tf-icon, .tf-try-peek-flag .tf-chip .tf-icon { display: none; } }
+.tf-try-peek-knob { position: absolute; top: 3px; bottom: 3px; left: 50%; right: 3px; border-radius: 7px; background: var(--tf-accent-soft); border: 1px solid var(--tf-accent-line); }
+.tf-try-peek-refused { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; box-sizing: border-box; border-radius: 8px; color: var(--tf-refused-text);
+  background: var(--tf-refused-soft); border: 1px solid var(--tf-refused-line); }
+.tf-try-peek-refused-text { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 0; font: 650 0.75rem/1 var(--tf-font-sans); }
+.tf-try-peek-refused .tf-try-ghost-bar { height: 5px; background: var(--tf-refused-line); }
+.tf-try-actions .tf-try-second { flex: 1 1 100%; }
+.tf-try-second .tf-mono { overflow: hidden; text-overflow: ellipsis; }
+@media (min-width: 640px) { .tf-try-actions .tf-try-second { flex: 0 1 auto; } }
 .tf-try-calls { position: relative; list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
 .tf-try-calls::before { content: ''; position: absolute; left: 11px; top: 14px; bottom: 14px; width: 1px; background: var(--tf-hairline-strong); }
 .tf-try-call { position: relative; display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
@@ -2423,6 +2459,7 @@
 @media (prefers-reduced-motion: no-preference) {
   .tf-try-enter .tf-try-stage-head { animation: tf-try-rise 420ms var(--tf-ease-out) both; }
   .tf-try-enter .tf-try-visual { animation: tf-try-rise 480ms var(--tf-ease-out) 90ms both; }
+  .tf-try-play .tf-try-peek { animation: tf-try-rise 480ms var(--tf-ease-out) both; animation-delay: calc(var(--tf-try-i, 0) * 90ms + 260ms); }
   .tf-try-entering .tf-try-step[data-state="current"] > .tf-step-num { animation: tf-try-dot 900ms var(--tf-ease-out) 1; }
   .tf-try-play .tf-try-arrive { animation: tf-try-arrive 420ms var(--tf-ease-out) both; animation-delay: calc(var(--tf-try-i, 0) * 110ms + 200ms); }
   .tf-try-play .tf-try-rise { animation: tf-try-rise 420ms var(--tf-ease-out) both; animation-delay: calc(var(--tf-try-i, 0) * 80ms + 120ms); }
@@ -2740,15 +2777,37 @@
         return html`<div class="tf-try-lanes${play.arrive ? ' tf-try-play' : ''}">
           ${agents.map(agent => {
             const mine = sorted.filter(r => r.agent === agent);
-            return html`<section class="tf-try-lane" aria-label="${agentLabel(agent)}">
-              <h3 class="tf-try-lane-head">${tryAvatar(agent)}<span class="tf-try-lane-name">${agentLabel(agent)}</span>${ready ? html`<span class="tf-try-lane-count">${plural(mine.length, 'call')}</span>` : ''}</h3>
+            return html`<section class="tf-try-lane"${ready ? '' : raw(' data-waiting')} aria-label="${agentLabel(agent)}">
+              <h3 class="tf-try-lane-head">${tryAvatar(agent)}<span class="tf-try-lane-name">${agentLabel(agent)}</span><span class="tf-try-lane-count">${ready ? plural(mine.length, 'call') : state.busy ? 'Sending its calls…' : 'Its calls land here'}</span></h3>
               ${ready
                 ? (mine.length ? html`<ol class="tf-try-calls">${mine.map(r => callItem(r, sorted.indexOf(r)))}</ol>` : html`<p class="tf-try-lane-empty">No call from this agent in the list.</p>`)
-                : html`<div class="tf-try-ghosts" aria-hidden="true">${['a', 'b', 'c'].map(() => html`<span class="${state.busy ? 'tf-skeleton ' : ''}tf-try-ghost"></span>`)}</div>
-                  <p class="tf-try-lane-empty">${state.busy ? 'Sending its calls…' : 'Its calls will land here.'}</p>`}
+                : html`<ol class="tf-try-calls tf-try-ghosts${state.busy ? ' tf-try-busy' : ''}" aria-hidden="true">${['62%', '84%', '48%'].map(w => html`<li class="tf-try-call tf-try-ghost"><span class="tf-try-call-dot"></span><span class="tf-try-call-body"><span class="tf-try-ghost-bar${state.busy ? ' tf-skeleton' : ''}" style="width:34%"></span><span class="tf-try-ghost-bar${state.busy ? ' tf-skeleton' : ''}" style="width:${w}"></span></span></li>`)}</ol>`}
             </section>`;
           })}
         </div>`;
+      }
+
+      // What the next minute holds, drawn with the pieces each step will
+      // show, before there is anything of the visitor's own to show. No
+      // figure in it: every number on the walkthrough is read from a response.
+      function peeks(play) {
+        const items = [
+          { n: 2, name: TRY_STEPS[1], text: 'The calls a rule would have stopped: who sent each, what it touched, and why.',
+            art: html`<span class="tf-try-peek-flag">${T.statusChip('observed')}<span class="tf-try-ghost-bar" style="width:78%"></span><span class="tf-try-ghost-bar" style="width:52%"></span></span>` },
+          { n: 3, name: TRY_STEPS[2], text: 'You say whether each rule was right, and spot the one false alarm.',
+            art: html`<span class="tf-try-peek-pair"><span class="tf-try-peek-btn" data-tone="good">${T.icon('check', 12)}Correct</span><span class="tf-try-peek-btn" data-tone="bad">${T.icon('x', 12)}False alarm</span></span>` },
+          { n: 4, name: TRY_STEPS[3], text: 'The rules you trust move to Enforce; a noisy one keeps observing.',
+            art: html`<span class="tf-try-peek-switch"><span class="tf-try-peek-knob"></span><span>${T.icon('eye', 12)}Observe</span><span data-on>${T.icon('shield', 12)}Enforce</span></span>` },
+          { n: 5, name: TRY_STEPS[4], text: 'The same kind of call is refused before it runs, with why and a suggested fix.',
+            art: html`<span class="tf-try-peek-refused">${T.icon('stop', 18)}<span class="tf-try-peek-refused-text"><b>Refused</b><span class="tf-try-ghost-bar" style="width:88%"></span></span></span>` }
+        ];
+        return html`<section class="tf-try-peeks${play.peeks || play.enter ? ' tf-try-play' : ''}" aria-labelledby="try-peeks-title">
+          <h3 id="try-peeks-title" class="tf-try-group">Then, in the next minute</h3>
+          <ol class="tf-try-peek-list">${items.map((p, i) => html`<li class="tf-try-peek" style="--tf-try-i:${i}">
+            <span class="tf-try-peek-art" aria-hidden="true">${p.art}</span>
+            <span class="tf-try-peek-words"><span class="tf-try-peek-name"><span class="tf-try-peek-n" aria-hidden="true">${p.n}</span>${p.name}</span><span class="tf-try-peek-text">${p.text}</span></span>
+          </li>`)}</ol>
+        </section>`;
       }
 
       function screenMake(play) {
@@ -2757,11 +2816,12 @@
             kicker: 'Step 1 of 5',
             title: 'Make a sandbox project',
             sentence: 'The stack creates a project of your own, in Observe, and sends about a dozen synthetic tool calls from Claude Code, Codex and Antigravity through the real evaluator.',
-            visual: html`${lanes(null, play)}
+            visual: html`${state.resume ? html`<div class="tf-callout tf-callout-accent tf-try-resume">${T.icon('clock', 18)}<div class="tf-callout-body"><p>You started one earlier: <span class="tf-mono tf-try-strong">${state.resume}</span>, with the labels you gave it. <button type="button" class="tf-link" data-action="try-resume">Continue with it</button> or make a new one.</p></div></div>` : ''}
+              ${lanes(null, play)}
               ${legend()}
-              ${state.resume ? html`<div class="tf-callout tf-callout-accent">${T.icon('clock', 18)}<div class="tf-callout-body"><p>You started one earlier: <span class="tf-mono tf-try-strong">${state.resume}</span>. <button type="button" class="tf-link" data-action="try-resume">Continue with it</button> or make a new one.</p></div></div>` : ''}`,
+              ${peeks(play)}`,
             foot: 'Its stage expires within a day, and the project then drops out of the overview and the project list; the calls and the labels stay in the public call lists for 30 days.',
-            actions: primary('try-create', 'Make my sandbox', 'Making your sandbox…')
+            actions: html`${primary('try-create', 'Make my sandbox', 'Making your sandbox…')}${state.resume && !state.busy ? html`<button type="button" class="tf-btn tf-btn-quiet tf-try-second" data-action="try-resume">${T.icon('clock', 16)}Continue with <span class="tf-mono">${state.resume}</span></button>` : ''}`
           };
         }
         const calls = Array.isArray(state.calls) ? state.calls : null;
@@ -3657,6 +3717,7 @@
         }
       });
 
+      state.play = { peeks: true };
       draw();
       T.whoami().then(who => {
         if (!ctx.alive()) return;
