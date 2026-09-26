@@ -1395,6 +1395,9 @@ def test_the_walkthrough_is_labelled_by_keyboard_alone(tmp_path: Path) -> None:
   out.c = press('c').prevented; await tick();
   out.afterC = Dash.tryState.cursor;
   out.focusAfterC = document.activeElement && document.activeElement.id;
+  out.describedBy = (/id="try-correct"[^>]*aria-describedby="([^"]*)"/.exec(view()) || [])[1] || '';
+  out.named = ['try-card-count', 'try-card-file', 'try-card-rule'].filter(id => view().indexOf('id="' + id + '"') !== -1);
+  out.spoken = el('live-status').textContent;
   out.typing = press('f', { target: { tagName: 'INPUT' } }).prevented;
   out.modified = press('f', { ctrlKey: true }).prevented;
   out.right = press('ArrowRight').prevented;
@@ -1415,6 +1418,9 @@ def test_the_walkthrough_is_labelled_by_keyboard_alone(tmp_path: Path) -> None:
     assert out["beforeTheStep"] is False, "A key does nothing before the labelling step"
     assert out["first"] == 0 and out["c"] is True and out["afterC"] == 1, "C labels the top call and the next one comes up"
     assert out["focusAfterC"] == "try-correct", "The keyboard stays on the stack"
+    # The button the keyboard lands on names the call it now labels, and the announcement says which is next.
+    assert out["describedBy"] == "try-card-count try-card-file try-card-rule" and len(out["named"]) == 3
+    assert out["spoken"] == "Marked Correct: src/web/domain/cart.ts. 1 of 3 labelled. Next: tests/domain/test_order_totals.py."
     assert "Keys: C correct F false alarm" in out["hint"]
     assert out["typing"] is False and out["modified"] is False, "Typing and a held modifier are left alone"
     assert out["right"] is True and out["afterRight"] == 2 and out["left"] is True and out["afterLeft"] == 1

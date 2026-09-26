@@ -3043,12 +3043,14 @@
       // The two labels for the call on top. On a desk they sit on the card;
       // on a phone they sit in the sticky bar at the foot of the screen, so
       // the thumb finds them in the same place from call to call however tall
-      // the card above is.
+      // the card above is. Either way each names the call it labels, so the
+      // keyboard landing on it after a label hears which call is next.
+      const TRY_VERDICT_NAMES = 'try-card-count try-card-file try-card-rule';
       function verdicts(row) {
         const l = state.labels[row.verdict_id];
         return html`<div class="tf-try-verdicts" role="group" aria-label="Your label for this call">
-          <button type="button" id="try-correct" class="tf-btn tf-btn-good tf-try-verdict" data-action="try-label" data-verdict="${row.verdict_id}" data-label="correct" aria-pressed="${l === 'correct' ? 'true' : 'false'}" aria-keyshortcuts="C">${T.icon('check', 20)}Correct${T.kbd('C')}</button>
-          <button type="button" id="try-false" class="tf-btn tf-btn-danger tf-try-verdict" data-action="try-label" data-verdict="${row.verdict_id}" data-label="false_alarm" aria-pressed="${l === 'false_alarm' ? 'true' : 'false'}" aria-keyshortcuts="F">${T.icon('x', 20)}False alarm${T.kbd('F')}</button>
+          <button type="button" id="try-correct" class="tf-btn tf-btn-good tf-try-verdict" data-action="try-label" data-verdict="${row.verdict_id}" data-label="correct" aria-pressed="${l === 'correct' ? 'true' : 'false'}" aria-keyshortcuts="C" aria-describedby="${TRY_VERDICT_NAMES}">${T.icon('check', 20)}Correct${T.kbd('C')}</button>
+          <button type="button" id="try-false" class="tf-btn tf-btn-danger tf-try-verdict" data-action="try-label" data-verdict="${row.verdict_id}" data-label="false_alarm" aria-pressed="${l === 'false_alarm' ? 'true' : 'false'}" aria-keyshortcuts="F" aria-describedby="${TRY_VERDICT_NAMES}">${T.icon('x', 20)}False alarm${T.kbd('F')}</button>
         </div>`;
       }
 
@@ -3109,11 +3111,11 @@
             <div class="tf-try-stack" data-behind="${Math.min(2, rest)}">
               <article class="tf-try-card" data-dir="${play.card || ''}" data-label="${l || ''}" aria-labelledby="try-card-file" aria-describedby="try-card-why">
                 <header class="tf-try-card-top">
-                  <span class="tf-try-card-count">Call ${num(i + 1)} of ${num(total)}</span>
+                  <span id="try-card-count" class="tf-try-card-count">Call ${num(i + 1)} of ${num(total)}</span>
                   <span class="tf-try-card-agent">${tryAvatar(row.agent, true)}${agentLabel(row.agent)} · <span class="tf-mono">${row.tool_name}</span></span>
                 </header>
                 <p id="try-card-file" class="tf-try-card-file">${tryPath(tryTarget(row))}</p>
-                <p class="tf-try-card-rule">${T.statusChip('observed')}<span class="tf-break">${ruleKeyOf(row)}</span></p>
+                <p id="try-card-rule" class="tf-try-card-rule">${T.statusChip('observed')}<span class="tf-break">${ruleKeyOf(row)}</span></p>
                 <p id="try-card-why" class="tf-try-card-why">${tryWhyHtml(why)}</p>
                 ${inBar ? '' : verdicts(row)}
                 <nav class="tf-try-card-nav" aria-label="Move between calls">
@@ -3817,7 +3819,9 @@
           state.cursor = next;
           state.focusId = 'try-correct';
         }
-        announce(REVIEWS[value].label + ': ' + tryTarget(row) + '. ' + labelledCount() + ' of ' + state.observed.length + ' labelled.');
+        // The call just labelled, the count, and the call now on top.
+        announce('Marked ' + REVIEWS[value].label + ': ' + tryTarget(row) + '. ' + labelledCount() + ' of ' + state.observed.length + ' labelled.'
+          + (next === -1 ? '' : ' Next: ' + tryTarget(state.observed[next]) + '.'));
         draw();
         // Kept until the service has answered, so readiness is never read
         // ahead of a label the reader has already seen land. It answers
