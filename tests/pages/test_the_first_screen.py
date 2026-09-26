@@ -431,7 +431,7 @@ def test_the_hero_asks_the_stack_once_and_shows_its_live_answer(tmp_path: Path) 
     assert "Live" in out["source"] and re.search(r"Live · \d+ ms", _text(out["source"])), "The round trip, in milliseconds under a second"
     assert out["caption"] == (
         "Judged just now by this stack through POST /evaluate-tool-call, and kept in its ledger as a page call, "
-        "which is always enforced. For an hour, this browser shows this answer again rather than adding another call."
+        "which is always enforced. A reload within an hour shows it again."
     ), "A page call is enforced where a hook's call on an observing project would only be recorded, so it is not called a hook's"
     assert "import boto3" in out["diff"] and "class User:" in out["diff"] and "src/domain/user.py" in out["call"]
     assert not out["verdictHidden"] and out["waitingHidden"]
@@ -489,8 +489,8 @@ def test_a_visit_within_the_hour_shows_the_kept_answer_and_asks_nothing(tmp_path
     assert out["heroAsked"] == [], "A reload adds no refused page call to the ledger"
     assert _text(out["source"]) == "Live · 12 min ago", "The chip says when the answer was given, not a round trip that did not happen now"
     assert out["caption"] == (
-        "Judged by this stack 12 minutes ago through POST /evaluate-tool-call, and shown again rather than asked again, "
-        "so a reload adds no call to its ledger. This browser asks afresh once the answer is an hour old."
+        "Judged by this stack 12 minutes ago through POST /evaluate-tool-call and shown again, not asked again: "
+        "a reload within an hour of it adds no call to its ledger."
     )
     assert out["dataSource"] == "live" and out["landed"] == "refused" and out["flagged"] == [True, False, False]
     assert _read(out["reason"]) == PLAIN_REASON + " " + RULE_LINE
@@ -638,7 +638,8 @@ def test_the_hero_replays_the_recorded_run_and_says_truly_why(tmp_path: Path) ->
         assert "without contacting it" not in out["caption"], f"{name}: the stack was asked"
         assert _read(out["reason"]) == PLAIN_REASON + " " + RULE_LINE, name
         assert "Refused before it was written" in out["verdict"] and out["flagged"] == [True, False, False], name
-        assert "No fix in a replay" in out["fix"] and "Checked fix" not in out["fix"] and "gate checks" not in out["fix"],             f"{name}: a replay invents no fix"
+        assert "No fix in a replay" in out["fix"] and "Checked fix" not in out["fix"] and "gate checks" not in out["fix"], name
+        assert 'href="#scenario-boundary">Scenario 3 below</a> asks the stack again' in out["fix"], f"{name}: a replay invents no fix, and says where one is asked for"
 
 
 def test_the_hero_shows_an_answer_that_is_not_a_refusal_as_what_it_is(tmp_path: Path) -> None:

@@ -378,7 +378,7 @@
     .tf-scenario:hover, button.tf-scenario:hover { border-color: var(--tf-accent-line); background: var(--tf-surface-2); transform: translateY(-1px); }
     .tf-scenario[aria-pressed="true"], button.tf-scenario[aria-pressed="true"] { border-color: var(--tf-accent); background: var(--tf-accent-soft); box-shadow: 0 0 0 3px var(--tf-accent-soft); }
     .tf-scenario-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; }
-    .tf-scenario-kicker { display: inline-flex; align-items: center; gap: 8px; min-width: 0; font: 600 var(--tf-fs-micro)/1rem var(--tf-font-sans); letter-spacing: var(--tf-track-caps); text-transform: uppercase; color: var(--tf-text-3); }
+    .tf-scenario-kicker { display: inline-flex; align-items: center; gap: 8px; min-width: 0; min-height: 20px; font: 600 var(--tf-fs-micro)/1rem var(--tf-font-sans); letter-spacing: var(--tf-track-caps); text-transform: uppercase; color: var(--tf-text-3); }
     /* The four scenarios are numbered as the README and the runbook name them;
        the adapter, which is not one of them, is not. */
     .tf-scenario-num {
@@ -1924,10 +1924,10 @@
     // came from, and for a live one what became of it in the ledger.
     function heroCaption(answer) {
       if (answer.source === 'live' && answer.kept) {
-        return 'Judged by this stack ' + heroAgo(answer.at) + ' through POST /evaluate-tool-call, and shown again rather than asked again, so a reload adds no call to its ledger. This browser asks afresh once the answer is ' + heroKeepWords() + ' old.';
+        return 'Judged by this stack ' + heroAgo(answer.at) + ' through POST /evaluate-tool-call and shown again, not asked again: a reload within ' + heroKeepWords() + ' of it adds no call to its ledger.';
       }
       if (answer.source === 'live') {
-        return 'Judged just now by this stack through POST /evaluate-tool-call, and kept in its ledger as a page call, which is always enforced. For ' + heroKeepWords() + ', this browser shows this answer again rather than adding another call.';
+        return 'Judged just now by this stack through POST /evaluate-tool-call, and kept in its ledger as a page call, which is always enforced. A reload within ' + heroKeepWords() + ' shows it again.';
       }
       return heroRecordedCaption(answer.why);
     }
@@ -2002,7 +2002,7 @@
     function heroFixHtml(answer, refused) {
       const h = T.html;
       if (answer.source !== 'live') {
-        return { tone: 'none', markup: h`<p class="tf-demo-fix-title">${T.icon('info', 16)}<span>No fix in a replay</span></p><p class="tf-demo-fix-summary">A live answer carries a checked fix with every refusal; this recording kept only the verdict and its reason.</p>` };
+        return { tone: 'none', markup: h`<p class="tf-demo-fix-title">${T.icon('info', 16)}<span>No fix in a replay</span></p><p class="tf-demo-fix-summary">A live answer carries a checked fix with every refusal; this recording kept only the verdict and its reason.</p><p class="tf-demo-fix-note"><a class="tf-link" href="#scenario-boundary">Scenario 3 below</a> asks the stack again</p>` };
       }
       if (!refused) return null;
       const fix = answer.fix;
