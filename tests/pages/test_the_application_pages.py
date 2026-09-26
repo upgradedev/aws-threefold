@@ -1376,6 +1376,62 @@ def test_the_walkthrough_is_labelled_by_keyboard_alone(tmp_path: Path) -> None:
     assert out["afterLeaving"] == 3, "The keys stop listening when the reader leaves the walkthrough"
 
 
+def test_the_walkthrough_escapes_every_value_the_service_sends(tmp_path: Path) -> None:
+    """Every string the walkthrough shows from a response is escaped, on every step.
+
+    The rows, the readiness, the promotion's answer, the rule the replay is
+    built from and the refusal all carry markup that would run if it were
+    written as markup; the screens are read at each step, the climax and the
+    completion included.
+    """
+    out = dash(
+        r"""
+  const P = 'Acme-Sandbox-0a1b2c3d';
+  const evilRow = i => row(i, { project_name: P, tool_name: EVIL, target: EVIL, observed_target: EVIL, reason: EVIL, observed_reason: EVIL,
+    rule_key: EVIL, observed_rules: [EVIL], observed_rule: EVIL, agent: EVIL, session_id: EVIL });
+  const rows = [evilRow(1), evilRow(2)];
+  answer = api({
+    'POST /api/sandbox': { status: 200, body: { project: P, calls_seeded: 2 } },
+    ['/api/projects/' + P]: { status: 200, body: { project: P, config: { stage: 'observe' }, readiness: { rules: [
+      { rule_key: EVIL, kind: EVIL, state: EVIL, recommendation: EVIL, would_refuse: 2, correct: 1, false_alarms: 1, unreviewed: 0 }
+    ] } } },
+    '/api/decisions': { status: 200, body: { items: rows, next_cursor: null } },
+    ['POST /api/projects/' + P + '/reviews']: { status: 200, body: { updated: 1, skipped: [] } },
+    ['POST /api/projects/' + P + '/promote']: { status: 200, body: { project: P, config: { stage: 'enforce', observe_rules: [EVIL] } } },
+    '/api/decision': { status: 200, body: { decision: rows[0], session: null, rule: { id: EVIL, forbid_imports: [EVIL] } } },
+    'POST /evaluate-tool-call': { status: 200, body: { status: EVIL, reason: EVIL, bedrock_explanation: EVIL, explanation_source: 'bedrock', project_stage: EVIL,
+      suggested_fix: { kind: EVIL, summary: EVIL, steps: [EVIL], writes: [{ path: EVIL, content: EVIL, new_file: true }], validated: true, checks: [{ gate: EVIL, path: EVIL, passed: true }] } } }
+  });
+  out.screens = {};
+  await visit('#/try');
+  await click('try-create'); await tick();
+  out.screens.arrived = view();
+  await click('try-show'); await tick();
+  out.screens.cards = view();
+  await click('try-review'); await tick();
+  out.screens.stack = view();
+  await click('try-label', { 'data-verdict': 'VERDICT-1', 'data-label': 'correct' }); await tick();
+  await click('try-label', { 'data-verdict': 'VERDICT-2', 'data-label': 'false_alarm' }); await tick();
+  await click('try-readiness'); await tick();
+  Dash.tryState.selected = new Set([EVIL]);
+  await click('try-promote'); await tick();
+  out.screens.promoted = view();
+  await click('try-next'); await tick();
+  out.screens.send = view();
+  await click('try-send'); await tick();
+  out.screens.climax = view();
+  out.sent = calls.filter(c => c.url.indexOf('/evaluate-tool-call') !== -1).pop().body;
+  await click('try-finish'); await tick();
+  out.screens.done = view();
+""",
+        tmp_path,
+    )
+    for name, markup in out["screens"].items():
+        assert "<img" not in markup and "<svg onload" not in markup, f"Service data reached the {name} screen as markup"
+        assert "&lt;img" in markup, f"The hostile value was not shown on the {name} screen, so this proves nothing there"
+    assert out["sent"]["session_id"].startswith("try-"), "The replay is still a hook's call in a session the stage decides"
+
+
 def test_the_walkthrough_moves_only_for_a_reader_who_has_not_asked_for_less() -> None:
     """Every animation the walkthrough declares sits under prefers-reduced-motion: no-preference.
 
