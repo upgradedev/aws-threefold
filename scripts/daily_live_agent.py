@@ -21,7 +21,11 @@ on consecutive days and all twelve pairs come round every twelve days.
 The row goes to benchmark/results/live/<date>-<agent>.jsonl and one line is
 printed. The benchmark's own output (which names the token file's path) goes
 to daily-live.log in the run's work root, outside the repository, not to the
-terminal. A day that already has a row is not run again.
+terminal. A day whose row went its course is not run again, whether or not
+the row counts; a day whose run did not go as planned (a harness error, an
+agent that never ran, a Threefold that stopped answering) is run again when
+the script is started again that day, as the next attempt in a session of its
+own, up to three rows a day.
 
 What it refuses, before anything is created:
 - an endpoint that is not https, that carries a user name, a password, a
@@ -35,12 +39,36 @@ What it refuses, before anything is created:
 After the run it checks that the row names exactly the endpoint, project and
 session it planned, and says so if not. The public stack judges a project by
 its stage there: a project it holds in Observe has its calls recorded and
-none refused, and the row then says the run did not measure Threefold
+none refused, and a project promoted with the flagging rule still observing
+lets that call through; the row then says the run did not measure Threefold
 enforcing (governance_problem), while its calls are still on the public ledger.
 
-Exit codes: 0 a row was recorded as planned (or today's already was), 1 no
-row, a row that does not match the plan, or a harness error, 2 refused before
-running, 3 the benchmark stopped (a usage limit or a login that stopped working).
+Exit codes, the same for a new row and for one already recorded today:
+0 the day's run went its course and its row is the one planned (it counts,
+  or only the project's stage on the stack keeps it from counting, which
+  the line says);
+1 no row, a row that is not the run planned, or a run that did not go as
+  planned (started again the same day, the script runs the day again);
+2 refused before running;
+3 the benchmark stopped (a usage limit or a login that stopped working).
+
+Scheduling it with Windows Task Scheduler, once a day at 04:30 local time
+(01:30 or 02:30 UTC from Athens, so the UTC day is the local one), as the
+owner and only while the owner is signed in; run it once by hand first, and
+point --codex-home at a folder that holds only a Codex login (the benchmark
+refuses a CODEX_HOME holding hooks.json or AGENTS.md). All on one line:
+
+    schtasks /Create /TN "Threefold\\Daily live agent" /SC DAILY /ST 04:30 /F /TR "cmd /c python
+        <repository>\\scripts\\daily_live_agent.py --endpoint https://<public stack>/ --codex-home
+        <Codex login folder> >> <a folder outside the repository>\\daily-live.txt 2>&1"
+
+To see it, start it now, stop a run in progress, pause it, or remove it:
+
+    schtasks /Query /TN "Threefold\\Daily live agent" /V /FO LIST
+    schtasks /Run /TN "Threefold\\Daily live agent"
+    schtasks /End /TN "Threefold\\Daily live agent"
+    schtasks /Change /TN "Threefold\\Daily live agent" /DISABLE     (/ENABLE to resume)
+    schtasks /Delete /TN "Threefold\\Daily live agent" /F
 """
 from __future__ import annotations
 
@@ -67,6 +95,10 @@ CONDITION = "threefold"
 LOG_NAME = "daily-live.log"
 # How a path that must not be printed is shown in the command a dry run prints.
 TOKEN_FILE_SHOWN = "<token file>"
+CODEX_HOME_SHOWN = "with CODEX_HOME set to the Codex home given"
+# How many runs one day may have: a run that did not go as planned (a harness error, an agent that never ran, a
+# Threefold that stopped answering) is run again when the script is started again that day, up to this many rows.
+MAX_RUNS_PER_DAY = 3
 
 
 class Refused(Exception):
@@ -142,7 +174,12 @@ def run_arguments(pick: Pick, endpoint: str, results_dir: Path, work_root: Path,
 
 
 def shown_command(arguments: Sequence[str], codex_home: bool = False) -> str:
-    """The command a dry run prints: the token file's path is not printed, and neither is the Codex home."""
+    """The command a dry run prints: the token file's path is not printed, and neither is the Codex home.
+
+    The run is made in this process, with CODEX_HOME set for it alone, so the
+    Codex home is said in words after the command rather than as a shell's
+    variable prefix, which cmd and PowerShell would not take.
+    """
     shown: List[str] = []
     hide_next = False
     for item in arguments:
@@ -152,8 +189,8 @@ def shown_command(arguments: Sequence[str], codex_home: bool = False) -> str:
             continue
         hide_next = item == "--token-file"
         shown.append(f'"{item}"' if " " in item else item)
-    prefix = "CODEX_HOME=<the Codex home given> " if codex_home else ""
-    return prefix + " ".join(["python", "benchmark/run.py", *shown])
+    command = " ".join(["python", "benchmark/run.py", *shown])
+    return command + (f" ({CODEX_HOME_SHOWN})" if codex_home else "")
 
 
 def read_rows(path: Path) -> List[Dict[str, Any]]:
@@ -193,6 +230,38 @@ def _environment(name: str, value: Optional[str]):
             os.environ[name] = before
 
 
+def day_outcome(row: Mapping[str, Any], pick: Pick, endpoint: str) -> Tuple[int, str, bool]:
+    """What a recorded row means for the day: (exit code, a note, whether another run today may put it right).
+
+    0 when the run went its course and the row is the one planned: it
+    counts, or the only thing that keeps it from counting is the stage the
+    public stack judged it under (a project in Observe, or promoted with the
+    flagging rule still observing; the line says so). Running again would be
+    judged the same way until someone promotes the project there, and the
+    day's agent session is on the public ledger either way.
+    3 when the benchmark stopped: a usage limit that outlasted its retry, or a
+    login that stopped working.
+    1 for anything else: a row that is not the run planned (never run again,
+    it would be the same), or a run that did not go as planned (a harness
+    error, an agent that never ran, a Threefold that stopped answering or
+    could not be read, a hook that failed), which another run may put right.
+    Both paths use this, a new row and one already recorded, so a day that
+    failed never reads as done.
+    """
+    problem = mismatch(row, pick, endpoint)
+    if problem:
+        return 1, f"the recorded row is not the run planned: {problem}", False
+    stopped = run.stop_reason(row)
+    if stopped:
+        return run.STOPPED_EXIT_CODE, f"the benchmark stopped: {stopped}", True
+    if report.is_valid(row):
+        return 0, "", False
+    reason = report.invalid_reason(row)
+    if reason == harness.stage_problem(row):
+        return 0, "", False
+    return 1, f"the run did not go as planned: {reason}", True
+
+
 def run_live(pick: Pick, endpoint: str, results_dir: Path = LIVE_RESULTS_DIR, work_root: Optional[Path] = None,
              token_file: Optional[Path] = None, codex_home: Optional[Path] = None, claude: Optional[str] = None,
              codex: Optional[str] = None, retry_pause: Optional[float] = None) -> Tuple[int, Optional[Dict[str, Any]], str]:
@@ -201,17 +270,32 @@ def run_live(pick: Pick, endpoint: str, results_dir: Path = LIVE_RESULTS_DIR, wo
     `endpoint` is taken as given: main() is where it is checked to be https.
     The benchmark's output goes to the log in the work root. The note is
     empty, or says why the exit code is not 0.
+
+    A day that already has a row is not run again when that row went its
+    course (day_outcome), and the exit code is the one that row earned. When
+    it did not, the day is run again, as the benchmark's resume of the same
+    run id (the next attempt, in a session of its own), until the day has
+    MAX_RUNS_PER_DAY rows.
     """
     results = Path(results_dir) / f"{pick.run_id}.jsonl"
     earlier = read_rows(results)
     if earlier:
-        return 0, earlier[-1], f"already recorded today, in {results.name}; delete that file to run again"
+        code, note, again = day_outcome(earlier[-1], pick, endpoint)
+        if not again:
+            return code, earlier[-1], f"already recorded today, in {results.name}" + (f"; {note}" if note else "")
+        if len(earlier) >= MAX_RUNS_PER_DAY:
+            return code, earlier[-1], (f"today already has {len(earlier)} rows in {results.name} and the last did not "
+                                       f"go as planned, so it is not run again today; {note}")
     work_root = Path(work_root) if work_root is not None else run.default_work_root(pick.run_id)
     try:
         harness.ensure_outside_workspace(work_root)
     except ValueError as error:
         return 2, None, f"refused: {error}"
     arguments = run_arguments(pick, endpoint, Path(results_dir), work_root, token_file, claude, codex, retry_pause)
+    if earlier:
+        # The benchmark's own resume: the same run id, the next attempt, and its checks that nothing about the
+        # login, the isolation or the endpoint changed since the day's first row.
+        arguments[arguments.index("--run-id")] = "--resume"
     work_root.mkdir(parents=True, exist_ok=True)
     log = work_root / LOG_NAME
     with open(log, "a", encoding="utf-8") as handle, contextlib.redirect_stdout(handle), \
@@ -225,16 +309,13 @@ def run_live(pick: Pick, endpoint: str, results_dir: Path = LIVE_RESULTS_DIR, wo
         except Exception as error:  # noqa: BLE001 - said in the log and the line, never as a traceback on the terminal
             print(f"the benchmark failed: {type(error).__name__}: {error}")
             code = 1
-    rows = read_rows(results)
-    row = rows[-1] if rows else None
-    if row is None:
+    added = read_rows(results)[len(earlier):]
+    if not added:
         return (code or 1), None, f"no row was recorded (benchmark exit {code}); see {log}"
-    problem = mismatch(row, pick, endpoint)
-    if problem:
-        return 1, row, f"the recorded row is not the run planned: {problem}"
-    if row.get("harness_error"):
-        return (code or 1), row, f"see {log}"
-    return code, row, "" if code == 0 else f"the benchmark stopped (exit {code}); see {log}"
+    row = added[-1]
+    outcome, note, _ = day_outcome(row, pick, endpoint)
+    outcome = outcome or code
+    return outcome, row, "" if outcome == 0 else (note or f"the benchmark exited {code}") + f"; see {log}"
 
 
 def _plural(count: int, word: str) -> str:
@@ -325,10 +406,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         arguments = run_arguments(pick, endpoint, args.results_dir, work_root, args.token_file, args.claude,
                                   args.codex, args.retry_pause)
         results = Path(args.results_dir) / f"{pick.run_id}.jsonl"
-        print(f"live {pick.date}: {pick.agent} on {pick.task}, project {pick.project}, session {pick.session}, "
-              f"against {endpoint}")
+        earlier = read_rows(results)
+        again = bool(earlier) and day_outcome(earlier[-1], pick, endpoint)[2] and len(earlier) < MAX_RUNS_PER_DAY
+        if again:
+            arguments[arguments.index("--run-id")] = "--resume"
+        print(f"live {pick.date}: {pick.agent} on {pick.task}, project {pick.project}, session {pick.session} "
+              f"(or the next free -a<n>), against {endpoint}")
         print("would run: " + shown_command(arguments, bool(args.codex_home and pick.agent == "codex")))
-        if read_rows(results):
+        if again:
+            print(f"(today already has {len(earlier)} row(s) in {results.name} and the last did not go as planned, so "
+                  "a real run would run the day again)")
+        elif earlier:
             print(f"(a row for this day is already in {results.name}, so a real run would do nothing)")
         return 0
     code, row, note = run_live(pick, endpoint, args.results_dir, work_root, args.token_file, args.codex_home,

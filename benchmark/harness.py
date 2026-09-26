@@ -1746,23 +1746,40 @@ def governance_problem(condition: str, row: Mapping[str, Any]) -> Optional[str]:
                 "(it fails open)")
     if int(row.get("hook_errors") or 0):
         return f"the hook failed {row['hook_errors']} time(s), letting those calls through"
-    if remote:
-        observed = int((ledger.get("stages") or {}).get("observe") or 0)
-        if observed or (not ledger.get("decisions") and row.get("project_stage_cached") == "observe"):
-            counted = f"{observed} of this run's {ledger.get('decisions')} call(s)" if observed else "this run's calls"
-            return (f"the remote Threefold judged {counted} in Observe (the project {ledger.get('project')} is not "
-                    "promoted there), so it recorded what it would have refused and refused nothing: this run did "
-                    "not measure Threefold enforcing")
-        watched = int(ledger.get("would_refuse") or 0)
-        if watched:
-            rules = sorted(ledger.get("would_refuse_by_rule_key") or {}) or ["a rule"]
-            return (f"the remote Threefold let {watched} of this run's call(s) through that {', '.join(rules)} would "
-                    f"have refused, because the project {ledger.get('project')} is promoted there with "
-                    f"{'that rule' if len(rules) == 1 else 'those rules'} still observing: this run did not measure "
-                    "Threefold enforcing")
+    staged = stage_problem(row) if remote else None
+    if staged:
+        return staged
     if int(row.get("governed_calls") or 0) and not row.get("governance_observed") and row.get("hook_fired"):
         return (f"the hook ran on the agent's {row['governed_calls']} governed call(s), but no decision reached the "
                 f"{'remote ' if remote else ''}ledger and nothing was refused")
+    return None
+
+
+def stage_problem(row: Mapping[str, Any]) -> Optional[str]:
+    """Why a remote run measured Threefold watching, not enforcing, from the stage the stack judged it under, or None.
+
+    Its own question beside governance_problem's others, because it is the one
+    a second run the same day cannot change: the stack would judge it the same
+    way again until someone promotes the project there (see
+    scripts/daily_live_agent.py). Every other reason a remote run falls short
+    is a failure of the run itself.
+    """
+    if row.get("ledger_source") != "remote":
+        return None
+    ledger = row.get("ledger") or {}
+    observed = int((ledger.get("stages") or {}).get("observe") or 0)
+    if observed or (not ledger.get("decisions") and row.get("project_stage_cached") == "observe"):
+        counted = f"{observed} of this run's {ledger.get('decisions')} call(s)" if observed else "this run's calls"
+        return (f"the remote Threefold judged {counted} in Observe (the project {ledger.get('project')} is not "
+                "promoted there), so it recorded what it would have refused and refused nothing: this run did "
+                "not measure Threefold enforcing")
+    watched = int(ledger.get("would_refuse") or 0)
+    if watched:
+        rules = sorted(ledger.get("would_refuse_by_rule_key") or {}) or ["a rule"]
+        return (f"the remote Threefold let {watched} of this run's call(s) through that {', '.join(rules)} would "
+                f"have refused, because the project {ledger.get('project')} is promoted there with "
+                f"{'that rule' if len(rules) == 1 else 'those rules'} still observing: this run did not measure "
+                "Threefold enforcing")
     return None
 
 
