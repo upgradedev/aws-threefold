@@ -609,8 +609,42 @@ function flagged(i, project) {
   return row(i, { project_name: project, rule_key: 'python-domain-stays-pure', observed_rule: 'python-domain-stays-pure',
     observed_rules: ['python-domain-stays-pure'], target: 'src/acme/domain/order_' + i + '.py', observed_target: 'src/acme/domain/order_' + i + '.py' });
 }
-function groupOrder() { return (view().match(/<h2 id="group-\d+"[\s\S]*?font-mono tf-break">[^<]+/g) || []).map(h => h.replace(/[\s\S]*>/, '')); }
+function groupOrder() { return (view().match(/<h3 id="group-\d+"[\s\S]*?font-mono tf-break">[^<]+/g) || []).map(h => h.replace(/[\s\S]*>/, '')); }
 """
+
+
+def test_a_rule_says_its_sentence_once_and_each_call_what_differs(tmp_path: Path) -> None:
+    """The queue reads by rule: the rule's sentence once, then each project's calls by file and import."""
+    out = ops(
+        KEYS
+        + QUEUE
+        + r"""
+  const said = (file, module) => "Clean Architecture violation: Layering rule 'python-domain-stays-pure' refuses this write: A Python file under domain/ may not import infrastructure or a driver. '" + file + "' imports '" + module + "', which matches '" + module + "'";
+  const layered = (i, project, module) => Object.assign(flagged(i, project), { observed_reason: said('src/acme/domain/order_' + i + '.py', module) });
+  answer = contract({
+    '/api/decisions': { status: 200, body: { items: [
+      layered(1, 'Acme-Checkout', 'boto3'), layered(2, 'Acme-Checkout', 'sqlalchemy'), layered(3, 'Acme-Ledger', 'boto3'),
+      row(4, { project_name: 'Acme-Ledger', rule_key: 'PROTECTED_PATH', observed_rules: ['PROTECTED_PATH'], observed_rule: 'PROTECTED_PATH', target: '.env', observed_target: '.env', observed_reason: "Command 'cat .env' reaches a protected path or credential store" })
+    ], next_cursor: null } }
+  });
+  await visit('#/review');
+  out.view = view();
+  out.text = text(view());
+  out.order = groupOrder();
+  out.count = text(el('view').innerHTML.split('id="review-count"')[1].split('</p>')[0]);
+""",
+        tmp_path,
+    )
+    page, words = out["view"], out["text"]
+    assert page.count('class="tf-card tf-ops-rsec"') == 2, "One section a rule, not one a project and rule"
+    assert words.count("A Python file under domain/ may not import infrastructure or a driver.") == 1, "The rule's sentence is said once"
+    assert "Layering rule 'python-domain-stays-pure' refuses this write" not in words, "The chip names the rule; its lead is not repeated"
+    assert words.count("imports boto3") == 2 and "imports sqlalchemy" in words, "Each call says what differs: its import"
+    assert "src/acme/domain/order_1.py' imports" not in words, "The file is on the row already"
+    assert "Command 'cat .env' reaches a protected path or credential store" in words, "A lone call's reason is shown whole"
+    assert out["order"] == ["Acme-Checkout", "Acme-Ledger", "Acme-Ledger"]
+    assert "4 calls waiting, under 2 rules in 2 projects" in out["count"]
+    assert page.count('data-action="label-group"') == 2, "Bulk labels only where a project holds more than one call"
 
 
 def test_the_keyboard_keeps_its_group_while_labels_change_the_counts(tmp_path: Path) -> None:

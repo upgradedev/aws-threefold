@@ -206,19 +206,40 @@
     .tf-ops-progress { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
     .tf-ops-progress .tf-ops-meter { flex: 1 1 14rem; max-width: 26rem; }
     .tf-ops-queue { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
-    .tf-ops-qrow { position: relative; display: flex; flex-direction: column; gap: 10px; padding: 12px 12px 12px 16px; margin: 0 -8px; border-radius: var(--tf-radius-md); border: 1px solid transparent; outline: none; transition: background-color var(--tf-dur-1), border-color var(--tf-dur-1); }
-    @media (min-width: 768px) { .tf-ops-qrow { flex-direction: row; align-items: flex-start; } }
-    .tf-ops-qrow + .tf-ops-qrow { margin-top: 2px; }
+    .tf-ops-qrow { position: relative; display: flex; flex-direction: column; gap: 8px; padding: 8px 10px 8px 16px; margin: 0 -10px; border-radius: var(--tf-radius-md); border: 1px solid transparent; outline: none; transition: background-color var(--tf-dur-1), border-color var(--tf-dur-1); }
+    @media (min-width: 768px) { .tf-ops-qrow { flex-direction: row; align-items: center; gap: 16px; } }
+    .tf-ops-qrow + .tf-ops-qrow { margin-top: 1px; }
     .tf-ops-qrow:hover { background: rgba(26, 34, 56, 0.45); }
     .tf-ops-qrow[data-current="true"] { background: var(--tf-accent-soft); border-color: var(--tf-accent-line); }
-    .tf-ops-qrow[data-current="true"]::before { content: ''; position: absolute; left: 4px; top: 12px; bottom: 12px; width: 3px; border-radius: 3px; background: var(--tf-accent); }
+    .tf-ops-qrow[data-current="true"]::before { content: ''; position: absolute; left: 5px; top: 9px; bottom: 9px; width: 3px; border-radius: 3px; background: var(--tf-accent); }
     .tf-ops-qrow:focus-visible { border-color: var(--tf-focus); }
-    .tf-ops-qrow-body { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 4px; }
+    .tf-ops-qrow-body { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+    .tf-ops-qrow-what { margin: 0; font-size: 0.8125rem; line-height: 1.25rem; }
+    .tf-ops-qrow-meta { margin: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-3); }
+    .tf-ops-qrow-detail { color: var(--tf-text-2); min-width: 0; }
+    .tf-ops-qrow-line { margin: 0; max-width: 90ch; font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-2); }
+    .tf-ops-code { font: 500 0.75rem/1 var(--tf-font-mono); color: var(--tf-text); background: var(--tf-surface-2); border: 1px solid var(--tf-hairline); border-radius: 4px; padding: 1px 5px; }
     .tf-ops-qrow-actions { display: flex; gap: 8px; flex-shrink: 0; }
+    /* A rule's section: its sentence once, then each project's calls under a thin line. */
+    .tf-ops-rsec { padding: 16px 16px 8px; }
+    @media (min-width: 768px) { .tf-ops-rsec { padding: 18px 20px 10px; } }
+    .tf-ops-rsec-head { display: flex; flex-direction: column; gap: 6px; padding-bottom: 12px; }
+    .tf-ops-rsec-rule { margin: 0; max-width: 82ch; font-size: 0.8125rem; line-height: 1.25rem; color: var(--tf-text-2); }
+    .tf-ops-proj { border-top: 1px solid var(--tf-hairline); padding: 8px 0 6px; }
+    .tf-ops-proj-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; min-height: 32px; padding-bottom: 2px; }
+    .tf-ops-proj-title { margin: 0; min-width: 0; display: flex; align-items: center; gap: 8px; font: 500 0.8125rem/1.25rem var(--tf-font-sans); color: var(--tf-text); }
+    .tf-ops-proj-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+    .tf-ops-proj-note { margin: 4px 0 6px; }
+    /* On a phone the bulk labels lead the project's line, and the note link takes its own. */
+    @media (max-width: 767px) {
+      .tf-ops-proj-tools { width: 100%; }
+      .tf-ops-proj-tools > .tf-ops-note-add { order: 9; flex-basis: 100%; }
+      .tf-ops-qrow-what { font-size: 0.75rem; line-height: 1.125rem; }
+    }
+    section[data-open="false"] .tf-ops-qrow-body { opacity: 0.78; }
     .tf-ops-qrow-actions .tf-kbd { margin-left: 2px; }
     .tf-ops-group-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 10px 16px; }
     .tf-ops-group-title { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font: 600 0.875rem/1.375rem var(--tf-font-sans); color: var(--tf-text); }
-    section[data-open="false"] .tf-ops-qrow-body { opacity: 0.78; }
     .tf-ops-note-add { display: inline-flex; align-items: center; gap: 6px; padding: 2px 0; border: 0; background: none; cursor: pointer; font-size: var(--tf-fs-micro); line-height: 1rem; color: var(--tf-text-3); }
     button.tf-ops-note-add { background: none; }
     .tf-ops-note-add:hover { color: var(--tf-text); }
@@ -483,6 +504,13 @@
       return html`<span class="tf-chip ${r.chip}">${r.label}</span>`;
     }
     function agentChip(agent) { return html`<span class="tf-chip tf-chip-gray">${agentLabel(agent)}</span>`; }
+    // A path or an identifier that may not fit its column breaks after a
+    // slash, a dot, a dash or an underscore, never inside a word. Every part
+    // is escaped by html``; only the break opportunities are markup.
+    function breakable(text) {
+      const parts = String(text == null ? '' : text).split(/(?<=[/._-])/);
+      return html`${parts.map((p, i) => html`${i ? raw('<wbr>') : ''}${p}`)}`;
+    }
 
     function callsHref(params) { return '#/calls' + query(params); }
     function projectHref(name) { return '#/projects/' + encodeURIComponent(name); }
@@ -2192,6 +2220,7 @@
       }
 
       function labelledCount() { return Object.keys(state.labelled).length; }
+      function distinct(list, key) { const seen = {}; list.forEach(g => { seen[g[key]] = true; }); return Object.keys(seen).length; }
 
       function signinHref() { return '#/signin' + query({ next: '/review' + query({ days, project, rule }) }); }
 
@@ -2202,7 +2231,7 @@
         const width = total ? Math.round((done / total) * 1000) / 10 : 0;
         const scope = [project && html`<span class="font-mono">${T.projectName(project)}</span>`, rule && html`rule <span class="font-mono">${rule}</span>`].filter(Boolean);
         return html`<div class="tf-ops-progress mb-3">
-          <p class="text-xs text-gray-400" id="review-count"><strong class="text-white" data-metric="unreviewed">${num(waiting)}</strong> call${waiting === 1 ? '' : 's'} waiting in ${plural(list.length, 'group')}${scope.length ? html` · ${scope}` : ''}${state.cursor && state.full ? ', and more beyond these' : ''}${done ? html` · <span class="text-emerald-300">${plural(done, 'call')} labelled on this visit</span>` : ''}.</p>
+          <p class="text-xs text-gray-400" id="review-count"><strong class="text-white" data-metric="unreviewed">${num(waiting)}</strong> call${waiting === 1 ? '' : 's'} waiting, under ${plural(distinct(list, 'rule'), 'rule')} in ${plural(distinct(list, 'project'), 'project')}${scope.length ? html` · ${scope}` : ''}${state.cursor && state.full ? ', and more beyond these' : ''}${done ? html` · <span class="text-emerald-300">${plural(done, 'call')} labelled on this visit</span>` : ''}.</p>
           ${done ? html`<span class="tf-ops-meter" data-state="${waiting ? 'part' : 'done'}" role="img" aria-label="${num(done)} of ${num(total)} labelled on this visit"><span class="tf-ops-meter-track"><span class="tf-ops-meter-fill" style="width:${width}%"></span></span><span class="tf-ops-meter-words">${num(done)}/${num(total)}</span></span>` : ''}
         </div>`;
       }
@@ -2234,30 +2263,31 @@
         </div>`;
       }
 
+      // A project's line inside a rule: who may label it, the bulk labels
+      // when it holds more than one call, and its note. A group of one call is
+      // labelled by its row's own buttons; a bulk button beside them would
+      // say the same thing twice.
       function groupActions(g) {
         if (!g.open) {
-          return html`<div class="flex flex-wrap items-center gap-2">
+          return html`<div class="tf-ops-proj-tools">
             <span class="tf-chip tf-chip-gray" title="Only the operator may label this project's calls">${T.icon('lock', 13)}Operator only</span>
             <a class="tf-btn tf-btn-quiet tf-btn-sm" href="${signinHref()}">Sign in to label</a>
           </div>`;
         }
-        // A group of one call is labelled by its row's own buttons; a bulk
-        // button beside them would say the same thing twice.
-        if (g.items.length < 2) return '';
-        return html`<div class="flex flex-wrap gap-2">
-          <button type="button" class="tf-btn tf-btn-good tf-btn-sm" data-action="label-group" data-group="${g.key}" data-label="correct">${T.icon('check', 14)}All ${g.items.length} correct</button>
-          <button type="button" class="tf-btn tf-btn-danger tf-btn-sm" data-action="label-group" data-group="${g.key}" data-label="false_alarm">All false alarm</button>
+        const noting = state.noteOpen[g.key] || state.notes[g.key];
+        return html`<div class="tf-ops-proj-tools">
+          ${noting ? '' : html`<button type="button" class="tf-ops-note-add" data-action="note-open" data-group="${g.key}"><span aria-hidden="true">+</span>Add a note to these labels</button>`}
+          ${g.items.length < 2 ? '' : html`<button type="button" class="tf-btn tf-btn-good tf-btn-sm" data-action="label-group" data-group="${g.key}" data-label="correct">${T.icon('check', 14)}All ${g.items.length} correct</button>
+          <button type="button" class="tf-btn tf-btn-danger tf-btn-sm" data-action="label-group" data-group="${g.key}" data-label="false_alarm">All false alarm</button>`}
         </div>`;
       }
 
       // A group's note, optional, sent with the labels set in it. It stays a
-      // small link until the reader asks for it or has written one, so a
-      // queue of small groups is not a column of empty fields.
+      // small link beside the project until the reader asks for it or has
+      // written one, so a queue of small groups is not a column of fields.
       function noteField(g) {
-        if (!state.noteOpen[g.key] && !state.notes[g.key]) {
-          return html`<button type="button" class="tf-ops-note-add" data-action="note-open" data-group="${g.key}"><span aria-hidden="true">+</span>Add a note to these labels</button>`;
-        }
-        return html`<label class="block"><span class="sr-only">Note for the labels you set in this group</span>
+        if (!state.noteOpen[g.key] && !state.notes[g.key]) return '';
+        return html`<label class="block tf-ops-proj-note"><span class="sr-only">Note for the labels you set in this group</span>
           <input id="note-${g.slot}" type="text" maxlength="200" class="tf-input tf-input-sm w-full md:max-w-lg" data-change="note" data-group="${g.key}" value="${state.notes[g.key] || ''}" placeholder="Optional note, sent with the labels you set in this group" /></label>`;
       }
 
@@ -2268,6 +2298,75 @@
           <button type="button" class="tf-btn tf-btn-good tf-btn-sm" data-action="label-one" data-verdict="${row.verdict_id}" data-timestamp="${row.timestamp}" data-label="correct" aria-label="Correct: ${row.tool_name} ${targetOf(row)}">Correct${hint('C')}</button>
           <button type="button" class="tf-btn tf-btn-danger tf-btn-sm" data-action="label-one" data-verdict="${row.verdict_id}" data-timestamp="${row.timestamp}" data-label="false_alarm" aria-label="False alarm: ${row.tool_name} ${targetOf(row)}">False alarm${hint('F')}</button>
         </div>`;
+      }
+
+      // The sentence every call of a rule shares, said once above its calls,
+      // and what differs call by call. A layering rule's reason is a lead
+      // ("Layering rule 'x' refuses this write:"), which the chip already
+      // names, then the rule's own description, then the file and what it
+      // imports; only that last part differs. It is found from the calls
+      // themselves: their common start cut back to a whole sentence, or,
+      // for a lone call, where its description ends. A reason that splits
+      // no way is shown whole on its row. Every part is the service's text
+      // and is escaped where it is drawn.
+      const RULE_LEAD = /^(?:Clean Architecture violation:\s*)?Layering rule '[^']*' (?:would refuse|refuses) this write:\s*/i;
+      // `rows` are a section's calls; a section of one call reads the rule's
+      // calls across the queue instead, so a lone call still finds where its
+      // rule's description ends.
+      function ruleWords(ruleKey, own) {
+        const rows = own.length > 1 ? own : state.items.filter(r => ruleKeyOf(r) === ruleKey);
+        const bodies = rows.map(r => String(reasonOf(r) || '').replace(RULE_LEAD, '').trim());
+        let shared = '';
+        if (bodies.length > 1 && bodies[0] && bodies.every(b => b === bodies[0])) shared = bodies[0];
+        if (!shared && bodies.length > 1) {
+          const first = bodies[0];
+          let n = 0;
+          while (n < first.length && bodies.every(b => b[n] === first[n])) n += 1;
+          const cut = first.slice(0, n).lastIndexOf('. ');
+          if (cut >= 20) shared = first.slice(0, cut + 1);
+        }
+        if (!shared) {
+          const heads = bodies.map(b => { const at = b.indexOf(". '"); return at > 0 ? b.slice(0, at + 1) : ''; });
+          if (heads.length && heads[0] && heads.every(h => h === heads[0])) shared = heads[0];
+        }
+        const detail = {};
+        rows.forEach((r, i) => { detail[rowKey(r)] = shared && bodies[i].indexOf(shared) === 0 ? bodies[i].slice(shared.length).trim() : bodies[i]; });
+        return { shared, detail };
+      }
+
+      // What differs, in a reader's words: the file is already on the row
+      // above, so it is not said twice, and an import is set as code.
+      // The ledger keeps a reason up to a length, so the pattern an import
+      // matched can be cut short; the import is said, and the cut part is
+      // left to the call's details rather than shown broken.
+      function detailOf(row, text) {
+        let t = String(text || '');
+        const target = targetOf(row);
+        if (target && t.indexOf("'" + target + "' ") === 0) t = t.slice(target.length + 3);
+        const m = /^imports '([^']+)'(.*)$/.exec(t);
+        if (!m) return { markup: t, words: t };
+        const rest = /^, which matches '([^']+)'(.*)$/.exec(m[2]);
+        const differs = rest && rest[1] !== m[1];
+        const tail = rest ? html`${differs ? html`, which matches <code class="tf-ops-code">${rest[1]}</code>` : ''}${rest[2]}`
+          : /^, which matches/.test(m[2]) ? '' : m[2];
+        const words = 'imports ' + m[1] + (rest ? (differs ? ', which matches ' + rest[1] : '') + rest[2] : /^, which matches/.test(m[2]) ? '' : m[2]);
+        return { markup: html`imports <code class="tf-ops-code">${m[1]}</code>${tail}`, words };
+      }
+      // A detail longer than a line of meta takes a line of its own.
+      function detailIsLong(detail) { return detail.words.length > 72; }
+
+      // The groups on screen, gathered by rule: a run of groups under the
+      // same rule, that the reader may or may not label alike, is one
+      // section. The order of the groups is the visit's own, so a rule whose
+      // sandbox calls follow the operator's own projects is two sections.
+      function sections(list) {
+        const out = [];
+        list.forEach(g => {
+          const last = out[out.length - 1];
+          if (last && last.rule === g.rule && last.open === g.open) last.groups.push(g);
+          else out.push({ rule: g.rule, open: g.open, groups: [g] });
+        });
+        return out;
       }
 
       // Focus that a redraw took away: nowhere, the page itself, or a row the
@@ -2310,33 +2409,41 @@
           ${visitorNote(list)}
           ${keysLegend()}
           <p id="review-error" class="text-xs text-rose-300 mb-3" role="alert"></p>
-          <div class="space-y-4">${list.map(g => html`<section class="tf-card p-4 md:p-5 space-y-3" aria-labelledby="group-${g.slot}" data-open="${g.open ? 'true' : 'false'}">
-            <div class="tf-ops-group-head">
-              <div class="min-w-0">
-                <h2 id="group-${g.slot}" class="tf-ops-group-title">
-                  <span class="tf-chip tf-chip-amber font-mono">${T.icon('eye', 13)}${g.rule}</span>
-                  <span class="text-xs font-normal text-gray-500">in</span>
-                  <a href="${projectHref(g.project)}" class="tf-link-quiet font-mono tf-break">${T.projectName(g.project)}</a>
-                  <span class="tf-ops-count">${num(g.items.length)}</span>
-                </h2>
-                <p class="tf-section-sub">${GATE_KEYS[g.rule] || 'A layering rule: what a layer of the code may not import'}</p>
-              </div>
-              ${groupActions(g)}
+          <div class="space-y-4">${sections(list).map((sec, si) => {
+            const w = ruleWords(sec.rule, sec.groups.reduce((all, g) => all.concat(g.items), []));
+            const sandboxes = sec.groups.every(g => SANDBOX_NAME.test(g.project));
+            const calls = sec.groups.reduce((n, g) => n + g.items.length, 0);
+            return html`<section class="tf-card tf-ops-rsec" aria-labelledby="rule-${si}" data-open="${sec.open ? 'true' : 'false'}">
+            <div class="tf-ops-rsec-head">
+              <h2 id="rule-${si}" class="tf-ops-group-title">
+                <span class="tf-chip tf-chip-amber font-mono">${T.icon('eye', 13)}${sec.rule}</span>
+                <span class="tf-ops-count">${num(calls)}</span>
+                ${sandboxes ? html`<span class="text-xs font-normal text-gray-500">in ${sec.groups.length === 1 ? "a visitor's sandbox" : num(sec.groups.length) + " visitors' sandboxes"}</span>` : sec.groups.length > 1 ? html`<span class="text-xs font-normal text-gray-500">in ${plural(sec.groups.length, 'project')}</span>` : ''}
+              </h2>
+              <p class="tf-ops-rsec-rule">${w.shared || GATE_KEYS[sec.rule] || 'A layering rule: what a layer of the code may not import'}</p>
             </div>
-            ${g.open ? noteField(g) : ''}
-            <ul class="tf-ops-queue">${g.items.map(row => {
+            ${sec.groups.map(g => html`<div class="tf-ops-proj" data-open="${g.open ? 'true' : 'false'}">
+              <div class="tf-ops-proj-head">
+                <h3 id="group-${g.slot}" class="tf-ops-proj-title"><a href="${projectHref(g.project)}" class="tf-link-quiet font-mono tf-break">${T.projectName(g.project)}</a><span class="tf-ops-count">${num(g.items.length)}</span></h3>
+                ${groupActions(g)}
+              </div>
+              ${g.open ? noteField(g) : ''}
+              <ul class="tf-ops-queue">${g.items.map(row => {
               index += 1;
               const on = index === here;
+              const d = w.detail[rowKey(row)] ? detailOf(row, w.detail[rowKey(row)]) : null;
               return html`<li id="qrow-${index}" class="tf-ops-qrow" tabindex="-1" data-current="${on ? 'true' : 'false'}" data-action="queue-pick" data-row="${rowKey(row)}"${on ? raw(' aria-current="true"') : ''}>
               <div class="tf-ops-qrow-body">
-                <p class="text-xs"><span class="font-mono text-gray-200">${row.tool_name}</span> <span class="font-mono text-gray-400 tf-break">${targetOf(row)}</span></p>
-                <p class="text-xs text-gray-300 tf-break">${reasonOf(row)}</p>
-                <p class="text-[11px] text-gray-500">${agentLabel(row.agent)} · <span title="${dateTime(row.timestamp)}">${timeAgo(row.timestamp)}</span> · <a class="tf-link" href="${callHref(row)}">details</a></p>
+                <p class="tf-ops-qrow-what"><span class="font-mono text-gray-100">${row.tool_name}</span> <span class="font-mono text-gray-300 tf-break">${breakable(targetOf(row))}</span></p>
+                ${d && detailIsLong(d) ? html`<p class="tf-ops-qrow-line tf-break">${d.markup}</p>` : ''}
+                <p class="tf-ops-qrow-meta">${d && !detailIsLong(d) ? html`<span class="tf-ops-qrow-detail tf-break">${d.markup}</span><span aria-hidden="true">·</span>` : ''}<span>${agentLabel(row.agent)}</span><span aria-hidden="true">·</span><span title="${dateTime(row.timestamp)}">${timeAgo(row.timestamp)}</span><span aria-hidden="true">·</span><a class="tf-link" href="${callHref(row)}">details</a></p>
               </div>
               ${rowActions(row, g, on)}
             </li>`;
-            })}</ul>
-          </section>`)}</div>
+              })}</ul>
+            </div>`)}
+          </section>`;
+          })}</div>
           ${state.cursor ? html`<div class="mt-4"><button type="button" class="tf-btn" data-action="more" ${state.loadingMore ? raw('disabled') : ''}>${state.loadingMore ? 'Loading…' : state.full ? 'Load more' : 'Look further back'}</button></div>` : ''}`);
         // A redraw replaces every row, and with them the focus. A reader typing
         // a note keeps the field; one working the queue gets the row back.
