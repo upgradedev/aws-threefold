@@ -1212,8 +1212,56 @@ def test_a_sign_in_never_sends_the_reader_off_this_page(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------- try
 
 
-def test_the_walkthrough_runs_the_rollout_from_sandbox_to_a_real_refusal(tmp_path: Path) -> None:
+# The walkthrough lets a path break only after a slash, with <wbr>. A browser's
+# text of the page has nothing there, and the text these scenarios read leaves
+# it out too, so a path is found whole.
+WALK = r"""
+  const view = () => el('view').innerHTML.replace(/<wbr>/g, '');
+"""
+
+
+def walk(scenario: str, tmp_path: Path, before: str = "") -> dict:
+    return dash(WALK + scenario, tmp_path, before=before)
+
+
+def test_the_walkthrough_breaks_a_path_only_between_its_folders(tmp_path: Path) -> None:
+    """A narrow line wraps a path at a slash, never inside a name or before its extension.
+
+    The lanes, the flagged cards, the stack and its queue split
+    'CartView.ts|x', 'test_order_totals|.py' and 'Order.jav|a' at 1440px,
+    because they broke a path anywhere.
+    """
     out = dash(
+        r"""
+  const P = 'Acme-Sandbox-0a1b2c3d';
+  const target = 'src/main/java/com/acme/domain/Order.java';
+  answer = api({
+    'POST /api/sandbox': { status: 200, body: { project: P, calls_seeded: 1 } },
+    ['/api/projects/' + P]: { status: 200, body: { project: P, config: { stage: 'observe' }, readiness: { rules: [] } } },
+    '/api/decisions': { status: 200, body: { items: [row(1, { project_name: P, target, observed_target: target })], next_cursor: null } }
+  });
+  await visit('#/try');
+  await click('try-create'); await tick();
+  out.lanes = view();
+  await click('try-show'); await tick();
+  out.cards = view();
+  await click('try-review'); await tick();
+  out.stack = view();
+""",
+        tmp_path,
+    )
+    broken = "src/<wbr>main/<wbr>java/<wbr>com/<wbr>acme/<wbr>domain/<wbr>Order.java"
+    assert out["lanes"].count(broken) == 1, "The lane does not break the path at its slashes"
+    assert out["cards"].count(broken) == 1, "The flagged card does not break the path at its slashes"
+    assert out["stack"].count(broken) == 2, "The card on top and its queue do not break the path at its slashes"
+    css = page_source("dashboard.html").split("const TRY_CSS = `", 1)[1].split("`;", 1)[0]
+    for rule in (".tf-try-call-target {", ".tf-try-dl dd {", ".tf-try-card-file {", ".tf-try-q-file {"):
+        line = css.split(rule, 1)[1].split("}", 1)[0]
+        assert "anywhere" not in line, f"{rule} still breaks a path anywhere"
+
+
+def test_the_walkthrough_runs_the_rollout_from_sandbox_to_a_real_refusal(tmp_path: Path) -> None:
+    out = walk(
         r"""
   const P = 'Acme-Sandbox-0a1b2c3d';
   const obs = (i, rule, target, extra) => row(i, Object.assign({ project_name: P, rule_key: rule, observed_rules: [rule], observed_rule: rule, target, observed_target: target }, extra || {}));
@@ -1240,17 +1288,24 @@ def test_the_walkthrough_runs_the_rollout_from_sandbox_to_a_real_refusal(tmp_pat
   await click('try-create'); await tick();
   out.step2 = text(view());
   await click('try-show'); await tick();
+  out.cards = text(view());
+  await click('try-review'); await tick();
   out.step3 = text(view());
   await click('try-label', { 'data-verdict': 'VERDICT-1', 'data-label': 'correct' });
   await click('try-label', { 'data-verdict': 'VERDICT-2', 'data-label': 'correct' });
   await click('try-label', { 'data-verdict': 'VERDICT-3', 'data-label': 'false_alarm' });
   await tick();
+  out.labelled = text(view());
   await click('try-readiness'); await tick();
   out.step4 = view();
   await click('try-promote'); await tick();
+  out.promoted = text(view());
+  await click('try-next'); await tick();
   out.step5 = text(view());
   await click('try-send'); await tick();
   out.done = text(view());
+  await click('try-finish'); await tick();
+  out.finish = view();
   out.sent = sent;
   out.saved = JSON.parse(store['threefold-try'] || 'null');
 """,
@@ -1258,12 +1313,28 @@ def test_the_walkthrough_runs_the_rollout_from_sandbox_to_a_real_refusal(tmp_pat
     )
     assert "Make my sandbox" in out["step1"]
     assert out["sent"]["sandbox"] == {}
-    assert "Acme-Sandbox-0a1b2c3d received 12 calls" in out["step2"]
+    assert "12 calls arrived" in out["step2"] and "Every call was judged and recorded in Acme-Sandbox-0a1b2c3d" in out["step2"]
+    assert "the project is in Observe" in out["step2"]
+    # The calls as they arrived, in a lane per agent, and how many of them the list held.
+    for agent in ("Claude Code", "Codex", "Antigravity"):
+        assert agent in out["step2"], f"The timeline has no lane for {agent}"
+    assert "The list read back 3 of the 12 so far" in out["step2"], "A short read of the ledger is said, never padded"
+    # Step 2: each flagged call as a card of agent, file, rule and why.
+    cards = out["cards"]
+    assert "3 calls would have been refused" in cards
+    for part in ("Claude Code", "src/acme/domain/order.py", "python-domain-stays-pure", "PROTECTED_PATH", "imports javax.persistence into the domain"):
+        assert part in cards, f"The step-2 cards do not show {part!r}"
     assert "One of them is a false alarm" in out["step3"] and "docs/.git-hooks-howto.md" in out["step3"]
     assert [r["label"] for r in out["sent"]["reviews"]] == ["correct", "correct", "false_alarm"]
+    assert "3 of 3 labelled" in out["labelled"] and "Every call has a label" in out["labelled"]
     checked = dict(re.findall(r'data-rule="([^"]+)"\s*(checked)?', out["step4"]))
     assert checked == {"python-domain-stays-pure": "checked", "PROTECTED_PATH": "", "LOOP": "checked"}, "Ready and Quiet are checked; the noisy rule keeps observing"
+    # A rule's state animates from the one read before the labels to the one read after, and only where it changed.
+    assert out["step4"].count("tf-try-flipping") == 2, "python-domain-stays-pure and PROTECTED_PATH changed; LOOP did not"
     assert out["sent"]["promote"] == {"enforce": ["python-domain-stays-pure", "LOOP"]}
+    assert "Now in Enforce" in out["promoted"] and "Enforces" in out["promoted"] and "Keeps observing" in out["promoted"]
+    assert "now in Enforce. This time the rule in force refuses it" in out["step5"]
+    assert "src/acme/domain/order.py" in out["step5"] and "import boto3" in out["step5"]
     evaluate = out["sent"]["evaluate"]
     assert evaluate["origin"] == "hook" and evaluate["agent"] == "claude-code" and evaluate["explain"] is True
     assert evaluate["project_name"] == "Acme-Sandbox-0a1b2c3d" and evaluate["tool_name"] == "Write"
@@ -1271,6 +1342,939 @@ def test_the_walkthrough_runs_the_rollout_from_sandbox_to_a_real_refusal(tmp_pat
     assert "Refused, before it ran" in out["done"] and "BLOCKED_BOUNDARY_VIOLATION" in out["done"]
     assert "couples the model to infrastructure" in out["done"] and "Amazon Bedrock" in out["done"]
     assert out["saved"]["project"] == "Acme-Sandbox-0a1b2c3d", "A reload can resume the same sandbox"
+    # The completion screen: three facts read from the responses, and three ways on.
+    finish = out["finish"]
+    words = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", finish))
+    assert "That was the whole rollout" in words
+    assert "12 calls judged in Observe" in words and "3 calls would have been refused, and none was" in words
+    assert "You marked 2 calls correct and 1 call a false alarm, so PROTECTED_PATH stayed in Observe" in words
+    assert "2 rules moved to Enforce" in words
+    # Plain words first, the precise verdict second.
+    assert "Stopped by python-domain-stays-pure before it ran, with a sentence from Amazon Bedrock. Its verdict: BLOCKED_BOUNDARY_VIOLATION." in words
+    for href in ('href="#/connect"', 'href="#/projects/Acme-Sandbox-0a1b2c3d"', 'href="#/proof"'):
+        assert href in finish, f"The completion screen does not offer {href}"
+
+
+def test_the_completion_counts_the_rules_the_promotion_s_answer_put_in_force(tmp_path: Path) -> None:
+    """The second completion fact reads the promotion as the service recorded it.
+
+    Its figure was counted from the list the page sent, while its source line
+    names the promotion's answer. And a rule's bar, one mark per flag, says
+    how many more there are past the 24 it draws rather than stopping short.
+    """
+    out = walk(
+        r"""
+  const P = 'Acme-Sandbox-0a1b2c3d';
+  const observed = [row(1, { project_name: P, rule_key: 'java-domain-stays-pure' })];
+  answer = api({
+    'POST /api/sandbox': { status: 200, body: { project: P, calls_seeded: 12 } },
+    ['/api/projects/' + P]: { status: 200, body: { project: P, config: { stage: 'observe' }, readiness: { rules: [
+      { rule_key: 'java-domain-stays-pure', kind: 'layering', state: 'ready', would_refuse: 30, correct: 30, false_alarms: 0, unreviewed: 0 },
+      { rule_key: 'LOOP', kind: 'gate', state: 'quiet', would_refuse: 0, correct: 0, false_alarms: 0, unreviewed: 0 }] } } },
+    '/api/decisions': { status: 200, body: { items: observed, next_cursor: null } },
+    ['POST /api/projects/' + P + '/reviews']: { status: 200, body: { updated: 1, skipped: [] } },
+    ['POST /api/projects/' + P + '/promote']: { status: 200, body: { project: P, config: { stage: 'enforce', observe_rules: ['LOOP'],
+      history: [{ at: NOW, action: 'create', enforce: [], observe: [] }, { at: NOW, action: 'promote', by: 'anonymous', enforce: ['java-domain-stays-pure'], observe: ['LOOP'] }] } } },
+    '/api/decision': { status: 200, body: { decision: observed[0], session: null, rule: { id: 'java-domain-stays-pure', forbid_imports: ['javax.persistence'] } } },
+    '/rules': { status: 200, body: { rules: [] } },
+    'POST /evaluate-tool-call': { status: 200, body: { status: 'BLOCKED_BOUNDARY_VIOLATION', reason: 'Refused.', project_stage: 'enforce' } }
+  });
+  await visit('#/try');
+  await click('try-create'); await tick();
+  await click('try-show'); await tick();
+  await click('try-review'); await tick();
+  await click('try-label', { 'data-verdict': 'VERDICT-1', 'data-label': 'correct' }); await tick();
+  await click('try-readiness'); await tick();
+  out.step4 = view();
+  await click('try-promote'); await tick();
+  out.sent = calls.filter(c => c.url.indexOf('/promote') !== -1).pop().body;
+  out.promoted = text(view());
+  await click('try-next'); await tick();
+  await click('try-send'); await tick();
+  await click('try-finish'); await tick();
+  out.done = text(view());
+""",
+        tmp_path,
+    )
+    assert out["sent"] == {"enforce": ["java-domain-stays-pure", "LOOP"]}
+    assert "1 rule now refuses the calls that break it; LOOP keeps observing." in out["promoted"]
+    assert "1 rule moved to Enforce" in out["done"], "The figure is the request's, not the answer's"
+    assert out["step4"].count('class="tf-try-bar-seg"') == 24 and 'class="tf-try-bar-more">+6<' in out["step4"]
+
+
+def test_the_walkthrough_is_labelled_by_keyboard_alone(tmp_path: Path) -> None:
+    """C and F label the call on top of the stack and the arrows move through it.
+
+    Only on the labelling step, never while the reader types or holds a
+    modifier, and not at all once the reader has left the walkthrough. The keys
+    go through the same path a click does, so each one is saved as a review.
+    """
+    out = dash(
+        r"""
+  const P = 'Acme-Sandbox-0a1b2c3d';
+  const obs = (i, rule, target, agent) => row(i, { project_name: P, rule_key: rule, observed_rules: [rule], observed_rule: rule, target, observed_target: target, agent });
+  const observed = [
+    obs(1, 'python-domain-stays-pure', 'src/acme/domain/order.py', 'claude-code'),
+    obs(2, 'python-domain-stays-pure', 'tests/domain/test_order_totals.py', 'codex'),
+    obs(3, 'web-domain-stays-pure', 'src/web/domain/cart.ts', 'antigravity')
+  ];
+  const reviews = [];
+  answer = api({
+    'POST /api/sandbox': { status: 200, body: { project: P, calls_seeded: 12 } },
+    ['/api/projects/' + P]: { status: 200, body: { project: P, config: { stage: 'observe' }, readiness: { rules: [] } } },
+    '/api/decisions': { status: 200, body: { items: observed, next_cursor: null } },
+    ['POST /api/projects/' + P + '/reviews']: (u, i, body) => { reviews.push([body.items[0].verdict_id, body.items[0].label]); return { status: 200, body: { updated: 1, skipped: [] } }; },
+    '/api/overview': { status: 200, body: overviewBody() }
+  });
+  function press(key, extra) {
+    const event = Object.assign({ key, target: el('view'), prevented: false, preventDefault() { this.prevented = true; } }, extra || {});
+    (docListeners.keydown || []).forEach(fn => fn(event));
+    return event;
+  }
+  await visit('#/try');
+  await click('try-create'); await tick();
+  await click('try-show'); await tick();
+  out.beforeTheStep = press('c').prevented;
+  await click('try-review'); await tick();
+  out.first = Dash.tryState.cursor;
+  out.order = Dash.tryState.observed.map(r => r.verdict_id);
+  out.hint = text(view());
+  out.c = press('c').prevented; await tick();
+  out.afterC = Dash.tryState.cursor;
+  out.focusAfterC = document.activeElement && document.activeElement.id;
+  out.describedBy = (/id="try-correct"[^>]*aria-describedby="([^"]*)"/.exec(view()) || [])[1] || '';
+  out.named = ['try-card-count', 'try-card-file', 'try-card-rule'].filter(id => view().indexOf('id="' + id + '"') !== -1);
+  out.spoken = el('live-status').textContent;
+  out.typing = press('f', { target: { tagName: 'INPUT' } }).prevented;
+  out.modified = press('f', { ctrlKey: true }).prevented;
+  out.right = press('ArrowRight').prevented;
+  out.afterRight = Dash.tryState.cursor;
+  out.left = press('ArrowLeft').prevented;
+  out.afterLeft = Dash.tryState.cursor;
+  press('F'); await tick();
+  press('c'); await tick();
+  out.reviews = reviews.slice();
+  out.done = text(view());
+  out.focused = document.activeElement && document.activeElement.id;
+  await visit('#/overview');
+  press('c'); await tick();
+  out.afterLeaving = reviews.length;
+""",
+        tmp_path,
+    )
+    assert out["beforeTheStep"] is False, "A key does nothing before the labelling step"
+    assert out["first"] == 0 and out["c"] is True and out["afterC"] == 1, "C labels the top call and the next one comes up"
+    assert out["focusAfterC"] == "try-correct", "The keyboard stays on the stack"
+    # The button the keyboard lands on names the call it now labels, and the announcement says which is next.
+    assert out["describedBy"] == "try-card-count try-card-file try-card-rule" and len(out["named"]) == 3
+    assert out["spoken"] == "Marked Correct: src/web/domain/cart.ts. 1 of 3 labelled. Next: tests/domain/test_order_totals.py."
+    assert "Keys: C correct F false alarm" in out["hint"]
+    assert out["typing"] is False and out["modified"] is False, "Typing and a held modifier are left alone"
+    assert out["right"] is True and out["afterRight"] == 2 and out["left"] is True and out["afterLeft"] == 1
+    # The stack runs in the order the calls arrived: VERDICT-3 is the oldest of the three.
+    assert out["order"] == ["VERDICT-3", "VERDICT-2", "VERDICT-1"]
+    assert out["reviews"] == [["VERDICT-3", "correct"], ["VERDICT-2", "false_alarm"], ["VERDICT-1", "correct"]]
+    assert "3 of 3 labelled" in out["done"] and "Every call has a label" in out["done"]
+    assert out["focused"] == "try-primary", "With every call labelled, the keyboard lands on the way on"
+    assert out["afterLeaving"] == 3, "The keys stop listening when the reader leaves the walkthrough"
+
+
+def test_a_held_key_labels_one_call_and_a_failed_label_keeps_the_keyboard_on_the_stack(tmp_path: Path) -> None:
+    """Holding C labels the call on top once, not every call left in a burst.
+
+    And a label the service does not keep is taken back with the keyboard on
+    the call, not on the way on, which is disabled until every call has one.
+    """
+    out = dash(
+        r"""
+  const P = 'Acme-Sandbox-0a1b2c3d';
+  const obs = (i, target) => row(i, { project_name: P, target, observed_target: target });
+  let refuse = false;
+  const reviews = [];
+  answer = api({
+    'POST /api/sandbox': { status: 200, body: { project: P, calls_seeded: 12 } },
+    ['/api/projects/' + P]: { status: 200, body: { project: P, config: { stage: 'observe' }, readiness: { rules: [] } } },
+    '/api/decisions': { status: 200, body: { items: [obs(1, 'src/acme/domain/a.py'), obs(2, 'src/acme/domain/b.py'), obs(3, 'src/acme/domain/c.py')], next_cursor: null } },
+    ['POST /api/projects/' + P + '/reviews']: (u, i, body) => { reviews.push(body.items[0].verdict_id); return refuse ? { status: 500, body: { detail: 'down' } } : { status: 200, body: { updated: 1, skipped: [] } }; }
+  });
+  function press(key, extra) {
+    const event = Object.assign({ key, target: el('view'), preventDefault() {} }, extra || {});
+    (docListeners.keydown || []).forEach(fn => fn(event));
+  }
+  await visit('#/try');
+  await click('try-create'); await tick();
+  await click('try-show'); await tick();
+  await click('try-review'); await tick();
+  press('c'); await tick();
+  press('c', { repeat: true }); press('c', { repeat: true }); await tick();
+  out.afterHold = reviews.length;
+  out.receipt = text(view().replace(/<wbr>/g, ''));
+  press('c'); await tick();
+  refuse = true;
+  press('f'); await tick();
+  out.focused = document.activeElement && document.activeElement.id;
+  out.error = text(view());
+""",
+        tmp_path,
+    )
+    assert out["afterHold"] == 1, "A held key labelled more than the call on top"
+    assert "Marked Correct : src/acme/domain/c.py" in out["receipt"], "The labelled call leaves a receipt on screen"
+    assert "That did not work" in out["error"]
+    assert out["focused"] == "try-correct", "A failed label drops the keyboard on a disabled button"
+
+
+def test_the_walkthrough_reads_readiness_only_after_every_label_is_saved(tmp_path: Path) -> None:
+    """A reader who labels the last call and presses on at once sees that label counted.
+
+    The last label moves the keyboard to the way on, so Enter can follow it
+    within milliseconds, while its save is still in flight; readiness read
+    then would show the rule just labelled as still needing review, and leave
+    it unchecked. The read waits for every save.
+    """
+    out = dash(
+        r"""
+  const P = 'Acme-Sandbox-0a1b2c3d';
+  const only = row(1, { project_name: P });
+  const hold = held();
+  answer = api({
+    'POST /api/sandbox': { status: 200, body: { project: P, calls_seeded: 12 } },
+    ['/api/projects/' + P]: { status: 200, body: { project: P, config: { stage: 'observe' }, readiness: { rules: [{ rule_key: 'java-domain-stays-pure', state: 'ready' }] } } },
+    '/api/decisions': { status: 200, body: { items: [only], next_cursor: null } },
+    ['POST /api/projects/' + P + '/reviews']: () => hold.promise.then(() => ({ status: 200, body: { updated: 1, skipped: [] } }))
+  });
+  const reads = () => calls.filter(c => c.method === 'GET' && new URL(c.url).pathname.endsWith('/api/projects/' + P)).length;
+  await visit('#/try');
+  await click('try-create'); await tick();
+  await click('try-show'); await tick();
+  await click('try-review'); await tick();
+  out.readsBefore = reads();
+  click('try-label', { 'data-verdict': 'VERDICT-1', 'data-label': 'correct' });
+  await tick();
+  const pressing = click('try-readiness');
+  await tick();
+  out.readsWhileSaving = reads();
+  out.busyWhileSaving = Dash.tryState.busy;
+  hold.release();
+  await pressing; await tick();
+  out.readsAfter = reads();
+  out.step = Dash.tryState.step;
+""",
+        tmp_path,
+    )
+    assert out["readsWhileSaving"] == out["readsBefore"], "Readiness was read while a label was still being saved"
+    assert out["busyWhileSaving"] is True, "The way on shows it is waiting"
+    assert out["readsAfter"] == out["readsBefore"] + 1 and out["step"] == 4
+
+
+def test_a_label_the_service_does_not_keep_holds_the_reader_on_the_call_it_was_for(tmp_path: Path) -> None:
+    """A save that fails while "See what that did" waits on it never moves the reader to step 4.
+
+    The wait once resolved whether the save kept the label or not, so the
+    reader landed on step 4 with that label taken back, the rail ticking step
+    3 at "4 of 5 labelled", a rule reading Needs review, one rule fewer to
+    promote, and no way back to label the call again.
+    """
+    out = dash(
+        r"""
+  const P = 'Acme-Sandbox-0a1b2c3d';
+  const rows = [row(1, { project_name: P, target: 'src/acme/domain/a.py', observed_target: 'src/acme/domain/a.py' }), row(2, { project_name: P, target: 'src/acme/domain/b.py', observed_target: 'src/acme/domain/b.py' })];
+  const hold = held();
+  let saves = 0;
+  answer = api({
+    'POST /api/sandbox': { status: 200, body: { project: P, calls_seeded: 12 } },
+    ['/api/projects/' + P]: { status: 200, body: { project: P, config: { stage: 'observe' }, readiness: { rules: [{ rule_key: 'java-domain-stays-pure', state: 'ready' }] } } },
+    '/api/decisions': { status: 200, body: { items: rows, next_cursor: null } },
+    ['POST /api/projects/' + P + '/reviews']: () => {
+      saves += 1;
+      return saves === 2 ? hold.promise.then(() => ({ status: 503, body: { detail: 'store down' } })) : { status: 200, body: { updated: 1, skipped: [] } };
+    }
+  });
+  const reads = () => calls.filter(c => c.method === 'GET' && new URL(c.url).pathname.endsWith('/api/projects/' + P)).length;
+  await visit('#/try');
+  await click('try-create'); await tick();
+  await click('try-show'); await tick();
+  await click('try-review'); await tick();
+  out.readsBefore = reads();
+  await click('try-label', { 'data-verdict': 'VERDICT-2', 'data-label': 'correct' }); await tick();
+  click('try-label', { 'data-verdict': 'VERDICT-1', 'data-label': 'correct' });
+  await tick();
+  const pressing = click('try-readiness');
+  await tick();
+  hold.release();
+  await pressing; await tick();
+  out.step = Dash.tryState.step;
+  out.busy = Dash.tryState.busy;
+  out.readsAfterFailure = reads();
+  out.cursorOn = Dash.tryState.observed[Dash.tryState.cursor].verdict_id;
+  out.focused = document.activeElement && document.activeElement.id;
+  out.failed = text(view());
+  await click('try-label', { 'data-verdict': 'VERDICT-1', 'data-label': 'correct' }); await tick();
+  await click('try-readiness'); await tick();
+  out.stepAfterRelabel = Dash.tryState.step;
+  out.readsAfterRelabel = reads();
+""",
+        tmp_path,
+    )
+    assert out["step"] == 3 and out["busy"] is False, "A label the service did not keep moved the reader on"
+    assert out["readsAfterFailure"] == out["readsBefore"], "Readiness was read with a label missing"
+    assert out["cursorOn"] == "VERDICT-1" and out["focused"] == "try-correct", "The keyboard is not back on the call to label again"
+    failed = out["failed"]
+    assert "1 of 2 labelled" in failed and "Was the rule right?" in failed
+    assert "That did not work: the label for src/acme/domain/a.py was not saved (HTTP 503: store down). Mark it again." in failed
+    assert out["stepAfterRelabel"] == 4 and out["readsAfterRelabel"] == out["readsBefore"] + 1
+
+
+REPLAY = r"""
+const P = 'Acme-Sandbox-0a1b2c3d';
+const obs = (i, rule, target, extra) => row(i, Object.assign({ project_name: P, rule_key: rule, observed_rules: [rule], observed_rule: rule, target, observed_target: target }, extra || {}));
+const observed = [
+  obs(1, 'python-domain-stays-pure', 'src/acme/domain/order.py', { observed_reason: "Clean Architecture violation: Layering rule 'python-domain-stays-pure' refuses this write: A Python file under domain/ may not import infrastructure or a driver. 'src/acme/domain/order.py' imports 'boto3', which matches 'boto3'" }),
+  obs(2, 'PROTECTED_PATH', 'cat', { agent: 'codex', tool_name: 'shell', action_type: 'COMMAND_EXEC', observed_target: '', observed_reason: "Command 'cat .env' reaches a protected path or credential store" })
+];
+const sent = { evaluate: [], promote: [] };
+answer = api({
+  'POST /api/sandbox': { status: 200, body: { project: P, calls_seeded: 12 } },
+  ['/api/projects/' + P]: { status: 200, body: { project: P, config: { stage: 'observe', sandbox: true }, readiness: { rules: [
+    { rule_key: 'python-domain-stays-pure', kind: 'layering', state: 'ready', would_refuse: 1, correct: 1, false_alarms: 0, unreviewed: 0 },
+    { rule_key: 'PROTECTED_PATH', kind: 'gate', state: 'ready', would_refuse: 1, correct: 1, false_alarms: 0, unreviewed: 0 },
+    { rule_key: 'dotnet-domain-stays-pure', kind: 'layering', state: 'quiet', would_refuse: 0, correct: 0, false_alarms: 0, unreviewed: 0 },
+    { rule_key: 'LOOP', kind: 'gate', state: 'quiet', would_refuse: 0, correct: 0, false_alarms: 0, unreviewed: 0 }] } } },
+  '/api/decisions': { status: 200, body: { items: observed, next_cursor: null } },
+  ['POST /api/projects/' + P + '/reviews']: { status: 200, body: { updated: 1, skipped: [] } },
+  ['POST /api/projects/' + P + '/promote']: (u, i, body) => { sent.promote.push(body.enforce); return { status: 200, body: { project: P, config: { stage: 'enforce', observe_rules: [] } } }; },
+  '/api/decision': { status: 200, body: { decision: observed[0], session: null, rule: { id: 'python-domain-stays-pure', forbid_imports: ['boto3'] } } },
+  '/rules': { status: 200, body: { rules: [{ id: 'dotnet-domain-stays-pure', when_path_matches: ['**/Domain/**/*.cs'], forbid_imports: ['**.Infrastructure.**', 'System.Data'] }] } },
+  'POST /evaluate-tool-call': (u, i, body) => { sent.evaluate.push(body); return { status: 200, body: { status: 'BLOCKED_BOUNDARY_VIOLATION', reason: 'Refused.', project_stage: 'enforce' } }; }
+});
+async function toStepFour(keep) {
+  await visit('#/try');
+  await click('try-restart'); await tick();
+  await click('try-create'); await tick();
+  await click('try-show'); await tick();
+  await click('try-review'); await tick();
+  await click('try-label', { 'data-verdict': 'VERDICT-1', 'data-label': 'correct' });
+  await click('try-label', { 'data-verdict': 'VERDICT-2', 'data-label': 'correct' });
+  await tick();
+  await click('try-readiness'); await tick();
+  for (const key of ['python-domain-stays-pure', 'PROTECTED_PATH', 'dotnet-domain-stays-pure', 'LOOP']) {
+    await click('try-toggle', { 'data-rule': key, checked: keep.indexOf(key) !== -1 });
+  }
+}
+"""
+
+
+def test_the_walkthrough_sends_a_gate_s_call_as_the_call_it_flagged(tmp_path: Path) -> None:
+    """A protected path's command is sent again as that command, never rebuilt as a write.
+
+    The replay once took whatever call was marked correct under a rule in
+    force and wrote an import into a file named after its target. For the
+    command `cat .env` that was a write to a file called `cat`, which the
+    service approved, and the climax said the rule "may not be in force".
+    """
+    out = dash(
+        REPLAY
+        + r"""
+  await toStepFour(['PROTECTED_PATH']);
+  out.button = text(view());
+  await click('try-promote'); await tick();
+  await click('try-next'); await tick();
+  out.send = text(view());
+  await click('try-send'); await tick();
+  out.sent = sent.evaluate.pop();
+""",
+        tmp_path,
+    )
+    assert "Promote with 1 rule" in out["button"]
+    assert out["sent"]["action_type"] == "COMMAND_EXEC"
+    assert out["sent"]["agent"] == "codex" and out["sent"]["tool_name"] == "shell", "The command goes again from the agent and tool that ran it"
+    assert out["sent"]["arguments"] == {"command": "cat .env"}, "The command the gate flagged is the command sent again"
+    assert "Terminal" in out["send"] and "cat .env" in out["send"] and "Earlier, in Observe" in out["send"]
+    assert "the same command" in out["send"]
+
+
+def test_the_walkthrough_builds_a_quiet_rule_s_write_from_the_rule_and_sends_nothing_a_gate_would_approve(tmp_path: Path) -> None:
+    """With no flagged call under a rule in force, the call to send comes from the rule, or is not sent.
+
+    A quiet layering rule says which files it watches and what they may not
+    import, so the write is built from that. A gate that one call cannot trip
+    (a loop, a budget) is never stood in for by a call it would approve, and
+    Enforce with no rule in force is never offered.
+    """
+    out = dash(
+        REPLAY
+        + r"""
+  await toStepFour(['dotnet-domain-stays-pure']);
+  await click('try-promote'); await tick();
+  await click('try-next'); await tick();
+  out.quietSend = text(view());
+  await click('try-send'); await tick();
+  out.quietSent = sent.evaluate.pop();
+
+  await toStepFour(['LOOP']);
+  await click('try-promote'); await tick();
+  await click('try-next'); await tick();
+  out.gateOnly = text(view());
+  const before = sent.evaluate.length;
+  await click('try-finish'); await tick();
+  out.gateDone = text(view());
+  out.gateSent = sent.evaluate.length - before;
+
+  await toStepFour([]);
+  out.none = view();
+  const promotes = sent.promote.length;
+  await click('try-promote'); await tick();
+  out.nonePromoted = sent.promote.length - promotes;
+  out.noneError = text(view());
+""",
+        tmp_path,
+    )
+    sent = out["quietSent"]
+    assert sent["tool_name"] == "Write" and sent["arguments"] == {"file_path": "src/Domain/Order.cs", "content": "using System.Data;\n"}
+    assert "built from the rule itself" in out["quietSend"]
+    assert "No single call can show these rules" in out["gateOnly"] and "LOOP" in out["gateOnly"]
+    assert out["gateSent"] == 0, "Nothing is sent for a gate one call cannot show"
+    assert "No call was sent" in out["gateDone"]
+    assert re.search(r'id="try-primary"[^>]*data-action="try-promote"[^>]*disabled', out["none"]), "Promote with no rule is not offered"
+    assert "Promote with 0 rules" in text_of(out["none"]) and "Check at least one rule to promote" in text_of(out["none"])
+    assert out["nonePromoted"] == 0 and "Check at least one rule to promote" in out["noneError"]
+
+
+def test_the_replay_sends_the_call_as_the_agent_and_tool_that_made_it(tmp_path: Path) -> None:
+    """Step 5 sends a flagged call again from the agent and with the tool that made it.
+
+    On the default run Claude Code's only flagged call is under the rule the
+    false alarm makes noisy, so the call sent again is another agent's. It
+    once went as Claude Code's Write whatever agent had made it, and the
+    judged moment spent its words on the swap ("Agent Antigravity → Claude
+    Code", "whichever agent sends the call") instead of showing the same call,
+    now refused. Now only the stage differs, and every place that compares
+    the two calls says so.
+    """
+    out = dash(
+        r"""
+  const P = 'Acme-Sandbox-0a1b2c3d';
+  const layer = (i, rule, target, agent, tool, imp, desc) => row(i, { project_name: P, agent, tool_name: tool, rule_key: rule, observed_rules: [rule], observed_rule: rule,
+    target, observed_target: target, observed_reason: "Clean Architecture violation: Layering rule '" + rule + "' refuses this write: " + desc + ". '" + target + "' imports '" + imp + "', which matches '" + imp + "'" });
+  const observed = [
+    layer(1, 'web-domain-stays-pure', 'src/web/domain/cart.ts', 'antigravity', 'write_to_file', 'axios', 'A TypeScript module under domain/ may not import a client or a framework'),
+    layer(2, 'java-domain-stays-pure', 'src/main/java/com/acme/domain/Order.java', 'codex', 'apply_patch', 'javax.persistence.Entity', 'A Java class under domain/ may not reach persistence'),
+    layer(3, 'python-domain-stays-pure', 'src/acme/domain/order.py', 'claude-code', 'Write', 'boto3', 'A Python file under domain/ may not import infrastructure or a driver')
+  ];
+  const labels = {};
+  const readiness = () => ['web-domain-stays-pure', 'java-domain-stays-pure', 'python-domain-stays-pure'].map(key => {
+    const mine = observed.filter(r => r.rule_key === key).map(r => labels[r.verdict_id]);
+    const alarms = mine.filter(l => l === 'false_alarm').length;
+    const correct = mine.filter(l => l === 'correct').length;
+    return { rule_key: key, kind: 'layering', would_refuse: mine.length, correct, false_alarms: alarms, unreviewed: mine.length - alarms - correct,
+      state: alarms ? 'noisy' : correct === mine.length ? 'ready' : 'needs_review' };
+  });
+  const sent = [];
+  answer = api({
+    'POST /api/sandbox': { status: 200, body: { project: P, calls_seeded: 12 } },
+    ['/api/projects/' + P]: () => ({ status: 200, body: { project: P, config: { stage: 'observe', sandbox: true }, readiness: { rules: readiness() } } }),
+    '/api/decisions': { status: 200, body: { items: observed, next_cursor: null } },
+    ['POST /api/projects/' + P + '/reviews']: (u, i, body) => { labels[body.items[0].verdict_id] = body.items[0].label; return { status: 200, body: { updated: 1, skipped: [] } }; },
+    ['POST /api/projects/' + P + '/promote']: { status: 200, body: { project: P, config: { stage: 'enforce', observe_rules: [] } } },
+    '/api/decision': { status: 200, body: { decision: null, session: null, rule: null } },
+    '/rules': { status: 200, body: { rules: [] } },
+    'POST /evaluate-tool-call': (u, i, body) => { sent.push(body); return { status: 200, body: { status: 'BLOCKED_BOUNDARY_VIOLATION', reason: 'Refused.', project_stage: 'enforce' } }; }
+  });
+  async function run(alarmFrom, sameInstant) {
+    Object.keys(labels).forEach(k => delete labels[k]);
+    if (sameInstant) observed.forEach(r => { r.timestamp = NOW; });
+    await visit('#/try');
+    await click('try-restart'); await tick();
+    await click('try-create'); await tick();
+    await click('try-show'); await tick();
+    await click('try-review'); await tick();
+    for (const r of Dash.tryState.observed.slice()) {
+      await click('try-label', { 'data-verdict': r.verdict_id, 'data-label': r.agent === alarmFrom ? 'false_alarm' : 'correct' });
+    }
+    await tick();
+    await click('try-readiness'); await tick();
+    await click('try-promote'); await tick();
+    await click('try-next'); await tick();
+    const send = text(view());
+    await click('try-send'); await tick();
+    return { send, climax: text(view()), sent: sent[sent.length - 1] };
+  }
+  out.web = await run('claude-code');
+  out.java = await run('antigravity');
+  out.tie = await run('claude-code', true);
+""",
+        tmp_path,
+    )
+    # Claude Code's rule is noisy: the newest call in force is Antigravity's, and it goes as Antigravity's.
+    web = out["web"]
+    assert web["sent"]["agent"] == "antigravity" and web["sent"]["tool_name"] == "write_to_file"
+    assert web["sent"]["arguments"] == {"file_path": "src/web/domain/cart.ts", "content": "import axios from 'axios';\n"}
+    send = web["send"]
+    assert "Send the same call again" in send
+    assert "Same agent, same file, same import, and your sandbox is now in Enforce. This time the rule in force refuses it." in send
+    assert "Now, in Enforce · as Antigravity's hook sends it" in send and "write_to_file · Antigravity · hook" in send
+    assert "Agent the same" in send and "File the same" in send and "Import the same" in send and "Stage Observe → Enforce" in send
+    assert "The write that ran in Observe is refused in Enforce: same agent, same file, same import, a new stage." in web["climax"]
+    for swap in ("Claude Code sends", "from Claude Code", "whichever agent", "→ Claude Code"):
+        assert swap not in send and swap not in web["climax"], f"Step 5 still tells of a swap of agents: {swap!r}"
+    # With Antigravity's call a false alarm, the newest call in force is Codex's, sent with Codex's own tool.
+    java = out["java"]
+    assert java["sent"]["agent"] == "codex" and java["sent"]["tool_name"] == "apply_patch"
+    assert java["sent"]["arguments"] == {"file_path": "src/main/java/com/acme/domain/Order.java", "content": "import javax.persistence.Entity;\n"}
+    assert "apply_patch · Codex · hook" in java["send"]
+    # A coarse clock stamps the sandbox's calls in one instant: the later lane was sent later, so every run replays the same call.
+    assert out["tie"]["sent"]["arguments"]["file_path"] == "src/web/domain/cart.ts", "Calls stamped together are not told apart the way they were sent"
+    assert out["tie"]["sent"]["agent"] == "antigravity"
+
+
+def test_the_rule_as_written_stands_beside_the_call_it_judged_on_steps_three_and_five(tmp_path: Path) -> None:
+    """The card on top of the stack, and the call about to be sent, show the rule as GET /rules has it.
+
+    Its path patterns, with the one that covers the call's path marked, are
+    how a reader spots the false alarm (a test module under tests/domain/ is
+    not the domain), and its forbidden packages, with the one the import
+    falls under marked, say what the refusal will be about. When the rules
+    cannot be read, nothing stands in for them.
+    """
+    scenario = r"""
+  const P = 'Acme-Sandbox-0a1b2c3d';
+  const layer = (i, target, agent, imp) => row(i, { project_name: P, agent, rule_key: 'python-domain-stays-pure', observed_rules: ['python-domain-stays-pure'], observed_rule: 'python-domain-stays-pure',
+    target, observed_target: target, observed_reason: "Clean Architecture violation: Layering rule 'python-domain-stays-pure' refuses this write: A Python file under domain/ may not import infrastructure or a driver. '" + target + "' imports '" + imp + "', which matches '" + imp + "'" });
+  const observed = [layer(1, 'tests/domain/test_order_totals.py', 'codex', 'fastapi.testclient'), layer(2, 'src/acme/domain/order.py', 'claude-code', 'boto3')];
+  const RULE = { id: 'python-domain-stays-pure', description: 'A Python file under domain/ may not import infrastructure or a driver',
+    when_path_matches: ['**/domain/**/*.py', '**/domain/**/*.pyi'], forbid_imports: ['boto3', 'botocore', 'requests', 'httpx', 'sqlalchemy', 'fastapi', 'flask', 'django'] };
+  answer = api({
+    'POST /api/sandbox': { status: 200, body: { project: P, calls_seeded: 12 } },
+    ['/api/projects/' + P]: { status: 200, body: { project: P, config: { stage: 'observe', sandbox: true }, readiness: { rules: [
+      { rule_key: 'python-domain-stays-pure', kind: 'layering', state: 'ready', would_refuse: 2, correct: 2, false_alarms: 0, unreviewed: 0 }] } } },
+    '/api/decisions': { status: 200, body: { items: observed, next_cursor: null } },
+    ['POST /api/projects/' + P + '/reviews']: { status: 200, body: { updated: 1, skipped: [] } },
+    ['POST /api/projects/' + P + '/promote']: { status: 200, body: { project: P, config: { stage: 'enforce', observe_rules: [] } } },
+    '/api/decision': { status: 200, body: { decision: null, session: null, rule: RULE } },
+    '/rules': READABLE ? { status: 200, body: { rules: [RULE] } } : { status: 503, body: { detail: 'down' } }
+  });
+  await visit('#/try');
+  await click('try-create'); await tick();
+  await click('try-show'); await tick();
+  await click('try-review'); await tick();
+  out.first = view();
+  await click('try-label', { 'data-verdict': 'VERDICT-2', 'data-label': 'correct' }); await tick();
+  out.second = view();
+  await click('try-label', { 'data-verdict': 'VERDICT-1', 'data-label': 'correct' }); await tick();
+  await click('try-readiness'); await tick();
+  await click('try-promote'); await tick();
+  await click('try-next'); await tick();
+  out.send = view();
+"""
+    out = walk("const READABLE = true;\n" + scenario, tmp_path)
+    hit = r'<code class="tf-try-glob" data-hit>\s*<svg[^>]*>.*?</svg>\s*'
+    first, second, send = out["first"], out["second"], out["send"]
+    # The oldest call is on top: Claude Code's order.py, whose import falls under boto3.
+    assert "What the rule watches" in text_of(first)
+    assert re.search(hit + re.escape("**/domain/**/*.py") + "<", first, re.S), "The pattern that covers the path is not marked"
+    assert '<code class="tf-try-glob">**/domain/**/*.pyi<' in first, "A pattern that does not cover the path is marked"
+    assert re.search(hit + "boto3<", first, re.S) and "and 2 more" in text_of(first)
+    # The next card is the test module: the same pattern covers it, which is the false alarm to spot.
+    assert "tests/domain/test_order_totals.py" in text_of(second)
+    assert re.search(hit + re.escape("**/domain/**/*.py") + "<", second, re.S) and re.search(hit + "fastapi<", second, re.S)
+    # Step 5: the rule now in force, in its own words, beside the call about to be sent: the
+    # newest call marked correct, the test module, whose import falls under fastapi.
+    words = text_of(send)
+    assert "Now in force python-domain-stays-pure" in words and "A Python file under domain/ may not import infrastructure or a driver." in words
+    assert "tests/domain/test_order_totals.py" in words
+    assert re.search(hit + "fastapi<", send, re.S), "The package the import falls under is not marked"
+
+    unreadable = walk("const READABLE = false;\n" + scenario, tmp_path)
+    for name in ("first", "send"):
+        assert "tf-try-rulebox" not in unreadable[name], "A rule that could not be read was shown"
+
+
+# A phone of 375px: every `max-width` query up to that width matches, the page
+# is scrolled down a long step, and each scroll the page asks for is recorded.
+PHONE = r"""
+globalThis.matchMedia = q => {
+  const m = /max-width:\s*(\d+)px/.exec(String(q));
+  return { matches: !!m && 375 <= Number(m[1]), media: String(q), addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} };
+};
+globalThis.scrollY = 1087;
+const scrolled = [];
+globalThis.scrollTo = (x, y) => { scrolled.push(y); };
+"""
+
+PHONE_WALK = r"""
+  await visit('#/try');
+  await click('try-restart'); await tick();
+  await click('try-create'); await tick();
+  await click('try-show'); await tick();
+  await click('try-review'); await tick();
+  const stack = view();
+  const card = (/<article class="tf-try-card"[\s\S]*?<\/article>/.exec(stack) || [''])[0];
+  const bar = stack.slice(stack.indexOf('class="tf-try-actions"'));
+  out.onCard = card.indexOf('id="try-correct"') !== -1 && card.indexOf('id="try-false"') !== -1;
+  out.inBar = bar.indexOf('id="try-correct"') !== -1 && bar.indexOf('id="try-false"') !== -1 && bar.indexOf('class="tf-try-thumb"') !== -1;
+  await click('try-label', { 'data-verdict': 'VERDICT-1', 'data-label': 'correct' });
+  await click('try-label', { 'data-verdict': 'VERDICT-2', 'data-label': 'correct' });
+  await tick();
+  await click('try-readiness'); await tick();
+  // The reader scrolls down the list of rules, so the stage's top is far above.
+  el('try-stage').getBoundingClientRect = () => ({ top: -900, height: 2400 });
+  el('try-rail').getBoundingClientRect = () => ({ top: 56, height: 52 });
+  const before = typeof scrolled === 'undefined' ? 0 : scrolled.length;
+  await click('try-promote'); await tick();
+  out.scrolls = typeof scrolled === 'undefined' ? null : scrolled.slice(before);
+  out.promoted = text(view());
+"""
+
+
+def test_on_a_phone_the_labels_sit_under_the_thumb_and_a_promotion_plays_in_view(tmp_path: Path) -> None:
+    """Below 640px the two labels move to the sticky bar; on a desk they stay on the card.
+
+    And a promotion made from the bar at the foot of a long list of rules takes
+    the reader back up to the stage's top, where the switch slides and the
+    chip turns from Observe to Enforce: at 375px they once played 500 to 800px
+    above the screen, and the reader saw none of it.
+    """
+    phone = dash(REPLAY + PHONE_WALK, tmp_path, before=PHONE)
+    desk = dash(REPLAY + PHONE_WALK, tmp_path)
+    assert phone["inBar"] is True and phone["onCard"] is False, "On a phone the labels are not in the thumb bar"
+    assert desk["onCard"] is True and desk["inBar"] is False, "On a desk the labels left the card"
+    assert "Now in Enforce" in phone["promoted"]
+    # The stage's top, less the header and the sticky rail: -900 + 1087 - 56 - 52 - 12.
+    assert phone["scrolls"] == [67], "The promotion did not bring the stage back into view"
+
+
+def test_the_flagged_cards_name_the_whole_command_and_an_import_the_reason_cut(tmp_path: Path) -> None:
+    """A card never shows a cut import as the thing a call imported, nor a program as the command.
+
+    The service keeps 240 characters of a reason, which ends a Java reason
+    inside the import ("javax.persistence.Enti"); the rule's own definition
+    names the package it falls under. A command's target is only its program
+    ("cat"); the whole command is in its reason.
+    """
+    cut = (
+        "Observe stage, not enforced. This call would have been refused: Clean Architecture violation: Layering rule "
+        "'java-domain-stays-pure' refuses this write: A Java class under domain/ may not reach persistence, HTTP or the "
+        "container. 'src/main/java/com/acme/domain/Order.java' imports 'javax.persistence.Enti"
+    )
+    out = dash(
+        r"""
+  const P = 'Acme-Sandbox-0a1b2c3d';
+  const CUT = """ + json.dumps(cut) + r""";
+  const observed = [
+    row(1, { project_name: P, agent: 'codex', tool_name: 'apply_patch', rule_key: 'java-domain-stays-pure', observed_rules: ['java-domain-stays-pure'],
+      target: 'src/main/java/com/acme/domain/Order.java', observed_target: 'src/main/java/com/acme/domain/Order.java', observed_reason: CUT.replace(/^Observe stage, not enforced\. This call would have been refused: /, ''), reason: CUT.slice(0, 240) }),
+    row(2, { project_name: P, agent: 'codex', tool_name: 'shell', action_type: 'COMMAND_EXEC', rule_key: 'PROTECTED_PATH', observed_rules: ['PROTECTED_PATH'],
+      target: 'cat', observed_target: '', observed_reason: "Command 'cat .env' reaches a protected path or credential store" })
+  ];
+  answer = api({
+    'POST /api/sandbox': { status: 200, body: { project: P, calls_seeded: 12 } },
+    ['/api/projects/' + P]: { status: 200, body: { project: P, config: { stage: 'observe' }, readiness: { rules: [] } } },
+    '/api/decisions': { status: 200, body: { items: observed, next_cursor: null } },
+    '/rules': { status: 200, body: { rules: [{ id: 'java-domain-stays-pure', when_path_matches: ['**/domain/**/*.java'], forbid_imports: ['java.sql', 'javax.persistence', '**.infrastructure.**'] }] } }
+  });
+  await visit('#/try');
+  await click('try-create'); await tick();
+  await click('try-show'); await tick();
+  out.cards = text(view());
+  await click('try-review'); await tick();
+  out.stack = text(view());
+""",
+        tmp_path,
+    )
+    cards = out["cards"]
+    assert "It imports from javax.persistence , a package the rule forbids." in cards
+    assert "javax.persistence.Enti" not in cards, "A cut import is shown as if it were the import"
+    assert "Command cat .env" in cards, "The command row names the program alone"
+    assert "It reaches a protected path or credential store." in cards
+    assert "cat .env" in out["stack"]
+
+
+def test_a_sandbox_with_nothing_flagged_says_so_and_offers_a_second_read(tmp_path: Path) -> None:
+    """Step 2 with no flagged call is a designed state, not a blank stage.
+
+    A ledger can lag a moment behind a new sandbox, so the read that found
+    nothing is offered again, and the calls that did arrive stay on screen.
+    """
+    out = dash(
+        r"""
+  const P = 'Acme-Sandbox-0a1b2c3d';
+  let reads = 0;
+  answer = api({
+    'POST /api/sandbox': { status: 200, body: { project: P, calls_seeded: 12 } },
+    ['/api/projects/' + P]: { status: 200, body: { project: P, config: { stage: 'observe' }, readiness: { rules: [] } } },
+    '/api/decisions': u => {
+      if (u.searchParams.get('kind') === 'observed') { reads += 1; return { status: 200, body: { items: [], next_cursor: null } }; }
+      return { status: 200, body: { items: [row(1, { project_name: P, observed_rules: [], observed_rule: '', rule_key: 'NONE', target: 'README.md', observed_target: '', tool_name: 'Read', action_type: 'FILE_READ' })], next_cursor: null } };
+    }
+  });
+  await visit('#/try');
+  await click('try-create'); await tick();
+  await click('try-show'); await tick();
+  out.empty = view();
+  await click('try-show'); await tick();
+  out.reads = reads;
+""",
+        tmp_path,
+    )
+    words = text_of(out["empty"])
+    assert "No call was flagged" in words and 'class="tf-empty"' in out["empty"]
+    assert "Read the list again" in words and "README.md" in words, "The calls that arrived stay on the empty step"
+    assert out["reads"] == 2
+
+
+def text_of(markup: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", markup))
+
+
+def test_a_resumed_sandbox_that_was_promoted_reads_as_enforce_on_every_step(tmp_path: Path) -> None:
+    """A visitor who comes back to a sandbox they promoted is shown the stage the service keeps.
+
+    The walkthrough once assumed Observe until it promoted the project itself,
+    so a resumed sandbox already in Enforce read "the project is in Observe",
+    offered to promote it again, and counted a call judged in Enforce among
+    the calls judged in Observe.
+    """
+    out = walk(
+        r"""
+  const P = 'Acme-Sandbox-0a1b2c3d';
+  const obs = (i, rule, target, extra) => row(i, Object.assign({ project_name: P, rule_key: rule, observed_rules: [rule], observed_rule: rule, target, observed_target: target, review: 'correct' }, extra || {}));
+  const observed = [
+    obs(2, 'python-domain-stays-pure', 'src/acme/domain/order.py'),
+    obs(3, 'PROTECTED_PATH', 'cat', { agent: 'codex', tool_name: 'shell', action_type: 'COMMAND_EXEC', observed_target: '', observed_reason: "Command 'cat .env' reaches a protected path or credential store" })
+  ];
+  const refusedLater = row(1, { project_name: P, status: 'BLOCKED_BOUNDARY_VIOLATION', stage: 'enforce', observed_rules: [], observed_rule: '', rule_key: 'python-domain-stays-pure', reason: 'The domain may not import boto3.' });
+  const sent = {};
+  store['threefold-try'] = JSON.stringify({ project: P, at: Date.now() });
+  answer = api({
+    ['/api/projects/' + P]: { status: 200, body: { project: P,
+      config: { stage: 'enforce', observe_rules: ['PROTECTED_PATH', 'LOOP'], sandbox: true,
+        history: [{ at: NOW, action: 'promote', by: 'anonymous', enforce: ['python-domain-stays-pure'], observe: ['PROTECTED_PATH', 'LOOP'] }] },
+      readiness: { summary: { stage: 'enforce' }, rules: [
+        { rule_key: 'python-domain-stays-pure', kind: 'layering', state: 'ready', mode_now: 'enforce', would_refuse: 1, correct: 1, false_alarms: 0, unreviewed: 0 },
+        { rule_key: 'PROTECTED_PATH', kind: 'gate', state: 'ready', mode_now: 'observe', would_refuse: 1, correct: 1, false_alarms: 0, unreviewed: 0 },
+        { rule_key: 'LOOP', kind: 'gate', state: 'quiet', mode_now: 'observe', would_refuse: 0, correct: 0, false_alarms: 0, unreviewed: 0 }] } } },
+    '/api/decisions': u => ({ status: 200, body: { items: u.searchParams.get('kind') === 'observed' ? observed : [refusedLater].concat(observed), next_cursor: null } }),
+    '/api/decision': { status: 200, body: { decision: observed[0], session: null, rule: { id: 'python-domain-stays-pure', forbid_imports: ['boto3'] } } },
+    'POST /evaluate-tool-call': (u, i, body) => { sent.evaluate = body; return { status: 200, body: { status: 'BLOCKED_BOUNDARY_VIOLATION', reason: 'The domain may not import boto3.', project_stage: 'enforce' } }; }
+  });
+  await visit('#/try');
+  out.offer = text(view());
+  await click('try-resume'); await tick();
+  out.step1 = text(view());
+  await click('try-show'); await tick();
+  await click('try-review'); await tick();
+  await click('try-readiness'); await tick();
+  out.step4 = text(view());
+  out.offersPromote = view().indexOf('data-action="try-promote"') !== -1;
+  await click('try-next'); await tick();
+  out.step5 = text(view());
+  await click('try-send'); await tick();
+  await click('try-finish'); await tick();
+  out.done = text(view());
+  out.sent = sent;
+""",
+        tmp_path,
+    )
+    assert "Continue with it" in out["offer"]
+    assert "the project is in Enforce, promoted earlier" in out["step1"]
+    assert "the project is in Observe" not in out["step1"], "Step 1 contradicts the stage the service keeps"
+    assert "Already in Enforce" in out["step4"] and "1 rule refuses the calls that break it" in out["step4"]
+    assert "PROTECTED_PATH and LOOP keep observing" in out["step4"]
+    assert out["offersPromote"] is False, "A project already in Enforce is not offered the promotion again"
+    assert "src/acme/domain/order.py" in out["step5"], "The call to send is planned for a promotion made on an earlier visit"
+    assert out["sent"]["evaluate"]["arguments"] == {"file_path": "src/acme/domain/order.py", "content": "import boto3\n"}
+    assert "3 calls judged 2 in Observe and 1 in Enforce" in out["done"]
+    assert "calls judged in Observe" not in out["done"], "A call judged in Enforce is not counted as judged in Observe"
+    # Each stage's count on its own: the refusal in Enforce is not one of the calls Observe let run.
+    assert "In Observe, 2 calls would have been refused and ran; in Enforce, 1 call was refused." in out["done"]
+    assert "would have been refused, and 1 was" not in out["done"]
+
+
+def test_a_resumed_sandbox_says_it_is_reading_until_the_reads_answer(tmp_path: Path) -> None:
+    """While a sandbox made earlier is read back, the screen says so and claims nothing about it.
+
+    The resume once showed "Step 1 of 5 · done", "Your sandbox is ready",
+    "Every call was judged and recorded" and lanes "Sending its calls…"
+    before a single call had been read, and offered to continue "with the
+    labels you gave it" to a visitor who had given none.
+    """
+    out = dash(
+        r"""
+  const P = 'Acme-Sandbox-0a1b2c3d';
+  const hold = held();
+  store['threefold-try'] = JSON.stringify({ project: P, at: Date.now() });
+  answer = api({
+    ['/api/projects/' + P]: { status: 200, body: { project: P, config: { stage: 'observe', sandbox: true }, readiness: { rules: [] } } },
+    '/api/decisions': () => hold.promise.then(() => ({ status: 200, body: { items: [row(1, { project_name: P })], next_cursor: null } }))
+  });
+  await visit('#/try');
+  out.offer = text(view());
+  const resuming = click('try-resume');
+  await tick();
+  out.reading = text(view());
+  hold.release();
+  await resuming; await tick();
+  out.read = text(view());
+""",
+        tmp_path,
+    )
+    assert "You started one earlier: Acme-Sandbox-0a1b2c3d" in out["offer"] and "Continue with it where you left off" in out["offer"]
+    assert "with the labels you gave it" not in out["offer"]
+    reading = out["reading"]
+    assert "Opening your sandbox" in reading and "Reading its calls…" in reading and "Reading your sandbox…" in reading
+    for claim in ("· done", "Your sandbox is ready", "judged and recorded", "Sending its calls"):
+        assert claim not in reading, f"While reading, the screen claims {claim!r}"
+    assert "Step 1 of 5 · done" in out["read"] and "Every call was judged and recorded" in out["read"]
+
+
+def test_the_walkthrough_words_the_service_s_counts_and_its_sources_plainly(tmp_path: Path) -> None:
+    """The service's "1 false alarm(s)" reads "1 false alarm", and a caption names its source in a few words.
+
+    A sentence the model did not write is said so beneath the caption, in
+    sentence case, rather than in a caption of shouting capitals; and the
+    rail's note for a refusal is drawn in the refusal's colour.
+    """
+    out = dash(
+        REPLAY.replace(
+            "{ rule_key: 'PROTECTED_PATH', kind: 'gate', state: 'ready', would_refuse: 1, correct: 1, false_alarms: 0, unreviewed: 0 }",
+            "{ rule_key: 'PROTECTED_PATH', kind: 'gate', state: 'noisy', would_refuse: 3, correct: 2, false_alarms: 1, unreviewed: 0, recommendation: '1 false alarm(s): keep it observing, or refine the rule, before enforcing it.' },"
+            + " { rule_key: 'LOOP_TWO', kind: 'gate', state: 'needs_review', would_refuse: 2, correct: 0, false_alarms: 0, unreviewed: 2, recommendation: '2 flagged call(s) not reviewed: mark each correct or false alarm before deciding.' }",
+        ).replace(
+            "body: { status: 'BLOCKED_BOUNDARY_VIOLATION', reason: 'Refused.', project_stage: 'enforce' }",
+            "body: { status: 'BLOCKED_BOUNDARY_VIOLATION', reason: 'Refused.', project_stage: 'enforce', bedrock_explanation: 'The domain reached for an AWS client.', explanation_source: 'deterministic_fallback' }",
+        )
+        + r"""
+  await toStepFour(['python-domain-stays-pure']);
+  out.step4 = text(view());
+  await click('try-promote'); await tick();
+  await click('try-next'); await tick();
+  await click('try-send'); await tick();
+  out.climax = view();
+""",
+        tmp_path,
+    )
+    assert "1 false alarm: keep it observing, or refine the rule" in out["step4"]
+    assert "2 flagged calls not reviewed" in out["step4"] and "(s)" not in out["step4"]
+    climax = out["climax"]
+    assert re.search(r'class="tf-try-quote-src">\s*<svg[^>]*>.*?</svg>\s*Deterministic explanation</figcaption>', climax, re.S)
+    assert "Amazon Bedrock was asked and did not answer, so this sentence is the service's own." in text_of(climax).replace("&#039;", "'")
+    assert 'data-tone="refused">Refused<' in climax, "The rail's note for the refusal is not in the refusal's colour"
+
+
+def test_a_resumed_sandbox_s_rail_counts_only_the_lists_it_has_read(tmp_path: Path) -> None:
+    """The rail's note for step 2 waits for the list of flagged calls it counts.
+
+    A resumed sandbox reads its readiness on step 1, before that list, and the
+    rail once counted the empty list as "0 calls flagged" beside a project bar
+    that said, on the same screen, that five calls would refuse.
+    """
+    out = dash(
+        r"""
+  const P = 'Acme-Sandbox-0a1b2c3d';
+  const obs = (i, rule, target, extra) => row(i, Object.assign({ project_name: P, rule_key: rule, observed_rules: [rule], observed_rule: rule, target, observed_target: target }, extra || {}));
+  const observed = [
+    obs(2, 'python-domain-stays-pure', 'src/acme/domain/order.py'),
+    obs(3, 'PROTECTED_PATH', 'cat', { agent: 'codex', tool_name: 'shell', action_type: 'COMMAND_EXEC', observed_target: '', observed_reason: "Command 'cat .env' reaches a protected path or credential store" })
+  ];
+  const approved = row(4, { project_name: P, agent: 'antigravity', observed_rules: [], observed_rule: '', rule_key: 'NONE', target: 'README.md', observed_target: '' });
+  store['threefold-try'] = JSON.stringify({ project: P, at: Date.now() });
+  answer = api({
+    ['/api/projects/' + P]: { status: 200, body: { project: P, config: { stage: 'observe', sandbox: true }, readiness: { rules: [
+      { rule_key: 'python-domain-stays-pure', kind: 'layering', state: 'needs_review', would_refuse: 1, correct: 0, false_alarms: 0, unreviewed: 1 },
+      { rule_key: 'PROTECTED_PATH', kind: 'gate', state: 'needs_review', would_refuse: 1, correct: 0, false_alarms: 0, unreviewed: 1 }] } } },
+    '/api/decisions': u => ({ status: 200, body: { items: u.searchParams.get('kind') === 'observed' ? observed : observed.concat([approved]), next_cursor: null } })
+  });
+  function notes() {
+    return view().split('<li class="tf-try-step"').slice(1).map(li => { const m = /class="tf-try-step-note"[^>]*>([^<]*)</.exec(li); return m ? m[1] : ''; });
+  }
+  await visit('#/try');
+  await click('try-resume'); await tick();
+  out.resumed = notes();
+  out.bar = text(view());
+  await click('try-show'); await tick();
+  out.read = notes();
+""",
+        tmp_path,
+    )
+    assert out["resumed"][0] == "3 calls · 3 agents"
+    assert out["resumed"][1] == "", "The rail counted a list it had not read yet"
+    assert "2 would refuse" in out["bar"], "The project bar on the same screen reads the calls it has"
+    assert out["read"][1] == "2 calls flagged", "Once the list is read, the rail counts it"
+
+
+def test_the_walkthrough_escapes_every_value_the_service_sends(tmp_path: Path) -> None:
+    """Every string the walkthrough shows from a response is escaped, on every step.
+
+    The rows, the readiness, the promotion's answer, the rule the replay is
+    built from and the refusal all carry markup that would run if it were
+    written as markup; the screens are read at each step, the climax and the
+    completion included.
+    """
+    out = dash(
+        r"""
+  const P = 'Acme-Sandbox-0a1b2c3d';
+  const evilRow = i => row(i, { project_name: P, tool_name: EVIL, target: EVIL, observed_target: EVIL, reason: EVIL, observed_reason: EVIL,
+    rule_key: EVIL, observed_rules: [EVIL], observed_rule: EVIL, agent: EVIL, session_id: EVIL });
+  const rows = [evilRow(1), evilRow(2)];
+  answer = api({
+    'POST /api/sandbox': { status: 200, body: { project: P, calls_seeded: 2 } },
+    ['/api/projects/' + P]: { status: 200, body: { project: P, config: { stage: 'observe' }, readiness: { rules: [
+      { rule_key: EVIL, kind: EVIL, state: EVIL, recommendation: EVIL, would_refuse: 2, correct: 1, false_alarms: 1, unreviewed: 0 }
+    ] } } },
+    '/api/decisions': { status: 200, body: { items: rows, next_cursor: null } },
+    ['POST /api/projects/' + P + '/reviews']: { status: 200, body: { updated: 1, skipped: [] } },
+    ['POST /api/projects/' + P + '/promote']: { status: 200, body: { project: P, config: { stage: 'enforce', observe_rules: [EVIL] } } },
+    '/api/decision': { status: 200, body: { decision: rows[0], session: null, rule: { id: EVIL, forbid_imports: [EVIL] } } },
+    '/rules': { status: 200, body: { rules: [{ id: EVIL, description: EVIL, when_path_matches: [EVIL, '**/' + EVIL], forbid_imports: [EVIL] }] } },
+    'POST /evaluate-tool-call': { status: 200, body: { status: EVIL, reason: EVIL, bedrock_explanation: EVIL, explanation_source: 'bedrock', project_stage: EVIL,
+      suggested_fix: { kind: EVIL, summary: EVIL, steps: [EVIL], writes: [{ path: EVIL, content: EVIL, new_file: true }], validated: true, checks: [{ gate: EVIL, path: EVIL, passed: true }] } } }
+  });
+  out.screens = {};
+  await visit('#/try');
+  await click('try-create'); await tick();
+  out.screens.arrived = view();
+  await click('try-show'); await tick();
+  out.screens.cards = view();
+  await click('try-review'); await tick();
+  out.screens.stack = view();
+  await click('try-label', { 'data-verdict': 'VERDICT-1', 'data-label': 'correct' }); await tick();
+  await click('try-label', { 'data-verdict': 'VERDICT-2', 'data-label': 'false_alarm' }); await tick();
+  await click('try-readiness'); await tick();
+  Dash.tryState.selected = new Set([EVIL]);
+  await click('try-promote'); await tick();
+  out.screens.promoted = view();
+  await click('try-next'); await tick();
+  out.screens.send = view();
+  await click('try-send'); await tick();
+  out.screens.climax = view();
+  out.sent = calls.filter(c => c.url.indexOf('/evaluate-tool-call') !== -1).pop().body;
+  await click('try-finish'); await tick();
+  out.screens.done = view();
+""",
+        tmp_path,
+    )
+    for name, markup in out["screens"].items():
+        assert "<img" not in markup and "<svg onload" not in markup, f"Service data reached the {name} screen as markup"
+        assert "&lt;img" in markup, f"The hostile value was not shown on the {name} screen, so this proves nothing there"
+    for name in ("stack", "send"):
+        assert "tf-try-rulebox" in out["screens"][name], f"The rule as written was not shown on the {name} screen, so this proves nothing about it"
+    assert out["sent"]["session_id"].startswith("try-"), "The replay is still a hook's call in a session the stage decides"
+
+
+def test_the_walkthrough_moves_only_for_a_reader_who_has_not_asked_for_less() -> None:
+    """Every animation the walkthrough declares sits under prefers-reduced-motion: no-preference.
+
+    Its default styles are the final state, so a reader who asked for less
+    motion sees the same screens, still; the markup never waits on a timer.
+    """
+    body = page_source("dashboard.html")
+    css = body.split("const TRY_CSS = `", 1)[1].split("`;", 1)[0]
+    motion = css.split("@media (prefers-reduced-motion: no-preference) {", 1)
+    assert len(motion) == 2, "The walkthrough's motion is not gated on the reader's preference"
+    outside = motion[0] + motion[1].split(chr(10) + "}" + chr(10), 1)[1]
+    assert not re.search(r"(^|[;{\s])animation(-name)?\s*:", outside), "An animation runs whatever the reader asked for"
+    assert "infinite" not in css, "Nothing in the walkthrough loops"
+    view = body.split("function viewTry(ctx)", 1)[1].split("// ------------------------------------------------------------- proof", 1)[0]
+    assert "setTimeout" not in view and "setInterval" not in view, "A step's content never waits on a timer"
 
 
 def test_the_walkthrough_says_where_it_runs_when_the_stack_is_private(tmp_path: Path) -> None:
@@ -1283,6 +2287,7 @@ def test_the_walkthrough_says_where_it_runs_when_the_stack_is_private(tmp_path: 
   Threefold.whoami(true);
   await visit('#/try');
   out.private = text(view());
+  out.privateRail = view().indexOf('tf-try-rail') !== -1;
   answer = api({ 'POST /api/sandbox': { status: 403, body: { detail: 'Forbidden' } } });
   Threefold.whoami(true);
   await visit('#/overview');
@@ -1293,6 +2298,7 @@ def test_the_walkthrough_says_where_it_runs_when_the_stack_is_private(tmp_path: 
         tmp_path,
     )
     assert "The walkthrough runs on the public demo" in out["private"] and "Connect a repository" in out["private"]
+    assert out["privateRail"] is False, "A private stack draws the five steps with the first current, though none can be taken"
     assert "does not let visitors make a sandbox" in out["refused"]
 
 

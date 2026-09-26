@@ -2068,13 +2068,668 @@
 
     // ---------------------------------------------------------------- try
 
+    // The sixty-second walkthrough: a guided run of the two-stage rollout on a
+    // sandbox of the visitor's own. A rail of the five steps stays in view
+    // beside a stage that holds one step at a time: a title, one sentence, one
+    // primary action, and a picture of what the last action did. Every figure
+    // on it is read from a response. The motion is CSS alone, and only for a
+    // reader who has not asked for less: the markup is always drawn in its
+    // final state, so nothing on the screen waits on a timer.
     const TRY_STORAGE = 'threefold-try';
     const TRY_STEPS = ['Make a sandbox', 'See what would be refused', 'Label each call', 'Promote', 'Send it again'];
+    const TRY_AGENTS = ['claude-code', 'codex', 'antigravity'];
+    const TRY_MONOGRAMS = { 'claude-code': 'CC', codex: 'CX', antigravity: 'AG' };
+    const TRY_TOOL_ICONS = { FILE_READ: 'book', FILE_WRITE: 'code', COMMAND_EXEC: 'terminal' };
+    const TRY_STYLE_ID = 'tf-try-style';
+    // Step 5 sends a flagged call again as the agent and the tool that made
+    // it, so only the stage differs. A write built from a rule alone, with no
+    // call of the sandbox's behind it, goes as Claude Code's Write.
+    const TRY_RULE_SENDER = { agent: 'claude-code', tool_name: 'Write' };
+
+    // The walkthrough's own styles, kept beside the only route that uses them
+    // and added to the page once, when the route is first opened. Built on the
+    // tokens of assets/threefold.css. Every animation sits under
+    // prefers-reduced-motion: no-preference, and the default styles are the
+    // final state, so a reader who asked for less motion sees the same screen,
+    // still.
+    const TRY_CSS = `
+.tf-try { display: flex; flex-direction: column; gap: 16px; }
+.tf-try-side { display: contents; }
+.tf-try-head { min-width: 0; }
+.tf-try-title { margin: 0; font: 650 1.125rem/1.5rem var(--tf-font-sans); letter-spacing: -0.01em; color: var(--tf-text); outline: none; }
+.tf-try-title:focus-visible, .tf-try-h2:focus-visible { outline: none; }
+.tf-try-head .tf-eyebrow { margin-bottom: 6px; }
+.tf-try-lede { display: none; margin: 8px 0 0; font-size: var(--tf-fs-small); line-height: var(--tf-lh-small); color: var(--tf-text-2); }
+.tf-try-tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 0; }
+.tf-try .tf-try-restart { display: none; }
+@media (min-width: 640px) { .tf-try-lede { display: block; } }
+
+.tf-try-rail { position: sticky; top: var(--tf-header-h); z-index: 30; margin: 0 -16px; padding: 10px 16px;
+  background: color-mix(in srgb, var(--tf-bg) 90%, transparent); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+  border-top: 1px solid var(--tf-hairline); border-bottom: 1px solid var(--tf-hairline); }
+.tf-try-steps { list-style: none; margin: 0; padding: 0; display: flex; align-items: center; gap: 8px; }
+.tf-try-step { display: flex; align-items: center; gap: 8px; flex: 1 1 auto; min-width: 0; }
+.tf-try-step::after { content: ''; flex: 1 1 8px; min-width: 8px; height: 1px; background: var(--tf-hairline-strong); }
+.tf-try-step:last-child { flex: 0 0 auto; }
+.tf-try-step:last-child::after { display: none; }
+.tf-try-step[data-state="done"]::after { background: var(--tf-accent-line); }
+.tf-try-step-text { display: none; min-width: 0; }
+.tf-try-step[data-state="current"] .tf-try-step-text { display: block; }
+.tf-try-step-name { display: block; font: 600 var(--tf-fs-small)/1.125rem var(--tf-font-sans); color: var(--tf-text); }
+.tf-try-step-note { display: none; }
+@media (max-width: 1023px) { .tf-try-step > .tf-step-num { width: 26px; height: 26px; font-size: 0.6875rem; } }
+
+@media (min-width: 1024px) {
+  .tf-try { display: grid; grid-template-columns: 17rem minmax(0, 1fr); gap: 32px; align-items: start; }
+  .tf-try-side { display: flex; flex-direction: column; gap: 28px; position: sticky; top: calc(var(--tf-header-h) + 24px); }
+  .tf-try-rail { position: static; margin: 0; padding: 0; background: none; -webkit-backdrop-filter: none; backdrop-filter: none; border: 0; }
+  .tf-try-steps { flex-direction: column; align-items: stretch; gap: 0; }
+  .tf-try-step { position: relative; align-items: flex-start; gap: 14px; flex: none; padding-bottom: 22px; }
+  .tf-try-step:last-child { padding-bottom: 0; }
+  .tf-try-step::after { position: absolute; left: 13.5px; top: 34px; bottom: 4px; width: 1px; height: auto; min-width: 0; }
+  .tf-try-step-text { display: block; padding-top: 3px; }
+  .tf-try-step-name { line-height: 1.25rem; color: var(--tf-text-3); }
+  .tf-try-step[data-state="done"] .tf-try-step-name { color: var(--tf-text-2); }
+  .tf-try-step[data-state="current"] .tf-try-step-name { color: var(--tf-text); }
+  .tf-try-step-note { display: block; margin-top: 2px; font: 500 0.75rem/1.125rem var(--tf-font-mono); color: var(--tf-text-3); overflow-wrap: anywhere; }
+  .tf-try-step[data-state="current"] .tf-try-step-note { color: var(--tf-accent-text); }
+  .tf-try-step .tf-try-step-note[data-tone="refused"] { color: var(--tf-refused-text); }
+  .tf-try-step .tf-try-step-note[data-tone="approved"] { color: var(--tf-approved-text); }
+  .tf-try .tf-try-restart { display: inline-flex; align-self: flex-start; }
+}
+
+.tf-try-stage { display: flex; flex-direction: column; gap: 24px; min-width: 0; box-sizing: border-box; padding: 20px 16px 0;
+  min-height: calc(100vh - var(--tf-header-h) - 72px); min-height: calc(100dvh - var(--tf-header-h) - 72px); }
+@media (min-width: 640px) { .tf-try-stage { padding: 28px 28px 0; } }
+@media (min-width: 1024px) { .tf-try-stage { padding: 36px 40px 0; min-height: calc(100vh - var(--tf-header-h) - 48px); min-height: calc(100dvh - var(--tf-header-h) - 48px); } }
+.tf-try-stage[data-tone="refused"] { border-color: var(--tf-refused-line); }
+.tf-try-kicker { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 8px; font: 600 var(--tf-fs-micro)/1rem var(--tf-font-sans);
+  letter-spacing: var(--tf-track-caps); text-transform: uppercase; color: var(--tf-accent-text); }
+.tf-try-stage[data-tone="refused"] .tf-try-kicker { color: var(--tf-refused-text); }
+.tf-try-h2 { margin: 0; font: 650 1.5rem/2rem var(--tf-font-sans); letter-spacing: -0.02em; color: var(--tf-text); outline: none; overflow-wrap: anywhere; }
+@media (min-width: 768px) { .tf-try-h2 { font-size: 2rem; line-height: 2.5rem; letter-spacing: -0.028em; } }
+.tf-try-sentence { margin: 10px 0 0; max-width: 68ch; font-size: 1rem; line-height: 1.625rem; color: var(--tf-text-2); overflow-wrap: anywhere; }
+.tf-try-strong { color: var(--tf-text); font-weight: 500; }
+.tf-try-visual { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+.tf-try-foot { margin: 0; max-width: 72ch; font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-3); }
+.tf-try-actions { position: sticky; bottom: 0; z-index: 5; margin: auto -16px 0; padding: 12px 16px 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px;
+  background: var(--tf-surface-1); border-top: 1px solid var(--tf-hairline); border-radius: 0 0 var(--tf-radius-lg) var(--tf-radius-lg);
+  box-shadow: 0 -16px 24px -18px color-mix(in srgb, var(--tf-ink-0) 80%, transparent); }
+.tf-try-actions .tf-try-primary { flex: 1 1 100%; }
+@media (min-width: 640px) {
+  .tf-try-actions { margin: auto -28px 0; padding: 18px 28px 22px; }
+  .tf-try-actions .tf-try-primary { flex: 0 0 auto; }
+}
+@media (min-width: 1024px) { .tf-try-actions { margin: auto -40px 0; padding: 18px 40px 22px; } }
+.tf-try-hint { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 0; font-size: 0.75rem; line-height: 1.25rem; color: var(--tf-text-3); }
+.tf-try-muted { color: var(--tf-text-3); font-size: 0.75rem; line-height: 1.125rem; }
+.tf-try-keys { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.tf-try-wait { display: contents; }
+@media (max-width: 639px) { .tf-try-wait { display: none; } }
+@media (hover: none) { .tf-try-keys, .tf-try-verdict .tf-kbd { display: none; } }
+
+.tf-try-avatar { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; flex-shrink: 0; box-sizing: border-box; border-radius: 8px;
+  font: 700 0.65rem/1 var(--tf-font-sans); letter-spacing: 0.02em; color: var(--tf-text-2); background: var(--tf-surface-3); border: 1px solid var(--tf-hairline-strong); }
+.tf-try-avatar-sm { width: 22px; height: 22px; border-radius: 6px; font-size: 0.56rem; }
+.tf-try-avatar[data-agent="claude-code"] { --tf-try-hue: var(--tf-cat-1); }
+.tf-try-avatar[data-agent="codex"] { --tf-try-hue: var(--tf-cat-2); }
+.tf-try-avatar[data-agent="antigravity"] { --tf-try-hue: var(--tf-cat-3); }
+.tf-try-avatar[data-agent="claude-code"], .tf-try-avatar[data-agent="codex"], .tf-try-avatar[data-agent="antigravity"] {
+  background: color-mix(in srgb, var(--tf-try-hue) 20%, transparent); border-color: color-mix(in srgb, var(--tf-try-hue) 65%, var(--tf-text-2));
+  color: color-mix(in srgb, var(--tf-try-hue) 28%, var(--tf-text)); }
+
+.tf-try-project { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; padding: 12px; background: var(--tf-inset); border: 1px solid var(--tf-hairline); border-radius: var(--tf-radius-md); }
+.tf-try-project-name { display: inline-flex; align-items: center; gap: 8px; min-width: 0; font: 500 0.8125rem/1.25rem var(--tf-font-mono); color: var(--tf-text); }
+.tf-try-project-name .tf-icon { color: var(--tf-text-3); }
+.tf-try-project-end { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; }
+.tf-try-stat { display: inline-flex; align-items: center; gap: 6px; font-size: 0.75rem; line-height: 1rem; color: var(--tf-text-3); white-space: nowrap; }
+.tf-try-stat b { font: 650 0.9375rem/1 var(--tf-font-sans); color: var(--tf-text); font-variant-numeric: tabular-nums; }
+.tf-try-stat .tf-icon { width: 14px; height: 14px; }
+.tf-try-stat[data-outcome="approved"] .tf-icon { color: var(--tf-approved-text); }
+.tf-try-stat[data-outcome="observed"] .tf-icon { color: var(--tf-observed-text); }
+.tf-try-stat[data-outcome="refused"] .tf-icon { color: var(--tf-refused-text); }
+
+.tf-try-switch { position: relative; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 4px; border-radius: 14px; background: var(--tf-inset); border: 1px solid var(--tf-hairline); }
+.tf-try-switch-knob { position: absolute; top: 4px; bottom: 4px; left: 4px; width: calc(50% - 4px); box-sizing: border-box; border-radius: 10px;
+  background: var(--tf-observed-soft); border: 1px solid var(--tf-observed-line); }
+.tf-try-switch[data-stage="enforce"] .tf-try-switch-knob { left: 50%; background: var(--tf-accent-soft); border-color: var(--tf-accent-line); box-shadow: 0 0 28px -8px color-mix(in srgb, var(--tf-accent) 70%, transparent); }
+.tf-try-switch-opt { position: relative; z-index: 1; display: flex; align-items: center; gap: 10px; min-width: 0; padding: 10px 14px; color: var(--tf-text-3); }
+.tf-try-switch-opt .tf-icon { width: 18px; height: 18px; flex-shrink: 0; }
+.tf-try-switch-opt b { display: block; font: 600 0.875rem/1.25rem var(--tf-font-sans); }
+.tf-try-switch-opt small { display: block; font-size: 0.75rem; line-height: 1rem; color: var(--tf-text-3); }
+.tf-try-switch[data-stage="observe"] [data-opt="observe"], .tf-try-switch[data-stage="enforce"] [data-opt="enforce"] { color: var(--tf-text); }
+.tf-try-switch[data-stage="observe"] [data-opt="observe"] .tf-icon { color: var(--tf-observed-text); }
+.tf-try-switch[data-stage="enforce"] [data-opt="enforce"] .tf-icon { color: var(--tf-accent-text); }
+@media (max-width: 479px) { .tf-try-switch-opt small { display: none; } }
+
+.tf-try-flip { display: inline-grid; vertical-align: middle; }
+.tf-try-flip > * { grid-area: 1 / 1; justify-self: end; }
+.tf-try-rules-quiet .tf-try-flip > *, .tf-try-project .tf-try-flip > * { justify-self: start; }
+.tf-try-was { display: none; }
+
+.tf-try-lanes { display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 1180px) { .tf-try-lanes { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (min-width: 640px) and (max-width: 1179px) {
+  .tf-try-lane .tf-try-calls { flex-direction: row; flex-wrap: wrap; gap: 10px 16px; }
+  .tf-try-lane .tf-try-calls::before { display: none; }
+  .tf-try-lane .tf-try-call { flex: 1 1 13rem; }
+}
+.tf-try-lane { min-width: 0; padding: 14px; background: var(--tf-inset); border: 1px solid var(--tf-hairline); border-radius: var(--tf-radius-md); }
+.tf-try-lane-head { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; }
+.tf-try-lane-name { font: 600 0.875rem/1.25rem var(--tf-font-sans); color: var(--tf-text); }
+.tf-try-lane-count { margin-left: auto; font: 500 0.75rem/1rem var(--tf-font-mono); color: var(--tf-text-3); }
+.tf-try-lane-empty { margin: 10px 0 0; font-size: 0.75rem; line-height: 1rem; color: var(--tf-text-3); }
+.tf-try-lane[data-waiting] .tf-try-lane-count { font-family: var(--tf-font-sans); }
+.tf-try-ghost .tf-try-call-dot { border-style: dashed; border-color: var(--tf-hairline-strong); }
+.tf-try-ghost .tf-try-call-body { gap: 7px; padding-top: 5px; }
+.tf-try-ghost-bar { display: block; height: 6px; max-width: 100%; border-radius: 3px; background: var(--tf-surface-3); }
+@media (max-width: 639px) { .tf-try-ghost:nth-child(n+2) { display: none; } }
+.tf-try-legend { margin: 0; display: flex; flex-wrap: wrap; gap: 8px 20px; font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-3); }
+.tf-try-legend > span { display: inline-flex; align-items: center; gap: 8px; }
+
+.tf-try-peeks { display: flex; flex-direction: column; gap: 10px; }
+.tf-try-peeks .tf-try-group { margin: 0; }
+.tf-try-peek-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 640px) { .tf-try-peek-list { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; } }
+@media (min-width: 1180px) { .tf-try-peek-list { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.tf-try-peek { display: grid; grid-template-columns: 8.5rem minmax(0, 1fr); gap: 12px; align-items: center; min-width: 0; padding: 10px; box-sizing: border-box;
+  background: var(--tf-inset); border: 1px solid var(--tf-hairline); border-radius: var(--tf-radius-md); }
+@media (min-width: 640px) { .tf-try-peek { grid-template-columns: minmax(0, 1fr); align-items: stretch; align-content: start; gap: 12px; padding: 12px; } }
+.tf-try-peek-art { display: flex; align-items: center; justify-content: center; height: 68px; padding: 0 8px; box-sizing: border-box; overflow: hidden;
+  border-radius: 10px; background: var(--tf-surface-1); border: 1px solid var(--tf-hairline); }
+.tf-try-peek-words { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.tf-try-peek-name { display: flex; align-items: center; gap: 8px; font: 600 0.8125rem/1.25rem var(--tf-font-sans); color: var(--tf-text); }
+.tf-try-peek-n { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; flex-shrink: 0; box-sizing: border-box; border-radius: 99px;
+  font: 600 0.6875rem/1 var(--tf-font-sans); color: var(--tf-text-3); border: 1px solid var(--tf-hairline-strong); }
+.tf-try-peek-text { font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-3); }
+.tf-try-peek-flag { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; width: 100%; padding: 2px 0 2px 10px; box-sizing: border-box; box-shadow: inset 2px 0 0 var(--tf-observed); }
+.tf-try-peek-flag .tf-try-ghost-bar { height: 5px; }
+.tf-try-peek-pair { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
+.tf-try-peek-btn { display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 9px; box-sizing: border-box; border-radius: 8px; font: 600 0.6875rem/1 var(--tf-font-sans); white-space: nowrap; }
+.tf-try-peek-btn[data-tone="good"] { background: var(--tf-approved-soft); border: 1px solid var(--tf-approved-line); color: var(--tf-approved-text); }
+.tf-try-peek-btn[data-tone="bad"] { background: var(--tf-refused-soft); border: 1px solid var(--tf-refused-line); color: var(--tf-refused-text); }
+.tf-try-peek-switch { position: relative; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; max-width: 11rem; padding: 3px; box-sizing: border-box;
+  border-radius: 10px; background: var(--tf-inset); border: 1px solid var(--tf-hairline-strong); }
+.tf-try-peek-switch > span:not(.tf-try-peek-knob) { position: relative; z-index: 1; display: inline-flex; align-items: center; justify-content: center; gap: 4px; height: 26px;
+  font: 600 0.6875rem/1 var(--tf-font-sans); color: var(--tf-text-3); }
+.tf-try-peek-switch > [data-on] { color: var(--tf-text); }
+.tf-try-peek-switch > [data-on] .tf-icon { color: var(--tf-accent-text); }
+@media (max-width: 639px) { .tf-try-peek-art { padding: 0 6px; } .tf-try-peek-switch .tf-icon, .tf-try-peek-flag .tf-chip .tf-icon { display: none; } }
+.tf-try-peek-knob { position: absolute; top: 3px; bottom: 3px; left: 50%; right: 3px; border-radius: 7px; background: var(--tf-accent-soft); border: 1px solid var(--tf-accent-line); }
+.tf-try-peek-refused { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; box-sizing: border-box; border-radius: 8px; color: var(--tf-refused-text);
+  background: var(--tf-refused-soft); border: 1px solid var(--tf-refused-line); }
+.tf-try-peek-refused-text { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 0; font: 650 0.75rem/1 var(--tf-font-sans); }
+.tf-try-peek-refused .tf-try-ghost-bar { height: 5px; background: var(--tf-refused-line); }
+.tf-try-calls { position: relative; list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.tf-try-calls::before { content: ''; position: absolute; left: 11px; top: 14px; bottom: 14px; width: 1px; background: var(--tf-hairline-strong); }
+.tf-try-call { position: relative; display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
+.tf-try-call-dot { position: relative; z-index: 1; display: inline-flex; align-items: center; justify-content: center; width: 23px; height: 23px; flex-shrink: 0; box-sizing: border-box;
+  border-radius: 99px; background: var(--tf-surface-1); border: 1px solid var(--tf-approved-line); color: var(--tf-approved-text); }
+.tf-try-call[data-outcome="observed"] .tf-try-call-dot { border-color: var(--tf-observed-line); color: var(--tf-observed-text); background: color-mix(in srgb, var(--tf-observed) 10%, var(--tf-surface-1)); }
+.tf-try-call[data-outcome="refused"] .tf-try-call-dot { border-color: var(--tf-refused-line); color: var(--tf-refused-text); background: color-mix(in srgb, var(--tf-refused) 10%, var(--tf-surface-1)); }
+.tf-try-call-body { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; padding-top: 1px; }
+.tf-try-call-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
+.tf-try-call-tool { font: 500 0.78rem/1.25rem var(--tf-font-mono); color: var(--tf-text); }
+.tf-try-call-status { font: 600 0.6875rem/1rem var(--tf-font-sans); color: var(--tf-approved-text); }
+.tf-try-call[data-outcome="observed"] .tf-try-call-status { color: var(--tf-observed-text); }
+.tf-try-call[data-outcome="refused"] .tf-try-call-status { color: var(--tf-refused-text); }
+.tf-try-call-target { font: 400 0.75rem/1.125rem var(--tf-font-mono); color: var(--tf-text-3); overflow-wrap: break-word; }
+
+.tf-try-cards { display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 720px) { .tf-try-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.tf-try-flag { display: flex; flex-direction: column; gap: 14px; min-width: 0; padding: 16px; background: var(--tf-inset); border: 1px solid var(--tf-hairline);
+  border-radius: var(--tf-radius-md); box-shadow: inset 3px 0 0 var(--tf-observed); }
+.tf-try-flag-top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.tf-try-flag-agent { font: 600 0.8125rem/1.25rem var(--tf-font-sans); color: var(--tf-text); }
+.tf-try-flag-top .tf-chip { margin-left: auto; }
+.tf-try-dl { margin: 0; display: flex; flex-direction: column; gap: 10px; }
+.tf-try-dl > div { display: grid; grid-template-columns: 4.5rem minmax(0, 1fr); gap: 10px; align-items: baseline; }
+@media (max-width: 479px) { .tf-try-dl > div { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
+.tf-try-dl dt { font: 600 var(--tf-fs-micro)/1rem var(--tf-font-sans); letter-spacing: var(--tf-track-caps); text-transform: uppercase; color: var(--tf-text-3); }
+.tf-try-dl dd { margin: 0; min-width: 0; font-size: 0.8125rem; line-height: 1.25rem; color: var(--tf-text-2); overflow-wrap: break-word; }
+.tf-try-file { font: 500 0.8125rem/1.25rem var(--tf-font-mono); color: var(--tf-text); }
+.tf-try-kind { font-size: 0.6875rem; color: var(--tf-text-3); }
+.tf-try-import mark, .tf-try-card-why mark { padding: 0 4px; border-radius: 4px; background: var(--tf-observed-soft); color: var(--tf-observed-text); font-family: var(--tf-font-mono); font-size: 0.92em; }
+.tf-try-summary { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; }
+
+.tf-try-review { display: grid; gap: 20px; grid-template-columns: minmax(0, 1fr); align-items: start; }
+@media (min-width: 1180px) { .tf-try-review { grid-template-columns: minmax(0, 1fr) 17rem; gap: 28px; } }
+.tf-try-stack-col { min-width: 0; }
+.tf-try-receipt { display: flex; align-items: flex-start; gap: 8px; min-width: 0; min-height: 1.5rem; margin: 0 0 10px; font-size: 0.8125rem; line-height: 1.25rem;
+  color: var(--tf-text-3); }
+.tf-try-receipt > span { min-width: 0; }
+.tf-try-receipt > .tf-icon { margin-top: 3px; }
+.tf-try-receipt b { font-weight: 600; color: var(--tf-text); }
+.tf-try-receipt .tf-icon { flex-shrink: 0; }
+.tf-try-receipt[data-label="correct"] .tf-icon { color: var(--tf-approved-text); }
+.tf-try-receipt[data-label="false_alarm"] .tf-icon { color: var(--tf-refused-text); }
+.tf-try-stack { position: relative; min-width: 0; }
+.tf-try-stack { padding-bottom: 20px; }
+.tf-try-gone { display: none; position: absolute; z-index: 3; inset: 0; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 16px;
+  box-sizing: border-box; pointer-events: none; border-radius: var(--tf-radius-lg); background: var(--tf-surface-2); border: 1px solid var(--tf-approved-line); box-shadow: var(--tf-shadow-3); }
+.tf-try-gone[data-label="false_alarm"] { border-color: var(--tf-refused-line); }
+.tf-try-gone-stamp { display: inline-flex; align-items: center; gap: 8px; padding: 8px 16px; border-radius: 12px; font: 650 1.125rem/1.5rem var(--tf-font-sans);
+  color: var(--tf-approved-text); background: var(--tf-approved-soft); border: 1px solid var(--tf-approved-line); }
+.tf-try-gone[data-label="false_alarm"] .tf-try-gone-stamp { color: var(--tf-refused-text); background: var(--tf-refused-soft); border-color: var(--tf-refused-line); }
+.tf-try-gone-file { max-width: 100%; font: 500 0.8125rem/1.25rem var(--tf-font-mono); color: var(--tf-text-2); overflow-wrap: break-word; text-align: center; }
+.tf-try-thumb { display: flex; flex-direction: column; gap: 10px; width: 100%; min-width: 0; }
+.tf-try-thumb-top { display: flex; align-items: center; gap: 12px; }
+.tf-try-thumb-top .tf-try-progress-text { flex-shrink: 0; }
+.tf-try-thumb-top .tf-try-progress { flex: 1; min-width: 0; }
+.tf-try-stack::before, .tf-try-stack::after { content: ''; position: absolute; border-radius: var(--tf-radius-lg); background: var(--tf-surface-2); border: 1px solid var(--tf-hairline-strong); }
+.tf-try-stack::before { left: 32px; right: 32px; bottom: 0; top: 20px; opacity: 0.45; }
+.tf-try-stack::after { left: 16px; right: 16px; bottom: 10px; top: 10px; opacity: 0.8; }
+.tf-try-stack[data-behind="1"]::before, .tf-try-stack[data-behind="0"]::before, .tf-try-stack[data-behind="0"]::after { display: none; }
+.tf-try-stack[data-behind="0"] { padding-bottom: 0; }
+.tf-try-stack[data-behind="1"] { padding-bottom: 10px; }
+.tf-try-card { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 16px; min-width: 0; padding: 20px; box-sizing: border-box;
+  background: var(--tf-surface-2); border: 1px solid var(--tf-hairline-strong); border-radius: var(--tf-radius-lg); box-shadow: var(--tf-shadow-2); }
+@media (min-width: 640px) { .tf-try-card { padding: 24px 28px; } }
+.tf-try-card[data-label="correct"] { border-color: var(--tf-approved-line); }
+.tf-try-card[data-label="false_alarm"] { border-color: var(--tf-refused-line); }
+.tf-try-card-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
+.tf-try-card-count { font: 600 var(--tf-fs-micro)/1rem var(--tf-font-sans); letter-spacing: var(--tf-track-caps); text-transform: uppercase; color: var(--tf-text-3); }
+.tf-try-card-agent { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; font-size: 0.8125rem; color: var(--tf-text-2); }
+.tf-try-agent-name { white-space: nowrap; }
+.tf-try-card-agent .tf-mono { min-width: 0; overflow-wrap: anywhere; }
+.tf-try-card-file { margin: 0; font: 500 1.0625rem/1.5rem var(--tf-font-mono); color: var(--tf-text); overflow-wrap: break-word; }
+@media (min-width: 768px) { .tf-try-card-file { font-size: 1.1875rem; line-height: 1.75rem; } }
+.tf-try-card-rule { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font: 500 0.8125rem/1.25rem var(--tf-font-mono); color: var(--tf-text-2); }
+.tf-try-card-why { margin: 0; font-size: 0.9375rem; line-height: 1.5rem; color: var(--tf-text-2); overflow-wrap: anywhere; }
+.tf-try-verdicts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.tf-try-verdict, button.tf-try-verdict { height: 56px; padding: 0 12px; gap: 10px; font-size: 1rem; border-radius: 12px; white-space: normal; text-align: center; line-height: 1.2; }
+.tf-try-verdict .tf-icon { width: 20px; height: 20px; }
+.tf-try-verdict .tf-kbd { background: color-mix(in srgb, var(--tf-ink-0) 25%, transparent); border-color: currentColor; color: inherit; opacity: 0.8; }
+.tf-try-verdict[aria-pressed="true"].tf-btn-good, button.tf-try-verdict[aria-pressed="true"].tf-btn-good { background: color-mix(in srgb, var(--tf-approved) 30%, transparent); box-shadow: inset 0 0 0 1px var(--tf-approved-text); }
+.tf-try-verdict[aria-pressed="true"].tf-btn-danger, button.tf-try-verdict[aria-pressed="true"].tf-btn-danger { background: color-mix(in srgb, var(--tf-refused) 30%, transparent); box-shadow: inset 0 0 0 1px var(--tf-refused-text); }
+@media (max-width: 480px) {
+  .tf-try-card { padding: 16px; }
+  .tf-try-verdict, button.tf-try-verdict { gap: 6px; padding: 0 8px; font-size: 0.9375rem; }
+  .tf-try-verdict .tf-icon { width: 18px; height: 18px; }
+  .tf-try-verdict .tf-kbd { display: none; }
+}
+.tf-try-card-nav { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 12px; border-top: 1px solid var(--tf-hairline); }
+.tf-try-side-panel { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.tf-try-progress-text { margin: 0; font: 600 0.8125rem/1.25rem var(--tf-font-sans); color: var(--tf-text); }
+.tf-try-progress { display: flex; gap: 4px; }
+.tf-try-seg { flex: 1; height: 6px; border-radius: 3px; background: var(--tf-track); }
+.tf-try-seg[data-label="correct"] { background: var(--tf-approved); }
+.tf-try-seg[data-label="false_alarm"] { background: var(--tf-refused); }
+.tf-try-seg[data-current="true"] { box-shadow: 0 0 0 1px var(--tf-bg), 0 0 0 2px var(--tf-accent-text); }
+.tf-try-queue { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.tf-try-queue button { display: flex; align-items: flex-start; gap: 8px; width: 100%; padding: 7px 8px; box-sizing: border-box; border-radius: 8px; border: 1px solid transparent;
+  background: transparent; color: var(--tf-text-2); text-align: left; cursor: pointer; font: 400 0.75rem/1.125rem var(--tf-font-sans); }
+.tf-try-queue button:hover { background: var(--tf-surface-2); color: var(--tf-text); }
+.tf-try-queue button[aria-current="true"] { background: var(--tf-accent-soft); border-color: var(--tf-accent-line); color: var(--tf-text); }
+.tf-try-q-mark { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; flex-shrink: 0; border-radius: 99px; border: 1px dashed var(--tf-hairline-strong); color: var(--tf-text-3); }
+.tf-try-q-mark .tf-icon { width: 11px; height: 11px; }
+.tf-try-q-mark[data-label="correct"] { border: 1px solid var(--tf-approved-line); background: var(--tf-approved-soft); color: var(--tf-approved-text); }
+.tf-try-q-mark[data-label="false_alarm"] { border: 1px solid var(--tf-refused-line); background: var(--tf-refused-soft); color: var(--tf-refused-text); }
+.tf-try-q-text { display: flex; flex-direction: column; min-width: 0; }
+.tf-try-q-file { font-family: var(--tf-font-mono); overflow-wrap: break-word; }
+.tf-try-q-state { font-size: 0.6875rem; color: var(--tf-text-3); }
+.tf-try-tally { margin: 0; padding: 12px 14px; list-style: none; display: flex; flex-direction: column; gap: 8px; background: var(--tf-inset); border: 1px solid var(--tf-hairline); border-radius: var(--tf-radius-md); }
+.tf-try-tally li { display: flex; align-items: center; justify-content: space-between; gap: 10px; font: 500 0.72rem/1rem var(--tf-font-mono); color: var(--tf-text-2); }
+.tf-try-tally li > span:first-child { min-width: 0; overflow-wrap: anywhere; }
+.tf-try-tally-marks { display: inline-flex; gap: 3px; flex-shrink: 0; }
+
+.tf-try-states { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; }
+.tf-try-group-note { margin: -2px 0 10px; }
+.tf-try-group { margin: 8px 0 0; font: 600 var(--tf-fs-micro)/1rem var(--tf-font-sans); letter-spacing: var(--tf-track-caps); text-transform: uppercase; color: var(--tf-text-3); }
+.tf-try-rules { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 8px; grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 900px) { .tf-try-rules-quiet { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.tf-try-rule { display: flex; align-items: flex-start; gap: 14px; padding: 14px 16px; box-sizing: border-box; height: 100%; cursor: pointer;
+  background: var(--tf-inset); border: 1px solid var(--tf-hairline); border-radius: var(--tf-radius-md); transition: border-color var(--tf-dur-2), background-color var(--tf-dur-2); }
+.tf-try-rule:hover { border-color: var(--tf-hairline-strong); }
+.tf-try-rule:has(input:checked) { border-color: var(--tf-accent-line); background: linear-gradient(90deg, var(--tf-accent-soft), transparent 70%), var(--tf-inset); }
+.tf-try-rule:has(input:disabled) { cursor: default; }
+.tf-try-check { width: 18px; height: 18px; margin: 3px 0 0; flex-shrink: 0; accent-color: var(--tf-accent); }
+.tf-try-rule-main { display: flex; flex-direction: column; gap: 8px; min-width: 0; flex: 1; }
+.tf-try-rule-top { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.tf-try-rule-key { font: 500 0.8125rem/1.25rem var(--tf-font-mono); color: var(--tf-text); overflow-wrap: anywhere; }
+.tf-try-rule-chips { display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; margin-left: auto; }
+.tf-try-rules-quiet .tf-try-rule-chips { flex-basis: 100%; justify-content: flex-start; margin-left: 0; }
+.tf-try-bar { display: flex; align-items: center; gap: 3px; height: 8px; max-width: 18rem; }
+.tf-try-bar-more { flex-shrink: 0; margin-left: 3px; font: 600 0.6875rem/1 var(--tf-font-sans); color: var(--tf-text-3); font-variant-numeric: tabular-nums; }
+.tf-try-bar-seg { display: block; flex: 0 1 32px; min-width: 6px; height: 100%; border-radius: 2px; background: var(--tf-track); transform-origin: left center; }
+.tf-try-bar-seg[data-k="correct"] { background: var(--tf-approved); }
+.tf-try-bar-seg[data-k="false_alarm"] { background: var(--tf-refused); }
+.tf-try-bar-seg[data-k="unreviewed"] { background: var(--tf-hairline-strong); }
+.tf-try-rule-counts, .tf-try-rule-rec { font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-3); }
+.tf-try-rule-counts { color: var(--tf-text-2); }
+
+.tf-try-compare { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); align-items: start; }
+@media (min-width: 1180px) {
+  .tf-try-compare { grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); }
+  .tf-try-compare > .tf-try-then-col { order: -1; }
+}
+.tf-try-then { display: flex; flex-direction: column; gap: 12px; padding: 16px; background: var(--tf-inset); border: 1px solid var(--tf-hairline); border-radius: var(--tf-radius-md); box-shadow: inset 3px 0 0 var(--tf-observed); }
+.tf-try-now-col { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.tf-try-then-col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.tf-try-stack-col > .tf-try-rulebox { margin-top: 16px; }
+.tf-try-rulebox { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 14px 16px; box-sizing: border-box;
+  background: var(--tf-inset); border: 1px solid var(--tf-hairline); border-radius: var(--tf-radius-md); }
+.tf-try-rulebox[data-stage="enforce"] { border-color: var(--tf-accent-line); background: linear-gradient(180deg, var(--tf-accent-soft), transparent 120px), var(--tf-inset); }
+.tf-try-rulebox-head { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.tf-try-rulebox-title { font: 600 var(--tf-fs-micro)/1rem var(--tf-font-sans); letter-spacing: var(--tf-track-caps); text-transform: uppercase; color: var(--tf-text-3); }
+.tf-try-rulebox-key { font: 500 0.8125rem/1.25rem var(--tf-font-mono); color: var(--tf-text); overflow-wrap: anywhere; }
+.tf-try-rulebox-desc { margin: 0; font-size: 0.8125rem; line-height: 1.25rem; color: var(--tf-text-2); }
+.tf-try-rulebox dl { margin: 0; display: flex; flex-direction: column; gap: 8px; }
+.tf-try-rulebox dl > div { display: grid; grid-template-columns: 4.5rem minmax(0, 1fr); gap: 10px; align-items: baseline; }
+.tf-try-rulebox dt { font: 600 var(--tf-fs-micro)/1rem var(--tf-font-sans); letter-spacing: var(--tf-track-caps); text-transform: uppercase; color: var(--tf-text-3); }
+.tf-try-rulebox dd { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; font-size: 0.75rem; line-height: 1.25rem; }
+@media (max-width: 479px) { .tf-try-rulebox dl > div { grid-template-columns: minmax(0, 1fr); gap: 4px; } }
+.tf-try-glob { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; padding: 1px 7px; box-sizing: border-box; border-radius: 6px;
+  font: 500 0.75rem/1.25rem var(--tf-font-mono); color: var(--tf-text-2); background: var(--tf-surface-2); border: 1px solid var(--tf-hairline); overflow-wrap: anywhere; }
+.tf-try-glob .tf-icon { width: 12px; height: 12px; flex-shrink: 0; }
+.tf-try-glob[data-hit] { color: var(--tf-observed-text); background: var(--tf-observed-soft); border-color: var(--tf-observed-line); }
+.tf-try-rulebox[data-stage="enforce"] .tf-try-glob[data-hit] { color: var(--tf-accent-text); background: var(--tf-accent-soft); border-color: var(--tf-accent-line); }
+.tf-try-then-label { margin: 0; font: 600 var(--tf-fs-micro)/1rem var(--tf-font-sans); letter-spacing: var(--tf-track-caps); text-transform: uppercase; color: var(--tf-text-3); }
+.tf-try-editor { margin: 0; min-width: 0; overflow: hidden; border-radius: var(--tf-radius-md); border: 1px solid var(--tf-hairline-strong); background: var(--tf-ink-0); }
+.tf-try-editor[data-tone="refused"] { border-color: var(--tf-refused-line); }
+.tf-try-editor-tab { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 10px 14px; background: var(--tf-surface-1); border-bottom: 1px solid var(--tf-hairline);
+  font: 500 0.75rem/1.125rem var(--tf-font-mono); color: var(--tf-text-2); }
+.tf-try-editor-tab .tf-icon { color: var(--tf-text-3); }
+.tf-try-editor-path { flex: 1 1 10rem; min-width: 0; overflow-wrap: break-word; }
+.tf-try-editor-meta { margin-left: auto; font-family: var(--tf-font-sans); color: var(--tf-text-3); }
+.tf-try-code { margin: 0; padding: 12px 0; font: 400 0.8125rem/1.6 var(--tf-font-mono); color: var(--tf-text); }
+.tf-try-code code { font: inherit; }
+.tf-try-line { display: block; padding: 0 16px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.tf-try-line[data-bad] { background: var(--tf-observed-soft); box-shadow: inset 3px 0 0 var(--tf-observed); }
+.tf-try-editor[data-tone="refused"] .tf-try-line[data-bad] { background: var(--tf-refused-soft); box-shadow: inset 3px 0 0 var(--tf-refused); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--tf-refused-text) 70%, transparent); }
+.tf-try-ln { display: inline-block; width: 2ch; margin-right: 14px; color: var(--tf-text-decor); text-align: right; user-select: none; text-decoration: none; }
+.tf-try-editor-note { margin: 0; padding: 10px 14px; border-top: 1px solid var(--tf-hairline); font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-3); }
+.tf-try-delta { margin: 0; display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr)); }
+.tf-try-delta > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 10px 12px; border-radius: var(--tf-radius-md); background: var(--tf-inset); border: 1px solid var(--tf-hairline); }
+@media (max-width: 479px) { .tf-try-delta > div { padding: 8px 10px; } }
+.tf-try-delta dt { font: 600 var(--tf-fs-micro)/1rem var(--tf-font-sans); letter-spacing: var(--tf-track-caps); text-transform: uppercase; color: var(--tf-text-3); }
+.tf-try-delta dd { margin: 0; display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 0.8125rem; line-height: 1.25rem; color: var(--tf-text); }
+.tf-try-delta dd .tf-icon { flex-shrink: 0; }
+.tf-try-delta [data-kind="same"] .tf-icon { color: var(--tf-approved-text); }
+.tf-try-delta [data-kind="changed"] .tf-icon { color: var(--tf-text-3); }
+.tf-try-delta [data-kind="stage"] { border-color: var(--tf-accent-line); background: linear-gradient(90deg, var(--tf-accent-soft), transparent 85%), var(--tf-inset); }
+.tf-try-delta [data-kind="stage"] .tf-icon { color: var(--tf-accent-text); }
+
+.tf-try-climax { display: flex; flex-direction: column; gap: 16px; }
+.tf-try-verdict-banner { display: flex; align-items: flex-start; gap: 16px; padding: 18px; border-radius: var(--tf-radius-lg); border: 1px solid var(--tf-approved-line);
+  background: radial-gradient(120% 160% at 0% 0%, color-mix(in srgb, var(--tf-approved) 18%, transparent), color-mix(in srgb, var(--tf-approved) 4%, transparent) 60%), var(--tf-surface-2); }
+.tf-try-verdict-banner[data-tone="refused"] { border-color: var(--tf-refused-line);
+  background: radial-gradient(120% 160% at 0% 0%, color-mix(in srgb, var(--tf-refused) 26%, transparent), color-mix(in srgb, var(--tf-refused) 5%, transparent) 60%), var(--tf-surface-2); }
+@media (min-width: 640px) { .tf-try-verdict-banner { padding: 22px 24px; gap: 20px; } }
+@media (max-width: 479px) { .tf-try-verdict-banner { flex-direction: column; gap: 12px; } }
+.tf-try-verdict-icon { display: inline-flex; align-items: center; justify-content: center; width: 52px; height: 52px; flex-shrink: 0; border-radius: 16px;
+  background: var(--tf-approved-soft); border: 1px solid var(--tf-approved-line); color: var(--tf-approved-text); }
+.tf-try-verdict-banner[data-tone="refused"] .tf-try-verdict-icon { background: var(--tf-refused-soft); border-color: var(--tf-refused-line); color: var(--tf-refused-text); }
+.tf-try-verdict-icon .tf-icon { width: 28px; height: 28px; }
+.tf-try-verdict-body { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.tf-try-verdict-lead { margin: 0; font: 650 1.125rem/1.5rem var(--tf-font-sans); letter-spacing: -0.01em; color: var(--tf-text); }
+.tf-try-verdict-reason { margin: 0; font-size: 0.9375rem; line-height: 1.5rem; color: var(--tf-text-2); overflow-wrap: anywhere; }
+.tf-try-verdict-reason mark { padding: 0 4px; border-radius: 4px; background: var(--tf-refused-soft); color: var(--tf-refused-text); font-family: var(--tf-font-mono); font-size: 0.92em; }
+.tf-try-verdict-banner[data-tone="approved"] .tf-try-verdict-reason mark { background: var(--tf-approved-soft); color: var(--tf-approved-text); }
+.tf-try-verdict-terms { margin: 2px 0 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; }
+.tf-try-term { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-3); }
+.tf-try-term > span:first-child { font: 600 var(--tf-fs-micro)/1rem var(--tf-font-sans); letter-spacing: var(--tf-track-caps); text-transform: uppercase; }
+.tf-try-term .tf-mono { color: var(--tf-text-2); overflow-wrap: anywhere; }
+.tf-try-climax-grid { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); align-items: start; }
+.tf-try-then-none { margin: 0; font-size: 0.8125rem; line-height: 1.25rem; color: var(--tf-text-3); }
+.tf-try-then-file { margin: 0; overflow-wrap: break-word; }
+@media (min-width: 960px) { .tf-try-climax-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.tf-try-quote { margin: 0; display: flex; flex-direction: column; gap: 10px; padding: 18px 20px; border-radius: var(--tf-radius-md); background: var(--tf-accent-soft); border: 1px solid var(--tf-accent-line); }
+.tf-try-quote-src { display: inline-flex; align-items: center; gap: 8px; font: 600 var(--tf-fs-micro)/1rem var(--tf-font-sans); letter-spacing: var(--tf-track-caps); text-transform: uppercase; color: var(--tf-accent-text); }
+.tf-try-quote blockquote { margin: 0; font-size: 1rem; line-height: 1.625rem; color: color-mix(in srgb, var(--tf-accent-text) 30%, var(--tf-text)); overflow-wrap: anywhere; }
+.tf-try-quote-note { margin: 0; font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-2); }
+.tf-try-fix { display: flex; flex-direction: column; gap: 14px; padding: 18px; border-radius: var(--tf-radius-lg); background: var(--tf-surface-2); border: 1px solid var(--tf-hairline-strong); }
+.tf-try-fix[data-fix="checked"] { border-color: var(--tf-approved-line); background: linear-gradient(180deg, color-mix(in srgb, var(--tf-approved) 9%, transparent), transparent 160px), var(--tf-surface-2); }
+@media (min-width: 640px) { .tf-try-fix { padding: 22px 24px; } }
+.tf-try-fix-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.tf-try-fix-head .tf-label { margin: 0 4px 0 0; }
+.tf-try-fix-head .tf-chip { height: auto; min-height: 22px; white-space: normal; overflow-wrap: anywhere; }
+.tf-try-fix-summary { margin: 0; font-size: 0.9375rem; line-height: 1.5rem; color: var(--tf-text); overflow-wrap: anywhere; }
+.tf-try-fix-checks { margin: 0; display: inline-flex; align-items: center; gap: 8px; font-size: 0.8125rem; color: var(--tf-approved-text); }
+.tf-try-fix-checks[data-passed="some"] { color: var(--tf-observed-text); }
+.tf-try-fix-more > summary { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; list-style: none; font: 600 0.8125rem/1.25rem var(--tf-font-sans); color: var(--tf-accent-text); border-radius: 6px; }
+.tf-try-fix-more > summary::-webkit-details-marker { display: none; }
+.tf-try-fix-more > summary .tf-icon { transform: rotate(-90deg); transition: transform var(--tf-dur-2); }
+.tf-try-fix-more[open] > summary .tf-icon { transform: none; }
+.tf-try-fix-more > summary:hover { color: var(--tf-text); }
+.tf-try-fix-body { display: flex; flex-direction: column; gap: 14px; margin-top: 12px; }
+.tf-try-fix-steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; font-size: 0.8125rem; line-height: 1.25rem; color: var(--tf-text-2); }
+.tf-try-fix-writes { display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr); }
+.tf-try-fix-path { margin: 0 0 6px; font: 500 0.75rem/1.125rem var(--tf-font-mono); color: var(--tf-text-2); overflow-wrap: anywhere; }
+.tf-try-fix-foot { margin: 0; font-size: 0.75rem; color: var(--tf-text-3); }
+
+.tf-try-facts { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 900px) { .tf-try-facts { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.tf-try-fact { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 20px; background: var(--tf-inset); border: 1px solid var(--tf-hairline); border-radius: var(--tf-radius-lg); }
+.tf-try-fact-n { font: 650 2.25rem/2.5rem var(--tf-font-sans); letter-spacing: -0.03em; color: var(--tf-text); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.tf-try-fact[data-tone="refused"] { border-color: var(--tf-refused-line); }
+.tf-try-fact[data-tone="refused"] .tf-try-fact-n { color: var(--tf-refused-text); }
+.tf-try-fact-label { font: 600 0.8125rem/1.25rem var(--tf-font-sans); color: var(--tf-text); }
+.tf-try-fact-text { margin: 0; font-size: 0.875rem; line-height: 1.375rem; color: var(--tf-text-2); overflow-wrap: anywhere; }
+.tf-try-fact-src { margin: auto 0 0; padding-top: 8px; font: 500 0.6875rem/1rem var(--tf-font-mono); color: var(--tf-text-3); overflow-wrap: anywhere; }
+.tf-try-next-title { margin: 12px 0 0; font: 600 var(--tf-fs-micro)/1rem var(--tf-font-sans); letter-spacing: var(--tf-track-caps); text-transform: uppercase; color: var(--tf-text-3); }
+.tf-try-next { display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 900px) { .tf-try-next { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.tf-try-next-card { display: flex; align-items: flex-start; gap: 14px; padding: 18px; }
+.tf-try-next-card[data-primary] { border-color: var(--tf-accent-line); background: linear-gradient(180deg, var(--tf-accent-soft), transparent 140px), var(--tf-surface-1); }
+.tf-try-next-icon { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; flex-shrink: 0; border-radius: 10px;
+  background: var(--tf-surface-2); border: 1px solid var(--tf-hairline-strong); color: var(--tf-accent-text); }
+.tf-try-next-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.tf-try-next-name { display: inline-flex; align-items: center; gap: 6px; font: 600 0.9375rem/1.375rem var(--tf-font-sans); color: var(--tf-text); }
+.tf-try-next-sub { font-size: 0.8125rem; line-height: 1.25rem; color: var(--tf-text-2); overflow-wrap: anywhere; }
+
+@keyframes tf-try-rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+@keyframes tf-try-arrive { from { opacity: 0; transform: translateY(-10px) scale(0.96); } to { opacity: 1; transform: none; } }
+@keyframes tf-try-dot { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--tf-accent) 55%, transparent); } 100% { box-shadow: 0 0 0 10px transparent; } }
+@keyframes tf-try-in-next { from { opacity: 0; transform: translateX(28px) rotate(1deg); } to { opacity: 1; transform: none; } }
+@keyframes tf-try-gone { 0%, 38% { opacity: 1; transform: none; } 100% { opacity: 0; transform: translateX(-56px) rotate(-2deg); } }
+@keyframes tf-try-in-prev { from { opacity: 0; transform: translateX(-28px) rotate(-1deg); } to { opacity: 1; transform: none; } }
+@keyframes tf-try-was { 0%, 45% { opacity: 1; transform: none; } 100% { opacity: 0; transform: translateY(-8px) scale(0.9); } }
+@keyframes tf-try-now { from { opacity: 0; transform: translateY(8px) scale(0.85); } to { opacity: 1; transform: none; } }
+@keyframes tf-try-grow { from { transform: scaleX(0); } to { transform: none; } }
+@keyframes tf-try-ring { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--tf-accent) 70%, transparent); } 100% { box-shadow: 0 0 0 14px transparent; } }
+@keyframes tf-try-slam { 0% { opacity: 0; transform: scale(1.05); } 55% { opacity: 1; transform: scale(0.995); } 100% { opacity: 1; transform: none; } }
+@keyframes tf-try-glow { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--tf-refused) 55%, transparent); } 100% { box-shadow: 0 0 0 18px transparent; } }
+@keyframes tf-try-pop { 0% { transform: scale(0.4) rotate(-20deg); opacity: 0; } 70% { transform: scale(1.12) rotate(4deg); opacity: 1; } 100% { transform: none; opacity: 1; } }
+@keyframes tf-try-mark { from { background-size: 0% 100%; } to { background-size: 100% 100%; } }
+@keyframes tf-try-slide { from { left: 4px; background: var(--tf-observed-soft); border-color: var(--tf-observed-line); box-shadow: none; } to { left: 50%; } }
+
+@media (prefers-reduced-motion: no-preference) {
+  .tf-try-enter .tf-try-stage-head { animation: tf-try-rise 420ms var(--tf-ease-out) both; }
+  .tf-try-enter .tf-try-visual { animation: tf-try-rise 480ms var(--tf-ease-out) 90ms both; }
+  .tf-try-play .tf-try-peek { animation: tf-try-rise 480ms var(--tf-ease-out) both; animation-delay: calc(var(--tf-try-i, 0) * 90ms + 260ms); }
+  .tf-try-entering .tf-try-step[data-state="current"] > .tf-step-num { animation: tf-try-dot 900ms var(--tf-ease-out) 1; }
+  .tf-try-play .tf-try-arrive { animation: tf-try-arrive 420ms var(--tf-ease-out) both; animation-delay: calc(var(--tf-try-i, 0) * 110ms + 200ms); }
+  .tf-try-play .tf-try-rise { animation: tf-try-rise 420ms var(--tf-ease-out) both; animation-delay: calc(var(--tf-try-i, 0) * 80ms + 120ms); }
+  .tf-try-card[data-dir="next"] { animation: tf-try-in-next 320ms var(--tf-ease-out) both; }
+  .tf-try-card[data-dir="prev"] { animation: tf-try-in-prev 320ms var(--tf-ease-out) both; }
+  .tf-try-gone { display: flex; animation: tf-try-gone 860ms var(--tf-ease-out) both; }
+  .tf-try-flipping > .tf-try-was { display: inline-flex; animation: tf-try-was 900ms var(--tf-ease-out) both; animation-delay: calc(var(--tf-try-i, 0) * 160ms + 200ms); }
+  .tf-try-flipping > .tf-try-now { animation: tf-try-now 520ms var(--tf-ease-spring) both; animation-delay: calc(var(--tf-try-i, 0) * 160ms + 620ms); }
+  .tf-try-play .tf-try-bar-seg { animation: tf-try-grow 560ms var(--tf-ease-out) both; animation-delay: calc(var(--tf-try-i, 0) * 160ms + 300ms); }
+  .tf-try-ring .tf-try-now .tf-chip { animation: tf-try-ring 1100ms var(--tf-ease-out) 900ms 1 both; }
+  .tf-try-switching .tf-try-switch-knob { animation: tf-try-slide 760ms var(--tf-ease-out) 200ms both; }
+  .tf-try-play .tf-try-verdict-banner { animation: tf-try-slam 560ms var(--tf-ease-out) both, tf-try-glow 1200ms var(--tf-ease-out) 300ms 1; }
+  .tf-try-play .tf-try-verdict-icon { animation: tf-try-pop 620ms var(--tf-ease-spring) 180ms both; }
+  .tf-try-play .tf-try-climax-compare, .tf-try-play .tf-try-climax-grid { animation: tf-try-rise 480ms var(--tf-ease-out) both; }
+  .tf-try-play .tf-try-climax-compare { animation-delay: 300ms; }
+  .tf-try-play .tf-try-climax-grid { animation-delay: 560ms; }
+  .tf-try-play .tf-try-editor[data-tone="refused"] .tf-try-line[data-bad] { background-image: linear-gradient(90deg, color-mix(in srgb, var(--tf-refused) 28%, transparent), color-mix(in srgb, var(--tf-refused) 28%, transparent));
+    background-repeat: no-repeat; animation: tf-try-mark 700ms var(--tf-ease-out) 520ms both; }
+}
+`;
+
+    function ensureTryStyle() {
+      if (typeof document.createElement !== 'function' || !document.head || typeof document.head.appendChild !== 'function') return;
+      if (document.getElementById(TRY_STYLE_ID)) return;
+      const style = document.createElement('style');
+      style.id = TRY_STYLE_ID;
+      style.textContent = TRY_CSS;
+      document.head.appendChild(style);
+    }
+
+    function tryAvatar(agent, small) {
+      const known = Object.prototype.hasOwnProperty.call(TRY_MONOGRAMS, agent);
+      return html`<span class="tf-try-avatar${small ? ' tf-try-avatar-sm' : ''}" data-agent="${known ? agent : 'other'}" aria-hidden="true">${known ? TRY_MONOGRAMS[agent] : '··'}</span>`;
+    }
+
+    function tryOutcomeIcon(outcome) { return outcome === 'refused' ? 'stop' : outcome === 'observed' ? 'eye' : 'check'; }
+
+    function tryIsGate(key) { return Object.prototype.hasOwnProperty.call(GATE_KEYS, key); }
+
+    // A would-refuse reason, split into the rule's sentence and the import it
+    // caught, so a card can say both plainly. The service keeps the first 240
+    // characters of a reason. An import cut there is named by the package it
+    // falls under, which the rule's own definition lists; without that it
+    // ends in an ellipsis rather than mid-word as if that were the end. A
+    // command's reason is said of the call, since the card names the command.
+    function tryWhy(row, defs) {
+      const full = String(reasonOf(row) || '');
+      const cut = full.length >= 240;
+      const text = full
+        .replace(/^Observe stage, not enforced\. This call would have been refused: /, '')
+        .replace(/^Clean Architecture violation: Layering rule '[^']*' refuses this write: /, '');
+      const command = /^Command '.*' (reaches .*)$/.exec(text);
+      if (command) return { sentence: tryStop('It ' + command[1]), imports: null };
+      const m = /^(.*?\.)\s+'[^']*' imports '([^']*)('?)/.exec(text);
+      if (!m) return { sentence: cut ? text + '…' : tryStop(text), imports: null };
+      if (m[3]) return { sentence: m[1], imports: m[2] };
+      const rule = defs && defs[ruleKeyOf(row)];
+      const pkg = tryPackageFor(m[2], rule && Array.isArray(rule.forbid_imports) ? rule.forbid_imports : []);
+      return pkg ? { sentence: m[1], imports: pkg, from: true } : { sentence: m[1], imports: m[2] + '…' };
+    }
+
+    function tryStop(sentence) {
+      const s = String(sentence || '').trim();
+      return !s || /[.!?…]$/.test(s) ? s : s + '.';
+    }
+
+    // A sentence from the service with its counts worded for them: "1 false
+    // alarm(s)" reads "1 false alarm", and "2 flagged call(s)" "2 flagged calls".
+    function tryPlurals(text) {
+      return String(text == null ? '' : text).replace(/\b(\d+) ((?:[A-Za-z-]+ )*?[A-Za-z-]+)\(s\)/g, (all, n, words) => n + ' ' + words + (Number(n) === 1 ? '' : 's'));
+    }
+
+    function tryWhyHtml(why) {
+      return html`${why.sentence}${why.imports ? html` <span class="tf-try-import">It imports ${why.from ? 'from ' : ''}<mark>${why.imports}</mark>${why.from ? ', a package the rule forbids' : ''}.</span>` : ''}`;
+    }
+
+    // The command a gate's call ran. For a command the ledger keeps only the
+    // program as its target; the whole command is in the reason.
+    function tryCommand(row) {
+      const m = /Command '(.*)' reaches /.exec(String(reasonOf(row) || row.reason || ''));
+      return m ? m[1] : '';
+    }
+
+    // The import a layering reason names, and whether the service's cut at
+    // 240 characters fell inside it.
+    function tryImportOf(row) {
+      const m = /' imports '([^']*)('?)/.exec(String(reasonOf(row) || ''));
+      return m && m[1] ? { name: m[1], cut: !m[2] } : null;
+    }
+
+    // The package a rule forbids that an import, whole or cut, falls under:
+    // the longest one named in full that the import starts with.
+    function tryPackageFor(name, forbid) {
+      const plain = (forbid || []).filter(p => typeof p === 'string' && p && !/[*]/.test(p));
+      const hits = plain.filter(p => name === p || name.indexOf(p + '.') === 0 || name.indexOf(p + '/') === 0);
+      return hits.sort((a, b) => b.length - a.length)[0] || '';
+    }
+
+    // Whether a flagged call can be sent again as one call of the same kind:
+    // a layering rule's write, or a protected path's command or file.
+    function tryReplayable(row) {
+      const key = ruleKeyOf(row);
+      if (key === 'PROTECTED_PATH') return !!(row.action_type === 'COMMAND_EXEC' ? tryCommand(row) : targetOf(row));
+      if (tryIsGate(key)) return false;
+      return row.action_type !== 'COMMAND_EXEC';
+    }
+
+    // A file a rule's path pattern covers: every `**` a step over no folder,
+    // under src/ when the pattern starts with one, and every `*` a name.
+    function tryPathFromGlob(glob) {
+      const text = String(glob || '');
+      if (!text || /[\[\]{}\\]/.test(text)) return '';
+      const segs = text.split('/').filter(s => s && s !== '**');
+      if (!segs.length) return '';
+      const last = segs[segs.length - 1];
+      const ext = (last.match(/\.([A-Za-z0-9]+)$/) || [])[1];
+      if (!ext) return '';
+      const capital = ['java', 'cs', 'kt', 'scala'].indexOf(ext.toLowerCase()) !== -1;
+      const named = segs.map((s, i) => s.replace(/\*+/g, i === segs.length - 1 ? (capital ? 'Order' : 'order') : 'acme').replace(/\?/g, 'x'));
+      return (text.indexOf('**') === 0 ? 'src/' : '') + named.join('/');
+    }
+
+    function tryTally(rows) {
+      const t = { approved: 0, observed: 0, refused: 0 };
+      (rows || []).forEach(r => { t[outcomeOf(r)] += 1; });
+      return t;
+    }
+
+    // Oldest first. Two calls stamped in the same instant (a coarse clock
+    // does that) come in the order the sandbox sends its agents, which is the
+    // order of the lanes.
+    function tryAgentRank(agent) {
+      const i = TRY_AGENTS.indexOf(agent);
+      return i === -1 ? TRY_AGENTS.length : i;
+    }
+    function tryChronological(rows) {
+      return (rows || []).slice().reverse().sort((a, b) =>
+        String(a.timestamp).localeCompare(String(b.timestamp)) || tryAgentRank(a.agent) - tryAgentRank(b.agent));
+    }
+
+    function tryList(words) {
+      if (words.length <= 1) return words.join('');
+      return words.slice(0, -1).join(', ') + ' and ' + words[words.length - 1];
+    }
+
+    // The same list of markup, each part kept as markup.
+    function tryListHtml(items) {
+      return items.map((item, i) => html`${i === 0 ? '' : i === items.length - 1 ? ' and ' : ', '}${item}`);
+    }
+
+    // What a call touched, as a reader would name it: a command whole, as
+    // its reason carries it, and a file by its path.
+    function tryTarget(row) {
+      return (row.action_type === 'COMMAND_EXEC' && tryCommand(row)) || targetOf(row) || row.tool_name || '';
+    }
+
+    // Whether a rule's path pattern covers a path, read the way a glob is:
+    // `**/` any folders or none, `**` anything, `*` and `?` within a name.
+    function tryGlobMatches(glob, path) {
+      const g = String(glob || '');
+      let re = '';
+      for (let i = 0; i < g.length; i++) {
+        const c = g[i];
+        if (c === '*' && g[i + 1] === '*') {
+          i += 1;
+          if (g[i + 1] === '/') { i += 1; re += '(?:.*/)?'; } else re += '.*';
+        } else if (c === '*') re += '[^/]*';
+        else if (c === '?') re += '[^/]';
+        else re += c.replace(/[.+^${}()|[\]\\]/g, '\\$&');
+      }
+      try { return new RegExp('^' + re + '$').test(String(path || '')); } catch (err) { return false; }
+    }
+
+    // A path that may break only after a slash, so a narrow line wraps it
+    // between folders and never inside a name or before its extension. Each
+    // part is escaped; <wbr> adds no character, so a copied path is whole.
+    function tryPath(text) {
+      const parts = String(text == null ? '' : text).split('/');
+      return parts.map((part, i) => (i < parts.length - 1 ? html`${part}/<wbr>` : html`${part}`));
+    }
+
+    // The agents that sent a list of calls, named, in the order of the lanes.
+    function tryAgentsOf(rows) {
+      return Array.from(new Set((rows || []).map(r => r.agent))).sort((a, b) => tryAgentRank(a) - tryAgentRank(b)).map(agentLabel);
+    }
 
     function viewTry(ctx) {
+      ensureTryStyle();
       const state = {
-        step: 1, project: '', seeded: null, readiness: null, observed: [], labels: {}, selected: null,
-        result: null, replay: null, error: null, busy: false, who: null
+        step: 1, project: '', stage: null, seeded: null, calls: null, callsError: null, readiness: null, before: null, observed: [], flaggedRead: false, labels: {}, cursor: 0,
+        selected: null, promoted: null, observing: null, result: null, replay: null, planned: false, error: null, busy: false, who: null, play: {}, focusId: null,
+        saves: [], rulesDef: null, lastLabel: null
       };
       try {
         const saved = JSON.parse(localStorage.getItem(TRY_STORAGE) || 'null');
@@ -2085,263 +2740,1312 @@
         try { localStorage.setItem(TRY_STORAGE, JSON.stringify({ project: state.project, at: Date.now() })); } catch (err) { /* resuming is a convenience */ }
       }
 
-      function stepper() {
-        return html`<ol class="flex flex-wrap gap-x-4 gap-y-2 mb-5" aria-label="Walkthrough steps">
-          ${TRY_STEPS.map((label, i) => {
-            const n = i + 1;
-            const s = n < state.step ? 'done' : n === state.step ? 'current' : 'todo';
-            return html`<li class="flex items-center gap-2 text-xs ${s === 'current' ? 'text-white' : 'text-gray-500'}" aria-current="${s === 'current' ? 'step' : 'false'}">
-              <span class="tf-step-num" data-state="${s}">${s === 'done' ? '✓' : n}</span>${label}</li>`;
-          })}
-        </ol>`;
+      function labelledCount() { return state.observed.filter(r => state.labels[r.verdict_id]).length; }
+      function labelCounts() {
+        const c = { correct: 0, false_alarm: 0 };
+        state.observed.forEach(r => { const l = state.labels[r.verdict_id]; if (l === 'correct' || l === 'false_alarm') c[l] += 1; });
+        return c;
+      }
+      function readinessRules() { return (state.readiness && Array.isArray(state.readiness.rules)) ? state.readiness.rules : []; }
+
+      // Below 640px the labels move to the sticky bar (see verdicts()), and
+      // a change of width redraws step 3 so they move with it.
+      let thumbQuery = null;
+      try { thumbQuery = typeof window.matchMedia === 'function' ? window.matchMedia('(max-width: 639px)') : null; } catch (err) { thumbQuery = null; }
+      function thumb() { return !!(thumbQuery && thumbQuery.matches); }
+      function onThumb() { if (ctx.alive() && state.step === 3) draw(); }
+      if (thumbQuery) {
+        if (typeof thumbQuery.addEventListener === 'function') thumbQuery.addEventListener('change', onThumb);
+        else if (typeof thumbQuery.addListener === 'function') thumbQuery.addListener(onThumb);
+        ctx.onLeave(() => {
+          if (typeof thumbQuery.removeEventListener === 'function') thumbQuery.removeEventListener('change', onThumb);
+          else if (typeof thumbQuery.removeListener === 'function') thumbQuery.removeListener(onThumb);
+        });
       }
 
-      function frame(body) {
-        ctx.render(html`${pageTitle('Try the two-stage rollout', 'About a minute, on the public demo: a sandbox project, the calls its rules would have refused, your review, a promotion, and the same kind of call refused for real.')}
-          ${stepper()}
-          <div class="max-w-3xl space-y-4">
-            ${state.error ? html`<div class="tf-card p-4 border-rose-900/60 text-xs text-rose-300" role="alert">${state.error}</div>` : ''}
-            ${body}
-          </div>`);
+      // The project's stage as the service keeps it. A sandbox resumed from
+      // an earlier visit may have been promoted since, and then the rules it
+      // enforces are the ones its last promotion named.
+      function applyConfig(detail) {
+        const config = detail && detail.config && typeof detail.config === 'object' ? detail.config : null;
+        if (!config || (config.stage !== 'observe' && config.stage !== 'enforce')) return;
+        state.stage = config.stage;
+        if (state.stage === 'observe') {
+          if (state.promoted && state.promoted.earlier) { state.promoted = null; state.observing = null; state.replay = null; state.planned = false; }
+          return;
+        }
+        if (state.promoted && !state.promoted.earlier) return;
+        const observe = Array.isArray(config.observe_rules) ? config.observe_rules.map(String) : [];
+        const history = Array.isArray(config.history) ? config.history : [];
+        const last = history.filter(h => h && h.action === 'promote' && Array.isArray(h.enforce)).pop();
+        const enforce = last
+          ? last.enforce.map(String).filter(key => observe.indexOf(key) === -1)
+          : readinessRules().map(r => r.rule_key).filter(key => observe.indexOf(key) === -1);
+        state.promoted = { stage: 'enforce', enforce, observe, earlier: true };
+        state.observing = observe.slice();
+      }
+      function selected() {
+        if (!(state.selected instanceof Set)) state.selected = new Set(readinessRules().filter(r => r.state === 'ready' || r.state === 'quiet').map(r => r.rule_key));
+        return state.selected;
       }
 
-      function stepCard(title, text, content, action) {
-        return html`<section class="tf-card p-5 space-y-4" aria-labelledby="try-step-title">
-          <div class="space-y-1">
-            <h2 id="try-step-title" class="text-base font-semibold text-white">${title}</h2>
-            <p class="text-xs text-gray-400">${text}</p>
+      // ------------------------------------------------------ the rail
+
+      // What each step did, in the numbers its responses gave; empty until then.
+      // The flagged count waits for the list of flagged calls itself: a
+      // resumed sandbox has its readiness before that list, and a count of
+      // an unread list would read as zero.
+      function railNotes() {
+        const notes = ['', '', '', '', ''];
+        const calls = Array.isArray(state.calls) ? state.calls : [];
+        const count = typeof state.seeded === 'number' ? state.seeded : (calls.length || null);
+        if (state.project && count !== null) {
+          const agents = new Set(calls.map(r => r.agent)).size;
+          notes[0] = plural(count, 'call') + (agents ? ' · ' + plural(agents, 'agent') : '');
+        }
+        if (state.flaggedRead) notes[1] = plural(state.observed.length, 'call') + ' flagged';
+        if (state.step >= 3 && state.observed.length) {
+          const c = labelCounts();
+          notes[2] = labelledCount() === state.observed.length
+            ? num(c.correct) + ' correct · ' + num(c.false_alarm) + ' false alarm' + (c.false_alarm === 1 ? '' : 's')
+            : num(labelledCount()) + ' of ' + num(state.observed.length) + ' labelled';
+        }
+        if (state.promoted) notes[3] = 'Enforce · ' + plural(state.promoted.enforce.length, 'rule');
+        else if (state.step >= 4 && readinessRules().length) {
+          const rules = readinessRules();
+          const ready = rules.filter(r => r.state === 'ready').length;
+          const noisy = rules.filter(r => r.state === 'noisy').length;
+          notes[3] = num(ready) + ' ready · ' + num(noisy) + ' noisy';
+        }
+        if (state.result) notes[4] = state.result.status && state.result.status !== 'APPROVED' ? 'Refused' : (state.result.status ? 'Approved' : '');
+        return notes;
+      }
+
+      function rail() {
+        const notes = railNotes();
+        const shown = Math.min(state.step, 6);
+        return html`<div class="tf-try-rail" id="try-rail">
+          <ol class="tf-try-steps" aria-label="Walkthrough steps">
+            ${TRY_STEPS.map((label, i) => {
+              const n = i + 1;
+              const s = n < shown ? 'done' : n === shown ? 'current' : 'todo';
+              return html`<li class="tf-try-step" data-state="${s}" aria-current="${s === 'current' ? 'step' : 'false'}">
+                <span class="tf-step-num" data-state="${s}">${s === 'done' ? T.icon('check', 14) : n}</span>
+                <span class="tf-try-step-text"><span class="tf-try-step-name">${label}${s === 'done' ? html`<span class="sr-only"> (done)</span>` : ''}</span>${notes[i] ? html`<span class="tf-try-step-note" data-tone="${i === 4 && state.result && state.result.status ? (state.result.status === 'APPROVED' ? 'approved' : 'refused') : ''}">${notes[i]}</span>` : ''}</span>
+              </li>`;
+            })}
+          </ol>
+        </div>`;
+      }
+
+      function side() {
+        // On a private stack no step can be taken, so no step is drawn as current.
+        const closed = !!(state.who && state.who.reads_public === false);
+        return html`<div class="tf-try-side">
+          <div class="tf-try-head">
+            <p class="tf-eyebrow">${T.icon('play', 16)}The 60-second walkthrough</p>
+            <h1 id="view-title" tabindex="-1" class="tf-try-title">Try the two-stage rollout</h1>
+            <p class="tf-try-lede">About a minute on the public demo, from a sandbox of your own to a real refusal.</p>
+            ${closed ? '' : html`<p class="tf-try-tags"><span class="tf-chip tf-chip-sky">${T.icon('flask', 13)}Synthetic sandbox</span><span class="tf-chip tf-chip-gray">${T.icon('lock', 13)}No account</span></p>`}
           </div>
-          ${content || ''}
-          ${action || ''}
+          ${closed ? '' : rail()}
+          ${state.project && state.step > 1 ? html`<button type="button" class="tf-link-btn tf-try-restart" data-action="try-restart">${T.icon('refresh', 14)}Start again with a new sandbox</button>` : ''}
+        </div>`;
+      }
+
+      // ----------------------------------------------------- the stage
+
+      function primary(action, label, busyLabel, disabled) {
+        const busy = state.busy;
+        return html`<button type="button" id="try-primary" class="tf-btn tf-btn-primary tf-btn-lg tf-try-primary" data-action="${action}"${busy ? raw(' aria-busy="true" disabled') : disabled ? raw(' disabled') : ''}>${busy ? (busyLabel || 'Working…') : label}${busy ? '' : T.icon('arrowright', 16)}</button>`;
+      }
+
+      function stageChipFlip(from, to, flip) {
+        return html`<span class="tf-try-flip${flip ? ' tf-try-flipping tf-try-ring' : ''}">${flip ? html`<span class="tf-try-was" aria-hidden="true">${stageChip(from)}</span>` : ''}<span class="tf-try-now">${stageChip(to)}</span></span>`;
+      }
+
+      function projectBar(extra, flip) {
+        const stageNow = state.promoted ? state.promoted.stage : state.stage;
+        return html`<div class="tf-try-project">
+          <span class="tf-try-project-name">${T.icon('folder', 16)}<span class="tf-break">${state.project}</span></span>
+          ${stageNow ? stageChipFlip('observe', stageNow, flip) : ''}
+          ${extra ? html`<span class="tf-try-project-end">${extra}</span>` : ''}
+        </div>`;
+      }
+
+      function stat(outcome, value, word) {
+        return html`<span class="tf-try-stat" data-outcome="${outcome}">${T.icon(tryOutcomeIcon(outcome), 14)}<b>${num(value)}</b>${word}</span>`;
+      }
+
+      function legend() {
+        return html`<p class="tf-try-legend">
+          <span>${T.statusChip('approved')}ran; nothing flagged it</span>
+          <span>${T.statusChip('observed')}ran; a rule in Observe flagged it</span>
+          <span>${T.statusChip('refused')}stopped before it ran</span>
+        </p>`;
+      }
+
+      function callItem(r, i) {
+        const o = outcomeOf(r);
+        const target = targetOf(r);
+        return html`<li class="tf-try-call tf-try-arrive" data-outcome="${o}" style="--tf-try-i:${i}">
+          <span class="tf-try-call-dot" aria-hidden="true">${T.icon(tryOutcomeIcon(o), 13)}</span>
+          <span class="tf-try-call-body">
+            <span class="tf-try-call-line"><span class="tf-try-call-tool">${r.tool_name}</span><span class="tf-try-call-status">${OUTCOMES[o].label}</span></span>
+            ${target ? html`<span class="tf-try-call-target">${tryPath(target)}</span>` : ''}
+          </span>
+        </li>`;
+      }
+
+      // The sandbox's calls in three lanes, one per agent, in the order the
+      // ledger recorded them. Before there are any, the lanes are drawn empty.
+      function lanes(calls, play) {
+        const ready = Array.isArray(calls);
+        const sorted = ready ? tryChronological(calls) : [];
+        const agents = TRY_AGENTS.slice();
+        sorted.forEach(r => { if (agents.indexOf(r.agent) === -1) agents.push(r.agent); });
+        return html`<div class="tf-try-lanes${play.arrive ? ' tf-try-play' : ''}">
+          ${agents.map(agent => {
+            const mine = sorted.filter(r => r.agent === agent);
+            return html`<section class="tf-try-lane"${ready ? '' : raw(' data-waiting')} aria-label="${agentLabel(agent)}">
+              <h3 class="tf-try-lane-head">${tryAvatar(agent)}<span class="tf-try-lane-name">${agentLabel(agent)}</span><span class="tf-try-lane-count">${ready ? plural(mine.length, 'call') : state.busy ? (state.project ? 'Reading its calls…' : 'Sending its calls…') : 'Its calls land here'}</span></h3>
+              ${ready
+                ? (mine.length ? html`<ol class="tf-try-calls">${mine.map(r => callItem(r, sorted.indexOf(r)))}</ol>` : html`<p class="tf-try-lane-empty">No call from this agent in the list.</p>`)
+                : html`<ol class="tf-try-calls tf-try-ghosts${state.busy ? ' tf-try-busy' : ''}" aria-hidden="true">${['62%', '84%', '48%'].map(w => html`<li class="tf-try-call tf-try-ghost"><span class="tf-try-call-dot"></span><span class="tf-try-call-body"><span class="tf-try-ghost-bar${state.busy ? ' tf-skeleton' : ''}" style="width:34%"></span><span class="tf-try-ghost-bar${state.busy ? ' tf-skeleton' : ''}" style="width:${w}"></span></span></li>`)}</ol>`}
+            </section>`;
+          })}
+        </div>`;
+      }
+
+      // What the next minute holds, drawn with the pieces each step will
+      // show, before there is anything of the visitor's own to show. No
+      // figure in it: every number on the walkthrough is read from a response.
+      function peeks(play) {
+        const items = [
+          { n: 2, name: TRY_STEPS[1], text: 'The calls a rule would have stopped: who sent each, what it touched, and why.',
+            art: html`<span class="tf-try-peek-flag">${T.statusChip('observed')}<span class="tf-try-ghost-bar" style="width:78%"></span><span class="tf-try-ghost-bar" style="width:52%"></span></span>` },
+          { n: 3, name: TRY_STEPS[2], text: 'You say whether each rule was right, and spot the one false alarm.',
+            art: html`<span class="tf-try-peek-pair"><span class="tf-try-peek-btn" data-tone="good">${T.icon('check', 12)}Correct</span><span class="tf-try-peek-btn" data-tone="bad">${T.icon('x', 12)}False alarm</span></span>` },
+          { n: 4, name: TRY_STEPS[3], text: 'The rules you trust move to Enforce; a noisy one keeps observing.',
+            art: html`<span class="tf-try-peek-switch"><span class="tf-try-peek-knob"></span><span>${T.icon('eye', 12)}Observe</span><span data-on>${T.icon('shield', 12)}Enforce</span></span>` },
+          { n: 5, name: TRY_STEPS[4], text: 'The same call is refused before it runs, with why and a suggested fix.',
+            art: html`<span class="tf-try-peek-refused">${T.icon('stop', 18)}<span class="tf-try-peek-refused-text"><b>Refused</b><span class="tf-try-ghost-bar" style="width:88%"></span></span></span>` }
+        ];
+        return html`<section class="tf-try-peeks${play.peeks || play.enter ? ' tf-try-play' : ''}" aria-labelledby="try-peeks-title">
+          <h3 id="try-peeks-title" class="tf-try-group">Then, in the next minute</h3>
+          <ol class="tf-try-peek-list">${items.map((p, i) => html`<li class="tf-try-peek" style="--tf-try-i:${i}">
+            <span class="tf-try-peek-art" aria-hidden="true">${p.art}</span>
+            <span class="tf-try-peek-words"><span class="tf-try-peek-name"><span class="tf-try-peek-n" aria-hidden="true">${p.n}</span>${p.name}</span><span class="tf-try-peek-text">${p.text}</span></span>
+          </li>`)}</ol>
         </section>`;
       }
 
-      function primary(action, label) {
-        return html`<button type="button" class="tf-btn tf-btn-primary" data-action="${action}" ${state.busy ? raw('disabled') : ''}>${state.busy ? 'Working…' : label}</button>`;
+      function screenMake(play) {
+        if (!state.project) {
+          return {
+            kicker: 'Step 1 of 5',
+            title: 'Make a sandbox project',
+            sentence: 'The stack makes you a project in Observe and sends it about a dozen synthetic calls from three agents, through the real evaluator.',
+            visual: html`${state.resume ? html`<div class="tf-callout tf-callout-accent tf-try-resume">${T.icon('clock', 18)}<div class="tf-callout-body"><p>You started one earlier: <span class="tf-mono tf-try-strong">${state.resume}</span>. <button type="button" class="tf-link" data-action="try-resume">Continue with it</button> where you left off, or make a new one.</p></div></div>` : ''}
+              ${lanes(null, play)}
+              ${legend()}
+              ${peeks(play)}`,
+            foot: 'Its stage expires within a day, and the project then drops out of the overview and the project list; the calls and the labels stay in the public call lists for 30 days.',
+            actions: primary('try-create', 'Make my sandbox', 'Making your sandbox…')
+          };
+        }
+        const calls = Array.isArray(state.calls) ? state.calls : null;
+        // A sandbox made earlier, being read back: nothing is claimed about
+        // its calls or its stage until the reads answer.
+        if (state.busy && !calls && state.seeded === null) {
+          return {
+            kicker: 'Step 1 of 5',
+            title: 'Opening your sandbox',
+            sentence: html`Reading the calls, the labels and the stage of <span class="tf-mono tf-try-strong">${state.project}</span> from the ledger.`,
+            visual: html`${lanes(null, play)}${legend()}`,
+            actions: primary('try-resume', 'Continue', 'Reading your sandbox…')
+          };
+        }
+        const t = tryTally(calls);
+        const shortRead = calls && typeof state.seeded === 'number' && calls.length < state.seeded;
+        const refusedWords = !calls ? '' : ', and ' + (t.refused ? plural(t.refused, 'call') + (t.refused === 1 ? ' was' : ' were') + ' refused' : 'nothing was refused');
+        const stageWords = state.stage === 'enforce'
+          ? ': the project is in Enforce' + (state.promoted && state.promoted.earlier ? ', promoted earlier' : '')
+          : state.stage === 'observe' ? ': the project is in Observe' : '';
+        return {
+          kicker: 'Step 1 of 5 · done',
+          title: state.seeded !== null ? plural(state.seeded, 'call') + ' arrived' : calls && calls.length ? plural(calls.length, 'call') + ' in your sandbox' : 'Your sandbox is ready',
+          sentence: html`Every call was judged and recorded in <span class="tf-mono tf-try-strong">${state.project}</span>${refusedWords}${stageWords}.`,
+          visual: html`${projectBar(calls ? html`${stat('approved', t.approved, 'approved')}${stat('observed', t.observed, 'would refuse')}${stat('refused', t.refused, 'refused')}` : '')}
+            ${lanes(calls, play)}
+            ${legend()}
+            ${shortRead ? html`<p class="tf-try-muted">The list read back ${num(calls.length)} of the ${num(state.seeded)} so far: the ledger can lag a moment behind a write, and the next step reads it again.</p>` : ''}
+            ${!calls && state.callsError ? html`<p class="tf-try-muted">The calls were recorded, but the list could not be read just now (${state.callsError.message || 'no answer'}). The next step reads it again.</p>` : ''}`,
+          actions: primary('try-show', 'Show what would be refused', 'Reading the ledger…')
+        };
+      }
+
+      function flagCard(r, i) {
+        const why = tryWhy(r, state.rulesDef);
+        const key = ruleKeyOf(r);
+        const command = r.action_type === 'COMMAND_EXEC';
+        return html`<article class="tf-try-flag tf-try-rise" style="--tf-try-i:${i}">
+          <header class="tf-try-flag-top">${tryAvatar(r.agent)}<span class="tf-try-flag-agent">${agentLabel(r.agent)}</span><span class="tf-mono tf-try-muted">${r.tool_name}</span>${T.statusChip('observed')}</header>
+          <dl class="tf-try-dl">
+            <div><dt>${command ? 'Command' : 'File'}</dt><dd class="tf-try-file">${tryTarget(r) ? tryPath(tryTarget(r)) : '—'}</dd></div>
+            <div><dt>Rule</dt><dd><span class="tf-mono tf-try-strong">${key}</span> <span class="tf-try-kind">${tryIsGate(key) ? 'gate' : 'layering rule'}</span></dd></div>
+            <div><dt>Why</dt><dd>${tryWhyHtml(why)}</dd></div>
+          </dl>
+        </article>`;
+      }
+
+      function screenFlagged(play) {
+        const rows = state.observed;
+        const rules = Array.from(new Set(rows.map(ruleKeyOf)));
+        const total = typeof state.seeded === 'number' ? state.seeded : (Array.isArray(state.calls) ? state.calls.length : null);
+        return {
+          kicker: 'Step 2 of 5',
+          title: rows.length ? plural(rows.length, 'call') + ' would have been refused' : 'No call was flagged',
+          sentence: rows.length
+            ? 'Each one ran: in Observe, a rule only records a call it would refuse.'
+            : 'No observing rule flagged a call here, so there is nothing to label; promote anyway to see a rule refuse.',
+          visual: html`${projectBar(html`<span class="tf-try-stat" data-outcome="observed">${T.icon('eye', 14)}<b>${num(rows.length)}</b>${total !== null ? html`of ${num(total)} calls` : 'calls'} · ${plural(rules.length, 'rule')}</span>${Array.isArray(state.calls) ? stat('refused', tryTally(state.calls).refused, 'refused') : ''}`)}
+            ${rows.length ? html`<div class="tf-try-cards${play.cards ? ' tf-try-play' : ''}">${rows.map(flagCard)}</div>` : html`${T.emptyState({
+              icon: 'check',
+              text: 'Every call in the list ran, and none broke a rule in Observe. The ledger can lag a moment behind a new sandbox, so a second read may find more.',
+              action: { label: 'Read the list again', action: 'try-show' }
+            })}${Array.isArray(state.calls) && state.calls.length ? lanes(state.calls, {}) : ''}`}`,
+          actions: rows.length ? primary('try-review', 'Label each call') : primary('try-readiness', 'See the rules', 'Reading readiness…')
+        };
+      }
+
+      function clampCursor() {
+        const total = state.observed.length;
+        state.cursor = Math.max(0, Math.min(total - 1, Number(state.cursor) || 0));
+        return state.cursor;
+      }
+
+      function nextUnlabelled(from) {
+        const rows = state.observed;
+        for (let k = 1; k <= rows.length; k++) {
+          const j = (from + k) % rows.length;
+          if (!state.labels[rows[j].verdict_id]) return j;
+        }
+        return -1;
+      }
+
+      function labelTally() {
+        const byRule = new Map();
+        state.observed.forEach(r => {
+          const k = ruleKeyOf(r);
+          if (!byRule.has(k)) byRule.set(k, []);
+          byRule.get(k).push(state.labels[r.verdict_id] || '');
+        });
+        return html`<div class="tf-try-side-block">
+          <p class="tf-label">Your labels, by rule</p>
+          <ul class="tf-try-tally">${Array.from(byRule).map(([key, marks]) => html`<li><span>${key}</span><span class="tf-try-tally-marks">${marks.map(l => html`<span class="tf-try-q-mark" data-label="${l}" title="${l ? REVIEWS[l].label : 'No label yet'}">${l === 'correct' ? T.icon('check', 11) : l === 'false_alarm' ? T.icon('x', 11) : ''}</span>`)}</span></li>`)}</ul>
+          <p class="tf-try-muted">A rule with a false alarm will read Noisy and keep observing.</p>
+        </div>`;
+      }
+
+      // The two labels for the call on top. On a desk they sit on the card;
+      // on a phone they sit in the sticky bar at the foot of the screen, so
+      // the thumb finds them in the same place from call to call however tall
+      // the card above is. Either way each names the call it labels, so the
+      // keyboard landing on it after a label hears which call is next.
+      const TRY_VERDICT_NAMES = 'try-card-count try-card-file try-card-rule';
+      function verdicts(row) {
+        const l = state.labels[row.verdict_id];
+        return html`<div class="tf-try-verdicts" role="group" aria-label="Your label for this call">
+          <button type="button" id="try-correct" class="tf-btn tf-btn-good tf-try-verdict" data-action="try-label" data-verdict="${row.verdict_id}" data-label="correct" aria-pressed="${l === 'correct' ? 'true' : 'false'}" aria-keyshortcuts="C" aria-describedby="${TRY_VERDICT_NAMES}">${T.icon('check', 20)}Correct${T.kbd('C')}</button>
+          <button type="button" id="try-false" class="tf-btn tf-btn-danger tf-try-verdict" data-action="try-label" data-verdict="${row.verdict_id}" data-label="false_alarm" aria-pressed="${l === 'false_alarm' ? 'true' : 'false'}" aria-keyshortcuts="F" aria-describedby="${TRY_VERDICT_NAMES}">${T.icon('x', 20)}False alarm${T.kbd('F')}</button>
+        </div>`;
+      }
+
+      function progressSegs(rows, i) {
+        return html`<div class="tf-try-progress" aria-hidden="true">${rows.map((r, j) => html`<span class="tf-try-seg" data-label="${state.labels[r.verdict_id] || ''}" data-current="${j === i ? 'true' : 'false'}"></span>`)}</div>`;
+      }
+
+      // The last label given, kept on screen above the stack, so the card
+      // that moved on leaves a receipt where the eye already is.
+      function receipt() {
+        const last = state.lastLabel;
+        if (!last || !REVIEWS[last.label]) {
+          return html`<p class="tf-try-receipt">${T.icon('info', 14)}<span>Label the call on top; the next one comes up.</span></p>`;
+        }
+        return html`<p class="tf-try-receipt" data-label="${last.label}">${T.icon(last.label === 'correct' ? 'check' : 'x', 14)}<span>Marked <b>${REVIEWS[last.label].label}</b>: <span class="tf-mono">${tryPath(last.target)}</span></span></p>`;
+      }
+
+      // A layering rule as it is written, read from GET /rules: the files it
+      // watches and the packages it forbids, with the pattern that covers the
+      // call's path and the package its import falls under marked. That is
+      // how a reader tells a layer from a folder that only shares its name.
+      // Nothing at all when the definitions could not be read, and nothing
+      // for a gate, which has no pattern to show.
+      function ruleBox(key, path, imported, opts) {
+        const rule = state.rulesDef && Object.prototype.hasOwnProperty.call(state.rulesDef, key) ? state.rulesDef[key] : null;
+        if (!rule || typeof rule !== 'object') return '';
+        const globs = (Array.isArray(rule.when_path_matches) ? rule.when_path_matches : []).filter(g => typeof g === 'string' && g);
+        const forbid = (Array.isArray(rule.forbid_imports) ? rule.forbid_imports : []).filter(g => typeof g === 'string' && g);
+        if (!globs.length && !forbid.length) return '';
+        const hitGlob = path ? globs.find(g => tryGlobMatches(g, path)) || '' : '';
+        const hitPkg = imported ? (forbid.indexOf(imported) !== -1 ? imported : tryPackageFor(imported, forbid)) : '';
+        let shown = forbid.slice(0, 6);
+        if (hitPkg && shown.indexOf(hitPkg) === -1) shown = [hitPkg].concat(forbid.filter(p => p !== hitPkg).slice(0, 5));
+        const o = opts || {};
+        const chip = (text, hit, why) => html`<code class="tf-try-glob"${hit ? raw(' data-hit') : ''}>${hit ? T.icon('check', 12) : ''}${text}${hit ? html`<span class="sr-only"> (${why})</span>` : ''}</code>`;
+        return html`<section class="tf-try-rulebox" data-stage="${o.stage || 'observe'}" aria-label="${o.title || 'The rule'}: ${key}">
+          <p class="tf-try-rulebox-head"><span class="tf-try-rulebox-title">${o.title || 'The rule'}</span><span class="tf-try-rulebox-key">${key}</span>${o.stage ? stageChip(o.stage) : ''}</p>
+          ${o.describe && typeof rule.description === 'string' && rule.description ? html`<p class="tf-try-rulebox-desc">${tryStop(rule.description)}</p>` : ''}
+          <dl>
+            ${globs.length ? html`<div><dt>Watches</dt><dd>${globs.map(g => chip(g, g === hitGlob, 'covers this path'))}</dd></div>` : ''}
+            ${forbid.length ? html`<div><dt>Forbids</dt><dd>${shown.map(p => chip(p, p === hitPkg, 'this import falls under it'))}${forbid.length > shown.length ? html`<span class="tf-try-muted">and ${num(forbid.length - shown.length)} more</span>` : ''}</dd></div>` : ''}
+          </dl>
+        </section>`;
+      }
+
+      function reviewBoard(play, inBar) {
+        const rows = state.observed;
+        const total = rows.length;
+        const i = clampCursor();
+        const row = rows[i];
+        const l = state.labels[row.verdict_id];
+        const why = tryWhy(row, state.rulesDef);
+        const rest = rows.filter((r, j) => j !== i && !state.labels[r.verdict_id]).length;
+        const gone = play.gone && REVIEWS[play.gone.label] ? play.gone : null;
+        return html`<div class="tf-try-review">
+          <div class="tf-try-stack-col">
+            ${receipt()}
+            <div class="tf-try-stack" data-behind="${Math.min(2, rest)}">
+              <article class="tf-try-card" data-dir="${play.card || ''}" data-label="${l || ''}" aria-labelledby="try-card-file" aria-describedby="try-card-why">
+                <header class="tf-try-card-top">
+                  <span id="try-card-count" class="tf-try-card-count">Call ${num(i + 1)} of ${num(total)}</span>
+                  <span class="tf-try-card-agent">${tryAvatar(row.agent, true)}<span class="tf-try-agent-name">${agentLabel(row.agent)} ·</span><span class="tf-mono">${row.tool_name}</span></span>
+                </header>
+                <p id="try-card-file" class="tf-try-card-file">${tryPath(tryTarget(row))}</p>
+                <p id="try-card-rule" class="tf-try-card-rule">${T.statusChip('observed')}<span class="tf-break">${ruleKeyOf(row)}</span></p>
+                <p id="try-card-why" class="tf-try-card-why">${tryWhyHtml(why)}</p>
+                ${inBar ? '' : verdicts(row)}
+                <nav class="tf-try-card-nav" aria-label="Move between calls">
+                  <button type="button" id="try-prev" class="tf-btn tf-btn-quiet tf-btn-sm" data-action="try-move" data-move="-1" aria-keyshortcuts="ArrowLeft"${i === 0 ? raw(' disabled') : ''}>← Previous</button>
+                  ${l ? reviewChip(l) : html`<span class="tf-try-muted">No label yet</span>`}
+                  <button type="button" id="try-next" class="tf-btn tf-btn-quiet tf-btn-sm" data-action="try-move" data-move="1" aria-keyshortcuts="ArrowRight"${i === total - 1 ? raw(' disabled') : ''}>Next →</button>
+                </nav>
+              </article>
+              ${gone ? html`<div class="tf-try-gone" data-label="${gone.label}" aria-hidden="true"><span class="tf-try-gone-stamp">${T.icon(gone.label === 'correct' ? 'check' : 'x', 18)}${REVIEWS[gone.label].label}</span><span class="tf-try-gone-file">${tryPath(gone.target)}</span></div>` : ''}
+            </div>
+            ${row.action_type === 'COMMAND_EXEC' ? '' : ruleBox(ruleKeyOf(row), targetOf(row), (tryImportOf(row) || {}).name || '', { title: 'What the rule watches' })}
+          </div>
+          <div class="tf-try-side-panel">
+            ${inBar ? '' : html`<div>
+              <p class="tf-try-progress-text">${num(labelledCount())} of ${num(total)} labelled</p>
+              ${progressSegs(rows, i)}
+            </div>`}
+            <ol class="tf-try-queue" aria-label="The calls to label">
+              ${rows.map((r, j) => {
+                const mark = state.labels[r.verdict_id] || '';
+                return html`<li><button type="button" data-action="try-goto" data-index="${j}" aria-current="${j === i ? 'true' : 'false'}">
+                  <span class="tf-try-q-mark" data-label="${mark}" aria-hidden="true">${mark === 'correct' ? T.icon('check', 11) : mark === 'false_alarm' ? T.icon('x', 11) : ''}</span>
+                  <span class="tf-try-q-text"><span class="tf-try-q-file">${tryPath(tryTarget(r))}</span><span class="tf-try-q-state">${agentLabel(r.agent)} · ${mark ? REVIEWS[mark].label : 'to label'}</span></span>
+                </button></li>`;
+              })}
+            </ol>
+            ${labelTally()}
+          </div>
+        </div>`;
+      }
+
+      function screenLabel(play) {
+        const total = state.observed.length;
+        const done = labelledCount() === total;
+        const inBar = !!(total && !done && thumb());
+        return {
+          kicker: 'Step 3 of 5',
+          title: total && done ? 'Every call has a label' : 'Was the rule right?',
+          sentence: total && done
+            ? 'You marked ' + plural(labelCounts().correct, 'call') + ' correct and ' + plural(labelCounts().false_alarm, 'call') + ' a false alarm, and each rule reads its state from those labels.'
+            : 'One of them is a false alarm: spot it, and mark each call Correct or False alarm.',
+          visual: total ? reviewBoard(play, inBar) : T.emptyState({ icon: 'check', text: 'No call in the sandbox was flagged by an observing rule, so there is nothing to label. Promote anyway to see a rule refuse.' }),
+          actions: done
+            ? primary('try-readiness', 'See what that did', 'Reading readiness…')
+            : inBar
+              ? html`<div class="tf-try-thumb">
+                  <div class="tf-try-thumb-top"><p class="tf-try-progress-text">${num(labelledCount())} of ${num(total)} labelled</p>${progressSegs(state.observed, clampCursor())}</div>
+                  ${verdicts(state.observed[clampCursor()])}
+                </div>`
+              : html`<span class="tf-try-wait">${primary('try-readiness', 'See what that did', null, true)}</span><p class="tf-try-hint">Label every call to continue.<span class="tf-try-keys"> Keys: ${T.kbd('C')} correct ${T.kbd('F')} false alarm ${T.kbd('←')}${T.kbd('→')} move</span></p>`
+        };
+      }
+
+      function modeChip(mode) {
+        return mode === 'enforce'
+          ? html`<span class="tf-chip tf-chip-purple">${T.icon('shield', 13)}Enforces</span>`
+          : html`<span class="tf-chip tf-chip-amber">${T.icon('eye', 13)}Keeps observing</span>`;
+      }
+
+      function ruleRow(r, i, play, quietWords) {
+        const count = v => (typeof v === 'number' && v > 0 ? v : 0);
+        const was = state.before && state.before[r.rule_key];
+        const flip = !!(play.flip && was && was !== r.state);
+        const checked = selected().has(r.rule_key);
+        const mode = state.promoted ? (state.promoted.observe.indexOf(r.rule_key) === -1 ? 'enforce' : 'observe') : null;
+        const flagged = count(r.would_refuse);
+        const correct = count(r.correct);
+        const alarms = count(r.false_alarms);
+        const open = count(r.unreviewed);
+        // One mark per flag, up to 24; past that the bar says how many more.
+        const marks = [].concat(Array(correct).fill('correct'), Array(alarms).fill('false_alarm'), Array(open).fill('unreviewed'));
+        const segs = marks.slice(0, 24);
+        const more = marks.length - segs.length;
+        return html`<li><label class="tf-try-rule" for="try-rule-${i}" style="--tf-try-i:${i}">
+          <input id="try-rule-${i}" type="checkbox" class="tf-try-check" data-change="try-toggle" data-rule="${r.rule_key}" ${checked ? raw('checked') : ''}${state.promoted || state.busy ? raw(' disabled') : ''} />
+          <span class="tf-try-rule-main">
+            <span class="tf-try-rule-top">
+              <span class="tf-try-rule-key">${r.rule_key}</span>
+              <span class="tf-try-kind">${r.kind === 'gate' || tryIsGate(r.rule_key) ? 'gate' : 'layering rule'}</span>
+              <span class="tf-try-rule-chips"><span class="tf-try-flip${flip ? ' tf-try-flipping' : ''}">${flip ? html`<span class="tf-try-was" aria-hidden="true">${stateChip(was)}</span>` : ''}<span class="tf-try-now">${stateChip(r.state)}</span></span>${mode ? modeChip(mode) : ''}</span>
+            </span>
+            ${flagged ? html`<span class="tf-try-bar" aria-hidden="true">${segs.map(k => html`<span class="tf-try-bar-seg" data-k="${k}"></span>`)}${more ? html`<span class="tf-try-bar-more">+${num(more)}</span>` : ''}</span>
+              <span class="tf-try-rule-counts">${plural(flagged, 'flag')}: ${num(correct)} correct · ${plural(alarms, 'false alarm')}${open ? ' · ' + num(open) + ' without a label' : ''}</span>` : ''}
+            ${quietWords ? '' : html`<span class="tf-try-rule-rec">${tryPlurals(r.recommendation || (STATES[r.state] || {}).says || '')}</span>`}
+          </span>
+        </label></li>`;
+      }
+
+      function stageSwitch(animate) {
+        const enforce = !!(state.promoted && state.promoted.stage === 'enforce');
+        return html`<div class="tf-try-switch${animate && enforce ? ' tf-try-switching' : ''}" data-stage="${enforce ? 'enforce' : 'observe'}" role="img" aria-label="The project's stage: ${enforce ? 'Enforce' : 'Observe'}">
+          <span class="tf-try-switch-knob"></span>
+          <span class="tf-try-switch-opt" data-opt="observe">${T.icon('eye', 18)}<span><b>Observe</b><small>judges and records; refuses nothing</small></span></span>
+          <span class="tf-try-switch-opt" data-opt="enforce">${T.icon('shield', 18)}<span><b>Enforce</b><small>refuses a call that breaks a rule in force</small></span></span>
+        </div>`;
+      }
+
+      function screenPromote(play) {
+        const rules = readinessRules();
+        const noisy = rules.filter(r => r.state === 'noisy').length;
+        const chosen = rules.filter(r => selected().has(r.rule_key)).length;
+        const flagged = rules.filter(r => (typeof r.would_refuse === 'number' && r.would_refuse > 0) || r.state !== 'quiet');
+        const quiet = rules.filter(r => flagged.indexOf(r) === -1);
+        let k = 0;
+        const row = r => ruleRow(r, k++, play);
+        const quietSays = Array.from(new Set(quiet.map(r => tryPlurals(r.recommendation || (STATES[r.state] || {}).says || ''))));
+        const quietWords = quiet.length > 1 && quietSays.length === 1 ? quietSays[0] : '';
+        const quietRow = r => ruleRow(r, k++, play, quietWords);
+        const byState = ['ready', 'noisy', 'needs_review', 'quiet']
+          .map(s => [s, rules.filter(r => r.state === s).length]).filter(([, n]) => n > 0);
+        const p = state.promoted;
+        const observing = p ? p.observe.filter(key => rules.some(r => r.rule_key === key)) : [];
+        const enforcing = p ? plural(p.enforce.length, 'rule') + (p.enforce.length === 1 ? ' refuses the calls that break it' : ' refuse the calls that break them') : '';
+        const keeps = observing.length ? '; ' + tryList(observing) + (observing.length === 1 ? ' keeps' : ' keep') + ' observing.' : '.';
+        return {
+          kicker: p ? (p.earlier ? 'Step 4 of 5 · promoted earlier' : 'Step 4 of 5 · promoted') : 'Step 4 of 5',
+          title: p ? (p.earlier ? 'Already in Enforce' : 'Now in Enforce') : 'Promote to Enforce',
+          sentence: p
+            ? (p.earlier ? 'Promoted before you came back: ' + enforcing + keeps : enforcing.replace(/ refuse/, ' now refuse') + keeps)
+            : noisy
+              ? 'Ready and Quiet rules are checked; ' + (noisy === 1 ? 'the Noisy one, with a false alarm, keeps' : 'the Noisy ones, with false alarms, keep') + ' observing.'
+              : 'Ready and Quiet rules are checked, and none is Noisy; an unchecked rule keeps observing.',
+          visual: html`${projectBar(html`<span class="tf-try-states">${byState.map(([s, n]) => html`<span class="tf-try-stat">${stateChip(s)}<b>${num(n)}</b></span>`)}</span>`, !!play.promote)}
+            ${stageSwitch(!!play.promote)}
+            <div class="${play.flip ? 'tf-try-play' : ''}">
+              ${flagged.length ? html`<ul class="tf-try-rules">${flagged.map(row)}</ul>` : ''}
+              ${quiet.length ? html`<p class="tf-try-group">Flagged nothing here</p>${quietWords ? html`<p class="tf-try-rule-rec tf-try-group-note">${quietWords}</p>` : ''}<ul class="tf-try-rules tf-try-rules-quiet">${quiet.map(quietRow)}</ul>` : ''}
+              ${rules.length ? '' : emptyNote('The service returned no rules for this project.')}
+            </div>`,
+          actions: p
+            ? primary('try-next', state.planned && !(state.replay && earlierRow(state.replay)) ? 'Send the same kind of call again' : 'Send the same call again', 'Planning the call…')
+            : html`${primary('try-promote', 'Promote with ' + plural(chosen, 'rule'), 'Promoting…', chosen === 0)}${chosen === 0 ? html`<p class="tf-try-hint">Check at least one rule to promote: with none in force, Enforce would refuse nothing.</p>` : ''}`
+        };
+      }
+
+      // The flagged call a replay was built from, when it was built from one.
+      function earlierRow(plan) {
+        return plan && plan.verdict_id ? state.observed.find(r => r.verdict_id === plan.verdict_id) || null : null;
+      }
+
+      function planWhat(plan) { return plan.action_type === 'COMMAND_EXEC' ? 'command' : plan.action_type === 'FILE_READ' ? 'read' : 'write'; }
+
+      // What is the same between the call that ran in Observe and the one
+      // sent again, read from the two calls: its parts, each once.
+      function sameParts(plan) {
+        const row = earlierRow(plan);
+        if (!row) return [];
+        const what = planWhat(plan);
+        const parts = [];
+        if (row.agent === planAgent(plan)) parts.push({ k: 'Agent', words: 'same agent' });
+        if (what === 'command') parts.push({ k: 'Command', words: 'same command' });
+        else if (plan.arguments && plan.arguments.file_path === targetOf(row)) parts.push({ k: 'File', words: 'same file' });
+        const imp = what === 'write' ? tryImportOf(row) : null;
+        if (imp) parts.push({ k: 'Import', words: imp.cut ? 'an import from the same package' : 'same import', v: imp.cut ? 'from the same package' : 'the same' });
+        return parts;
+      }
+
+      // Those parts in words: "same agent, same file, same import".
+      function sameWords(plan) { return sameParts(plan).map(part => part.words).join(', '); }
+
+      // What is the same and what changed, as tiles: every part of the call
+      // the same, and the stage moved.
+      function delta(plan) {
+        const row = earlierRow(plan);
+        if (!row) return '';
+        const items = [];
+        if (row.agent !== planAgent(plan)) items.push({ k: 'Agent', v: agentLabel(row.agent) + ' → ' + agentLabel(planAgent(plan)), kind: 'changed' });
+        sameParts(plan).forEach(part => items.push({ k: part.k, v: part.v || 'the same', kind: 'same' }));
+        items.push({ k: 'Stage', v: 'Observe → Enforce', kind: 'stage' });
+        return html`<dl class="tf-try-delta" aria-label="Between the call in Observe and this one">${items.map(i => html`<div data-kind="${i.kind}"><dt>${i.k}</dt><dd>${i.kind === 'changed' ? '' : T.icon(i.kind === 'stage' ? 'shield' : 'check', 14)}<span>${i.v}</span></dd></div>`)}</dl>`;
+      }
+
+      function editor(plan, tone) {
+        const args = plan && plan.arguments ? plan.arguments : {};
+        const command = plan.action_type === 'COMMAND_EXEC';
+        const read = plan.action_type === 'FILE_READ';
+        const lines = command ? [String(args.command || '')] : read ? ['Read ' + String(args.file_path || '')] : String(args.content || '').replace(/\n$/, '').split('\n');
+        const bad = line => command || read || /^\s*(import|from|using)\b/.test(line);
+        const what = planWhat(plan);
+        const row = earlierRow(plan);
+        const imp = row && what === 'write' ? tryImportOf(row) : null;
+        const same = command ? 'the same command' : read ? 'the same file'
+          : 'the file it flagged, and ' + (!imp ? 'a package the rule forbids' : imp.cut ? 'the package its import fell under' : 'the import it caught');
+        const note = tone === 'refused'
+          ? 'Refused before it ran: a hook would have stopped the ' + what + ' here.'
+          : tone === 'approved'
+            ? 'This ' + what + ' was answered with an approval.'
+            : plan.from === 'rule'
+              ? html`No call in the sandbox fell under <span class="tf-mono">${plan.rule}</span>, so this write is built from the rule itself: a file it watches, and a package it forbids.`
+              : plan.from === 'flagged'
+                ? html`Built from a call <span class="tf-mono">${plan.rule}</span> flagged: ${same}.`
+                : html`Built from a call you marked correct under <span class="tf-mono">${plan.rule}</span>: ${same}.`;
+        return html`<figure class="tf-try-editor" data-tone="${tone || 'pending'}" data-kind="${what}">
+          <figcaption class="tf-try-editor-tab">${T.icon(command ? 'terminal' : read ? 'book' : 'code', 14)}<span class="tf-try-editor-path">${command ? 'Terminal' : tryPath(args.file_path || '')}</span><span class="tf-try-editor-meta">${plan.tool_name} · ${agentLabel(planAgent(plan))} · hook</span></figcaption>
+          <pre class="tf-try-code"><code>${lines.map((line, n) => html`<span class="tf-try-line"${bad(line) ? raw(' data-bad') : ''}><span class="tf-try-ln" aria-hidden="true">${command ? '$' : n + 1}</span>${line}</span>`)}</code></pre>
+          <p class="tf-try-editor-note">${note}</p>
+        </figure>`;
+      }
+
+      // The flagged call the replay was built from, as step 2 showed it.
+      function thenCard(plan) {
+        const row = earlierRow(plan);
+        if (!row) {
+          if (!plan || plan.from !== 'rule') return '';
+          return html`<div class="tf-try-then" data-from="rule">
+            <p class="tf-try-then-label">Earlier, in Observe</p>
+            <p class="tf-try-then-none">No call in the sandbox fell under <span class="tf-mono">${plan.rule}</span>, so there is no earlier call to set beside this one. The write is built from the rule itself.</p>
+          </div>`;
+        }
+        const l = state.labels[row.verdict_id];
+        return html`<div class="tf-try-then">
+          <p class="tf-try-then-label">Earlier, in Observe</p>
+          <p class="tf-try-card-agent">${tryAvatar(row.agent, true)}<span class="tf-try-agent-name">${agentLabel(row.agent)} ·</span><span class="tf-mono">${row.tool_name}</span></p>
+          <p class="tf-try-file tf-try-then-file">${tryPath(tryTarget(row))}</p>
+          <p class="tf-try-summary">${T.statusChip('observed')}<span class="tf-try-muted">It ran, and was recorded.</span>${l ? html`<span class="tf-try-muted">You marked it</span>${reviewChip(l)}` : ''}</p>
+        </div>`;
+      }
+
+      function screenSend(play) {
+        const plan = state.replay;
+        const p = state.promoted;
+        if (!plan && p) {
+          return {
+            kicker: 'Step 5 of 5',
+            title: 'No single call can show these rules',
+            sentence: html`${tryListHtml(p.enforce.map(key => html`<span class="tf-mono tf-try-strong">${key}</span>`))} ${p.enforce.length === 1 ? 'is a gate' : 'are gates'} one call cannot trip, so nothing is sent rather than a call ${p.enforce.length === 1 ? 'it' : 'they'} would approve.`,
+            visual: html`${projectBar()}${T.emptyState({ icon: 'shield', text: 'A loop needs the same call repeated, a budget a session\'s spend, and an unreadable write a layering rule in force over its path. Start again and keep a layering rule checked on step 4 to watch one refuse a write.' })}`,
+            actions: html`${primary('try-finish', 'See what just happened')}<button type="button" class="tf-btn tf-btn-quiet" data-action="try-restart">${T.icon('refresh', 16)}Start again</button>`
+          };
+        }
+        const same = plan ? sameWords(plan) : '';
+        // The call about to be sent comes first, so a phone shows it above
+        // the fold; on a desk the call from Observe sits to its left.
+        return {
+          kicker: 'Step 5 of 5',
+          title: same ? 'Send the same call again' : 'Send the same kind of call again',
+          sentence: same
+            ? same.charAt(0).toUpperCase() + same.slice(1) + ', and your sandbox is now in Enforce. This time the rule in force refuses it.'
+            : 'A write the rule forbids, to your sandbox, now in Enforce. This time the rule in force refuses it.',
+          visual: plan
+            ? html`${projectBar()}<div class="tf-try-compare tf-try-compare-send">
+                <div class="tf-try-now-col"><p class="tf-try-then-label">Now, in Enforce · as ${agentLabel(planAgent(plan))}'s hook sends it</p>${editor(plan, 'pending')}${plan.action_type === 'FILE_WRITE' ? ruleBox(plan.rule, (plan.arguments || {}).file_path, plan.imports || '', { title: 'Now in force', stage: 'enforce', describe: true }) : ''}</div>
+                <div class="tf-try-then-col">${thenCard(plan)}${delta(plan)}</div>
+              </div>`
+            : emptyNote('There is no call to send yet: promote the project first.'),
+          actions: plan ? primary('try-send', 'Send it', 'Sending…') : primary('try-restart', 'Start again')
+        };
+      }
+
+      // The fix the response carries, as it carries it: the summary and how
+      // many gate checks passed, with the steps and the proposed files one
+      // click away; "checked" is claimed only when the service says every
+      // proposed write passed the same gates.
+      function tryFix(fix) {
+        if (!fix || typeof fix !== 'object' || typeof fix.summary !== 'string') return '';
+        const checked = fix.validated === true;
+        const steps = Array.isArray(fix.steps) ? fix.steps.filter(s => typeof s === 'string') : [];
+        const writes = Array.isArray(fix.writes) ? fix.writes.filter(w => w && typeof w.path === 'string' && typeof w.content === 'string') : [];
+        const checks = Array.isArray(fix.checks) ? fix.checks.filter(c => c && typeof c === 'object') : [];
+        const passed = checks.filter(c => c.passed === true).length;
+        const more = [];
+        if (steps.length) more.push(plural(steps.length, 'step'));
+        if (writes.length) more.push(plural(writes.length, 'proposed file'));
+        return html`<section class="tf-try-fix" data-fix="${checked ? 'checked' : 'unchecked'}" aria-label="The fix in the response">
+          <header class="tf-try-fix-head">
+            <p class="tf-label">Suggested fix</p>
+            ${typeof fix.kind === 'string' ? html`<span class="tf-chip tf-chip-gray">${fixKindLabel(fix.kind, fix.kind)}</span>` : ''}
+            ${checked ? html`<span class="tf-chip tf-chip-emerald">${T.icon('check', 13)}Checked by Threefold: passes the same gates</span>` : ''}
+          </header>
+          <p class="tf-try-fix-summary">${tryPlurals(fix.summary)}</p>
+          ${checks.length ? html`<p class="tf-try-fix-checks" data-passed="${passed === checks.length ? 'all' : 'some'}">${T.icon(passed === checks.length ? 'shield' : 'alert', 16)}${num(passed)} of ${num(checks.length)} gate checks passed on the proposed files</p>` : ''}
+          ${more.length ? html`<details class="tf-try-fix-more">
+            <summary>${T.icon('chevrondown', 14)}Show the ${tryList(more)}</summary>
+            <div class="tf-try-fix-body">
+              ${steps.length ? html`<ol class="tf-try-fix-steps">${steps.map(s => html`<li class="tf-break">${s}</li>`)}</ol>` : ''}
+              ${writes.length ? html`<div class="tf-try-fix-writes">${writes.map(w => html`<div>
+                <p class="tf-try-fix-path">${w.path}${w.new_file === true ? ' · a new file: if it exists, add to it' : ''}${w.partial === true ? ' · add this with an Edit where the command put it' : ''}${typeof w.old_string === 'string' ? ' · an Edit: in place of the text you replaced' : ''}${w.content === '' ? ' · empty' : ''}</p>
+                <pre class="tf-pre tf-pre-plain"><code>${w.content}</code></pre>
+              </div>`)}</div>` : ''}
+            </div>
+          </details>` : ''}
+          <p class="tf-try-fix-foot">A starting point, never applied automatically.</p>
+        </section>`;
+      }
+
+      // What a refusal stopped, in words.
+      function stoppedWords(plan) {
+        if (!plan) return 'Stopped before it ran';
+        if (plan.action_type === 'COMMAND_EXEC') return 'Stopped before the command ran';
+        if (plan.action_type === 'FILE_READ') return 'Stopped before the file was read';
+        return 'Stopped before the file was written';
+      }
+
+      function screenClimax(play) {
+        const r = state.result || {};
+        const plan = state.replay;
+        const refused = !!(r.status && r.status !== 'APPROVED');
+        // The caption names the source in a few words; why a sentence is not
+        // the model's is said beneath it, in sentence case.
+        const source = r.explanation_source === 'bedrock' ? 'Amazon Bedrock' : 'Deterministic explanation';
+        const sourceNote = r.explanation_source === 'deterministic_fallback'
+          ? 'Amazon Bedrock was asked and did not answer, so this sentence is the service\'s own. The deterministic gate made the verdict either way.'
+          : 'It explains the verdict for the person reading; the deterministic gate made it.';
+        // Plain words first: the rule's reason as a reader would say it. The
+        // precise terms (the rule, the verdict, the stage) come second.
+        const why = r.reason ? tryWhy({ status: r.status || 'APPROVED', reason: r.reason, rule_key: plan && plan.rule }, state.rulesDef) : null;
+        const what = plan ? planWhat(plan) : 'call';
+        const same = plan ? sameWords(plan) : '';
+        return {
+          tone: refused ? 'refused' : '',
+          kicker: refused ? 'Step 5 of 5 · refused' : 'Step 5 of 5 · the answer',
+          title: refused ? 'Refused, before it ran' : 'The service approved it',
+          sentence: refused
+            ? (same
+              ? 'The ' + what + ' that ran in Observe is refused in Enforce: ' + same + ', a new stage.'
+              : 'The ' + what + ' built from the rule is refused now that your sandbox is in Enforce.')
+            : 'This call was not refused' + (r.project_stage ? ' in stage ' + r.project_stage : '') + ': the rule it was built from may not be in force here.',
+          visual: html`<div class="tf-try-climax${play.climax ? ' tf-try-play' : ''}">
+            <div class="tf-try-verdict-banner" data-tone="${refused ? 'refused' : 'approved'}">
+              <span class="tf-try-verdict-icon" aria-hidden="true">${T.icon(refused ? 'stop' : 'check', 28)}</span>
+              <div class="tf-try-verdict-body">
+                <p class="tf-try-verdict-lead">${refused ? stoppedWords(plan) : 'Answered with an approval'}</p>
+                ${why ? html`<p class="tf-try-verdict-reason">${tryWhyHtml(why)}</p>` : ''}
+                <p class="tf-try-verdict-terms">
+                  ${plan && plan.rule ? html`<span class="tf-try-term"><span>Rule</span><span class="tf-mono">${plan.rule}</span></span>` : ''}
+                  <span class="tf-try-term"><span>Verdict</span><span class="tf-mono">${r.status || '—'}</span></span>
+                  ${r.project_stage ? html`<span class="tf-try-term"><span>Stage</span>${stageChip(r.project_stage)}</span>` : ''}
+                </p>
+              </div>
+            </div>
+            ${plan ? html`<div class="tf-try-compare tf-try-climax-compare">
+              <div class="tf-try-now-col"><p class="tf-try-then-label">${refused ? 'Now, in Enforce · refused' : 'Now · approved'}</p>${editor(plan, refused ? 'refused' : 'approved')}</div>
+              <div class="tf-try-then-col">${thenCard(plan)}</div>
+            </div>` : ''}
+            ${r.bedrock_explanation || tryFix(r.suggested_fix) ? html`<div class="tf-try-climax-grid">
+              ${r.bedrock_explanation ? html`<figure class="tf-try-quote">
+                <figcaption class="tf-try-quote-src">${T.icon('sparkles', 14)}${source}</figcaption>
+                <blockquote>${r.bedrock_explanation}</blockquote>
+                <p class="tf-try-quote-note">${sourceNote}</p>
+              </figure>` : ''}
+              ${tryFix(r.suggested_fix)}
+            </div>` : ''}
+          </div>`,
+          actions: primary('try-finish', 'See what just happened')
+        };
+      }
+
+      // Three facts, each read from a response the walkthrough received.
+      function completionFacts() {
+        const facts = [];
+        const calls = Array.isArray(state.calls) ? state.calls : null;
+        const seeded = typeof state.seeded === 'number' ? state.seeded : (calls ? calls.length : null);
+        const flagged = state.observed.length;
+        const agents = calls ? tryAgentsOf(calls) : [];
+        const refusedFirst = calls ? tryTally(calls).refused : 0;
+        // A fresh sandbox's seeded calls were all judged in Observe. A resumed
+        // one's list may hold calls judged after a promotion, and says so.
+        const inEnforce = typeof state.seeded === 'number' || !calls ? 0 : calls.filter(r => r.stage === 'enforce').length;
+        const where = inEnforce ? num(seeded - inEnforce) + ' in Observe and ' + num(inEnforce) + ' in Enforce. ' : '';
+        // With calls judged in both stages, each stage's count is said on its
+        // own, so a refusal in Enforce is never read as one of the calls
+        // Observe let run.
+        const refusedInEnforce = inEnforce ? calls.filter(r => r.stage === 'enforce' && outcomeOf(r) === 'refused').length : 0;
+        const refusedElsewhere = refusedFirst - refusedInEnforce;
+        const outcomes = inEnforce
+          ? 'In Observe, ' + (flagged ? plural(flagged, 'call') + ' would have been refused and ran' : 'no rule flagged a call')
+            + (refusedElsewhere ? ', and ' + num(refusedElsewhere) + ' other ' + (refusedElsewhere === 1 ? 'was' : 'were') + ' refused' : '')
+            + '; in Enforce, ' + (refusedInEnforce ? plural(refusedInEnforce, 'call') + (refusedInEnforce === 1 ? ' was' : ' were') + ' refused.' : 'none was refused.')
+          : flagged ? plural(flagged, 'call') + ' would have been refused, and ' + (refusedFirst ? num(refusedFirst) + (refusedFirst === 1 ? ' was.' : ' were.') : 'none was.') : 'No rule flagged one' + (refusedFirst ? '.' : ', and none was refused.');
+        facts.push(seeded !== null
+          ? {
+            figure: num(seeded), label: inEnforce ? (seeded === 1 ? 'call judged' : 'calls judged') : (seeded === 1 ? 'call judged in Observe' : 'calls judged in Observe'),
+            text: where + (agents.length ? tryList(agents) + ' sent them. ' : '') + outcomes,
+            source: 'POST /api/sandbox · GET /api/decisions'
+          }
+          : { figure: num(flagged), label: 'calls flagged in Observe', text: 'Each one ran, and was recorded as a call its rule would have refused.', source: 'GET /api/decisions' });
+        const c = labelCounts();
+        const p = state.promoted;
+        // The noisy rules the promotion left observing, as its answer lists them.
+        const noisy = readinessRules().filter(r => r.state === 'noisy').map(r => r.rule_key)
+          .filter(key => !p || p.observe.indexOf(key) !== -1);
+        facts.push({
+          figure: p ? num(p.enforce.length) : '—',
+          label: p && p.enforce.length === 1 ? 'rule moved to Enforce' : 'rules moved to Enforce',
+          text: 'You marked ' + plural(c.correct, 'call') + ' correct and ' + plural(c.false_alarm, 'call') + ' a false alarm' + (noisy.length ? ', so ' + tryList(noisy) + ' stayed in Observe.' : '.'),
+          source: 'POST …/reviews · GET …/projects · POST …/promote'
+        });
+        const r = state.result || {};
+        const refused = !!(r.status && r.status !== 'APPROVED');
+        const fix = r.suggested_fix && typeof r.suggested_fix === 'object' && typeof r.suggested_fix.summary === 'string' ? r.suggested_fix : null;
+        const fixChecks = fix && Array.isArray(fix.checks) ? fix.checks.filter(x => x && typeof x === 'object') : [];
+        // A fix is called checked only when the service says so, and called
+        // unchecked only when there were checks for it to fail.
+        const extras = [];
+        if (fix) extras.push(fix.validated === true ? 'a fix checked by Threefold' : fixChecks.length ? 'a fix the gates did not pass' : 'a suggested fix');
+        if (r.explanation_source === 'bedrock') extras.push('a sentence from Amazon Bedrock');
+        const rule = state.replay && state.replay.rule ? ' by ' + state.replay.rule : '';
+        facts.push({
+          figure: refused ? 'Refused' : (r.status ? 'Approved' : '—'), tone: refused ? 'refused' : '',
+          label: state.replay && earlierRow(state.replay) ? 'the same call, in Enforce' : 'the same kind of call, in Enforce',
+          text: r.status
+            ? (refused ? 'Stopped' + rule + ' before it ran' : 'Approved') + (extras.length ? ', with ' + tryList(extras) : '') + '. Its verdict: ' + r.status + '.'
+            : state.planned && !state.replay ? 'No call was sent: no rule in force can be shown by a single call.' : 'No answer was recorded.',
+          source: 'POST /evaluate-tool-call'
+        });
+        return facts;
+      }
+
+      function nextCard(href, iconName, name, sub, first) {
+        return html`<a href="${href}" class="tf-card tf-card-link tf-try-next-card"${first ? raw(' data-primary') : ''}>
+          <span class="tf-try-next-icon" aria-hidden="true">${T.icon(iconName, 18)}</span>
+          <span class="tf-try-next-text"><span class="tf-try-next-name">${name}${T.icon('arrowright', 14)}</span><span class="tf-try-next-sub">${sub}</span></span>
+        </a>`;
+      }
+
+      function screenDone(play) {
+        return {
+          kicker: 'Done',
+          title: 'That was the whole rollout',
+          sentence: 'Watch, label, promote, and demote in one click if a rule bites wrong: here is what the service answered.',
+          visual: html`<ol class="tf-try-facts${play.enter ? ' tf-try-play' : ''}">${completionFacts().map((f, i) => html`<li class="tf-try-fact tf-try-rise" style="--tf-try-i:${i}" data-tone="${f.tone || ''}">
+              <span class="tf-try-fact-n">${f.figure}</span>
+              <span class="tf-try-fact-label">${f.label}</span>
+              <p class="tf-try-fact-text">${f.text}</p>
+              <p class="tf-try-fact-src">${f.source}</p>
+            </li>`)}</ol>
+            <h3 class="tf-try-next-title">Next</h3>
+            <div class="tf-try-next">
+              ${nextCard('#/connect', 'plug', 'Connect your repository', 'One command. It starts in Observe, so nothing is refused until you promote.', true)}
+              ${state.project ? nextCard(projectHref(state.project), 'folder', 'Open this sandbox project', html`<span class="tf-mono">${state.project}</span>: its readiness, its calls, and Demote in one click.`) : ''}
+              ${nextCard('#/proof', 'chart', 'See the proof', 'What Threefold has been measured to do, with real agents, with and without it.')}
+            </div>`,
+          actions: html`<button type="button" id="try-primary" class="tf-btn tf-btn-lg" data-action="try-restart">${T.icon('refresh', 16)}Start again</button><a class="tf-btn tf-btn-quiet" href="#/overview">The overview</a>`
+        };
+      }
+
+      function screenPrivate() {
+        return {
+          kicker: 'Private stack',
+          title: 'The walkthrough runs on the public demo',
+          sentence: 'Only the operator makes projects on this private stack; connect a real repository instead, and it starts in Observe.',
+          visual: T.emptyState({ icon: 'lock', text: 'Visitors cannot make a sandbox here. On the public demo anyone can, with no account.' }),
+          actions: html`<a id="try-primary" class="tf-btn tf-btn-primary tf-btn-lg tf-try-primary" href="#/connect">Connect a repository${T.icon('arrowright', 16)}</a>`
+        };
+      }
+
+      function screen(play) {
+        if (state.who && state.who.reads_public === false) return screenPrivate();
+        if (state.step === 2) return screenFlagged(play);
+        if (state.step === 3) return screenLabel(play);
+        if (state.step === 4) return screenPromote(play);
+        if (state.step === 5) return state.result ? screenClimax(play) : screenSend(play);
+        if (state.step >= 6) return screenDone(play);
+        return screenMake(play);
       }
 
       function draw() {
-        if (state.who && state.who.reads_public === false) {
-          frame(stepCard('The walkthrough runs on the public demo', 'This is a private stack, where only the operator can make projects. Connect a real repository instead: it starts in Observe, so nothing is refused while you watch.', null,
-            html`<a class="tf-btn tf-btn-primary" href="#/connect">Connect a repository</a>`));
-          return;
+        const play = state.play || {};
+        state.play = {};
+        const s = screen(play);
+        ctx.render(html`<div class="tf-try${play.enter ? ' tf-try-entering' : ''}" data-step="${state.step}">
+          ${side()}
+          <section id="try-stage" class="tf-card tf-try-stage${play.enter ? ' tf-try-enter' : ''}" data-tone="${s.tone || ''}" aria-labelledby="try-step-title">
+            <header class="tf-try-stage-head">
+              <p class="tf-try-kicker">${s.kicker}</p>
+              <h2 id="try-step-title" tabindex="-1" class="tf-try-h2">${s.title}</h2>
+              ${s.sentence ? html`<p class="tf-try-sentence">${s.sentence}</p>` : ''}
+            </header>
+            ${state.error ? html`<div class="tf-callout tf-callout-danger" role="alert">${T.icon('alert', 18)}<div class="tf-callout-body"><p>${state.error}</p></div></div>` : ''}
+            <div class="tf-try-visual">${s.visual || ''}</div>
+            ${s.foot ? html`<p class="tf-try-foot">${s.foot}</p>` : ''}
+            <div class="tf-try-actions">${s.actions || ''}</div>
+          </section>
+        </div>`);
+        if (!ctx.alive()) return;
+        // A promotion plays at the top of the stage (the title, the chip and
+        // the switch), while the button that made it sits in the bar at the
+        // foot of a long list; on a phone the reader is taken back up to it.
+        if (play.enter || play.promote) scrollToStage();
+        const id = state.focusId;
+        state.focusId = null;
+        if (id) {
+          const node = document.getElementById(id);
+          if (node && typeof node.focus === 'function' && !node.disabled) { try { node.focus({ preventScroll: true }); } catch (err) { /* focus is a courtesy */ } }
         }
-        if (state.step === 1) {
-          frame(stepCard('1 · Make a sandbox project',
-            'The stack creates a project of your own, in Observe, and sends about a dozen synthetic tool calls from Claude Code, Codex and Antigravity through the real evaluator. Its stage expires within a day, and the project then drops out of the overview and the project list; the calls and the labels stay in the public call lists for 30 days.',
-            state.resume ? html`<p class="text-xs text-gray-400">You started one earlier: <span class="font-mono text-gray-200">${state.resume}</span>. <button type="button" class="tf-link" data-action="try-resume">Continue with it</button> or make a new one.</p>` : '',
-            primary('try-create', 'Make my sandbox')));
-          return;
-        }
-        if (state.step === 2) {
-          frame(stepCard('2 · See what the rules would have refused',
-            html`<span class="font-mono text-gray-200">${state.project}</span> ${state.seeded !== null ? html`received ${plural(state.seeded, 'call')}` : 'is ready'}. Everything was judged, and nothing was refused: the project is in Observe.`,
-            null, primary('try-show', 'Show me')));
-          return;
-        }
-        if (state.step === 3) {
-          const total = state.observed.length;
-          const labelled = state.observed.filter(r => state.labels[r.verdict_id]).length;
-          frame(stepCard('3 · Label each call',
-            'These calls ran, and a rule in Observe would have refused each one. Mark it Correct if the rule was right, or False alarm if the call should run. One of them is a false alarm: spot it.',
-            total ? html`<p class="text-xs text-gray-400" role="status">${labelled} of ${total} labelled</p>
-              <ul class="space-y-2">${state.observed.map(row => {
-                const l = state.labels[row.verdict_id];
-                return html`<li class="tf-card-quiet p-3 space-y-2">
-                  <div class="flex flex-wrap items-center gap-2"><span class="tf-chip tf-chip-amber font-mono">${ruleKeyOf(row)}</span><span class="text-[11px] text-gray-500">${agentLabel(row.agent)}</span></div>
-                  <p class="text-xs"><span class="font-mono text-gray-200">${row.tool_name}</span> <span class="font-mono text-gray-400 tf-break">${targetOf(row)}</span></p>
-                  <p class="text-[11px] text-gray-400 tf-break">${reasonOf(row)}</p>
-                  <div class="flex flex-wrap items-center gap-2">
-                    <button type="button" class="tf-btn tf-btn-good tf-btn-sm" data-action="try-label" data-verdict="${row.verdict_id}" data-label="correct" aria-pressed="${l === 'correct' ? 'true' : 'false'}">Correct</button>
-                    <button type="button" class="tf-btn tf-btn-danger tf-btn-sm" data-action="try-label" data-verdict="${row.verdict_id}" data-label="false_alarm" aria-pressed="${l === 'false_alarm' ? 'true' : 'false'}">False alarm</button>
-                    ${l ? reviewChip(l) : ''}
-                  </div>
-                </li>`;
-              })}</ul>`
-              : emptyNote('No call in the sandbox was flagged by an observing rule, so there is nothing to label. Promote anyway to see a rule refuse.'),
-            labelled === total ? primary('try-readiness', 'See what that did') : html`<p class="text-[11px] text-gray-500">Label every call to continue.</p>`));
-          return;
-        }
-        if (state.step === 4) {
-          const rules = (state.readiness && state.readiness.rules) || [];
-          const noisy = rules.filter(r => r.state === 'noisy').length;
-          frame(stepCard('4 · Promote to Enforce',
-            'Each rule now reads its state from your labels. Ready and Quiet rules are checked. ' + (noisy
-              ? (noisy === 1 ? 'The rule with a false alarm is Noisy and stays' : 'The rules with false alarms are Noisy and stay') + ' in Observe, where it records and refuses nothing.'
-              : 'No rule is Noisy: you marked every flag correct. An unchecked rule keeps observing.'),
-            html`<ul class="space-y-2">${rules.map(r => html`<li>
-              <label class="flex items-start gap-3 tf-card-quiet p-3 cursor-pointer">
-                <input type="checkbox" class="mt-0.5 accent-purple-500" data-change="try-toggle" data-rule="${r.rule_key}" ${state.selected.has(r.rule_key) ? raw('checked') : ''} />
-                <span class="min-w-0 flex-1"><span class="flex flex-wrap items-center gap-2"><span class="font-mono text-xs text-white">${r.rule_key}</span>${stateChip(r.state)}</span>
-                <span class="block text-[11px] text-gray-400 mt-1">${r.recommendation || (STATES[r.state] || {}).says || ''}</span></span>
-              </label></li>`)}</ul>`,
-            primary('try-promote', 'Promote with ' + plural(rules.filter(r => state.selected.has(r.rule_key)).length, 'rule'))));
-          return;
-        }
-        if (state.step === 5) {
-          const plan = state.replay;
-          frame(stepCard('5 · Send the same kind of call again',
-            'As a hook would: origin hook, agent Claude Code, to your sandbox, now in Enforce. This time the rule in force refuses it, and Amazon Bedrock explains why.',
-            plan ? html`<div class="tf-card-quiet p-3 text-xs space-y-1"><p><span class="font-mono text-gray-200">${plan.tool_name}</span> <span class="font-mono text-gray-400 tf-break">${plan.arguments.file_path}</span></p><pre class="tf-pre !pr-3">${plan.arguments.content}</pre><p class="text-[11px] text-gray-500">Built from a call you marked correct under <span class="font-mono">${plan.rule}</span>.</p></div>` : '',
-            primary('try-send', 'Send it')));
-          return;
-        }
-        const r = state.result || {};
-        const refused = r.status && r.status !== 'APPROVED';
-        const source = r.explanation_source === 'bedrock' ? 'Amazon Bedrock' : r.explanation_source === 'deterministic_fallback' ? 'Deterministic explanation: the model was asked and did not answer' : 'Deterministic explanation';
-        frame(html`<section class="tf-card p-5 space-y-4 ${refused ? 'border-rose-900/60' : 'border-amber-900/60'}" aria-labelledby="try-step-title">
-          <h2 id="try-step-title" class="text-base font-semibold text-white">${refused ? 'Refused, before it ran' : 'The service answered ' + (r.status || 'without a verdict')}</h2>
-          <div class="flex flex-wrap gap-2"><span class="tf-chip ${refused ? 'tf-chip-rose' : 'tf-chip-emerald'} font-mono">${r.status || '—'}</span>${r.project_stage ? html`<span class="tf-chip tf-chip-purple">stage ${r.project_stage}</span>` : ''}</div>
-          <p class="text-xs text-gray-300 tf-break">${r.reason || ''}</p>
-          ${r.bedrock_explanation ? html`<div class="rounded-xl bg-purple-950/30 border border-purple-900/50 p-3 text-xs text-purple-100"><p class="tf-label !text-purple-300">${source}</p><p class="tf-break">${r.bedrock_explanation}</p></div>` : ''}
-          ${fixPanel(r.suggested_fix)}
-          <p class="text-xs text-gray-400">${refused
-            ? 'The same kind of call that ran in Observe is refused in Enforce' + (state.observing && state.observing.length ? ', while ' + state.observing.join(', ') + (state.observing.length === 1 ? ' keeps' : ' keep') + ' watching without refusing' : '') + '. That is the whole rollout: watch, label, promote, and back to Observe in one click if it bites wrong.'
-            : 'This call was not refused. The rule it was built from may not be in force, or the sandbox rules differ; the project page shows each rule\'s mode.'}</p>
-          <div class="flex flex-wrap gap-2">
-            <a class="tf-btn tf-btn-primary" href="${projectHref(state.project)}">Open ${state.project}</a>
-            <a class="tf-btn" href="#/connect">Connect your own repository</a>
-            <button type="button" class="tf-btn tf-btn-quiet" data-action="try-restart">Start again</button>
-          </div>
-        </section>`);
       }
 
-      function fail(err, doing) {
+      // A new step starts at the top of the stage: on a desk that is the top of
+      // the page, and on a phone the stage's title just under the sticky rail.
+      function scrollToStage() {
+        if (typeof window.scrollTo !== 'function') return;
+        let y = 0;
+        try {
+          const narrow = typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 1023px)').matches;
+          const stageEl = document.getElementById('try-stage');
+          const railEl = document.getElementById('try-rail');
+          if (narrow && stageEl && typeof stageEl.getBoundingClientRect === 'function' && railEl && typeof railEl.getBoundingClientRect === 'function') {
+            const top = stageEl.getBoundingClientRect().top + (window.scrollY || 0);
+            y = Math.max(0, Math.round(top - 56 - railEl.getBoundingClientRect().height - 12));
+          }
+        } catch (err) { y = 0; }
+        try { window.scrollTo(0, y); } catch (err) { /* no scroll */ }
+      }
+
+      // A new step: the stage animates in, the page returns to its top, and
+      // the keyboard lands on the step's title.
+      function enter(step, play) {
+        state.step = step;
+        state.play = Object.assign({ enter: true }, play || {});
+        state.focusId = 'try-step-title';
+      }
+
+      function fail(err, doing, target) {
         state.busy = false;
+        const why = String((err && err.message) || 'no answer').replace(/[.\s]+$/, '');
         state.error = T.isAuthError(err)
           ? (doing === 'create' ? 'This stack does not let visitors make a sandbox (HTTP ' + err.status + '). The walkthrough runs on the public demo.' : 'The stack refused (HTTP ' + err.status + '): a sandbox is open to anyone only on the public demo.')
-          : 'That did not work: ' + err.message + '. Try again.';
+          : doing === 'label' && target
+            ? 'That did not work: the label for ' + target + ' was not saved (' + why + '). Mark it again.'
+            : 'That did not work: ' + why + '. Try again.';
+        // On step 3 with calls still to label the way on is disabled, so the
+        // keyboard goes back to the call it was on.
+        state.focusId = state.step === 3 && labelledCount() < state.observed.length ? 'try-correct' : 'try-primary';
         draw();
+      }
+
+      function loadCalls() {
+        return T.api('/api/decisions' + query({ project: state.project, kind: 'all', days: 1, limit: 50 })).then(list => {
+          state.calls = list && Array.isArray(list.items) ? list.items : [];
+          state.callsError = null;
+        }, err => { state.calls = null; state.callsError = err; });
       }
 
       function loadSandbox() {
         const p = state.project;
         return Promise.all([
           T.api('/api/projects/' + encodeURIComponent(p) + query({ days: 1 })),
-          T.api('/api/decisions' + query({ project: p, kind: 'observed', days: 1, limit: 50 }))
+          T.api('/api/decisions' + query({ project: p, kind: 'observed', days: 1, limit: 50 })),
+          // The rules' own definitions, so a card can name an import the
+          // reason cut short. Never in the way: a failed read is no names.
+          ruleDefinitions()
         ]).then(([detail, list]) => {
           state.readiness = (detail && detail.readiness) || { rules: [] };
-          state.observed = list && Array.isArray(list.items) ? list.items : [];
+          applyConfig(detail);
+          // Each rule's state before the labels, so step 4 can show it change.
+          state.before = {};
+          readinessRules().forEach(r => { state.before[r.rule_key] = r.state; });
+          // Oldest first, the order they arrived in on step 1.
+          state.observed = tryChronological(list && Array.isArray(list.items) ? list.items : []);
+          state.flaggedRead = true;
           state.labels = {};
           state.observed.forEach(r => { if (r.review === 'correct' || r.review === 'false_alarm') state.labels[r.verdict_id] = r.review; });
+          const first = state.observed.findIndex(r => !state.labels[r.verdict_id]);
+          state.cursor = first === -1 ? 0 : first;
         });
       }
 
       // The ledger keeps no arguments, so the call is rebuilt: the file the
       // rule watched, and an import the rule forbids, written the way that
-      // file's language writes one.
-      function importLine(path, name) {
+      // file's language writes one. A package a rule names, rather than an
+      // import a call made, is written as a wildcard where the language
+      // needs one.
+      function importLine(path, name, isPackage) {
         const ext = (String(path).match(/\.([A-Za-z0-9]+)$/) || [])[1] || '';
         const lower = ext.toLowerCase();
-        if (lower === 'java' || lower === 'kt' || lower === 'scala') return 'import ' + name + ';\n';
+        if (lower === 'java' || lower === 'kt' || lower === 'scala') return 'import ' + name + (isPackage ? '.*' : '') + ';\n';
         if (lower === 'cs') return 'using ' + name + ';\n';
-        if (['ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs'].indexOf(lower) !== -1) return "import client from '" + name + "';\n";
+        // A module is bound to its own name when that name is an identifier
+        // (axios), and to `client` when it is not (@nestjs/common, node-fetch).
+        if (['ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs'].indexOf(lower) !== -1) {
+          const binding = /^[A-Za-z_$][\w$]*$/.test(name) && ['default', 'class', 'function', 'import', 'export', 'new', 'delete', 'in', 'this'].indexOf(name) === -1 ? name : 'client';
+          return 'import ' + binding + " from '" + name + "';\n";
+        }
         if (lower === 'go') return 'import "' + name + '"\n';
         return 'import ' + name + '\n';
       }
 
-      function planReplay(enforce) {
-        const candidates = state.observed.filter(r => state.labels[r.verdict_id] === 'correct' && enforce.indexOf(ruleKeyOf(r)) !== -1);
-        const row = candidates[0] || state.observed.find(r => enforce.indexOf(ruleKeyOf(r)) !== -1) || null;
-        if (!row) return Promise.resolve(null);
+      // Every rule of the sandbox, by id, read once. A failed read is an
+      // empty set: what is built from it then says less, never something else.
+      function ruleDefinitions() {
+        if (state.rulesDef) return Promise.resolve(state.rulesDef);
+        return T.api('/rules' + query({ project: state.project })).then(set => {
+          const byId = {};
+          (set && Array.isArray(set.rules) ? set.rules : []).forEach(r => { if (r && typeof r.id === 'string') byId[r.id] = r; });
+          state.rulesDef = byId;
+          return byId;
+        }, () => ({}));
+      }
+
+      function ruleOfRow(row) {
         const key = ruleKeyOf(row);
-        const path = targetOf(row) || 'src/domain/acme_order.py';
-        const fromDecision = T.api('/api/decision' + query({ timestamp: row.timestamp, verdict_id: row.verdict_id })).then(d => d && d.rule, () => null);
-        return fromDecision.then(rule => rule || T.api('/rules' + query({ project: state.project })).then(set => {
-          return (set && Array.isArray(set.rules) ? set.rules : []).find(r => r.id === key) || null;
-        }, () => null)).then(rule => {
-          let content = '# Acme sandbox\n';
-          if (rule && Array.isArray(rule.forbid_imports) && rule.forbid_imports.length) {
-            const plain = rule.forbid_imports.find(n => typeof n === 'string' && !/[*]/.test(n)) ||
-              String(rule.forbid_imports[0]).replace(/\*+\.?/g, '').replace(/^\.+|\.+$/g, '') || 'boto3';
-            content = importLine(path, plain);
+        return T.api('/api/decision' + query({ timestamp: row.timestamp, verdict_id: row.verdict_id })).then(d => d && d.rule, () => null)
+          .then(rule => rule || ruleDefinitions().then(defs => defs[key] || null));
+      }
+
+      // The import to write again: the one the flagged call made when its
+      // reason carries it whole; else the package it matched, which the rule
+      // names; else the first package the rule forbids by name.
+      function importToSend(row, rule) {
+        const forbid = rule && Array.isArray(rule.forbid_imports) ? rule.forbid_imports.filter(n => typeof n === 'string' && n) : [];
+        const seen = row ? tryImportOf(row) : null;
+        if (seen && !seen.cut) return { name: seen.name, isPackage: false };
+        const matched = seen ? tryPackageFor(seen.name, forbid) : '';
+        if (matched) return { name: matched, isPackage: true };
+        const plain = forbid.find(n => !/[*]/.test(n)) || (forbid.length ? String(forbid[0]).replace(/\*+\.?/g, '').replace(/^[./]+|[./]+$/g, '') : '');
+        return plain ? { name: plain, isPackage: true } : null;
+      }
+
+      function writePlan(base, path, rule, row) {
+        const imp = importToSend(row, rule);
+        return Object.assign(base, { kind: 'write', action_type: 'FILE_WRITE', imports: imp ? imp.name : '',
+          arguments: { file_path: path, content: imp ? importLine(path, imp.name, imp.isPackage) : '# Acme sandbox\n' } });
+      }
+
+      // Who sends a flagged call again: the agent that made it, with the tool
+      // it used, as that agent's hook would. A row from an agent the hook
+      // contract does not name goes as Claude Code's, with the plain tool.
+      function trySender(row, plainTool) {
+        const known = row && TRY_AGENTS.indexOf(row.agent) !== -1 && typeof row.tool_name === 'string' && /^[A-Za-z_][\w.-]{0,63}$/.test(row.tool_name);
+        return known ? { agent: row.agent, tool_name: row.tool_name } : { agent: TRY_RULE_SENDER.agent, tool_name: plainTool };
+      }
+
+      // The agent a plan is sent as.
+      function planAgent(plan) { return (plan && plan.agent) || TRY_RULE_SENDER.agent; }
+
+      // The call a flagged row made, rebuilt as the same kind of call from
+      // the same agent and tool: a gate's command as that command, a gate's
+      // file as a call to that file, and a layering rule's write as a write
+      // to the file it flagged.
+      function planFromRow(row, from) {
+        const key = ruleKeyOf(row);
+        const base = { rule: key, from, verdict_id: row.verdict_id };
+        if (tryIsGate(key)) {
+          const command = row.action_type === 'COMMAND_EXEC' ? tryCommand(row) : '';
+          if (command) return Promise.resolve(Object.assign(base, trySender(row, 'Bash'), { kind: 'command', action_type: 'COMMAND_EXEC', arguments: { command } }));
+          const path = targetOf(row);
+          return Promise.resolve(Object.assign(base, row.action_type === 'FILE_READ'
+            ? Object.assign(trySender(row, 'Read'), { kind: 'read', action_type: 'FILE_READ', arguments: { file_path: path } })
+            : Object.assign(trySender(row, 'Write'), { kind: 'write', action_type: 'FILE_WRITE', arguments: { file_path: path, content: '# Acme sandbox\n' } })));
+        }
+        return ruleOfRow(row).then(rule => writePlan(Object.assign(base, trySender(row, 'Write')), targetOf(row) || 'src/domain/acme_order.py', rule, row));
+      }
+
+      // A write a layering rule refuses, built from the rule alone: a file
+      // its path pattern covers, and a package it forbids.
+      function planFromRule(rule) {
+        if (!rule || typeof rule.id !== 'string') return null;
+        const globs = Array.isArray(rule.when_path_matches) ? rule.when_path_matches : [];
+        for (const glob of globs) {
+          const path = tryPathFromGlob(glob);
+          const imp = path ? importToSend(null, rule) : null;
+          if (path && imp) return writePlan(Object.assign({ rule: rule.id, from: 'rule', verdict_id: null }, TRY_RULE_SENDER), path, rule, null);
+        }
+        return null;
+      }
+
+      // What to send again under the rules now in force: the newest call
+      // marked correct, then the newest flagged, preferring a layering rule's
+      // (a write with the import it caught) over a gate's; then, when no call
+      // in the sandbox fell under a rule in force, a write built from a
+      // layering rule's definition. A gate that one call cannot show (a loop,
+      // a budget, an unreadable write) is never stood in for by a call it
+      // would approve: the answer is then no call at all, and step 5 says why.
+      function planReplay(enforce) {
+        const inForce = r => enforce.indexOf(ruleKeyOf(r)) !== -1;
+        // Two calls stamped in the same instant: the later lane was sent later.
+        const newestFirst = (a, b) => String(b.timestamp).localeCompare(String(a.timestamp)) || tryAgentRank(b.agent) - tryAgentRank(a.agent);
+        const usable = state.observed.filter(r => inForce(r) && tryReplayable(r)).sort(newestFirst);
+        const correct = usable.filter(r => state.labels[r.verdict_id] === 'correct');
+        const layered = rows => rows.filter(r => !tryIsGate(ruleKeyOf(r)));
+        const tier = [layered(correct), correct, layered(usable), usable].find(rows => rows.length) || [];
+        const row = tier[0] || null;
+        if (row) return planFromRow(row, state.labels[row.verdict_id] === 'correct' ? 'correct' : 'flagged');
+        const layering = enforce.filter(key => !tryIsGate(key));
+        if (!layering.length) return Promise.resolve(null);
+        return ruleDefinitions().then(defs => {
+          for (const key of layering) {
+            const plan = planFromRule(defs[key]);
+            if (plan) return plan;
           }
-          return { rule: key, tool_name: 'Write', action_type: 'FILE_WRITE', arguments: { file_path: path, content } };
+          return null;
         });
       }
+
+      // A label, from a button or a key: shown at once, saved, and taken back
+      // if the service does not keep it. The next call without a label comes
+      // up, as a reviewer works down a queue.
+      function label(verdict, value) {
+        const index = state.observed.findIndex(r => r.verdict_id === verdict);
+        const row = state.observed[index];
+        if (!row || (value !== 'correct' && value !== 'false_alarm')) return;
+        const before = state.labels[verdict];
+        const beforeLast = state.lastLabel;
+        state.labels[verdict] = value;
+        state.lastLabel = { label: value, target: tryTarget(row) };
+        state.error = null;
+        const next = nextUnlabelled(index);
+        if (next === -1) {
+          state.cursor = index;
+          state.focusId = 'try-primary';
+        } else {
+          state.play = { card: next > index ? 'next' : 'prev', gone: { label: value, target: tryTarget(row) } };
+          state.cursor = next;
+          state.focusId = 'try-correct';
+        }
+        // The call just labelled, the count, and the call now on top.
+        announce('Marked ' + REVIEWS[value].label + ': ' + tryTarget(row) + '. ' + labelledCount() + ' of ' + state.observed.length + ' labelled.'
+          + (next === -1 ? '' : ' Next: ' + tryTarget(state.observed[next]) + '.'));
+        draw();
+        // Kept until the service has answered, so readiness is never read
+        // ahead of a label the reader has already seen land. It answers
+        // whether the label was kept: a label taken back holds the reader
+        // on this step, on that call, however the way on was pressed.
+        const saving = T.api('/api/projects/' + encodeURIComponent(state.project) + '/reviews', {
+          method: 'POST', body: { items: [{ timestamp: row.timestamp, verdict_id: row.verdict_id, label: value }] }
+        }).then(answer => {
+          if (!ctx.alive()) return false;
+          const skipped = answer && Array.isArray(answer.skipped) ? answer.skipped : [];
+          if (!skipped.length) return true;
+          if (before) state.labels[verdict] = before; else delete state.labels[verdict];
+          state.lastLabel = beforeLast;
+          state.busy = false;
+          state.error = 'That did not work: the label for ' + tryTarget(row) + ' was not saved (' + (skipped[0].reason || 'skipped') + '). Mark it again.';
+          state.cursor = index;
+          state.focusId = 'try-correct';
+          draw();
+          return false;
+        }, err => {
+          if (!ctx.alive()) return false;
+          if (before) state.labels[verdict] = before; else delete state.labels[verdict];
+          state.lastLabel = beforeLast;
+          state.cursor = index;
+          fail(err, 'label', tryTarget(row));
+          return false;
+        });
+        state.saves.push(saving);
+        saving.then(() => { const at = state.saves.indexOf(saving); if (at !== -1) state.saves.splice(at, 1); });
+        return saving;
+      }
+
+      function move(delta, focusId) {
+        const total = state.observed.length;
+        if (!total) return;
+        const to = Math.max(0, Math.min(total - 1, clampCursor() + delta));
+        if (to === state.cursor) return;
+        state.play = { card: to > state.cursor ? 'next' : 'prev' };
+        state.cursor = to;
+        const edge = (focusId === 'try-prev' && to === 0) || (focusId === 'try-next' && to === total - 1);
+        state.focusId = edge || !focusId ? 'try-correct' : focusId;
+        draw();
+      }
+
+      // C and F label the call on top of the stack, and the arrows move
+      // through it. Only on step 3, never while the reader types, holds a
+      // modifier, or has the palette or a dialog open.
+      function onKey(event) {
+        if (!event || !ctx.alive() || state.step !== 3 || state.busy || !state.observed.length) return;
+        if (event.ctrlKey || event.metaKey || event.altKey) return;
+        if (dialogOpen || (T.palette && typeof T.palette.isOpen === 'function' && T.palette.isOpen())) return;
+        const target = event.target || {};
+        const tag = String(target.tagName || '').toLowerCase();
+        if (tag === 'input' || tag === 'textarea' || tag === 'select' || target.isContentEditable) return;
+        if (typeof target.closest === 'function' && target.closest('#tf-nav, [role="dialog"]')) return;
+        const key = event.key;
+        const row = state.observed[clampCursor()];
+        // A held C or F labels one call, never every call left in a burst.
+        if (event.repeat && /^[cCfF]$/.test(key)) { if (typeof event.preventDefault === 'function') event.preventDefault(); return; }
+        if (key === 'c' || key === 'C') label(row.verdict_id, 'correct');
+        else if (key === 'f' || key === 'F') label(row.verdict_id, 'false_alarm');
+        else if (key === 'ArrowRight') move(1);
+        else if (key === 'ArrowLeft') move(-1);
+        else return;
+        if (typeof event.preventDefault === 'function') event.preventDefault();
+      }
+      document.addEventListener('keydown', onKey);
+      ctx.onLeave(() => document.removeEventListener('keydown', onKey));
 
       ctx.actions({
         'try-create': () => {
           state.busy = true; state.error = null; draw();
           return T.api('/api/sandbox', { method: 'POST', body: {} }).then(body => {
             if (!ctx.alive()) return;
-            state.busy = false;
-            state.project = body && body.project ? String(body.project) : '';
+            const name = body && body.project ? String(body.project) : '';
+            if (!/^Acme-Sandbox-[0-9a-f]{8}$/.test(name)) { fail({ message: 'the stack returned no sandbox name', kind: 'http' }, 'create'); return; }
+            state.project = name;
+            // The contract makes every sandbox in Observe.
+            state.stage = 'observe';
             state.seeded = body && typeof body.calls_seeded === 'number' ? body.calls_seeded : null;
-            if (!/^Acme-Sandbox-[0-9a-f]{8}$/.test(state.project)) { fail({ message: 'the stack returned no sandbox name', kind: 'http' }, 'create'); return; }
             remember();
-            state.step = 2;
-            draw();
+            return loadCalls().then(() => {
+              if (!ctx.alive()) return;
+              state.busy = false;
+              enter(1, { arrive: true });
+              draw();
+            });
           }, err => { if (ctx.alive()) fail(err, 'create'); });
         },
         'try-resume': () => {
-          state.project = state.resume; state.step = 2; state.error = null; draw();
+          state.project = state.resume; state.seeded = null; state.stage = null; state.busy = true; state.error = null; draw();
+          // Its stage too: it may have been promoted since it was made.
+          const detail = T.api('/api/projects/' + encodeURIComponent(state.project) + query({ days: 1 })).then(d => {
+            state.readiness = (d && d.readiness) || state.readiness;
+            applyConfig(d);
+          }, () => { /* the stage is then not claimed */ });
+          return Promise.all([loadCalls(), detail]).then(() => {
+            if (!ctx.alive()) return;
+            state.busy = false;
+            enter(1, { arrive: true });
+            draw();
+          });
         },
         'try-show': () => {
           state.busy = true; state.error = null; draw();
-          return loadSandbox().then(() => {
+          // A second read from step 2 reads the whole list again as well.
+          return Promise.all([loadSandbox(), state.step === 2 ? loadCalls() : null]).then(() => {
             if (!ctx.alive()) return;
-            state.busy = false; state.step = 3; draw();
+            state.busy = false;
+            enter(2, { cards: true });
+            draw();
           }, err => { if (ctx.alive()) fail(err, 'show'); });
         },
-        'try-label': el => {
-          const verdict = el.getAttribute('data-verdict');
-          const value = el.getAttribute('data-label');
-          const row = state.observed.find(r => r.verdict_id === verdict);
-          if (!row) return;
-          const before = state.labels[verdict];
-          state.labels[verdict] = value;
+        'try-review': () => {
+          const first = state.observed.findIndex(r => !state.labels[r.verdict_id]);
+          state.cursor = first === -1 ? 0 : first;
           state.error = null;
+          enter(3, { card: 'next' });
           draw();
-          return T.api('/api/projects/' + encodeURIComponent(state.project) + '/reviews', {
-            method: 'POST', body: { items: [{ timestamp: row.timestamp, verdict_id: row.verdict_id, label: value }] }
-          }).then(answer => {
-            if (!ctx.alive()) return;
-            const skipped = answer && Array.isArray(answer.skipped) ? answer.skipped : [];
-            if (skipped.length) {
-              if (before) state.labels[verdict] = before; else delete state.labels[verdict];
-              state.error = 'That label was not saved: ' + (skipped[0].reason || 'skipped') + '.';
-              draw();
-            }
-          }, err => {
-            if (!ctx.alive()) return;
-            if (before) state.labels[verdict] = before; else delete state.labels[verdict];
-            fail(err, 'label');
-          });
+        },
+        'try-label': el => label(el.getAttribute('data-verdict'), el.getAttribute('data-label')),
+        'try-move': el => move(Number(el.getAttribute('data-move')) || 0, el.getAttribute('id')),
+        'try-goto': el => {
+          const to = Number(el.getAttribute('data-index'));
+          if (!Number.isInteger(to) || to < 0 || to >= state.observed.length || to === state.cursor) return;
+          state.play = { card: to > state.cursor ? 'next' : 'prev' };
+          state.cursor = to;
+          state.focusId = 'try-correct';
+          draw();
         },
         'try-readiness': () => {
           state.busy = true; state.error = null; draw();
-          return T.api('/api/projects/' + encodeURIComponent(state.project) + query({ days: 1 })).then(detail => {
+          // Every label saved first: a rule's state is read from them. A label
+          // the service did not keep holds the reader here, on the call it
+          // was for, with the save's own error; readiness is not read.
+          return Promise.all(state.saves.slice()).then(kept => {
             if (!ctx.alive()) return;
-            state.busy = false;
-            state.readiness = (detail && detail.readiness) || { rules: [] };
-            state.selected = new Set((state.readiness.rules || []).filter(r => r.state === 'ready' || r.state === 'quiet').map(r => r.rule_key));
-            state.step = 4;
-            draw();
-          }, err => { if (ctx.alive()) fail(err, 'readiness'); });
+            if (kept.some(ok => ok === false) || labelledCount() < state.observed.length) {
+              state.busy = false;
+              const first = state.observed.findIndex(r => !state.labels[r.verdict_id]);
+              if (first !== -1) state.cursor = first;
+              if (!state.error) state.error = 'That did not work: a label was not saved. Mark the call again.';
+              state.focusId = 'try-correct';
+              draw();
+              return;
+            }
+            return T.api('/api/projects/' + encodeURIComponent(state.project) + query({ days: 1 })).then(detail => {
+              if (!ctx.alive()) return;
+              state.busy = false;
+              state.readiness = (detail && detail.readiness) || { rules: [] };
+              applyConfig(detail);
+              state.selected = new Set(readinessRules().filter(r => r.state === 'ready' || r.state === 'quiet').map(r => r.rule_key));
+              enter(4, { flip: true });
+              draw();
+            }, err => { if (ctx.alive()) fail(err, 'readiness'); });
+          });
         },
         'try-toggle': el => {
           const key = el.getAttribute('data-rule');
-          if (el.checked) state.selected.add(key); else state.selected.delete(key);
+          if (el.checked) selected().add(key); else selected().delete(key);
+          state.focusId = el.id || el.getAttribute('id') || null;
           draw();
         },
         'try-promote': () => {
-          const all = ((state.readiness && state.readiness.rules) || []).map(r => r.rule_key);
-          const enforce = all.filter(key => state.selected.has(key));
-          state.observing = all.filter(key => !state.selected.has(key));
+          const all = readinessRules().map(r => r.rule_key);
+          const chosen = selected();
+          const enforce = all.filter(key => chosen.has(key));
+          if (!enforce.length || state.promoted) {
+            // Enforce with no rule in force would refuse nothing, and step 5 would prove nothing.
+            state.error = state.promoted ? null : 'Check at least one rule to promote.';
+            draw();
+            return;
+          }
+          state.observing = all.filter(key => !chosen.has(key));
           state.busy = true; state.error = null; draw();
           return T.api('/api/projects/' + encodeURIComponent(state.project) + '/promote', { method: 'POST', body: { enforce } })
-            .then(() => planReplay(enforce))
+            .then(answer => {
+              const config = answer && answer.config && typeof answer.config === 'object' ? answer.config : {};
+              const stage = typeof config.stage === 'string' ? config.stage : (answer && typeof answer.stage === 'string' ? answer.stage : 'enforce');
+              // The rules in force as the service recorded the promotion, in
+              // its history; the list sent stands in only when it has none.
+              const history = Array.isArray(config.history) ? config.history : [];
+              const entry = history.filter(h => h && h.action === 'promote' && Array.isArray(h.enforce)).pop();
+              const inForce = entry ? entry.enforce.map(String) : enforce;
+              state.promoted = { stage, enforce: inForce, observe: Array.isArray(config.observe_rules) ? config.observe_rules.map(String) : state.observing.slice() };
+              return planReplay(inForce);
+            })
             .then(plan => {
               if (!ctx.alive()) return;
               state.busy = false;
-              state.replay = plan || { rule: enforce[0] || '', tool_name: 'Write', action_type: 'FILE_WRITE', arguments: { file_path: 'src/domain/acme_order.py', content: 'import boto3\n' } };
-              state.step = 5;
+              state.replay = plan || null;
+              state.planned = true;
+              state.play = { promote: true };
+              state.focusId = 'try-primary';
               draw();
             }, err => { if (ctx.alive()) fail(err, 'promote'); });
         },
+        'try-next': () => {
+          state.error = null;
+          // A sandbox promoted on an earlier visit has no call planned yet.
+          if (state.planned || !state.promoted) { enter(5); draw(); return; }
+          state.busy = true; draw();
+          return planReplay(state.promoted.enforce).then(plan => {
+            if (!ctx.alive()) return;
+            state.busy = false;
+            state.replay = plan || null;
+            state.planned = true;
+            enter(5);
+            draw();
+          }, err => { if (ctx.alive()) fail(err, 'plan'); });
+        },
         'try-send': () => {
           const plan = state.replay;
+          if (!plan) return;
           state.busy = true; state.error = null; draw();
           // The contract asks for a hook's call that still carries the model's
           // sentence, so the visitor reads why it was refused. Never a sim-
@@ -2357,7 +4061,7 @@
               tool_name: plan.tool_name,
               action_type: plan.action_type,
               arguments: plan.arguments,
-              agent: 'claude-code',
+              agent: planAgent(plan),
               origin: 'hook',
               explain: true,
               hook_mode: 'managed'
@@ -2366,17 +4070,27 @@
             if (!ctx.alive()) return;
             state.busy = false;
             state.result = body || {};
-            state.step = 6;
+            enter(5, { climax: true });
             draw();
           }, err => { if (ctx.alive()) fail(err, 'send'); });
         },
+        'try-finish': () => {
+          state.error = null;
+          enter(6);
+          draw();
+        },
         'try-restart': () => {
           try { localStorage.removeItem(TRY_STORAGE); } catch (err) { /* nothing stored */ }
-          Object.assign(state, { step: 1, project: '', seeded: null, readiness: null, observed: [], labels: {}, selected: null, result: null, replay: null, error: null, busy: false, resume: null });
+          Object.assign(state, {
+            step: 1, project: '', stage: null, seeded: null, calls: null, callsError: null, readiness: null, before: null, observed: [], flaggedRead: false, labels: {}, cursor: 0,
+            selected: null, promoted: null, observing: null, result: null, replay: null, planned: false, error: null, busy: false, resume: null, saves: [], rulesDef: null, lastLabel: null
+          });
+          enter(1);
           draw();
         }
       });
 
+      state.play = { peeks: true };
       draw();
       T.whoami().then(who => {
         if (!ctx.alive()) return;
