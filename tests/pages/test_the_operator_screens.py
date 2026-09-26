@@ -444,6 +444,45 @@ def test_the_stage_hero_is_a_headline_a_consequence_and_the_action(tmp_path: Pat
     assert "False-alarm rate" not in unlabelled and "over 0" not in unlabelled, "No rate is shown over nothing"
 
 
+def test_a_stage_change_hands_the_focus_to_the_new_headline(tmp_path: Path) -> None:
+    out = ops(
+        r"""
+  let stage = 'observe';
+  let demotes = 0;
+  const demote = held();
+  answer = contract({
+    '/api/projects/Acme-Billing': () => ({ status: 200, body: detailBody(stage) }),
+    'POST /api/projects/Acme-Billing/promote': () => { stage = 'enforce'; return { status: 200, body: { stage } }; },
+    'POST /api/projects/Acme-Billing/demote': () => { demotes += 1; return demote.promise.then(() => { stage = 'observe'; return { status: 200, body: { stage } }; }); }
+  });
+  await visit('#/projects/Acme-Billing');
+  click('promote-open');
+  await click('promote-confirm');
+  await tick();
+  out.afterPromote = document.activeElement && document.activeElement.id;
+  out.hero = view().split('id="stage-title"')[1].split('</h2>')[0];
+  click('demote-open');
+  const pending = click('demote-confirm');
+  await tick();
+  out.busy = el('dialog-footer').innerHTML;
+  click('demote-confirm');
+  await tick();
+  demote.release();
+  await pending;
+  await tick();
+  out.demotes = demotes;
+  out.afterDemote = document.activeElement && document.activeElement.id;
+  out.observe = view().split('id="stage-title"')[1].split('</h2>')[0];
+""",
+        tmp_path,
+    )
+    assert out["afterPromote"] == "stage-title", "Focus lands on the new stage, not on the page"
+    assert "In Enforce" in out["hero"]
+    assert "Going back to Observe…" in out["busy"] and "disabled" in out["busy"], "Back to Observe says it is working"
+    assert out["demotes"] == 1, "A second press while the first is out sends nothing"
+    assert out["afterDemote"] == "stage-title" and "In Observe" in out["observe"]
+
+
 def test_quiet_rules_that_did_nothing_share_one_row(tmp_path: Path) -> None:
     out = ops(
         r"""

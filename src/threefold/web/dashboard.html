@@ -33,6 +33,8 @@
        control, so it draws no focus ring: the design system's ring on
        [tabindex] would otherwise frame the headline of every screen. */
     #view-title:focus, #view-title:focus-visible { outline: none; }
+    /* The same for a stage's headline, which takes the focus after a promotion or a demotion. */
+    #stage-title:focus, #stage-title:focus-visible { outline: none; }
 
     .tf-ops-h2 { margin: 0; display: flex; align-items: center; gap: 8px; font: 600 1rem/1.5rem var(--tf-font-sans); letter-spacing: -0.01em; color: var(--tf-text); }
     .tf-ops-h2 .tf-icon { width: 18px; height: 18px; color: var(--tf-accent-text); }
@@ -1638,14 +1640,14 @@
       const canEnforce = rules.filter(r => r.state === 'ready' || r.state === 'quiet').length;
       const enforce = stage === 'enforce';
       const track = html`<div class="tf-ops-track" aria-hidden="true">
-          <span class="tf-ops-step" data-on="${enforce ? '' : 'observe'}">${T.icon('eye', 14)}Observe</span>
+          <span class="tf-ops-step" id="stage-step-observe" data-on="${enforce ? '' : 'observe'}">${T.icon('eye', 14)}Observe</span>
           <span class="tf-ops-track-line"></span>
-          <span class="tf-ops-step" data-on="${enforce ? 'enforce' : ''}">${T.icon('shield', 14)}Enforce</span>
+          <span class="tf-ops-step" id="stage-step-enforce" data-on="${enforce ? 'enforce' : ''}">${T.icon('shield', 14)}Enforce</span>
         </div>`;
       const could = html`<strong class="text-white">${num(canEnforce)} of ${plural(rules.length, 'rule')}</strong> could enforce today`;
       const more = (what, body) => html`<details class="tf-ops-hero-more"><summary>${what}${T.icon('chevrondown', 14)}</summary>${body}</details>`;
       const words = enforce
-        ? html`<h2 class="tf-ops-hero-title">${enforcing
+        ? html`<h2 id="stage-title" tabindex="-1" class="tf-ops-hero-title">${enforcing
               ? html`In Enforce: ${plural(enforcing, 'rule')} ${enforcing === 1 ? 'refuses' : 'refuse'} a call before it runs`
               : 'In Enforce: the rules in force refuse a call before it runs'}</h2>
             <p class="tf-ops-hero-text">${observing.length
@@ -1656,7 +1658,7 @@
               <button type="button" class="tf-btn" data-action="promote-open">Change which rules enforce</button>
             </div>
             ${more('How Enforce works', html`<p class="tf-ops-hero-fine">An agent's write or command that breaks a rule in force is refused, and the agent is told why. A rule that still observes records what it would refuse, and refuses nothing. A hook capped to observe on its machine is never refused, whatever this says; the agents list below flags one.</p>`)}`
-        : html`<h2 class="tf-ops-hero-title">In Observe: the rules record, and refuse nothing</h2>
+        : html`<h2 id="stage-title" tabindex="-1" class="tf-ops-hero-title">In Observe: the rules record, and refuse nothing</h2>
             <p class="tf-ops-hero-text">${!rules.length
               ? 'Readiness appears once this project sends calls in the window.'
               : canEnforce === rules.length
@@ -1687,7 +1689,7 @@
             ? html`False-alarm rate ${pct(summary.false_alarm_rate)} over ${plural(reviewed, 'labelled call')}.`
             : 'No flagged call is labelled yet, so there is no false-alarm rate.'}</p>
         </aside>`;
-      return html`<section class="tf-ops-hero" data-stage="${enforce ? 'enforce' : 'observe'}" aria-label="Stage">
+      return html`<section class="tf-ops-hero" id="stage-hero" data-stage="${enforce ? 'enforce' : 'observe'}" aria-label="Stage">
         <div class="tf-ops-hero-grid">
           <div class="min-w-0">${track}${words}</div>
           ${side}
@@ -1775,7 +1777,7 @@
     function viewProject(ctx) {
       const name = ctx.args[0] || '';
       const days = pickDays(ctx.params.days, 14, true);
-      const state = { detail: null, recent: null, recentError: null, selected: null };
+      const state = { detail: null, recent: null, recentError: null, selected: null, busy: false };
       // The alias is what this screen is addressed by and what every request
       // below sends; T.projectName adds the reader's own name for display only.
       const shown = T.projectName(name);
@@ -1910,6 +1912,23 @@
           <button type="button" class="tf-btn tf-btn-primary" data-action="promote-confirm" ${count && !busy ? '' : raw('disabled')}>${busy ? 'Promoting…' : 'Promote with ' + plural(count, 'rule')}</button>`;
       }
 
+      function demoteFooter(busy) {
+        return html`<button type="button" class="tf-btn" data-action="close-dialog">Cancel</button><button type="button" id="dialog-first" class="tf-btn tf-btn-warn" data-action="demote-confirm" ${busy ? raw('disabled aria-busy="true"') : ''}>${busy ? 'Going back to Observe…' : 'Back to Observe'}</button>`;
+      }
+
+      // After a promotion or a demotion the screen is drawn again, and the
+      // button that opened the dialog is gone with it. The focus goes to the
+      // stage's new headline, so a keyboard or a screen reader carries on
+      // from what changed, and the stage the project moved to pulses once.
+      function stageChanged(stage) {
+        if (!ctx.alive() || !state.detail) return;
+        const title = document.getElementById('stage-title');
+        if (title && typeof title.focus === 'function') { try { title.focus({ preventScroll: false }); } catch (err) { /* courtesy */ } }
+        T.pulse(document.getElementById('stage-step-' + stage), stage === 'enforce' ? '' : 'warn');
+        const hero = document.getElementById('stage-hero');
+        T.pulse(hero, stage === 'enforce' ? '' : 'warn');
+      }
+
       function writeError(err, verb) {
         if (T.isAuthError(err)) return verb + ' needs the operator. Sign in with python threefold.py open on the machine that holds the key, then try again.';
         return 'Nothing changed: ' + err.message + '.';
@@ -1943,14 +1962,17 @@
         'promote-confirm': () => {
           const rules = state.detail.readiness.rules || [];
           const enforce = rules.filter(r => state.selected.has(r.rule_key)).map(r => r.rule_key);
-          if (!enforce.length) return;
+          if (!enforce.length || state.busy) return;
+          state.busy = true;
           setHtml(document.getElementById('dialog-footer'), promoteFooter(true));
           return T.api('/api/projects/' + encodeURIComponent(name) + '/promote', { method: 'POST', body: { enforce } }).then(() => {
+            state.busy = false;
             if (!ctx.alive()) return;
             closeDialog();
             toast(() => T.projectNameText(name) + ' is in Enforce: ' + plural(enforce.length, 'rule') + ' now refuse' + (enforce.length === 1 ? 's' : '') + '.');
-            load();
+            return load().then(() => stageChanged('enforce'));
           }, err => {
+            state.busy = false;
             if (!ctx.alive()) return;
             const el = document.getElementById('promote-error');
             if (el) el.textContent = writeError(err, 'Promoting');
@@ -1960,18 +1982,26 @@
         'demote-open': () => {
           openDialog('Back to Observe?', html`<p class="text-sm text-gray-300">Every rule of <span class="font-mono">${T.projectName(name)}</span> stops refusing from the next call. Everything is still judged and recorded, and the readiness you built up is kept.</p>
             <p id="demote-error" class="text-xs text-rose-300" role="alert"></p>`,
-            html`<button type="button" class="tf-btn" data-action="close-dialog">Cancel</button><button type="button" id="dialog-first" class="tf-btn tf-btn-warn" data-action="demote-confirm">Back to Observe</button>`);
+            demoteFooter(false));
         },
         'demote-confirm': () => {
+          // One press sends one demote: the button is disabled and says so
+          // while the request is out, and comes back if it fails.
+          if (state.busy) return;
+          state.busy = true;
+          setHtml(document.getElementById('dialog-footer'), demoteFooter(true));
           return T.api('/api/projects/' + encodeURIComponent(name) + '/demote', { method: 'POST', body: {} }).then(() => {
+            state.busy = false;
             if (!ctx.alive()) return;
             closeDialog();
             toast(() => T.projectNameText(name) + ' is back in Observe. Nothing is refused from the next call.');
-            load();
+            return load().then(() => stageChanged('observe'));
           }, err => {
+            state.busy = false;
             if (!ctx.alive()) return;
             const el = document.getElementById('demote-error');
             if (el) el.textContent = writeError(err, 'Going back to Observe');
+            setHtml(document.getElementById('dialog-footer'), demoteFooter(false));
           });
         }
       });
