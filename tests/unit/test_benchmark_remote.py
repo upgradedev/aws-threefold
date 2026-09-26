@@ -846,8 +846,11 @@ def test_the_owner_s_never_send_list_goes_with_a_live_run_and_nothing_else_of_th
     assert [body["tool_name"] for body in sent] == ["Write", "Bash", "Bash"], "the never-send call was sent, or more held"
     assert not any("orion" in text.casefold() for body in sent for text in _strings(body))
     assert not any({"x-api-key", "authorization"} & set(item["headers"]) for item in fake.requests), "a key was sent"
+    # The copy is the hook's for as long as the agent works, and gone after: the run's folders stay behind.
     run_home = tmp_path / "work" / f"{TASK}--threefold--r1" / "threefold-home"
-    assert (run_home / harness.NEVER_SEND_NAME).read_bytes() == listed and not (run_home / "config.json").exists()
+    assert run_home.is_dir() and sorted(run_home.rglob(harness.NEVER_SEND_NAME)) == []
+    assert not (run_home / "config.json").exists()
+    assert not any(b"orion" in path.read_bytes().lower() for path in run_home.rglob("*") if path.is_file())
     assert (owner_home / harness.NEVER_SEND_NAME).read_bytes() == listed
     recorded = [text.casefold() for text in _strings(row)]
     assert not any("orion" in text or str(owner_home).casefold() in text for text in recorded)
