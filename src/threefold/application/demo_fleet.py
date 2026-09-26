@@ -172,7 +172,7 @@ PROJECTS: Tuple[FleetProject, ...] = (
                  ("invoice", "refund", "settlement", "payout", "fee", "chargeback")),
     FleetProject("Acme-Checkout", "checkout", "web", "checkout",
                  ("cart", "basket", "promotion", "shipping", "tax", "voucher")),
-    FleetProject("Acme-Ledger", "ledger", "java", "ledger",
+    FleetProject("Acme-Treasury", "treasury", "java", "treasury",
                  ("account", "journal", "posting", "balance", "currency", "period")),
     FleetProject("Acme-Search", "search", "python", "search",
                  ("ranking", "query", "synonym", "facet", "snippet", "crawl_job")),
