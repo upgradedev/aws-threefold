@@ -44,7 +44,7 @@ UTC = datetime.timezone.utc
 # nights and a weekend.
 MONDAY = datetime.datetime(2026, 9, 21, tzinfo=UTC)
 A_WEEK = [demo_fleet.bucket_of(MONDAY) + offset for offset in range(7 * 96)]
-SESSION = re.compile(r"^fleet-(payments|checkout|ledger|search|mobile|platform)-(claude-code|codex|antigravity)-\d{1,4}$")
+SESSION = re.compile(r"^fleet-(payments|checkout|treasury|search|mobile|platform)-(claude-code|codex|antigravity)-\d{1,4}$")
 
 
 class SimulatedClock:
@@ -694,10 +694,10 @@ def test_demotion_is_one_step_back_to_observe() -> None:
     evaluator = _fresh_evaluator()
     now = datetime.datetime.now(UTC)
     demo_fleet._ensure_configured(evaluator, now)
-    keys = demo_fleet._keys(evaluator, "Acme-Ledger")
-    evaluator.save_project_config("Acme-Ledger", stages.promoted(None, now.isoformat(), "fleet", keys, keys))
-    assert demo_fleet._demote(evaluator, "Acme-Ledger", now) == {"action": "demote", "project": "Acme-Ledger"}
-    config = evaluator.project_config("Acme-Ledger", fresh=True)
+    keys = demo_fleet._keys(evaluator, "Acme-Treasury")
+    evaluator.save_project_config("Acme-Treasury", stages.promoted(None, now.isoformat(), "fleet", keys, keys))
+    assert demo_fleet._demote(evaluator, "Acme-Treasury", now) == {"action": "demote", "project": "Acme-Treasury"}
+    config = evaluator.project_config("Acme-Treasury", fresh=True)
     assert config["stage"] == stages.OBSERVE and config["history"][-1]["action"] == "demote"
 
 
@@ -973,9 +973,9 @@ def _an_enforcing_ledger(table: _FlakyTable) -> Dict[tuple, Dict[str, Any]]:
     now = datetime.datetime.now(UTC)
     for name in rollups.FLEET_PROJECTS:
         evaluator.save_project_config(name, stages.new_config(now.isoformat(), stage=stages.OBSERVE))
-    keys = demo_fleet._keys(evaluator, "Acme-Ledger")
-    evaluator.save_project_config("Acme-Ledger", stages.promoted(None, now.isoformat(), "fleet", keys, keys))
-    stored = table.items[("CONFIG#project#Acme-Ledger", "METADATA")]
+    keys = demo_fleet._keys(evaluator, "Acme-Treasury")
+    evaluator.save_project_config("Acme-Treasury", stages.promoted(None, now.isoformat(), "fleet", keys, keys))
+    stored = table.items[("CONFIG#project#Acme-Treasury", "METADATA")]
     assert stored["stage"] == stages.ENFORCE and len(stored["history"]) == 1 and stored["promoted_at"]
     return copy.deepcopy(table.configs())
 
@@ -987,7 +987,7 @@ def test_a_configuration_the_store_cannot_read_is_never_written_over() -> None:
     table.reads_fail = True
     with pytest.raises(ConnectionError):
         demo_fleet._ensure_configured(_a_container(table), datetime.datetime.now(UTC))
-    assert table.configs() == before, "Acme-Ledger still enforces, with its history and its promotion"
+    assert table.configs() == before, "Acme-Treasury still enforces, with its history and its promotion"
 
 
 def test_a_tick_that_cannot_read_the_stages_sends_nothing_and_changes_nothing() -> None:
@@ -1020,10 +1020,10 @@ def test_a_change_of_stage_that_cannot_read_the_configuration_changes_nothing(ch
     now = datetime.datetime.now(UTC)
     summary = demo_fleet.TickSummary(tick=0)
     steps = {
-        "promote": lambda: demo_fleet._promote(evaluator, "Acme-Ledger", now, summary, None),
-        "demote": lambda: demo_fleet._demote(evaluator, "Acme-Ledger", now),
-        "observe_noisy": lambda: demo_fleet._observe_noisy(evaluator, "Acme-Ledger", now),
+        "promote": lambda: demo_fleet._promote(evaluator, "Acme-Treasury", now, summary, None),
+        "demote": lambda: demo_fleet._demote(evaluator, "Acme-Treasury", now),
+        "observe_noisy": lambda: demo_fleet._observe_noisy(evaluator, "Acme-Treasury", now),
     }
-    demo_fleet._act(summary, change, "Acme-Ledger", steps[change])
+    demo_fleet._act(summary, change, "Acme-Treasury", steps[change])
     assert summary.operator_errors == 1 and summary.actions == []
     assert table.configs() == before

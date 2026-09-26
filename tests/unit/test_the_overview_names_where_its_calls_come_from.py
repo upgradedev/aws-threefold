@@ -38,16 +38,16 @@ def _rollup(project, day=TODAY, **counters):
 ITEMS = [
     _rollup("Acme-Payments", calls=30, approved=27, observed=2, refused=1, **{"agent:codex": 30}),
     _rollup("Acme-Payments", day=TODAY - datetime.timedelta(days=1), calls=20, approved=20, **{"agent:codex": 20}),
-    _rollup("Acme-Ledger", calls=25, approved=25, **{"agent:claude-code": 25}),
+    _rollup("Acme-Treasury", calls=25, approved=25, **{"agent:claude-code": 25}),
     _rollup(SANDBOX, calls=12, approved=6, observed=6, **{"agent:antigravity": 12}),
     _rollup("Acme-Probe", calls=9, approved=9, **{"agent:claude-code": 9}),
     # Close to a fleet name and not one: a test's fresh project, and another team's.
-    _rollup("Acme-Ledger-0a1b2c3d4e", calls=4, approved=4, **{"agent:claude-code": 4}),
+    _rollup("Acme-Treasury-0a1b2c3d4e", calls=4, approved=4, **{"agent:claude-code": 4}),
     _rollup("Acme-Payments-Internal", calls=3, approved=3, **{"agent:claude-code": 3}),
 ]
 CONFIGS = {
     "Acme-Payments": stages.new_config(CREATED, stage="enforce"),
-    "Acme-Ledger": stages.new_config(CREATED),
+    "Acme-Treasury": stages.new_config(CREATED),
     SANDBOX: stages.new_config(CREATED, sandbox=True),
 }
 
@@ -66,7 +66,7 @@ def a_stack_that_runs_the_fleet(monkeypatch):
     [
         ("Acme-Payments", "fleet"),
         ("Acme-Checkout", "fleet"),
-        ("Acme-Ledger", "fleet"),
+        ("Acme-Treasury", "fleet"),
         ("Acme-Search", "fleet"),
         ("Acme-Mobile", "fleet"),
         ("Acme-Platform", "fleet"),
@@ -74,7 +74,7 @@ def a_stack_that_runs_the_fleet(monkeypatch):
         ("Acme-Probe", "other"),
         ("Acme-Sim", "other"),
         ("unlabelled", "other"),
-        ("Acme-Ledger-0a1b2c3d4e", "other"),
+        ("Acme-Treasury-0a1b2c3d4e", "other"),
         ("Acme-Payments-Internal", "other"),
         ("acme-payments", "other"),
         ("", "other"),
@@ -105,7 +105,7 @@ def test_where_the_fleet_does_not_run_its_six_names_are_other(value, monkeypatch
 @pytest.mark.parametrize("value", ["true", "TRUE", " true "])
 def test_the_stack_s_setting_is_read_as_the_template_writes_it(value, monkeypatch) -> None:
     monkeypatch.setenv(rollups.DEMO_FLEET_ENV, value)
-    assert rollups.fleet_runs_here() and rollups.source_of("Acme-Ledger") == "fleet"
+    assert rollups.fleet_runs_here() and rollups.source_of("Acme-Treasury") == "fleet"
 
 
 def test_the_fleet_is_six_projects_and_the_three_sources_are_closed() -> None:
@@ -129,10 +129,10 @@ def test_every_by_project_row_names_its_source() -> None:
     rows = {row["project"]: row["source"] for row in _overview()["by_project"]}
     assert rows == {
         "Acme-Payments": "fleet",
-        "Acme-Ledger": "fleet",
+        "Acme-Treasury": "fleet",
         SANDBOX: "sandbox",
         "Acme-Probe": "other",
-        "Acme-Ledger-0a1b2c3d4e": "other",
+        "Acme-Treasury-0a1b2c3d4e": "other",
         "Acme-Payments-Internal": "other",
     }
 
@@ -157,7 +157,7 @@ def test_an_expired_sandbox_counts_nowhere() -> None:
 
 def test_the_projects_listing_names_each_row_s_source() -> None:
     rows = {row["project"]: row["source"] for row in rollups.projects_listing(ITEMS, CONFIGS)}
-    assert rows["Acme-Payments"] == rows["Acme-Ledger"] == "fleet"
+    assert rows["Acme-Payments"] == rows["Acme-Treasury"] == "fleet"
     assert rows[SANDBOX] == "sandbox" and rows["Acme-Probe"] == "other"
     assert rows["Acme-Payments-Internal"] == "other"
 

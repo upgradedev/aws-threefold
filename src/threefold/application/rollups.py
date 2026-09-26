@@ -57,7 +57,7 @@ def is_sandbox(project: Any) -> bool:
 # these six names exactly, and only on a stack that runs the fleet (DEMO_FLEET,
 # the template's DemoFleet parameter): elsewhere a team may call its own
 # repository Acme-Payments, as the installer's examples do, and its calls are
-# not synthetic. `Acme-Ledger-2` or `Acme-Payments-Internal` is other anywhere.
+# not synthetic. `Acme-Treasury-2` or `Acme-Payments-Internal` is other anywhere.
 FLEET = "fleet"
 SANDBOX = "sandbox"
 OTHER = "other"
@@ -65,7 +65,7 @@ SOURCES = (FLEET, SANDBOX, OTHER)
 FLEET_PROJECTS = (
     "Acme-Payments",
     "Acme-Checkout",
-    "Acme-Ledger",
+    "Acme-Treasury",
     "Acme-Search",
     "Acme-Mobile",
     "Acme-Platform",

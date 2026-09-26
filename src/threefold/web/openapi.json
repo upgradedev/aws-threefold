@@ -2295,7 +2295,7 @@
                               "sandbox",
                               "other"
                             ],
-                            "description": "Where this project's calls come from: fleet for the six projects of the synthetic Acme fleet (Acme-Payments, Acme-Checkout, Acme-Ledger, Acme-Search, Acme-Mobile, Acme-Platform, exactly) on a stack that runs it, the public one, whose DemoFleet parameter is true and whose schedule sends their calls through the real evaluator; on any other stack those six names are other, since a team may call its own repository by one of them; sandbox for a visitor's sandbox (^Acme-Sandbox-[0-9a-f]{8}$); other for everything else, the service's own probes and page calls included."
+                            "description": "Where this project's calls come from: fleet for the six projects of the synthetic Acme fleet (Acme-Payments, Acme-Checkout, Acme-Treasury, Acme-Search, Acme-Mobile, Acme-Platform, exactly) on a stack that runs it, the public one, whose DemoFleet parameter is true and whose schedule sends their calls through the real evaluator; on any other stack those six names are other, since a team may call its own repository by one of them; sandbox for a visitor's sandbox (^Acme-Sandbox-[0-9a-f]{8}$); other for everything else, the service's own probes and page calls included."
                           },
                           "calls": {
                             "type": "integer"
@@ -2596,7 +2596,7 @@
                               "sandbox",
                               "other"
                             ],
-                            "description": "Where this project's calls come from: fleet for the six projects of the synthetic Acme fleet (Acme-Payments, Acme-Checkout, Acme-Ledger, Acme-Search, Acme-Mobile, Acme-Platform, exactly) on a stack that runs it, the public one, whose DemoFleet parameter is true and whose schedule sends their calls through the real evaluator; on any other stack those six names are other, since a team may call its own repository by one of them; sandbox for a visitor's sandbox (^Acme-Sandbox-[0-9a-f]{8}$); other for everything else, the service's own probes and page calls included."
+                            "description": "Where this project's calls come from: fleet for the six projects of the synthetic Acme fleet (Acme-Payments, Acme-Checkout, Acme-Treasury, Acme-Search, Acme-Mobile, Acme-Platform, exactly) on a stack that runs it, the public one, whose DemoFleet parameter is true and whose schedule sends their calls through the real evaluator; on any other stack those six names are other, since a team may call its own repository by one of them; sandbox for a visitor's sandbox (^Acme-Sandbox-[0-9a-f]{8}$); other for everything else, the service's own probes and page calls included."
                           },
                           "observe_rules": {
                             "type": "array",
