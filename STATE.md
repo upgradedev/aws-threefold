@@ -25,6 +25,12 @@
   - UI-1a, the design system: `web/assets/threefold.css`, `web/assets/threefold.js` (tokens, primitives, icons, motion, the shell and navigation, a command palette, chart helpers), the shell adopted on `rules.html`, `sessions.html`, `settings.html`, `connect.html`, `swagger.html`, and tests for these
   - UI-1b, numbers a reader can trust: `application/insights.py`, `application/rollups.py`, `interfaces/app_routes.py`, the OpenAPI entries for the fields they add, and tests for these
   - UI-2, after UI-1 merges: the first screen (`web/index.html`), the walkthrough (`#/try` in `web/dashboard.html`), and the operator's screens (every other route of `web/dashboard.html`)
+- Wave UI-2 and the demo fleet (2026-09-26), each track in its own worktree:
+  - FLEET, the synthetic Acme fleet: `application/demo_fleet.py` (new), the scheduled-event branch of `interfaces/api_handlers.py` (one dispatch), the `source` fields in `application/rollups.py` and `interfaces/app_routes.py`, `deploy/template.yml` (the DemoFleet parameter and its schedule only), `deploy/iam/**`, tests for these
+  - LIVE, the daily real agent: `benchmark/**` (a remote endpoint for the threefold condition), `scripts/daily_live_agent.py` (new), tests for these
+  - FACE, the first screen: `web/index.html` and its page tests
+  - TRY, the walkthrough: the `#/try` route of `web/dashboard.html` and its page tests
+  - OPS, the operator's screens: every other route of `web/dashboard.html`, and their page tests
 - Shared, one dispatch line each: `src/threefold/interfaces/api_handlers.py`, `src/threefold/web/openapi.json`, `docs/openapi.yaml`
 - Owner: `STATE.md`, `LOG.md`, `TRAPS.md`, `CLAUDE.md`; merges and deploys
 
@@ -79,6 +85,14 @@ Fixed before the tracks split. A track that needs a field not listed here asks t
 **Private names for projects (2026-09-23).** Every alias a page renders is followed by the reader's own name for it when this browser holds one (`Acme-Proj-FB · the portal one`). The names live in `localStorage` under `threefold-local-names`, are set on `settings.html`, and are never sent: no route, request body, URL, copied command or field a handler reads back carries one, which a page test proves by driving the handlers with a sentinel label. A switch in the shared navigation (`threefold-local-names-hidden`) turns them all off at once for a screenshot, and with no name set every page's markup is what it was before. `threefold_install.py status --names-json` prints only a JSON object of alias to this machine's folder name, on standard output, with the warning that these are real names on standard error.
 
 **The application (D).** `dashboard.html` is one page with hash routes: `#/overview` (tiles, a stacked daily chart, by agent, by rule, by project; every tile and bar opens the rows behind it), `#/projects`, `#/projects/<name>` (stage, readiness per rule, Promote and Demote, recent calls, agents and their hook mode, setup), `#/review` (the queue of unreviewed would-refuse calls, grouped by project and rule, labelled one at a time or in bulk), `#/calls?<filters>` and `#/call?timestamp=&verdict_id=` (drill-down), `#/connect` (choose a name, copy one command, then watch for the first call), `#/signin?code=&next=`, and `#/try` (the sandbox walkthrough for an anonymous visitor on the public stack). Charts are inline SVG from `assets/threefold.js`, no chart library. Every page shares the navigation and the sign-in state from `assets/threefold.js`. `console.html` sends the reader to `dashboard.html#/overview`.
+
+## Contracts, 2026-09-26 — the demo fleet
+
+The public demo is fed by a synthetic Acme fleet so that every chart and tile has something true to show. It is labelled wherever it appears.
+
+- **What it is.** An EventBridge Scheduler schedule, created only where the stack's `DemoFleet` parameter is `true` (the public stack), invokes the function every 15 minutes with the input `{"threefold_fleet": {"tick": 1}}`. The function recognises that event only when it is not an HTTP event (no `requestContext.http`), so no caller of the API can trigger it. Each tick sends a bounded batch of synthetic tool calls from `claude-code`, `codex` and `antigravity` through the real evaluator (origin `hook`, `explain` false, so no Bedrock call), across six projects `Acme-Payments`, `Acme-Checkout`, `Acme-Ledger`, `Acme-Search`, `Acme-Mobile`, `Acme-Platform`, in sessions named `fleet-<project suffix>-<agent>-<n>`. Now and then it acts as an operator in process: it labels would-refuse calls (most correct, a few false alarms), promotes a project whose rules are ready and leaves noisy rules observing, and rarely demotes one. Its reviews are recorded with `reviewed_by` `fleet`.
+- **No invented history.** The fleet writes only at the moment it runs; nothing is backdated. The history on the public demo is exactly as long as the fleet has been running.
+- **How a page tells it apart.** `GET /api/overview` gains `sources: {fleet: {calls, projects}, sandbox: {calls, projects}, other: {calls, projects}}`, and every `by_project` row and every `GET /api/projects` row gains `source`, one of `fleet`, `sandbox`, `other`. A page on the public stack says in words that the fleet is synthetic and runs through the real gates.
 
 ## Ship gate
 
