@@ -75,6 +75,12 @@ ROLLUP_TTL_SECONDS = 35 * 24 * 3600
 DRAFT_BUDGET_PREFIX = "DRAFTBUDGET#"
 DRAFT_BUDGET_TTL_SECONDS = 2 * 24 * 3600
 
+# One item per scheduled run (PK=RUNCLAIM#<name>, SK=CLAIM), put with a
+# condition that it does not exist yet, so a run the scheduler or Lambda
+# delivers twice does its work once whichever container each lands on. The
+# demo fleet claims each of its fifteen-minute ticks this way.
+RUN_CLAIM_PREFIX = "RUNCLAIM#"
+
 
 def rollup_counters(decision: Dict[str, Any]) -> tuple:
     """The counters one decision adds to its day, and the stamps it sets.
@@ -636,6 +642,34 @@ class DynamoDBSessionRepository:
         if have + calls > cap:
             return False
         stored["claimed"] = have + calls
+        return True
+
+    def claim_once(self, name: str, ttl_seconds: int) -> bool:
+        """True for the first caller to claim `name`, on any container; False for every later one.
+
+        A store that cannot be reached also answers False: a run that cannot
+        be claimed is skipped, which costs one quiet interval, rather than
+        risked twice.
+        """
+        item = {
+            "PK": f"{RUN_CLAIM_PREFIX}{name}",
+            "SK": "CLAIM",
+            "claimed_at": datetime.now(timezone.utc).isoformat(),
+            "ttl": int(time.time()) + int(ttl_seconds),
+        }
+        if self._table is not None:
+            try:
+                self._table.put_item(Item=item, ConditionExpression="attribute_not_exists(PK)")
+                return True
+            except Exception as exc:
+                code = ((getattr(exc, "response", None) or {}).get("Error") or {}).get("Code", "")
+                if type(exc).__name__ != "ConditionalCheckFailedException" and code != "ConditionalCheckFailedException":
+                    logger.warning("Could not claim %s, so it is skipped: %s", name, exc)
+                return False
+        key = f"{item['PK']}#CLAIM"
+        if key in self._memory_store:
+            return False
+        self._memory_store[key] = item
         return True
 
     def list_rollups(self, days: int = 7, project: Optional[str] = None) -> List[Dict[str, Any]]:

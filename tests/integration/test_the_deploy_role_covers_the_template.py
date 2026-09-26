@@ -39,6 +39,12 @@ trusted:
   Service Authorization Reference for Amazon EventBridge Scheduler gives the
   schedule's ARN as schedule/<group>/<name>, and a schedule takes no tags.
   Its role is a plain AWS::IAM::Role, checked with the function's.
+- The fleet's asynchronous-invocation setting, AWS::Lambda::EventInvokeConfig
+  (also only where DemoFleet is true): one Lambda API action per operation,
+  PutFunctionEventInvokeConfig to create, Get, Update and Delete for the
+  rest. The Service Authorization Reference for AWS Lambda authorizes each of
+  them against the function and against a qualified function ARN,
+  function:<name>:<qualifier>, which with Qualifier $LATEST is the one used.
 
 The policy is matched as IAM matches it: an action pattern is case-insensitive
 with '*' and '?', a resource pattern is case-sensitive and its '*' crosses ':'
@@ -230,6 +236,13 @@ def _required() -> Dict[str, List[tuple]]:
             [FUNCTION_ARN],
         ),
         "AWS::Lambda::Permission": each(["lambda:AddPermission", "lambda:RemovePermission", "lambda:GetPolicy"], [FUNCTION_ARN]),
+        "AWS::Lambda::EventInvokeConfig": each(
+            [
+                "lambda:PutFunctionEventInvokeConfig", "lambda:GetFunctionEventInvokeConfig",
+                "lambda:UpdateFunctionEventInvokeConfig", "lambda:DeleteFunctionEventInvokeConfig",
+            ],
+            [FUNCTION_ARN, f"{FUNCTION_ARN}:$LATEST"],
+        ),
         "AWS::IAM::Role": each(
             [
                 "iam:CreateRole", "iam:GetRole", "iam:PassRole", "iam:PutRolePolicy", "iam:GetRolePolicy",

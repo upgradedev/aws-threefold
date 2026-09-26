@@ -200,12 +200,19 @@ def test_the_local_server_cannot_start_a_tick_either(server, ticks, method: str,
         connection.request(method, path, body=TICK_TEXT, headers={"Content-Type": "application/json",
                                                                   "threefold_fleet": TICK_TEXT})
         response = connection.getresponse()
-        answer = response.read()
+        status, answer = response.status, response.read()
+    except (ConnectionResetError, ConnectionAbortedError):
+        # The standard library answers a method the server does not route
+        # (PUT) with 501 and closes without reading the body; on Windows the
+        # client can see that as a reset before it reads the answer. Either
+        # way the request reached no handler.
+        assert method == "PUT"
+        status, answer = 501, b""
     finally:
         connection.close()
     # 501 is the standard library answering a method the server does not route (PUT).
-    assert response.status in (200, 400, 401, 403, 404, 405, 409, 415, 422, 501)
-    assert b'"threefold_fleet"' not in answer or path == "/evaluate-tool-call" and response.status == 400
+    assert status in (200, 400, 401, 403, 404, 405, 409, 415, 422, 501)
+    assert b'"threefold_fleet"' not in answer or path == "/evaluate-tool-call" and status == 400
     assert not ticks
 
 

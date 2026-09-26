@@ -7,8 +7,9 @@ schedule and its role exist only under the condition; the schedule's input is
 exactly the event the handler recognises, read out of the template and handed
 to the handler's own check; the interval is the fleet's tick; the flexible
 window is off, written so YAML cannot read it as a boolean; nothing retries a
-tick; and the role may invoke this function and nothing else, assumed only by
-the scheduler for this account.
+tick, neither the scheduler nor Lambda's own handling of the asynchronous
+invocation; and the role may invoke this function and nothing else, assumed
+only by the scheduler for this account.
 
 Read as text, as the other template tests read it, because CloudFormation's
 short tags would need a loader of their own. Nothing calls AWS.
@@ -38,6 +39,9 @@ def _block(section: str, name: str) -> str:
 
 SCHEDULE = _block("Resources", "DemoFleetSchedule")
 ROLE = _block("Resources", "DemoFleetScheduleRole")
+INVOKE = _block("Resources", "DemoFleetInvokeConfig")
+FUNCTION = _block("Resources", "ThreefoldFunction")
+FLEET_RESOURCES = ("DemoFleetSchedule", "DemoFleetScheduleRole", "DemoFleetInvokeConfig")
 
 
 def test_the_parameter_is_off_unless_the_owner_turns_it_on() -> None:
@@ -52,7 +56,10 @@ def test_the_condition_is_the_parameter_being_true() -> None:
     assert re.search(r"^  RunDemoFleet: !Equals \[!Ref DemoFleet, 'true'\]$", conditions, re.M)
 
 
-@pytest.mark.parametrize("block, resource_type", [(SCHEDULE, "AWS::Scheduler::Schedule"), (ROLE, "AWS::IAM::Role")])
+@pytest.mark.parametrize(
+    "block, resource_type",
+    [(SCHEDULE, "AWS::Scheduler::Schedule"), (ROLE, "AWS::IAM::Role"), (INVOKE, "AWS::Lambda::EventInvokeConfig")],
+)
 def test_the_schedule_and_its_role_exist_only_under_the_condition(block: str, resource_type: str) -> None:
     assert re.match(rf"^    Type: {re.escape(resource_type)}\n    Condition: RunDemoFleet\n", block)
 
@@ -63,9 +70,15 @@ def test_nothing_unconditional_refers_to_them() -> None:
     for name, body in re.findall(r"^  (\w+):\n(.*?)(?=^  \w|\Z)", resources, re.S | re.M):
         if re.search(r"^    Condition: RunDemoFleet$", body, re.M):
             continue
-        assert "DemoFleetSchedule" not in body, f"{name} refers to the fleet's schedule or its role"
+        # Comments are not references, and the comment above a resource reads
+        # as part of the one before it.
+        code = "\n".join(line for line in body.splitlines() if not line.lstrip().startswith("#"))
+        for fleet in FLEET_RESOURCES:
+            assert fleet not in code, f"{name} refers to {fleet}"
     outputs = re.search(r"^Outputs:\n(.*?)(?=^\S|\Z)", TEMPLATE, re.S | re.M).group(1)
     assert "DemoFleet" not in outputs
+    conditional = re.findall(r"^  (\w+):\n    Type: [^\n]+\n    Condition: RunDemoFleet$", resources, re.M)
+    assert sorted(conditional) == sorted(FLEET_RESOURCES), "a fleet resource was added without being checked here"
 
 
 def test_the_schedule_sends_exactly_the_event_the_handler_runs_a_tick_for() -> None:
@@ -93,6 +106,11 @@ def test_the_schedule_ticks_every_fifteen_minutes_on_time() -> None:
 def test_nothing_retries_a_tick() -> None:
     """A retried tick sends its batch twice; a missed one is only a quieter quarter hour."""
     assert re.search(r"^        RetryPolicy:\n          MaximumRetryAttempts: 0\n", SCHEDULE, re.M)
+    # Lambda's own handling of the asynchronous invocation: by default two
+    # retries after an error or a timeout, and up to six hours in the queue.
+    assert re.search(r"^      MaximumRetryAttempts: 0$", INVOKE, re.M)
+    assert re.search(r"^      MaximumEventAgeInSeconds: 60$", INVOKE, re.M), "60 is the least Lambda accepts"
+    assert re.search(r"^      FunctionName: !Ref ThreefoldFunction$", INVOKE, re.M)
     timeout = re.search(r"^    Timeout: (\d+)$", TEMPLATE, re.M)
     assert timeout, "the function declares no timeout"
     budget = int(timeout.group(1)) - demo_fleet.STOP_BEFORE_DEADLINE_SECONDS
@@ -129,3 +147,19 @@ def test_only_the_scheduler_acting_for_this_account_may_assume_the_role() -> Non
     assert re.search(r"^            Action: sts:AssumeRole$", text, re.M)
     assert re.search(r"^                aws:SourceAccount: !Ref AWS::AccountId$", text, re.M)
     assert text.count("Effect:") == 1
+
+
+def test_the_retry_setting_covers_the_version_the_schedule_invokes() -> None:
+    """The schedule invokes the unqualified function, which is $LATEST while no alias is published."""
+    assert re.search(r"^      Qualifier: '\$LATEST'$", INVOKE, re.M)
+    assert "AutoPublishAlias" not in FUNCTION, "With an alias, the schedule and this setting must both name it"
+    assert re.search(r"^        Arn: !GetAtt ThreefoldFunction\.Arn$", SCHEDULE, re.M)
+
+
+def test_the_schedule_is_the_function_s_only_asynchronous_caller() -> None:
+    """So turning Lambda's retries off changes nothing but the tick: every other event is an HTTP API call, answered synchronously."""
+    kinds = re.findall(r"^          Type: (\w+)$", FUNCTION, re.M)
+    assert kinds and set(kinds) == {"HttpApi"}, kinds
+    for asynchronous in ("AWS::Events::Rule", "AWS::Lambda::EventSourceMapping", "AWS::SNS::Subscription\n    Properties:\n      Protocol: lambda"):
+        assert asynchronous not in TEMPLATE
+    assert TEMPLATE.count("Type: AWS::Scheduler::Schedule") == 1

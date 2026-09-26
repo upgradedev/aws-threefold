@@ -1103,11 +1103,12 @@ Resources:
 
   # The synthetic fleet, only where DemoFleet is 'true'. EventBridge Scheduler
   # invokes the function every fifteen minutes with exactly the event the
-  # handler runs a tick for, which no request through the API can be. The
-  # invocation is asynchronous and the scheduler does not retry it: a missed
-  # tick is a quieter quarter hour, a repeated one a doubled batch. The tick
-  # itself stops well before the function's timeout, so Lambda has no failed
-  # invocation to retry either.
+  # handler runs a tick for, which no request through the API can be. A missed
+  # tick is a quieter quarter hour, a repeated one a doubled batch, so nothing
+  # repeats one: the scheduler does not retry its invocation, Lambda does not
+  # retry the asynchronous invocation (DemoFleetInvokeConfig), and a tick
+  # first claims its quarter hour in the table, so one delivered twice sends
+  # nothing the second time.
   DemoFleetSchedule:
     Type: AWS::Scheduler::Schedule
     Condition: RunDemoFleet
@@ -1151,6 +1152,21 @@ Resources:
               - Effect: Allow
                 Action: lambda:InvokeFunction
                 Resource: !GetAtt ThreefoldFunction.Arn
+
+  # Lambda retries a failed or timed-out asynchronous invocation twice by
+  # default and keeps a throttled event queued for up to six hours, either of
+  # which would run a tick late or twice. The schedule is the only caller that
+  # invokes this function asynchronously (API Gateway invokes it synchronously),
+  # so this changes nothing else: no retry, and an event not started within a
+  # minute is dropped rather than run in a later quarter hour.
+  DemoFleetInvokeConfig:
+    Type: AWS::Lambda::EventInvokeConfig
+    Condition: RunDemoFleet
+    Properties:
+      FunctionName: !Ref ThreefoldFunction
+      Qualifier: '$LATEST'
+      MaximumRetryAttempts: 0
+      MaximumEventAgeInSeconds: 60
 
 # Each turns an operations parameter's value for "none" into no property or
 # no resource at all, rather than a resource configured with nothing.

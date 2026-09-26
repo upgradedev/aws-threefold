@@ -760,3 +760,69 @@ def test_a_failing_tick_is_answered_not_raised(monkeypatch) -> None:
 
     monkeypatch.setattr(evaluator, "evaluate_tool_call", broken)
     assert demo_fleet.run_scheduled_tick(evaluator, None) == {"threefold_fleet": {"ok": False}}
+
+
+# ---------------------------------------------------------------- never twice
+
+
+def test_a_tick_delivered_twice_sends_its_batch_once(monkeypatch) -> None:
+    """The scheduler delivers at least once; a second delivery in the same quarter hour finds it claimed."""
+    moment = datetime.datetime.now(UTC).replace(minute=7, second=0, microsecond=0)
+    monkeypatch.setattr(demo_fleet, "_now", lambda: moment)
+    evaluator = _fresh_evaluator()
+    first = demo_fleet.run_scheduled_tick(evaluator, _Context(15000))["threefold_fleet"]
+    rows = len(_rows(evaluator))
+    assert first["ok"] is True and first["calls"] == rows >= demo_fleet.MIN_CALLS
+    second = demo_fleet.run_scheduled_tick(evaluator, _Context(15000))["threefold_fleet"]
+    assert second == {"ok": True, "tick": demo_fleet.bucket_of(moment), "skipped": "claimed already"}
+    assert len(_rows(evaluator)) == rows, "Nothing was sent the second time"
+    monkeypatch.setattr(demo_fleet, "_now", lambda: moment + datetime.timedelta(minutes=15))
+    third = demo_fleet.run_scheduled_tick(evaluator, _Context(15000))["threefold_fleet"]
+    assert third["ok"] is True and third["calls"] >= demo_fleet.MIN_CALLS, "The next quarter hour is a tick of its own"
+
+
+def test_a_tick_whose_bucket_cannot_be_claimed_sends_nothing(monkeypatch) -> None:
+    evaluator = _fresh_evaluator()
+    monkeypatch.setattr(evaluator.session_repo, "claim_once", lambda name, ttl: False)
+    answer = demo_fleet.run_scheduled_tick(evaluator, _Context(15000))["threefold_fleet"]
+    assert answer["skipped"] == "claimed already" and not _rows(evaluator)
+
+
+class _ClaimTable:
+    """Enough of a table to see the claim's conditional put."""
+
+    def __init__(self, down: bool = False) -> None:
+        self.puts: List[Dict[str, Any]] = []
+        self.keys = set()
+        self.down = down
+
+    def put_item(self, Item, ConditionExpression=None, **_):  # noqa: N803 - boto3 spells it this way
+        if self.down:
+            raise ConnectionError("simulated outage")
+        self.puts.append({"Item": Item, "ConditionExpression": ConditionExpression})
+        if (Item["PK"], Item["SK"]) in self.keys:
+            error = type("ConditionalCheckFailedException", (Exception,), {})()
+            error.response = {"Error": {"Code": "ConditionalCheckFailedException"}}
+            raise error
+        self.keys.add((Item["PK"], Item["SK"]))
+
+
+def _repo_on(table: _ClaimTable) -> DynamoDBSessionRepository:
+    return DynamoDBSessionRepository(boto3_resource=type("R", (), {"Table": lambda self, name: table})())
+
+
+def test_the_store_grants_a_claim_once_across_containers() -> None:
+    table = _ClaimTable()
+    first, second = _repo_on(table), _repo_on(table)
+    assert first.claim_once("fleet-tick-1", demo_fleet.CLAIM_TTL_SECONDS) is True
+    assert second.claim_once("fleet-tick-1", demo_fleet.CLAIM_TTL_SECONDS) is False
+    assert first.claim_once("fleet-tick-2", demo_fleet.CLAIM_TTL_SECONDS) is True
+    put = table.puts[0]
+    assert put["ConditionExpression"] == "attribute_not_exists(PK)"
+    assert (put["Item"]["PK"], put["Item"]["SK"]) == ("RUNCLAIM#fleet-tick-1", "CLAIM")
+    assert 0 < put["Item"]["ttl"] - int(datetime.datetime.now(UTC).timestamp()) <= demo_fleet.CLAIM_TTL_SECONDS
+
+
+def test_a_store_that_cannot_be_reached_grants_no_claim() -> None:
+    """Skipping a quarter hour is cheaper than risking it twice."""
+    assert _repo_on(_ClaimTable(down=True)).claim_once("fleet-tick-1", 60) is False

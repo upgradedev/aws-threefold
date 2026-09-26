@@ -38,6 +38,10 @@ What it is not:
 - Not a route. `is_tick_event` accepts the one event the schedule sends and
   nothing an HTTP request can be turned into: an HTTP event always carries its
   request context, a path and headers beside anything its body says.
+- Not repeated. A scheduled tick first claims its fifteen-minute bucket in the
+  table with a conditional write, so an event delivered twice, or retried after
+  a failure or a timeout, finds the bucket taken and sends nothing; the stack
+  also turns Lambda's own retries of the asynchronous invocation off.
 
 Deterministic per tick: everything a tick decides (which sessions work, what
 each call is, which would-refuse calls are labelled now, whether an operator
@@ -115,11 +119,14 @@ COOLDOWN = datetime.timedelta(hours=6)
 # observed in it first: some hours of a project's work, not its first minutes.
 READINESS_DAYS = 14
 MIN_CALLS_OBSERVED = 120
-# Stop sending calls this long before the function would time out. A timed-out
-# asynchronous invocation is retried by Lambda, and a retried tick would send
-# its batch again.
+# Stop sending calls this long before the function would time out, so a tick
+# ends with a summary in the log rather than a timeout. The time is checked
+# between calls, so one store call that stalls can still outlast it; a tick's
+# claim on its bucket is what keeps a retry from sending the batch again.
 STOP_BEFORE_DEADLINE_SECONDS = 5.0
 DEFAULT_BUDGET_SECONDS = 10.0
+# How long a tick's claim on its bucket is kept: well past any redelivery.
+CLAIM_TTL_SECONDS = 24 * 3600
 
 NOISY_RULE = "python-domain-stays-pure"
 NOTES = {
@@ -1166,13 +1173,21 @@ def _observe_noisy(evaluator: Any, name: str, now: datetime.datetime) -> Optiona
 # ---------------------------------------------------------------- the schedule's entry point
 
 
-def run_scheduled_tick(evaluator: Any, context: Any = None) -> Dict[str, Any]:
-    """The function's answer to the schedule's event. Never raises.
+def _now() -> datetime.datetime:
+    """The moment a scheduled tick runs: the clock's, never anything the event says."""
+    return datetime.datetime.now(datetime.timezone.utc)
 
-    The schedule invokes the function asynchronously, and Lambda retries an
-    asynchronous invocation that fails or times out, which would send a tick's
-    batch twice. So the tick stops sending well before the deadline, and any
-    failure is logged and answered rather than raised.
+
+def run_scheduled_tick(evaluator: Any, context: Any = None) -> Dict[str, Any]:
+    """The function's answer to the schedule's event. Never raises, and never runs a bucket twice.
+
+    A tick delivered twice would send its batch twice: the scheduler delivers
+    at least once, and Lambda retries an asynchronous invocation that fails or
+    times out unless the stack turns that off (it does, DemoFleetInvokeConfig).
+    So the tick first claims its fifteen-minute bucket with a conditional
+    write; a second delivery finds it taken and sends nothing, and a store
+    that cannot be claimed skips the tick. It also stops sending well before
+    the deadline, and any failure is logged and answered rather than raised.
     """
     started = time.monotonic()
     remaining = getattr(context, "get_remaining_time_in_millis", None)
@@ -1180,8 +1195,14 @@ def run_scheduled_tick(evaluator: Any, context: Any = None) -> Dict[str, Any]:
         budget = max(0.0, remaining() / 1000.0 - STOP_BEFORE_DEADLINE_SECONDS) if callable(remaining) else DEFAULT_BUDGET_SECONDS
     except Exception:  # pragma: no cover - a context that cannot say is treated as the default
         budget = DEFAULT_BUDGET_SECONDS
+    now = _now()
+    bucket = bucket_of(now)
     try:
-        summary = run_tick(evaluator, stop_at=started + budget)
+        claim = getattr(evaluator.session_repo, "claim_once", None)
+        if claim is not None and not claim(f"fleet-tick-{bucket}", CLAIM_TTL_SECONDS):
+            logger.info("Demo fleet tick %d was claimed already; nothing sent", bucket)
+            return {FLEET_EVENT_KEY: {"ok": True, "tick": bucket, "skipped": "claimed already"}}
+        summary = run_tick(evaluator, now=now, stop_at=started + budget)
     except Exception:
         logger.exception("The demo fleet's tick failed; nothing is retried")
         return {FLEET_EVENT_KEY: {"ok": False}}
