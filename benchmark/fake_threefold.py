@@ -13,6 +13,10 @@ service uses:
                                as a ledger row
     GET  /api/decisions        the recorded rows, filtered by project and
                                session, a few per page behind an opaque cursor
+    GET  /sessions/<id>        the session's record once a call named it or it
+                               was frozen (`freeze`), 404 before; a frozen
+                               session's calls are refused as HALTED_SESSION
+    GET  /api/projects/<name>  the project's stage, as readiness.summary.stage
 
 and 404 to anything else. Every request is kept, so a test can say exactly
 what a run sent and where. The judge is not Threefold's: the suite checks the
@@ -23,6 +27,7 @@ itself, and never used by a real run.
         fake.endpoint   ->  "http://127.0.0.1:<port>/"
         fake.requests   ->  [{"method": ..., "path": ..., "query": {...}, "body": {...}, "headers": [names]}, ...]
         fake.rows       ->  the ledger rows it recorded
+        fake.freeze(session)  ->  the kill switch: the session is halted, with no ledger row
 """
 from __future__ import annotations
 
@@ -31,12 +36,13 @@ import json
 import threading
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, Dict, List, Optional, Sequence
-from urllib.parse import parse_qs, urlsplit
+from typing import Any, Dict, List, Optional, Sequence, Set
+from urllib.parse import parse_qs, unquote, urlsplit
 
 FLAGGED_WORD = "boto3"
 RULE = "python-domain-stays-pure"
 REASON = f"Clean Architecture violation: Layering rule '{RULE}' refuses this write."
+HALTED_REASON = "Session execution frozen by an operator."
 
 
 class FakeThreefold:
@@ -55,6 +61,8 @@ class FakeThreefold:
         self.hidden_reads = hidden_reads
         self.requests: List[Dict[str, Any]] = []
         self.rows: List[Dict[str, Any]] = []
+        # Sessions frozen with the kill switch: known to the stack, halted, and in no ledger row.
+        self.frozen: Set[str] = set()
         self._lock = threading.Lock()
         self._server = ThreadingHTTPServer(("127.0.0.1", 0), self._handler())
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
@@ -77,6 +85,18 @@ class FakeThreefold:
     def evaluations(self) -> List[Dict[str, Any]]:
         return [item["body"] for item in self.requests if item["path"] == "/evaluate-tool-call"]
 
+    def freeze(self, session: str) -> None:
+        with self._lock:
+            self.frozen.add(session)
+
+    def _session(self, session: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            calls = sum(1 for row in self.rows if row["session_id"] == session)
+            if not calls and session not in self.frozen:
+                return None
+            return {"session_id": session, "tool_call_history_count": min(calls, 50),
+                    "is_tripped": session in self.frozen, "cumulative_cost_usd": 0.0}
+
     # --- answering ---------------------------------------------------------------------
 
     def _judge(self, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -84,20 +104,30 @@ class FakeThreefold:
         text = json.dumps(body.get("arguments")).replace("\\\\", "/")
         flagged = FLAGGED_WORD in text and "/domain/" in text
         stage = "observe" if body.get("dry_run") else self.stage
+        session = str(body.get("session_id") or "")
+        with self._lock:
+            halted = session in self.frozen
         refused = flagged and stage == "enforce" and RULE not in self.observe_rules
         now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
         row = {
-            "timestamp": now, "verdict_id": uuid.uuid4().hex[:12], "session_id": str(body.get("session_id") or ""),
+            "timestamp": now, "verdict_id": uuid.uuid4().hex[:12], "session_id": session,
             "project_name": str(body.get("project_name") or ""), "agent": body.get("agent"), "origin": body.get("origin"),
             "tool_name": body.get("tool_name"), "stage": stage, "hook_mode": body.get("hook_mode") or "unknown",
             "status": "BLOCKED_BOUNDARY_VIOLATION" if refused else "APPROVED",
             "rule": "ARCHITECTURAL_BOUNDARY_SAFE" if refused else "",
             "rule_key": RULE if flagged else "NONE", "category": "LAYERING" if flagged else "NONE",
         }
+        if halted:
+            # A frozen session refuses every call, whatever it is, and under Observe records that it would have.
+            refused = stage == "enforce"
+            row.update(status="BLOCKED_CIRCUIT_BREAKER" if refused else "APPROVED",
+                       rule="BUDGET_CIRCUIT_BREAKER_SAFE" if refused else "", rule_key="HALTED_SESSION",
+                       category="SESSION")
         with self._lock:
             self.rows.append(row)
-        return {"status": row["status"], "reason": REASON if refused else "Approved.", "verdict_id": row["verdict_id"],
-                "project_stage": self.stage, "session_tripped": False, "explanation_source": "deterministic"}
+        reason = (HALTED_REASON if halted else REASON) if refused else "Approved."
+        return {"status": row["status"], "reason": reason, "verdict_id": row["verdict_id"],
+                "project_stage": self.stage, "session_tripped": halted, "explanation_source": "deterministic"}
 
     def _decisions(self, query: Dict[str, str]) -> Dict[str, Any]:
         with self._lock:
@@ -150,6 +180,16 @@ class FakeThreefold:
                     self._send(302, {}, {"Location": fake.redirect_decisions_to})
                 elif path == "/api/decisions":
                     self._send(200, fake._decisions(query))
+                elif path.startswith("/sessions/") and path.count("/") == 2:
+                    found = fake._session(unquote(path[len("/sessions/"):]))
+                    if found is None:
+                        self._send(404, {"title": "No Such Session"})
+                    else:
+                        self._send(200, found)
+                elif path.startswith("/api/projects/") and path.count("/") == 3:
+                    name = unquote(path[len("/api/projects/"):])
+                    self._send(200, {"project": name, "config": None,
+                                     "readiness": {"summary": {"stage": fake.stage}, "rules": []}})
                 else:
                     self._send(404, {"title": "Not Found"})
 
