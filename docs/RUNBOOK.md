@@ -20,9 +20,9 @@ outside the repository.
 
 ## 1. Deploy a regional stack
 
-`deploy/template.yml` has grown to within two kilobytes of the 51,200 bytes
-CloudFormation accepts for an inline template, so both commands send it through
-the packaging bucket, which has no such limit. Its exact size is not written
+`deploy/template.yml` has grown past the 51,200 bytes CloudFormation accepts
+for an inline template, so both commands send it through the packaging bucket,
+whose limit for a template is some twenty times higher. Its exact size is not written
 down here, because it changes with every edit to the template and a number in a
 document does not; `wc -c deploy/template.yml` gives it. (`deploy/edge.yml` is
 still comfortably under that limit and is deployed inline in section 2.)
@@ -53,6 +53,7 @@ current value, secrets included, so an ordinary code deploy names none.
 | `AlarmEmail` | empty, `NoEcho` | subscribes an address to the alarm topic; AWS sends a confirmation first |
 | `EdgeOriginSecret` | empty, `NoEcho` | the edge secret; empty trusts no edge header |
 | `DefaultHookStage` | `observe` | the stage for a project with none of its own |
+| `DemoFleet` | `false` | `true` on the public stack only: a schedule runs the synthetic Acme fleet every fifteen minutes |
 | `ReservedConcurrency` | `25` | Lambda refuses a reservation that leaves fewer than 100 unreserved: check `aws lambda get-account-settings` shows at least 150 for two stacks at 25, or deploy with `0` |
 | `ApiThrottleRateLimit` / `ApiThrottleBurstLimit` | `100` / `200` | per route, answered 429 by API Gateway |
 | `SlowCallAlarmMs` | `5000` | threshold of the two latency alarms |

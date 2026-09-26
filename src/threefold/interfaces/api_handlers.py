@@ -15,6 +15,7 @@ import uuid
 from typing import Any, Dict, List
 from urllib.parse import unquote
 
+from threefold.application import demo_fleet
 from threefold.application.audit_issuer import AuditIssuer
 from threefold.application.bedrock_reviewer import BedrockArchitecturalReviewer
 from threefold.application.dtos import InvalidRequestError, PolicyConfigDTO, ToolCallRequestDTO
@@ -188,7 +189,13 @@ def lambda_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]
     HEAD is answered as GET with the body removed, so a link checker or an
     uptime probe gets the status and headers a browser would. It used to fall
     through to 404, which a probe reads as the page being gone.
+
+    The one event that is not a request is the demo fleet's scheduled tick,
+    recognised only in the exact shape the schedule sends and never in
+    anything an HTTP request becomes (demo_fleet.is_tick_event).
     """
+    if demo_fleet.is_tick_event(event):
+        return demo_fleet.run_scheduled_tick(_evaluator, context)
     request_id = _request_id(event, context)
     method = str(
         event.get("httpMethod")

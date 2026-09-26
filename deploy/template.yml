@@ -164,6 +164,19 @@ Parameters:
       THREEFOLD_EDGE_SECRET, readable by anyone in the account allowed
       lambda:GetFunctionConfiguration, the CI deploy role included.
 
+  DemoFleet:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: >-
+      Whether a schedule runs the synthetic Acme fleet every fifteen minutes:
+      20 to 40 synthetic hook calls from Claude Code, Codex and Antigravity
+      across six Acme projects, sent through the real evaluator, then labelled,
+      promoted and demoted as an operator would, so the public demo's charts
+      show something true (src/threefold/application/demo_fleet.py). 'true' on
+      the public stack only. 'false', the default, creates neither the
+      schedule nor its role, which is right for a stack that carries real use.
+
 Globals:
   Function:
     Timeout: 15
@@ -1088,12 +1101,80 @@ Resources:
             - SubscriptionType: SNS
               Address: !Ref ThreefoldAlarmTopic
 
+  # The synthetic fleet, only where DemoFleet is 'true'. EventBridge Scheduler
+  # invokes the function every fifteen minutes with exactly the event the
+  # handler runs a tick for, which no request through the API can be. A missed
+  # tick is a quieter quarter hour, a repeated one a doubled batch, so nothing
+  # repeats one: the scheduler does not retry its invocation, Lambda does not
+  # retry the asynchronous invocation (DemoFleetInvokeConfig), and a tick
+  # first claims its quarter hour in the table, so one delivered twice sends
+  # nothing the second time.
+  DemoFleetSchedule:
+    Type: AWS::Scheduler::Schedule
+    Condition: RunDemoFleet
+    Properties:
+      Name: !Sub '${AWS::StackName}-demo-fleet'
+      Description: One tick of the synthetic Acme fleet, through the real evaluator
+      ScheduleExpression: rate(15 minutes)
+      # Quoted: YAML reads a bare OFF as the boolean false.
+      FlexibleTimeWindow:
+        Mode: 'OFF'
+      State: ENABLED
+      Target:
+        Arn: !GetAtt ThreefoldFunction.Arn
+        RoleArn: !GetAtt DemoFleetScheduleRole.Arn
+        Input: '{"threefold_fleet": {"tick": 1}}'
+        RetryPolicy:
+          MaximumRetryAttempts: 0
+          MaximumEventAgeInSeconds: 60
+
+  # The schedule's own role: it may invoke this function and nothing else,
+  # and only EventBridge Scheduler acting for this account may assume it.
+  DemoFleetScheduleRole:
+    Type: AWS::IAM::Role
+    Condition: RunDemoFleet
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: scheduler.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+      Policies:
+        - PolicyName: invoke-the-function
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt ThreefoldFunction.Arn
+
+  # Lambda retries a failed or timed-out asynchronous invocation twice by
+  # default and keeps a throttled event queued for up to six hours, either of
+  # which would run a tick late or twice. The schedule is the only caller that
+  # invokes this function asynchronously (API Gateway invokes it synchronously),
+  # so this changes nothing else: no retry, and an event not started within a
+  # minute is dropped rather than run in a later quarter hour.
+  DemoFleetInvokeConfig:
+    Type: AWS::Lambda::EventInvokeConfig
+    Condition: RunDemoFleet
+    Properties:
+      FunctionName: !Ref ThreefoldFunction
+      Qualifier: '$LATEST'
+      MaximumRetryAttempts: 0
+      MaximumEventAgeInSeconds: 60
+
 # Each turns an operations parameter's value for "none" into no property or
 # no resource at all, rather than a resource configured with nothing.
 Conditions:
   CapConcurrency: !Not [!Equals [!Ref ReservedConcurrency, '0']]
   HasAlarmEmail: !Not [!Equals [!Ref AlarmEmail, '']]
   HasBudget: !Not [!Equals [!Ref MonthlyBudgetUsd, '0']]
+  RunDemoFleet: !Equals [!Ref DemoFleet, 'true']
 
 Outputs:
   OperationsDashboardUrl:

@@ -28,6 +28,22 @@ MAX_SCAN_PAGES = 50
 # could pull MAX_SCAN_PAGES megabytes out of the table.
 MIN_SCAN_PAGE_SIZE = 100
 
+# Every session's summary is kept a second time under this one partition, with
+# the sort key `<created_at>#<session id>`, so the listing is one Query for the
+# newest sessions rather than a Scan of a table that is mostly ledger. A Scan
+# reads in hash order, not by recency: once the table held more than
+# MAX_SCAN_PAGES pages, the sessions it left out were as likely to be the
+# newest as the oldest, and every anonymous listing paid for all fifty pages.
+# The entry is rewritten after every successful session write, with the
+# session's own ttl, so the two expire together. Sessions written before the
+# index existed are still found by the scan, which now runs only while the
+# index holds fewer sessions than were asked for.
+SESSION_INDEX_PARTITION = "SESSIONINDEX"
+SESSION_SUMMARY_FIELDS = (
+    "developer_id", "project_name", "total_cost_usd", "total_input_tokens", "total_output_tokens",
+    "is_tripped", "trip_reason", "is_terminated", "created_at",
+)
+
 # One project's layering rules live under this prefix plus the project name,
 # beside the shared set at CONFIG#rules rather than inside it, so saving one
 # team's architecture can never overwrite everyone else's.
@@ -58,6 +74,12 @@ ROLLUP_TTL_SECONDS = 35 * 24 * 3600
 # reader straddling midnight still finds it.
 DRAFT_BUDGET_PREFIX = "DRAFTBUDGET#"
 DRAFT_BUDGET_TTL_SECONDS = 2 * 24 * 3600
+
+# One item per scheduled run (PK=RUNCLAIM#<name>, SK=CLAIM), put with a
+# condition that it does not exist yet, so a run the scheduler or Lambda
+# delivers twice does its work once whichever container each lands on. The
+# demo fleet claims each of its fifteen-minute ticks this way.
+RUN_CLAIM_PREFIX = "RUNCLAIM#"
 
 
 def rollup_counters(decision: Dict[str, Any]) -> tuple:
@@ -192,6 +214,34 @@ def _plain(value: Any) -> Any:
     if isinstance(value, (list, tuple, set)):
         return [_plain(item) for item in value]
     return value
+
+
+def _session_summary(item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """One row of the sessions listing, from a session item or its entry in the sessions index."""
+    pk = str(item.get("PK", ""))
+    if pk == SESSION_INDEX_PARTITION:
+        session_id = str(item.get("session_id") or "")
+        calls = int(item.get("calls", 0) or 0)
+    elif pk.startswith("SESSION#"):
+        session_id = pk[len("SESSION#"):]
+        calls = len(json.loads(item.get("history_json") or "[]"))
+    else:
+        return None
+    if not session_id or session_id.endswith("__probe__"):
+        return None
+    return {
+        "session_id": session_id,
+        "developer_id": item.get("developer_id", ""),
+        "project_name": item.get("project_name", ""),
+        "total_cost_usd": float(item.get("total_cost_usd", 0) or 0),
+        "total_input_tokens": int(item.get("total_input_tokens", 0) or 0),
+        "total_output_tokens": int(item.get("total_output_tokens", 0) or 0),
+        "is_tripped": bool(item.get("is_tripped", False)),
+        "trip_reason": item.get("trip_reason") or "",
+        "is_terminated": bool(item.get("is_terminated", False)),
+        "created_at": item.get("created_at", ""),
+        "calls": calls,
+    }
 
 
 class SessionConflictError(RuntimeError):
@@ -334,10 +384,11 @@ class DynamoDBSessionRepository:
     def list_sessions(self, limit: int = 50) -> List[Dict[str, Any]]:
         """Returns recent sessions, newest first, for the dashboard.
 
-        A scan is honest at this scale and dishonest at any other. The table
-        holds one item per session with a thirty day ttl, so the working set is
-        small; a deployment with real traffic wants a secondary index on a
-        recency key instead, and this is where that change goes.
+        Read from the sessions index (SESSION_INDEX_PARTITION): one Query,
+        newest first, whatever else the table holds. Only while the index
+        holds fewer sessions than asked for, as on a stack whose sessions
+        mostly predate it, is the table scanned as well, and the two are
+        merged.
 
         The scan follows LastEvaluatedKey to the end. It used to read one page
         of a few hundred items and keep the sessions among them, but the same
@@ -348,11 +399,12 @@ class DynamoDBSessionRepository:
         """
         items: List[Dict[str, Any]] = []
         if self._table is not None:
-            try:
-                items = self._scan_session_metadata(limit)
-            except Exception as exc:
-                logger.warning("Failed to list sessions from DynamoDB: %s", exc)
-                items = []
+            items = self._indexed_sessions(limit)
+            if len(items) < limit:
+                try:
+                    items = items + self._scan_session_metadata(limit)
+                except Exception as exc:
+                    logger.warning("Failed to list sessions from DynamoDB: %s", exc)
         if not items:
             items = [
                 item for key, item in self._memory_store.items()
@@ -360,27 +412,54 @@ class DynamoDBSessionRepository:
             ]
 
         summaries = []
+        listed = set()
         for item in items:
-            pk = str(item.get("PK", ""))
-            if not pk.startswith("SESSION#") or pk.endswith("__probe__"):
+            summary = _session_summary(item)
+            if summary is None or summary["session_id"] in listed:
                 continue
-            summaries.append(
-                {
-                    "session_id": pk[len("SESSION#"):],
-                    "developer_id": item.get("developer_id", ""),
-                    "project_name": item.get("project_name", ""),
-                    "total_cost_usd": float(item.get("total_cost_usd", 0) or 0),
-                    "total_input_tokens": int(item.get("total_input_tokens", 0) or 0),
-                    "total_output_tokens": int(item.get("total_output_tokens", 0) or 0),
-                    "is_tripped": bool(item.get("is_tripped", False)),
-                    "trip_reason": item.get("trip_reason") or "",
-                    "is_terminated": bool(item.get("is_terminated", False)),
-                    "created_at": item.get("created_at", ""),
-                    "calls": len(json.loads(item.get("history_json") or "[]")),
-                }
-            )
+            listed.add(summary["session_id"])
+            summaries.append(summary)
         summaries.sort(key=lambda s: s["created_at"], reverse=True)
         return summaries[:limit]
+
+    def _indexed_sessions(self, limit: int) -> List[Dict[str, Any]]:
+        """The newest `limit` entries of the sessions index, newest first; none when it cannot be read."""
+        kwargs: Dict[str, Any] = {
+            "KeyConditionExpression": "PK = :pk",
+            "ExpressionAttributeValues": {":pk": SESSION_INDEX_PARTITION},
+            "ScanIndexForward": False,
+            "Limit": max(1, limit),
+        }
+        items: List[Dict[str, Any]] = []
+        try:
+            for _ in range(MAX_INDEX_PAGES):
+                response = self._table.query(**kwargs)
+                items.extend(response.get("Items", []))
+                last_key = response.get("LastEvaluatedKey")
+                if len(items) >= limit or not last_key:
+                    break
+                kwargs["ExclusiveStartKey"] = last_key
+                kwargs["Limit"] = max(1, limit - len(items))
+        except Exception as exc:
+            logger.warning("Could not read the sessions index, so the listing scans: %s", exc)
+            return []
+        return items[:limit]
+
+    def _index_session(self, item: Dict[str, Any], calls: int) -> None:
+        """Writes the session's entry in the sessions index. Best effort: it never fails the session's write."""
+        session_id = str(item["PK"])[len("SESSION#"):]
+        entry: Dict[str, Any] = {
+            "PK": SESSION_INDEX_PARTITION,
+            "SK": f"{item.get('created_at') or ''}#{session_id}",
+            "session_id": session_id,
+            "calls": calls,
+            "ttl": item["ttl"],
+        }
+        entry.update({name: item[name] for name in SESSION_SUMMARY_FIELDS if item.get(name) is not None})
+        try:
+            self._table.put_item(Item=entry)
+        except Exception as exc:
+            logger.warning("Could not index a session for the listing: %s", exc)
 
     def _scan_session_metadata(self, limit: int = 50) -> List[Dict[str, Any]]:
         """Every session metadata item, across as many scan pages as it takes.
@@ -563,6 +642,34 @@ class DynamoDBSessionRepository:
         if have + calls > cap:
             return False
         stored["claimed"] = have + calls
+        return True
+
+    def claim_once(self, name: str, ttl_seconds: int) -> bool:
+        """True for the first caller to claim `name`, on any container; False for every later one.
+
+        A store that cannot be reached raises, so the caller can tell an
+        outage from a second delivery; either way the run is not done, which
+        costs one quiet interval rather than risking it twice.
+        """
+        item = {
+            "PK": f"{RUN_CLAIM_PREFIX}{name}",
+            "SK": "CLAIM",
+            "claimed_at": datetime.now(timezone.utc).isoformat(),
+            "ttl": int(time.time()) + int(ttl_seconds),
+        }
+        if self._table is not None:
+            try:
+                self._table.put_item(Item=item, ConditionExpression="attribute_not_exists(PK)")
+                return True
+            except Exception as exc:
+                code = ((getattr(exc, "response", None) or {}).get("Error") or {}).get("Code", "")
+                if type(exc).__name__ == "ConditionalCheckFailedException" or code == "ConditionalCheckFailedException":
+                    return False
+                raise
+        key = f"{item['PK']}#CLAIM"
+        if key in self._memory_store:
+            return False
+        self._memory_store[key] = item
         return True
 
     def list_rollups(self, days: int = 7, project: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -1006,6 +1113,7 @@ class DynamoDBSessionRepository:
                 self._table.put_item(**put_kwargs)
                 self._last_persistence_mode = "dynamodb"
                 self._memory_store[memory_key] = item
+                self._index_session(item, calls=len(session.history[-50:]))
                 return True
             except Exception as exc:
                 error_code = ""

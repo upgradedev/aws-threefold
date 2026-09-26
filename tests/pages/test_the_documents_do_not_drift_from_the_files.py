@@ -18,6 +18,10 @@ ROOT = Path(__file__).resolve().parents[2]
 
 # What CloudFormation accepts for a template sent inline, in bytes.
 INLINE_TEMPLATE_LIMIT = 51200
+# What it accepts for a template read from an S3 object, in bytes: the limit
+# the runbook's commands work under, since they send the template through the
+# packaging bucket.
+S3_TEMPLATE_LIMIT = 1_000_000
 
 # A size written with digits, in any unit and however the digits are grouped.
 SIZE = r"\d[\d,]*(?:\.\d+)?\s*(?:bytes?|KiB|MiB|[kKMG]B|kilobytes?|megabytes?)\b"
@@ -99,9 +103,11 @@ def test_the_runbook_states_the_inline_limit_and_no_size_that_goes_stale() -> No
 
     template = _size("deploy/template.yml")
     edge = _size("deploy/edge.yml")
-    assert template < INLINE_TEMPLATE_LIMIT, "The template no longer fits even through the packaging bucket's own limit"
-    assert INLINE_TEMPLATE_LIMIT - template <= 2048, (
-        f"The runbook says the template is within two kilobytes of the limit; it has {INLINE_TEMPLATE_LIMIT - template}"
+    assert template < S3_TEMPLATE_LIMIT, "The template no longer fits even through the packaging bucket"
+    assert "has grown past the 51,200 bytes" in runbook, "The runbook must say why the template goes through the bucket"
+    assert template > INLINE_TEMPLATE_LIMIT, (
+        f"The runbook says the template has grown past the inline limit; it has {INLINE_TEMPLATE_LIMIT - template} "
+        "bytes to spare"
     )
     assert INLINE_TEMPLATE_LIMIT - edge > 2048, (
         f"The runbook calls edge.yml comfortably under the limit; it has {INLINE_TEMPLATE_LIMIT - edge} bytes left"
