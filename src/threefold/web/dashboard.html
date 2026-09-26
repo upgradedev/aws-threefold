@@ -477,11 +477,11 @@
     const HOOK_MODES = {
       managed: 'follows the project\'s stage on the server',
       observe: 'capped to Observe on the machine: never refused, whatever the stage',
-      enforce: 'enforces on the machine, whatever the stage',
+      enforce: 'follows the project\'s stage on the server, as managed does; on the machine it also refuses a write to the hooks\' own files, whatever the stage',
       unknown: 'an older hook that does not report its mode'
     };
     // A hook mode in a few words, beside its chip; HOOK_MODES says it whole.
-    const HOOK_MODE_WORDS = { managed: 'follows the stage', observe: 'never refused here', enforce: 'always enforces', unknown: 'an older hook' };
+    const HOOK_MODE_WORDS = { managed: 'follows the stage', observe: 'never refused here', enforce: 'follows the stage, guards hook files', unknown: 'an older hook' };
     const GATE_KEYS = {
       LOOP: 'The same call repeating',
       PROTECTED_PATH: 'A write to a protected path, such as hook settings or .git/hooks',

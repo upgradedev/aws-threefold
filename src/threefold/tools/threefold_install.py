@@ -1795,7 +1795,8 @@ def mode_line(mode: str) -> str:
         return "the project's stage on the dashboard decides; it starts in Observe"
     if mode == "observe":
         return "every call is recorded as a dry run and nothing is refused, whatever the stage"
-    return "every call is judged and refused when it breaks a rule, whatever the stage"
+    return ("the project's stage on the dashboard decides, as in managed; a write to the hooks' own files "
+            "is refused on this machine whatever the stage")
 
 
 def next_steps(agents: Sequence[str], mode: str, home: Path, root: Path) -> List[str]:

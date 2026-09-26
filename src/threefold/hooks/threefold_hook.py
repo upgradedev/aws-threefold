@@ -76,10 +76,12 @@ refused (below), it is refused before the list is consulted.
     THREEFOLD_PROJECT     required, here or in a file. Unset, nothing is sent.
     THREEFOLD_ENDPOINT    the service, default the public /prod/ stack
     THREEFOLD_MODE        `enforce` (the default), `managed` or `observe`:
-                          enforce sends every call to be judged and refused;
-                          managed sends it the same way and lets the project's
-                          stage on the service decide, so a project in Observe
-                          records and a project promoted to Enforce refuses;
+                          managed sends every call to be judged and lets the
+                          project's stage on the service decide, so a project
+                          in Observe records and a project promoted to Enforce
+                          refuses; enforce sends it the same way, so the stage
+                          still decides, and also refuses on this machine a
+                          write to the hooks' own files whatever the stage;
                           observe sends every call as `dry_run`, recorded,
                           never refused, never able to trip the session, which
                           stays a hard cap on this machine whatever the stage
