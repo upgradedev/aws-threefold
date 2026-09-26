@@ -122,6 +122,9 @@
     .tf-demo-dots { display: inline-flex; gap: 6px; }
     .tf-demo-dots i { display: block; width: 10px; height: 10px; border-radius: 99px; background: var(--tf-hairline-strong); }
     .tf-demo-title { margin-right: auto; font: 500 0.75rem/1rem var(--tf-font-sans); color: var(--tf-text-3); }
+    /* A phone has no room for the title beside the longer recorded label, which
+       says more; the title still names the figure for a screen reader. */
+    @media (max-width: 419px) { .tf-demo[data-source="recorded"] .tf-demo-title { display: none; } }
     .tf-demo-body { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px 14px; }
     @media (min-width: 640px) { .tf-demo-body { gap: 12px; padding: 18px 20px; } }
     .tf-demo-call { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-height: 22px; font-size: 0.75rem; line-height: 1rem; color: var(--tf-text-3); }
@@ -1813,6 +1816,7 @@
       const words = refused ? 'Refused before it was written' : approved ? 'Approved: the write would go ahead' : 'Answered';
       heroShowWaiting(false);
       card.setAttribute('data-verdict', refused ? 'refused' : approved ? 'approved' : 'other');
+      card.setAttribute('data-source', answer.source === 'live' ? 'live' : 'recorded');
       T.setHtml(verdict, h`<span id="hero-stamp" class="tf-stamp ${refused ? 'tf-stamp-refused' : approved ? 'tf-stamp-approved' : ''}">${T.icon(refused ? 'stop' : approved ? 'check' : 'info', 18)}${words}</span>`);
       verdict.hidden = false;
       reason.className = 'tf-demo-reason' + (refused ? '' : ' tf-demo-reason-approved');

@@ -151,6 +151,7 @@ def _load(tmp_path: Path, overview: str = "'network'", hero: str = "'network'", 
   out.fixHidden = el('hero-fix').hidden;
   out.landed = el('hero-demo').getAttribute('data-verdict');
   out.motion = el('hero-demo').getAttribute('data-motion');
+  out.dataSource = el('hero-demo').getAttribute('data-source');
   out.flagged = [0, 1, 2].map(i => el('hero-line-' + i).classList.contains('is-flagged'));
   out.scenarioFix = el('fix-box').innerHTML;
   out.freezeTitle = el('btnEmergencyFreeze').title || '';
@@ -375,6 +376,7 @@ def test_the_hero_asks_the_stack_once_and_shows_its_live_answer(tmp_path: Path) 
     assert reason == PLAIN_REASON + " " + RULE_LINE and not out["reasonHidden"], "One plain sentence, the rule's id second"
     assert "which matches" not in reason and "Clean Architecture violation:" not in reason, "The service's machine text is not the sentence"
     assert out["landed"] == "refused" and out["flagged"] == [True, False, False], "The verdict lands on the import line"
+    assert out["dataSource"] == "live"
     fix = out["fix"]
     assert not out["fixHidden"] and "Checked by Threefold" in fix and "3 of 3 gate checks passed" in fix
     assert "move boto3 out of the domain behind UserPort" in fix and "src/infrastructure/user_adapter.py · new" in fix
@@ -432,6 +434,7 @@ def test_the_hero_replays_the_recorded_run_and_says_truly_why(tmp_path: Path) ->
     for name, (reply, caption) in cases.items():
         out = _load(tmp_path, hero=reply)
         assert "Recorded 2026-09-25, replayed offline" in out["source"], name
+        assert out["dataSource"] == "recorded", f"{name}: a phone gives the recorded label the bar's room"
         assert out["caption"] == caption, name
         assert "without contacting it" not in out["caption"], f"{name}: the stack was asked"
         assert _read(out["reason"]) == PLAIN_REASON + " " + RULE_LINE, name
