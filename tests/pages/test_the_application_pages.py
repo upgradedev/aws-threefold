@@ -1301,7 +1301,8 @@ def test_the_walkthrough_runs_the_rollout_from_sandbox_to_a_real_refusal(tmp_pat
     assert "12 calls judged in Observe" in words and "3 calls would have been refused, and none was" in words
     assert "You marked 2 calls correct and 1 call a false alarm, so PROTECTED_PATH stayed in Observe" in words
     assert "2 rules moved to Enforce" in words
-    assert "Answered BLOCKED_BOUNDARY_VIOLATION and a sentence from Amazon Bedrock" in words
+    # Plain words first, the precise verdict second.
+    assert "Stopped before it ran by python-domain-stays-pure, with a sentence from Amazon Bedrock. Its verdict: BLOCKED_BOUNDARY_VIOLATION." in words
     for href in ('href="#/connect"', 'href="#/projects/Acme-Sandbox-0a1b2c3d"', 'href="#/proof"'):
         assert href in finish, f"The completion screen does not offer {href}"
 

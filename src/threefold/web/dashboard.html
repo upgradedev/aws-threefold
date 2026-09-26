@@ -2418,10 +2418,17 @@
 .tf-try-verdict-banner[data-tone="refused"] .tf-try-verdict-icon { background: var(--tf-refused-soft); border-color: var(--tf-refused-line); color: var(--tf-refused-text); }
 .tf-try-verdict-icon .tf-icon { width: 28px; height: 28px; }
 .tf-try-verdict-body { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
-.tf-try-verdict-chips { margin: 0; display: flex; flex-wrap: wrap; gap: 6px; }
-.tf-try-verdict-chips .tf-chip { height: auto; min-height: 22px; white-space: normal; overflow-wrap: anywhere; }
-.tf-try-verdict-reason { margin: 0; font-size: 0.9375rem; line-height: 1.5rem; color: var(--tf-text); overflow-wrap: anywhere; }
+.tf-try-verdict-lead { margin: 0; font: 650 1.125rem/1.5rem var(--tf-font-sans); letter-spacing: -0.01em; color: var(--tf-text); }
+.tf-try-verdict-reason { margin: 0; font-size: 0.9375rem; line-height: 1.5rem; color: var(--tf-text-2); overflow-wrap: anywhere; }
+.tf-try-verdict-reason mark { padding: 0 4px; border-radius: 4px; background: var(--tf-refused-soft); color: var(--tf-refused-text); font-family: var(--tf-font-mono); font-size: 0.92em; }
+.tf-try-verdict-banner[data-tone="approved"] .tf-try-verdict-reason mark { background: var(--tf-approved-soft); color: var(--tf-approved-text); }
+.tf-try-verdict-terms { margin: 2px 0 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; }
+.tf-try-term { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-3); }
+.tf-try-term > span:first-child { font: 600 var(--tf-fs-micro)/1rem var(--tf-font-sans); letter-spacing: var(--tf-track-caps); text-transform: uppercase; }
+.tf-try-term .tf-mono { color: var(--tf-text-2); overflow-wrap: anywhere; }
 .tf-try-climax-grid { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); align-items: start; }
+.tf-try-then-none { margin: 0; font-size: 0.8125rem; line-height: 1.25rem; color: var(--tf-text-3); }
+.tf-try-then-file { margin: 0; }
 @media (min-width: 960px) { .tf-try-climax-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .tf-try-quote { margin: 0; display: flex; flex-direction: column; gap: 10px; padding: 18px 20px; border-radius: var(--tf-radius-md); background: var(--tf-accent-soft); border: 1px solid var(--tf-accent-line); }
 .tf-try-quote-src { display: inline-flex; align-items: center; gap: 8px; font: 600 var(--tf-fs-micro)/1rem var(--tf-font-sans); letter-spacing: var(--tf-track-caps); text-transform: uppercase; color: var(--tf-accent-text); }
@@ -2435,6 +2442,13 @@
 .tf-try-fix-head .tf-chip { height: auto; min-height: 22px; white-space: normal; overflow-wrap: anywhere; }
 .tf-try-fix-summary { margin: 0; font-size: 0.9375rem; line-height: 1.5rem; color: var(--tf-text); overflow-wrap: anywhere; }
 .tf-try-fix-checks { margin: 0; display: inline-flex; align-items: center; gap: 8px; font-size: 0.8125rem; color: var(--tf-approved-text); }
+.tf-try-fix-checks[data-passed="some"] { color: var(--tf-observed-text); }
+.tf-try-fix-more > summary { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; list-style: none; font: 600 0.8125rem/1.25rem var(--tf-font-sans); color: var(--tf-accent-text); border-radius: 6px; }
+.tf-try-fix-more > summary::-webkit-details-marker { display: none; }
+.tf-try-fix-more > summary .tf-icon { transform: rotate(-90deg); transition: transform var(--tf-dur-2); }
+.tf-try-fix-more[open] > summary .tf-icon { transform: none; }
+.tf-try-fix-more > summary:hover { color: var(--tf-text); }
+.tf-try-fix-body { display: flex; flex-direction: column; gap: 14px; margin-top: 12px; }
 .tf-try-fix-steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; font-size: 0.8125rem; line-height: 1.25rem; color: var(--tf-text-2); }
 .tf-try-fix-writes { display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr); }
 .tf-try-fix-path { margin: 0 0 6px; font: 500 0.75rem/1.125rem var(--tf-font-mono); color: var(--tf-text-2); overflow-wrap: anywhere; }
@@ -2493,9 +2507,9 @@
   .tf-try-switching .tf-try-switch-knob { animation: tf-try-slide 760ms var(--tf-ease-spring) 200ms both; }
   .tf-try-play .tf-try-verdict-banner { animation: tf-try-slam 560ms var(--tf-ease-out) both, tf-try-glow 1200ms var(--tf-ease-out) 300ms 1; }
   .tf-try-play .tf-try-verdict-icon { animation: tf-try-pop 620ms var(--tf-ease-spring) 180ms both; }
-  .tf-try-play .tf-try-climax-grid, .tf-try-play .tf-try-fix { animation: tf-try-rise 480ms var(--tf-ease-out) both; }
-  .tf-try-play .tf-try-climax-grid { animation-delay: 380ms; }
-  .tf-try-play .tf-try-fix { animation-delay: 620ms; }
+  .tf-try-play .tf-try-climax-compare, .tf-try-play .tf-try-climax-grid { animation: tf-try-rise 480ms var(--tf-ease-out) both; }
+  .tf-try-play .tf-try-climax-compare { animation-delay: 300ms; }
+  .tf-try-play .tf-try-climax-grid { animation-delay: 560ms; }
   .tf-try-play .tf-try-editor[data-tone="refused"] .tf-try-line[data-bad] { background-image: linear-gradient(90deg, rgba(225, 29, 72, 0.28), rgba(225, 29, 72, 0.28));
     background-repeat: no-repeat; animation: tf-try-mark 700ms var(--tf-ease-out) 520ms both; }
 }
@@ -3189,9 +3203,10 @@
         };
       }
 
-      // The fix the response carries, as it carries it: the summary, the
-      // steps, the proposed files as code, and "checked" claimed only when the
-      // service says every proposed write passed the same gates.
+      // The fix the response carries, as it carries it: the summary and how
+      // many gate checks passed, with the steps and the proposed files one
+      // click away; "checked" is claimed only when the service says every
+      // proposed write passed the same gates.
       function tryFix(fix) {
         if (!fix || typeof fix !== 'object' || typeof fix.summary !== 'string') return '';
         const checked = fix.validated === true;
@@ -3199,6 +3214,9 @@
         const writes = Array.isArray(fix.writes) ? fix.writes.filter(w => w && typeof w.path === 'string' && typeof w.content === 'string') : [];
         const checks = Array.isArray(fix.checks) ? fix.checks.filter(c => c && typeof c === 'object') : [];
         const passed = checks.filter(c => c.passed === true).length;
+        const more = [];
+        if (steps.length) more.push(plural(steps.length, 'step'));
+        if (writes.length) more.push(plural(writes.length, 'proposed file'));
         return html`<section class="tf-try-fix" data-fix="${checked ? 'checked' : 'unchecked'}" aria-label="The fix in the response">
           <header class="tf-try-fix-head">
             <p class="tf-label">Suggested fix</p>
@@ -3206,45 +3224,71 @@
             ${checked ? html`<span class="tf-chip tf-chip-emerald">${T.icon('check', 13)}Checked by Threefold: passes the same gates</span>` : ''}
           </header>
           <p class="tf-try-fix-summary">${fix.summary}</p>
-          ${checks.length ? html`<p class="tf-try-fix-checks">${T.icon(passed === checks.length ? 'shield' : 'alert', 16)}${num(passed)} of ${num(checks.length)} gate checks passed on the proposed files</p>` : ''}
-          ${steps.length ? html`<ol class="tf-try-fix-steps">${steps.map(s => html`<li class="tf-break">${s}</li>`)}</ol>` : ''}
-          ${writes.length ? html`<div class="tf-try-fix-writes">${writes.map(w => html`<div>
-            <p class="tf-try-fix-path">${w.path}${w.new_file === true ? ' · a new file: if it exists, add to it' : ''}${w.partial === true ? ' · add this with an Edit where the command put it' : ''}${typeof w.old_string === 'string' ? ' · an Edit: in place of the text you replaced' : ''}${w.content === '' ? ' · empty' : ''}</p>
-            <pre class="tf-pre tf-pre-plain"><code>${w.content}</code></pre>
-          </div>`)}</div>` : ''}
+          ${checks.length ? html`<p class="tf-try-fix-checks" data-passed="${passed === checks.length ? 'all' : 'some'}">${T.icon(passed === checks.length ? 'shield' : 'alert', 16)}${num(passed)} of ${num(checks.length)} gate checks passed on the proposed files</p>` : ''}
+          ${more.length ? html`<details class="tf-try-fix-more">
+            <summary>${T.icon('chevrondown', 14)}Show the ${tryList(more)}</summary>
+            <div class="tf-try-fix-body">
+              ${steps.length ? html`<ol class="tf-try-fix-steps">${steps.map(s => html`<li class="tf-break">${s}</li>`)}</ol>` : ''}
+              ${writes.length ? html`<div class="tf-try-fix-writes">${writes.map(w => html`<div>
+                <p class="tf-try-fix-path">${w.path}${w.new_file === true ? ' · a new file: if it exists, add to it' : ''}${w.partial === true ? ' · add this with an Edit where the command put it' : ''}${typeof w.old_string === 'string' ? ' · an Edit: in place of the text you replaced' : ''}${w.content === '' ? ' · empty' : ''}</p>
+                <pre class="tf-pre tf-pre-plain"><code>${w.content}</code></pre>
+              </div>`)}</div>` : ''}
+            </div>
+          </details>` : ''}
           <p class="tf-try-fix-foot">A starting point, never applied automatically.</p>
         </section>`;
       }
 
+      // What a refusal stopped, in words.
+      function stoppedWords(plan) {
+        if (!plan) return 'Stopped before it ran';
+        if (plan.action_type === 'COMMAND_EXEC') return 'Stopped before the command ran';
+        if (plan.action_type === 'FILE_READ') return 'Stopped before the file was read';
+        return 'Stopped before the file was written';
+      }
+
       function screenClimax(play) {
         const r = state.result || {};
+        const plan = state.replay;
         const refused = !!(r.status && r.status !== 'APPROVED');
         const source = r.explanation_source === 'bedrock' ? 'Amazon Bedrock' : r.explanation_source === 'deterministic_fallback' ? 'Deterministic explanation: the model was asked and did not answer' : 'Deterministic explanation';
         const observing = Array.isArray(state.observing) ? state.observing : [];
+        // Plain words first: the rule's reason as a reader would say it. The
+        // precise terms (the rule, the verdict, the stage) come second.
+        const why = r.reason ? tryWhy({ status: r.status || 'APPROVED', reason: r.reason, rule_key: plan && plan.rule }, state.rulesDef) : null;
+        const earlier = plan ? thenCard(plan) : '';
         return {
           tone: refused ? 'refused' : '',
           kicker: refused ? 'Step 5 of 5 · refused' : 'Step 5 of 5 · the answer',
-          title: refused ? 'Refused, before it ran' : 'The service answered ' + (r.status || 'without a verdict'),
+          title: refused ? 'Refused, before it ran' : 'The service approved it',
           sentence: refused
             ? 'The same kind of call that ran in Observe is refused in Enforce' + (observing.length ? ', while ' + tryList(observing) + (observing.length === 1 ? ' keeps' : ' keep') + ' watching without refusing' : '') + '.'
-            : 'This call was not refused. The rule it was built from may not be in force, or the sandbox rules differ; the project page shows each rule\'s mode.',
+            : 'This call was not refused' + (r.project_stage ? ' in stage ' + r.project_stage : '') + '. The rule it was built from may not be in force here; the project page shows each rule\'s mode.',
           visual: html`<div class="tf-try-climax${play.climax ? ' tf-try-play' : ''}">
             <div class="tf-try-verdict-banner" data-tone="${refused ? 'refused' : 'approved'}">
               <span class="tf-try-verdict-icon" aria-hidden="true">${T.icon(refused ? 'stop' : 'check', 28)}</span>
               <div class="tf-try-verdict-body">
-                <p class="tf-try-verdict-chips"><span class="tf-chip ${refused ? 'tf-chip-rose' : 'tf-chip-emerald'} tf-mono">${r.status || '—'}</span>${r.project_stage ? html`<span class="tf-chip tf-chip-purple">${T.icon('shield', 13)}stage ${r.project_stage}</span>` : ''}</p>
-                ${r.reason ? html`<p class="tf-try-verdict-reason">${r.reason}</p>` : ''}
+                <p class="tf-try-verdict-lead">${refused ? stoppedWords(plan) : 'Answered with an approval'}</p>
+                ${why ? html`<p class="tf-try-verdict-reason">${tryWhyHtml(why)}</p>` : ''}
+                <p class="tf-try-verdict-terms">
+                  ${plan && plan.rule ? html`<span class="tf-try-term"><span>Rule</span><span class="tf-mono">${plan.rule}</span></span>` : ''}
+                  <span class="tf-try-term"><span>Verdict</span><span class="tf-mono">${r.status || '—'}</span></span>
+                  ${r.project_stage ? html`<span class="tf-try-term"><span>Stage</span>${stageChip(r.project_stage)}</span>` : ''}
+                </p>
               </div>
             </div>
-            <div class="tf-try-climax-grid">
-              ${state.replay ? editor(state.replay, refused ? 'refused' : 'approved') : ''}
+            ${plan ? html`<div class="tf-try-compare tf-try-climax-compare">
+              ${earlier}
+              <div class="tf-try-now-col"><p class="tf-try-then-label">${refused ? 'Now, in Enforce · refused' : 'Now · approved'}</p>${editor(plan, refused ? 'refused' : 'approved')}</div>
+            </div>` : ''}
+            ${r.bedrock_explanation || tryFix(r.suggested_fix) ? html`<div class="tf-try-climax-grid">
               ${r.bedrock_explanation ? html`<figure class="tf-try-quote">
                 <figcaption class="tf-try-quote-src">${T.icon('sparkles', 14)}${source}</figcaption>
                 <blockquote>${r.bedrock_explanation}</blockquote>
                 <p class="tf-try-quote-note">It explains the verdict for the person reading; the deterministic gate made it.</p>
               </figure>` : ''}
-            </div>
-            ${tryFix(r.suggested_fix)}
+              ${tryFix(r.suggested_fix)}
+            </div>` : ''}
           </div>`,
           actions: primary('try-finish', 'See what just happened')
         };
@@ -3283,11 +3327,18 @@
         const r = state.result || {};
         const refused = !!(r.status && r.status !== 'APPROVED');
         const fix = r.suggested_fix && typeof r.suggested_fix === 'object' && typeof r.suggested_fix.summary === 'string' ? r.suggested_fix : null;
+        const fixChecks = fix && Array.isArray(fix.checks) ? fix.checks.filter(x => x && typeof x === 'object') : [];
+        // A fix is called checked only when the service says so, and called
+        // unchecked only when there were checks for it to fail.
+        const extras = [];
+        if (fix) extras.push(fix.validated === true ? 'a fix checked by Threefold' : fixChecks.length ? 'a fix the gates did not pass' : 'a suggested fix');
+        if (r.explanation_source === 'bedrock') extras.push('a sentence from Amazon Bedrock');
+        const rule = state.replay && state.replay.rule ? ' by ' + state.replay.rule : '';
         facts.push({
           figure: refused ? 'Refused' : (r.status ? 'Approved' : '—'), tone: refused ? 'refused' : '',
           label: 'the same kind of call, in Enforce',
           text: r.status
-            ? 'Answered ' + r.status + (fix ? (fix.validated === true ? ', with a fix checked by Threefold' : ', with a fix the gates did not validate') : '') + (r.explanation_source === 'bedrock' ? ' and a sentence from Amazon Bedrock' : '') + '.'
+            ? (refused ? 'Stopped before it ran' + rule : 'Approved') + (extras.length ? ', with ' + tryList(extras) : '') + '. Its verdict: ' + r.status + '.'
             : state.planned && !state.replay ? 'No call was sent: no rule in force can be shown by a single call.' : 'No answer was recorded.',
           source: 'POST /evaluate-tool-call'
         });
