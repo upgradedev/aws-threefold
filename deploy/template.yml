@@ -146,6 +146,14 @@ Parameters:
       'enforce' runs the gates as before. Page and simulation calls always
       enforce, so the public demo is the same under either value.
 
+  EnforceProjectPattern:
+    Type: String
+    Default: ''
+    Description: >-
+      Projects whose name matches this regular expression start in Enforce
+      until configured. Empty: none do. The public demo sets ^Acme-Live-.+$
+      so the daily real agent's projects refuse from their first call.
+
   EdgeOriginSecret:
     Type: String
     Default: ''
@@ -202,6 +210,7 @@ Globals:
         ALLOWED_PROJECT_PATTERN: !Ref AllowedProjectPattern
         PUBLIC_READS: !Ref PublicReads
         DEFAULT_HOOK_STAGE: !Ref DefaultHookStage
+        ENFORCE_PROJECT_PATTERN: !Ref EnforceProjectPattern
         # Empty unless an edge is deployed in front of this stack; the
         # middleware then ignores every header only the edge may set.
         THREEFOLD_EDGE_SECRET: !Ref EdgeOriginSecret

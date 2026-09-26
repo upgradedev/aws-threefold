@@ -35,6 +35,7 @@ def _stack_parameters_start_at_their_defaults(monkeypatch):
     """
     monkeypatch.delenv("PUBLIC_READS", raising=False)
     monkeypatch.delenv("ALLOWED_PROJECT_PATTERN", raising=False)
+    monkeypatch.delenv("ENFORCE_PROJECT_PATTERN", raising=False)
     yield
 
 
