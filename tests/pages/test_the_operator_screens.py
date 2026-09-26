@@ -84,6 +84,71 @@ def test_the_overview_leads_with_what_needs_the_operator(tmp_path: Path) -> None
     assert overviews(out["afterTimer"]) == overviews(out["reads"]) + 1
 
 
+def test_the_refresh_reads_the_false_alarms_with_the_numbers(tmp_path: Path) -> None:
+    """A label set while the tab is open reaches the strip and the portfolio on the next refresh."""
+    out = ops(
+        r"""
+  const body = overviewBody({ needs_review: 0 });
+  body.by_project = [{ project: 'Acme-Search', stage: 'observe', configured: true, source: 'fleet', calls: 40, refused: 0, would_refuse: 5, needs_review: 0, last_seen: NOW }];
+  let alarms = [];
+  let failAlarms = false;
+  const cell = () => view().split('data-row-href="#/projects/Acme-Search"')[1].split('</tr>')[0];
+  answer = contract({
+    '/api/overview': () => ({ status: 200, body }),
+    '/api/decisions': () => (failAlarms ? 'network' : { status: 200, body: { items: alarms, next_cursor: null } }),
+    '/api/sessions': { status: 200, body: { sessions: [] } }
+  });
+  await visit('#/overview?days=7');
+  await tick();
+  out.before = cell();
+  out.sessionsNote = text(view().split('data-slot="halted"')[1].split('</article>')[0]);
+  alarms = [falseAlarm(1, 'Acme-Search', 'python-domain-stays-pure')];
+  await runIntervals();
+  out.after = cell();
+  out.noisy = text(view().split('data-slot="noisy"')[1].split('</article>')[0]);
+  failAlarms = true;
+  await runIntervals();
+  out.failed = cell();
+  out.stale = text(view().split('data-slot="noisy"')[1].split('</article>')[0]);
+  out.reads = calls.map(c => c.url);
+""",
+        tmp_path,
+    )
+    assert 'data-state="ready"' in out["before"] and 'data-part="correct"' in out["before"]
+    assert "Read at" in out["sessionsNote"] and "Refresh to read again" in out["sessionsNote"], "The sessions slot says when it was read"
+    after = out["after"]
+    assert 'data-state="noisy"' in after and "1 false alarm" in after, "A false alarm labelled since the first read turns the row Noisy"
+    assert 'data-state="ready"' not in after
+    assert "1 rule turned noisy" in out["noisy"] and "Acme-Search" in out["noisy"]
+    failed = out["failed"]
+    assert 'data-state="ready"' not in failed and 'data-part="correct"' not in failed, "A false-alarm read that failed claims no Ready"
+    assert "the last re-read failed" in out["stale"], "The slot keeps what it read and says it is stale"
+    assert sum(1 for u in out["reads"] if "review=false_alarm" in u) == 3, "Read once on opening and once with each refresh"
+    assert sum(1 for u in out["reads"] if "/api/sessions" in u) == 1, "The timer never scans the session table"
+
+
+def test_an_empty_window_starts_the_strip_once_calls_arrive(tmp_path: Path) -> None:
+    out = ops(
+        r"""
+  let body = overviewBody({ calls: 0, approved: 0, refused: 0, would_refuse: 0, needs_review: 0 });
+  answer = contract({
+    '/api/overview': () => ({ status: 200, body }),
+    '/api/decisions': { status: 200, body: { items: [falseAlarm(1, 'Acme-Ledger', 'LOOP')], next_cursor: null } },
+    '/api/sessions': { status: 200, body: { sessions: [session('fleet-ledger-codex-1', 'Acme-Ledger', true)] } }
+  });
+  await visit('#/overview?days=7');
+  await tick();
+  out.emptyReads = calls.map(c => c.url).filter(u => u.indexOf('/api/sessions') !== -1 || u.indexOf('review=false_alarm') !== -1);
+  body = overviewBody();
+  await runIntervals();
+  out.text = text(view());
+""",
+        tmp_path,
+    )
+    assert out["emptyReads"] == [], "An empty window reads nothing for the strip to show"
+    assert "1 rule turned noisy" in out["text"] and "1 session halted" in out["text"], "Once calls arrive, the strip reads and says what it found"
+
+
 def test_a_quiet_window_says_each_slot_is_clear(tmp_path: Path) -> None:
     out = ops(
         r"""

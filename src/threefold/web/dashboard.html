@@ -119,6 +119,8 @@
     /* A project's readiness in the portfolio: its state, and its flagged calls split by label. */
     .tf-ops-ready { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-width: 12rem; }
     .tf-ops-ready > .tf-chip { flex-shrink: 0; }
+    /* Where a state waits on a read still on its way: a chip's shape, no word. */
+    .tf-ops-chip-wait { display: inline-block; flex-shrink: 0; width: 64px; height: 22px; border-radius: var(--tf-radius-pill); }
     .tf-ops-ready-bar { display: flex; gap: 2px; flex: 1 1 4rem; min-width: 4rem; max-width: 9rem; height: 6px; border-radius: 3px; overflow: hidden; background: var(--tf-track); }
     .tf-ops-ready-bar > span { display: block; height: 100%; min-width: 3px; }
     .tf-ops-ready-bar > span:last-child { border-radius: 0 3px 3px 0; }
@@ -917,17 +919,25 @@
     // it is Ready if it flagged anything and Quiet if not. Approved green is
     // drawn only where the false alarms were read to the end of the window:
     // a labelled call that may be a false alarm is drawn neutral, never Ready.
+    // `fa` undefined is a read still on its way: a state that hangs on it is
+    // a placeholder until it lands, so nothing is claimed and then taken back.
+    // `fa` null is a read that failed: that state is left unsaid, and the
+    // words say why, rather than a fifth state the product does not have.
     function readinessCell(p, fa) {
       const would = p.would_refuse;
       const waiting = p.needs_review;
       if (typeof would !== 'number' || typeof waiting !== 'number') return html`<span class="text-gray-500">—</span>`;
+      const reading = fa === undefined;
       const seen = (fa && fa.byProject[p.project]) || { any: 0, observed: 0 };
       const known = !!fa && (fa.complete || seen.any > 0);
       const flagged = would + (typeof p.refused === 'number' ? p.refused : 0);
-      const state = seen.any > 0 ? 'noisy' : waiting > 0 ? 'needs_review' : flagged <= 0 ? 'quiet' : known ? 'ready' : '';
-      const chip = state ? stateChip(state) : html`<span class="tf-chip tf-chip-gray" title="The false alarms of this window could not all be read, so Ready is not claimed">Labelled</span>`;
+      const state = seen.any > 0 ? 'noisy' : flagged <= 0 ? 'quiet' : reading ? '' : waiting > 0 ? 'needs_review' : known ? 'ready' : '';
+      const chip = state ? stateChip(state) : reading
+        ? html`<span class="tf-skeleton tf-ops-chip-wait" aria-hidden="true"></span><span class="sr-only">Reading the false alarms</span>`
+        : '';
+      const unread = !state && !reading ? html` · <span title="The false alarms of this window could not all be read, so neither Ready nor Noisy is claimed">false alarms not all read</span>` : '';
       if (would <= 0) {
-        return html`<span class="tf-ops-ready" data-state="${state || 'unknown'}">${chip}<span class="tf-ops-ready-bar" aria-hidden="true"></span><span class="tf-ops-meter-words">${flagged > 0 ? 'nothing to label' : 'nothing flagged'}</span></span>`;
+        return html`<span class="tf-ops-ready" data-state="${state || 'unknown'}">${chip}<span class="tf-ops-ready-bar" aria-hidden="true"></span><span class="tf-ops-meter-words">${flagged > 0 ? 'nothing to label' : 'nothing flagged'}${unread}</span></span>`;
       }
       const done = Math.max(0, Math.min(would, would - waiting));
       const wrong = Math.min(done, seen.observed);
@@ -939,7 +949,7 @@
         { part: 'unlabelled', value: waiting, color: 'transparent', label: 'not labelled' }
       ].filter(x => x.value > 0);
       const said = parts.map(x => num(x.value) + ' ' + x.label).join(', ');
-      return html`<span class="tf-ops-ready" data-state="${state || 'unknown'}" title="${said}, of ${num(would)} flagged">${chip}<span class="tf-ops-ready-bar" role="img" aria-label="${num(done)} of ${num(would)} flagged calls labelled">${parts.map(x => html`<span data-part="${x.part}" style="flex-grow:${x.value};background:${x.color}"></span>`)}</span><span class="tf-ops-meter-words">${num(done)}/${num(would)} labelled${wrong ? html` · <span class="text-rose-300">${plural(wrong, 'false alarm')}</span>` : ''}</span></span>`;
+      return html`<span class="tf-ops-ready" data-state="${state || 'unknown'}" title="${said}, of ${num(would)} flagged">${chip}<span class="tf-ops-ready-bar" role="img" aria-label="${num(done)} of ${num(would)} flagged calls labelled">${parts.map(x => html`<span data-part="${x.part}" style="flex-grow:${x.value};background:${x.color}"></span>`)}</span><span class="tf-ops-meter-words">${num(done)}/${num(would)} labelled${wrong ? html` · <span class="text-rose-300">${plural(wrong, 'false alarm')}</span>` : ''}${unread}</span></span>`;
     }
 
     // One slot of the attention strip: something to do, or plainly nothing.
@@ -1018,7 +1028,8 @@
         if (outcomeOf(row) === 'refused') groups[key].refused += 1;
       });
       const list = order.map(k => groups[k]).sort((a, b) => b.count - a.count || a.rule.localeCompare(b.rule));
-      const partial = att.noisy.partial ? html`<p class="tf-ops-att-note">Counted over the newest ${plural(att.noisy.rows.length, 'false alarm')}; the ledger holds more.</p>` : '';
+      const partial = html`${att.noisy.partial ? html`<p class="tf-ops-att-note">Counted over the newest ${plural(att.noisy.rows.length, 'false alarm')}; the ledger holds more.</p>` : ''}${att.noisy.stale
+        ? html`<p class="tf-ops-att-note text-amber-300">As read at ${T.clockTime(att.noisy.at)}: the last re-read failed (${trimStop(att.noisy.stale.message || 'no answer')}).</p>` : ''}`;
       if (!list.length) {
         return attSlot({ slot: 'noisy', tone: 'ok', icon: 'check', kicker, title: 'No rule turned noisy',
           body: html`<p class="tf-ops-att-note">No call from ${windowWords(days)} is marked a false alarm.</p>${apart}${partial}` });
@@ -1058,8 +1069,10 @@
       // rather than offered a button the stack would refuse.
       const operator = !!who && who.authenticated === true;
       // The list is read up to a limit; a full read may not be every session.
-      const partial = att.sessions.rows.length >= SESSIONS_READ
-        ? html`<p class="tf-ops-att-note">Among the newest ${plural(att.sessions.rows.length, 'session')} read; the table holds more.</p>` : '';
+      // It is not on the timer, so the slot says when it was read.
+      const partial = html`${att.sessions.rows.length >= SESSIONS_READ
+        ? html`<p class="tf-ops-att-note">Among the newest ${plural(att.sessions.rows.length, 'session')} read; the table holds more.</p>` : ''}${att.sessions.at
+        ? html`<p class="tf-ops-att-note" data-note="sessions-read">Read at ${T.clockTime(att.sessions.at)} · Refresh to read again.</p>` : ''}`;
       if (!halted.length) {
         return attSlot({ slot: 'halted', tone: 'ok', icon: 'check', kicker, title: 'No session is halted',
           body: html`<p class="tf-ops-att-note">Left out: the demo page's scenarios and the service's own probes, which halt their sessions on purpose.</p>${partial}` });
@@ -1085,7 +1098,7 @@
       return html`<section aria-labelledby="attention-title">
         <div class="tf-ops-head"><div>
           <h2 id="attention-title" class="tf-ops-h2">${T.icon('bolt', 18)}Needs your attention</h2>
-          <p class="tf-ops-sub">Labels and false alarms from ${windowWords(days)}; halted sessions as they stand now.</p>
+          <p class="tf-ops-sub">Labels and false alarms from ${windowWords(days)}, refreshed with the numbers. Halted sessions are read when the page opens and on Refresh.</p>
         </div></div>
         <div class="tf-ops-attention">${reviewSlot(data, days, who)}${noisySlot(att, days)}${haltedSlot(att, who)}</div>
       </section>`;
@@ -1152,14 +1165,39 @@
       const sub = 'What Threefold judged across every project in ' + windowWords(days) + '.';
       ctx.render(loadingView('Overview', sub, ['attention', 'kpis', 'chart']));
 
-      function load(quiet) {
-        return T.api('/api/overview' + query({ days })).then(body => {
+      // The false alarms of the window: a filtered read of the ledger, so it
+      // is read again with every refresh of the numbers. A project's
+      // readiness is drawn from both reads together, and never green from a
+      // false-alarm read older than the numbers beside it.
+      function readFalseAlarms() {
+        return T.api('/api/decisions' + query({ review: 'false_alarm', days, limit: 200 })).then(body => {
+          // Only rows the ledger says were marked false alarm: a stack that did
+          // not filter would otherwise have every call counted as one.
+          const rows = body && Array.isArray(body.items) ? body.items : [];
+          return { rows: rows.filter(r => r && r.review === 'false_alarm'), partial: !!(body && body.next_cursor), at: Date.now() };
+        });
+      }
+      // A refresh that could not read them keeps the last rows in the slot,
+      // marked stale, and readiness claims nothing from them.
+      function falseAlarmsFailed(err) {
+        att.noisy = att.noisy && !att.noisy.error ? Object.assign({}, att.noisy, { stale: err }) : { error: err };
+      }
+
+      function load(quiet, withSessions) {
+        const numbers = T.api('/api/overview' + query({ days }));
+        // Once the strip has started, a refresh reads the false alarms beside
+        // the numbers and draws once both have answered.
+        const alarms = attStarted ? readFalseAlarms().then(read => ({ read }), err => ({ err })) : null;
+        return Promise.all([numbers, alarms]).then(([body, fa]) => {
           if (!ctx.alive()) return;
           data = body || {};
           loadedAt = Date.now();
-          // The strip's own reads start once the overview itself was read: a
-          // stack that refused the overview would refuse them too.
-          if (!attStarted) { attStarted = true; loadAttention(); }
+          if (fa) { if (fa.read) att.noisy = fa.read; else falseAlarmsFailed(fa.err); }
+          // The strip's own reads start once the overview has calls to speak
+          // of: a stack that refused the overview would refuse them too, and
+          // an empty window has nothing for them to find yet.
+          if (!attStarted && data.totals && data.totals.calls) { attStarted = true; loadAttention(); }
+          else if (withSessions && attStarted) loadSessions();
           draw();
           if (quiet) announce('Overview refreshed');
         }, err => {
@@ -1175,22 +1213,20 @@
         });
       }
 
-      // Read once a visit and on Refresh, never on the timer: the session list
-      // is a scan of the table, and the false alarms change only when someone
-      // labels a call. A Refresh keeps what the slots show until the new
-      // answers land, and a read that fails then leaves the last good one.
+      // The session list is a scan of the table, so it is read when the strip
+      // starts, on Refresh and after a resume, never on the timer; the slot
+      // says when it was read. A read that fails leaves the last good one.
+      function loadSessions() {
+        return T.api('/api/sessions' + query({ limit: SESSIONS_READ })).then(body => {
+          att.sessions = { rows: body && Array.isArray(body.sessions) ? body.sessions : [], at: Date.now() };
+        }, err => { att.sessions = att.sessions && !att.sessions.error ? att.sessions : { error: err }; })
+          .then(() => { if (ctx.alive() && data) draw(); });
+      }
+
       function loadAttention() {
-        const failed = (was, err) => (was && !was.error ? was : { error: err });
-        const noisy = T.api('/api/decisions' + query({ review: 'false_alarm', days, limit: 200 })).then(body => {
-          // Only rows the ledger says were marked false alarm: a stack that did
-          // not filter would otherwise have every call counted as one.
-          const rows = body && Array.isArray(body.items) ? body.items : [];
-          att.noisy = { rows: rows.filter(r => r && r.review === 'false_alarm'), partial: !!(body && body.next_cursor) };
-        }, err => { att.noisy = failed(att.noisy, err); });
-        const sessions = T.api('/api/sessions' + query({ limit: SESSIONS_READ })).then(body => {
-          att.sessions = { rows: body && Array.isArray(body.sessions) ? body.sessions : [] };
-        }, err => { att.sessions = failed(att.sessions, err); });
-        [noisy, sessions].forEach(p => p.then(() => { if (ctx.alive() && data) draw(); }));
+        readFalseAlarms().then(read => { att.noisy = read; }, falseAlarmsFailed)
+          .then(() => { if (ctx.alive() && data) draw(); });
+        loadSessions();
       }
 
       function chartWidth() {
@@ -1345,7 +1381,7 @@
                 ${card('By rule', 'A call two rules flagged counts under each, so these add up to more than the tiles.', ruleBars, 'min-w-0')}
                 ${agentsCard(byAgent)}
               </div>
-              ${card('By project', 'Open a project to promote it.', projectsTable(byProject, days, true, att.noisy && !att.noisy.error ? falseAlarmsByProject(att.noisy) : null), 'min-w-0')}
+              ${card('By project', 'Open a project to promote it.', projectsTable(byProject, days, true, !att.noisy ? undefined : att.noisy.error || att.noisy.stale ? null : falseAlarmsByProject(att.noisy)), 'min-w-0')}
             </div>
           </div>`);
         if (firstPaint) {
@@ -1397,7 +1433,7 @@
           <button type="button" class="tf-btn tf-btn-primary" data-action="resume-confirm" data-session="${id}" ${busy ? raw('disabled') : ''}>${busy ? 'Resuming…' : 'Resume the session'}</button>`;
       }
       ctx.actions({
-        refresh: () => { if (attStarted) loadAttention(); return load(true); },
+        refresh: () => load(true, true),
         'resume-open': el => {
           const id = el.getAttribute('data-session') || '';
           const halt = att.sessions && att.sessions.rows ? att.sessions.rows.find(s => s && s.session_id === id) : null;
@@ -1419,7 +1455,7 @@
             if (!ctx.alive()) return;
             closeDialog();
             toast('Resumed ' + id + '. Its history and spend are kept, so the gates still apply.');
-            loadAttention();
+            loadSessions();
           }, err => {
             if (!ctx.alive()) return;
             const said = document.getElementById('resume-error');
