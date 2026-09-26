@@ -456,7 +456,7 @@
           <div id="hero-call" class="tf-demo-call"></div>
           <ol id="hero-diff" class="tf-diff" aria-label="The file the agent proposes to write"></ol>
           <div id="hero-outcome" aria-live="polite">
-            <div id="hero-waiting" class="tf-waiting"><span class="tf-waiting-dot" aria-hidden="true"></span>Asking Threefold whether it may be written</div>
+            <div id="hero-waiting" class="tf-waiting"><span class="tf-waiting-dot" aria-hidden="true"></span><span id="hero-waiting-text">Asking Threefold whether it may be written</span></div>
             <div id="hero-verdict" class="tf-demo-verdict" hidden></div>
           </div>
           <div id="hero-reason" class="tf-demo-reason" hidden></div>
@@ -1646,9 +1646,15 @@
     // loop gate's halt, and the same call asked a third time under one id
     // would be refused as a loop. A recorded replay is never kept.
 
+    // The moment is the page's first ten seconds, so nothing it waits on may
+    // take them: the counts get under a second before the hero asks anyway, the
+    // stack four seconds to answer before the recorded run stands in, and a
+    // wait past HERO_SLOW_MS says so rather than leaving a reader looking at
+    // a dot.
     const HERO_MIN_MS = 1000;
-    const HERO_TIMEOUT_MS = 6000;
-    const HERO_COUNTS_WAIT_MS = 4000;
+    const HERO_TIMEOUT_MS = 4000;
+    const HERO_COUNTS_WAIT_MS = 800;
+    const HERO_SLOW_MS = 1500;
     const HERO_KEEP_MS = 60 * 60 * 1000;
     const HERO_STORE = 'threefold-hero-answer';
     const hero = { answer: null, motion: false };
@@ -1725,9 +1731,12 @@
       T.setHtml(diff, T.html`${lines.map((line, i) => T.html`<li class="tf-diff-line" id="hero-line-${i}" style="--i:${i}"><span class="tf-diff-num" aria-hidden="true">${i + 1}</span><span class="tf-diff-sign" aria-hidden="true">+</span><code class="tf-diff-code">${line}</code><span class="tf-diff-tag">not written</span></li>`)}`);
     }
 
-    function heroShowWaiting(on) {
+    // The line in the verdict's place while there is none yet, and what it says.
+    function heroShowWaiting(on, words) {
       const waiting = document.getElementById('hero-waiting');
       if (waiting) waiting.hidden = !on;
+      const said = document.getElementById('hero-waiting-text');
+      if (said && words) said.textContent = words;
     }
 
     // What came back, read defensively: a verdict is a status and a reason, both
@@ -1952,6 +1961,7 @@
       const base = getApiBase();
       let answer = heroRemembered(base);
       if (!answer) {
+        const slow = setTimeout(() => heroShowWaiting(true, 'Still waiting for this stack; the recorded run stands in after ' + Math.round(HERO_TIMEOUT_MS / 1000) + ' s'), HERO_SLOW_MS);
         if (countsRead && typeof countsRead.then === 'function') {
           let timer = null;
           await Promise.race([
@@ -1961,6 +1971,7 @@
           if (timer) clearTimeout(timer);
         }
         answer = await askHero();
+        clearTimeout(slow);
         if (answer.source === 'live') heroRemember(base, answer);
       }
       // The lines finish arriving before the verdict lands on them; with motion

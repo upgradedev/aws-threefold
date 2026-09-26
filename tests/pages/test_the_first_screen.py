@@ -485,6 +485,68 @@ def test_the_hero_asks_only_once_the_counts_are_read_so_a_visit_never_counts_its
     assert _metrics(out["live"])["calls"] == "1,284" and "Refused before it was written" in out["verdict"]
 
 
+def test_a_counts_read_that_never_answers_holds_the_hero_back_under_a_second(tmp_path: Path) -> None:
+    """The moment is the first ten seconds: a slow strip may not spend them."""
+    out = run(
+        "index.html",
+        r"""
+  const heroCalls = () => calls.filter(c => c.url.indexOf('/evaluate-tool-call') !== -1).length;
+  out.before = heroCalls();
+  const t0 = Date.now();
+  while (!heroCalls() && Date.now() - t0 < 3000) await new Promise(r => setTimeout(r, 25));
+  out.waited = Date.now() - t0;
+  await tick();
+  out.after = heroCalls();
+  out.verdict = el('hero-verdict').innerHTML;
+  out.strip = el('proof-live').innerHTML;
+""",
+        tmp_path,
+        before=DEMO_DOM
+        + LIVE_REFUSAL
+        + "const gate = held();\n"
+        + "answer = api({ '/status': { status: 200, body: { service: 'Threefold', status: 'HEALTHY' } }, "
+        + "'/api/overview': () => gate.promise, 'POST /evaluate-tool-call': { status: 200, body: LIVE_REFUSAL }, "
+        + "'/proof.json': 'network' });\n",
+    )
+    assert out["before"] == 0 and out["after"] == 1
+    assert out["waited"] < 1500, f"The hero asked {out['waited']} ms after load, with the counts still unread"
+    assert "Refused before it was written" in out["verdict"] and out["strip"] == "", "The verdict landed with the counts still being read"
+
+
+def test_a_stack_that_does_not_answer_in_time_gives_way_to_the_recorded_run(tmp_path: Path) -> None:
+    out = run(
+        "index.html",
+        r"""
+  await new Promise(r => setTimeout(r, 1800));
+  out.slow = el('hero-waiting-text').textContent;
+  out.slowShown = !el('hero-waiting').hidden;
+  await new Promise(r => setTimeout(r, 3600));
+  await tick();
+  out.caption = el('hero-caption').textContent;
+  out.dataSource = el('hero-demo').getAttribute('data-source');
+  out.verdict = el('hero-verdict').innerHTML;
+  out.aborted = !!(signal && signal.aborted);
+  out.kept = store['threefold-hero-answer'] || null;
+""",
+        tmp_path,
+        before=DEMO_DOM
+        + LIVE_REFUSAL
+        + "let signal = null;\n"
+        + "answer = api({ '/status': { status: 200, body: { service: 'Threefold', status: 'HEALTHY' } }, "
+        + "'/api/overview': { status: 200, body: " + _overview() + " }, "
+        + "'POST /evaluate-tool-call': (u, init) => { signal = init.signal; return new Promise(() => {}); }, "
+        + "'/proof.json': 'network' });\n",
+    )
+    assert out["slowShown"] and out["slow"] == "Still waiting for this stack; the recorded run stands in after 4 s", \
+        "A wait past a second and a half says what it is waiting for, and for how long"
+    assert out["caption"] == (
+        "This stack did not answer within 4 seconds, so this is a real run recorded against the live API on 2026-09-25, replayed here."
+    )
+    assert out["dataSource"] == "recorded" and "Refused before it was written" in out["verdict"]
+    assert out["aborted"], "The call that lost the race is cancelled"
+    assert out["kept"] is None
+
+
 def test_the_hero_replays_the_recorded_run_and_says_truly_why(tmp_path: Path) -> None:
     """The caption says what this stack did: never 'not contacted' when it answered."""
     run_ = "so this is a real run recorded against the live API on 2026-09-25, replayed here."
