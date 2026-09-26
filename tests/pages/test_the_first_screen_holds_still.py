@@ -140,3 +140,60 @@ def test_the_connection_summary_leaves_its_chevron_room_on_a_phone(tmp_path: Pat
     # One line where the page's own font is loaded; a wider fallback may take two, never one word to a line.
     assert words["height"] <= landed["lineHeight"] * 2.6, "The summary's words keep to a line or two; the chip goes under them"
     assert landed["chevron"] >= 8
+
+
+LAYOUT = r"""() => {
+  const box = s => { const e = document.querySelector(s); if (!e) return null; const b = e.getBoundingClientRect(); return { top: b.top + scrollY, bottom: b.bottom + scrollY, left: b.left, right: b.right, height: b.height, width: b.width }; };
+  const shown = e => !!e && !e.hidden && e.getClientRects().length > 0 && getComputedStyle(e).visibility !== 'hidden';
+  const landed = Array.from(document.querySelectorAll('.tf-demo-landed > *')).filter(shown);
+  const outcome = box('.tf-demo-outcome');
+  return {
+    how: box('#how-it-works'),
+    flowShown: Array.from(document.querySelectorAll('#how-it-works svg.tf-diagram-wide, #how-it-works svg.tf-diagram-narrow')).filter(shown).map(e => e.getAttribute('class')),
+    connectors: getComputedStyle(document.querySelector('.tf-step-card'), '::before').content,
+    slack: outcome.bottom - Math.max.apply(null, landed.map(e => e.getBoundingClientRect().bottom + scrollY)),
+    actions: Array.from(document.querySelectorAll('#hero-actions > *')).map(e => { const b = e.getBoundingClientRect(); return { id: e.id, top: b.top, left: b.left, width: b.width }; }),
+    names: Array.from(document.querySelectorAll('.tf-scenario-name')).map(e => e.getBoundingClientRect().top),
+    scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth
+  };
+}"""
+
+
+def _layout(tmp_path: Path, width: int, height: int) -> dict:
+    return measure("index.html", tmp_path, width=width, height=height, replies=_replies(HEROES["live"]), moments={"landed": 3200}, probe=LAYOUT)["taken"]["landed"]
+
+
+def test_on_a_phone_the_steps_are_the_flow_and_how_it_works_stays_short(tmp_path: Path) -> None:
+    """The stacked steps carry the flow in their gaps, so the drawing that would repeat them waits for a wider screen."""
+    phone = _layout(tmp_path, 375, 812)
+    assert phone["flowShown"] == [], "No second drawing of the three steps under them on a phone"
+    assert "the call" in phone["connectors"], "The steps are joined by the call going down"
+    assert phone["how"]["height"] < 2.4 * 812, f"How it works takes {phone['how']['height'] / 812:.1f} phone screens"
+    assert phone["scrollWidth"] <= phone["clientWidth"]
+    desk = _layout(tmp_path, 1440, 900)
+    assert desk["flowShown"] == ["tf-diagram-wide"], "On a desk the steps sit side by side and the one drawing joins them"
+    tablet = _layout(tmp_path, 768, 1024)
+    assert tablet["flowShown"] == ["tf-diagram-narrow"]
+
+
+@pytest.mark.parametrize("width,height", [(375, 812), (768, 1024), (1440, 900)])
+def test_the_verdict_fills_the_room_its_ghost_held(tmp_path: Path, width: int, height: int) -> None:
+    """A verdict shorter than the recorded one leaves no empty band under the card's last box."""
+    got = _layout(tmp_path, width, height)
+    assert abs(got["slack"]) < 1, f"{got['slack']:.0f} px of empty room under the verdict at {width} px"
+
+
+def test_the_hero_actions_never_leave_one_button_alone_on_a_row(tmp_path: Path) -> None:
+    for width, height in ((768, 1024), (1024, 768), (1280, 800), (1440, 900)):
+        acts = {a["id"]: a for a in _layout(tmp_path, width, height)["actions"]}
+        primary, secondary, link = acts["hero-try"], acts["hero-dashboard"], acts["hero-connect"]
+        side_by_side = abs(primary["top"] - secondary["top"]) < 1
+        stacked = abs(primary["left"] - secondary["left"]) < 1 and abs(primary["width"] - secondary["width"]) < 1
+        assert side_by_side or stacked, f"At {width} px the two buttons are neither on one row nor one column"
+        assert link["top"] > max(primary["top"], secondary["top"]) and abs(link["left"] - primary["left"]) < 1, \
+            f"At {width} px the quiet link has the line under the buttons to itself"
+
+
+def test_the_scenario_names_line_up_whether_or_not_their_card_is_numbered(tmp_path: Path) -> None:
+    names = _layout(tmp_path, 1440, 900)["names"]
+    assert max(names) - min(names) < 0.5, f"The adapter's name sits apart from the numbered ones: {names}"

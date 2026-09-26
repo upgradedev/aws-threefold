@@ -98,6 +98,12 @@
     @media (min-width: 640px) { .tf-hero-lede { font-size: 1.0625rem; line-height: 1.65; } }
     .tf-hero-actions { display: flex; flex-direction: column; align-items: stretch; gap: var(--tf-space-1); }
     @media (min-width: 640px) { .tf-hero-actions { flex-direction: row; flex-wrap: wrap; align-items: center; gap: var(--tf-space-1h); } }
+    /* The two buttons share a row where they fit, and the quiet link always
+       takes the line under them; in a desk's narrow copy column, where the
+       two do not fit side by side, they stack at its full width instead of
+       one of them wrapping alone. */
+    @media (min-width: 640px) { .tf-hero-actions .tf-hero-link { flex-basis: 100%; justify-content: flex-start; } }
+    @media (min-width: 1024px) and (max-width: 1279px) { .tf-hero-actions { flex-direction: column; align-items: stretch; } }
     /* A label that does not fit wraps inside its button rather than pushing a
        phone's page sideways. */
     .tf-hero-actions .tf-btn { white-space: normal; height: auto; min-height: 44px; padding-top: 10px; padding-bottom: 10px; line-height: 1.25; text-align: center; }
@@ -110,7 +116,7 @@
     }
     .tf-hero-link:hover { color: var(--tf-text); text-decoration-color: currentColor; }
     .tf-hero-link .tf-icon { width: 14px; height: 14px; }
-    .tf-hero-scope { display: flex; gap: 8px; margin: 0; max-width: 36rem; font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-3); overflow-wrap: break-word; }
+    .tf-hero-scope { display: flex; gap: 8px; margin: 0; max-width: 36rem; font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-3); overflow-wrap: break-word; text-wrap: balance; }
     .tf-hero-scope .tf-icon { width: 14px; height: 14px; margin-top: 2px; }
 
     /* The living demonstration: one proposed write, the verdict landing on it. */
@@ -193,6 +199,11 @@
     .tf-demo-why code { font: 500 0.8125rem/1 var(--tf-font-mono); color: var(--tf-text); }
     .tf-demo-ruleline { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; margin: 0; font: 500 0.6875rem/1rem var(--tf-font-mono); color: var(--tf-text-3); overflow-wrap: anywhere; }
     .tf-demo-ruleline b { font-weight: 500; color: var(--tf-accent-text); }
+    /* The status is a small tag of its own rather than text after a dot, so
+       where the line wraps nothing is left hanging at its end. */
+    .tf-demo-status { padding: 0 6px; border-radius: var(--tf-radius-xs); border: 1px solid var(--tf-hairline-strong); background: var(--tf-surface-2); color: var(--tf-text-2); }
+    .tf-demo[data-verdict="refused"] .tf-demo-landed .tf-demo-status { border-color: var(--tf-refused-line); background: var(--tf-refused-soft); color: var(--tf-refused-text); }
+    .tf-demo[data-verdict="approved"] .tf-demo-landed .tf-demo-status { border-color: var(--tf-approved-line); background: var(--tf-approved-soft); color: var(--tf-approved-text); }
     /* The fix in three rows of known height: a title on one line, the service's
        summary in at most --tf-demo-fix-lines lines (all of it on hover on a
        desk, and in full in Scenario 3 below), and one quiet line about the files. */
@@ -206,6 +217,14 @@
     .tf-demo-fix-summary { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; overflow-wrap: anywhere; }
     @media (min-width: 640px) { .tf-demo-fix-summary { -webkit-line-clamp: 2; line-clamp: 2; } }
     .tf-demo-fix-note { height: 1rem; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--tf-fs-micro); line-height: 1rem; color: var(--tf-text-3); }
+    /* The room the ghost held is the fix's to fill: a shorter verdict than the
+       recorded one leaves no empty band under the card's last box, because
+       that box grows into it with its quiet line at its foot. An answer with
+       no box under its reason sits in the middle of its room. */
+    .tf-demo-landed > .tf-demo-fix { flex: 1 1 auto; }
+    .tf-demo-landed .tf-demo-fix-note { margin-top: auto; }
+    .tf-demo-landed > .tf-demo-fix-none { justify-content: center; }
+    .tf-demo[data-verdict="approved"] .tf-demo-landed, .tf-demo[data-verdict="other"] .tf-demo-landed { justify-content: center; }
     .tf-demo-fix-none { background: var(--tf-surface-2); border-color: var(--tf-hairline); }
     .tf-demo-fix-none .tf-demo-fix-title { color: var(--tf-text-2); }
     .tf-demo-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; padding: 10px 14px; border-top: 1px solid var(--tf-hairline); background: var(--tf-inset); font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-3); }
@@ -245,7 +264,7 @@
     .tf-proof-note p { margin: 0; }
     .tf-proof-note .tf-link { align-self: flex-start; font-size: 0.8125rem; line-height: 1.25rem; }
     /* Where the counts come from, right under the three tiles it describes. */
-    .tf-proof-where { display: flex; gap: 10px; margin: 0 0 var(--tf-space-1); max-width: 64rem; font-size: 0.8125rem; line-height: 1.3125rem; color: var(--tf-text-3); }
+    .tf-proof-where { display: flex; gap: 10px; margin: 0 0 var(--tf-space-1); max-width: 64rem; font-size: 0.8125rem; line-height: 1.3125rem; color: var(--tf-text-3); text-wrap: pretty; }
     .tf-proof-where .tf-icon { width: 16px; height: 16px; margin-top: 2px; flex-shrink: 0; color: var(--tf-info-text); }
     .tf-proof-where strong { color: var(--tf-text-2); font-weight: 600; }
     .tf-proof-links { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 0; font-size: 0.75rem; color: var(--tf-text-3); }
@@ -280,13 +299,40 @@
     .tf-step-kicker { font: 600 var(--tf-fs-micro)/1rem var(--tf-font-sans); letter-spacing: var(--tf-track-caps); text-transform: uppercase; color: var(--tf-text-3); }
     .tf-step-card h3 { margin: 0; font: 600 1.0625rem/1.5rem var(--tf-font-sans); letter-spacing: -0.01em; color: var(--tf-text); }
     .tf-step-card p { margin: 0; font-size: var(--tf-fs-small); line-height: 1.375rem; color: var(--tf-text-2); }
+    /* Where the steps stack, each is one compact row, its icon beside its
+       words, and the steps are the flow: the call goes down from the hook to
+       Threefold and the verdict comes back up, then every verdict goes down
+       to the ledger, drawn in the gaps between them. The drawing under the
+       steps, which would say the same again, waits for a screen that sets
+       the steps side by side. */
+    @media (max-width: 767px) {
+      .tf-steps { gap: 40px; }
+      .tf-step-card { position: relative; display: grid; grid-template-columns: 36px minmax(0, 1fr); column-gap: 14px; row-gap: 2px; padding: 14px 16px; }
+      .tf-step-card:not(:last-child)::before, .tf-step-card:not(:last-child)::after {
+        position: absolute; top: calc(100% + 1px); height: 40px; display: flex; align-items: center; gap: 6px;
+        font: 500 0.75rem/1 var(--tf-font-sans); color: var(--tf-accent-text); white-space: nowrap;
+      }
+      .tf-step-card:not(:last-child)::before { left: 33px; content: "↓\2002 the call" / ""; }
+      .tf-step-card:not(:last-child)::after { right: 33px; content: "the verdict, and why\2002↑" / ""; }
+      .tf-step-card:nth-child(2)::before { content: "↓\2002 every verdict, to the ledger" / ""; color: var(--tf-text-2); }
+      .tf-step-card:nth-child(2)::after { content: none; }
+      .tf-diagram.tf-flow { margin-top: var(--tf-space-1h); padding: 0; background: none; border: 0; box-shadow: none; }
+      .tf-diagram.tf-flow svg.tf-diagram-narrow { display: none; }
+      .tf-diagram.tf-flow figcaption { margin: 0; padding: 0; text-align: left; max-width: 40rem; }
+      .tf-step-card .tf-step-top { grid-row: 1 / span 2; align-self: start; }
+      .tf-step-card .tf-step-kicker { display: none; }
+      .tf-step-icon { width: 36px; height: 36px; border-radius: 10px; }
+      .tf-step-icon .tf-icon { width: 18px; height: 18px; }
+      .tf-step-card h3 { font-size: 1rem; line-height: 1.375rem; }
+      .tf-step-card p { font-size: 0.8125rem; line-height: 1.25rem; }
+    }
 
     .tf-diagram { margin: var(--tf-space-2) 0 0; padding: 20px 8px 16px; }
     @media (min-width: 640px) { .tf-diagram { padding: 28px 24px 20px; } }
     .tf-diagram svg { display: block; width: 100%; height: auto; margin: 0 auto; overflow: visible; }
     /* One diagram, drawn for the width it has: across on a desk, down on a phone. */
     .tf-diagram svg.tf-diagram-wide { display: none; }
-    .tf-diagram svg.tf-diagram-narrow { max-width: 420px; }
+    .tf-diagram svg.tf-diagram-narrow { max-width: 360px; }
     @media (min-width: 1024px) {
       .tf-diagram svg.tf-diagram-wide { display: block; max-width: 1040px; }
       .tf-diagram svg.tf-diagram-narrow { display: none; }
@@ -336,6 +382,19 @@
     }
     .tf-demote { display: flex; align-items: center; gap: 10px; margin: 18px 0 0; font-size: 0.8125rem; line-height: 1.25rem; color: var(--tf-text-2); }
     .tf-demote .tf-icon { width: 16px; height: 16px; color: var(--tf-accent-text); flex-shrink: 0; }
+    @media (max-width: 639px) {
+      .tf-diagram { margin-top: var(--tf-space-1h); padding: 16px 8px 14px; }
+      .tf-diagram figcaption { margin-top: 12px; }
+      .tf-rollout { margin-top: var(--tf-space-2); padding: 16px; }
+      .tf-rollout-head { margin-bottom: 14px; }
+      .tf-track { gap: 18px; }
+      .tf-stage { padding: 10px 12px; gap: 2px; }
+      .tf-stage:not(:last-child)::after { bottom: -14px; width: 8px; height: 8px; margin-left: -4px; }
+      .tf-demote { margin-top: 12px; }
+      .tf-agents { margin-top: var(--tf-space-2); gap: var(--tf-space-1); }
+      .tf-agent { padding: 14px 16px; gap: 8px; }
+      .tf-agent blockquote { line-height: 1.25rem; }
+    }
     .tf-demote-line { display: none; }
     @media (min-width: 900px) {
       .tf-demote { position: relative; justify-content: center; margin: 0 calc(16.66% - 8px); padding-top: 26px; }
@@ -356,7 +415,8 @@
     .tf-agent-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
     .tf-agent-name { font: 600 1rem/1.5rem var(--tf-font-sans); letter-spacing: -0.01em; color: var(--tf-text); }
     .tf-agent blockquote { margin: 0; padding-left: 12px; border-left: 2px solid var(--tf-hairline-strong); font-size: 0.8125rem; line-height: 1.3125rem; color: var(--tf-text-2); overflow-wrap: anywhere; }
-    .tf-agent-src { margin: auto 0 0; font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-3); overflow-wrap: anywhere; }
+    .tf-agent-src { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 12px; margin: auto 0 0; font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-3); }
+    .tf-agent-src a { white-space: nowrap; }
     .tf-agents-note { margin: var(--tf-space-1h) 0 0; max-width: 64rem; font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-3); }
 
     /* ------------------------------------------------------- built on AWS */
@@ -383,7 +443,7 @@
     /* The four scenarios are numbered as the README and the runbook name them;
        the adapter, which is not one of them, is not. */
     .tf-scenario-num {
-      display: inline-flex; align-items: center; justify-content: center; flex: none; width: 20px; height: 20px; border-radius: var(--tf-radius-pill);
+      display: inline-flex; align-items: center; justify-content: center; flex: none; width: 20px; height: 20px; box-sizing: border-box; border-radius: var(--tf-radius-pill);
       background: var(--tf-accent-soft); border: 1px solid var(--tf-accent-line); color: var(--tf-accent-text); font: 600 0.6875rem/1 var(--tf-font-mono); letter-spacing: 0;
     }
     .tf-scenario-top .tf-icon { width: 18px; height: 18px; color: var(--tf-accent-text); }
@@ -441,6 +501,7 @@
     .tf-cert-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font: 600 0.8125rem/1.25rem var(--tf-font-sans); color: var(--tf-approved-text); }
     .tf-session-stats { display: flex; flex-wrap: wrap; gap: 6px 20px; font-size: 0.75rem; line-height: 1rem; color: var(--tf-text-3); }
     .tf-session-stats b { font: 600 0.8125rem/1rem var(--tf-font-mono); color: var(--tf-text); }
+    .tf-session-stats b.tf-kpi-none { font: 400 0.75rem/1rem var(--tf-font-sans); color: var(--tf-text-3); }
     .tf-contract { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: var(--tf-space-2); font-size: 0.75rem; color: var(--tf-text-3); }
     .tf-connection { margin-top: var(--tf-space-2); }
     /* The summary's words and the status chip wrap as one piece, the chip under
@@ -603,7 +664,7 @@
         </li>
       </ol>
 
-      <figure class="tf-card tf-diagram">
+      <figure class="tf-card tf-diagram tf-flow">
         <svg class="tf-diagram-wide" viewBox="0 0 960 150" role="img" aria-labelledby="flow-wide-title flow-wide-desc">
           <title id="flow-wide-title">How a tool call travels</title>
           <desc id="flow-wide-desc">The coding agent asks the hook before each call; the hook sends the call to Threefold on AWS; Threefold sends the verdict back, and the hook either denies the call with its reason, and a checked fix where one can be made, or lets it run; every verdict goes to the ledger the dashboard reads.</desc>
@@ -642,35 +703,35 @@
           <path class="dg-edge" d="M712 82H774" marker-end="url(#fw-head)"/>
           <text class="dg-label" x="744" y="72" text-anchor="middle">ledger</text>
         </svg>
-        <svg class="tf-diagram-narrow" viewBox="0 0 340 470" role="img" aria-labelledby="flow-narrow-title flow-narrow-desc">
+        <svg class="tf-diagram-narrow" viewBox="0 0 340 346" role="img" aria-labelledby="flow-narrow-title flow-narrow-desc">
           <title id="flow-narrow-title">How a tool call travels</title>
           <desc id="flow-narrow-desc">The coding agent asks the hook before each call; the hook sends the call to Threefold on AWS; Threefold sends the verdict back, and the hook either denies the call with its reason, and a checked fix where one can be made, or lets it run; every verdict goes to the ledger the dashboard reads.</desc>
           <defs>
             <marker id="fn-head" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="dg-head" d="M0 0L10 5L0 10z"/></marker>
             <marker id="fn-head-accent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="dg-head-accent" d="M0 0L10 5L0 10z"/></marker>
           </defs>
-          <rect class="dg-node" x="30" y="1" width="280" height="72" rx="14"/>
-          <text class="dg-title" x="170" y="31" text-anchor="middle">Coding agent</text>
-          <text class="dg-sub" x="170" y="53" text-anchor="middle">Claude Code · Codex · Antigravity</text>
-          <rect class="dg-node" x="30" y="125" width="280" height="72" rx="14"/>
-          <text class="dg-title" x="170" y="155" text-anchor="middle">The hook, on your machine</text>
-          <text class="dg-sub" x="170" y="177" text-anchor="middle">credentials stay there</text>
-          <rect class="dg-node dg-node-accent" x="30" y="249" width="280" height="72" rx="14"/>
-          <text class="dg-title" x="170" y="279" text-anchor="middle">Threefold, on AWS</text>
-          <text class="dg-sub" x="170" y="301" text-anchor="middle">gates decide; Bedrock explains</text>
-          <rect class="dg-node" x="30" y="373" width="280" height="72" rx="14"/>
-          <text class="dg-title" x="170" y="403" text-anchor="middle">The dashboard</text>
-          <text class="dg-sub" x="170" y="425" text-anchor="middle">every verdict, in a ledger you review</text>
-          <path class="dg-edge" d="M120 73V121" marker-end="url(#fn-head)"/>
-          <text class="dg-label" x="112" y="102" text-anchor="end">asks first</text>
-          <path class="dg-edge dg-edge-back" d="M220 125V77" marker-end="url(#fn-head)"/>
-          <text class="dg-label" x="228" y="102">deny + why</text>
-          <path class="dg-edge dg-edge-accent" d="M120 197V245" marker-end="url(#fn-head-accent)"/>
-          <text class="dg-label dg-label-accent" x="112" y="226" text-anchor="end">the call</text>
-          <path class="dg-edge dg-edge-accent dg-edge-back" d="M220 249V201" marker-end="url(#fn-head-accent)"/>
-          <text class="dg-label dg-label-accent" x="228" y="226">verdict</text>
-          <path class="dg-edge" d="M170 321V369" marker-end="url(#fn-head)"/>
-          <text class="dg-label" x="178" y="350">ledger</text>
+          <rect class="dg-node" x="30" y="1" width="280" height="56" rx="12"/>
+          <text class="dg-title" x="170" y="25" text-anchor="middle">Coding agent</text>
+          <text class="dg-sub" x="170" y="45" text-anchor="middle">Claude Code · Codex · Antigravity</text>
+          <rect class="dg-node" x="30" y="97" width="280" height="56" rx="12"/>
+          <text class="dg-title" x="170" y="121" text-anchor="middle">The hook, on your machine</text>
+          <text class="dg-sub" x="170" y="141" text-anchor="middle">credentials stay there</text>
+          <rect class="dg-node dg-node-accent" x="30" y="193" width="280" height="56" rx="12"/>
+          <text class="dg-title" x="170" y="217" text-anchor="middle">Threefold, on AWS</text>
+          <text class="dg-sub" x="170" y="237" text-anchor="middle">gates decide; Bedrock explains</text>
+          <rect class="dg-node" x="30" y="289" width="280" height="56" rx="12"/>
+          <text class="dg-title" x="170" y="313" text-anchor="middle">The dashboard</text>
+          <text class="dg-sub" x="170" y="333" text-anchor="middle">every verdict, in a ledger you review</text>
+          <path class="dg-edge" d="M120 57V93" marker-end="url(#fn-head)"/>
+          <text class="dg-label" x="112" y="81" text-anchor="end">asks first</text>
+          <path class="dg-edge dg-edge-back" d="M220 97V61" marker-end="url(#fn-head)"/>
+          <text class="dg-label" x="228" y="81">deny + why</text>
+          <path class="dg-edge dg-edge-accent" d="M120 153V189" marker-end="url(#fn-head-accent)"/>
+          <text class="dg-label dg-label-accent" x="112" y="177" text-anchor="end">the call</text>
+          <path class="dg-edge dg-edge-accent dg-edge-back" d="M220 193V157" marker-end="url(#fn-head-accent)"/>
+          <text class="dg-label dg-label-accent" x="228" y="177">verdict</text>
+          <path class="dg-edge" d="M170 249V285" marker-end="url(#fn-head)"/>
+          <text class="dg-label" x="178" y="273">ledger</text>
         </svg>
         <figcaption>A refused call never runs: the agent gets the reason, and a checked fix where one can be made. No verdict waits on a model.</figcaption>
       </figure>
@@ -683,7 +744,7 @@
         <ol class="tf-track">
           <li class="tf-stage tf-stage-observe">
             <span class="tf-stage-name"><span data-tf-icon="eye"></span>Observe</span>
-            <p>Every call is judged and recorded; none is refused yet. What a rule would have stopped waits for review.</p>
+            <p>Every call is judged and recorded; none is refused yet.</p>
           </li>
           <li class="tf-stage tf-stage-review">
             <span class="tf-stage-name"><span data-tf-icon="inbox"></span>Review</span>
@@ -701,17 +762,17 @@
         <li class="tf-card tf-agent">
           <div class="tf-agent-head"><span class="tf-agent-name">Claude Code</span><span class="tf-chip tf-chip-emerald"><span data-tf-icon="check" data-tf-size="13"></span>Measured: the write is stopped</span></div>
           <blockquote>A deny from the hook “stops the write in Claude Code 2.1.220 on this platform, over both the file tool and the shell.”</blockquote>
-          <p class="tf-agent-src">Measured on the file system, 2026-09-21 · <a class="tf-link" href="https://github.com/upgradedev/aws-threefold/blob/main/docs/evidence/ENFORCEMENT_2026-09-21.md">the evidence</a></p>
+          <p class="tf-agent-src"><span>Measured on disk, <span class="tf-nobr">2026-09-21</span></span><a class="tf-link" href="https://github.com/upgradedev/aws-threefold/blob/main/docs/evidence/ENFORCEMENT_2026-09-21.md">Read the evidence</a></p>
         </li>
         <li class="tf-card tf-agent">
           <div class="tf-agent-head"><span class="tf-agent-name">Antigravity</span><span class="tf-chip tf-chip-emerald"><span data-tf-icon="check" data-tf-size="13"></span>Measured: the write is stopped</span></div>
           <blockquote>The deny stops the write “in the Antigravity desktop app over <code>write_to_file</code>”: the file was not created.</blockquote>
-          <p class="tf-agent-src">Measured on the file system, 2026-09-21 · <a class="tf-link" href="https://github.com/upgradedev/aws-threefold/blob/main/docs/evidence/ENFORCEMENT_2026-09-21.md">the evidence</a></p>
+          <p class="tf-agent-src"><span>Measured on disk, <span class="tf-nobr">2026-09-21</span></span><a class="tf-link" href="https://github.com/upgradedev/aws-threefold/blob/main/docs/evidence/ENFORCEMENT_2026-09-21.md">Read the evidence</a></p>
         </li>
         <li class="tf-card tf-agent">
           <div class="tf-agent-head"><span class="tf-agent-name">Codex</span><span class="tf-chip tf-chip-amber"><span data-tf-icon="alert" data-tf-size="13"></span>Measured once, over its patch tool</span></div>
           <blockquote>In one run “the real hook refused it”, and the governed file “had the same sha256 afterwards as before.” Codex CLI 0.155.0; its shell route is not measured.</blockquote>
-          <p class="tf-agent-src">Measured on the file system, 2026-09-23 · <a class="tf-link" href="https://github.com/upgradedev/aws-threefold/blob/main/docs/evidence/ENFORCEMENT_2026-09-23.md">the evidence</a></p>
+          <p class="tf-agent-src"><span>Measured on disk, <span class="tf-nobr">2026-09-23</span></span><a class="tf-link" href="https://github.com/upgradedev/aws-threefold/blob/main/docs/evidence/ENFORCEMENT_2026-09-23.md">Read the evidence</a></p>
         </li>
       </ul>
       <p class="tf-agents-note">Measured on one Windows machine by what was on disk afterwards, not by what the agent said: two open bug reports say a deny can be ignored.</p>
@@ -762,40 +823,40 @@
           <path class="dg-edge dg-edge-back" d="M720 96V198H791" marker-end="url(#aw-head)"/>
           <text class="dg-label" x="728" y="152">explain, draft</text>
         </svg>
-        <svg class="tf-diagram-narrow" viewBox="0 0 340 556" role="img" aria-labelledby="aws-narrow-title aws-narrow-desc">
+        <svg class="tf-diagram-narrow" viewBox="0 0 340 448" role="img" aria-labelledby="aws-narrow-title aws-narrow-desc">
           <title id="aws-narrow-title">The AWS services Threefold runs on</title>
           <desc id="aws-narrow-desc">Browsers and hooks reach CloudFront with AWS WAF, which serves the pages and forwards API calls to API Gateway; API Gateway invokes one AWS Lambda function that runs the gates; it records verdicts in Amazon DynamoDB, asks Amazon Bedrock for page explanations and rule drafts, never for a verdict, and is invoked on a schedule by Amazon EventBridge Scheduler to run the synthetic demo fleet.</desc>
           <defs>
             <marker id="an-head" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="dg-head" d="M0 0L10 5L0 10z"/></marker>
             <marker id="an-head-accent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="dg-head-accent" d="M0 0L10 5L0 10z"/></marker>
           </defs>
-          <rect class="dg-node dg-node-quiet" x="30" y="1" width="280" height="64" rx="14"/>
-          <text class="dg-title" x="170" y="29" text-anchor="middle">Browsers, hooks</text>
-          <text class="dg-sub" x="170" y="49" text-anchor="middle">pages and tool calls</text>
-          <rect class="dg-node" x="30" y="95" width="280" height="64" rx="14"/>
-          <text class="dg-title" x="170" y="123" text-anchor="middle">CloudFront + WAF</text>
-          <text class="dg-sub" x="170" y="143" text-anchor="middle">pages, rate limits</text>
-          <rect class="dg-node" x="30" y="189" width="280" height="64" rx="14"/>
-          <text class="dg-title" x="170" y="217" text-anchor="middle">API Gateway</text>
-          <text class="dg-sub" x="170" y="237" text-anchor="middle">HTTP API, throttled</text>
-          <rect class="dg-node dg-node-accent" x="30" y="283" width="280" height="64" rx="14"/>
-          <text class="dg-title" x="170" y="311" text-anchor="middle">AWS Lambda</text>
-          <text class="dg-sub" x="170" y="331" text-anchor="middle">the gates, one function</text>
-          <rect class="dg-node" x="1" y="387" width="160" height="64" rx="14"/>
-          <text class="dg-title" x="81" y="415" text-anchor="middle">DynamoDB</text>
-          <text class="dg-sub" x="81" y="435" text-anchor="middle">the ledger</text>
-          <rect class="dg-node" x="179" y="387" width="160" height="64" rx="14"/>
-          <text class="dg-title" x="259" y="415" text-anchor="middle">Amazon Bedrock</text>
-          <text class="dg-sub" x="259" y="435" text-anchor="middle">explains, drafts</text>
-          <rect class="dg-node" x="30" y="491" width="280" height="64" rx="14"/>
-          <text class="dg-title" x="170" y="519" text-anchor="middle">EventBridge Scheduler</text>
-          <text class="dg-sub" x="170" y="539" text-anchor="middle">runs the synthetic demo fleet</text>
-          <path class="dg-edge" d="M170 65V91" marker-end="url(#an-head)"/>
-          <path class="dg-edge" d="M170 159V185" marker-end="url(#an-head)"/>
-          <path class="dg-edge dg-edge-accent" d="M170 253V279" marker-end="url(#an-head-accent)"/>
-          <path class="dg-edge" d="M90 347V383" marker-end="url(#an-head)"/>
-          <path class="dg-edge dg-edge-back" d="M250 347V383" marker-end="url(#an-head)"/>
-          <path class="dg-edge" d="M170 491V351" marker-end="url(#an-head)"/>
+          <rect class="dg-node dg-node-quiet" x="30" y="1" width="280" height="52" rx="12"/>
+          <text class="dg-title" x="170" y="23" text-anchor="middle">Browsers, hooks</text>
+          <text class="dg-sub" x="170" y="42" text-anchor="middle">pages and tool calls</text>
+          <rect class="dg-node" x="30" y="79" width="280" height="52" rx="12"/>
+          <text class="dg-title" x="170" y="101" text-anchor="middle">CloudFront + WAF</text>
+          <text class="dg-sub" x="170" y="120" text-anchor="middle">pages, rate limits</text>
+          <rect class="dg-node" x="30" y="157" width="280" height="52" rx="12"/>
+          <text class="dg-title" x="170" y="179" text-anchor="middle">API Gateway</text>
+          <text class="dg-sub" x="170" y="198" text-anchor="middle">HTTP API, throttled</text>
+          <rect class="dg-node dg-node-accent" x="30" y="235" width="280" height="52" rx="12"/>
+          <text class="dg-title" x="170" y="257" text-anchor="middle">AWS Lambda</text>
+          <text class="dg-sub" x="170" y="276" text-anchor="middle">the gates, one function</text>
+          <rect class="dg-node" x="1" y="317" width="160" height="52" rx="12"/>
+          <text class="dg-title" x="81" y="339" text-anchor="middle">DynamoDB</text>
+          <text class="dg-sub" x="81" y="358" text-anchor="middle">the ledger</text>
+          <rect class="dg-node" x="179" y="317" width="160" height="52" rx="12"/>
+          <text class="dg-title" x="259" y="339" text-anchor="middle">Amazon Bedrock</text>
+          <text class="dg-sub" x="259" y="358" text-anchor="middle">explains, drafts</text>
+          <rect class="dg-node" x="30" y="395" width="280" height="52" rx="12"/>
+          <text class="dg-title" x="170" y="417" text-anchor="middle">EventBridge Scheduler</text>
+          <text class="dg-sub" x="170" y="436" text-anchor="middle">runs the synthetic demo fleet</text>
+          <path class="dg-edge" d="M170 53V75" marker-end="url(#an-head)"/>
+          <path class="dg-edge" d="M170 131V153" marker-end="url(#an-head)"/>
+          <path class="dg-edge dg-edge-accent" d="M170 209V231" marker-end="url(#an-head-accent)"/>
+          <path class="dg-edge" d="M90 287V313" marker-end="url(#an-head)"/>
+          <path class="dg-edge dg-edge-back" d="M250 287V313" marker-end="url(#an-head)"/>
+          <path class="dg-edge" d="M170 395V291" marker-end="url(#an-head)"/>
         </svg>
         <div class="tf-aws-foot">
           <p>Edge in <span class="tf-nobr">us-east-1</span>, service in <span class="tf-nobr">eu-west-1</span>. The scheduler runs only on the public demo, where it feeds the synthetic Acme fleet.</p>
@@ -865,11 +926,11 @@
             <div class="tf-terminal-bar"><span>agent-telemetry-stream</span><span id="terminal-badge" class="tf-chip tf-chip-gray">Idle</span></div>
             <div id="terminal-log" class="tf-terminal" role="log" aria-label="What the agent sent and what came back">
               <p class="tf-log tf-log-muted">// Ready. Each scenario sends real calls to this stack and prints what comes back; with no answer, the first four replay a recorded run.</p>
-              <p class="tf-log"><span class="tf-log-key">1 · Loop</span> <span class="tf-log-route">POST /simulate-loop</span></p>
-              <p class="tf-log"><span class="tf-log-key">2 · Credential</span> <span class="tf-log-route">POST /simulate-secret</span></p>
-              <p class="tf-log"><span class="tf-log-key">3 · Architecture</span> <span class="tf-log-route">POST /evaluate-tool-call</span></p>
-              <p class="tf-log"><span class="tf-log-key">4 · Certificate</span> <span class="tf-log-route">POST /evaluate-tool-call ×4, POST /issue-certificate</span></p>
-              <p class="tf-log"><span class="tf-log-key">Adapter</span> <span class="tf-log-route">POST /adapter/universal-tool-call</span></p>
+              <p class="tf-log"><span class="tf-log-key">1 · Loop</span> <span class="tf-log-route"><span class="tf-nobr">POST /simulate-loop</span></span></p>
+              <p class="tf-log"><span class="tf-log-key">2 · Credential</span> <span class="tf-log-route"><span class="tf-nobr">POST /simulate-secret</span></span></p>
+              <p class="tf-log"><span class="tf-log-key">3 · Architecture</span> <span class="tf-log-route"><span class="tf-nobr">POST /evaluate-tool-call</span></span></p>
+              <p class="tf-log"><span class="tf-log-key">4 · Certificate</span> <span class="tf-log-route"><span class="tf-nobr">POST /evaluate-tool-call ×4,</span> <span class="tf-nobr">POST /issue-certificate</span></span></p>
+              <p class="tf-log"><span class="tf-log-key">Adapter</span> <span class="tf-log-route"><span class="tf-nobr">POST /adapter/universal-tool-call</span></span></p>
             </div>
           </div>
           <div class="tf-result-pane">
@@ -906,8 +967,8 @@
               </p>
             </div>
             <div class="tf-session-stats" aria-label="The last scenario's session">
-              <span>Session spend <b id="kpi-spend">—</b></span>
-              <span id="kpi-tokens">no session yet</span>
+              <span>Session spend <b id="kpi-spend" class="tf-kpi-none">none yet</b></span>
+              <span id="kpi-tokens"></span>
             </div>
           </div>
         </div>
@@ -1262,12 +1323,20 @@
       });
     }
 
+    // The last scenario's spend, or words saying there is none yet: a dash in
+    // the bold mono face read as a solid bar.
+    function setSpend(spend, tokens) {
+      const el = document.getElementById('kpi-spend');
+      el.innerText = spend || 'none yet';
+      el.classList.toggle('tf-kpi-none', !spend);
+      document.getElementById('kpi-tokens').innerText = tokens || '';
+    }
+
     // Everything back to where it started. A scenario starts from here too, and
     // then writes its own first line into the empty terminal.
     function resetDemo(forScenario) {
       markScenario(null);
-      document.getElementById('kpi-spend').innerText = '—';
-      document.getElementById('kpi-tokens').innerText = 'no session yet';
+      setSpend(null, null);
       setBreaker('armed');
       document.getElementById('terminal-badge').innerText = 'Idle';
       document.getElementById('terminal-log').innerHTML = forScenario === true ? '' : terminalGuide('// Reset.');
@@ -1290,7 +1359,13 @@
         ['Adapter', 'POST /adapter/universal-tool-call']
       ];
       return '<p class="tf-log tf-log-muted">' + escapeHtml(first) + ' Each scenario sends real calls to this stack and prints what comes back; with no answer, the first four replay a recorded run.</p>' +
-        guide.map(([key, route]) => '<p class="tf-log"><span class="tf-log-key">' + escapeHtml(key) + '</span> <span class="tf-log-route">' + escapeHtml(route) + '</span></p>').join('');
+        guide.map(([key, route]) => '<p class="tf-log"><span class="tf-log-key">' + escapeHtml(key) + '</span> <span class="tf-log-route">' + wholeRoutes(route) + '</span></p>').join('');
+    }
+
+    // A route is never broken at a hyphen: each "METHOD /path" stays on one
+    // line, and a line breaks only between them.
+    function wholeRoutes(route) {
+      return String(route).split(/ (?=[A-Z]+ \/)/).map(part => '<span class="tf-nobr">' + escapeHtml(part) + '</span>').join(' ');
     }
 
     function escapeHtml(str) {
@@ -1529,8 +1604,7 @@
             document.getElementById('cert-origin').innerHTML =
               '<span class="tf-good">Issued by the live service</span> for the four calls above. The session behind it is in DynamoDB; the certificate itself is returned, not archived.';
 
-            document.getElementById('kpi-spend').innerText = `$${certData.total_cost_usd.toFixed(4)}`;
-            document.getElementById('kpi-tokens').innerText = `${certData.total_tokens} tokens consumed`;
+            setSpend(`$${certData.total_cost_usd.toFixed(4)}`, `${certData.total_tokens} tokens consumed`);
             setVerdictTag('APPROVED (COMPLIANT)', 'approved');
             setInvariants('none');
 
@@ -1561,8 +1635,7 @@
       });
       logTerminal(`✓ Recorded run complete: certificate ${cert.certificate_id}, ${cert.evaluations_count} recorded verdicts (recorded ${RECORDED.recorded_at}, replayed offline).`, 'warn strong');
 
-      document.getElementById('kpi-spend').innerText = `$${cert.total_cost_usd.toFixed(4)}`;
-      document.getElementById('kpi-tokens').innerText = `${cert.total_tokens} tokens consumed`;
+      setSpend(`$${cert.total_cost_usd.toFixed(4)}`, `${cert.total_tokens} tokens consumed`);
       setVerdictTag('APPROVED (COMPLIANT)', 'approved');
       setInvariants('none');
 
@@ -1996,7 +2069,7 @@
         ? h`${plain.said}, and <code>${plain.path}</code> imports <code>${plain.module}</code>.`
         : h`${plain.said}`;
       return h`<p class="tf-demo-why"${ghost ? '' : h` title="The service’s reason: ${answer.reason}"`}>${sentence}</p>
-        <p class="tf-demo-ruleline">${plain.rule ? h`<span>rule <b>${plain.rule}</b></span><span aria-hidden="true">·</span>` : ''}<span${ghost ? '' : h` title="The status the service returned"`}>${answer.status}</span></p>`;
+        <p class="tf-demo-ruleline">${plain.rule ? h`<span>rule <b>${plain.rule}</b></span>` : ''}<span class="tf-demo-status"${ghost ? '' : h` title="The status the service returned"`}>${answer.status}</span></p>`;
     }
 
     // The service's summary under a title that already says it was checked, so
@@ -2018,7 +2091,7 @@
       if (!refused) return null;
       const fix = answer.fix;
       if (!fix || typeof fix !== 'object' || typeof fix.summary !== 'string') {
-        return { tone: 'none', markup: h`<p class="tf-demo-fix-title">${T.icon('info', 16)}<span>No fix came with this answer</span></p>` };
+        return { tone: 'none', markup: h`<p class="tf-demo-fix-title">${T.icon('info', 16)}<span>No fix came with this answer</span></p><p class="tf-demo-fix-summary">The refusal came with its reason only: the gates had no change of their own to propose.</p>` };
       }
       const checks = Array.isArray(fix.checks) ? fix.checks.filter(c => c && typeof c === 'object' && typeof c.passed === 'boolean') : [];
       const passed = checks.filter(c => c.passed).length;
@@ -2324,7 +2397,7 @@
       const judged = trend('calls', 'Calls judged per day', T.COLORS.accent, calls, 'in ' + span);
       const ownDemos = demoRefusals(data, refused);
       const stopped = trend('refused', 'Calls stopped per day', T.COLORS.refused, refused,
-        ownDemos ? 'before they ran; ' + formatCount(ownDemos) + (ownDemos === 1 ? ' was this page’s demo' : ' were this page’s demos') + ' (' + DEMO_PROJECT + ')' : 'before they ran');
+        ownDemos ? 'before they ran; ' + formatCount(ownDemos) + (ownDemos === 1 ? ' was this page’s own demo' : ' were this page’s own demos') : 'before they ran');
       const observed = trend('observed', 'Calls that would have been stopped, per day', T.COLORS.observed, wouldRefuse, 'recorded while a project observes');
       const href = params => T.pageHref('dashboard.html#/calls' + T.query(Object.assign({ days: days }, params)));
       T.setHtml(strip, h`
@@ -2354,20 +2427,20 @@
         const pieces = [];
         if (fleet) pieces.push(formatCount(fleet) + ' from a synthetic Acme fleet run through the real gates');
         if (sandbox) pieces.push(formatCount(sandbox) + ' from visitors’ sandboxes');
-        if (other) pieces.push(formatCount(other) + ' from probes, page demos and other callers of its open API');
+        if (other) pieces.push(formatCount(other) + ' from probes, page demos and other API callers');
         return h`${lead} ${pieces.join(', ')}.`;
       }
       // A fleet the stack reports is always named, even when its parts cannot
       // be given as figures: synthetic calls are never left unlabelled.
       if (fleet !== null && fleet > 0) {
-        return h`${lead} a synthetic Acme fleet run through the real gates, visitors’ sandboxes, probes, page demos and other callers of its open API.`;
+        return h`${lead} a synthetic Acme fleet run through the real gates, visitors’ sandboxes, probes, page demos and other API callers.`;
       }
       const split = data.sandbox_split && typeof data.sandbox_split === 'object' ? data.sandbox_split : null;
       const inSandboxes = split ? part(split.sandbox) : null;
       if (inSandboxes !== null && inSandboxes > 0 && inSandboxes <= calls) {
-        return h`${lead} ${formatCount(inSandboxes)} of the ${plural(calls, 'call', 'calls')} from visitors’ sandboxes, the rest from probes, page demos and other callers of its open API.`;
+        return h`${lead} ${formatCount(inSandboxes)} of the ${plural(calls, 'call', 'calls')} from visitors’ sandboxes, the rest from probes, page demos and other API callers.`;
       }
-      return h`${lead} probes, visitors’ sandboxes, page demos and other callers of this stack’s open API.`;
+      return h`${lead} probes, visitors’ sandboxes, page demos and other API callers.`;
     }
 
     // How many of the refusals counted were this page's own demonstrations:
@@ -2470,9 +2543,10 @@
         : (totals.agents[0] || 'coding agents');
       // One plain term throughout the card, a rule-breaking write, and the
       // benchmark's own term, a governed violation, named once under the chart.
+      const one = totals.series === 1;
       const verdictLine = totals.landed === 0
-        ? 'No rule-breaking write landed under Threefold in any of the ' + plural(totals.series, 'series', 'series') + '.'
-        : 'A rule-breaking write landed under Threefold in ' + formatCount(totals.landed) + ' of the ' + plural(totals.series, 'series', 'series') + '.';
+        ? (one ? 'No rule-breaking write landed under Threefold in it.' : 'No rule-breaking write landed under Threefold in any of the ' + plural(totals.series, 'series', 'series') + '.')
+        : (one ? 'A rule-breaking write landed under Threefold in it.' : 'A rule-breaking write landed under Threefold in ' + formatCount(totals.landed) + ' of the ' + plural(totals.series, 'series', 'series') + '.');
       const max = Math.max.apply(null, CONDITIONS.map(c => totals.sums[c.key].n));
       const bars = T.hbars(CONDITIONS.map(c => {
         const sum = totals.sums[c.key];
@@ -2499,7 +2573,7 @@
         <div class="tf-bench-chart">
           <div class="tf-bench-label">
             <p class="tf-bench-label-main">Runs in which a rule-breaking write landed</p>
-            <p class="tf-bench-label-sub">By condition, the ${plural(totals.series, 'series', 'series')} pooled. The benchmark calls these governed violations.</p>
+            <p class="tf-bench-label-sub">${totals.series === 1 ? 'By condition.' : h`By condition, the ${plural(totals.series, 'series', 'series')} pooled.`} The benchmark calls these governed violations.</p>
           </div>
           ${bars}
         </div>`);

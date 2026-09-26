@@ -48,9 +48,10 @@ RECORDED_REASON = (
     "domain/ may not import infrastructure or a driver. 'src/domain/user.py' imports 'boto3', which matches 'boto3'"
 )
 # The same reason as the hero says it: one plain sentence, then the rule's id
-# and the status on the line under it.
+# and the status on the line under it, the status a tag of its own, so no
+# separator is left hanging where the line wraps on a phone.
 PLAIN_REASON = "A Python file under domain/ may not import infrastructure or a driver, and src/domain/user.py imports boto3."
-RULE_LINE = "rule python-domain-stays-pure · BLOCKED_BOUNDARY_VIOLATION"
+RULE_LINE = "rule python-domain-stays-pure BLOCKED_BOUNDARY_VIOLATION"
 PROOF_FILE = ROOT / "src" / "threefold" / "web" / "proof.json"
 
 # simulateLoop writes its terminal log with createElement and appendChild,
@@ -789,7 +790,7 @@ def test_the_counts_are_read_from_the_overview_at_load_and_say_what_they_are_mad
     assert not out["whereHidden"]
     assert _read(out["where"]) == (
         "Where they come from: 1,102 from a synthetic Acme fleet run through the real gates, 120 from visitors’ "
-        "sandboxes, 62 from probes, page demos and other callers of its open API."
+        "sandboxes, 62 from probes, page demos and other API callers."
     ), "One clause, where a reader first meets the numbers, and the fleet called synthetic"
 
 
@@ -807,8 +808,8 @@ def test_the_stopped_tile_says_how_many_of_its_refusals_were_this_pages_demos(tm
         return subs[1]
 
     rows = "[{ project: 'Acme-Payments', calls: 900, refused: 4 }, { project: 'Acme-Core', calls: 12, refused: 10 }]"
-    assert stopped_sub(rows) == "before they ran; 10 were this page’s demos (Acme-Core)"
-    assert stopped_sub("[{ project: 'Acme-Core', calls: 3, refused: 1 }]") == "before they ran; 1 was this page’s demo (Acme-Core)"
+    assert stopped_sub(rows) == "before they ran; 10 were this page’s own demos"
+    assert stopped_sub("[{ project: 'Acme-Core', calls: 3, refused: 1 }]") == "before they ran; 1 was this page’s own demo"
     for none in ("[{ project: 'Acme-Payments', calls: 900, refused: 14 }]", "[{ project: 'Acme-Core', calls: 4, refused: 0 }]",
                  "[{ project: 'Acme-Core', calls: 40, refused: 40 }]", "[{ project: 'Acme-Core', refused: '<img src=x>' }]", "'many'"):
         assert stopped_sub(none) == "before they ran", f"{none}: no share that is not a count within the tile's own"
@@ -819,7 +820,7 @@ def test_without_sources_the_sandboxes_are_still_told_apart(tmp_path: Path) -> N
     out = _load(tmp_path, overview="{ status: 200, body: " + _overview(split) + " }")
     assert "24 of the 1,284 calls from visitors’ sandboxes, the rest from probes" in _text(out["where"])
     out = _load(tmp_path, overview="{ status: 200, body: " + _overview() + " }")
-    assert _read(out["where"]) == "Where they come from: probes, visitors’ sandboxes, page demos and other callers of this stack’s open API."
+    assert _read(out["where"]) == "Where they come from: probes, visitors’ sandboxes, page demos and other API callers."
     hostile = "sources: { fleet: { calls: '<img src=x onerror=alert(1)>' }, sandbox: { calls: 1 }, other: { calls: 1 } }"
     out = _load(tmp_path, overview="{ status: 200, body: " + _overview(hostile) + " }")
     assert "<img" not in out["where"] and "synthetic Acme fleet" not in out["where"], "A source that is not a count is not used"
