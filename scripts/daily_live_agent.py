@@ -54,15 +54,22 @@ Exit codes, the same for a new row and for one already recorded today:
 2 refused before running;
 3 the benchmark stopped (a usage limit or a login that stopped working).
 
-Scheduling it with Windows Task Scheduler, once a day at 04:30 local time
-(01:30 or 02:30 UTC from Athens, so the UTC day is the local one), as the
-owner and only while the owner is signed in; run it once by hand first, and
-point --codex-home at a folder that holds only a Codex login (the benchmark
-refuses a CODEX_HOME holding hooks.json or AGENTS.md). All on one line:
+Scheduling it with Windows Task Scheduler, once a day at a quiet hour, 04:30
+local time (in a time zone less than four and a half hours ahead of UTC, the
+UTC day that names the session is then the local one), as the owner and only
+while the owner is signed in; run it once by hand first, and point
+--codex-home at a folder that holds only a Codex login (the benchmark refuses
+a CODEX_HOME holding hooks.json or AGENTS.md). A scheduled task does not see
+the PATH a shell has, and /TR takes 261 characters at most, so the task runs
+a wrapper, <folder>\\daily-live.cmd, in a folder outside the repository with
+no space in its path, holding this one line:
 
-    schtasks /Create /TN "Threefold\\Daily live agent" /SC DAILY /ST 04:30 /F /TR "cmd /c python
-        <repository>\\scripts\\daily_live_agent.py --endpoint https://<public stack>/ --codex-home
-        <Codex login folder> >> <a folder outside the repository>\\daily-live.txt 2>&1"
+    "<full path to python.exe>" "<repository>\\scripts\\daily_live_agent.py" --endpoint https://<public stack>/
+        --codex-home "<Codex login folder>" >> "<folder>\\daily-live.txt" 2>&1
+
+and the task is created with:
+
+    schtasks /Create /TN "Threefold\\Daily live agent" /SC DAILY /ST 04:30 /F /TR <folder>\\daily-live.cmd
 
 To see it, start it now, stop a run in progress, pause it, or remove it:
 

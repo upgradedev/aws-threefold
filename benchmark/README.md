@@ -336,17 +336,26 @@ same way for a new row and one already recorded:
 These rows are single runs on a public stack, never a matrix: they are
 reported apart, if at all.
 
-**Scheduling it.** Windows Task Scheduler runs it once a day at a quiet hour;
-04:30 local time is 01:30 or 02:30 UTC from Athens, so the UTC day the
-session is named after is the local one. The task runs as the owner, only
-while the owner is signed in, from the repository's own copy of the script.
-Run the same command by hand once first. `--codex-home` names a folder that
-holds only a Codex login (`set CODEX_HOME=<that folder>` then `codex login`,
-in one cmd window): the benchmark refuses a `CODEX_HOME` holding `hooks.json`
-or `AGENTS.md`, which a machine whose own Codex is governed has. All on one
-line, 261 characters at most after `/TR`:
+**Scheduling it.** Windows Task Scheduler runs it once a day at a quiet hour,
+04:30 local time: in a time zone less than four and a half hours ahead of
+UTC, the UTC day the session is named after is then the local one. The task
+runs as the owner, only while the owner is signed in, from the repository's
+own copy of the script. `--codex-home` names a folder that holds only a Codex
+login (`set CODEX_HOME=<that folder>` then `codex login`, in one cmd window):
+the benchmark refuses a `CODEX_HOME` holding `hooks.json` or `AGENTS.md`,
+which a machine whose own Codex is governed has.
 
-    schtasks /Create /TN "Threefold\Daily live agent" /SC DAILY /ST 04:30 /F /TR "cmd /c python <repository>\scripts\daily_live_agent.py --endpoint https://<public stack>/ --codex-home <Codex login folder> >> <a folder outside the repository>\daily-live.txt 2>&1"
+A scheduled task does not see the `PATH` a signed-in shell has, so it names
+python.exe in full (`python -c "import sys; print(sys.executable)"` prints
+it), and `/TR` takes 261 characters at most, which that full command
+outgrows. So the task runs a one-line wrapper, `daily-live.cmd`, kept in a
+folder outside the repository whose path has no space in it, `<folder>`:
+
+    "<full path to python.exe>" "<repository>\scripts\daily_live_agent.py" --endpoint https://<public stack>/ --codex-home "<Codex login folder>" >> "<folder>\daily-live.txt" 2>&1
+
+Run the wrapper by hand once first, then create the task:
+
+    schtasks /Create /TN "Threefold\Daily live agent" /SC DAILY /ST 04:30 /F /TR <folder>\daily-live.cmd
 
 To see it, start it now, stop a run in progress, pause it and resume it, or
 remove it:
