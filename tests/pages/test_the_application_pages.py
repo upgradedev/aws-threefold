@@ -1313,7 +1313,7 @@ def test_the_walkthrough_runs_the_rollout_from_sandbox_to_a_real_refusal(tmp_pat
     )
     assert "Make my sandbox" in out["step1"]
     assert out["sent"]["sandbox"] == {}
-    assert "12 calls arrived" in out["step2"] and "Acme-Sandbox-0a1b2c3d is ready" in out["step2"]
+    assert "12 calls arrived" in out["step2"] and "Every call was judged and recorded in Acme-Sandbox-0a1b2c3d" in out["step2"]
     assert "the project is in Observe" in out["step2"]
     # The calls as they arrived, in a lane per agent, and how many of them the list held.
     for agent in ("Claude Code", "Codex", "Antigravity"):

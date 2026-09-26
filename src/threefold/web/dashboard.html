@@ -2257,9 +2257,6 @@
   background: var(--tf-refused-soft); border: 1px solid var(--tf-refused-line); }
 .tf-try-peek-refused-text { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 0; font: 650 0.75rem/1 var(--tf-font-sans); }
 .tf-try-peek-refused .tf-try-ghost-bar { height: 5px; background: var(--tf-refused-line); }
-.tf-try-actions .tf-try-second { flex: 1 1 100%; }
-.tf-try-second .tf-mono { overflow: hidden; text-overflow: ellipsis; }
-@media (min-width: 640px) { .tf-try-actions .tf-try-second { flex: 0 1 auto; } }
 .tf-try-calls { position: relative; list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
 .tf-try-calls::before { content: ''; position: absolute; left: 11px; top: 14px; bottom: 14px; width: 1px; background: var(--tf-hairline-strong); }
 .tf-try-call { position: relative; display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
@@ -2840,7 +2837,7 @@
           <div class="tf-try-head">
             <p class="tf-eyebrow">${T.icon('play', 16)}The 60-second walkthrough</p>
             <h1 id="view-title" tabindex="-1" class="tf-try-title">Try the two-stage rollout</h1>
-            <p class="tf-try-lede">About a minute, on the public demo: a sandbox project, the calls its rules would have refused, your review, a promotion, and the same kind of call refused for real.</p>
+            <p class="tf-try-lede">About a minute on the public demo, from a sandbox of your own to a real refusal.</p>
             ${closed ? '' : html`<p class="tf-try-tags"><span class="tf-chip tf-chip-sky">${T.icon('flask', 13)}Synthetic sandbox</span><span class="tf-chip tf-chip-gray">${T.icon('lock', 13)}No account</span></p>`}
           </div>
           ${closed ? '' : rail()}
@@ -2940,13 +2937,13 @@
           return {
             kicker: 'Step 1 of 5',
             title: 'Make a sandbox project',
-            sentence: 'The stack creates a project of your own, in Observe, and sends about a dozen synthetic tool calls from Claude Code, Codex and Antigravity through the real evaluator.',
+            sentence: 'The stack makes you a project in Observe and sends it about a dozen synthetic calls from three agents, through the real evaluator.',
             visual: html`${state.resume ? html`<div class="tf-callout tf-callout-accent tf-try-resume">${T.icon('clock', 18)}<div class="tf-callout-body"><p>You started one earlier: <span class="tf-mono tf-try-strong">${state.resume}</span>. <button type="button" class="tf-link" data-action="try-resume">Continue with it</button> where you left off, or make a new one.</p></div></div>` : ''}
               ${lanes(null, play)}
               ${legend()}
               ${peeks(play)}`,
             foot: 'Its stage expires within a day, and the project then drops out of the overview and the project list; the calls and the labels stay in the public call lists for 30 days.',
-            actions: html`${primary('try-create', 'Make my sandbox', 'Making your sandbox…')}${state.resume && !state.busy ? html`<button type="button" class="tf-btn tf-btn-quiet tf-try-second" data-action="try-resume">${T.icon('clock', 16)}Continue with <span class="tf-mono">${state.resume}</span></button>` : ''}`
+            actions: primary('try-create', 'Make my sandbox', 'Making your sandbox…')
           };
         }
         const calls = Array.isArray(state.calls) ? state.calls : null;
@@ -2963,7 +2960,6 @@
         }
         const t = tryTally(calls);
         const shortRead = calls && typeof state.seeded === 'number' && calls.length < state.seeded;
-        const agents = calls && !shortRead ? tryAgentsOf(calls) : [];
         const refusedWords = !calls ? '' : ', and ' + (t.refused ? plural(t.refused, 'call') + (t.refused === 1 ? ' was' : ' were') + ' refused' : 'nothing was refused');
         const stageWords = state.stage === 'enforce'
           ? ': the project is in Enforce' + (state.promoted && state.promoted.earlier ? ', promoted earlier' : '')
@@ -2971,7 +2967,7 @@
         return {
           kicker: 'Step 1 of 5 · done',
           title: state.seeded !== null ? plural(state.seeded, 'call') + ' arrived' : calls && calls.length ? plural(calls.length, 'call') + ' in your sandbox' : 'Your sandbox is ready',
-          sentence: html`${agents.length ? html`${tryList(agents)} sent them to <span class="tf-mono tf-try-strong">${state.project}</span>.` : html`<span class="tf-mono tf-try-strong">${state.project}</span> is ready.`} Every call was judged and recorded${refusedWords}${stageWords}.`,
+          sentence: html`Every call was judged and recorded in <span class="tf-mono tf-try-strong">${state.project}</span>${refusedWords}${stageWords}.`,
           visual: html`${projectBar(calls ? html`${stat('approved', t.approved, 'approved')}${stat('observed', t.observed, 'would refuse')}${stat('refused', t.refused, 'refused')}` : '')}
             ${lanes(calls, play)}
             ${legend()}
@@ -3003,8 +2999,8 @@
           kicker: 'Step 2 of 5',
           title: rows.length ? plural(rows.length, 'call') + ' would have been refused' : 'No call was flagged',
           sentence: rows.length
-            ? 'Each one ran: in Observe a rule that would refuse a call only records it. Here is who sent it, what it touched, the rule, and why.'
-            : 'No observing rule flagged a call in this sandbox, so there is nothing to label. Promote anyway to see a rule refuse.',
+            ? 'Each one ran: in Observe, a rule only records a call it would refuse.'
+            : 'No observing rule flagged a call here, so there is nothing to label; promote anyway to see a rule refuse.',
           visual: html`${projectBar(html`<span class="tf-try-stat" data-outcome="observed">${T.icon('eye', 14)}<b>${num(rows.length)}</b>${total !== null ? html`of ${num(total)} calls` : 'calls'} · ${plural(rules.length, 'rule')}</span>${Array.isArray(state.calls) ? stat('refused', tryTally(state.calls).refused, 'refused') : ''}`)}
             ${rows.length ? html`<div class="tf-try-cards${play.cards ? ' tf-try-play' : ''}">${rows.map(flagCard)}</div>` : html`${T.emptyState({
               icon: 'check',
@@ -3065,7 +3061,7 @@
       function receipt() {
         const last = state.lastLabel;
         if (!last || !REVIEWS[last.label]) {
-          return html`<p class="tf-try-receipt">${T.icon('info', 14)}<span>Label the call on top, and the next one comes up.</span></p>`;
+          return html`<p class="tf-try-receipt">${T.icon('info', 14)}<span>Label the call on top; the next one comes up.</span></p>`;
         }
         return html`<p class="tf-try-receipt" data-label="${last.label}">${T.icon(last.label === 'correct' ? 'check' : 'x', 14)}<span>Marked <b>${REVIEWS[last.label].label}</b>: <span class="tf-mono">${last.target}</span></span></p>`;
       }
@@ -3157,8 +3153,8 @@
           kicker: 'Step 3 of 5',
           title: total && done ? 'Every call has a label' : 'Was the rule right?',
           sentence: total && done
-            ? 'You marked ' + plural(labelCounts().correct, 'call') + ' correct and ' + plural(labelCounts().false_alarm, 'call') + ' a false alarm. Each rule now reads its state from those labels.'
-            : 'Mark each call Correct if the rule was right, or False alarm if the call should run. One of them is a false alarm: spot it.',
+            ? 'You marked ' + plural(labelCounts().correct, 'call') + ' correct and ' + plural(labelCounts().false_alarm, 'call') + ' a false alarm, and each rule reads its state from those labels.'
+            : 'One of them is a false alarm: spot it, and mark each call Correct or False alarm.',
           visual: total ? reviewBoard(play, inBar) : T.emptyState({ icon: 'check', text: 'No call in the sandbox was flagged by an observing rule, so there is nothing to label. Promote anyway to see a rule refuse.' }),
           actions: done
             ? primary('try-readiness', 'See what that did', 'Reading readiness…')
@@ -3229,15 +3225,15 @@
         const p = state.promoted;
         const observing = p ? p.observe.filter(key => rules.some(r => r.rule_key === key)) : [];
         const enforcing = p ? plural(p.enforce.length, 'rule') + (p.enforce.length === 1 ? ' refuses the calls that break it' : ' refuse the calls that break them') : '';
-        const keeps = observing.length ? '; ' + tryList(observing) + (observing.length === 1 ? ' keeps' : ' keep') + ' observing, recording and refusing nothing.' : '.';
+        const keeps = observing.length ? '; ' + tryList(observing) + (observing.length === 1 ? ' keeps' : ' keep') + ' observing.' : '.';
         return {
           kicker: p ? (p.earlier ? 'Step 4 of 5 · promoted earlier' : 'Step 4 of 5 · promoted') : 'Step 4 of 5',
           title: p ? (p.earlier ? 'Already in Enforce' : 'Now in Enforce') : 'Promote to Enforce',
           sentence: p
-            ? (p.earlier ? 'This sandbox was promoted before you came back: ' + enforcing + keeps : enforcing.replace(/ refuse/, ' now refuse') + keeps)
-            : 'Each rule now reads its state from your labels. Ready and Quiet rules are checked. ' + (noisy
-              ? (noisy === 1 ? 'The rule with a false alarm is Noisy and stays' : 'The rules with false alarms are Noisy and stay') + ' in Observe, where it records and refuses nothing.'
-              : 'No rule is Noisy: you marked every flag correct. An unchecked rule keeps observing.'),
+            ? (p.earlier ? 'Promoted before you came back: ' + enforcing + keeps : enforcing.replace(/ refuse/, ' now refuse') + keeps)
+            : noisy
+              ? 'Ready and Quiet rules are checked; ' + (noisy === 1 ? 'the Noisy one, with a false alarm, keeps' : 'the Noisy ones, with false alarms, keep') + ' observing.'
+              : 'Ready and Quiet rules are checked, and none is Noisy; an unchecked rule keeps observing.',
           visual: html`${projectBar(html`<span class="tf-try-states">${byState.map(([s, n]) => html`<span class="tf-try-stat">${stateChip(s)}<b>${num(n)}</b></span>`)}</span>`, !!play.promote)}
             ${stageSwitch(!!play.promote)}
             <div class="${play.flip ? 'tf-try-play' : ''}">
@@ -3535,7 +3531,7 @@
         return {
           kicker: 'Done',
           title: 'That was the whole rollout',
-          sentence: 'Watch, label, promote, and back to Observe in one click if a rule bites wrong. Here is what just happened, as the service answered it.',
+          sentence: 'Watch, label, promote, and demote in one click if a rule bites wrong: here is what the service answered.',
           visual: html`<ol class="tf-try-facts${play.enter ? ' tf-try-play' : ''}">${completionFacts().map((f, i) => html`<li class="tf-try-fact tf-try-rise" style="--tf-try-i:${i}" data-tone="${f.tone || ''}">
               <span class="tf-try-fact-n">${f.figure}</span>
               <span class="tf-try-fact-label">${f.label}</span>
@@ -3556,7 +3552,7 @@
         return {
           kicker: 'Private stack',
           title: 'The walkthrough runs on the public demo',
-          sentence: 'This is a private stack, where only the operator can make projects. Connect a real repository instead: it starts in Observe, so nothing is refused while you watch.',
+          sentence: 'Only the operator makes projects on this private stack; connect a real repository instead, and it starts in Observe.',
           visual: T.emptyState({ icon: 'lock', text: 'Visitors cannot make a sandbox here. On the public demo anyone can, with no account.' }),
           actions: html`<a id="try-primary" class="tf-btn tf-btn-primary tf-btn-lg tf-try-primary" href="#/connect">Connect a repository${T.icon('arrowright', 16)}</a>`
         };
