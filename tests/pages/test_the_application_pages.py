@@ -1212,8 +1212,56 @@ def test_a_sign_in_never_sends_the_reader_off_this_page(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------- try
 
 
-def test_the_walkthrough_runs_the_rollout_from_sandbox_to_a_real_refusal(tmp_path: Path) -> None:
+# The walkthrough lets a path break only after a slash, with <wbr>. A browser's
+# text of the page has nothing there, and the text these scenarios read leaves
+# it out too, so a path is found whole.
+WALK = r"""
+  const view = () => el('view').innerHTML.replace(/<wbr>/g, '');
+"""
+
+
+def walk(scenario: str, tmp_path: Path, before: str = "") -> dict:
+    return dash(WALK + scenario, tmp_path, before=before)
+
+
+def test_the_walkthrough_breaks_a_path_only_between_its_folders(tmp_path: Path) -> None:
+    """A narrow line wraps a path at a slash, never inside a name or before its extension.
+
+    The lanes, the flagged cards, the stack and its queue split
+    'CartView.ts|x', 'test_order_totals|.py' and 'Order.jav|a' at 1440px,
+    because they broke a path anywhere.
+    """
     out = dash(
+        r"""
+  const P = 'Acme-Sandbox-0a1b2c3d';
+  const target = 'src/main/java/com/acme/domain/Order.java';
+  answer = api({
+    'POST /api/sandbox': { status: 200, body: { project: P, calls_seeded: 1 } },
+    ['/api/projects/' + P]: { status: 200, body: { project: P, config: { stage: 'observe' }, readiness: { rules: [] } } },
+    '/api/decisions': { status: 200, body: { items: [row(1, { project_name: P, target, observed_target: target })], next_cursor: null } }
+  });
+  await visit('#/try');
+  await click('try-create'); await tick();
+  out.lanes = view();
+  await click('try-show'); await tick();
+  out.cards = view();
+  await click('try-review'); await tick();
+  out.stack = view();
+""",
+        tmp_path,
+    )
+    broken = "src/<wbr>main/<wbr>java/<wbr>com/<wbr>acme/<wbr>domain/<wbr>Order.java"
+    assert out["lanes"].count(broken) == 1, "The lane does not break the path at its slashes"
+    assert out["cards"].count(broken) == 1, "The flagged card does not break the path at its slashes"
+    assert out["stack"].count(broken) == 2, "The card on top and its queue do not break the path at its slashes"
+    css = page_source("dashboard.html").split("const TRY_CSS = `", 1)[1].split("`;", 1)[0]
+    for rule in (".tf-try-call-target {", ".tf-try-dl dd {", ".tf-try-card-file {", ".tf-try-q-file {"):
+        line = css.split(rule, 1)[1].split("}", 1)[0]
+        assert "anywhere" not in line, f"{rule} still breaks a path anywhere"
+
+
+def test_the_walkthrough_runs_the_rollout_from_sandbox_to_a_real_refusal(tmp_path: Path) -> None:
+    out = walk(
         r"""
   const P = 'Acme-Sandbox-0a1b2c3d';
   const obs = (i, rule, target, extra) => row(i, Object.assign({ project_name: P, rule_key: rule, observed_rules: [rule], observed_rule: rule, target, observed_target: target }, extra || {}));
@@ -1802,7 +1850,7 @@ def test_a_resumed_sandbox_that_was_promoted_reads_as_enforce_on_every_step(tmp_
     offered to promote it again, and counted a call judged in Enforce among
     the calls judged in Observe.
     """
-    out = dash(
+    out = walk(
         r"""
   const P = 'Acme-Sandbox-0a1b2c3d';
   const obs = (i, rule, target, extra) => row(i, Object.assign({ project_name: P, rule_key: rule, observed_rules: [rule], observed_rule: rule, target, observed_target: target, review: 'correct' }, extra || {}));

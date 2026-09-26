@@ -2269,7 +2269,7 @@
 .tf-try-call-status { font: 600 0.6875rem/1rem var(--tf-font-sans); color: var(--tf-approved-text); }
 .tf-try-call[data-outcome="observed"] .tf-try-call-status { color: var(--tf-observed-text); }
 .tf-try-call[data-outcome="refused"] .tf-try-call-status { color: var(--tf-refused-text); }
-.tf-try-call-target { font: 400 0.75rem/1.125rem var(--tf-font-mono); color: var(--tf-text-3); overflow-wrap: anywhere; }
+.tf-try-call-target { font: 400 0.75rem/1.125rem var(--tf-font-mono); color: var(--tf-text-3); overflow-wrap: break-word; }
 
 .tf-try-cards { display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr); }
 @media (min-width: 720px) { .tf-try-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
@@ -2282,7 +2282,7 @@
 .tf-try-dl > div { display: grid; grid-template-columns: 4.5rem minmax(0, 1fr); gap: 10px; align-items: baseline; }
 @media (max-width: 479px) { .tf-try-dl > div { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
 .tf-try-dl dt { font: 600 var(--tf-fs-micro)/1rem var(--tf-font-sans); letter-spacing: var(--tf-track-caps); text-transform: uppercase; color: var(--tf-text-3); }
-.tf-try-dl dd { margin: 0; min-width: 0; font-size: 0.8125rem; line-height: 1.25rem; color: var(--tf-text-2); overflow-wrap: anywhere; }
+.tf-try-dl dd { margin: 0; min-width: 0; font-size: 0.8125rem; line-height: 1.25rem; color: var(--tf-text-2); overflow-wrap: break-word; }
 .tf-try-file { font: 500 0.8125rem/1.25rem var(--tf-font-mono); color: var(--tf-text); }
 .tf-try-kind { font-size: 0.6875rem; color: var(--tf-text-3); }
 .tf-try-import mark, .tf-try-card-why mark { padding: 0 4px; border-radius: 4px; background: var(--tf-observed-soft); color: var(--tf-observed-text); font-family: var(--tf-font-mono); font-size: 0.92em; }
@@ -2306,7 +2306,7 @@
 .tf-try-gone-stamp { display: inline-flex; align-items: center; gap: 8px; padding: 8px 16px; border-radius: 12px; font: 650 1.125rem/1.5rem var(--tf-font-sans);
   color: var(--tf-approved-text); background: var(--tf-approved-soft); border: 1px solid var(--tf-approved-line); }
 .tf-try-gone[data-label="false_alarm"] .tf-try-gone-stamp { color: var(--tf-refused-text); background: var(--tf-refused-soft); border-color: var(--tf-refused-line); }
-.tf-try-gone-file { max-width: 100%; font: 500 0.8125rem/1.25rem var(--tf-font-mono); color: var(--tf-text-2); overflow-wrap: anywhere; text-align: center; }
+.tf-try-gone-file { max-width: 100%; font: 500 0.8125rem/1.25rem var(--tf-font-mono); color: var(--tf-text-2); overflow-wrap: break-word; text-align: center; }
 .tf-try-thumb { display: flex; flex-direction: column; gap: 10px; width: 100%; min-width: 0; }
 .tf-try-thumb-top { display: flex; align-items: center; gap: 12px; }
 .tf-try-thumb-top .tf-try-progress-text { flex-shrink: 0; }
@@ -2325,7 +2325,7 @@
 .tf-try-card-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
 .tf-try-card-count { font: 600 var(--tf-fs-micro)/1rem var(--tf-font-sans); letter-spacing: var(--tf-track-caps); text-transform: uppercase; color: var(--tf-text-3); }
 .tf-try-card-agent { display: inline-flex; align-items: center; gap: 8px; font-size: 0.8125rem; color: var(--tf-text-2); }
-.tf-try-card-file { margin: 0; font: 500 1.0625rem/1.5rem var(--tf-font-mono); color: var(--tf-text); overflow-wrap: anywhere; }
+.tf-try-card-file { margin: 0; font: 500 1.0625rem/1.5rem var(--tf-font-mono); color: var(--tf-text); overflow-wrap: break-word; }
 @media (min-width: 768px) { .tf-try-card-file { font-size: 1.1875rem; line-height: 1.75rem; } }
 .tf-try-card-rule { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font: 500 0.8125rem/1.25rem var(--tf-font-mono); color: var(--tf-text-2); }
 .tf-try-card-why { margin: 0; font-size: 0.9375rem; line-height: 1.5rem; color: var(--tf-text-2); overflow-wrap: anywhere; }
@@ -2359,7 +2359,7 @@
 .tf-try-q-mark[data-label="correct"] { border: 1px solid var(--tf-approved-line); background: var(--tf-approved-soft); color: var(--tf-approved-text); }
 .tf-try-q-mark[data-label="false_alarm"] { border: 1px solid var(--tf-refused-line); background: var(--tf-refused-soft); color: var(--tf-refused-text); }
 .tf-try-q-text { display: flex; flex-direction: column; min-width: 0; }
-.tf-try-q-file { font-family: var(--tf-font-mono); overflow-wrap: anywhere; }
+.tf-try-q-file { font-family: var(--tf-font-mono); overflow-wrap: break-word; }
 .tf-try-q-state { font-size: 0.6875rem; color: var(--tf-text-3); }
 .tf-try-tally { margin: 0; padding: 12px 14px; list-style: none; display: flex; flex-direction: column; gap: 8px; background: var(--tf-inset); border: 1px solid var(--tf-hairline); border-radius: var(--tf-radius-md); }
 .tf-try-tally li { display: flex; align-items: center; justify-content: space-between; gap: 10px; font: 500 0.72rem/1rem var(--tf-font-mono); color: var(--tf-text-2); }
@@ -2399,6 +2399,7 @@
 .tf-try-editor-tab { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 10px 14px; background: var(--tf-surface-1); border-bottom: 1px solid var(--tf-hairline);
   font: 500 0.75rem/1.125rem var(--tf-font-mono); color: var(--tf-text-2); }
 .tf-try-editor-tab .tf-icon { color: var(--tf-text-3); }
+.tf-try-editor-path { min-width: 0; overflow-wrap: break-word; }
 .tf-try-editor-meta { margin-left: auto; font-family: var(--tf-font-sans); color: var(--tf-text-3); }
 .tf-try-code { margin: 0; padding: 12px 0; font: 400 0.8125rem/1.6 var(--tf-font-mono); color: #dde1ea; }
 .tf-try-code code { font: inherit; }
@@ -2439,7 +2440,7 @@
 .tf-try-term .tf-mono { color: var(--tf-text-2); overflow-wrap: anywhere; }
 .tf-try-climax-grid { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); align-items: start; }
 .tf-try-then-none { margin: 0; font-size: 0.8125rem; line-height: 1.25rem; color: var(--tf-text-3); }
-.tf-try-then-file { margin: 0; }
+.tf-try-then-file { margin: 0; overflow-wrap: break-word; }
 @media (min-width: 960px) { .tf-try-climax-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .tf-try-quote { margin: 0; display: flex; flex-direction: column; gap: 10px; padding: 18px 20px; border-radius: var(--tf-radius-md); background: var(--tf-accent-soft); border: 1px solid var(--tf-accent-line); }
 .tf-try-quote-src { display: inline-flex; align-items: center; gap: 8px; font: 600 var(--tf-fs-micro)/1rem var(--tf-font-sans); letter-spacing: var(--tf-track-caps); text-transform: uppercase; color: var(--tf-accent-text); }
@@ -2655,6 +2656,14 @@
       return (row.action_type === 'COMMAND_EXEC' && tryCommand(row)) || targetOf(row) || row.tool_name || '';
     }
 
+    // A path that may break only after a slash, so a narrow line wraps it
+    // between folders and never inside a name or before its extension. Each
+    // part is escaped; <wbr> adds no character, so a copied path is whole.
+    function tryPath(text) {
+      const parts = String(text == null ? '' : text).split('/');
+      return parts.map((part, i) => (i < parts.length - 1 ? html`${part}/<wbr>` : html`${part}`));
+    }
+
     // The agents that sent a list of calls, named, in the order of the lanes.
     function tryAgentsOf(rows) {
       return Array.from(new Set((rows || []).map(r => r.agent))).sort((a, b) => tryAgentRank(a) - tryAgentRank(b)).map(agentLabel);
@@ -2826,7 +2835,7 @@
           <span class="tf-try-call-dot" aria-hidden="true">${T.icon(tryOutcomeIcon(o), 13)}</span>
           <span class="tf-try-call-body">
             <span class="tf-try-call-line"><span class="tf-try-call-tool">${r.tool_name}</span><span class="tf-try-call-status">${OUTCOMES[o].label}</span></span>
-            ${target ? html`<span class="tf-try-call-target">${target}</span>` : ''}
+            ${target ? html`<span class="tf-try-call-target">${tryPath(target)}</span>` : ''}
           </span>
         </li>`;
       }
@@ -2916,7 +2925,7 @@
         return html`<article class="tf-try-flag tf-try-rise" style="--tf-try-i:${i}">
           <header class="tf-try-flag-top">${tryAvatar(r.agent)}<span class="tf-try-flag-agent">${agentLabel(r.agent)}</span><span class="tf-mono tf-try-muted">${r.tool_name}</span>${T.statusChip('observed')}</header>
           <dl class="tf-try-dl">
-            <div><dt>${command ? 'Command' : 'File'}</dt><dd class="tf-try-file">${tryTarget(r) || '—'}</dd></div>
+            <div><dt>${command ? 'Command' : 'File'}</dt><dd class="tf-try-file">${tryTarget(r) ? tryPath(tryTarget(r)) : '—'}</dd></div>
             <div><dt>Rule</dt><dd><span class="tf-mono tf-try-strong">${key}</span> <span class="tf-try-kind">${tryIsGate(key) ? 'gate' : 'layering rule'}</span></dd></div>
             <div><dt>Why</dt><dd>${tryWhyHtml(why)}</dd></div>
           </dl>
@@ -3016,7 +3025,7 @@
                   <span class="tf-try-card-count">Call ${num(i + 1)} of ${num(total)}</span>
                   <span class="tf-try-card-agent">${tryAvatar(row.agent, true)}${agentLabel(row.agent)} · <span class="tf-mono">${row.tool_name}</span></span>
                 </header>
-                <p id="try-card-file" class="tf-try-card-file">${tryTarget(row)}</p>
+                <p id="try-card-file" class="tf-try-card-file">${tryPath(tryTarget(row))}</p>
                 <p class="tf-try-card-rule">${T.statusChip('observed')}<span class="tf-break">${ruleKeyOf(row)}</span></p>
                 <p id="try-card-why" class="tf-try-card-why">${tryWhyHtml(why)}</p>
                 ${inBar ? '' : verdicts(row)}
@@ -3026,7 +3035,7 @@
                   <button type="button" id="try-next" class="tf-btn tf-btn-quiet tf-btn-sm" data-action="try-move" data-move="1" aria-keyshortcuts="ArrowRight"${i === total - 1 ? raw(' disabled') : ''}>Next →</button>
                 </nav>
               </article>
-              ${gone ? html`<div class="tf-try-gone" data-label="${gone.label}" aria-hidden="true"><span class="tf-try-gone-stamp">${T.icon(gone.label === 'correct' ? 'check' : 'x', 18)}${REVIEWS[gone.label].label}</span><span class="tf-try-gone-file">${gone.target}</span></div>` : ''}
+              ${gone ? html`<div class="tf-try-gone" data-label="${gone.label}" aria-hidden="true"><span class="tf-try-gone-stamp">${T.icon(gone.label === 'correct' ? 'check' : 'x', 18)}${REVIEWS[gone.label].label}</span><span class="tf-try-gone-file">${tryPath(gone.target)}</span></div>` : ''}
             </div>
           </div>
           <div class="tf-try-side-panel">
@@ -3039,7 +3048,7 @@
                 const mark = state.labels[r.verdict_id] || '';
                 return html`<li><button type="button" data-action="try-goto" data-index="${j}" aria-current="${j === i ? 'true' : 'false'}">
                   <span class="tf-try-q-mark" data-label="${mark}" aria-hidden="true">${mark === 'correct' ? T.icon('check', 11) : mark === 'false_alarm' ? T.icon('x', 11) : ''}</span>
-                  <span class="tf-try-q-text"><span class="tf-try-q-file">${tryTarget(r)}</span><span class="tf-try-q-state">${agentLabel(r.agent)} · ${mark ? REVIEWS[mark].label : 'to label'}</span></span>
+                  <span class="tf-try-q-text"><span class="tf-try-q-file">${tryPath(tryTarget(r))}</span><span class="tf-try-q-state">${agentLabel(r.agent)} · ${mark ? REVIEWS[mark].label : 'to label'}</span></span>
                 </button></li>`;
               })}
             </ol>
@@ -3201,7 +3210,7 @@
                 ? html`Built from a call <span class="tf-mono">${plan.rule}</span> flagged: ${same}.${byWhom}`
                 : html`Built from a call you marked correct under <span class="tf-mono">${plan.rule}</span>: ${same}.${byWhom}`;
         return html`<figure class="tf-try-editor" data-tone="${tone || 'pending'}" data-kind="${what}">
-          <figcaption class="tf-try-editor-tab">${T.icon(command ? 'terminal' : read ? 'book' : 'code', 14)}<span class="tf-break">${command ? 'Terminal' : (args.file_path || '')}</span><span class="tf-try-editor-meta">${plan.tool_name} · ${agentLabel(TRY_SENDER)} · hook</span></figcaption>
+          <figcaption class="tf-try-editor-tab">${T.icon(command ? 'terminal' : read ? 'book' : 'code', 14)}<span class="tf-try-editor-path">${command ? 'Terminal' : tryPath(args.file_path || '')}</span><span class="tf-try-editor-meta">${plan.tool_name} · ${agentLabel(TRY_SENDER)} · hook</span></figcaption>
           <pre class="tf-try-code"><code>${lines.map((line, n) => html`<span class="tf-try-line"${bad(line) ? raw(' data-bad') : ''}><span class="tf-try-ln" aria-hidden="true">${command ? '$' : n + 1}</span>${line}</span>`)}</code></pre>
           <p class="tf-try-editor-note">${note}</p>
         </figure>`;
@@ -3221,7 +3230,7 @@
         return html`<div class="tf-try-then">
           <p class="tf-try-then-label">Earlier, in Observe</p>
           <p class="tf-try-card-agent">${tryAvatar(row.agent, true)}${agentLabel(row.agent)} · <span class="tf-mono">${row.tool_name}</span></p>
-          <p class="tf-try-file tf-break tf-try-then-file">${tryTarget(row)}</p>
+          <p class="tf-try-file tf-try-then-file">${tryPath(tryTarget(row))}</p>
           <p class="tf-try-summary">${T.statusChip('observed')}<span class="tf-try-muted">It ran, and was recorded.</span></p>
           ${l ? html`<p class="tf-try-summary"><span class="tf-try-muted">You marked it</span>${reviewChip(l)}</p>` : ''}
         </div>`;
