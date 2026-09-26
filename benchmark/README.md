@@ -227,7 +227,9 @@ people read. What changes:
   `--basetemp ~\AppData\Local\Temp\bt` and `cat ~/.gitconfig`. `THREEFOLD_HOME`
   stays the run's own, and the owner's never-send list (`never_send.txt` in
   `THREEFOLD_HOME`, or `~/.threefold`) is copied into it byte for byte before
-  the agent starts, so a call holding one of those terms is never sent.
+  the agent starts, so a call holding one of those terms is never sent, and
+  removed as soon as the agent stops: the run's folders stay behind, and the
+  next agent on the machine may have no sandbox.
   Nothing else of that folder is read: its `config.json` can name a key file,
   and that key must never reach another stack. A list that is there but
   cannot be read stops the run before an agent starts. The row records

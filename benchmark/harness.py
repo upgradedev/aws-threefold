@@ -23,8 +23,9 @@ real agent puts its session on the public demo's ledger
 machine for a stand-in. The agent's side of the run is unchanged; the hook's
 is not, because what it sends lands on a ledger others read: it runs with the
 machine's own home, which it shortens to `~` in every command it sends, and
-with the owner's never-send list carried into the run, exactly as it runs on
-the owner's own repositories (machine_home, carry_never_send).
+with the owner's never-send list carried into the run for as long as the
+agent works, exactly as it runs on the owner's own repositories
+(machine_home, carry_never_send, forget_never_send).
 
 The agent is Claude Code (`claude -p`) or Codex (`codex exec`, see
 codex_agent.py). For Codex the prompt condition writes the rules to AGENTS.md
@@ -1019,6 +1020,19 @@ def carry_never_send(owner_home: Path, run_home: Path) -> str:
     run_home.mkdir(parents=True, exist_ok=True)
     (run_home / NEVER_SEND_NAME).write_bytes(data)
     return "copied"
+
+
+def forget_never_send(run_home: Path) -> None:
+    """Removes the copy carry_never_send made, once the hook has no more calls to judge.
+
+    The run's folders stay behind for a reader, and the next run on this
+    machine may be an agent with no sandbox: the owner's terms stay only where
+    the owner keeps them.
+    """
+    try:
+        (Path(run_home) / NEVER_SEND_NAME).unlink()
+    except FileNotFoundError:
+        pass
 
 
 def claim_unused_session(server: RemoteServer, remote: RemoteThreefold, task: Task, rep: int, attempt: int) -> str:
@@ -2384,6 +2398,8 @@ def run_one(task: Task, condition: str, rep: int, plan: RunPlan, base_env: Optio
         code, timed_out, seconds = run_agent(
             command, task.prompt(), repo, env, options.timeout_s, run_dir / "transcript.jsonl", run_dir / "agent-stderr.txt"
         )
+        if remote is not None:
+            forget_never_send(run_dir / "threefold-home")
         row.update({"agent_exit_code": code, "agent_timed_out": timed_out, "wall_seconds": round(seconds, 1)})
         row.update(agent_metrics(read_agent_transcript(options, run_dir, condition), sanitise, timed_out, options.timeout_s))
         explain_ending(row, run_dir / "agent-stderr.txt", sanitise)
@@ -2407,6 +2423,11 @@ def run_one(task: Task, condition: str, rep: int, plan: RunPlan, base_env: Optio
     finally:
         if server is not None:
             server.stop()
+        if remote is not None:
+            try:
+                forget_never_send(run_dir / "threefold-home")
+            except OSError:
+                pass  # removed after the agent stopped already, or said there as the run's harness error
 
     if repo.exists():
         try:
