@@ -204,7 +204,132 @@ recorded as `codex-default`, so pass one to pin it), `--parallel`,
 `--max-turns` and `--budget-usd` (per run, Claude Code only), `--timeout`
 (seconds per run), `--isolation`, `--token-file`, `--check-auth`, `--resume`,
 `--retry-pause` (seconds, default 180), `--codex-sandbox`, `--work-root`,
-`--dry-run`.
+`--threefold-endpoint` and `--live-date` (below), `--dry-run`.
+
+### Against a Threefold that is already running
+
+`--threefold-endpoint URL` points the Threefold conditions at a Threefold
+running elsewhere instead of a local server started for each run. The agent's
+side of a run is unchanged: the same copy of the task outside the workspace,
+the same permission lists, the same login handling, and no key of any kind is
+sent. The hook's side is not, because what it sends lands on a ledger other
+people read. What changes:
+
+- **What leaves the machine is what leaves it from the owner's own
+  repositories.** A local run's hook has a home folder of the run's own; a
+  remote run's hook runs with the machine's home (`USERPROFILE`, `HOME`),
+  because the hook replaces its home with `~` in every command it sends, and
+  only the real one keeps the login name a Windows profile path carries off
+  the ledger. Claude Code keeps `TEMP` and `TMP`, which sit inside that
+  profile, and Codex keeps `HOME` itself: a command that spells either out,
+  `pytest --basetemp C:\Users\<login>\AppData\Local\Temp\bt` or
+  `cat C:/Users/<login>/.gitconfig`, reaches the ledger as
+  `--basetemp ~\AppData\Local\Temp\bt` and `cat ~/.gitconfig`. `THREEFOLD_HOME`
+  stays the run's own, and the owner's never-send list (`never_send.txt` in
+  `THREEFOLD_HOME`, or `~/.threefold`) is copied into it byte for byte before
+  the agent starts, so a call holding one of those terms is never sent.
+  Nothing else of that folder is read: its `config.json` can name a key file,
+  and that key must never reach another stack. A list that is there but
+  cannot be read stops the run before an agent starts. The row records
+  `hook_home: "machine"` and `never_send_list` (`copied` or `none`), never the
+  list or where it is.
+- The hook in the task repository names that endpoint, the project
+  `Acme-Live-<task>` and the session `live-<task>-<date>` (`--live-date`, the
+  UTC day, default today; `-r<rep>` and `-a<attempt>` are added for a later
+  repetition or attempt). The per-run wrapper sends every call under that
+  session name instead of the agent's own id, so the run's calls can be found
+  on the remote ledger and read back.
+- Before the agent starts, the endpoint must answer `GET status`, and the
+  remote ledger is read for the run's session: a session that already holds
+  rows (an earlier run the same day, or anyone's calls under that name) is
+  never reused, since its rows would be counted as this run's and its loop
+  history and spend would carry over, so the next attempt's name (`-a2`, ...,
+  up to ten) is taken instead. If either read fails, no agent is started.
+  After the agent stops, the run's decisions are read back
+  from `GET /api/decisions?project=Acme-Live-<task>&session=live-<task>-<date>&days=2`,
+  page by page, with no redirect followed, instead of the local ledger.
+- The endpoint must be https; plain http is accepted only on this machine,
+  for a stand-in (`fake_threefold.py`).
+- The row records `ledger_source: "remote"`, `threefold_endpoint`,
+  `threefold_project`, `threefold_session`, `project_stage_cached` (the stage
+  the hook last saw in a response) and `threefold_config_intact` (whether
+  `.threefold.json` still named that endpoint and project when the agent
+  stopped). Its `ledger` counts `refused` (a `BLOCKED*` verdict) apart from
+  `would_refuse` (a call that ran although a rule would have refused it) and
+  gives the stage each call was judged under in `stages`.
+- A remote stack decides by the project's stage there. The public stack's
+  default stage is Observe, and a project it holds there has every call
+  recorded and none refused: such a row carries a `governance_problem` saying
+  so, and the report never counts it as Threefold enforcing. Promoting the
+  `Acme-Live-*` projects on that stack is what turns these runs into
+  measurements of enforcement, and only a promotion that enforces every rule
+  that flags the run does: Promote enforces the rules the operator picks and
+  keeps the others observing, and a call such a rule flags is recorded under
+  the stage `enforce` yet runs. Any `would_refuse` in a remote run's rows
+  (`would_refuse_by_rule_key` names the rules) therefore makes the same
+  `governance_problem`, naming those rules. A repeated read carries the key
+  `NONE` and is not a would-refuse.
+- The report refuses to pool one agent's Threefold rows from a remote
+  Threefold with its matrix rows from a local server, and a resume refuses to
+  switch where a run id's Threefold rows report to.
+
+### The daily live run
+
+`scripts/daily_live_agent.py` runs one such run a day, so the public ledger
+carries real agent sessions beside the synthetic fleet:
+
+    python scripts/daily_live_agent.py --endpoint https://<public stack>/ --dry-run   # the pick and the command
+    python scripts/daily_live_agent.py --endpoint https://<public stack>/             # today's run
+
+The agent alternates every day (Claude Code, then Codex) and the task moves
+on every second day through the six standard tasks, from 2026-09-27, so each
+task is done by both agents on consecutive days and all twelve pairs come
+round every twelve days. It runs the `threefold` condition once, writes the
+row to `results/live/<date>-<agent>.jsonl` and prints one line: how the run
+ended, what the remote ledger holds for its session (refused and would refuse
+apart, and the stage they were judged under) and whether the row counts. The
+benchmark's own output goes to `daily-live.log` in the run's work root, not to
+the terminal; the dry run prints the command with the token file shown as
+`<token file>` and the Codex home (`--codex-home`) not at all, only that it is
+set. It refuses an endpoint that is not https or holds anything but visible
+ASCII (there is no default), `--date` outside a dry run, and a work root
+inside the repository or its workspace, before anything is created; after the
+run it checks the row names the endpoint, project and session it planned.
+
+A day's row decides both the exit code and whether the day is run again, the
+same way for a new row and one already recorded:
+
+| Exit | The day's last row | Started again the same day |
+|---|---|---|
+| 0 | went its course and is the run planned: it counts, or only the project's stage on the stack keeps it from counting (the line says which) | does nothing |
+| 1 | no row, a row that is not the run planned, or a run that did not go as planned: a harness error, an agent that never ran, a Threefold that stopped answering or could not be read, a hook that failed | runs the day again as the benchmark's resume (the next attempt, in a session of its own), up to three rows a day; a row that is not the run planned is never run again |
+| 2 | refused before running | |
+| 3 | the benchmark stopped: a usage limit that outlasted its retry, or a login that stopped working | runs the day again, once the login works |
+
+These rows are single runs on a public stack, never a matrix: they are
+reported apart, if at all.
+
+**Scheduling it.** Windows Task Scheduler runs it once a day at a quiet hour;
+04:30 local time is 01:30 or 02:30 UTC from Athens, so the UTC day the
+session is named after is the local one. The task runs as the owner, only
+while the owner is signed in, from the repository's own copy of the script.
+Run the same command by hand once first. `--codex-home` names a folder that
+holds only a Codex login (`set CODEX_HOME=<that folder>` then `codex login`,
+in one cmd window): the benchmark refuses a `CODEX_HOME` holding `hooks.json`
+or `AGENTS.md`, which a machine whose own Codex is governed has. All on one
+line, 261 characters at most after `/TR`:
+
+    schtasks /Create /TN "Threefold\Daily live agent" /SC DAILY /ST 04:30 /F /TR "cmd /c python <repository>\scripts\daily_live_agent.py --endpoint https://<public stack>/ --codex-home <Codex login folder> >> <a folder outside the repository>\daily-live.txt 2>&1"
+
+To see it, start it now, stop a run in progress, pause it and resume it, or
+remove it:
+
+    schtasks /Query /TN "Threefold\Daily live agent" /V /FO LIST
+    schtasks /Run /TN "Threefold\Daily live agent"
+    schtasks /End /TN "Threefold\Daily live agent"
+    schtasks /Change /TN "Threefold\Daily live agent" /DISABLE
+    schtasks /Change /TN "Threefold\Daily live agent" /ENABLE
+    schtasks /Delete /TN "Threefold\Daily live agent" /F
 
 **When the service says no.** A run the service stops, a usage limit or an
 overload, is recorded as `cut_short:usage_limit` or `cut_short:overloaded`,
@@ -396,5 +521,6 @@ table. What each part rests on:
 - `codex_agent.py` — Codex's command, the checks before a Codex run, and reading its JSON events
 - `scripted_agent.py` — a fixed script in place of the model, to test the harness
 - `fake_agents.py` — stand-ins for the `claude` and `codex` executables, used only by the suite; they reach no service
+- `fake_threefold.py` — a stand-in for a remote Threefold on 127.0.0.1, used only by the suite
 - `report.py` — the aggregation, the report and the summary file
-- `results/` — the recorded rows and their summaries
+- `results/` — the recorded rows and their summaries; `results/live/` the daily live runs' rows

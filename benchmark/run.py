@@ -40,6 +40,13 @@ that was cut short, never reached the model, hit a harness error, or was a
 Threefold run without a working Threefold in front of it (the local server
 stopped answering, the hook failed open or never fired) is run again. The
 report counts only the latest row of each run.
+
+`--threefold-endpoint URL` points the Threefold conditions at a Threefold that
+is already running (https, or http to this machine for a stand-in) instead of
+a local server per run: the hook names the project Acme-Live-<task> and the
+session live-<task>-<date>, and the run's decisions are read back from that
+Threefold's GET /api/decisions. Every row records which (`ledger_source`,
+`threefold_endpoint`). scripts/daily_live_agent.py runs one such run a day.
 """
 from __future__ import annotations
 
@@ -118,9 +125,26 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
                         help="default: <system temp>/threefold-bench/<run-id>, or <drive root>/threefold-bench/<run-id> "
                              "when a CLAUDE.md sits above the temp folder")
     parser.add_argument("--results-dir", type=Path, default=RESULTS_DIR)
+    parser.add_argument("--threefold-endpoint", metavar="URL", default=None,
+                        help="the Threefold conditions report to this Threefold instead of a local server started for "
+                             "each run: https, or http to this machine only for a stand-in. The hook names the project "
+                             "Acme-Live-<task> and the session live-<task>-<date>, and the run's ledger is read back "
+                             "from GET /api/decisions there")
+    parser.add_argument("--live-date", metavar="YYYY-MM-DD", default=None,
+                        help="the UTC day in a remote run's session names (default: today, UTC); only with "
+                             "--threefold-endpoint")
     parser.add_argument("--dry-run", action="store_true", help="print the plan and the agent command, run nothing")
     args = parser.parse_args(argv)
     args.agent = harness.normalise_agent(args.agent)
+    if args.live_date and not args.threefold_endpoint:
+        parser.error("--live-date names a remote run's sessions; give --threefold-endpoint with it")
+    if args.threefold_endpoint:
+        try:
+            args.remote = harness.RemoteThreefold(args.threefold_endpoint, args.live_date or utc_day())
+        except ValueError as error:
+            parser.error(f"--threefold-endpoint / --live-date: {error}")
+    else:
+        args.remote = None
     unknown = [condition for condition in args.conditions if condition not in harness.CONDITIONS]
     if unknown:
         parser.error(f"unknown condition(s) {', '.join(unknown)}; choose from {', '.join(harness.CONDITIONS)}")
@@ -135,6 +159,35 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     if args.model is None and args.agent == "claude-code":
         args.model = harness.DEFAULT_MODEL
     return args
+
+
+def utc_day(now: Optional[datetime.datetime] = None) -> str:
+    """Today in UTC, YYYY-MM-DD: the day a remote run's sessions are named after."""
+    return (now or datetime.datetime.now(datetime.timezone.utc)).strftime("%Y-%m-%d")
+
+
+def remote_problem(rows: Sequence[Mapping[str, Any]], remote: Optional[harness.RemoteThreefold],
+                   tasks: Sequence[task_library.Task]) -> Optional[str]:
+    """Why a matrix must not run against this Threefold, or None.
+
+    Every task's live project must be a name the stack shows, and a run id's
+    Threefold rows all come from one place: the local server of each run, or
+    one remote endpoint. A resume that switched would mix two ledgers in one
+    results file.
+    """
+    if remote is not None:
+        for task in tasks:
+            try:
+                remote.project(task)
+            except ValueError as error:
+                return str(error)
+    wanted = remote.endpoint if remote is not None else None
+    recorded = {row.get("threefold_endpoint") for row in rows if harness.uses_threefold(str(row.get("condition") or ""))}
+    if recorded and recorded != {wanted}:
+        where = ", ".join(sorted(str(value or "a local server") for value in recorded))
+        return (f"the recorded Threefold rows reported to {where}, and this run would report to "
+                f"{wanted or 'a local server'}; pass the same --threefold-endpoint as before")
+    return None
 
 
 def default_run_id(pilot: bool, agent: str, now: Optional[datetime.datetime] = None,
@@ -507,6 +560,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if problem:
             print(f"refused: {problem}.", file=sys.stderr)
             return 2
+    problem = remote_problem(previous, args.remote, tasks)
+    if problem:
+        print(f"refused: {problem}.", file=sys.stderr)
+        return 2
     work_root = args.work_root or default_work_root(run_id)
     harness.ensure_outside_workspace(work_root)
 
@@ -581,7 +638,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         codex_home=codex_home() if args.agent == "codex" else None, agent_version=version,
     )
     plan = harness.RunPlan(run_id=run_id, work_root=work_root, options=options, pilot=args.pilot,
-                           credential=credential)
+                           credential=credential, remote=args.remote)
     planned = plan_runs(tasks, args.conditions, args.reps)
     done = done_keys(previous)
     runs = [(task, condition, rep) for task, condition, rep in planned
@@ -602,6 +659,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
               "account can. Only the task repository is measured, and every row records it.")
     if credential is not None:
         print(f"token file: {credential.path} (the token goes to the agent process only)")
+    if any(harness.uses_threefold(condition) for condition in args.conditions):
+        if args.remote is not None:
+            print(f"threefold: the remote Threefold at {args.remote.endpoint}, projects Acme-Live-<task>, sessions "
+                  f"live-<task>-{args.remote.date}; its ledger is read back from GET /api/decisions")
+        else:
+            print("threefold: a local server from this repository's source, started for each run")
     print(f"work root: {work_root}")
     print(f"results: {results.path}")
     if args.dry_run:
