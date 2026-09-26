@@ -1705,6 +1705,66 @@ def test_the_replay_prefers_claude_code_s_call_and_says_so_when_another_agent_ma
     assert "Now, in Enforce · refused, from Claude Code" in other["climax"]
 
 
+def test_the_rule_as_written_stands_beside_the_call_it_judged_on_steps_three_and_five(tmp_path: Path) -> None:
+    """The card on top of the stack, and the call about to be sent, show the rule as GET /rules has it.
+
+    Its path patterns, with the one that covers the call's path marked, are
+    how a reader spots the false alarm (a test module under tests/domain/ is
+    not the domain), and its forbidden packages, with the one the import
+    falls under marked, say what the refusal will be about. When the rules
+    cannot be read, nothing stands in for them.
+    """
+    scenario = r"""
+  const P = 'Acme-Sandbox-0a1b2c3d';
+  const layer = (i, target, agent, imp) => row(i, { project_name: P, agent, rule_key: 'python-domain-stays-pure', observed_rules: ['python-domain-stays-pure'], observed_rule: 'python-domain-stays-pure',
+    target, observed_target: target, observed_reason: "Clean Architecture violation: Layering rule 'python-domain-stays-pure' refuses this write: A Python file under domain/ may not import infrastructure or a driver. '" + target + "' imports '" + imp + "', which matches '" + imp + "'" });
+  const observed = [layer(1, 'tests/domain/test_order_totals.py', 'codex', 'fastapi.testclient'), layer(2, 'src/acme/domain/order.py', 'claude-code', 'boto3')];
+  const RULE = { id: 'python-domain-stays-pure', description: 'A Python file under domain/ may not import infrastructure or a driver',
+    when_path_matches: ['**/domain/**/*.py', '**/domain/**/*.pyi'], forbid_imports: ['boto3', 'botocore', 'requests', 'httpx', 'sqlalchemy', 'fastapi', 'flask', 'django'] };
+  answer = api({
+    'POST /api/sandbox': { status: 200, body: { project: P, calls_seeded: 12 } },
+    ['/api/projects/' + P]: { status: 200, body: { project: P, config: { stage: 'observe', sandbox: true }, readiness: { rules: [
+      { rule_key: 'python-domain-stays-pure', kind: 'layering', state: 'ready', would_refuse: 2, correct: 2, false_alarms: 0, unreviewed: 0 }] } } },
+    '/api/decisions': { status: 200, body: { items: observed, next_cursor: null } },
+    ['POST /api/projects/' + P + '/reviews']: { status: 200, body: { updated: 1, skipped: [] } },
+    ['POST /api/projects/' + P + '/promote']: { status: 200, body: { project: P, config: { stage: 'enforce', observe_rules: [] } } },
+    '/api/decision': { status: 200, body: { decision: null, session: null, rule: RULE } },
+    '/rules': READABLE ? { status: 200, body: { rules: [RULE] } } : { status: 503, body: { detail: 'down' } }
+  });
+  await visit('#/try');
+  await click('try-create'); await tick();
+  await click('try-show'); await tick();
+  await click('try-review'); await tick();
+  out.first = view();
+  await click('try-label', { 'data-verdict': 'VERDICT-2', 'data-label': 'correct' }); await tick();
+  out.second = view();
+  await click('try-label', { 'data-verdict': 'VERDICT-1', 'data-label': 'correct' }); await tick();
+  await click('try-readiness'); await tick();
+  await click('try-promote'); await tick();
+  await click('try-next'); await tick();
+  out.send = view();
+"""
+    out = walk("const READABLE = true;\n" + scenario, tmp_path)
+    hit = r'<code class="tf-try-glob" data-hit>\s*<svg[^>]*>.*?</svg>\s*'
+    first, second, send = out["first"], out["second"], out["send"]
+    # The oldest call is on top: Claude Code's order.py, whose import falls under boto3.
+    assert "What the rule watches" in text_of(first)
+    assert re.search(hit + re.escape("**/domain/**/*.py") + "<", first, re.S), "The pattern that covers the path is not marked"
+    assert '<code class="tf-try-glob">**/domain/**/*.pyi<' in first, "A pattern that does not cover the path is marked"
+    assert re.search(hit + "boto3<", first, re.S) and "and 2 more" in text_of(first)
+    # The next card is the test module: the same pattern covers it, which is the false alarm to spot.
+    assert "tests/domain/test_order_totals.py" in text_of(second)
+    assert re.search(hit + re.escape("**/domain/**/*.py") + "<", second, re.S) and re.search(hit + "fastapi<", second, re.S)
+    # Step 5: the rule now in force, in its own words, beside the call about to be sent.
+    words = text_of(send)
+    assert "Now in force python-domain-stays-pure" in words and "A Python file under domain/ may not import infrastructure or a driver." in words
+    assert re.search(hit + "boto3<", send, re.S), "The package the import falls under is not marked"
+
+    unreadable = walk("const READABLE = false;\n" + scenario, tmp_path)
+    for name in ("first", "send"):
+        assert "tf-try-rulebox" not in unreadable[name], "A rule that could not be read was shown"
+
+
 # A phone of 375px: every `max-width` query up to that width matches, the page
 # is scrolled down a long step, and each scroll the page asks for is recorded.
 PHONE = r"""
@@ -1967,6 +2027,7 @@ def test_the_walkthrough_escapes_every_value_the_service_sends(tmp_path: Path) -
     ['POST /api/projects/' + P + '/reviews']: { status: 200, body: { updated: 1, skipped: [] } },
     ['POST /api/projects/' + P + '/promote']: { status: 200, body: { project: P, config: { stage: 'enforce', observe_rules: [EVIL] } } },
     '/api/decision': { status: 200, body: { decision: rows[0], session: null, rule: { id: EVIL, forbid_imports: [EVIL] } } },
+    '/rules': { status: 200, body: { rules: [{ id: EVIL, description: EVIL, when_path_matches: [EVIL, '**/' + EVIL], forbid_imports: [EVIL] }] } },
     'POST /evaluate-tool-call': { status: 200, body: { status: EVIL, reason: EVIL, bedrock_explanation: EVIL, explanation_source: 'bedrock', project_stage: EVIL,
       suggested_fix: { kind: EVIL, summary: EVIL, steps: [EVIL], writes: [{ path: EVIL, content: EVIL, new_file: true }], validated: true, checks: [{ gate: EVIL, path: EVIL, passed: true }] } } }
   });
@@ -1997,6 +2058,8 @@ def test_the_walkthrough_escapes_every_value_the_service_sends(tmp_path: Path) -
     for name, markup in out["screens"].items():
         assert "<img" not in markup and "<svg onload" not in markup, f"Service data reached the {name} screen as markup"
         assert "&lt;img" in markup, f"The hostile value was not shown on the {name} screen, so this proves nothing there"
+    for name in ("stack", "send"):
+        assert "tf-try-rulebox" in out["screens"][name], f"The rule as written was not shown on the {name} screen, so this proves nothing about it"
     assert out["sent"]["session_id"].startswith("try-"), "The replay is still a hook's call in a session the stage decides"
 
 

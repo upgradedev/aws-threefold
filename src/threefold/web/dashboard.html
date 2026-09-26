@@ -2393,6 +2393,25 @@
 @media (min-width: 960px) { .tf-try-compare { grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); } }
 .tf-try-then { display: flex; flex-direction: column; gap: 12px; padding: 16px; background: var(--tf-inset); border: 1px solid var(--tf-hairline); border-radius: var(--tf-radius-md); box-shadow: inset 3px 0 0 var(--tf-observed); }
 .tf-try-now-col { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.tf-try-then-col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.tf-try-stack-col > .tf-try-rulebox { margin-top: 16px; }
+.tf-try-rulebox { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 14px 16px; box-sizing: border-box;
+  background: var(--tf-inset); border: 1px solid var(--tf-hairline); border-radius: var(--tf-radius-md); }
+.tf-try-rulebox[data-stage="enforce"] { border-color: var(--tf-accent-line); background: linear-gradient(180deg, var(--tf-accent-soft), rgba(139, 92, 246, 0) 120px), var(--tf-inset); }
+.tf-try-rulebox-head { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.tf-try-rulebox-title { font: 600 var(--tf-fs-micro)/1rem var(--tf-font-sans); letter-spacing: var(--tf-track-caps); text-transform: uppercase; color: var(--tf-text-3); }
+.tf-try-rulebox-key { font: 500 0.8125rem/1.25rem var(--tf-font-mono); color: var(--tf-text); overflow-wrap: anywhere; }
+.tf-try-rulebox-desc { margin: 0; font-size: 0.8125rem; line-height: 1.25rem; color: var(--tf-text-2); }
+.tf-try-rulebox dl { margin: 0; display: flex; flex-direction: column; gap: 8px; }
+.tf-try-rulebox dl > div { display: grid; grid-template-columns: 4.5rem minmax(0, 1fr); gap: 10px; align-items: baseline; }
+.tf-try-rulebox dt { font: 600 var(--tf-fs-micro)/1rem var(--tf-font-sans); letter-spacing: var(--tf-track-caps); text-transform: uppercase; color: var(--tf-text-3); }
+.tf-try-rulebox dd { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; font-size: 0.75rem; line-height: 1.25rem; }
+@media (max-width: 479px) { .tf-try-rulebox dl > div { grid-template-columns: minmax(0, 1fr); gap: 4px; } }
+.tf-try-glob { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; padding: 1px 7px; box-sizing: border-box; border-radius: 6px;
+  font: 500 0.75rem/1.25rem var(--tf-font-mono); color: var(--tf-text-2); background: var(--tf-surface-2); border: 1px solid var(--tf-hairline); overflow-wrap: anywhere; }
+.tf-try-glob .tf-icon { width: 12px; height: 12px; flex-shrink: 0; }
+.tf-try-glob[data-hit] { color: var(--tf-observed-text); background: var(--tf-observed-soft); border-color: var(--tf-observed-line); }
+.tf-try-rulebox[data-stage="enforce"] .tf-try-glob[data-hit] { color: var(--tf-accent-text); background: var(--tf-accent-soft); border-color: var(--tf-accent-line); }
 .tf-try-then-label { margin: 0; font: 600 var(--tf-fs-micro)/1rem var(--tf-font-sans); letter-spacing: var(--tf-track-caps); text-transform: uppercase; color: var(--tf-text-3); }
 .tf-try-editor { margin: 0; min-width: 0; overflow: hidden; border-radius: var(--tf-radius-md); border: 1px solid var(--tf-hairline-strong); background: var(--tf-ink-0); }
 .tf-try-editor[data-tone="refused"] { border-color: var(--tf-refused-line); }
@@ -2654,6 +2673,23 @@
     // its reason carries it, and a file by its path.
     function tryTarget(row) {
       return (row.action_type === 'COMMAND_EXEC' && tryCommand(row)) || targetOf(row) || row.tool_name || '';
+    }
+
+    // Whether a rule's path pattern covers a path, read the way a glob is:
+    // `**/` any folders or none, `**` anything, `*` and `?` within a name.
+    function tryGlobMatches(glob, path) {
+      const g = String(glob || '');
+      let re = '';
+      for (let i = 0; i < g.length; i++) {
+        const c = g[i];
+        if (c === '*' && g[i + 1] === '*') {
+          i += 1;
+          if (g[i + 1] === '/') { i += 1; re += '(?:.*/)?'; } else re += '.*';
+        } else if (c === '*') re += '[^/]*';
+        else if (c === '?') re += '[^/]';
+        else re += c.replace(/[.+^${}()|[\]\\]/g, '\\$&');
+      }
+      try { return new RegExp('^' + re + '$').test(String(path || '')); } catch (err) { return false; }
     }
 
     // A path that may break only after a slash, so a narrow line wraps it
@@ -3007,6 +3043,34 @@
         return html`<p class="tf-try-receipt" data-label="${last.label}">${T.icon(last.label === 'correct' ? 'check' : 'x', 14)}<span>Marked <b>${REVIEWS[last.label].label}</b>: <span class="tf-mono">${last.target}</span></span></p>`;
       }
 
+      // A layering rule as it is written, read from GET /rules: the files it
+      // watches and the packages it forbids, with the pattern that covers the
+      // call's path and the package its import falls under marked. That is
+      // how a reader tells a layer from a folder that only shares its name.
+      // Nothing at all when the definitions could not be read, and nothing
+      // for a gate, which has no pattern to show.
+      function ruleBox(key, path, imported, opts) {
+        const rule = state.rulesDef && Object.prototype.hasOwnProperty.call(state.rulesDef, key) ? state.rulesDef[key] : null;
+        if (!rule || typeof rule !== 'object') return '';
+        const globs = (Array.isArray(rule.when_path_matches) ? rule.when_path_matches : []).filter(g => typeof g === 'string' && g);
+        const forbid = (Array.isArray(rule.forbid_imports) ? rule.forbid_imports : []).filter(g => typeof g === 'string' && g);
+        if (!globs.length && !forbid.length) return '';
+        const hitGlob = path ? globs.find(g => tryGlobMatches(g, path)) || '' : '';
+        const hitPkg = imported ? (forbid.indexOf(imported) !== -1 ? imported : tryPackageFor(imported, forbid)) : '';
+        let shown = forbid.slice(0, 6);
+        if (hitPkg && shown.indexOf(hitPkg) === -1) shown = [hitPkg].concat(forbid.filter(p => p !== hitPkg).slice(0, 5));
+        const o = opts || {};
+        const chip = (text, hit, why) => html`<code class="tf-try-glob"${hit ? raw(' data-hit') : ''}>${hit ? T.icon('check', 12) : ''}${text}${hit ? html`<span class="sr-only"> (${why})</span>` : ''}</code>`;
+        return html`<section class="tf-try-rulebox" data-stage="${o.stage || 'observe'}" aria-label="${o.title || 'The rule'}: ${key}">
+          <p class="tf-try-rulebox-head"><span class="tf-try-rulebox-title">${o.title || 'The rule'}</span><span class="tf-try-rulebox-key">${key}</span>${o.stage ? stageChip(o.stage) : ''}</p>
+          ${o.describe && typeof rule.description === 'string' && rule.description ? html`<p class="tf-try-rulebox-desc">${tryStop(rule.description)}</p>` : ''}
+          <dl>
+            ${globs.length ? html`<div><dt>Watches</dt><dd>${globs.map(g => chip(g, g === hitGlob, 'covers this path'))}</dd></div>` : ''}
+            ${forbid.length ? html`<div><dt>Forbids</dt><dd>${shown.map(p => chip(p, p === hitPkg, 'this import falls under it'))}${forbid.length > shown.length ? html`<span class="tf-try-muted">and ${num(forbid.length - shown.length)} more</span>` : ''}</dd></div>` : ''}
+          </dl>
+        </section>`;
+      }
+
       function reviewBoard(play, inBar) {
         const rows = state.observed;
         const total = rows.length;
@@ -3037,6 +3101,7 @@
               </article>
               ${gone ? html`<div class="tf-try-gone" data-label="${gone.label}" aria-hidden="true"><span class="tf-try-gone-stamp">${T.icon(gone.label === 'correct' ? 'check' : 'x', 18)}${REVIEWS[gone.label].label}</span><span class="tf-try-gone-file">${tryPath(gone.target)}</span></div>` : ''}
             </div>
+            ${row.action_type === 'COMMAND_EXEC' ? '' : ruleBox(ruleKeyOf(row), targetOf(row), (tryImportOf(row) || {}).name || '', { title: 'What the rule watches' })}
           </div>
           <div class="tf-try-side-panel">
             ${inBar ? '' : html`<div>
@@ -3260,7 +3325,10 @@
             ? 'The same ' + what + ' ' + agentLabel(other.agent) + (what === 'command' ? ' ran' : ' made') + ' in Observe, sent this time by ' + agentLabel(TRY_SENDER) + ' as its hook would, to your sandbox, now in Enforce. This time the rule in force refuses it, whichever agent sends it, and Amazon Bedrock explains why.'
             : 'As a hook would: origin hook, agent Claude Code, to your sandbox, now in Enforce. This time the rule in force refuses it, and Amazon Bedrock explains why.',
           visual: plan
-            ? html`${projectBar()}<div class="tf-try-compare">${earlier}<div class="tf-try-now-col"><p class="tf-try-then-label">${other ? 'Now, in Enforce · the same ' + what + ', from ' + agentLabel(TRY_SENDER) : 'Now, in Enforce · sent as a hook would'}</p>${editor(plan, 'pending')}</div></div>${delta(plan)}`
+            ? html`${projectBar()}<div class="tf-try-compare">
+                <div class="tf-try-then-col">${earlier}${delta(plan)}</div>
+                <div class="tf-try-now-col"><p class="tf-try-then-label">${other ? 'Now, in Enforce · the same ' + what + ', from ' + agentLabel(TRY_SENDER) : 'Now, in Enforce · sent as a hook would'}</p>${editor(plan, 'pending')}${plan.action_type === 'FILE_WRITE' ? ruleBox(plan.rule, (plan.arguments || {}).file_path, plan.imports || '', { title: 'Now in force', stage: 'enforce', describe: true }) : ''}</div>
+              </div>`
             : emptyNote('There is no call to send yet: promote the project first.'),
           actions: plan ? primary('try-send', 'Send it', 'Sending…') : primary('try-restart', 'Start again')
         };
@@ -3607,7 +3675,7 @@
 
       function writePlan(base, path, rule, row) {
         const imp = importToSend(row, rule);
-        return Object.assign(base, { kind: 'write', tool_name: 'Write', action_type: 'FILE_WRITE',
+        return Object.assign(base, { kind: 'write', tool_name: 'Write', action_type: 'FILE_WRITE', imports: imp ? imp.name : '',
           arguments: { file_path: path, content: imp ? importLine(path, imp.name, imp.isPackage) : '# Acme sandbox\n' } });
       }
 
