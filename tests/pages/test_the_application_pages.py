@@ -1664,8 +1664,9 @@ def test_the_replay_prefers_claude_code_s_call_and_says_so_when_another_agent_ma
     '/rules': { status: 200, body: { rules: [] } },
     'POST /evaluate-tool-call': (u, i, body) => { sent.push(body); return { status: 200, body: { status: 'BLOCKED_BOUNDARY_VIOLATION', reason: 'Refused.', project_stage: 'enforce' } }; }
   });
-  async function run(claudeLabel) {
+  async function run(claudeLabel, sameInstant) {
     Object.keys(labels).forEach(k => delete labels[k]);
+    if (sameInstant) observed.forEach(r => { r.timestamp = NOW; });
     await visit('#/try');
     await click('try-restart'); await tick();
     await click('try-create'); await tick();
@@ -1684,6 +1685,7 @@ def test_the_replay_prefers_claude_code_s_call_and_says_so_when_another_agent_ma
   }
   out.claude = await run('correct');
   out.other = await run('false_alarm');
+  out.tie = await run('false_alarm', true);
 """,
         tmp_path,
     )
@@ -1703,6 +1705,8 @@ def test_the_replay_prefers_claude_code_s_call_and_says_so_when_another_agent_ma
     assert "File the same" in send and "Import the same" in send and "Agent Antigravity → Claude Code" in send and "Stage Observe → Enforce" in send
     assert "The write Antigravity made in Observe is refused in Enforce when Claude Code sends it" in other["climax"]
     assert "Now, in Enforce · refused, from Claude Code" in other["climax"]
+    # A coarse clock stamps the sandbox's calls in one instant: the later lane was sent later, so every run replays the same call.
+    assert out["tie"]["sent"]["arguments"]["file_path"] == "src/web/domain/cart.ts", "Calls stamped together are not told apart the way they were sent"
 
 
 def test_the_rule_as_written_stands_beside_the_call_it_judged_on_steps_three_and_five(tmp_path: Path) -> None:

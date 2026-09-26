@@ -3757,7 +3757,8 @@
       // says why.
       function planReplay(enforce) {
         const inForce = r => enforce.indexOf(ruleKeyOf(r)) !== -1;
-        const newestFirst = (a, b) => String(b.timestamp).localeCompare(String(a.timestamp));
+        // Two calls stamped in the same instant: the later lane was sent later.
+        const newestFirst = (a, b) => String(b.timestamp).localeCompare(String(a.timestamp)) || tryAgentRank(b.agent) - tryAgentRank(a.agent);
         const usable = state.observed.filter(r => inForce(r) && tryReplayable(r)).sort(newestFirst);
         const correct = usable.filter(r => state.labels[r.verdict_id] === 'correct');
         const layered = rows => rows.filter(r => !tryIsGate(ruleKeyOf(r)));
