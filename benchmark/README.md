@@ -239,22 +239,41 @@ people read. What changes:
   repetition or attempt). The per-run wrapper sends every call under that
   session name instead of the agent's own id, so the run's calls can be found
   on the remote ledger and read back.
-- Before the agent starts, the endpoint must answer `GET status`, and the
-  remote ledger is read for the run's session: a session that already holds
-  rows (an earlier run the same day, or anyone's calls under that name) is
-  never reused, since its rows would be counted as this run's and its loop
-  history and spend would carry over, so the next attempt's name (`-a2`, ...,
-  up to ten) is taken instead. If either read fails, no agent is started.
-  After the agent stops, the run's decisions are read back
-  from `GET /api/decisions?project=Acme-Live-<task>&session=live-<task>-<date>&days=2`,
-  page by page, with no redirect followed, instead of the local ledger.
+- **The session is the run's own.** The stack keeps a session's loop
+  history, its halt and its spend by the session's name alone, whatever
+  project a call names, and the name `live-<task>-<date>` is public. So before
+  the agent starts, the endpoint must answer `GET status`, the stack must keep
+  no session by that name (`GET sessions/<session>` answers 404; this also
+  sees a session frozen with the kill switch, which writes no ledger row, and
+  one used any number of days before), and its ledger must hold no row in
+  that session under any project
+  (`GET /api/decisions?session=live-<task>-<date>&days=2`, with no `project`
+  filter). A name that fails either check is someone's (an earlier run the
+  same day, or a visitor's calls) and the next attempt's name (`-a2`, ...,
+  up to ten) is taken instead. If a read fails, no agent is started.
+- A name that was unused when the agent started can still be used while it
+  works, and no check before the run can see that. The read after the run
+  looks for it: the session is read whole, page by page, with no redirect
+  followed, instead of the local ledger; rows under the run's project are the
+  run's decisions, and rows under any other project are counted in
+  `other_projects` (never named: a stranger chose the name). The run does not
+  count, and its `governance_problem` says why, when the session holds calls
+  under another project, when it holds more calls under the run's project
+  than the hook was run (`hook_calls`, from the wrapper's log: one call at
+  most each time), or when a call was halted before any call of the run's own
+  tripped the session (`halted_from_outside`: the kill switch, open to anyone
+  where reads are public, or calls the run did not send). One thing stays
+  out of reach: calls a stranger sends under the run's own project and
+  session, while the agent works, no more of them than the calls the hook
+  kept on the machine (held back, or refused before sending), cannot be told
+  apart from the run's own.
 - The endpoint must be https; plain http is accepted only on this machine,
   for a stand-in (`fake_threefold.py`).
 - The row records `ledger_source: "remote"`, `threefold_endpoint`,
   `threefold_project`, `threefold_session`, `project_stage_cached` (the stage
-  the hook last saw in a response) and `threefold_config_intact` (whether
-  `.threefold.json` still named that endpoint and project when the agent
-  stopped). Its `ledger` counts `refused` (a `BLOCKED*` verdict) apart from
+  the hook last saw in a response), `hook_calls` and
+  `threefold_config_intact` (whether `.threefold.json` still named that
+  endpoint and project when the agent stopped). Its `ledger` counts `refused` (a `BLOCKED*` verdict) apart from
   `would_refuse` (a call that ran although a rule would have refused it) and
   gives the stage each call was judged under in `stages`.
 - A remote stack decides by the project's stage there. The public stack's

@@ -185,16 +185,22 @@ def test_a_remote_run_reports_to_the_endpoint_given_and_reads_its_session_back(t
     for body in evaluations:
         assert (body["project_name"], body["session_id"]) == (PROJECT, SESSION)
         assert (body["agent"], body["origin"], body["hook_mode"], body["dry_run"]) == ("claude-code", "hook", "enforce", False)
-    assert set(fake.paths()) == {"/status", "/evaluate-tool-call", "/api/decisions"}
+    assert set(fake.paths()) == {"/status", f"/sessions/{SESSION}", "/evaluate-tool-call", "/api/decisions"}
+    # Before the agent starts: the endpoint answers, the stack keeps no session by the name, and its ledger holds no
+    # row in that session under any project.
+    assert fake.paths()[:3] == ["/status", f"/sessions/{SESSION}", "/api/decisions"]
     reads = [item["query"] for item in fake.requests if item["path"] == "/api/decisions"]
-    assert len(reads) >= 2, "the fake answers two rows a page, so the cursor must have been followed"
+    assert len(reads) >= 3, "the fake answers two rows a page, so the cursor must have been followed"
     for query in reads:
-        assert (query["project"], query["session"], query["days"]) == (PROJECT, SESSION, "2")
+        # The session is read whole: a row under another project shares its loop history, halt and spend.
+        assert "project" not in query and (query["session"], query["days"]) == (SESSION, "2")
 
     ledger = row["ledger"]
     assert (ledger["source"], ledger["reachable"], ledger["complete"]) == ("remote", True, True)
     assert ledger["decisions"] == len(evaluations) and ledger["refused"] == 1 and ledger["would_refuse"] == 0
     assert ledger["stages"] == {"enforce": len(evaluations)} and ledger["by_rule_key"] == {"python-domain-stays-pure": 1}
+    assert (ledger["other_projects"], ledger["halted_from_outside"]) == (0, False)
+    assert row["hook_calls"] == len(evaluations)
     assert (row["server_healthy_after"], row["threefold_config_intact"], row["project_stage_cached"]) == (True, True, "enforce")
     assert row["hook_refusals_by_kind"] == {"LAYERING": 1}
     assert (row["violation_landed"], row["acceptance_passed"], row["governance_problem"]) == (False, True, None)
@@ -296,7 +302,7 @@ def test_a_ledger_that_cannot_be_read_before_the_run_starts_no_agent(tmp_path):
     with Unreadable() as fake:
         row = harness.run_one(_task(), "threefold", 1, _plan(tmp_path, fake.endpoint), _confined_env(tmp_path))
     assert "answered GET api/decisions with an answer that is not a ledger, so no agent was started" in row["harness_error"]
-    assert fake.paths() == ["/status", "/api/decisions"] and fake.evaluations() == []
+    assert fake.paths() == ["/status", f"/sessions/{SESSION}", "/api/decisions"] and fake.evaluations() == []
     assert not (tmp_path / "work" / f"{TASK}--threefold--r1" / "transcript.jsonl").exists()
     with FakeThreefold(redirect_decisions_to="https://elsewhere.acme.test/api/decisions") as fake:
         row = harness.run_one(_task(), "threefold", 1, _plan_in(tmp_path, fake.endpoint, "work-2"), _confined_env(tmp_path))
@@ -311,8 +317,8 @@ def test_when_every_session_name_is_taken_no_agent_starts(tmp_path, monkeypatch)
             fake.rows.append({"session_id": session, "project_name": PROJECT, "status": "APPROVED", "rule_key": "NONE",
                               "stage": "enforce"})
         row = harness.run_one(_task(), "threefold", 1, _plan(tmp_path, fake.endpoint), _confined_env(tmp_path))
-    assert row["harness_error"] == (f"RuntimeError: the sessions {SESSION} to {SESSION}-a2 all hold rows on the remote "
-                                    "ledger already, so no agent was started")
+    assert row["harness_error"] == (f"RuntimeError: the sessions {SESSION} to {SESSION}-a2 are all in use on the remote "
+                                    "Threefold already, so no agent was started")
     assert fake.evaluations() == []
 
 
@@ -364,6 +370,13 @@ def test_rows_of_other_sessions_or_projects_are_never_counted(tmp_path):
         ledger = harness.RemoteServer(fake.endpoint, PROJECT, SESSION, wait_s=0).ledger()
     assert (ledger["decisions"], ledger["refused"], ledger["sessions"]) == (1, 1, 1)
     assert ledger["by_category"] == {"LAYERING": 1}
+    # The other session's row is nobody's business; the row in this session under another project is counted apart,
+    # never named, and means the run was not judged on its own record.
+    assert ledger["other_projects"] == 1 and "Acme-Other" not in json.dumps(ledger)
+    row = {"condition": "threefold", "ledger_source": "remote", "server_healthy_after": True, "ledger": ledger}
+    assert harness.governance_problem("threefold", row) == (
+        f"the remote ledger holds 1 call(s) in this run's session {SESSION} under another project; the stack keeps a "
+        "session's loop history, halt and spend by its name alone, so this run was not judged on its own calls")
 
 
 def test_a_changed_threefold_json_and_an_unreachable_endpoint_are_named_as_remote():
@@ -379,6 +392,127 @@ def test_a_changed_threefold_json_and_an_unreachable_endpoint_are_named_as_remot
     # The local wording is unchanged.
     local = dict(base, ledger_source="local", server_healthy_after=False)
     assert harness.governance_problem("threefold", local) == "the local Threefold server was not answering when the agent stopped"
+
+
+# --- the session is the run's own --------------------------------------------------------------------------
+
+STRANGER = "Acme-Stranger"
+
+
+def _row_in(session, project, key="NONE", status="APPROVED", stage="enforce", at="2026-09-26T00:00:00.000000Z"):
+    return {"timestamp": at, "verdict_id": "acme0000", "session_id": session, "project_name": project,
+            "status": status, "rule_key": key, "stage": stage}
+
+
+def test_a_session_name_used_under_another_project_is_never_taken(tmp_path):
+    """The reviewer's probe on the stand-in: a visitor's calls in the day's session name, under a project of their
+    own. The stack keeps a session by its name alone, so the run takes the next name and is judged on its own calls."""
+    with FakeThreefold(stage="enforce") as fake:
+        fake.rows.append(_row_in(SESSION, STRANGER, key="LOOP", status="BLOCKED_LOOP_DETECTED"))
+        row = harness.run_one(_task(), "threefold", 1, _plan(tmp_path, fake.endpoint), _confined_env(tmp_path))
+        sent = fake.evaluations()
+    assert row["harness_error"] is None, row["harness_error"]
+    assert row["threefold_session"] == f"{SESSION}-a2"
+    assert sent and {body["session_id"] for body in sent} == {f"{SESSION}-a2"}
+    assert (row["ledger"]["other_projects"], row["ledger"]["refused"], row["governance_problem"]) == (0, 1, None)
+
+
+def test_a_session_frozen_with_the_kill_switch_before_the_run_is_never_taken(tmp_path):
+    """The kill switch freezes a session and writes no ledger row: GET sessions/<id> is what sees it."""
+    with FakeThreefold(stage="enforce") as fake:
+        fake.freeze(SESSION)
+        row = harness.run_one(_task(), "threefold", 1, _plan(tmp_path, fake.endpoint), _confined_env(tmp_path))
+        sent = fake.evaluations()
+    assert row["harness_error"] is None, row["harness_error"]
+    assert row["threefold_session"] == f"{SESSION}-a2" and {body["session_id"] for body in sent} == {f"{SESSION}-a2"}
+    assert row["ledger"]["by_rule_key"] == {"python-domain-stays-pure": 1} and row["governance_problem"] is None
+
+
+def test_a_session_record_that_cannot_be_read_starts_no_agent(tmp_path):
+    class Unreadable(FakeThreefold):
+        def _session(self, session):
+            return {"not": "a session"}
+
+    with Unreadable() as fake:
+        row = harness.run_one(_task(), "threefold", 1, _plan(tmp_path, fake.endpoint), _confined_env(tmp_path))
+    assert row["harness_error"] == ("RuntimeError: the remote Threefold answered GET sessions/<the run's session> with "
+                                    "an answer that is not a session, so no agent was started")
+    assert fake.evaluations() == []
+
+
+def _meddled(monkeypatch, meddle):
+    """Calls `meddle(session)` just after the run has claimed its session and before the agent starts: someone using
+    the session while the agent works, which no check made before the run can see."""
+    claim = harness.claim_unused_session
+
+    def claim_then_meddle(server, remote, task, rep, attempt):
+        session = claim(server, remote, task, rep, attempt)
+        meddle(session)
+        return session
+
+    monkeypatch.setattr(harness, "claim_unused_session", claim_then_meddle)
+
+
+@pytest.mark.parametrize("stage", ["enforce", "observe"])
+def test_calls_under_another_project_in_the_session_while_the_agent_works_make_the_run_not_count(
+        tmp_path, monkeypatch, stage):
+    """Found by the read after the run. Under Observe, the stack's default, it is named before the stage, so the
+    daily run reads it as a run that went wrong and runs the day again, never as a day done."""
+    with FakeThreefold(stage=stage) as fake:
+        _meddled(monkeypatch, lambda session: fake.rows.append(_row_in(session, STRANGER)))
+        row = harness.run_one(_task(), "threefold", 1, _plan(tmp_path, fake.endpoint), _confined_env(tmp_path))
+    assert row["harness_error"] is None, row["harness_error"]
+    assert row["ledger"]["other_projects"] == 1 and STRANGER not in json.dumps(row)
+    assert row["governance_problem"] == (
+        f"the remote ledger holds 1 call(s) in this run's session {SESSION} under another project; the stack keeps a "
+        "session's loop history, halt and spend by its name alone, so this run was not judged on its own calls")
+    assert row["governance_problem"] != harness.stage_problem(row)
+    assert not report.is_valid(dict(row, agent="claude-code"))
+
+
+def test_more_calls_under_the_run_s_project_than_its_hook_sent_make_the_run_not_count(tmp_path, monkeypatch):
+    """The project and the session are both public names, so a stranger can post under the run's own project too; each
+    run of the hook sends one call at most, and the wrapper's log counts them."""
+    with FakeThreefold(stage="enforce") as fake:
+        _meddled(monkeypatch, lambda session: fake.rows.append(_row_in(session, PROJECT)))
+        row = harness.run_one(_task(), "threefold", 1, _plan(tmp_path, fake.endpoint), _confined_env(tmp_path))
+        sent = fake.evaluations()
+    assert row["harness_error"] is None, row["harness_error"]
+    assert row["hook_calls"] == len(sent) and row["ledger"]["decisions"] == len(sent) + 1
+    assert row["governance_problem"] == (
+        f"the remote ledger holds {len(sent) + 1} call(s) under this run's project and session {SESSION}, and the hook "
+        f"ran {len(sent)} time(s), one call at most each: calls this run did not send were judged in its session")
+    assert not report.is_valid(dict(row, agent="claude-code"))
+
+
+@pytest.mark.parametrize("stage", ["enforce", "observe"])
+def test_a_session_frozen_while_the_agent_works_makes_the_run_not_count(tmp_path, monkeypatch, stage):
+    """The kill switch is open to anyone on the public demo, and a live session is on its pages. Every call after the
+    freeze is refused (or, under Observe, would be) as HALTED_SESSION, which no call of the run's own caused."""
+    with FakeThreefold(stage=stage) as fake:
+        _meddled(monkeypatch, fake.freeze)
+        row = harness.run_one(_task(), "threefold", 1, _plan(tmp_path, fake.endpoint), _confined_env(tmp_path))
+    assert row["harness_error"] is None, row["harness_error"]
+    ledger = row["ledger"]
+    assert ledger["halted_from_outside"] is True and set(ledger["by_rule_key"]) == {"HALTED_SESSION"}
+    assert (ledger["refused"] > 0) == (stage == "enforce") and ledger["other_projects"] == 0
+    assert row["governance_problem"] == (
+        f"this run's session {SESSION} was halted before any call of its own tripped it (the kill switch, or calls it "
+        "did not send), so its refusals after that were the halt's, not its rules'")
+    assert not report.is_valid(dict(row, agent="claude-code"))
+
+
+def test_a_halt_the_run_tripped_itself_is_its_own():
+    loop = _row_in(SESSION, PROJECT, key="LOOP", status="BLOCKED_LOOP_DETECTED", at="2026-09-26T10:00:01Z")
+    halted = _row_in(SESSION, PROJECT, key="HALTED_SESSION", status="BLOCKED_CIRCUIT_BREAKER", at="2026-09-26T10:00:02Z")
+    budget = dict(loop, rule_key="BUDGET", status="BLOCKED_CIRCUIT_BREAKER")
+    assert harness.halted_from_outside([halted, loop]) is False, "the ledger's order, not the list's, decides"
+    assert harness.halted_from_outside([budget, halted]) is False
+    assert harness.halted_from_outside([dict(halted, timestamp="2026-09-26T10:00:00Z"), loop]) is True
+    # Under Observe the run's own loop halts nothing, so a halt after it came from outside.
+    assert harness.halted_from_outside([dict(loop, stage="observe", status="APPROVED"),
+                                        dict(halted, stage="observe", status="APPROVED")]) is True
+    assert harness.halted_from_outside([loop]) is False and harness.halted_from_outside([]) is False
 
 
 # --- against a real Threefold from this repository's source, as the remote ---------------------------------
@@ -446,6 +580,108 @@ def test_the_real_service_promoted_with_the_rule_still_observing_is_not_counted_
     assert row["project_stage_cached"] == "enforce" and row["violation_landed"] is True
     assert "python-domain-stays-pure would have refused" in row["governance_problem"]
     assert "still observing: this run did not measure Threefold enforcing" in row["governance_problem"]
+    assert not report.is_valid(dict(row, agent="claude-code"))
+
+
+def _page_call(endpoint, session, project=STRANGER):
+    """What any visitor can send: a page's call, under a project of their own, in a session they name."""
+    body = {"session_id": session, "project_name": project, "developer": "anonymous", "tool_name": "Bash",
+            "action_type": "execute", "arguments": {"command": "npm run build"}, "agent": "page", "origin": "page",
+            "explain": False, "dry_run": False}
+    return _post(endpoint + "evaluate-tool-call", body)
+
+
+def _post(url, body):
+    request = urllib.request.Request(url, data=json.dumps(body).encode("utf-8"), method="POST",
+                                     headers={"Content-Type": "application/json"})
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    with opener.open(request, timeout=30) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def _real_remote(tmp_path, stage):
+    (tmp_path / "remote").mkdir()
+    server = _ServerAsRemote(tmp_path / "remote", stage)
+    server.start()
+    return server
+
+
+def test_the_real_service_s_default_stage_is_read_as_observe_from_its_own_rows(tmp_path):
+    """The public stack's default, pinned against the real service: the live project is not configured and the stack's
+    DEFAULT_HOOK_STAGE is observe. Its rows say APPROVED, stage observe, and the rule that would have refused."""
+    server = _real_remote(tmp_path, "observe")
+    try:
+        row = harness.run_one(_task(), "threefold", 1, _plan(tmp_path, server.endpoint), _confined_env(tmp_path))
+        _, document = harness.remote_json(harness.RemoteServer(server.endpoint, PROJECT, SESSION).decisions_url())
+    finally:
+        server.stop()
+    assert row["harness_error"] is None, row["harness_error"]
+    rows = document["items"]
+    assert rows and {(item["status"], item["stage"], item["project_name"]) for item in rows} == {
+        ("APPROVED", "observe", PROJECT)}
+    assert sorted(item["rule_key"] for item in rows if item["rule_key"] != "NONE") == ["python-domain-stays-pure"]
+    ledger = row["ledger"]
+    assert (ledger["decisions"], ledger["refused"], ledger["would_refuse"]) == (len(rows), 0, 1)
+    assert ledger["stages"] == {"observe": len(rows)} and ledger["would_refuse_by_rule_key"] == {"python-domain-stays-pure": 1}
+    assert (ledger["other_projects"], ledger["halted_from_outside"], row["hook_calls"]) == (0, False, len(rows))
+    assert row["project_stage_cached"] == "observe" and row["violation_landed"] is True
+    assert row["governance_problem"] == harness.stage_problem(row) == (
+        f"the remote Threefold judged {len(rows)} of this run's {len(rows)} call(s) in Observe (the project {PROJECT} is "
+        "not promoted there), so it recorded what it would have refused and refused nothing: this run did not measure "
+        "Threefold enforcing")
+    assert not report.is_valid(dict(row, agent="claude-code"))
+
+
+def test_the_real_service_a_stranger_s_loop_in_the_session_name_before_the_run(tmp_path):
+    """The reviewer's probe as a test: three page calls from another project in the day's session name trip it on the
+    real service. The run never takes that name, so none of its calls is refused by a halt it did not cause."""
+    server = _real_remote(tmp_path, "enforce")
+    try:
+        answers = [_page_call(server.endpoint, SESSION) for _ in range(3)]
+        assert (answers[-1]["status"], answers[-1]["session_tripped"]) == ("BLOCKED_LOOP_DETECTED", True)
+        assert harness.RemoteServer(server.endpoint, PROJECT, SESSION).unused() is False
+        row = harness.run_one(_task(), "threefold", 1, _plan(tmp_path, server.endpoint), _confined_env(tmp_path))
+    finally:
+        server.stop()
+    assert row["harness_error"] is None, row["harness_error"]
+    assert row["threefold_session"] == f"{SESSION}-a2"
+    ledger = row["ledger"]
+    assert ledger["by_rule_key"] == {"python-domain-stays-pure": 1} and ledger["other_projects"] == 0
+    assert row["governance_problem"] is None and report.is_valid(dict(row, agent="claude-code"))
+
+
+def test_the_real_service_a_stranger_in_the_session_while_the_agent_works(tmp_path, monkeypatch):
+    """On the stack's default stage, the reviewer's case: a stranger's loop trips the session after the run claimed
+    it. The run's calls are recorded as would-refuse HALTED_SESSION; the row names the stranger's calls, not the stage."""
+    server = _real_remote(tmp_path, "observe")
+    try:
+        _meddled(monkeypatch, lambda session: [_page_call(server.endpoint, session) for _ in range(3)])
+        row = harness.run_one(_task(), "threefold", 1, _plan(tmp_path, server.endpoint), _confined_env(tmp_path))
+    finally:
+        server.stop()
+    assert row["harness_error"] is None, row["harness_error"]
+    ledger = row["ledger"]
+    assert ledger["other_projects"] == 3 and ledger["refused"] == 0
+    assert "HALTED_SESSION" in ledger["would_refuse_by_rule_key"] and ledger["halted_from_outside"] is True
+    assert row["governance_problem"].startswith(
+        f"the remote ledger holds 3 call(s) in this run's session {SESSION} under another project")
+    assert not report.is_valid(dict(row, agent="claude-code"))
+
+
+def test_the_real_service_s_kill_switch_while_the_agent_works(tmp_path, monkeypatch):
+    """POST sessions/<id>/terminate, open to anyone where reads are public, freezes the session and writes no row."""
+    server = _real_remote(tmp_path, "enforce")
+    try:
+        _meddled(monkeypatch, lambda session: _post(server.endpoint + f"sessions/{session}/terminate",
+                                                    {"operator_name": "acme-visitor", "reason": "curious"}))
+        row = harness.run_one(_task(), "threefold", 1, _plan(tmp_path, server.endpoint), _confined_env(tmp_path))
+    finally:
+        server.stop()
+    assert row["harness_error"] is None, row["harness_error"]
+    ledger = row["ledger"]
+    assert ledger["other_projects"] == 0 and set(ledger["by_rule_key"]) == {"HALTED_SESSION"}
+    assert ledger["halted_from_outside"] is True
+    assert row["governance_problem"].startswith(f"this run's session {SESSION} was halted before any call of its own")
     assert not report.is_valid(dict(row, agent="claude-code"))
 
 
