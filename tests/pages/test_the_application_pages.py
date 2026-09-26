@@ -1579,6 +1579,60 @@ def test_the_walkthrough_builds_a_quiet_rule_s_write_from_the_rule_and_sends_not
     assert out["nonePromoted"] == 0 and "Check at least one rule to promote" in out["noneError"]
 
 
+# A phone of 375px: every `max-width` query up to that width matches, the page
+# is scrolled down a long step, and each scroll the page asks for is recorded.
+PHONE = r"""
+globalThis.matchMedia = q => {
+  const m = /max-width:\s*(\d+)px/.exec(String(q));
+  return { matches: !!m && 375 <= Number(m[1]), media: String(q), addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} };
+};
+globalThis.scrollY = 1087;
+const scrolled = [];
+globalThis.scrollTo = (x, y) => { scrolled.push(y); };
+"""
+
+PHONE_WALK = r"""
+  await visit('#/try');
+  await click('try-restart'); await tick();
+  await click('try-create'); await tick();
+  await click('try-show'); await tick();
+  await click('try-review'); await tick();
+  const stack = view();
+  const card = (/<article class="tf-try-card"[\s\S]*?<\/article>/.exec(stack) || [''])[0];
+  const bar = stack.slice(stack.indexOf('class="tf-try-actions"'));
+  out.onCard = card.indexOf('id="try-correct"') !== -1 && card.indexOf('id="try-false"') !== -1;
+  out.inBar = bar.indexOf('id="try-correct"') !== -1 && bar.indexOf('id="try-false"') !== -1 && bar.indexOf('class="tf-try-thumb"') !== -1;
+  await click('try-label', { 'data-verdict': 'VERDICT-1', 'data-label': 'correct' });
+  await click('try-label', { 'data-verdict': 'VERDICT-2', 'data-label': 'correct' });
+  await tick();
+  await click('try-readiness'); await tick();
+  // The reader scrolls down the list of rules, so the stage's top is far above.
+  el('try-stage').getBoundingClientRect = () => ({ top: -900, height: 2400 });
+  el('try-rail').getBoundingClientRect = () => ({ top: 56, height: 52 });
+  const before = typeof scrolled === 'undefined' ? 0 : scrolled.length;
+  await click('try-promote'); await tick();
+  out.scrolls = typeof scrolled === 'undefined' ? null : scrolled.slice(before);
+  out.promoted = text(view());
+"""
+
+
+def test_on_a_phone_the_labels_sit_under_the_thumb_and_a_promotion_plays_in_view(tmp_path: Path) -> None:
+    """Below 640px the two labels move to the sticky bar; on a desk they stay on the card.
+
+    And a promotion made from the bar at the foot of a long list of rules takes
+    the reader back up to the stage's top, where the switch slides and the
+    chip turns from Observe to Enforce: at 375px they once played 500 to 800px
+    above the screen, and the reader saw none of it.
+    """
+    phone = dash(REPLAY + PHONE_WALK, tmp_path, before=PHONE)
+    desk = dash(REPLAY + PHONE_WALK, tmp_path)
+    assert phone["inBar"] is True and phone["onCard"] is False, "On a phone the labels are not in the thumb bar"
+    assert desk["onCard"] is True and desk["inBar"] is False, "On a desk the labels left the card"
+    assert "Now in Enforce" in phone["promoted"]
+    # The stage's top, less the header and the sticky rail: -900 + 1087 - 56 - 52 - 12.
+    assert phone["scrolls"] == [67], "The promotion did not bring the stage back into view"
+
+
 def test_the_flagged_cards_name_the_whole_command_and_an_import_the_reason_cut(tmp_path: Path) -> None:
     """A card never shows a cut import as the thing a call imported, nor a program as the command.
 

@@ -3415,7 +3415,10 @@
           </section>
         </div>`);
         if (!ctx.alive()) return;
-        if (play.enter) scrollToStage();
+        // A promotion plays at the top of the stage (the title, the chip and
+        // the switch), while the button that made it sits in the bar at the
+        // foot of a long list; on a phone the reader is taken back up to it.
+        if (play.enter || play.promote) scrollToStage();
         const id = state.focusId;
         state.focusId = null;
         if (id) {
