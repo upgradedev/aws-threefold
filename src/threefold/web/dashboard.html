@@ -1013,8 +1013,9 @@
         const project = String(row.project_name || '');
         const rule = ruleKeyOf(row);
         const key = project + '\u0000' + rule;
-        if (!groups[key]) { groups[key] = { project, rule, count: 0 }; order.push(key); }
+        if (!groups[key]) { groups[key] = { project, rule, count: 0, refused: 0 }; order.push(key); }
         groups[key].count += 1;
+        if (outcomeOf(row) === 'refused') groups[key].refused += 1;
       });
       const list = order.map(k => groups[k]).sort((a, b) => b.count - a.count || a.rule.localeCompare(b.rule));
       const partial = att.noisy.partial ? html`<p class="tf-ops-att-note">Counted over the newest ${plural(att.noisy.rows.length, 'false alarm')}; the ledger holds more.</p>` : '';
@@ -1022,12 +1023,20 @@
         return attSlot({ slot: 'noisy', tone: 'ok', icon: 'check', kicker, title: 'No rule turned noisy',
           body: html`<p class="tf-ops-att-note">No call from ${windowWords(days)} is marked a false alarm.</p>${apart}${partial}` });
       }
+      // How loud the slot is follows what the false alarms cost. A rule that
+      // refused a call marked a false alarm stopped work it should not have:
+      // that is the refused colour. One whose false alarms were all calls it
+      // only watched refused nothing; its flags were would-refuse calls, so
+      // it takes their colour, and the note says it refused nothing.
+      const bit = list.filter(g => g.refused > 0);
       return attSlot({
-        slot: 'noisy', tone: 'danger', icon: 'alert', kicker,
+        slot: 'noisy', tone: bit.length ? 'danger' : 'warn', icon: 'alert', kicker,
         title: html`${plural(list.length, 'rule')} turned noisy`,
-        body: html`<ul class="tf-ops-att-list">${list.slice(0, 3).map(g => html`<li><a href="${projectHref(g.project)}" title="Open the project: keep the rule observing, or refine it, before it enforces"><span class="tf-ops-att-what"><span class="font-mono text-gray-200">${g.rule}</span> <span class="text-gray-500">in</span> <span class="font-mono">${T.projectName(g.project)}</span></span><span class="tf-ops-att-n">${plural(g.count, 'false alarm')}</span></a></li>`)}</ul>
+        body: html`<ul class="tf-ops-att-list">${list.slice(0, 3).map(g => html`<li><a href="${projectHref(g.project)}" title="${g.refused ? 'Open the project: it refused calls marked false alarm; go back to Observe, or refine the rule' : 'Open the project: keep the rule observing, or refine it, before it enforces'}"><span class="tf-ops-att-what"><span class="font-mono text-gray-200">${g.rule}</span> <span class="text-gray-500">in</span> <span class="font-mono">${T.projectName(g.project)}</span></span><span class="tf-ops-att-n">${plural(g.count, 'false alarm')}${g.refused ? html` <span class="text-rose-300">· ${num(g.refused)} refused</span>` : ''}</span></a></li>`)}</ul>
           ${list.length > 3 ? html`<p class="tf-ops-att-note">and ${plural(list.length - 3, 'more rule')}.</p>` : ''}
-          <p class="tf-ops-att-note">Keep each observing, or refine it, before it enforces.</p>${apart}${partial}`,
+          <p class="tf-ops-att-note">${bit.length
+            ? html`${bit.length === list.length ? (list.length === 1 ? 'It' : 'Each') : plural(bit.length, 'of them', 'of them')} refused a call marked false alarm: go back to Observe, or refine the rule.`
+            : list.length === 1 ? 'It only watched, so it refused nothing. Refine it before it enforces.' : 'They only watched, so they refused nothing. Refine each before it enforces.'}</p>${apart}${partial}`,
         foot: html`<a class="tf-btn tf-btn-sm" href="${callsHref({ review: 'false_alarm', days })}">The calls marked false alarm</a>`
       });
     }

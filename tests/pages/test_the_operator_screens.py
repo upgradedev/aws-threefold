@@ -44,7 +44,7 @@ def test_the_overview_leads_with_what_needs_the_operator(tmp_path: Path) -> None
   answer = contract({
     '/api/decisions': { status: 200, body: { items: [
       falseAlarm(1, 'Acme-Ledger', 'java-domain-stays-pure'), falseAlarm(2, 'Acme-Ledger', 'java-domain-stays-pure'),
-      falseAlarm(3, 'Acme-Checkout', 'PROTECTED_PATH'), row(4)
+      Object.assign(falseAlarm(3, 'Acme-Checkout', 'PROTECTED_PATH'), { status: 'BLOCKED_PROTECTED_PATH', observed_rules: [], observed_rule: '' }), row(4)
     ], next_cursor: null } },
     '/api/sessions': { status: 200, body: { sessions: [
       session('fleet-ledger-codex-1', 'Acme-Ledger', true), session('sim-0a1b2c3d', 'Acme-Demo', true), session('fleet-ledger-codex-2', 'Acme-Ledger', false)
@@ -68,6 +68,8 @@ def test_the_overview_leads_with_what_needs_the_operator(tmp_path: Path) -> None
     assert 'href="#/review?days=7"' in page, "The strip starts the review in the same window"
     # Rules a false alarm made noisy, from the ledger's labels, and only those.
     assert "2 rules turned noisy" in words and "2 false alarms" in words and "1 false alarm" in words
+    # PROTECTED_PATH's false alarm is on a call it refused: a rule that bit wrong is the refused colour.
+    assert re.search(r'data-tone="danger" data-slot="noisy"', page) and "refused a call marked false alarm" in words
     assert page.index("java-domain-stays-pure") < page.index("PROTECTED_PATH"), "The noisiest rule first"
     assert "https://example.test/prod/api/decisions?review=false_alarm&days=7&limit=200" in out["reads"]
     # Halted sessions, leaving out the demo page's own scenarios.
@@ -177,6 +179,8 @@ def test_the_strip_leaves_out_what_halts_or_misfires_on_purpose(tmp_path: Path) 
     reviews, noisy, halted = out["reviews"], out["noisy"], out["halted"]
     assert reviews.index("Acme-Ledger") < reviews.index("Acme-Sandbox-0a1b2c3d"), "The operator's own projects lead a visitor's sandbox"
     assert "1 rule turned noisy" in noisy and "LOOP" in noisy and "python-domain-stays-pure" not in noisy
+    assert 'data-slot="noisy"' in out["operator"] and re.search(r'data-tone="warn" data-slot="noisy"', out["operator"]), "A rule that only watched is flagged in the would-refuse colour"
+    assert "It only watched, so it refused nothing." in noisy
     assert "Left out: 2 false alarms in visitors' sandboxes, where the walkthrough asks for one." in noisy
     assert "1 session halted" in halted and "fleet-ledger-codex-1" in halted
     assert "probe-20260926a" not in halted and "sim-0a1b2c3d" not in halted, "The probes and the demo's scenarios halt on purpose"
