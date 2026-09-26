@@ -173,6 +173,13 @@
     .tf-ops-qrow-actions .tf-kbd { margin-left: 2px; }
     .tf-ops-group-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 10px 16px; }
     .tf-ops-group-title { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font: 600 0.875rem/1.375rem var(--tf-font-sans); color: var(--tf-text); }
+    section[data-open="false"] .tf-ops-qrow-body { opacity: 0.78; }
+    /* Signed out on the public demo: which groups a visitor may label. */
+    .tf-ops-visitor { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px 14px; padding: 12px 16px; border-radius: var(--tf-radius-md); background: var(--tf-info-soft); border: 1px solid var(--tf-info-line); }
+    .tf-ops-visitor > .tf-icon { width: 18px; height: 18px; margin-top: 1px; color: var(--tf-info-text); flex-shrink: 0; }
+    .tf-ops-visitor > div:nth-child(2) { flex: 1 1 22rem; }
+    /* Keyboard hints are for a keyboard: not on a phone or a touch screen. */
+    @media (max-width: 767px), (hover: none) and (pointer: coarse) { .tf-ops-kbd-hint { display: none !important; } }
 
     /* A call, as an incident card: what was tried, what was said, the rule, the fix. */
     .tf-ops-incident { padding: var(--tf-space-3); border-radius: var(--tf-radius-xl); border: 1px solid var(--tf-hairline-strong); background: var(--tf-surface-1); box-shadow: var(--tf-shadow-2); }
@@ -431,6 +438,9 @@
     }
 
     function plural(n, one, many) { return num(n) + ' ' + (n === 1 ? one : (many || one + 's')); }
+    // A message the service wrote, without the full stop it may end in, so a
+    // sentence built around it does not end in two.
+    function trimStop(text) { return String(text || '').replace(/[.\s]+$/, ''); }
 
     // Self-correction, as the overview and a project's page both word it. It
     // counts only an agent's refusals, from a hook or CI, of a call to a file:
@@ -1698,24 +1708,48 @@
     // refuses them.
     const REVIEW_KEYS = [['J', 'next'], ['K', 'previous'], ['C', 'correct'], ['F', 'false alarm'], ['U', 'undo the last label']];
 
+    // The one kind of project anyone may label on the public demo: a visitor's
+    // sandbox, named as POST /api/sandbox names it. Every other project's
+    // labels are the operator's.
+    const SANDBOX_NAME = /^Acme-Sandbox-[0-9a-f]{8}$/;
+
+    // Whether this reader may label a project's calls: the operator always; on
+    // a stack that lets anyone write sandboxes, anyone, in a sandbox. A stack
+    // that did not say who is reading is not second-guessed: the service
+    // answers a label it refuses, and the queue puts the call back.
+    function mayLabel(who, project) {
+      if (!who || who.authenticated === true) return true;
+      return who.sandbox_writes === true && SANDBOX_NAME.test(String(project || ''));
+    }
+    function isVisitor(who) { return !!who && who.authenticated !== true; }
+
     function viewReview(ctx) {
       const project = T.PROJECT_PATTERN.test(ctx.params.project || '') ? ctx.params.project : '';
       const rule = /^[A-Za-z0-9_.:-]{1,80}$/.test(ctx.params.rule || '') ? ctx.params.rule : '';
       const days = pickDays(ctx.params.days, 30);
       const sub = 'Calls a rule in Observe would have refused and nobody has labelled. Correct if the rule was right to flag it, False alarm if the call should run. A rule becomes Ready when everything it flagged is correct.';
-      // `current` is the row the keyboard is on, counted across every group
-      // in the order they are drawn. `labelled` holds the rows labelled on
-      // this visit and still labelled; `saved` the batches Undo can take back.
-      const state = { items: [], cursor: null, loadingMore: false, error: null, current: 0, labelled: {}, saved: [] };
+      // `order` is this visit's group order. It is fixed when the queue is
+      // first drawn, so a label never moves the group being worked, and a
+      // group first seen later (Load more, an undo) joins at the end. `at` is
+      // the row the keyboard is on, held by its key rather than its place, so
+      // a label anywhere else cannot move it. `notes` keeps each group's note
+      // across redraws. `labelled` holds the rows labelled on this visit and
+      // still labelled; `saved` the batches Undo can take back. `engaged` is
+      // set once the reader works the queue, and from then on a redraw hands
+      // focus back to the row the keyboard is on.
+      const state = { items: [], cursor: null, loadingMore: false, who: null, order: [], at: null, notes: {}, labelled: {}, saved: [], engaged: false };
       ctx.render(loadingView('Review', sub, ['table']));
 
       function fetchPage(cursor) {
         return T.api('/api/decisions' + query({ kind: 'observed', review: 'unreviewed', days, project, rule, limit: 200, cursor }));
       }
 
+      // Who is reading decides which groups can be labelled here, and on the
+      // public demo it puts those first, so it is read with the first page.
       function load() {
-        return fetchPage(null).then(body => {
+        return Promise.all([fetchPage(null), T.whoami()]).then(([body, who]) => {
           if (!ctx.alive()) return;
+          state.who = who || null;
           state.items = (body && Array.isArray(body.items)) ? body.items.filter(r => !r.review) : [];
           state.cursor = body && body.next_cursor ? body.next_cursor : null;
           draw();
@@ -1724,30 +1758,71 @@
         });
       }
 
+      const rowKey = r => r.verdict_id + '|' + r.timestamp;
+      const groupKey = r => JSON.stringify([r.project_name || '', ruleKeyOf(r)]);
+
       // A group is one rule in one project, because a label is written to that
-      // project's own route. The rule with the most waiting leads, and its
-      // projects follow it, so what one rule flagged is read together. Each
-      // group keeps its calls newest first.
-      function groups() {
-        const map = {};
-        const order = [];
-        state.items.forEach(row => {
-          const key = JSON.stringify([row.project_name || '', ruleKeyOf(row)]);
-          if (!map[key]) { map[key] = { key, project: row.project_name || '', rule: ruleKeyOf(row), items: [] }; order.push(key); }
-          map[key].items.push(row);
-        });
+      // project's own route. Groups a reader may label lead; then the rule
+      // with the most waiting, with its projects after it, so what one rule
+      // flagged is read together. The order is taken once and then kept.
+      function settleOrder(list) {
+        const known = {};
+        state.order.forEach(k => { known[k] = true; });
+        const fresh = list.filter(g => !known[g.key]);
+        if (!fresh.length) return;
         const perRule = {};
         state.items.forEach(row => { const r = ruleKeyOf(row); perRule[r] = (perRule[r] || 0) + 1; });
-        return order.map(k => map[k]).sort((a, b) =>
+        const open = g => (mayLabel(state.who, g.project) ? 1 : 0);
+        fresh.sort((a, b) => open(b) - open(a) ||
           (perRule[b.rule] || 0) - (perRule[a.rule] || 0) || a.rule.localeCompare(b.rule) ||
           b.items.length - a.items.length || a.project.localeCompare(b.project));
+        state.order = state.order.concat(fresh.map(g => g.key));
       }
 
-      // Every row, in the order the groups draw them, with the group it is in.
+      // The groups on screen, in this visit's order. Each keeps its calls
+      // newest first, and its place in the order names its note and heading.
+      function groups() {
+        const map = {};
+        const keys = [];
+        state.items.forEach(row => {
+          const key = groupKey(row);
+          if (!map[key]) { map[key] = { key, project: row.project_name || '', rule: ruleKeyOf(row), items: [] }; keys.push(key); }
+          map[key].items.push(row);
+        });
+        settleOrder(keys.map(k => map[k]));
+        return state.order.filter(k => map[k]).map(k => Object.assign(map[k], { slot: state.order.indexOf(k), open: mayLabel(state.who, map[k].project) }));
+      }
+
+      // Every row, in the order the groups draw them, with its group.
       function ordered(list) {
         const rows = [];
-        (list || groups()).forEach((g, gi) => g.items.forEach(row => rows.push({ row, gi })));
+        (list || groups()).forEach(g => g.items.forEach(row => rows.push({ row, g })));
         return rows;
+      }
+
+      // Where the keyboard is: the row held in `at`, or the first row when
+      // that one has left the queue some other way.
+      function currentIndex(rows) {
+        const at = rows.findIndex(x => rowKey(x.row) === state.at);
+        if (at >= 0) return at;
+        state.at = rows.length ? rowKey(rows[0].row) : null;
+        return rows.length ? 0 : -1;
+      }
+
+      // Before rows leave the queue: if the keyboard is on one of them, it
+      // moves to the next row that stays, in the same group while one is left,
+      // or else to the one before.
+      function stepAside(leaving) {
+        const rows = ordered();
+        const here = currentIndex(rows);
+        if (here < 0 || !leaving[state.at]) return;
+        for (let i = here + 1; i < rows.length; i++) {
+          if (!leaving[rowKey(rows[i].row)]) { state.at = rowKey(rows[i].row); return; }
+        }
+        for (let i = here - 1; i >= 0; i--) {
+          if (!leaving[rowKey(rows[i].row)]) { state.at = rowKey(rows[i].row); return; }
+        }
+        state.at = null;
       }
 
       function filters() {
@@ -1758,6 +1833,8 @@
       }
 
       function labelledCount() { return Object.keys(state.labelled).length; }
+
+      function signinHref() { return '#/signin' + query({ next: '/review' + query({ days, project, rule }) }); }
 
       function progress(list) {
         const waiting = state.items.length;
@@ -1771,6 +1848,26 @@
         </div>`;
       }
 
+      // On the public demo, signed out: which of these groups a visitor may
+      // label, said before a key is pressed rather than after one fails.
+      function visitorNote(list) {
+        if (!isVisitor(state.who)) return '';
+        const open = list.filter(g => g.open);
+        return html`<div class="tf-ops-visitor mb-4" role="note" data-visitor="${open.length ? 'some' : 'none'}">
+          ${T.icon('lock', 18)}
+          <div class="min-w-0 space-y-1">
+            <p class="text-sm text-white font-medium">${open.length
+              ? html`You can label the ${plural(open.length, 'group')} from visitors' sandboxes, which come first.`
+              : 'You are not signed in, and none of these groups is a sandbox\'s.'}</p>
+            <p class="text-xs text-gray-400">Anyone may label a sandbox's calls on this public demo. The other projects' labels are the operator's; their groups read Operator only.</p>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <a class="tf-btn tf-btn-sm${open.length ? '' : ' tf-btn-primary'}" href="#/try">Try it with your own sandbox</a>
+            <a class="tf-btn tf-btn-quiet tf-btn-sm" href="${signinHref()}">${T.icon('signin', 14)}Sign in</a>
+          </div>
+        </div>`;
+      }
+
       function keysLegend() {
         return html`<div class="tf-ops-keys mb-4 hidden md:flex" role="note" aria-label="Keyboard">
           <span class="text-gray-300 font-semibold">${T.icon('command', 14)}Keyboard</span>
@@ -1779,10 +1876,43 @@
         </div>`;
       }
 
+      function groupActions(g) {
+        if (!g.open) {
+          return html`<div class="flex flex-wrap items-center gap-2">
+            <span class="tf-chip tf-chip-gray" title="Only the operator may label this project's calls">${T.icon('lock', 13)}Operator only</span>
+            <a class="tf-btn tf-btn-quiet tf-btn-sm" href="${signinHref()}">Sign in to label</a>
+          </div>`;
+        }
+        return html`<div class="flex flex-wrap gap-2">
+          <button type="button" class="tf-btn tf-btn-good tf-btn-sm" data-action="label-group" data-group="${g.key}" data-label="correct">${T.icon('check', 14)}All ${g.items.length} correct</button>
+          <button type="button" class="tf-btn tf-btn-danger tf-btn-sm" data-action="label-group" data-group="${g.key}" data-label="false_alarm">All false alarm</button>
+        </div>`;
+      }
+
+      function rowActions(row, g, here) {
+        if (!g.open) return '';
+        const hint = key => here ? html`<kbd class="tf-kbd tf-ops-kbd-hint" aria-hidden="true">${key}</kbd>` : '';
+        return html`<div class="tf-ops-qrow-actions">
+          <button type="button" class="tf-btn tf-btn-good tf-btn-sm" data-action="label-one" data-verdict="${row.verdict_id}" data-timestamp="${row.timestamp}" data-label="correct" aria-label="Correct: ${row.tool_name} ${targetOf(row)}">Correct${hint('C')}</button>
+          <button type="button" class="tf-btn tf-btn-danger tf-btn-sm" data-action="label-one" data-verdict="${row.verdict_id}" data-timestamp="${row.timestamp}" data-label="false_alarm" aria-label="False alarm: ${row.tool_name} ${targetOf(row)}">False alarm${hint('F')}</button>
+        </div>`;
+      }
+
+      // Focus that a redraw took away: nowhere, the page itself, or a row the
+      // redraw replaced.
+      function focusLost() {
+        const a = document.activeElement;
+        if (!a || (document.body && a === document.body)) return true;
+        if (typeof a.isConnected === 'boolean' && !a.isConnected) return true;
+        return /^qrow-/.test(String(a.id || ''));
+      }
+
       function draw() {
+        const before = document.activeElement;
+        const typing = before && /^note-/.test(String(before.id || '')) ? before.id : '';
         const list = groups();
         const rows = ordered(list);
-        if (state.current >= rows.length) state.current = Math.max(0, rows.length - 1);
+        const here = currentIndex(rows);
         const scope = [project && html`<span class="font-mono">${T.projectName(project)}</span>`, rule && html`rule <span class="font-mono">${rule}</span>`].filter(Boolean);
         const head = pageTitle('Review', sub, filters());
         if (!list.length) {
@@ -1799,17 +1929,19 @@
               <p id="review-error" class="text-xs text-rose-300" role="alert"></p>
               <div class="flex flex-wrap gap-2"><a class="tf-btn tf-btn-primary" href="${project ? projectHref(project) : '#/projects'}">${project ? html`Open ${T.projectName(project)}` : 'Open the projects'}</a><a class="tf-btn" href="${callsHref({ kind: 'observed', days, project })}">See the labelled calls</a></div>
             </div>`);
+          if (state.engaged && focusLost()) focusTitle();
           return;
         }
         let index = -1;
         ctx.render(html`${head}
           ${progress(list)}
+          ${visitorNote(list)}
           ${keysLegend()}
           <p id="review-error" class="text-xs text-rose-300 mb-3" role="alert"></p>
-          <div class="space-y-4">${list.map((g, gi) => html`<section class="tf-card p-4 md:p-5 space-y-3" aria-labelledby="group-${gi}">
+          <div class="space-y-4">${list.map(g => html`<section class="tf-card p-4 md:p-5 space-y-3" aria-labelledby="group-${g.slot}" data-open="${g.open ? 'true' : 'false'}">
             <div class="tf-ops-group-head">
               <div class="min-w-0">
-                <h2 id="group-${gi}" class="tf-ops-group-title">
+                <h2 id="group-${g.slot}" class="tf-ops-group-title">
                   <span class="tf-chip tf-chip-amber font-mono">${T.icon('eye', 13)}${g.rule}</span>
                   <span class="text-xs font-normal text-gray-500">in</span>
                   <a href="${projectHref(g.project)}" class="tf-link-quiet font-mono tf-break">${T.projectName(g.project)}</a>
@@ -1817,49 +1949,54 @@
                 </h2>
                 <p class="tf-section-sub">${GATE_KEYS[g.rule] || 'A layering rule: what a layer of the code may not import'}</p>
               </div>
-              <div class="flex flex-wrap gap-2">
-                <button type="button" class="tf-btn tf-btn-good tf-btn-sm" data-action="label-group" data-group="${g.key}" data-label="correct">${T.icon('check', 14)}All ${g.items.length} correct</button>
-                <button type="button" class="tf-btn tf-btn-danger tf-btn-sm" data-action="label-group" data-group="${g.key}" data-label="false_alarm">All false alarm</button>
-              </div>
+              ${groupActions(g)}
             </div>
-            <label class="block"><span class="sr-only">Note for the labels you set in this group</span>
-              <input id="note-${gi}" type="text" maxlength="200" class="tf-input tf-input-sm w-full md:max-w-lg" placeholder="Optional note, sent with the labels you set in this group" /></label>
+            ${g.open ? html`<label class="block"><span class="sr-only">Note for the labels you set in this group</span>
+              <input id="note-${g.slot}" type="text" maxlength="200" class="tf-input tf-input-sm w-full md:max-w-lg" data-change="note" data-group="${g.key}" value="${state.notes[g.key] || ''}" placeholder="Optional note, sent with the labels you set in this group" /></label>` : ''}
             <ul class="tf-ops-queue">${g.items.map(row => {
               index += 1;
-              const here = index === state.current;
-              return html`<li id="qrow-${index}" class="tf-ops-qrow" tabindex="-1" data-current="${here ? 'true' : 'false'}" data-action="queue-pick" data-index="${index}"${here ? raw(' aria-current="true"') : ''}>
+              const on = index === here;
+              return html`<li id="qrow-${index}" class="tf-ops-qrow" tabindex="-1" data-current="${on ? 'true' : 'false'}" data-action="queue-pick" data-row="${rowKey(row)}"${on ? raw(' aria-current="true"') : ''}>
               <div class="tf-ops-qrow-body">
                 <p class="text-xs"><span class="font-mono text-gray-200">${row.tool_name}</span> <span class="font-mono text-gray-400 tf-break">${targetOf(row)}</span></p>
                 <p class="text-[11px] text-gray-300 tf-break">${reasonOf(row)}</p>
                 <p class="text-[11px] text-gray-500">${agentLabel(row.agent)} · <span title="${dateTime(row.timestamp)}">${timeAgo(row.timestamp)}</span> · <a class="tf-link" href="${callHref(row)}">details</a></p>
               </div>
-              <div class="tf-ops-qrow-actions">
-                <button type="button" class="tf-btn tf-btn-good tf-btn-sm" data-action="label-one" data-verdict="${row.verdict_id}" data-timestamp="${row.timestamp}" data-label="correct" data-group-index="${gi}" aria-label="Correct: ${row.tool_name} ${targetOf(row)}">Correct${here ? html`<kbd class="tf-kbd" aria-hidden="true">C</kbd>` : ''}</button>
-                <button type="button" class="tf-btn tf-btn-danger tf-btn-sm" data-action="label-one" data-verdict="${row.verdict_id}" data-timestamp="${row.timestamp}" data-label="false_alarm" data-group-index="${gi}" aria-label="False alarm: ${row.tool_name} ${targetOf(row)}">False alarm${here ? html`<kbd class="tf-kbd" aria-hidden="true">F</kbd>` : ''}</button>
-              </div>
+              ${rowActions(row, g, on)}
             </li>`;
             })}</ul>
           </section>`)}</div>
           ${state.cursor ? html`<div class="mt-4"><button type="button" class="tf-btn" data-action="more" ${state.loadingMore ? raw('disabled') : ''}>${state.loadingMore ? 'Loading…' : 'Load more'}</button></div>` : ''}`);
+        // A redraw replaces every row, and with them the focus. A reader typing
+        // a note keeps the field; one working the queue gets the row back.
+        if (typing) { refocus(document.getElementById(typing)); return; }
+        if (state.engaged && focusLost()) focusCurrent(false, false);
       }
 
-      function noteFor(groupIndex) {
-        const el = document.getElementById('note-' + groupIndex);
-        const text = el && typeof el.value === 'string' ? el.value.trim().slice(0, 200) : '';
-        return text;
+      function refocus(el) {
+        if (el && typeof el.focus === 'function') { try { el.focus({ preventScroll: true }); } catch (err) { /* courtesy */ } }
+      }
+      function focusTitle() { refocus(document.getElementById('view-title')); }
+
+      // What the group's field holds now, which is also kept for the redraw.
+      function noteFor(g) {
+        const el = document.getElementById('note-' + g.slot);
+        if (el && typeof el.value === 'string') state.notes[g.key] = el.value.slice(0, 200);
+        return String(state.notes[g.key] || '').trim().slice(0, 200);
       }
 
-      // Labels are applied on screen at once and sent; on a refusal the rows
-      // come back where they were and the reason is shown.
-      const rowKey = r => r.verdict_id + '|' + r.timestamp;
-
-      // Puts rows back in the queue, newest first, as the ledger lists them.
+      // Puts rows back in the queue, newest first, as the ledger lists them,
+      // and the keyboard on the first of them: they are what was just undone.
       function restore(rows) {
         const known = {};
         state.items.forEach(r => { known[rowKey(r)] = true; });
         rows.forEach(r => { delete state.labelled[rowKey(r)]; });
         state.items = state.items.concat(rows.filter(r => !known[rowKey(r)]))
           .sort((a, b) => String(b.timestamp).localeCompare(String(a.timestamp)));
+        const back = {};
+        rows.forEach(r => { back[rowKey(r)] = true; });
+        const first = ordered().find(x => back[rowKey(x.row)]);
+        if (first) state.at = rowKey(first.row);
       }
 
       // POST /api/projects/<name>/reviews takes at most this many items a call
@@ -1895,11 +2032,22 @@
         return () => { state.saved = state.saved.filter(e => e !== entry); return undo(rows); };
       }
 
+      function sayError(text) {
+        const el = document.getElementById('review-error');
+        if (el) el.textContent = text;
+        announce(text);
+      }
+
       function label(rows, value, note) {
         if (!rows.length) return Promise.resolve();
         const projectName = rows[0].project_name;
+        if (!mayLabel(state.who, projectName)) {
+          sayError('Labelling ' + T.projectNameText(projectName) + ' is the operator\'s, so nothing was sent. Sign in to label it; a visitor may label the calls in a sandbox.');
+          return Promise.resolve();
+        }
         const ids = {};
         rows.forEach(r => { ids[rowKey(r)] = true; state.labelled[rowKey(r)] = value; });
+        stepAside(ids);
         state.items = state.items.filter(r => !ids[rowKey(r)]);
         draw();
         const item = r => Object.assign({ timestamp: r.timestamp, verdict_id: r.verdict_id, label: value }, note ? { note } : {});
@@ -1912,8 +2060,7 @@
             const returned = rows.filter(r => back[r.verdict_id]);
             restore(returned);
             draw();
-            const el = document.getElementById('review-error');
-            if (el) el.textContent = plural(returned.length, 'call') + ' could not be labelled: ' + skipped.map(s => s.reason || 'skipped').filter((v, i, a) => a.indexOf(v) === i).join('; ') + '.';
+            sayError(plural(returned.length, 'call') + ' could not be labelled: ' + skipped.map(s => s.reason || 'skipped').filter((v, i, a) => a.indexOf(v) === i).join('; ') + '.');
           }
           const done = rows.length - skipped.length;
           if (done > 0) {
@@ -1929,12 +2076,11 @@
           const back = rows.filter(r => !kept[rowKey(r)]);
           restore(back);
           draw();
-          const el = document.getElementById('review-error');
-          if (el) el.textContent = (T.isAuthError(err)
+          sayError((T.isAuthError(err)
             ? 'Labelling needs the operator. Sign in with python threefold.py open, then try again.'
-            : 'The labels were not saved: ' + err.message + '.') + ' ' + (back.length === rows.length
+            : 'The labels were not saved: ' + trimStop(err.message) + '.') + ' ' + (back.length === rows.length
               ? 'The calls are back in the queue.'
-              : plural(back.length, 'call') + ' back in the queue; ' + plural(rows.length - back.length, 'call') + ' had already been saved.');
+              : plural(back.length, 'call') + ' back in the queue; ' + plural(rows.length - back.length, 'call') + ' had already been saved.'));
           // A chunk that landed before one failed is labelled on the service and
           // out of the queue, so it needs the same Undo the whole group gets when
           // nothing fails. Without it those rows can only be cleared one by one.
@@ -1960,34 +2106,37 @@
           const cleared = Array.isArray(err.saved) ? err.saved : [];
           if (cleared.length) { restore(cleared); draw(); }
           toast(cleared.length
-            ? plural(cleared.length, 'call') + ' back in the queue; the rest of the undo was not saved: ' + err.message + '.'
-            : 'The undo was not saved: ' + err.message + '.');
+            ? plural(cleared.length, 'call') + ' back in the queue; the rest of the undo was not saved: ' + trimStop(err.message) + '.'
+            : 'The undo was not saved: ' + trimStop(err.message) + '.');
         });
       }
 
-      // The row the keyboard is on is brought into view and given focus, so a
-      // screen reader hears it and the page scrolls to it.
-      function focusCurrent(say) {
+      // The row the keyboard is on is given focus, so a screen reader hears
+      // it, and brought into view when the keyboard moved it.
+      function focusCurrent(say, scroll) {
         const rows = ordered();
-        const here = rows[state.current];
-        const el = document.getElementById('qrow-' + state.current);
-        if (el && typeof el.focus === 'function') { try { el.focus({ preventScroll: true }); } catch (err) { /* courtesy */ } }
-        if (el && typeof el.scrollIntoView === 'function') { try { el.scrollIntoView({ block: 'nearest' }); } catch (err) { /* courtesy */ } }
-        if (say && here) announce((state.current + 1) + ' of ' + rows.length + ': ' + here.row.tool_name + ' ' + targetOf(here.row));
+        const here = currentIndex(rows);
+        if (here < 0) return;
+        const el = document.getElementById('qrow-' + here);
+        refocus(el);
+        if (scroll !== false && el && typeof el.scrollIntoView === 'function') { try { el.scrollIntoView({ block: 'nearest' }); } catch (err) { /* courtesy */ } }
+        if (say) announce((here + 1) + ' of ' + rows.length + ': ' + rows[here].row.tool_name + ' ' + targetOf(rows[here].row) + (rows[here].g.open ? '' : ', operator only'));
       }
 
       function move(step) {
         const rows = ordered();
         if (!rows.length) return;
-        state.current = Math.max(0, Math.min(rows.length - 1, state.current + step));
+        const here = currentIndex(rows);
+        state.at = rowKey(rows[Math.max(0, Math.min(rows.length - 1, here + step))].row);
         draw();
         focusCurrent(true);
       }
 
       function labelCurrent(value) {
-        const here = ordered()[state.current];
-        if (!here) return;
-        const done = label([here.row], value, noteFor(here.gi));
+        const rows = ordered();
+        const here = currentIndex(rows);
+        if (here < 0) return;
+        const done = label([rows[here].row], value, noteFor(rows[here].g));
         focusCurrent(false);
         return done;
       }
@@ -2008,32 +2157,50 @@
         const run = { j: () => move(1), k: () => move(-1), c: () => labelCurrent('correct'), f: () => labelCurrent('false_alarm'), u: () => undoLast() }[key];
         if (!run || String(event.key).length !== 1) return;
         if (typeof event.preventDefault === 'function') event.preventDefault();
+        state.engaged = true;
         return run();
       };
+      // A group's note is kept as it is typed, so a redraw while the reader is
+      // still in the field cannot wipe it.
+      const onInput = event => {
+        const t = event && event.target;
+        if (!t || typeof t.getAttribute !== 'function' || t.getAttribute('data-change') !== 'note') return;
+        const key = t.getAttribute('data-group');
+        if (key) state.notes[key] = String(t.value || '').slice(0, 200);
+      };
       document.addEventListener('keydown', onKey);
-      ctx.onLeave(() => { if (typeof document.removeEventListener === 'function') document.removeEventListener('keydown', onKey); });
+      document.addEventListener('input', onInput);
+      ctx.onLeave(() => {
+        if (typeof document.removeEventListener !== 'function') return;
+        document.removeEventListener('keydown', onKey);
+        document.removeEventListener('input', onInput);
+      });
 
       ctx.actions({
         'label-one': el => {
           const verdict = el.getAttribute('data-verdict');
           const stamp = el.getAttribute('data-timestamp');
-          const at = ordered().findIndex(x => x.row.verdict_id === verdict && String(x.row.timestamp) === stamp);
-          if (at < 0) return;
-          state.current = at;
-          const row = ordered()[at].row;
-          return label([row], el.getAttribute('data-label'), noteFor(el.getAttribute('data-group-index')));
+          const found = ordered().find(x => x.row.verdict_id === verdict && String(x.row.timestamp) === stamp);
+          if (!found) return;
+          state.engaged = true;
+          state.at = rowKey(found.row);
+          return label([found.row], el.getAttribute('data-label'), noteFor(found.g));
         },
         'label-group': el => {
+          const g = groups().find(x => x.key === el.getAttribute('data-group'));
+          if (!g) return;
+          state.engaged = true;
+          return label(g.items.slice(), el.getAttribute('data-label'), noteFor(g));
+        },
+        note: el => {
           const key = el.getAttribute('data-group');
-          const list = groups();
-          const index = list.findIndex(g => g.key === key);
-          if (index < 0) return;
-          return label(list[index].items.slice(), el.getAttribute('data-label'), noteFor(index));
+          if (key) state.notes[key] = typeof el.value === 'string' ? el.value.slice(0, 200) : '';
         },
         'queue-pick': el => {
-          const at = Number(el.getAttribute('data-index'));
-          if (!Number.isInteger(at) || at === state.current) return;
-          state.current = at;
+          const key = el.getAttribute('data-row');
+          if (!key || key === state.at || !state.items.some(r => rowKey(r) === key)) return;
+          state.engaged = true;
+          state.at = key;
           draw();
           focusCurrent(false);
         },
@@ -2044,7 +2211,9 @@
           return fetchPage(state.cursor).then(body => {
             if (!ctx.alive()) return;
             state.loadingMore = false;
-            const more = (body && Array.isArray(body.items)) ? body.items.filter(r => !r.review) : [];
+            const known = {};
+            state.items.forEach(r => { known[rowKey(r)] = true; });
+            const more = (body && Array.isArray(body.items)) ? body.items.filter(r => !r.review && !known[rowKey(r)] && !state.labelled[rowKey(r)]) : [];
             state.items = state.items.concat(more);
             state.cursor = body && body.next_cursor ? body.next_cursor : null;
             draw();
@@ -2052,12 +2221,10 @@
             if (!ctx.alive()) return;
             state.loadingMore = false;
             draw();
-            const el = document.getElementById('review-error');
-            if (el) el.textContent = 'More could not be read: ' + err.message + '.';
+            sayError('More could not be read: ' + trimStop(err.message) + '.');
           });
         }
       });
-      Dash.review = { state, ordered };
       return load();
     }
 

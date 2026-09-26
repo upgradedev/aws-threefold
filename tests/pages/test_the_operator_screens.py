@@ -223,7 +223,7 @@ function press(key, extra) {
 }
 function currentRow() {
   const chunk = view().split('<li id="qrow-').find(part => /^\d+"[^>]*data-current="true"/.test(part)) || '';
-  return (chunk.match(/data-verdict="(VERDICT-\d+)"/) || [])[1] || null;
+  return (chunk.match(/data-row="(VERDICT-\d+)\|/) || [])[1] || null;
 }
 """
 
@@ -279,6 +279,154 @@ def test_the_queue_is_worked_from_the_keyboard(tmp_path: Path) -> None:
     assert out["afterU"] == 2, "The undone call is back in the queue"
     assert out["typing"] is False and out["modified"] is False and out["ignored"], "A key typed in a field or with a modifier is left alone"
     assert out["gone"], "The keys leave with the screen"
+
+
+QUEUE = r"""
+function flagged(i, project) {
+  return row(i, { project_name: project, rule_key: 'python-domain-stays-pure', observed_rule: 'python-domain-stays-pure',
+    observed_rules: ['python-domain-stays-pure'], target: 'src/acme/domain/order_' + i + '.py', observed_target: 'src/acme/domain/order_' + i + '.py' });
+}
+function groupOrder() { return (view().match(/<h2 id="group-\d+"[\s\S]*?font-mono tf-break">[^<]+/g) || []).map(h => h.replace(/[\s\S]*>/, '')); }
+"""
+
+
+def test_the_keyboard_keeps_its_group_while_labels_change_the_counts(tmp_path: Path) -> None:
+    """Labels shrink the group being worked below its neighbour; the group stays put, and so does the keyboard."""
+    out = ops(
+        KEYS
+        + QUEUE
+        + r"""
+  const sent = [];
+  const record = (u, i, body) => { sent.push(u.pathname.replace(/^\/prod\/api\/projects\//, '') + ' ' + body.items.map(x => x.verdict_id + ':' + x.label).join(',')); return { status: 200, body: { updated: body.items.length, skipped: [] } }; };
+  answer = contract({
+    '/api/decisions': { status: 200, body: { items: [1, 2, 3, 4, 5, 6].map(i => flagged(i, 'Acme-Checkout')).concat([7, 8, 9, 10].map(i => flagged(i, 'Acme-Mobile'))), next_cursor: null } },
+    'POST /api/projects/Acme-Checkout/reviews': record,
+    'POST /api/projects/Acme-Mobile/reviews': record
+  });
+  await visit('#/review');
+  out.before = groupOrder();
+  press('j');
+  press('c'); await tick();
+  press('c'); await tick();
+  press('f'); await tick();
+  out.after = groupOrder();
+  out.current = currentRow();
+  press('c'); await tick();
+  out.sent = sent;
+""",
+        tmp_path,
+    )
+    assert out["before"] == ["Acme-Checkout", "Acme-Mobile"]
+    assert out["after"] == ["Acme-Checkout", "Acme-Mobile"], "Three calls left in Checkout, four in Mobile: the groups keep their places"
+    assert out["current"] == "VERDICT-5", "The keyboard stays on the next call of the group being worked"
+    assert out["sent"] == [
+        "Acme-Checkout/reviews VERDICT-2:correct",
+        "Acme-Checkout/reviews VERDICT-3:correct",
+        "Acme-Checkout/reviews VERDICT-4:false_alarm",
+        "Acme-Checkout/reviews VERDICT-5:correct",
+    ], "Every key labelled the call the reader was on, in the project they were reading"
+
+
+def test_labelling_another_group_leaves_the_keyboard_where_it_is(tmp_path: Path) -> None:
+    out = ops(
+        KEYS
+        + QUEUE
+        + r"""
+  answer = contract({
+    '/api/decisions': { status: 200, body: { items: [1, 2, 3].map(i => flagged(i, 'Acme-Checkout')).concat([4, 5].map(i => flagged(i, 'Acme-Mobile'))), next_cursor: null } },
+    'POST /api/projects/Acme-Checkout/reviews': (u, i, body) => ({ status: 200, body: { updated: body.items.length, skipped: [] } })
+  });
+  await visit('#/review');
+  press('j'); press('j'); press('j');
+  out.before = currentRow();
+  await click('label-group', { 'data-group': JSON.stringify(['Acme-Checkout', 'python-domain-stays-pure']), 'data-label': 'correct' });
+  await tick();
+  out.after = currentRow();
+""",
+        tmp_path,
+    )
+    assert out["before"] == "VERDICT-4"
+    assert out["after"] == "VERDICT-4", "A label set elsewhere does not move the keyboard"
+
+
+def test_the_keyboard_gets_its_row_back_after_an_undo_and_a_rollback(tmp_path: Path) -> None:
+    out = ops(
+        KEYS
+        + QUEUE
+        + r"""
+  let refuse = false;
+  answer = contract({
+    '/api/decisions': { status: 200, body: { items: [flagged(1, 'Acme-Checkout'), flagged(2, 'Acme-Checkout')], next_cursor: null } },
+    'POST /api/projects/Acme-Checkout/reviews': (u, i, body) => refuse
+      ? { status: 500, body: { detail: 'The table is unavailable.' } }
+      : { status: 200, body: { updated: body.items.length, skipped: [] } }
+  });
+  const focused = () => {
+    const id = (document.activeElement && document.activeElement.id) || '';
+    const on = (view().match(/<li id="(qrow-\d+)"[^>]*data-current="true"/) || [])[1];
+    return id && id === on ? currentRow() : 'focus on ' + (id || 'nothing');
+  };
+  await visit('#/review');
+  press('c'); await tick();
+  document.activeElement = null;
+  press('u'); await tick();
+  out.afterUndo = focused();
+  refuse = true;
+  press('j');
+  press('c');
+  document.activeElement = null;
+  await tick();
+  out.afterRollback = focused();
+  out.error = el('review-error').textContent;
+""",
+        tmp_path,
+    )
+    assert out["afterUndo"] == "VERDICT-1", "U puts the call back and the keyboard, and the focus, on it"
+    assert out["afterRollback"] == "VERDICT-2", "A refused label comes back with the focus on it"
+    assert out["error"].endswith("The calls are back in the queue.") and ".." not in out["error"]
+
+
+def test_a_visitor_is_told_which_groups_they_may_label(tmp_path: Path) -> None:
+    out = ops(
+        KEYS
+        + QUEUE
+        + r"""
+  const sent = [];
+  const record = (u, i, body) => { sent.push(u.pathname.replace(/^\/prod\/api\/projects\//, '')); return { status: 200, body: { updated: body.items.length, skipped: [] } }; };
+  answer = contract({
+    '/api/auth/whoami': PUBLIC,
+    '/api/decisions': { status: 200, body: { items: [flagged(1, 'Acme-Checkout'), flagged(2, 'Acme-Checkout'), flagged(3, 'Acme-Sandbox-0a1b2c3d')], next_cursor: null } },
+    'POST /api/projects/Acme-Checkout/reviews': record,
+    'POST /api/projects/Acme-Sandbox-0a1b2c3d/reviews': record
+  });
+  Threefold.whoami(true);
+  await visit('#/review');
+  out.order = groupOrder();
+  out.note = text(view().split('class="tf-ops-visitor')[1].split('class="tf-ops-keys')[0]);
+  out.buttons = (view().match(/data-action="label-one"/g) || []).length;
+  out.locked = view().split('</svg>Operator only</span>').length - 1;
+  press('j');
+  out.on = currentRow();
+  press('c'); await tick();
+  out.refused = el('review-error').textContent;
+  out.stillThere = /qrow-1"[^>]*data-current="true"/.test(view());
+  press('k');
+  press('c'); await tick();
+  out.sent = sent;
+  answer = contract({ '/api/auth/whoami': PRIVATE, '/api/decisions': { status: 200, body: { items: [flagged(1, 'Acme-Checkout')], next_cursor: null } } });
+  Threefold.whoami(true);
+  await visit('#/review?days=7');
+  out.operator = view();
+""",
+        tmp_path,
+    )
+    assert out["order"] == ["Acme-Sandbox-0a1b2c3d", "Acme-Checkout"], "What a visitor may label comes first"
+    assert "You can label the 1 group from visitors' sandboxes, which come first." in out["note"]
+    assert out["buttons"] == 2, "Only the sandbox's call carries Correct and False alarm"
+    assert out["locked"] == 1 and out["on"] == "VERDICT-1"
+    assert "is the operator's, so nothing was sent" in out["refused"] and out["stillThere"], "C on a project a visitor may not label sends nothing and removes nothing"
+    assert out["sent"] == ["Acme-Sandbox-0a1b2c3d/reviews"]
+    assert "tf-ops-visitor" not in out["operator"] and "Operator only" not in out["operator"]
 
 
 # ---------------------------------------------------------------------- proof
