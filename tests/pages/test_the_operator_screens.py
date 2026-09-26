@@ -248,6 +248,35 @@ def test_the_projects_screen_reads_as_a_portfolio(tmp_path: Path) -> None:
     assert 'data-row-href="#/projects/Acme-Payments"' in page, "A row opens its project"
 
 
+# -------------------------------------------------------------------- project
+
+
+def test_the_stage_hero_is_a_headline_a_consequence_and_the_action(tmp_path: Path) -> None:
+    out = ops(
+        r"""
+  answer = contract();
+  await visit('#/projects/Acme-Billing');
+  out.observe = view().split('class="tf-ops-hero"')[1].split('</section>')[0];
+  const fresh = detailBody('observe', [{ rule_key: 'LOOP', kind: 'gate', mode_now: 'observe', would_refuse: 0, correct: 0, false_alarms: 0, unreviewed: 0, last_seen: null, state: 'quiet', recommendation: '' }]);
+  Object.assign(fresh.readiness.summary, { reviewed: 0, false_alarms: 0, false_alarm_rate: 0, rules_ready: 0, rules_quiet: 1, rules_noisy: 0 });
+  answer = contract({ '/api/projects/Acme-Billing': { status: 200, body: fresh } });
+  await visit('#/projects/Acme-Billing?days=7');
+  out.unlabelled = view().split('class="tf-ops-hero"')[1].split('</section>')[0];
+""",
+        tmp_path,
+    )
+    observe = out["observe"]
+    lead, rest = observe.split('<p class="tf-ops-hero-text">', 1)[1].split("</p>", 1)
+    assert re.sub(r"<[^>]+>", "", lead) == "2 of 3 rules could enforce today; 1 call waits for a label."
+    assert observe.count('class="tf-ops-hero-text"') == 1, "One line of consequence, not paragraphs"
+    assert rest.index('data-action="promote-open"') < rest.index("<details"), "The action comes before how the stage works"
+    assert "False-alarm rate 14% over 7 labelled calls." in observe
+    unlabelled = out["unlabelled"]
+    assert "Every rule reads Ready or Quiet: promote, and it refuses from the next call." in unlabelled
+    assert "No flagged call is labelled yet, so there is no false-alarm rate." in unlabelled
+    assert "False-alarm rate" not in unlabelled and "over 0" not in unlabelled, "No rate is shown over nothing"
+
+
 # ---------------------------------------------------------------- review keys
 
 

@@ -118,11 +118,18 @@
     .tf-ops-hero[data-stage="enforce"] { background: radial-gradient(640px 220px at 0% 0%, rgba(139, 92, 246, 0.2), transparent 70%), var(--tf-surface-1); border-color: var(--tf-accent-line); }
     .tf-ops-hero-grid { display: grid; grid-template-columns: 1fr; gap: var(--tf-space-3); align-items: start; }
     @media (min-width: 1024px) { .tf-ops-hero-grid { grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); } }
-    .tf-ops-hero-title { margin: 6px 0 0; font: 650 1.375rem/1.875rem var(--tf-font-sans); letter-spacing: -0.02em; color: var(--tf-text); }
+    .tf-ops-hero-title { margin: 10px 0 0; font: 650 1.375rem/1.875rem var(--tf-font-sans); letter-spacing: -0.02em; color: var(--tf-text); text-wrap: balance; }
     @media (min-width: 768px) { .tf-ops-hero-title { font-size: 1.625rem; line-height: 2.125rem; } }
     .tf-ops-hero-text { margin: 8px 0 0; max-width: 62ch; font-size: var(--tf-fs-small); line-height: 1.375rem; color: var(--tf-text-2); }
     .tf-ops-hero-fine { margin: 8px 0 0; max-width: 62ch; font-size: var(--tf-fs-micro); line-height: 1rem; color: var(--tf-text-3); }
     .tf-ops-hero-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: var(--tf-space-2); }
+    .tf-ops-hero-more { margin-top: var(--tf-space-2); max-width: 62ch; }
+    .tf-ops-hero-more > summary { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; list-style: none; padding: 2px 0; border-radius: var(--tf-radius-sm); font-size: var(--tf-fs-micro); line-height: 1rem; color: var(--tf-text-3); }
+    .tf-ops-hero-more > summary::-webkit-details-marker { display: none; }
+    .tf-ops-hero-more > summary:hover { color: var(--tf-text-2); }
+    .tf-ops-hero-more > summary:focus-visible { outline: 2px solid var(--tf-focus); outline-offset: 2px; }
+    .tf-ops-hero-more > summary .tf-icon { width: 14px; height: 14px; transition: transform var(--tf-dur-1); }
+    .tf-ops-hero-more[open] > summary .tf-icon { transform: rotate(180deg); }
     .tf-ops-track { display: flex; align-items: center; gap: 8px; }
     .tf-ops-step { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px; border-radius: var(--tf-radius-pill); border: 1px solid var(--tf-hairline-strong); background: var(--tf-inset); font: 600 0.75rem/1 var(--tf-font-sans); color: var(--tf-text-3); }
     .tf-ops-step .tf-icon { width: 14px; height: 14px; }
@@ -1376,13 +1383,17 @@
     // The order a project's rules are read in: what needs a decision first.
     const STATE_ORDER = { noisy: 0, needs_review: 1, ready: 2, quiet: 3 };
 
-    // The stage, in plain words, with the one action that moves it: Promote in
-    // Observe, Back to Observe in Enforce. Beside it, how ready the rules are.
+    // The stage, as a reader remembers it: a short headline, one line of what
+    // follows from the readiness beside it, and the one action that moves it
+    // (Promote in Observe, Back to Observe in Enforce). How the stage works is
+    // one click away, under the actions, rather than read before them.
     function stageHero(name, stage, config, readiness, days) {
       const rules = (readiness && readiness.rules) || [];
       const summary = (readiness && readiness.summary) || {};
       const observing = rules.filter(r => r.mode_now === 'observe').map(r => r.rule_key);
+      const enforcing = rules.filter(r => r.mode_now === 'enforce').length;
       const waiting = sum(rules, 'unreviewed');
+      const noisy = rules.filter(r => r.state === 'noisy').length;
       const canEnforce = rules.filter(r => r.state === 'ready' || r.state === 'quiet').length;
       const enforce = stage === 'enforce';
       const track = html`<div class="tf-ops-track" aria-hidden="true">
@@ -1390,36 +1401,50 @@
           <span class="tf-ops-track-line"></span>
           <span class="tf-ops-step" data-on="${enforce ? 'enforce' : ''}">${T.icon('shield', 14)}Enforce</span>
         </div>`;
+      const could = html`<strong class="text-white">${num(canEnforce)} of ${plural(rules.length, 'rule')}</strong> could enforce today`;
+      const more = (what, body) => html`<details class="tf-ops-hero-more"><summary>${what}${T.icon('chevrondown', 14)}</summary>${body}</details>`;
       const words = enforce
-        ? html`<h2 class="tf-ops-hero-title">Enforce: the rules in force refuse a call before it runs</h2>
-            <p class="tf-ops-hero-text">An agent's write or command that breaks a rule in force is refused, and the agent is told why. ${observing.length
-              ? html`<strong class="text-white">${plural(observing.length, 'rule')}</strong> still ${observing.length === 1 ? 'observes' : 'observe'}: <span class="font-mono text-gray-200">${observing.join(', ')}</span>. ${observing.length === 1 ? 'It records' : 'They record'} what ${observing.length === 1 ? 'it' : 'they'} would refuse, and ${observing.length === 1 ? 'refuses' : 'refuse'} nothing.`
-              : 'Every rule of this project is in force.'}</p>
-            <p class="tf-ops-hero-fine">Back to Observe is one click and applies from the next call. A hook capped to observe on its machine is never refused, whatever this says; the agents list below flags one.</p>
+        ? html`<h2 class="tf-ops-hero-title">${enforcing
+              ? html`In Enforce: ${plural(enforcing, 'rule')} ${enforcing === 1 ? 'refuses' : 'refuse'} a call before it runs`
+              : 'In Enforce: the rules in force refuse a call before it runs'}</h2>
+            <p class="tf-ops-hero-text">${observing.length
+              ? html`<strong class="text-white">${plural(observing.length, 'rule')}</strong> still ${observing.length === 1 ? 'observes' : 'observe'}: <span class="font-mono text-gray-200">${observing.join(', ')}</span>. Back to Observe applies from the next call.`
+              : 'Every rule of this project is in force. Back to Observe applies from the next call.'}</p>
             <div class="tf-ops-hero-actions">
               <button type="button" class="tf-btn tf-btn-warn" data-action="demote-open">${T.icon('eye', 16)}Back to Observe</button>
               <button type="button" class="tf-btn" data-action="promote-open">Change which rules enforce</button>
-            </div>`
-        : html`<h2 class="tf-ops-hero-title">Observe: what the hooks send is judged and recorded, and not refused</h2>
-            <p class="tf-ops-hero-text">Your agents work exactly as before. What a rule <em>would</em> have refused is listed below: mark each one correct or false alarm. A rule whose flags were all correct is <strong class="text-emerald-300">Ready</strong>; one that flagged nothing is <strong class="text-gray-200">Quiet</strong>. When the rules you care about read Ready, promote the project and those rules start refusing; the others keep observing.</p>
-            <p class="tf-ops-hero-fine">One thing is refused even here: a call carrying a credential, which the hook refuses on the machine and never sends. A call the hook holds back, such as one outside the project, is neither sent nor recorded.${config ? '' : ' This project has no configuration yet, so it follows the stack default.'}</p>
+            </div>
+            ${more('How Enforce works', html`<p class="tf-ops-hero-fine">An agent's write or command that breaks a rule in force is refused, and the agent is told why. A rule that still observes records what it would refuse, and refuses nothing. A hook capped to observe on its machine is never refused, whatever this says; the agents list below flags one.</p>`)}`
+        : html`<h2 class="tf-ops-hero-title">In Observe: the rules record, and refuse nothing</h2>
+            <p class="tf-ops-hero-text">${!rules.length
+              ? 'Readiness appears once this project sends calls in the window.'
+              : canEnforce === rules.length
+                ? html`Every rule reads Ready or Quiet: promote, and ${rules.length === 1 ? 'it refuses' : 'they refuse'} from the next call.`
+                : waiting
+                  ? html`${could}; ${plural(waiting, 'call')} ${waiting === 1 ? 'waits' : 'wait'} for a label.`
+                  : noisy
+                    ? html`${could}; ${plural(noisy, 'noisy rule')} should keep observing.`
+                    : html`${could}.`}</p>
             <div class="tf-ops-hero-actions">
               <button type="button" class="tf-btn tf-btn-primary tf-btn-lg" data-action="promote-open" ${rules.length ? '' : raw('disabled')}>${T.icon('shield', 16)}Promote to Enforce…</button>
               ${waiting ? html`<a class="tf-btn tf-btn-lg" href="${reviewHref({ project: name })}">${T.icon('inbox', 16)}Label ${plural(waiting, 'waiting call')}</a>` : ''}
-            </div>`;
+            </div>
+            ${more('How Observe works', html`<p class="tf-ops-hero-fine">Your agents work exactly as before. What a rule <em>would</em> have refused is listed below: mark each one correct or false alarm. A rule whose flags were all correct is Ready; one that flagged nothing is Quiet. Promote, and the rules you choose start refusing; the others keep observing.</p>
+              <p class="tf-ops-hero-fine">One thing is refused even here: a call carrying a credential, which the hook refuses on the machine and never sends. A call the hook holds back, such as one outside the project, is neither sent nor recorded.${config ? '' : ' This project has no configuration yet, so it follows the stack default.'}</p>`)}`;
       const tally = [
         ['ready', summary.rules_ready, 'Ready', 'tf-good'], ['quiet', summary.rules_quiet, 'Quiet', ''],
         ['needs_review', summary.rules_needing_review, 'To review', 'text-sky-300'], ['noisy', summary.rules_noisy, 'Noisy', 'tf-bad']
       ];
+      // A rate over nothing is not a rate: with no label yet, it says so.
+      const reviewed = typeof summary.reviewed === 'number' ? summary.reviewed : 0;
       const side = html`<aside class="tf-ops-hero-side" aria-label="Readiness">
           <span class="tf-ops-att-kicker">Readiness, ${windowWords(days)}</span>
-          <div class="tf-ops-tally">${tally.map(([key, value, label, tone]) => html`<div><b class="${value ? tone : 'text-gray-500'}">${num(value)}</b><small>${label}</small></div>`)}</div>
-          <p class="text-xs text-gray-300">${rules.length
-            ? (enforce
-              ? html`<strong class="text-white">${num(canEnforce)} of ${num(rules.length)}</strong> ${rules.length === 1 ? 'rule reads' : 'rules read'} Ready or Quiet.`
-              : html`<strong class="text-white">${num(canEnforce)} of ${num(rules.length)}</strong> ${rules.length === 1 ? 'rule' : 'rules'} could enforce today: Ready or Quiet.`)
-            : 'Readiness appears once this project has sent calls in the window.'}</p>
-          <p class="text-[11px] text-gray-500">False-alarm rate ${pct(summary.false_alarm_rate)} over ${plural(summary.reviewed || 0, 'labelled call')}.</p>
+          ${rules.length
+            ? html`<div class="tf-ops-tally">${tally.map(([key, value, label, tone]) => html`<div><b class="${value ? tone : 'text-gray-500'}">${num(value)}</b><small>${label}</small></div>`)}</div>`
+            : html`<p class="text-xs text-gray-400">No rule has judged a call from this project in the window.</p>`}
+          <p class="text-[11px] text-gray-500" data-note="false-alarm-rate">${reviewed > 0 && typeof summary.false_alarm_rate === 'number'
+            ? html`False-alarm rate ${pct(summary.false_alarm_rate)} over ${plural(reviewed, 'labelled call')}.`
+            : 'No flagged call is labelled yet, so there is no false-alarm rate.'}</p>
         </aside>`;
       return html`<section class="tf-ops-hero" data-stage="${enforce ? 'enforce' : 'observe'}" aria-label="Stage">
         <div class="tf-ops-hero-grid">
@@ -1704,7 +1729,7 @@
             ${showProject ? html`<td class="font-mono text-gray-300 tf-break">${T.projectName(row.project_name)}</td>` : ''}
             <td class="text-gray-300 whitespace-nowrap">${agentLabel(row.agent)}</td>
             <td class="min-w-[12rem]"><span class="font-mono text-gray-200">${row.tool_name}</span> <span class="font-mono text-gray-500 tf-break">${targetOf(row)}</span></td>
-            <td class="font-mono text-gray-400 whitespace-nowrap">${outcomeOf(row) === 'approved' ? html`<span class="text-gray-600">—</span>` : ruleKeyOf(row)}</td>
+            <td class="font-mono text-gray-400 tf-break">${outcomeOf(row) === 'approved' ? html`<span class="text-gray-600">—</span>` : ruleKeyOf(row)}</td>
             <td>${outcomeOf(row) === 'observed' ? reviewChip(row.review) : ''}</td>
           </tr>`)}</tbody>
         </table>
