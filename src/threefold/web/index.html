@@ -420,6 +420,13 @@
     .tf-session-stats b { font: 600 0.8125rem/1rem var(--tf-font-mono); color: var(--tf-text); }
     .tf-contract { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: var(--tf-space-2); font-size: 0.75rem; color: var(--tf-text-3); }
     .tf-connection { margin-top: var(--tf-space-2); }
+    /* The summary's words and the status chip wrap as one piece, the chip under
+       the words when a phone has no room beside them, so the chevron keeps its
+       own place at the edge; a chip longer than the line ends in an ellipsis. */
+    .tf-connection-sum { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; flex: 1 1 auto; min-width: 0; }
+    .tf-connection-name { display: inline-flex; align-items: center; gap: 10px; min-width: 0; }
+    .tf-connection-sum .tf-chip { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; line-height: 20px; }
+    .tf-connection > summary::after { flex: none; }
     .tf-connection-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
     @media (min-width: 768px) { .tf-connection-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
     .tf-connection .tf-input { width: 100%; }
@@ -890,7 +897,7 @@
       <!-- Where the scenarios send, and the two operator controls. A first-time
            reader meets the product before these; they are one click away. -->
       <details id="connection-panel" class="tf-disclosure tf-connection">
-        <summary><span data-tf-icon="settings"></span>Connection and operator controls <span id="statusRouteBadge" class="tf-chip tf-chip-gray tf-mono">checking /status</span></summary>
+        <summary><span class="tf-connection-sum"><span class="tf-connection-name"><span data-tf-icon="settings"></span>Connection and operator controls</span><span id="statusRouteBadge" class="tf-chip tf-chip-gray tf-mono">checking /status</span></span></summary>
         <div class="tf-disclosure-body">
           <div class="tf-connection-grid">
             <label class="tf-field">
