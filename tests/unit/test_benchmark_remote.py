@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -34,11 +35,17 @@ SESSION = f"live-orders-s3-archive-{DAY}"
 @pytest.fixture(autouse=True)
 def _confined(tmp_path, monkeypatch):
     """The owner's token file is never read, a CLAUDE.md above tmp_path is not this machine's business, and Codex's
-    home is the test's own."""
+    home is the test's own. So are the machine's home and THREEFOLD_HOME: a live run gives its hook the machine's home
+    and carries the owner's never-send list from THREEFOLD_HOME, and a run started through the runner reads both from
+    this process's environment."""
     monkeypatch.setattr(credentials, "DEFAULT_TOKEN_FILE", tmp_path / "no-such-token-file")
     monkeypatch.setattr(harness, "claude_memory_above", lambda path: [])
     (tmp_path / "codex-home").mkdir()
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex-home"))
+    (tmp_path / "machine-home").mkdir()
+    for name in ("HOME", "USERPROFILE"):
+        monkeypatch.setenv(name, str(tmp_path / "machine-home"))
+    monkeypatch.setenv("THREEFOLD_HOME", str(tmp_path / "owner-threefold-home"))
 
 
 def _plan(tmp_path, endpoint, agent="scripted"):
@@ -379,6 +386,142 @@ def test_a_whole_claude_code_run_through_the_runner_reports_to_the_remote_threef
     assert row["ledger"]["decisions"] == 2 and row["ledger"]["refused"] == 1
     assert row["hook_refusals_by_kind"] == {"LAYERING": 1} and row["governance_problem"] is None
     assert report.is_valid(row)
+
+
+# --- what leaves the machine for a public ledger ---------------------------------------------------------------
+
+def _strings(value):
+    """Every string a request body holds, keys included."""
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            yield from _strings(key)
+            yield from _strings(item)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            yield from _strings(item)
+
+
+def _spellings(path):
+    """A folder as a command may name it: as written, with forward slashes, and as Git Bash writes a drive."""
+    text = str(path)
+    forms = {text, text.replace("\\", "/")}
+    if len(text) > 2 and text[1] == ":":
+        forms.add("/" + text[0].lower() + text[2:].replace("\\", "/"))
+    return forms
+
+
+def _owner_profile(tmp_path, monkeypatch):
+    """A machine home laid out as a Windows profile, with the TEMP folder inside it, as this process's environment."""
+    owner = tmp_path / "Users" / "acme-owner"
+    temp = owner / "AppData" / "Local" / "Temp"
+    temp.mkdir(parents=True)
+    for name in ("HOME", "USERPROFILE"):
+        monkeypatch.setenv(name, str(owner))
+    for name in ("TEMP", "TMP"):
+        monkeypatch.setenv(name, str(temp))
+    return owner
+
+
+def _live_claude_run(tmp_path, commands, stage="enforce"):
+    """One whole Claude Code run through the runner against a stand-in, the fake `claude` adding `commands`."""
+    claude = fake_agents.install(tmp_path / "bin", "claude", mode="governed", commands=commands)
+    with FakeThreefold(stage=stage) as fake:
+        code = run.main(["--tasks", TASK, "--conditions", "threefold", "--reps", "1", "--claude", str(claude),
+                         "--isolation", "user-config", "--threefold-endpoint", fake.endpoint, "--live-date", DAY,
+                         "--run-id", f"{DAY}-claude-code", "--work-root", str(tmp_path / "work"),
+                         "--results-dir", str(tmp_path / "results"), "--retry-pause", "0"])
+    rows = run.ResultsFile(tmp_path / "results" / f"{DAY}-claude-code.jsonl").rows()
+    assert code == 0 and len(rows) == 1
+    return rows[0], fake
+
+
+def test_a_live_run_sends_the_machine_s_home_as_tilde_and_never_spelled_out(tmp_path, monkeypatch):
+    """The reviewer's probe as a test: the agent spells out its TEMP folder and a file in its home. The hook shortens
+    the machine's home to ~ in what it sends, as on the owner's own repositories, so the owner's login name, which a
+    Windows profile path carries, never reaches the remote ledger."""
+    owner = _owner_profile(tmp_path, monkeypatch)
+    row, fake = _live_claude_run(tmp_path, ["python -m pytest -q --basetemp <ENV:TEMP>\\bt", 'dir "<ENV:TEMP>"',
+                                            "cat <ENV:USERPROFILE>/.gitconfig"])
+    assert row["harness_error"] is None, row["harness_error"]
+    assert (row["hook_home"], row["never_send_list"]) == ("machine", "none")
+    sent = fake.evaluations()
+    assert [body["tool_name"] for body in sent] == ["Write", "Bash", "Bash", "Bash", "Bash"], "a call was held back"
+    texts = [text.casefold() for body in sent for text in _strings(body)]
+    for spelling in _spellings(owner):
+        assert not any(spelling.casefold() in text for text in texts), f"{spelling} reached the remote ledger"
+    commands = [text for text in texts if text.startswith(("python -m pytest", "dir ", "cat "))]
+    assert len(commands) == 3, commands
+    assert re.search(r"--basetemp ~[\\/]appdata[\\/]local[\\/]temp[\\/]bt$", commands[0]), commands[0]
+    assert re.fullmatch(r'dir "~[\\/]appdata[\\/]local[\\/]temp"', commands[1]), commands[1]
+    assert commands[2] == "cat ~/.gitconfig"
+    assert not (owner / ".threefold").exists() and sorted(path.name for path in owner.iterdir()) == ["AppData"], \
+        "the run wrote into the machine's home"
+
+
+def test_the_hook_of_a_local_run_keeps_a_home_of_the_run_s_own(tmp_path):
+    """Only a run reporting to a remote Threefold is given the machine's home; the matrix's local runs are unchanged."""
+    hook = tmp_path / "hook.py"
+    hook.write_text("", encoding="utf-8")
+    local = harness.write_hook_wrapper(tmp_path / "local-run", hook).read_text(encoding="utf-8")
+    assert f'os.environ["USERPROFILE"] = "{harness.forward(tmp_path / "local-run" / "home")}"' in local
+    live = harness.write_hook_wrapper(tmp_path / "live-run", hook, session=SESSION,
+                                      home=tmp_path / "machine-home").read_text(encoding="utf-8")
+    assert f'os.environ["USERPROFILE"] = "{harness.forward(tmp_path / "machine-home")}"' in live
+    assert f'os.environ["THREEFOLD_HOME"] = "{harness.forward(tmp_path / "live-run" / "threefold-home")}"' in live
+    assert not (tmp_path / "live-run" / "home").exists()
+    assert "must never carry the owner's login name" in live and "must never carry" not in local
+
+
+def test_the_owner_s_never_send_list_goes_with_a_live_run_and_nothing_else_of_threefold_home(tmp_path, monkeypatch):
+    """A call holding one of the owner's never-send terms never reaches the public ledger. Only the list is carried:
+    the owner's config.json, which may name a key file, stays where it is and is never read."""
+    owner_home = tmp_path / "owner-threefold-home"
+    owner_home.mkdir()
+    listed = "# the owner's own terms\r\nAcme-Codename-Orion\r\n".encode("utf-8")
+    (owner_home / harness.NEVER_SEND_NAME).write_bytes(listed)
+    (tmp_path / "private-key").write_text("acme-fixture-private-stack-key-0123456789\n", encoding="utf-8")
+    (owner_home / "config.json").write_text(json.dumps({"api_key_file": str(tmp_path / "private-key")}), encoding="utf-8")
+    row, fake = _live_claude_run(tmp_path, ["echo acme-codename-orion > notes.txt", "python -m pytest -q"])
+    assert row["harness_error"] is None, row["harness_error"]
+    assert row["never_send_list"] == "copied"
+    sent = fake.evaluations()
+    assert [body["tool_name"] for body in sent] == ["Write", "Bash", "Bash"], "the never-send call was sent, or more held"
+    assert not any("orion" in text.casefold() for body in sent for text in _strings(body))
+    assert not any({"x-api-key", "authorization"} & set(item["headers"]) for item in fake.requests), "a key was sent"
+    run_home = tmp_path / "work" / f"{TASK}--threefold--r1" / "threefold-home"
+    assert (run_home / harness.NEVER_SEND_NAME).read_bytes() == listed and not (run_home / "config.json").exists()
+    assert (owner_home / harness.NEVER_SEND_NAME).read_bytes() == listed
+    recorded = [text.casefold() for text in _strings(row)]
+    assert not any("orion" in text or str(owner_home).casefold() in text for text in recorded)
+
+
+def test_a_never_send_list_that_cannot_be_read_starts_no_agent(tmp_path):
+    (tmp_path / "threefold-home" / harness.NEVER_SEND_NAME).mkdir(parents=True)
+    with FakeThreefold() as fake:
+        row = harness.run_one(_task(), "threefold", 1, _plan(tmp_path, fake.endpoint), _confined_env(tmp_path))
+    assert "never-send list is there but could not be read" in row["harness_error"]
+    assert fake.evaluations() == []
+    assert not (tmp_path / "work" / f"{TASK}--threefold--r1" / "transcript.jsonl").exists()
+
+
+def test_the_harness_carries_the_file_the_hook_reads():
+    hook = (REPO_ROOT / "src" / "threefold" / "hooks" / "threefold_hook.py").read_text(encoding="utf-8")
+    assert f'NEVER_SEND_NAME = "{harness.NEVER_SEND_NAME}"' in hook
+    assert re.search(r"MAX_NEVER_SEND_BYTES = ([0-9_]+)", hook)
+    assert int(re.search(r"MAX_NEVER_SEND_BYTES = ([0-9_]+)", hook).group(1).replace("_", "")) < harness.NEVER_SEND_COPY_BYTES
+
+
+@pytest.mark.parametrize("env, expected", [
+    ({"THREEFOLD_HOME": "D:/acme/threefold-home"}, "D:/acme/threefold-home"),
+    ({}, "<home>/.threefold"),
+    ({"THREEFOLD_HOME": "~/.threefold-acme"}, "<home>/.threefold-acme"),
+])
+def test_the_owner_s_threefold_home_is_found_as_the_hook_finds_it(tmp_path, env, expected):
+    home = tmp_path / "machine"
+    found = harness.owner_threefold_home(dict(env, HOME=str(home), USERPROFILE=str(home)))
+    assert found == Path(os.path.abspath(expected.replace("<home>", str(home))))
 
 
 # --- the report -------------------------------------------------------------------------------------------

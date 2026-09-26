@@ -40,10 +40,16 @@ TOKEN = "acme-fixture-daily-token-0123456789abcdef"
 
 @pytest.fixture(autouse=True)
 def _confined(tmp_path, monkeypatch):
+    """The machine's home and THREEFOLD_HOME are the test's own: a live run hands the first to its hook and reads the
+    owner's never-send list from the second, both from this process's environment."""
     monkeypatch.setattr(credentials, "DEFAULT_TOKEN_FILE", tmp_path / "no-such-token-file")
     monkeypatch.setattr(harness, "claude_memory_above", lambda path: [])
     (tmp_path / "codex-home").mkdir()
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex-home"))
+    (tmp_path / "machine-home").mkdir()
+    for name in ("HOME", "USERPROFILE"):
+        monkeypatch.setenv(name, str(tmp_path / "machine-home"))
+    monkeypatch.setenv("THREEFOLD_HOME", str(tmp_path / "owner-threefold-home"))
 
 
 @pytest.fixture
@@ -211,6 +217,27 @@ def test_a_codex_day_puts_its_session_on_the_remote_ledger_and_records_one_row(t
     again = daily.run_live(pick, endpoint, results_dir=results, work_root=tmp_path / "work", codex=str(fake_bin["codex"]))
     assert again[0] == 0 and again[1] == row and "already recorded today" in again[2]
     assert len([call for call in fake_agents.calls(fake_bin["dir"], "codex") if call["argv"][:1] == ["exec"]]) == 1
+
+
+def test_a_codex_day_sends_the_machine_s_home_as_tilde_and_never_spelled_out(tmp_path, fake_bin, monkeypatch):
+    """Codex keeps the machine's HOME, so a command it writes may name the owner's profile in full; the public ledger
+    gets `~` in its place, as the hook sends it from the owner's own repositories."""
+    owner = tmp_path / "Users" / "acme-owner"
+    (owner / "AppData" / "Local" / "Temp").mkdir(parents=True)
+    for name in ("HOME", "USERPROFILE"):
+        monkeypatch.setenv(name, str(owner))
+    fake_agents.set_behaviour(fake_bin["dir"], "codex", commands=['type "<ENV:USERPROFILE>\\.gitconfig"',
+                                                                  "dir <ENV:HOME>/AppData/Local/Temp"])
+    with FakeThreefold(stage="enforce") as fake:
+        code, row, note = daily.run_live(daily.Pick(DAY, "codex", TASK), fake.endpoint, results_dir=tmp_path / "results",
+                                         work_root=tmp_path / "work", codex=str(fake_bin["codex"]), retry_pause=0)
+        sent = fake.evaluations()
+    assert (code, note) == (0, ""), note
+    assert row["hook_home"] == "machine"
+    commands = [str((body.get("arguments") or {}).get("command") or "") for body in sent]
+    assert 'type "~\\.gitconfig"' in commands and "dir ~/AppData/Local/Temp" in commands, commands
+    for spelling in {str(owner), str(owner).replace("\\", "/")}:
+        assert spelling.casefold() not in json.dumps(sent).replace("\\\\", "\\").casefold()
 
 
 def test_a_claude_code_day_in_observe_is_recorded_as_would_refuse_and_not_counted(tmp_path, fake_bin):

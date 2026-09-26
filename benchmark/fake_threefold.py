@@ -18,7 +18,7 @@ itself, and never used by a real run.
 
     with FakeThreefold(stage="enforce") as fake:
         fake.endpoint   ->  "http://127.0.0.1:<port>/"
-        fake.requests   ->  [{"method": ..., "path": ..., "query": {...}, "body": {...}}, ...]
+        fake.requests   ->  [{"method": ..., "path": ..., "query": {...}, "body": {...}, "headers": [names]}, ...]
         fake.rows       ->  the ledger rows it recorded
 """
 from __future__ import annotations
@@ -119,8 +119,11 @@ class FakeThreefold:
             def _record(self, body: Any = None) -> Dict[str, str]:
                 parts = urlsplit(self.path)
                 query = {key: values[-1] for key, values in parse_qs(parts.query).items()}
+                # The names of the headers only: enough to say whether a key was sent, without keeping one.
+                headers = sorted({name.lower() for name in self.headers.keys()})
                 with fake._lock:
-                    fake.requests.append({"method": self.command, "path": parts.path, "query": query, "body": body})
+                    fake.requests.append({"method": self.command, "path": parts.path, "query": query, "body": body,
+                                          "headers": headers})
                 return query
 
             def _send(self, status: int, document: Any = None, headers: Optional[Dict[str, str]] = None) -> None:

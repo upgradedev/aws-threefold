@@ -16,7 +16,12 @@ and a session `live-<task>-<date>`, and what the run left in that Threefold's
 ledger is read back through its public API (GET /api/decisions) instead of
 from a local server. That is how a daily real agent puts its session on the
 public demo's ledger (scripts/daily_live_agent.py). The endpoint must be https,
-or http to this machine for a stand-in; nothing else about a run changes.
+or http to this machine for a stand-in. The agent's side of the run is
+unchanged; the hook's is not, because what it sends lands on a ledger others
+read: it runs with the machine's own home, which it shortens to `~` in every
+command it sends, and with the owner's never-send list carried into the run,
+exactly as it runs on the owner's own repositories (machine_home,
+carry_never_send).
 
 The agent is Claude Code (`claude -p`) or Codex (`codex exec`, see
 codex_agent.py). For Codex the prompt condition writes the rules to AGENTS.md
@@ -637,6 +642,14 @@ PROJECT_PATTERN = re.compile(r"^Acme-[A-Za-z0-9-]{1,40}$")
 _DAY_SHAPE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 # A DNS name as a resolver takes it: ASCII labels of letters, digits and inner hyphens, dot-separated.
 _HOST_NAME = re.compile(r"^(?=.{1,253}\.?$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*\.?$")
+# How many session names a live run tries (`live-<task>-<date>`, then `-a2`, `-a3`, ...) before it gives up:
+# a session that already holds rows on the remote ledger is never reused, so no run counts another's calls.
+MAX_SESSION_TRIES = 10
+# The file the hook reads the owner's never-send terms from, in THREEFOLD_HOME (the hook's NEVER_SEND_NAME).
+NEVER_SEND_NAME = "never_send.txt"
+# How much of the owner's never-send list is carried into a live run: more than the hook reads (256 KB), so a
+# list the hook would refuse as too large is carried too large, and the hook still sends nothing.
+NEVER_SEND_COPY_BYTES = 1024 * 1024
 # How much of one answer from a remote Threefold is read, and how many pages
 # of its ledger: bounded, so a server that never stops answering cannot hold
 # a run, and a read that stops at the bound says it is incomplete.
@@ -867,6 +880,59 @@ class RemoteServer:
         """Nothing to stop: the remote Threefold is not this run's."""
 
 
+def machine_home(env: Mapping[str, str]) -> Path:
+    """The home folder of the account the run starts from, as its environment names it (USERPROFILE first on Windows).
+
+    A live run's hook is given this home, not a folder of the run's: the hook
+    replaces its home with `~` in every command it sends, so only the real
+    one keeps the owner's login name off a public ledger. On Windows the agent
+    keeps TEMP and TMP, which sit inside this folder, and Codex keeps HOME
+    itself, so a command that spells either out in full is sent as `~/...`.
+    """
+    names = ("USERPROFILE", "HOME") if os.name == "nt" else ("HOME", "USERPROFILE")
+    for name in names:
+        value = str(env.get(name) or "").strip()
+        if value:
+            return Path(value)
+    return Path.home()
+
+
+def owner_threefold_home(env: Mapping[str, str]) -> Path:
+    """Where the hook on this machine keeps the owner's lists: THREEFOLD_HOME, or ~/.threefold, read from env."""
+    configured = str(env.get("THREEFOLD_HOME") or "").strip()
+    if not configured:
+        return machine_home(env) / ".threefold"
+    if configured == "~" or configured.startswith(("~/", "~\\")):
+        configured = str(machine_home(env)) + configured[1:]
+    return Path(os.path.abspath(configured))
+
+
+def carry_never_send(owner_home: Path, run_home: Path) -> str:
+    """Copies the owner's never-send list into a run's THREEFOLD_HOME, byte for byte: `copied`, or `none` without one.
+
+    The hook sends no call that holds one of the owner's never-send terms,
+    and reads them from its THREEFOLD_HOME, which for a run is the run's own.
+    A live run's calls go to a public ledger, so the owner's list goes with
+    it. Only this one file is carried: the folder's config.json can name a
+    key file, and that key must never reach another stack. The bytes are
+    copied as they are, so a list the hook cannot read makes it send nothing
+    here as on the owner's repositories; a list that exists but cannot be
+    opened stops the run before an agent starts. Neither the list nor where
+    it lives is ever recorded.
+    """
+    try:
+        with open(Path(owner_home) / NEVER_SEND_NAME, "rb") as handle:
+            data = handle.read(NEVER_SEND_COPY_BYTES + 1)
+    except FileNotFoundError:
+        return "none"
+    except OSError:
+        raise RuntimeError("the owner's never-send list is there but could not be read, so no agent was started") from None
+    run_home = Path(run_home)
+    run_home.mkdir(parents=True, exist_ok=True)
+    (run_home / NEVER_SEND_NAME).write_bytes(data)
+    return "copied"
+
+
 def read_threefold_config(repo: Path) -> Optional[Dict[str, Any]]:
     """The task repository's .threefold.json, or None when it is missing or not a JSON object."""
     try:
@@ -954,34 +1020,53 @@ def copy_hook(work_root: Path) -> Path:
 HOOK_LOG_NAME = "hook-calls.jsonl"
 
 
-def write_hook_wrapper(run_dir: Path, hook: Path, agent: str = "claude-code", session: Optional[str] = None) -> Path:
+def write_hook_wrapper(run_dir: Path, hook: Path, agent: str = "claude-code", session: Optional[str] = None,
+                       home: Optional[Path] = None) -> Path:
     """The per-run wrapper the agent runs as its hook: the hook's state kept inside the run, and each call logged.
 
     With `session`, every call is sent under that session name instead of the
     agent's own session id: a live run's calls then sit on a remote ledger as
     `live-<task>-<date>`, which a reader can find and the run can read back.
+
+    `home` is the HOME and USERPROFILE the hook runs with: a folder of the
+    run's own by default, and the machine's home (machine_home) for a run
+    that reports to a remote Threefold, so the hook shortens that home to `~`
+    as it does on the owner's repositories. THREEFOLD_HOME is the run's own
+    either way. Nothing is created in a home that is given.
     """
     run_bin = Path(run_dir) / "bin"
     run_bin.mkdir(parents=True, exist_ok=True)
-    for folder in ("threefold-home", "home"):
-        (Path(run_dir) / folder).mkdir(parents=True, exist_ok=True)
+    (Path(run_dir) / "threefold-home").mkdir(parents=True, exist_ok=True)
+    own_home = home is None
+    if home is None:
+        home = Path(run_dir) / "home"
+        home.mkdir(parents=True, exist_ok=True)
     wrapper = run_bin / "threefold_hook_wrapper.py"
     wrapper.write_text(WRAPPER_TEMPLATE.format(
         hook=forward(hook),
         threefold_home=forward(Path(run_dir) / "threefold-home"),
-        home=forward(Path(run_dir) / "home"),
+        home=forward(home),
         agent=agent,
         token_env=TOKEN_ENV,
         log=forward(Path(run_dir) / HOOK_LOG_NAME),
         kinds=json.dumps([[kind, list(phrases)] for kind, phrases in REFUSAL_KINDS]),
         session=json.dumps(session or ""),
+        home_is=HOME_IS_RUN if own_home else HOME_IS_MACHINE,
     ), encoding="utf-8")
     return wrapper
 
 
+# What the wrapper's docstring says about the home it gives the hook, one sentence for each case.
+HOME_IS_RUN = ("this run's own folder, so ~ in the hook names nothing of the owner's; the calls\n"
+               "go to a server on this machine that is gone when the run ends")
+HOME_IS_MACHINE = ("the machine's own home, which the hook replaces with ~ in every command it\n"
+                   "sends, as on the owner's governed repositories: this run's calls go to a\n"
+                   "remote ledger, which must never carry the owner's login name")
+
+
 def install_hook(task: Task, repo: Path, run_dir: Path, work_root: Path, endpoint: str, python: str = sys.executable,
                  agent: str = "claude-code", project: Optional[str] = None,
-                 session: Optional[str] = None) -> Dict[str, str]:
+                 session: Optional[str] = None, home: Optional[Path] = None) -> Dict[str, str]:
     """Installs the hook the way the installer would, pointed at this run's local server or its remote Threefold.
 
     The hook file is copied once into the work root and run from there, never
@@ -997,10 +1082,11 @@ def install_hook(task: Task, repo: Path, run_dir: Path, work_root: Path, endpoin
 
     `project` replaces the benchmark's own project name (`Acme-Bench-<task>`)
     and `session` the agent's session id, for a run that reports to a remote
-    Threefold.
+    Threefold; `home` is then the machine's home, the one the hook shortens
+    to `~` (write_hook_wrapper).
     """
     hook_copy = copy_hook(work_root)
-    wrapper = write_hook_wrapper(run_dir, hook_copy, agent, session)
+    wrapper = write_hook_wrapper(run_dir, hook_copy, agent, session, home)
     command = f"{quoted(python)} {quoted(wrapper)}"
     if agent == "codex":
         relative = CODEX_HOOK_FILE
@@ -1030,12 +1116,14 @@ def install_hook(task: Task, repo: Path, run_dir: Path, work_root: Path, endpoin
 
 WRAPPER_TEMPLATE = '''"""Runs the Threefold hook for one benchmark run, with its state kept inside the run.
 
-Written by benchmark/harness.py. The hook reads THREEFOLD_HOME and expands ~
-for its local lists and logs; both point into this run, so the owner's
-~/.threefold is never read or written, and no inherited THREEFOLD_* variable
-can send a call anywhere but the local server the repository's .threefold.json
-names. A login token the agent may have inherited is removed before the hook
-starts: the hook has no use for it.
+Written by benchmark/harness.py. The hook keeps its local lists and logs in
+THREEFOLD_HOME, which points into this run, so the owner's ~/.threefold is
+never read or written by it (a run reporting to a remote Threefold has the
+owner's never-send list copied in before the agent starts, and nothing else),
+and no inherited THREEFOLD_* variable can send a call anywhere but the
+Threefold the repository's .threefold.json names. HOME and USERPROFILE are
+{home_is}. A login token the agent may have inherited is removed before the
+hook starts: the hook has no use for it.
 
 Each call adds one line to the run's hook log, with no content: whether the
 hook printed a decision, whether that decision refused the call and which gate
@@ -2102,11 +2190,17 @@ def run_one(task: Task, condition: str, rep: int, plan: RunPlan, base_env: Optio
             server.start(base_env)
             installed = install_hook(task, repo, run_dir, plan.work_root, server.endpoint, python=options.python,
                                      agent="codex" if options.agent == "codex" else "claude-code",
-                                     project=project, session=session)
+                                     project=project, session=session,
+                                     home=machine_home(base_env) if remote is not None else None)
             row["hook_sha256"] = installed["hook_sha256"]
             row["hook_file"] = installed["hook_file"]
-            if remote is not None and not _names(read_threefold_config(repo), remote.endpoint, project):
-                raise RuntimeError("the repository's .threefold.json does not name the endpoint and project given")
+            if remote is not None:
+                # What leaves the machine for a public ledger is what leaves it from the owner's repositories:
+                # the machine's home shortened to ~, and nothing holding a never-send term.
+                row["hook_home"] = "machine"
+                row["never_send_list"] = carry_never_send(owner_threefold_home(base_env), run_dir / "threefold-home")
+                if not _names(read_threefold_config(repo), remote.endpoint, project):
+                    raise RuntimeError("the repository's .threefold.json does not name the endpoint and project given")
         settings_file = write_agent_settings(run_dir, plan.home, private_files) if options.agent != "codex" else None
         command = build_agent_command(options, task, settings_file, plan.home, repo=repo, private_files=private_files)
         code, timed_out, seconds = run_agent(

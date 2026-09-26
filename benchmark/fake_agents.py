@@ -32,6 +32,11 @@ Modes: ok, expired, not_logged_in, usage_limit, overloaded, and:
   Claude Code does, with its hook events in the transcript. A refused call is
   not carried out; an approved Write is.
 
+`commands` (a list, Claude Code in governed mode and Codex) adds one Bash call
+per entry after those, asked of the hook the same way; each `<ENV:NAME>` in it
+is replaced by that variable as the stand-in's own environment holds it, so a
+test can have the agent spell out its TEMP folder or its home in full.
+
 `modes` (a list) gives one mode per call, in order, the last repeated. Not a
 test itself, and never used by a real run.
 """
@@ -41,6 +46,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -130,6 +136,12 @@ def _behaviour(bin_dir: Path, agent: str) -> Dict[str, Any]:
     return json.loads((bin_dir / f"{agent}.behaviour.json").read_text(encoding="utf-8"))
 
 
+def _commands(bin_dir: Path, agent: str) -> List[str]:
+    """The behaviour's extra Bash commands, each `<ENV:NAME>` replaced from this process's environment."""
+    return [re.sub(r"<ENV:([A-Za-z_][A-Za-z0-9_]*)>", lambda found: os.environ.get(found.group(1), ""), str(command))
+            for command in _behaviour(bin_dir, agent).get("commands") or []]
+
+
 def _mode(bin_dir: Path, agent: str) -> str:
     behaviour = _behaviour(bin_dir, agent)
     counter = bin_dir / f"{agent}.count"
@@ -211,7 +223,7 @@ def fake_claude(bin_dir: Path, argv: List[str]) -> int:
     if mode == "hide" and token:
         _hide(token, _behaviour(bin_dir, "claude"))
     if mode == "governed" and streaming:
-        _governed_calls(Path.cwd())
+        _governed_calls(Path.cwd(), _commands(bin_dir, "claude"))
     _emit({"type": "result", "subtype": "success", "is_error": False, "terminal_reason": "completed", "num_turns": 2,
            "duration_ms": 1500, "duration_api_ms": 900, "total_cost_usd": 0.0123, "result": "ok",
            "usage": {"input_tokens": 12, "output_tokens": 34, "cache_read_input_tokens": 100, "cache_creation_input_tokens": 0},
@@ -278,11 +290,14 @@ def _domain_module(repo: Path) -> Path:
     return repo / "src" / "domain" / "archive.py"
 
 
-def _governed_calls(repo: Path) -> None:
-    """Two governed calls, each asked of the registered hook first: a Write a layering rule refuses, and a read-only command."""
+def _governed_calls(repo: Path, commands: Optional[List[str]] = None) -> None:
+    """Two governed calls, each asked of the registered hook first: a Write a layering rule refuses, and a read-only
+    command; then one Bash call for each of `commands`."""
     target = _domain_module(repo)
     calls = [("toolu_w", "Write", {"file_path": str(target), "content": "import boto3\n\n\ndef archive(order):\n    return order\n"}),
              ("toolu_b", "Bash", {"command": "git status", "description": "look at the working tree"})]
+    calls += [(f"toolu_c{number}", "Bash", {"command": command, "description": "run a command"})
+              for number, command in enumerate(commands or [], 1)]
     for tool_id, tool, tool_input in calls:
         _emit({"type": "assistant", "message": {"content": [
             {"type": "tool_use", "id": tool_id, "name": tool, "input": tool_input}]}})
@@ -353,6 +368,8 @@ def fake_codex(bin_dir: Path, argv: List[str]) -> int:
         ("item_2", "file_change", {"tool_name": "apply_patch", "tool_input": {"command": (
             "*** Begin Patch\n*** Add File: src/acme_orders/domain/archive.py\n+import boto3\n*** End Patch\n")}}),
     ]
+    calls_made += [(f"item_c{number}", "command_execution", {"tool_name": "Bash", "tool_input": {"command": command}})
+                   for number, command in enumerate(_commands(bin_dir, "codex"), 1)]
     for item_id, item_type, call in calls_made:
         payload = dict(call, session_id="fake-codex-session", cwd=str(repo), hook_event_name="PreToolUse")
         started = {"id": item_id, "type": item_type, "status": "in_progress"}

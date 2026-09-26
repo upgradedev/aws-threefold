@@ -209,11 +209,30 @@ recorded as `codex-default`, so pass one to pin it), `--parallel`,
 ### Against a Threefold that is already running
 
 `--threefold-endpoint URL` points the Threefold conditions at a Threefold
-running elsewhere instead of a local server started for each run. Everything
-else about a run is unchanged: the same copy of the task outside the
-workspace, the same permission lists, the same login handling, and no key of
-any kind is sent. What changes:
+running elsewhere instead of a local server started for each run. The agent's
+side of a run is unchanged: the same copy of the task outside the workspace,
+the same permission lists, the same login handling, and no key of any kind is
+sent. The hook's side is not, because what it sends lands on a ledger other
+people read. What changes:
 
+- **What leaves the machine is what leaves it from the owner's own
+  repositories.** A local run's hook has a home folder of the run's own; a
+  remote run's hook runs with the machine's home (`USERPROFILE`, `HOME`),
+  because the hook replaces its home with `~` in every command it sends, and
+  only the real one keeps the login name a Windows profile path carries off
+  the ledger. Claude Code keeps `TEMP` and `TMP`, which sit inside that
+  profile, and Codex keeps `HOME` itself: a command that spells either out,
+  `pytest --basetemp C:\Users\<login>\AppData\Local\Temp\bt` or
+  `cat C:/Users/<login>/.gitconfig`, reaches the ledger as
+  `--basetemp ~\AppData\Local\Temp\bt` and `cat ~/.gitconfig`. `THREEFOLD_HOME`
+  stays the run's own, and the owner's never-send list (`never_send.txt` in
+  `THREEFOLD_HOME`, or `~/.threefold`) is copied into it byte for byte before
+  the agent starts, so a call holding one of those terms is never sent.
+  Nothing else of that folder is read: its `config.json` can name a key file,
+  and that key must never reach another stack. A list that is there but
+  cannot be read stops the run before an agent starts. The row records
+  `hook_home: "machine"` and `never_send_list` (`copied` or `none`), never the
+  list or where it is.
 - The hook in the task repository names that endpoint, the project
   `Acme-Live-<task>` and the session `live-<task>-<date>` (`--live-date`, the
   UTC day, default today; `-r<rep>` and `-a<attempt>` are added for a later
