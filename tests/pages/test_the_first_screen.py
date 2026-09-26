@@ -259,13 +259,77 @@ def test_the_hero_fits_a_phone_without_scrolling_sideways() -> None:
     assert not re.search(r'style="[^"]*\b(?:min-)?width:\s*\d', hero), "A fixed width can push a 375 px screen sideways"
 
 
-def test_the_demonstration_moves_only_for_a_reader_who_has_not_asked_for_less() -> None:
+# A browser that draws frames, and says whether its reader asked for less
+# motion; the design system's two motion helpers are watched as the page calls
+# them. REDUCE is set by each test before this runs.
+MOTION = r"""
+globalThis.requestAnimationFrame = fn => setTimeout(() => fn(Date.now()), 16);
+globalThis.matchMedia = q => ({ matches: REDUCE && q.indexOf('reduce') !== -1, addEventListener() {}, removeListener() {} });
+const moved = [];
+let layer;
+Object.defineProperty(globalThis, 'Threefold', { configurable: true, get() { return layer; }, set(v) {
+  const reveal = v.reveal, pulse = v.pulse;
+  v.reveal = (nodes, o) => { moved.push(['reveal', Array.from(nodes || []).map(n => n && n.id), o && o.stagger]); return reveal(nodes, o); };
+  v.pulse = (node, tone) => { moved.push(['pulse', node && node.id, tone]); return pulse(node, tone); };
+  layer = v;
+} });
+"""
+
+
+def test_the_demonstration_moves_only_for_a_reader_who_has_not_asked_for_less(tmp_path: Path) -> None:
+    """Its motion is the design system's own, which does nothing for a reader who asked for less."""
     style = _style()
     reduced = style.split("@media (prefers-reduced-motion: reduce)", 1)[1]
     assert ".tf-demo, .tf-demo *" in reduced and "animation: none !important" in reduced
-    assert '.tf-demo[data-motion="on"] .tf-diff-line { animation:' in style, "The lines arrive only when motion is on"
+    assert "@keyframes" not in style, "No motion of the page's own: T.reveal and T.pulse, from the design system"
     script = page_source("index.html")
     assert "return !!T && !T.reducedMotion() && typeof window.requestAnimationFrame === 'function';" in script
+    seen = r"""
+  await new Promise(r => setTimeout(r, 1300)); await tick();
+  out.motion = el('hero-demo').getAttribute('data-motion');
+  out.phase = el('hero-demo').getAttribute('data-phase');
+  out.replayHidden = el('hero-replay').hidden;
+  out.moved = moved;
+"""
+    moving = _load(tmp_path, hero="{ status: 200, body: LIVE_REFUSAL }", before="const REDUCE = false;\n" + MOTION, scenario=seen)
+    assert moving["motion"] == "on" and moving["phase"] == "landed" and moving["replayHidden"] is False
+    assert ["reveal", ["hero-verdict", "hero-reason", "hero-fix"], 140] in moving["moved"], "The verdict, its reason and its fix rise in, in turn"
+    assert ["pulse", "hero-stamp", "danger"] in moving["moved"], "and the refusal's stamp pulses once"
+    assert any(m[0] == "reveal" and m[2] == 130 for m in moving["moved"]), "The lines arrive one after another"
+    still = _load(tmp_path, hero="{ status: 200, body: LIVE_REFUSAL }", before="const REDUCE = true;\n" + MOTION, scenario=seen)
+    assert still["motion"] == "off" and still["phase"] == "landed" and still["moved"] == [], "Nothing moves for a reader who asked for less"
+    assert still["replayHidden"] is True, "and there is nothing to replay"
+
+
+def test_replay_plays_the_answer_again_and_sends_nothing(tmp_path: Path) -> None:
+    out = _load(
+        tmp_path,
+        hero="{ status: 200, body: LIVE_REFUSAL }",
+        before="const REDUCE = false;\n" + MOTION,
+        scenario=r"""
+  await new Promise(r => setTimeout(r, 1300)); await tick();
+  const asked = () => calls.filter(c => c.url.indexOf('/evaluate-tool-call') !== -1).length;
+  out.askedBefore = asked();
+  el('hero-replay').listeners.click();
+  el('hero-replay').listeners.click();
+  await tick();
+  out.during = { phase: el('hero-demo').getAttribute('data-phase'), verdictHidden: el('hero-verdict').hidden,
+    waiting: !el('hero-waiting').hidden, words: el('hero-waiting-text').textContent, landed: el('hero-demo').getAttribute('data-verdict') };
+  await new Promise(r => setTimeout(r, 1300)); await tick();
+  out.after = { phase: el('hero-demo').getAttribute('data-phase'), verdict: el('hero-verdict').innerHTML, waiting: !el('hero-waiting').hidden,
+    source: el('hero-source').innerHTML };
+  out.askedAfter = asked();
+  out.stamps = moved.filter(m => m[0] === 'pulse').length;
+""",
+    )
+    assert out["askedBefore"] == 1 and out["askedAfter"] == 1, "Replay sends no second call"
+    during = out["during"]
+    assert during["phase"] == "waiting" and during["verdictHidden"] is True and during["landed"] == "pending"
+    assert during["waiting"] and during["words"] == "Playing this stack’s answer again; nothing is sent",         "While it plays again it says so, and never that it is asking"
+    after = out["after"]
+    assert after["phase"] == "landed" and "Refused before it was written" in after["verdict"] and not after["waiting"]
+    assert re.search(r"Live · \d+ ms", _text(after["source"])), "The same answer, with the round trip it took the first time"
+    assert out["stamps"] == 2, "One landing on load and one for the replay, though Replay was pressed twice"
 
 
 def test_the_header_holds_the_shell_and_the_footer_the_links_and_the_tags() -> None:
@@ -378,9 +442,13 @@ def test_the_hero_asks_the_stack_once_and_shows_its_live_answer(tmp_path: Path) 
     assert out["landed"] == "refused" and out["flagged"] == [True, False, False], "The verdict lands on the import line"
     assert out["dataSource"] == "live"
     fix = out["fix"]
-    assert not out["fixHidden"] and "Checked by Threefold" in fix and "3 of 3 gate checks passed" in fix
-    assert "move boto3 out of the domain behind UserPort" in fix and "src/infrastructure/user_adapter.py · new" in fix
-    assert "A starting point, never applied automatically." in fix
+    assert not out["fixHidden"] and "Checked fix" in _text(fix) and "3 of 3 gate checks passed" in fix
+    summary = _text(re.search(r'<p class="tf-demo-fix-summary"[^>]*>(.*?)</p>', fix, re.S).group(1))
+    assert summary == "Move boto3 out of the domain behind UserPort; adapter: src/infrastructure/user_adapter.py.",         "The service's summary, without a second 'Checked fix:' under a title that already says it"
+    assert 'title="Checked fix: move boto3 out of the domain behind UserPort;' in fix, "The service's own words on hover"
+    note = re.search(r'<p class="tf-demo-fix-note" title="([^"]*)">(.*?)</p>', fix, re.S)
+    assert note and note.group(1) == "src/domain/user.py; src/infrastructure/user_adapter.py (new)", "Each file, and which is new"
+    assert _text(note.group(2)) == "2 files proposed · never applied automatically", "A starting point, never applied automatically"
     assert out["motion"] == "off", "With no animation frames the moment lands at once"
     assert out["scenarioFix"] == "" and out["freezeTitle"] == "", "The hero touches neither the scenarios' panel nor their session"
 
@@ -426,7 +494,7 @@ def test_a_visit_within_the_hour_shows_the_kept_answer_and_asks_nothing(tmp_path
     )
     assert out["dataSource"] == "live" and out["landed"] == "refused" and out["flagged"] == [True, False, False]
     assert _read(out["reason"]) == PLAIN_REASON + " " + RULE_LINE
-    assert "3 of 3 gate checks passed" in out["fix"] and "src/infrastructure/user_adapter.py · new" in out["fix"]
+    assert "3 of 3 gate checks passed" in out["fix"] and "src/infrastructure/user_adapter.py (new)" in out["fix"]
     assert _metrics(out["live"])["calls"] == "1,284"
 
 
@@ -570,7 +638,7 @@ def test_the_hero_replays_the_recorded_run_and_says_truly_why(tmp_path: Path) ->
         assert "without contacting it" not in out["caption"], f"{name}: the stack was asked"
         assert _read(out["reason"]) == PLAIN_REASON + " " + RULE_LINE, name
         assert "Refused before it was written" in out["verdict"] and out["flagged"] == [True, False, False], name
-        assert "No fix in a replay" in out["fix"] and "Checked by Threefold" not in out["fix"], f"{name}: a replay invents no fix"
+        assert "No fix in a replay" in out["fix"] and "Checked fix" not in out["fix"] and "gate checks" not in out["fix"],             f"{name}: a replay invents no fix"
 
 
 def test_the_hero_shows_an_answer_that_is_not_a_refusal_as_what_it_is(tmp_path: Path) -> None:

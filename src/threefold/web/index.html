@@ -53,29 +53,28 @@
     .tf-hero-copy { grid-area: copy; }
     .tf-hero > .tf-demo { grid-area: demo; }
     .tf-hero > .tf-hero-scope { grid-area: scope; }
-    /* Side by side from a desk's width, top-aligned. The row keeps the room the
-       demonstration takes once its verdict has landed, so nothing under the hero
-       moves when it does; the card itself is only as tall as what it holds. */
+    /* Side by side from a desk's width, top-aligned. At every width the
+       demonstration is as tall from its first paint as once its verdict has
+       landed (its ghost, below), so nothing under the hero moves when it does. */
     @media (min-width: 1024px) {
       .tf-hero { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: var(--tf-space-8); row-gap: var(--tf-space-3);
-        grid-template-areas: "copy demo" "scope demo"; grid-template-rows: auto 1fr; min-height: 37.25rem; }
+        grid-template-areas: "copy demo" "scope demo"; grid-template-rows: auto 1fr; }
       .tf-hero-copy { padding-top: var(--tf-space-2); }
     }
-    @media (min-width: 1280px) { .tf-hero { min-height: 34.5rem; } }
     .tf-hero::before {
       /* Inside the hero's own width: a glow that reached past it would give a
          phone's page a sideways scroll. */
       content: ''; position: absolute; z-index: -1; pointer-events: none; left: 0; right: 0; top: -120px; height: 640px;
       /* closest-side: each glow has faded out before it meets an edge of the box. */
       background:
-        radial-gradient(closest-side at 50% 42%, rgba(124, 58, 237, 0.2), transparent),
-        radial-gradient(closest-side at 50% 70%, rgba(8, 145, 178, 0.08), transparent);
+        radial-gradient(closest-side at 50% 42%, color-mix(in srgb, var(--tf-accent-strong) 20%, transparent), transparent),
+        radial-gradient(closest-side at 50% 70%, color-mix(in srgb, var(--tf-info) 8%, transparent), transparent);
     }
     @media (min-width: 1024px) {
       .tf-hero::before {
         background:
-          radial-gradient(closest-side at 26% 42%, rgba(124, 58, 237, 0.2), transparent),
-          radial-gradient(closest-side at 76% 50%, rgba(8, 145, 178, 0.1), transparent);
+          radial-gradient(closest-side at 26% 42%, color-mix(in srgb, var(--tf-accent-strong) 20%, transparent), transparent),
+          radial-gradient(closest-side at 76% 50%, color-mix(in srgb, var(--tf-info) 10%, transparent), transparent);
       }
     }
     /* On a phone the copy is set tight, so the proposed write and its verdict
@@ -91,7 +90,7 @@
     @media (min-width: 1280px) { .tf-hero-title { font-size: 3.625rem; } }
     .tf-hero-title em {
       font-style: normal; color: var(--tf-accent-text);
-      background: linear-gradient(92deg, #ddd6fe 0%, #a78bfa 48%, #67e8f9 100%); -webkit-background-clip: text; background-clip: text;
+      background: linear-gradient(92deg, var(--tf-accent-text) 0%, var(--tf-accent) 52%, var(--tf-info-text) 100%); -webkit-background-clip: text; background-clip: text;
       -webkit-text-fill-color: transparent;
     }
     .tf-hero-lede { margin: 0; max-width: 34rem; font-size: 0.9375rem; line-height: 1.5; color: var(--tf-text-2); overflow-wrap: break-word; text-wrap: pretty; }
@@ -101,8 +100,10 @@
     /* A label that does not fit wraps inside its button rather than pushing a
        phone's page sideways. */
     .tf-hero-actions .tf-btn { white-space: normal; height: auto; min-height: 44px; padding-top: 10px; padding-bottom: 10px; line-height: 1.25; text-align: center; }
+    /* The quiet link starts where the buttons above it start: it has no padding
+       of its own, and the 44 px it needs to be pressed comes from its height. */
     .tf-hero-link {
-      display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; padding: 0 6px; border-radius: var(--tf-radius);
+      display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; padding: 0; border-radius: var(--tf-radius);
       font: 500 var(--tf-fs-small)/1.25 var(--tf-font-sans); color: var(--tf-text-2);
       text-decoration: underline; text-decoration-color: var(--tf-hairline-strong); text-underline-offset: 4px;
     }
@@ -113,20 +114,29 @@
 
     /* The living demonstration: one proposed write, the verdict landing on it. */
     .tf-demo {
+      --tf-demo-gap: 10px; --tf-demo-fix-lines: 3;
       position: relative; margin: 0; min-width: 0; overflow: hidden; border-radius: var(--tf-radius-xl);
-      background: linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0) 140px), var(--tf-surface-1);
+      background: linear-gradient(180deg, var(--tf-highlight), transparent 140px), var(--tf-surface-1);
       border: 1px solid var(--tf-hairline-strong); box-shadow: var(--tf-shadow-3);
     }
-    .tf-demo-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 10px 14px; border-bottom: 1px solid var(--tf-hairline); background: var(--tf-inset); }
+    @media (min-width: 640px) { .tf-demo { --tf-demo-gap: 12px; --tf-demo-fix-lines: 2; } }
+    /* The bar keeps to one line at any width. On a phone the decorative dots
+       go first, then the title gives way with an ellipsis; the chip, which says
+       where the answer came from, never does. */
+    .tf-demo-bar { display: flex; flex-wrap: nowrap; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--tf-hairline); background: var(--tf-inset); }
     @media (min-width: 640px) { .tf-demo-bar { padding: 11px 16px; } }
-    .tf-demo-dots { display: inline-flex; gap: 6px; }
+    .tf-demo-dots { display: inline-flex; flex: none; gap: 6px; }
     .tf-demo-dots i { display: block; width: 10px; height: 10px; border-radius: 99px; background: var(--tf-hairline-strong); }
-    .tf-demo-title { margin-right: auto; font: 500 0.75rem/1rem var(--tf-font-sans); color: var(--tf-text-3); }
-    /* A phone has no room for the title beside the longer recorded label, which
-       says more; the title still names the figure for a screen reader. */
-    @media (max-width: 419px) { .tf-demo[data-source="recorded"] .tf-demo-title { display: none; } }
-    .tf-demo-body { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px 14px; }
-    @media (min-width: 640px) { .tf-demo-body { gap: 12px; padding: 18px 20px; } }
+    .tf-demo-title { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font: 500 0.75rem/1rem var(--tf-font-sans); color: var(--tf-text-3); }
+    .tf-demo-bar > .tf-chip { flex: none; margin-left: auto; }
+    @media (max-width: 419px) {
+      .tf-demo-dots { display: none; }
+      /* The recorded label says more than the title, and there is room for one;
+         the title still names the figure for a screen reader. */
+      .tf-demo[data-source="recorded"] .tf-demo-title { display: none; }
+    }
+    .tf-demo-body { display: flex; flex-direction: column; gap: var(--tf-demo-gap); padding: 12px 14px 14px; }
+    @media (min-width: 640px) { .tf-demo-body { padding: 18px 20px; } }
     .tf-demo-call { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-height: 22px; font-size: 0.75rem; line-height: 1rem; color: var(--tf-text-3); }
     .tf-demo-call code { font: 500 0.75rem/1rem var(--tf-font-mono); color: var(--tf-text); overflow-wrap: anywhere; }
     /* On a phone the call keeps to one line: the tool and the file it writes. */
@@ -138,11 +148,35 @@
     .tf-diff-line { position: relative; display: grid; grid-template-columns: 2.5rem 1.25rem minmax(0, 1fr) auto; align-items: center; padding-right: 12px; transition: background-color 400ms var(--tf-ease-out), box-shadow 400ms var(--tf-ease-out); }
     .tf-diff-num { padding-right: 12px; text-align: right; color: var(--tf-text-decor); user-select: none; }
     .tf-diff-sign { color: var(--tf-info-text); user-select: none; }
-    .tf-diff-code { white-space: pre-wrap; overflow-wrap: anywhere; color: #dde1ea; }
+    .tf-diff-code { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--tf-text); }
     .tf-diff-tag { display: none; margin-left: 8px; padding: 0 6px; border-radius: var(--tf-radius-xs); font: 600 0.625rem/1rem var(--tf-font-sans); letter-spacing: var(--tf-track-caps); text-transform: uppercase; color: var(--tf-refused-text); background: var(--tf-refused-soft); }
     .tf-demo[data-verdict="refused"] .tf-diff-line.is-flagged { background: var(--tf-refused-soft); box-shadow: inset 2px 0 0 var(--tf-refused); }
     .tf-demo[data-verdict="refused"] .tf-diff-line.is-flagged .tf-diff-sign { color: var(--tf-refused-text); }
     .tf-demo[data-verdict="refused"] .tf-diff-line.is-flagged .tf-diff-tag { display: inline-block; }
+
+    /* The verdict's place, held from the first paint. The ghost is the reason
+       the recorded run gives, set in the same type, and a fix in the same rows a
+       fix is shown in, so it is as tall as the verdict that lands, in any font.
+       The two share one grid cell, and the ghost is hidden, never removed, once
+       the verdict is there: the cell never shrinks, and nothing under it moves. */
+    .tf-demo-outcome { display: grid; grid-template-columns: minmax(0, 1fr); }
+    .tf-demo-outcome > .tf-demo-stack { grid-area: 1 / 1; }
+    .tf-demo-stack { display: flex; flex-direction: column; gap: var(--tf-demo-gap); min-width: 0; }
+    .tf-demo-slot { display: flex; align-items: center; min-height: 40px; }
+    .tf-demo[data-phase="landed"] .tf-demo-ghost { visibility: hidden; }
+    .tf-demo[data-phase="waiting"] .tf-demo-landed > :not(.tf-demo-slot) { visibility: hidden; }
+    .tf-demo-ghost .tf-stamp { visibility: hidden; }
+    .tf-demo-ghost .tf-demo-reason { border-left-color: var(--tf-hairline-strong); }
+    .tf-demo-ghost .tf-demo-reason, .tf-demo-ghost .tf-demo-reason * { color: transparent; }
+    /* One bar per line of text, at the text's own line height. */
+    .tf-demo-ghost .tf-demo-why { background: repeating-linear-gradient(180deg, transparent 0 5px, var(--tf-surface-2) 5px 17px, transparent 17px 1.375rem); }
+    .tf-demo-ghost .tf-demo-ruleline > span { border-radius: var(--tf-radius-xs); background: var(--tf-surface-2); }
+    .tf-demo-ghost .tf-demo-fix { background: transparent; border-color: var(--tf-hairline); }
+    .tf-demo-ghost .tf-demo-fix-summary { height: calc(var(--tf-demo-fix-lines) * 1.25rem); background: repeating-linear-gradient(180deg, transparent 0 4px, var(--tf-surface-2) 4px 16px, transparent 16px 1.25rem); }
+    .tf-ghost-bar { display: block; height: 12px; width: 100%; border-radius: var(--tf-radius-xs); }
+    .tf-demo-fix-title .tf-ghost-bar { width: 42%; }
+    .tf-demo-fix-note .tf-ghost-bar { width: 64%; height: 10px; margin-top: 3px; }
+
     .tf-demo-verdict { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; min-height: 40px; }
     .tf-stamp {
       display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 10px; border: 1px solid var(--tf-hairline-strong);
@@ -158,27 +192,31 @@
     .tf-demo-why code { font: 500 0.8125rem/1 var(--tf-font-mono); color: var(--tf-text); }
     .tf-demo-ruleline { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; margin: 0; font: 500 0.6875rem/1rem var(--tf-font-mono); color: var(--tf-text-3); overflow-wrap: anywhere; }
     .tf-demo-ruleline b { font-weight: 500; color: var(--tf-accent-text); }
+    /* The fix in three rows of known height: a title on one line, the service's
+       summary in at most --tf-demo-fix-lines lines (all of it on hover, and in
+       full in the scenarios below), and one quiet line about the files. */
     .tf-demo-fix { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: var(--tf-radius-md); background: var(--tf-approved-soft); border: 1px solid var(--tf-approved-line); font-size: 0.8125rem; line-height: 1.25rem; color: var(--tf-text-2); }
     @media (min-width: 640px) { .tf-demo-fix { padding: 12px 14px; } }
-    .tf-demo-fix p { margin: 0; }
-    .tf-demo-fix-title { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; font-weight: 600; color: var(--tf-approved-text); }
-    .tf-demo-fix-title .tf-icon { width: 16px; height: 16px; }
-    .tf-demo-fix-files { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-    .tf-demo-fix-files code { padding: 1px 6px; border-radius: var(--tf-radius-xs); background: var(--tf-inset); border: 1px solid var(--tf-hairline); font: 400 0.6875rem/1.125rem var(--tf-font-mono); color: var(--tf-text-2); overflow-wrap: anywhere; }
-    .tf-demo-fix-files .tf-micro { margin-left: 2px; }
+    .tf-demo-fix p { margin: 0; min-width: 0; }
+    .tf-demo-fix-title { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; height: 22px; overflow: hidden; font-weight: 600; color: var(--tf-approved-text); }
+    .tf-demo-fix-title .tf-icon { width: 16px; height: 16px; flex: none; }
+    .tf-demo-fix-title > span:not(.tf-chip) { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+    .tf-demo-fix-title .tf-chip { flex: none; }
+    .tf-demo-fix-summary { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; overflow-wrap: anywhere; }
+    @media (min-width: 640px) { .tf-demo-fix-summary { -webkit-line-clamp: 2; line-clamp: 2; } }
+    .tf-demo-fix-note { height: 1rem; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--tf-fs-micro); line-height: 1rem; color: var(--tf-text-3); }
     .tf-demo-fix-none { background: var(--tf-surface-2); border-color: var(--tf-hairline); }
     .tf-demo-fix-none .tf-demo-fix-title { color: var(--tf-text-2); }
     .tf-demo-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; padding: 10px 14px; border-top: 1px solid var(--tf-hairline); background: var(--tf-inset); font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-3); }
     @media (min-width: 640px) { .tf-demo-foot { padding: 12px 16px; } }
-    .tf-demo-foot p { margin: 0; flex: 1 1 16rem; min-width: 0; overflow-wrap: anywhere; }
-
-    @keyframes tf-type { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: none; } }
-    @keyframes tf-stamp-in { 0% { opacity: 0; transform: scale(1.35); } 55% { opacity: 1; transform: scale(0.96); } 100% { opacity: 1; transform: none; } }
-    .tf-demo[data-motion="on"] .tf-diff-line { animation: tf-type 280ms var(--tf-ease-out) both; animation-delay: calc(var(--i, 0) * 130ms + 140ms); }
-    .tf-demo[data-motion="on"] .tf-stamp { animation: tf-stamp-in 460ms var(--tf-ease-out) both; }
-    .tf-demo[data-motion="on"] .tf-demo-why { animation: tf-rise 320ms var(--tf-ease-out) 180ms both; }
-    .tf-demo[data-motion="on"] .tf-demo-ruleline { animation: tf-rise 320ms var(--tf-ease-out) 300ms both; }
-    .tf-demo[data-motion="on"] .tf-demo-fix { animation: tf-rise 360ms var(--tf-ease-out) 480ms both; }
+    .tf-demo-foot p { margin: 0; flex: 1 1 14rem; min-width: 0; overflow-wrap: anywhere; }
+    /* The caption changes when the verdict lands, so its cell is as tall as
+       the longest caption it can hold from the start: that caption sits in the
+       same cell, unseen. Replay keeps its room while the moment plays. */
+    .tf-demo-caption { display: grid; }
+    .tf-demo-caption > span { grid-area: 1 / 1; min-width: 0; }
+    .tf-demo-room { visibility: hidden; }
+    .tf-demo[data-phase="waiting"] #hero-replay { visibility: hidden; }
 
     /* ------------------------------------------------------- the proof strip */
     .tf-proof-grid { display: flex; flex-direction: column; gap: var(--tf-space-2); }
@@ -446,7 +484,7 @@
         </div>
       </div>
 
-      <figure id="hero-demo" class="tf-demo" data-motion="off" aria-labelledby="hero-demo-title">
+      <figure id="hero-demo" class="tf-demo" data-motion="off" data-phase="waiting" aria-labelledby="hero-demo-title">
         <div class="tf-demo-bar">
           <span class="tf-demo-dots" aria-hidden="true"><i></i><i></i><i></i></span>
           <span id="hero-demo-title" class="tf-demo-title">An agent proposes a write</span>
@@ -455,15 +493,20 @@
         <div class="tf-demo-body">
           <div id="hero-call" class="tf-demo-call"></div>
           <ol id="hero-diff" class="tf-diff" aria-label="The file the agent proposes to write"></ol>
-          <div id="hero-outcome" aria-live="polite">
-            <div id="hero-waiting" class="tf-waiting"><span class="tf-waiting-dot" aria-hidden="true"></span><span id="hero-waiting-text">Asking Threefold whether it may be written</span></div>
-            <div id="hero-verdict" class="tf-demo-verdict" hidden></div>
+          <div class="tf-demo-outcome">
+            <div id="hero-ghost" class="tf-demo-stack tf-demo-ghost" aria-hidden="true"></div>
+            <div class="tf-demo-stack tf-demo-landed">
+              <div id="hero-outcome" class="tf-demo-slot" aria-live="polite">
+                <div id="hero-waiting" class="tf-waiting"><span class="tf-waiting-dot" aria-hidden="true"></span><span id="hero-waiting-text">Asking Threefold whether it may be written</span></div>
+                <div id="hero-verdict" class="tf-demo-verdict" hidden></div>
+              </div>
+              <div id="hero-reason" class="tf-demo-reason" hidden></div>
+              <div id="hero-fix" class="tf-demo-fix" hidden></div>
+            </div>
           </div>
-          <div id="hero-reason" class="tf-demo-reason" hidden></div>
-          <div id="hero-fix" class="tf-demo-fix" hidden></div>
         </div>
         <figcaption class="tf-demo-foot">
-          <p id="hero-caption">Asking this stack to judge the call.</p>
+          <p class="tf-demo-caption"><span id="hero-caption">Asking this stack through POST /evaluate-tool-call, exactly as a hook asks it.</span><span id="hero-caption-room" class="tf-demo-room" aria-hidden="true"></span></p>
           <button type="button" id="hero-replay" class="tf-link-btn" hidden><span data-tf-icon="refresh" data-tf-size="14"></span>Replay</button>
         </figcaption>
       </figure>
@@ -1728,7 +1771,23 @@
       if (!T || !call || !diff) return;
       T.setHtml(call, T.html`<span class="tf-chip tf-chip-gray">${T.icon('code', 13)}${BOUNDARY_CALL.tool_name}</span><code>${args.TargetFile}</code><span class="tf-demo-project">in ${DEMO_PROJECT}</span>`);
       const lines = String(args.CodeContent).split('\n');
-      T.setHtml(diff, T.html`${lines.map((line, i) => T.html`<li class="tf-diff-line" id="hero-line-${i}" style="--i:${i}"><span class="tf-diff-num" aria-hidden="true">${i + 1}</span><span class="tf-diff-sign" aria-hidden="true">+</span><code class="tf-diff-code">${line}</code><span class="tf-diff-tag">not written</span></li>`)}`);
+      T.setHtml(diff, T.html`${lines.map((line, i) => T.html`<li class="tf-diff-line" id="hero-line-${i}"><span class="tf-diff-num" aria-hidden="true">${i + 1}</span><span class="tf-diff-sign" aria-hidden="true">+</span><code class="tf-diff-code">${line}</code><span class="tf-diff-tag">not written</span></li>`)}`);
+      const ghost = document.getElementById('hero-ghost');
+      if (ghost) T.setHtml(ghost, heroGhostHtml());
+      // The lines arrive one after another, through the design system's own
+      // motion, which does nothing for a reader who asked for less.
+      if (hero.motion && typeof diff.querySelectorAll === 'function') T.reveal(diff.querySelectorAll('.tf-diff-line'), { stagger: 130 });
+    }
+
+    // The verdict's place before there is a verdict: the recorded run's reason,
+    // drawn as bars in the same type, and the rows a fix is shown in. It is
+    // hidden from a screen reader and, once the verdict lands, from the eye.
+    function heroGhostHtml() {
+      const h = T.html;
+      const recorded = { status: RECORDED.boundary.status, reason: RECORDED.boundary.reason };
+      return h`<div class="tf-demo-slot"><span class="tf-stamp">${T.icon('stop', 18)}Refused before it was written</span></div>
+        <div class="tf-demo-reason">${heroReasonHtml(recorded, true)}</div>
+        <div class="tf-demo-fix"><p class="tf-demo-fix-title"><span class="tf-skeleton tf-ghost-bar"></span></p><p class="tf-demo-fix-summary"></p><p class="tf-demo-fix-note"><span class="tf-skeleton tf-ghost-bar"></span></p></div>`;
     }
 
     // The line in the verdict's place while there is none yet, and what it says.
@@ -1812,6 +1871,33 @@
       return { source: 'recorded', status: RECORDED.boundary.status, reason: RECORDED.boundary.reason, fix: null, ms: null, why: why };
     }
 
+    // What the caption under the demonstration says of an answer: where it
+    // came from, and for a live one what became of it in the ledger.
+    function heroCaption(answer) {
+      if (answer.source === 'live' && answer.kept) {
+        return 'Judged by this stack ' + heroAgo(answer.at) + ' through POST /evaluate-tool-call, and shown again rather than asked again, so a reload adds no call to its ledger. This browser asks afresh once the answer is ' + heroKeepWords() + ' old.';
+      }
+      if (answer.source === 'live') {
+        return 'Judged just now by this stack through POST /evaluate-tool-call, and kept in its ledger as a page call, which is always enforced. For ' + heroKeepWords() + ', this browser shows this answer again rather than adding another call.';
+      }
+      return heroRecordedCaption(answer.why);
+    }
+
+    // The longest caption the demonstration can end with, set unseen in the
+    // caption's cell so the cell never grows when the verdict lands.
+    function heroCaptionRoom() {
+      const oldest = Date.now() - (HERO_KEEP_MS - 60000);
+      const all = [
+        heroCaption({ source: 'live' }),
+        heroCaption({ source: 'live', kept: true, at: oldest }),
+        heroCaption({ source: 'recorded', why: { kind: 'private', http: 403 } }),
+        heroCaption({ source: 'recorded', why: { kind: 'timeout' } }),
+        heroCaption({ source: 'recorded', why: { kind: 'unreadable', http: 200 } }),
+        heroCaption({ source: 'recorded', why: { kind: 'http', http: 503 } })
+      ];
+      return all.reduce((a, b) => (b.length > a.length ? b : a), '');
+    }
+
     // Why the recorded run is showing, in one sentence that is true of what
     // this stack did: it is never said to be unreachable when it answered.
     function heroRecordedCaption(why) {
@@ -1842,39 +1928,53 @@
       return { said: text ? (/[.!?]$/.test(text) ? text : text + '.') : 'The service gave no reason.', path: null, module: null, rule: rule };
     }
 
-    function heroReasonHtml(answer) {
+    // The ghost draws the same reason without the hover text: it is never read.
+    function heroReasonHtml(answer, ghost) {
       const h = T.html;
       const plain = heroPlainReason(answer.reason);
       const sentence = plain.path
         ? h`${plain.said}, and <code>${plain.path}</code> imports <code>${plain.module}</code>.`
         : h`${plain.said}`;
-      return h`<p class="tf-demo-why" title="The service’s reason: ${answer.reason}">${sentence}</p>
-        <p class="tf-demo-ruleline">${plain.rule ? h`<span>rule <b>${plain.rule}</b></span><span aria-hidden="true">·</span>` : ''}<span title="The status the service returned">${answer.status}</span></p>`;
+      return h`<p class="tf-demo-why"${ghost ? '' : h` title="The service’s reason: ${answer.reason}"`}>${sentence}</p>
+        <p class="tf-demo-ruleline">${plain.rule ? h`<span>rule <b>${plain.rule}</b></span><span aria-hidden="true">·</span>` : ''}<span${ghost ? '' : h` title="The status the service returned"`}>${answer.status}</span></p>`;
     }
 
-    // The fix that came with a refusal. An approval needs none, so it gets no
-    // box at all; a replay says it kept none.
+    // The service's summary under a title that already says it was checked, so
+    // a leading "Checked fix:" is not said twice. Nothing else is changed.
+    function heroFixSummary(summary) {
+      const text = String(summary).trim();
+      const rest = text.replace(/^(?:checked|suggested|proposed)?\s*fix\s*:\s*/i, '');
+      return rest ? rest.charAt(0).toUpperCase() + rest.slice(1) : text;
+    }
+
+    // The fix that came with a refusal, in the three rows the ghost holds room
+    // for. An approval needs none, so it gets no box at all; a replay says it
+    // kept none.
     function heroFixHtml(answer, refused) {
       const h = T.html;
       if (answer.source !== 'live') {
-        return { tone: 'none', markup: h`<p class="tf-demo-fix-title">${T.icon('info', 16)}No fix in a replay</p><p>A live answer carries a checked fix with every refusal. This recording kept only the verdict and its reason.</p>` };
+        return { tone: 'none', markup: h`<p class="tf-demo-fix-title">${T.icon('info', 16)}<span>No fix in a replay</span></p><p class="tf-demo-fix-summary">A live answer carries a checked fix with every refusal; this recording kept only the verdict and its reason.</p>` };
       }
       if (!refused) return null;
       const fix = answer.fix;
       if (!fix || typeof fix !== 'object' || typeof fix.summary !== 'string') {
-        return { tone: 'none', markup: h`<p class="tf-demo-fix-title">${T.icon('info', 16)}No fix came with this answer</p>` };
+        return { tone: 'none', markup: h`<p class="tf-demo-fix-title">${T.icon('info', 16)}<span>No fix came with this answer</span></p>` };
       }
       const checks = Array.isArray(fix.checks) ? fix.checks.filter(c => c && typeof c === 'object' && typeof c.passed === 'boolean') : [];
       const passed = checks.filter(c => c.passed).length;
       const writes = Array.isArray(fix.writes) ? fix.writes.filter(w => w && typeof w.path === 'string') : [];
+      const files = writes.map(w => w.path + (w.new_file === true ? ' (new)' : '')).join('; ');
       const title = fix.validated === true
-        ? h`${T.icon('check', 16)}Checked by Threefold${checks.length ? h`<span class="tf-chip tf-chip-emerald">${passed} of ${checks.length} gate checks passed</span>` : ''}`
-        : h`${T.icon('info', 16)}A suggested fix, not checked`;
+        ? h`${T.icon('check', 16)}<span>Checked fix</span>${checks.length ? h`<span class="tf-chip tf-chip-emerald" title="Threefold ran the same gates, with the same rules, on every write it proposes">${passed} of ${checks.length} gate checks passed</span>` : ''}`
+        : h`${T.icon('info', 16)}<span>A suggested fix, not checked</span>`;
+      const note = writes.length
+        ? (writes.length === 1 ? 'One file proposed' : writes.length + ' files proposed') + ' · never applied automatically'
+        : 'Never applied automatically';
       return {
         tone: fix.validated === true ? 'checked' : 'none',
         markup: h`<p class="tf-demo-fix-title">${title}</p>
-          <p>${fix.summary}</p>
-          <div class="tf-demo-fix-files">${writes.map(w => h`<code>${w.path}${w.new_file === true ? ' · new' : ''}</code>`)}<span class="tf-micro">A starting point, never applied automatically.</span></div>`
+          <p class="tf-demo-fix-summary" title="${fix.summary}">${heroFixSummary(fix.summary)}</p>
+          <p class="tf-demo-fix-note"${files ? h` title="${files}"` : ''}>${note}</p>`
       };
     }
 
@@ -1923,44 +2023,56 @@
         source.className = 'tf-chip tf-chip-emerald';
         source.setAttribute('title', 'A live answer this stack gave ' + heroAgo(answer.at) + (took ? ', ' + took + ' there and back' : '') + '; shown again, not asked again');
         T.setHtml(source, h`${T.icon('bolt', 13)}Live · ${heroAgo(answer.at, true)}`);
-        caption.textContent = 'Judged by this stack ' + heroAgo(answer.at) + ' through POST /evaluate-tool-call, and shown again rather than asked again, so a reload adds no call to its ledger. This browser asks afresh once the answer is ' + heroKeepWords() + ' old.';
       } else if (answer.source === 'live') {
         const took = formatRoundTrip(answer.ms);
         source.className = 'tf-chip tf-chip-emerald';
         source.setAttribute('title', 'A live answer from this stack' + (took ? ', ' + took + ' there and back from this browser' : ''));
         T.setHtml(source, h`${T.icon('bolt', 13)}Live${took ? h` · ${took}` : ''}`);
-        caption.textContent = 'Judged just now by this stack through POST /evaluate-tool-call, and kept in its ledger as a page call, which is always enforced. For ' + heroKeepWords() + ', this browser shows this answer again rather than adding another call.';
       } else {
         source.className = 'tf-chip tf-chip-amber';
         source.setAttribute('title', 'A recorded answer, replayed in this browser');
         T.setHtml(source, h`${T.icon('clock', 13)}Recorded ${RECORDED.recorded_at}, replayed offline`);
-        caption.textContent = heroRecordedCaption(answer.why);
       }
+      caption.textContent = heroCaption(answer);
+      // The verdict takes the ghost's place: the ghost is hidden, not removed,
+      // so the card keeps its height.
+      card.setAttribute('data-phase', 'landed');
       const replay = document.getElementById('hero-replay');
       if (replay) replay.hidden = !hero.motion;
-      if (hero.motion) T.pulse(document.getElementById('hero-stamp'), refused ? 'danger' : approved ? 'ok' : null);
+      if (hero.motion) {
+        T.reveal([verdict, reason].concat(fix ? [fixBox] : []), { stagger: 140 });
+        T.pulse(document.getElementById('hero-stamp'), refused ? 'danger' : approved ? 'ok' : null);
+      }
     }
 
-    function hideHeroVerdict() {
-      ['hero-verdict', 'hero-reason', 'hero-fix'].forEach(id => { const node = document.getElementById(id); if (node) node.hidden = true; });
-      const card = document.getElementById('hero-demo');
-      if (card) card.removeAttribute('data-verdict');
+    // What the verdict's place says while the lines arrive, when nothing is
+    // being asked: an answer kept from earlier, or the one being played again.
+    function heroShowingWords(answer, again) {
+      if (answer.source !== 'live') return again ? 'Playing the recorded run again' : 'Showing the recorded run';
+      if (answer.kept && !again) return 'Showing the answer this stack gave ' + heroAgo(answer.at);
+      return 'Playing this stack’s answer again; nothing is sent';
     }
 
     // countsRead is the proof strip's read of GET /api/overview: the hero's call
     // goes once that has been answered, or after HERO_COUNTS_WAIT_MS if it is
     // slow, so the counts a visitor sees never include their own visit. The
-    // lines type in meanwhile; the wait adds nothing to the moment itself.
+    // lines arrive meanwhile; the wait adds nothing to the moment itself.
     async function runHeroDemo(countsRead) {
       const card = document.getElementById('hero-demo');
       hero.motion = heroCanAnimate();
       if (card) card.setAttribute('data-motion', hero.motion ? 'on' : 'off');
+      const room = document.getElementById('hero-caption-room');
+      if (room) room.textContent = heroCaptionRoom();
+      const replay = document.getElementById('hero-replay');
+      if (replay) replay.hidden = !hero.motion;
       drawHeroCall();
       heroShowWaiting(true);
       const started = Date.now();
       const base = getApiBase();
       let answer = heroRemembered(base);
-      if (!answer) {
+      if (answer) {
+        heroShowWaiting(true, heroShowingWords(answer, false));
+      } else {
         const slow = setTimeout(() => heroShowWaiting(true, 'Still waiting for this stack; the recorded run stands in after ' + Math.round(HERO_TIMEOUT_MS / 1000) + ' s'), HERO_SLOW_MS);
         if (countsRead && typeof countsRead.then === 'function') {
           let timer = null;
@@ -1986,19 +2098,20 @@
     }
 
     // Plays the moment again from the answer already given: no second call.
+    // The verdict, its reason and its fix are hidden, not removed, while it
+    // plays, and the ghost shows in their place, so the card keeps its height.
     async function replayHero() {
-      if (!hero.answer || !hero.motion) return;
+      if (!hero.answer || !hero.motion || hero.replaying) return;
+      hero.replaying = true;
       const card = document.getElementById('hero-demo');
-      // The card keeps the height it has while it plays again, so the page
-      // under it does not jump.
-      if (card && card.style) card.style.minHeight = card.offsetHeight + 'px';
-      hideHeroVerdict();
-      if (card) { card.setAttribute('data-motion', 'off'); void card.offsetWidth; card.setAttribute('data-motion', 'on'); }
+      const verdict = document.getElementById('hero-verdict');
+      if (card) { card.setAttribute('data-phase', 'waiting'); card.setAttribute('data-verdict', 'pending'); }
+      if (verdict) verdict.hidden = true;
+      heroShowWaiting(true, heroShowingWords(hero.answer, true));
       drawHeroCall();
-      heroShowWaiting(true);
       await wait(HERO_MIN_MS);
       landHero(hero.answer);
-      if (card && card.style) card.style.minHeight = '';
+      hero.replaying = false;
     }
 
     // ---------------------------------------------------------- the proof strip
