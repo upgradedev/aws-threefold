@@ -178,7 +178,8 @@
     .tf-ops-incident[data-outcome="observed"] { border-color: var(--tf-observed-line); background: radial-gradient(560px 200px at 0% 0%, var(--tf-observed-soft), transparent 70%), var(--tf-surface-1); }
     .tf-ops-incident[data-outcome="approved"] { border-color: var(--tf-approved-line); background: radial-gradient(560px 200px at 0% 0%, var(--tf-approved-soft), transparent 70%), var(--tf-surface-1); }
     .tf-ops-flow { list-style: none; margin: var(--tf-space-3) 0 0; padding: 0; display: grid; grid-template-columns: 1fr; gap: 10px; }
-    @media (min-width: 900px) { .tf-ops-flow { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+    @media (min-width: 900px) { .tf-ops-flow-three { grid-template-columns: repeat(3, minmax(0, 1fr)); } .tf-ops-flow-four { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    @media (min-width: 1280px) { .tf-ops-flow-four { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
     .tf-ops-flow > li { position: relative; display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 14px; border-radius: var(--tf-radius-md); background: rgba(8, 11, 21, 0.62); border: 1px solid var(--tf-hairline); }
     .tf-ops-flow-q { display: flex; align-items: center; gap: 6px; font: 600 var(--tf-fs-micro)/1rem var(--tf-font-sans); letter-spacing: var(--tf-track-caps); text-transform: uppercase; color: var(--tf-text-3); }
     .tf-ops-flow-q .tf-icon { width: 14px; height: 14px; }
@@ -208,7 +209,7 @@
     .tf-ops-steps .tf-step-num { width: 24px; height: 24px; font-size: 0.6875rem; }
 
     /* Sign-in: the brand, and what is and is not kept. */
-    .tf-ops-signin { max-width: 44rem; margin: 0 auto; }
+    .tf-ops-signin { max-width: 44rem; margin: var(--tf-space-2) auto 0; }
     .tf-ops-signin-card { padding: var(--tf-space-4) var(--tf-space-3); border-radius: var(--tf-radius-xl); border: 1px solid var(--tf-hairline-strong); background: radial-gradient(520px 220px at 50% -40px, rgba(139, 92, 246, 0.22), transparent 70%), var(--tf-surface-1); box-shadow: var(--tf-shadow-3); }
     @media (min-width: 768px) { .tf-ops-signin-card { padding: var(--tf-space-5) var(--tf-space-5); } }
     .tf-ops-mark { display: inline-flex; align-items: center; justify-content: center; width: 52px; height: 52px; border-radius: 15px; color: #fff; background: radial-gradient(120% 120% at 20% 0%, #a78bfa 0%, #7c3aed 45%, #5b21b6 100%); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 14px 34px -10px rgba(124, 58, 237, 0.8); }
@@ -376,9 +377,10 @@
     function reasonOf(row) { return (outcomeOf(row) === 'observed' && row.observed_reason) || row.reason || ''; }
     function agentLabel(agent) { return AGENT_LABELS[agent] || agent || 'Unknown'; }
 
+    // An outcome is an icon and a word, never a colour alone.
     function outcomeChip(row) {
-      const o = OUTCOMES[outcomeOf(row)];
-      return html`<span class="tf-chip ${o.chip}">${o.label}</span>`;
+      const kind = outcomeOf(row);
+      return T.statusChip(kind, OUTCOMES[kind].label);
     }
     function stageChip(stage, configured) {
       const s = STAGES[stage];
@@ -1634,7 +1636,7 @@
             ${showProject ? html`<td class="font-mono text-gray-300 tf-break">${T.projectName(row.project_name)}</td>` : ''}
             <td class="text-gray-300 whitespace-nowrap">${agentLabel(row.agent)}</td>
             <td class="min-w-[12rem]"><span class="font-mono text-gray-200">${row.tool_name}</span> <span class="font-mono text-gray-500 tf-break">${targetOf(row)}</span></td>
-            <td class="font-mono text-gray-400 tf-break">${outcomeOf(row) === 'approved' ? '' : ruleKeyOf(row)}</td>
+            <td class="font-mono text-gray-400 whitespace-nowrap">${outcomeOf(row) === 'approved' ? html`<span class="text-gray-600">—</span>` : ruleKeyOf(row)}</td>
             <td>${outcomeOf(row) === 'observed' ? reviewChip(row.review) : ''}</td>
           </tr>`)}</tbody>
         </table>
@@ -2110,6 +2112,7 @@
         const chips = activeChips(f);
         ctx.render(html`${crumbs([{ label: 'Overview', href: '#/overview' }, { label: 'Calls' }])}
           ${pageTitle('Calls', sub)}
+          ${outcomeTabs(f)}
           ${filterBar(f)}
           ${chips}
           <p id="calls-error" class="text-xs text-rose-300 mb-2" role="alert"></p>
@@ -2184,6 +2187,18 @@
       return html`<div class="flex flex-wrap gap-2">${f.day
         ? html`<a class="tf-btn tf-btn-sm" href="${callsHref(Object.assign({}, cleanFilters(f), { day: '' }))}">Drop the day filter</a>` : ''}${f.days < 30
         ? html`<a class="tf-btn tf-btn-sm" href="${callsHref(Object.assign({}, cleanFilters(f), { days: 30, day: '' }))}">Show 30 days</a>` : ''}<a class="tf-btn tf-btn-sm" href="#/calls">Clear every filter</a></div>`;
+    }
+
+    // The outcome, one click away. The one on screen is not a link: a way out
+    // never leads back to the page it is on.
+    const KIND_ICONS = { refused: 'stop', observed: 'eye', approved: 'check' };
+    function outcomeTabs(f) {
+      return html`<nav class="tf-segmented mb-3" aria-label="Outcome">${KINDS.map(k => {
+        const label = html`${KIND_ICONS[k.value] ? T.icon(KIND_ICONS[k.value], 14) : ''}${k.label}`;
+        return k.value === f.kind
+          ? html`<span aria-current="true" class="inline-flex items-center gap-1.5">${label}</span>`
+          : html`<a class="inline-flex items-center gap-1.5" href="${callsHref(cleanFilters(Object.assign({}, f, { kind: k.value })))}">${label}</a>`;
+      })}</nav>`;
     }
 
     function filterBar(f) {
@@ -2327,6 +2342,20 @@
         });
       }
 
+      // What an operator reads first: what the agent tried, what Threefold
+      // said, which rule decided, and the fix it was given, as one card. The
+      // full record follows it, field by field.
+      const HEADLINES = {
+        refused: 'Refused before it ran',
+        observed: 'It ran, and a rule in Observe would have refused it',
+        approved: 'Approved: nothing flagged it'
+      };
+      const SAID = {
+        refused: 'The call was stopped before it ran, and the agent was told why.',
+        observed: 'Recorded, not refused: the rule that flagged it is observing. A label decides whether it should enforce.',
+        approved: 'Every gate passed it, and it ran.'
+      };
+
       function draw() {
         const row = state.data.decision || {};
         const session = state.data.session || null;
@@ -2338,6 +2367,46 @@
         const rows = FIELD_ORDER.filter(([key]) => hasFix || !FIX_FIELDS[key]).map(([key, label]) => [key, label, row[key]])
           .concat(Object.keys(row).filter(k => !known[k]).sort().map(k => [k, k, row[k]]));
         const key = ruleKeyOf(row);
+
+        const incident = html`<article class="tf-ops-incident" data-outcome="${outcome}" aria-labelledby="incident-title">
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div class="min-w-0">
+              <span class="tf-ops-att-kicker">${outcome === 'approved' ? 'A call' : 'An incident'} · ${dateTime(row.timestamp)}</span>
+              <h2 id="incident-title" class="tf-ops-hero-title">${HEADLINES[outcome]}</h2>
+            </div>
+            ${outcomeChip(row)}
+          </div>
+          <ol class="tf-ops-flow tf-ops-flow-${hasFix ? 'four' : 'three'}">
+            <li>
+              <span class="tf-ops-flow-q">${T.icon('terminal', 14)}What the agent tried</span>
+              <span class="tf-ops-flow-a"><code>${row.tool_name || 'a call'}</code> <code class="text-gray-400">${targetOf(row)}</code></span>
+              <span class="tf-ops-flow-sub">${agentLabel(row.agent)}${row.origin ? ' through its ' + row.origin : ''}${row.action_type ? ' · ' + row.action_type : ''}${row.project_name ? html` · in <span class="font-mono">${T.projectName(row.project_name)}</span>` : ''}</span>
+            </li>
+            <li>
+              <span class="tf-ops-flow-q">${T.icon('shield', 14)}What Threefold said</span>
+              <span class="tf-ops-flow-a">${reasonOf(row) || OUTCOMES[outcome].label}</span>
+              <span class="tf-ops-flow-sub">${SAID[outcome]}</span>
+            </li>
+            <li>
+              <span class="tf-ops-flow-q">${T.icon('layers', 14)}The rule</span>
+              <span class="tf-ops-flow-a">${outcome === 'approved' ? 'None: nothing flagged this call' : html`<code>${key}</code>`}</span>
+              <span class="tf-ops-flow-sub">${outcome === 'approved' ? '' : rule ? (rule.description || 'A layering rule of this project') : (GATE_KEYS[key] || 'A built-in gate')}${row.stage ? ' · project stage ' + row.stage : ''}</span>
+            </li>
+            ${hasFix ? html`<li>
+              <span class="tf-ops-flow-q">${T.icon('sparkles', 14)}Suggested fix</span>
+              <span class="tf-ops-flow-a">${fixKindLabel(row.suggested_fix_kind, row.suggested_fix_kind)}</span>
+              <span class="flex flex-wrap gap-1">${row.suggested_fix_validated === true ? html`<span class="tf-chip tf-chip-emerald">${T.icon('check', 13)}Checked by Threefold: passes the same gates</span>` : html`<span class="tf-chip tf-chip-gray">Not validated</span>`}</span>
+              <span class="tf-ops-flow-sub">The fix went back with the verdict, to the agent or the page that sent the call. The ledger keeps its kind and whether the gates validated it, never its files or its steps: those were the caller's own source.</span>
+            </li>` : ''}
+          </ol>
+          <p class="tf-ops-facts">
+            <span>When <b>${timeAgo(row.timestamp)}</b></span>
+            ${row.session_id ? html`<span>Session <b class="font-mono">${row.session_id}</b></span>` : ''}
+            ${row.hook_mode ? html`<span>Hook mode <b>${row.hook_mode}</b></span>` : ''}
+            ${row.developer_id ? html`<span>Developer <b class="font-mono">${row.developer_id}</b></span>` : ''}
+            <span>Verdict <b class="font-mono">${row.verdict_id || verdict}</b></span>
+          </p>
+        </article>`;
 
         const fields = html`<dl class="grid grid-cols-1 sm:grid-cols-[12rem_1fr] gap-x-4 text-xs">${rows.map(([k, label, value]) => html`
           <dt class="text-gray-500 pt-2 sm:py-2 sm:border-b border-gray-800/60">${label}</dt>
@@ -2361,7 +2430,7 @@
               <dt class="text-gray-500">Session</dt><dd class="font-mono text-gray-200 tf-break">${session.session_id}</dd>
               <dt class="text-gray-500">Calls</dt><dd class="font-mono text-gray-200">${num(session.calls)}</dd>
               <dt class="text-gray-500">Cost</dt><dd class="font-mono text-gray-200">${T.usd(Number(session.cost_usd))}</dd>
-              <dt class="text-gray-500">State</dt><dd>${session.is_tripped ? html`<span class="tf-chip tf-chip-rose">halted</span>` : html`<span class="tf-chip tf-chip-emerald">running</span>`}</dd>
+              <dt class="text-gray-500">State</dt><dd>${session.is_tripped ? html`<span class="tf-chip tf-chip-rose">${T.icon('stop', 13)}halted</span>` : html`<span class="tf-chip tf-chip-emerald">${T.icon('check', 13)}running</span>`}</dd>
             </dl>
             <div class="flex flex-wrap gap-2 mt-3">
               <a class="tf-btn tf-btn-sm" href="${T.pageHref('sessions.html' + query({ session: session.session_id }))}">Open in Sessions</a>
@@ -2374,7 +2443,7 @@
               <p class="text-xs text-gray-300">Now: ${reviewChip(row.review)}${row.review_note ? html` <span class="text-gray-400">“${row.review_note}”</span>` : ''}</p>
               <input id="call-note" type="text" maxlength="200" class="tf-input w-full" placeholder="Optional note (200 characters)" value="${row.review_note || ''}" />
               <div class="flex flex-wrap gap-2">
-                <button type="button" class="tf-btn tf-btn-good tf-btn-sm" data-action="call-label" data-label="correct">Correct</button>
+                <button type="button" class="tf-btn tf-btn-good tf-btn-sm" data-action="call-label" data-label="correct">${T.icon('check', 14)}Correct</button>
                 <button type="button" class="tf-btn tf-btn-danger tf-btn-sm" data-action="call-label" data-label="false_alarm">False alarm</button>
                 ${row.review ? html`<button type="button" class="tf-btn tf-btn-quiet tf-btn-sm" data-action="call-label" data-label="clear">Clear the label</button>` : ''}
               </div>
@@ -2382,25 +2451,22 @@
             </div>`
           : '';
 
-        const fixBody = hasFix
-          ? html`<div class="space-y-2 text-xs">
-              <p class="flex flex-wrap items-center gap-2"><span class="tf-chip tf-chip-gray">${fixKindLabel(row.suggested_fix_kind, row.suggested_fix_kind)}</span>${row.suggested_fix_validated === true ? html`<span class="tf-chip tf-chip-emerald">Checked by Threefold: passes the same gates</span>` : html`<span class="tf-chip tf-chip-gray">Not validated</span>`}</p>
-              <p class="text-[11px] text-gray-500">The fix went back with the verdict, to the agent or the page that sent the call. The ledger keeps its kind and whether the gates validated it, never its files or its steps: those were the caller's own source.</p>
-            </div>`
-          : '';
-
         ctx.render(html`${crumb}
           ${pageTitle(html`<span class="font-mono">${row.tool_name || 'Call'}</span> <span class="font-mono text-gray-400 text-base md:text-lg tf-break">${targetOf(row)}</span>`,
-            html`${outcomeChip(row)} ${reasonOf(row)}`,
+            null,
             html`<a class="tf-btn tf-btn-quiet tf-btn-sm" href="${T.specHref('get', '/api/decision')}">GET /api/decision in the API document</a>`)}
-          <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            ${card('The decision', 'Every field the ledger keeps for this call.', fields, 'lg:col-span-2 min-w-0')}
-            <div class="space-y-4 min-w-0">
-              ${reviewBody ? card('Review', 'A rule in Observe flagged this call. Was it right to?', reviewBody) : ''}
-              ${card('The rule', outcome === 'approved' ? 'Nothing flagged this call.' : 'What decided.', ruleBody)}
-              ${fixBody ? card('Suggested fix', 'Sent with the verdict.', fixBody) : ''}
-              ${card('The session', null, sessionBody)}
-              ${row.project_name && T.PROJECT_PATTERN.test(row.project_name) ? html`<a class="tf-card tf-card-link block p-4 text-xs text-gray-300" href="${projectHref(row.project_name)}">Open <span class="font-mono text-white">${T.projectName(row.project_name)}</span>: its stage and readiness ${raw(T.ICONS.arrow)}</a>` : ''}
+          <div class="space-y-4">
+            ${incident}
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+              <div class="lg:col-span-2 space-y-4 min-w-0">
+                ${reviewBody ? card('Was the rule right?', 'A rule in Observe flagged this call. Label it, and the rule\'s readiness follows.', reviewBody) : ''}
+                ${card('The decision', 'Every field the ledger keeps for this call.', fields, 'min-w-0')}
+              </div>
+              <div class="space-y-4 min-w-0">
+                ${card('The rule', outcome === 'approved' ? 'Nothing flagged this call.' : 'What decided.', ruleBody)}
+                ${card('The session', null, sessionBody)}
+                ${row.project_name && T.PROJECT_PATTERN.test(row.project_name) ? html`<a class="tf-card tf-card-link block p-4 text-xs text-gray-300" href="${projectHref(row.project_name)}">Open <span class="font-mono text-white">${T.projectName(row.project_name)}</span>: its stage and readiness ${raw(T.ICONS.arrow)}</a>` : ''}
+              </div>
             </div>
           </div>`);
       }
@@ -2437,6 +2503,16 @@
 
     // ------------------------------------------------------------ connect
 
+    const OS_TABS = [
+      { os: 'powershell', label: 'Windows · PowerShell', command: 'PowerShell connect command' },
+      { os: 'posix', label: 'macOS / Linux', command: 'macOS and Linux connect command' }
+    ];
+
+    // The wait for the first call: a calm radar, one ring a beat. The markup is
+    // static, so nothing here depends on the animation, which stops under
+    // prefers-reduced-motion.
+    const RADAR = html`<div class="tf-ops-radar" aria-hidden="true"><span class="tf-ops-radar-ring"></span><span class="tf-ops-radar-ring"></span><span class="tf-ops-radar-ring"></span><span class="tf-ops-radar-grid"></span><span class="tf-ops-radar-sweep"></span><span class="tf-ops-radar-core"></span></div>`;
+
     function viewConnect(ctx) {
       const state = {
         name: T.PROJECT_PATTERN.test(ctx.params.project || '') ? ctx.params.project : 'Acme-Billing',
@@ -2446,16 +2522,36 @@
 
       function nameOk() { return T.PROJECT_PATTERN.test(state.name); }
 
+      // Both commands are on the page, one tab each; the shared layer's tabs
+      // switch between them from a click or the arrow keys.
+      function commandTabs() {
+        const cmd = connectCommands(state.name);
+        return html`<div class="tf-tabs" role="tablist" aria-label="Operating system" data-tf-tabs>
+            ${OS_TABS.map(t => html`<button type="button" role="tab" class="tf-tab" id="os-tab-${t.os}" aria-controls="os-panel-${t.os}" aria-selected="${state.os === t.os ? 'true' : 'false'}" tabindex="${state.os === t.os ? '0' : '-1'}" data-action="os" data-os="${t.os}">${T.icon(t.os === 'powershell' ? 'terminal' : 'command', 15)}${t.label}</button>`)}
+          </div>
+          ${OS_TABS.map(t => html`<div class="tf-tabpanel" role="tabpanel" id="os-panel-${t.os}" aria-labelledby="os-tab-${t.os}"${state.os === t.os ? '' : raw(' hidden')}>${T.commandBlock(t.os === 'powershell' ? cmd.powershell : cmd.posix, t.command)}</div>`)}`;
+      }
+
+      function stepState(n) {
+        const ok = nameOk();
+        if (n === 1) return ok ? 'done' : 'current';
+        // The command is the reader's to run, so step 2 stays current until the
+        // first call lands; then every step is done at once.
+        if (n === 2) return !ok ? 'todo' : (state.found ? 'done' : 'current');
+        return state.found ? 'done' : 'todo';
+      }
+
       function draw() {
         const ok = nameOk();
-        const cmd = connectCommands(state.name);
-        const shown = state.os === 'powershell' ? cmd.powershell : cmd.posix;
-        const step = state.found ? 4 : ok ? 3 : 1;
-        const num3 = state.found ? 'done' : state.waiting ? 'current' : 'todo';
-        ctx.render(html`${pageTitle('Connect a repository', 'One command installs the hook for the agents on the machine and starts the project in Observe, so nothing is refused while you watch what would be.', html`<a class="tf-btn tf-btn-quiet tf-btn-sm" href="${T.pageHref('connect.html')}">Every detail, by hand</a>`)}
-          <ol class="space-y-4 max-w-3xl" aria-label="Connect in three steps">
-            <li class="tf-card p-5 tf-step" aria-current="${step === 1 ? 'step' : 'false'}">
-              <span class="tf-step-num" data-state="${ok ? 'done' : 'current'}">1</span>
+        const steps = ['Name the project', 'Run one command', 'See the first call'];
+        ctx.render(html`<div class="max-w-3xl">${pageTitle('Connect a repository', 'One command installs the hook for the agents on the machine and starts the project in Observe, so nothing is refused while you watch what would be.', html`<a class="tf-btn tf-btn-quiet tf-btn-sm" href="${T.pageHref('connect.html')}">Every detail, by hand</a>`)}
+          <ol class="tf-ops-steps" aria-label="Where you are">${steps.map((label, i) => {
+            const s = stepState(i + 1);
+            return html`<li data-state="${s}"${s === 'current' ? raw(' aria-current="step"') : ''}><span class="tf-step-num" data-state="${s}">${s === 'done' ? T.icon('check', 13) : i + 1}</span>${label}</li>`;
+          })}</ol>
+          <ol class="space-y-4" aria-label="Connect in three steps">
+            <li class="tf-card p-5 tf-step" aria-current="${stepState(1) === 'current' ? 'step' : 'false'}">
+              <span class="tf-step-num" data-state="${stepState(1)}">1</span>
               <div class="flex-1 min-w-0 space-y-2">
                 <h2 class="text-sm font-semibold text-white">Name the project</h2>
                 <p class="text-xs text-gray-400">This name is all that identifies the repository to the stack, so use an alias, never the real name. It starts with <span class="font-mono">Acme-</span>, then up to 40 letters, digits or dashes.</p>
@@ -2465,19 +2561,15 @@
               </div>
             </li>
             <li class="tf-card p-5 tf-step">
-              <span class="tf-step-num" data-state="${ok ? (state.waiting || state.found ? 'done' : 'current') : 'todo'}">2</span>
+              <span class="tf-step-num" data-state="${stepState(2)}">2</span>
               <div class="flex-1 min-w-0 space-y-3">
                 <h2 class="text-sm font-semibold text-white">Run one command at the root of the repository</h2>
-                <div class="tf-segmented" role="group" aria-label="Operating system">
-                  <button type="button" data-action="os" data-os="powershell" aria-pressed="${state.os === 'powershell' ? 'true' : 'false'}">Windows · PowerShell</button>
-                  <button type="button" data-action="os" data-os="posix" aria-pressed="${state.os === 'posix' ? 'true' : 'false'}">macOS / Linux</button>
-                </div>
-                ${ok ? html`<div id="connect-command">${T.commandBlock(shown, state.os === 'powershell' ? 'PowerShell connect command' : 'macOS and Linux connect command')}</div>`
+                ${ok ? html`<div id="connect-command" class="space-y-3">${commandTabs()}</div>`
                   : html`<p class="text-xs text-rose-300">Fix the name above and the command appears here.</p>`}
                 <p class="text-[11px] text-gray-400">It downloads one standard-library Python file from this stack, installs the hook for Claude Code, Codex and Antigravity where they are installed, keeps its files out of git, and finishes by sending one harmless call and opening this project here.</p>
-                <details class="text-[11px] text-gray-400">
-                  <summary class="cursor-pointer text-gray-300">For the careful: check the file before you run it</summary>
-                  <div class="mt-2 space-y-2">
+                <details class="tf-disclosure text-[11px] text-gray-400">
+                  <summary>${T.icon('shield', 16)}For the careful: check the file before you run it</summary>
+                  <div class="tf-disclosure-body">
                     <p>Download it first with the part of the command before the <span class="font-mono">;</span> or <span class="font-mono">&amp;&amp;</span>, then compare its SHA-256 with the one this stack publishes in <a class="tf-link" href="${T.STACK_URL}dist/manifest.json">dist/manifest.json</a>:</p>
                     ${state.sha ? html`<p class="font-mono text-gray-200 tf-break" data-sha>${state.sha}</p>`
                       : html`<p class="text-amber-300">${state.shaError ? 'The manifest could not be read (' + state.shaError + '), so no checksum is shown.' : 'Reading the manifest…'}</p>`}
@@ -2488,44 +2580,51 @@
               </div>
             </li>
             <li class="tf-card p-5 tf-step">
-              <span class="tf-step-num" data-state="${num3}">3</span>
+              <span class="tf-step-num" data-state="${stepState(3)}">3</span>
               <div class="flex-1 min-w-0 space-y-3" id="connect-wait">${waitPanel()}</div>
             </li>
-          </ol>`);
+          </ol></div>`);
       }
 
       function waitPanel() {
-        if (!nameOk()) return html`<h2 class="text-sm font-semibold text-white">Wait for the first call</h2><p class="text-xs text-gray-500">Once the name is right.</p>`;
+        if (!nameOk()) return html`<h2 class="text-sm font-semibold text-white">See the first call</h2><p class="text-xs text-gray-500">Once the name is right.</p>`;
         if (state.found) {
           const row = state.found;
-          return html`<h2 class="text-sm font-semibold text-white">Connected</h2>
-            <div class="tf-card-quiet p-4 space-y-1 border-emerald-900/60" role="status">
-              <p class="text-sm text-emerald-300"><strong>${agentLabel(row.agent)}</strong> reached the stack from <span class="font-mono">${T.projectName(state.name)}</span> ${timeAgo(row.timestamp)}.</p>
-              <p class="text-[11px] text-gray-400"><span class="font-mono">${row.tool_name}</span> ${targetOf(row)} · ${OUTCOMES[outcomeOf(row)].label.toLowerCase()} · hook mode ${row.hook_mode || 'unknown'}${row.stage ? ' · stage ' + row.stage : ''}</p>
+          return html`<div class="tf-ops-arrived" role="status">
+              <span class="tf-ops-arrived-mark" aria-hidden="true">${T.icon('check', 22)}</span>
+              <div class="min-w-0 space-y-1">
+                <h2 class="text-base font-semibold text-white">Connected</h2>
+                <p class="text-sm text-emerald-200"><strong class="text-white">${agentLabel(row.agent)}</strong> reached the stack from <span class="font-mono">${T.projectName(state.name)}</span> ${timeAgo(row.timestamp)}.</p>
+                <p class="text-[11px] text-gray-300"><span class="font-mono">${row.tool_name}</span> ${targetOf(row)} · ${OUTCOMES[outcomeOf(row)].label.toLowerCase()} · hook mode ${row.hook_mode || 'unknown'}${row.stage ? ' · stage ' + row.stage : ''}</p>
+              </div>
             </div>
-            <div class="space-y-2">
-              <p class="text-xs font-semibold text-amber-300">You are in Observe</p>
-              <p class="text-xs text-gray-400">What the hooks in this repository send is judged and recorded, and not refused. A call carrying a credential is still refused on the machine and never sent, and a call the hook holds back is neither sent nor recorded. Keep working as usual. What the rules would have refused shows up for review; when a rule's record reads right, promote the project and that rule starts refusing.</p>
-            </div>
+            <div class="tf-callout tf-callout-warn">${T.icon('eye', 18)}<div class="tf-callout-body">
+              <p class="tf-callout-title">You are in Observe</p>
+              <p>What the hooks in this repository send is judged and recorded, and not refused. A call carrying a credential is still refused on the machine and never sent, and a call the hook holds back is neither sent nor recorded. Keep working as usual. What the rules would have refused shows up for review; when a rule's record reads right, promote the project and that rule starts refusing.</p>
+            </div></div>
             <div class="flex flex-wrap gap-2">
-              <a class="tf-btn tf-btn-primary" href="${projectHref(state.name)}">Open ${T.projectName(state.name)}</a>
+              <a class="tf-btn tf-btn-primary" href="${projectHref(state.name)}">Open ${T.projectName(state.name)}${T.icon('arrowright', 14)}</a>
               <a class="tf-btn" href="#/review">The review queue</a>
               <a class="tf-btn tf-btn-quiet" href="#/overview">Overview</a>
             </div>`;
         }
         if (state.pollError && T.isAuthError(state.pollError)) {
-          return html`<h2 class="text-sm font-semibold text-white">Wait for the first call</h2>${T.signedOutHtml(state.pollError, 'watching for the first call')}`;
+          return html`<h2 class="text-sm font-semibold text-white">See the first call</h2>${T.signedOutHtml(state.pollError, 'watching for the first call')}`;
         }
-        return html`<h2 class="text-sm font-semibold text-white">Wait for the first call</h2>
-          <p class="text-xs text-gray-400 flex items-center gap-2" role="status"><span class="tf-dot bg-amber-400 animate-pulse" aria-hidden="true"></span>
-            ${state.waiting ? html`Watching for a call from <span class="font-mono text-gray-200">${T.projectName(state.name)}</span>, every 3 seconds while this tab is open.` : 'Paused while this tab is hidden.'}</p>
-          ${state.before ? html`<p class="text-[11px] text-gray-500">${T.projectName(state.name)} has sent calls before (the last ${timeAgo(state.before.timestamp)}), so this waits for a new one.</p>` : ''}
-          ${state.pollError ? html`<p class="text-[11px] text-rose-300">The last check failed: ${state.pollError.message}. Still trying.</p>` : ''}
-          <p class="text-[11px] text-gray-500">Nothing arriving? The command prints whether its test call was recorded. <a class="tf-link" href="${T.pageHref('connect.html')}">The connect page</a> covers each agent's details.</p>`;
+        return html`<div class="tf-ops-wait">
+            ${RADAR}
+            <div>
+              <h2 class="text-sm font-semibold text-white">Waiting for the first call</h2>
+              <p class="text-xs text-gray-300" role="status">${state.waiting ? html`Watching for a call from <span class="font-mono text-white">${T.projectName(state.name)}</span>, every 3 seconds while this tab is open.` : 'Paused while this tab is hidden.'}</p>
+              ${state.before ? html`<p class="text-[11px] text-gray-500">${T.projectName(state.name)} has sent calls before (the last ${timeAgo(state.before.timestamp)}), so this waits for a new one.</p>` : ''}
+              ${state.pollError ? html`<p class="text-[11px] text-rose-300">The last check failed: ${state.pollError.message}. Still trying.</p>` : ''}
+              <p class="text-[11px] text-gray-500">Nothing arriving? The command prints whether its test call was recorded. <a class="tf-link" href="${T.pageHref('connect.html')}">The connect page</a> covers each agent's details.</p>
+            </div>
+          </div>`;
       }
 
       // Redrawn only when what it says changes, so a copy button inside it is
-      // not reset every three seconds.
+      // not reset every three seconds, and the radar keeps its beat.
       let lastWait = '';
       function redrawWait() {
         const el = document.getElementById('connect-wait');
@@ -2553,6 +2652,8 @@
               state.found = row;
               stop();
               draw();
+              const mark = document.getElementById('view');
+              if (mark && typeof mark.querySelector === 'function') T.pulse(mark.querySelector('.tf-ops-arrived-mark'), 'ok');
               announce('Connected: ' + agentLabel(row.agent) + ' reached the stack.');
               return;
             }
@@ -2593,7 +2694,9 @@
       });
 
       ctx.actions({
-        os: el => { state.os = el.getAttribute('data-os') === 'powershell' ? 'powershell' : 'posix'; draw(); }
+        // The shared layer has already switched the tab and its panel; this
+        // remembers the choice for the next redraw.
+        os: el => { state.os = el.getAttribute('data-os') === 'powershell' ? 'powershell' : 'posix'; }
       });
       // Typing changes the name; the command and the watch follow it.
       const onInput = event => {
@@ -2611,8 +2714,7 @@
         }
         const commandEl = document.getElementById('connect-command');
         if (commandEl && ok) {
-          const cmd = connectCommands(state.name);
-          setHtml(commandEl, T.commandBlock(state.os === 'powershell' ? cmd.powershell : cmd.posix, 'connect command'));
+          setHtml(commandEl, commandTabs());
         } else if (ok !== !!commandEl) {
           draw();
           const input = document.getElementById('connect-name');
@@ -2644,6 +2746,27 @@
       return text;
     }
 
+    // What signing in keeps and what it never does, said where the reader
+    // decides whether to trust it.
+    const SIGNIN_PROMISES = [
+      ['lock', 'No password', 'Nothing to type or remember here: the command on your machine does the asking.'],
+      ['key', 'The key stays home', 'The operator key never leaves the machine. This browser keeps a sign-in session that ends on its own.'],
+      ['clock', 'A link works once', 'For a short while only, so it cannot be opened again, forwarded or shared.']
+    ];
+
+    function signinFrame(title, sub, body) {
+      return html`<div class="tf-ops-signin">
+        <div class="tf-ops-signin-card space-y-6">
+          <div class="text-center space-y-3">
+            <span class="tf-ops-mark" aria-hidden="true">${T.icon('shield', 26)}</span>
+            <h1 id="view-title" tabindex="-1" class="text-2xl md:text-3xl font-semibold tracking-tight text-white outline-none">${title}</h1>
+            ${sub ? html`<p class="text-sm text-gray-300 max-w-xl mx-auto">${sub}</p>` : ''}
+          </div>
+          ${body}
+        </div>
+      </div>`;
+    }
+
     function viewSignin(ctx) {
       const code = (ctx.params.code || '').trim();
       const next = safeNext(ctx.params.next);
@@ -2655,21 +2778,20 @@
       }
       if (!code) {
         const signedIn = T.readSession();
-        ctx.render(html`${pageTitle('Sign in', 'The operator signs in from the command line. There is no password here, and the key never goes into the browser.')}
-          <div class="max-w-2xl space-y-4">
-            ${signedIn ? html`<div class="tf-card p-4 border-emerald-900/60 text-sm text-emerald-300" role="status">This browser is signed in${signedIn.endsAt ? ' until ' + T.clockTime(signedIn.endsAt) : ''}. <a class="tf-link" href="#/overview">Go to the overview</a></div>` : ''}
-            <div class="tf-card p-5 space-y-3">
-              <h2 class="text-sm font-semibold text-white">On the machine that holds the operator key</h2>
-              ${T.commandBlock('python threefold.py open', 'Sign-in command')}
-              <p class="text-xs text-gray-400">It asks the stack for a one-time link and opens it here. The link works once, for a short while; the browser keeps a sign-in session, never the key.</p>
-              <p class="text-[11px] text-gray-500">No <span class="font-mono">threefold.py</span> yet? <a class="tf-link" href="#/connect">Connect a repository</a> first. On the public demo, reading needs no sign-in at all.</p>
-            </div>
-          </div>`);
+        ctx.render(signinFrame('Sign in from your terminal', 'The operator signs in from the command line. There is no password here, and the key never goes into the browser.', html`
+          ${signedIn ? html`<div class="tf-callout tf-callout-ok" role="status">${T.icon('check', 18)}<div class="tf-callout-body"><p>This browser is signed in${signedIn.endsAt ? ' until ' + T.clockTime(signedIn.endsAt) : ''}. <a class="tf-link" href="#/overview">Go to the overview</a></p></div></div>` : ''}
+          <div class="space-y-3">
+            <p class="text-xs font-semibold text-gray-200">On the machine that holds the operator key, in the folder where you ran connect:</p>
+            ${T.commandBlock('python threefold.py open', 'Sign-in command')}
+            <p class="text-xs text-gray-400">It asks the stack for a one-time link and opens it here. The link works once, for a short while; the browser keeps a sign-in session, never the key.</p>
+          </div>
+          <ul class="tf-ops-promise">${SIGNIN_PROMISES.map(([icon, head, words]) => html`<li>${T.icon(icon, 16)}<b>${head}</b><span>${words}</span></li>`)}</ul>
+          <p class="text-[11px] text-gray-500 text-center">No <span class="font-mono">threefold.py</span> yet? <a class="tf-link" href="#/connect">Connect a repository</a> first. On the public demo, reading needs no sign-in at all.</p>`));
         return;
       }
 
       function attempt() {
-        ctx.render(html`${pageTitle('Signing you in…', null)}<div class="tf-card p-5 max-w-xl" aria-busy="true"><div class="tf-skeleton h-4 w-2/3"></div></div>`);
+        ctx.render(signinFrame('Signing you in…', 'Trading the one-time link for a sign-in session. This takes a moment.', html`<div class="space-y-3" aria-busy="true"><div class="tf-skeleton h-4 w-2/3 mx-auto"></div><div class="tf-skeleton h-4 w-1/2 mx-auto"></div></div>`));
         return T.api('/api/auth/sessions', { method: 'POST', body: { code } }).then(body => {
           if (!body || typeof body.token !== 'string' || !body.token) {
             if (ctx.alive()) ctx.render(html`${pageTitle('The sign-in could not be completed', null)}${T.errorHtml({ kind: 'http', message: 'The stack answered without a session' }, 'the sign-in', null)}`);
@@ -2688,12 +2810,12 @@
         }, err => {
           if (!ctx.alive()) return;
           if (err.status === 401) {
-            ctx.render(html`${pageTitle('This sign-in link has already been used, or has expired', 'A link works once and only for a short while, so it cannot be opened again or shared.')}
-              <div class="tf-card p-5 max-w-2xl space-y-3" role="alert" data-state="signin-refused">
+            ctx.render(signinFrame('This sign-in link has already been used, or has expired', 'A link works once and only for a short while, so it cannot be opened again or shared.', html`
+              <div class="space-y-3" role="alert" data-state="signin-refused">
                 <p class="text-xs text-gray-300">Ask for a fresh one on the machine that holds the operator key:</p>
                 ${T.commandBlock('python threefold.py open', 'Sign-in command')}
                 <p class="text-[11px] text-gray-500">If you opened this link twice, the first tab may already be signed in.</p>
-              </div>`);
+              </div>`));
             return;
           }
           ctx.render(html`${pageTitle('The sign-in did not complete', null)}${T.errorHtml(err, 'the sign-in', 'signin-retry')}`);

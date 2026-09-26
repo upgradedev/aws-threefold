@@ -320,3 +320,64 @@ def test_the_proof_page_leads_with_the_violation_rates_on_one_scale(tmp_path: Pa
     assert "data-metric" not in chart and "data-series=" not in chart and 'data-proof="provenance"' not in chart
     assert 'class="tf-legend"' in chart, "Three conditions carry a legend as well as their own labels"
     assert "Did a violation land?" not in out["pilot"], "A pilot proves the harness, not a rate, so it is not charted"
+
+
+# -------------------------------------------------------------- call, connect
+
+
+def test_a_call_reads_as_an_incident_card(tmp_path: Path) -> None:
+    out = ops(
+        r"""
+  const refused = row(1, { status: 'BLOCKED_BOUNDARY_VIOLATION', observed_rules: [], observed_rule: '', reason: 'The domain imports infrastructure.',
+    suggested_fix_kind: 'layering', suggested_fix_validated: true });
+  answer = contract({ '/api/decision': { status: 200, body: Object.assign({}, DECISION, { decision: refused }) } });
+  await visit('#/call?timestamp=t&verdict_id=VERDICT-1');
+  out.refused = view();
+  answer = contract();
+  await visit('#/call?timestamp=t&verdict_id=VERDICT-1&n=2');
+  out.observed = view();
+  answer = contract({ '/api/decision': { status: 200, body: { decision: row(3, { observed_rules: [], observed_rule: '', rule_key: 'NONE' }), session: null, rule: null } } });
+  await visit('#/call?timestamp=t&verdict_id=VERDICT-3');
+  out.approved = view();
+""",
+        tmp_path,
+    )
+    refused = out["refused"]
+    card = refused.split('class="tf-ops-incident"', 1)[1].split("</article>", 1)[0]
+    assert 'data-outcome="refused"' in refused and "Refused before it ran" in card
+    for question in ("What the agent tried", "What Threefold said", "The rule", "Suggested fix"):
+        assert question in card, f"The incident card does not answer: {question}"
+    assert "src/billing/domain/Invoice.java" in card and "The domain imports infrastructure." in card
+    assert "java-domain-stays-pure" in card and "Move the import out of the domain" in card
+    assert refused.index("tf-ops-incident") < refused.index("Every field the ledger keeps"), "The card leads, the record follows"
+    assert "It ran, and a rule in Observe would have refused it" in out["observed"] and "Was the rule right?" in out["observed"]
+    approved = out["approved"]
+    assert "Approved: nothing flagged it" in approved and "None: nothing flagged this call" in approved
+    assert "Suggested fix" not in approved and "Was the rule right?" not in approved
+
+
+def test_connect_waits_with_a_radar_and_turns_into_a_success_card(tmp_path: Path) -> None:
+    out = ops(
+        r"""
+  let decisions = { items: [], next_cursor: null };
+  answer = contract({ '/api/decisions': () => ({ status: 200, body: decisions }) });
+  await visit('#/connect');
+  out.waiting = view();
+  out.wait = el('connect-wait').innerHTML;
+  decisions = { items: [row(1, { agent: 'antigravity', timestamp: new Date(Date.now() + 1000).toISOString() })], next_cursor: null };
+  await runIntervals();
+  out.connected = view();
+""",
+        tmp_path,
+    )
+    waiting = out["waiting"]
+    assert 'role="tablist"' in waiting and waiting.count('role="tab"') == 2 and waiting.count('role="tabpanel"') == 2
+    assert re.search(r'id="os-tab-posix"[^>]*aria-selected="true"', waiting), "The shell this browser runs on is chosen first"
+    assert re.search(r'id="os-panel-powershell"[^>]*hidden', waiting), "The other shell's command waits behind its tab"
+    assert "tf-ops-radar" in out["wait"] and "Waiting for the first call" in out["wait"]
+    steps = waiting.split('class="tf-ops-steps"', 1)[1].split("</ol>", 1)[0]
+    assert re.search(r'data-state="current" aria-current="step"><span class="tf-step-num" data-state="current">2<', steps), "Step 2 is current until a call lands"
+    connected = out["connected"]
+    assert "tf-ops-arrived" in connected and "tf-ops-radar" not in connected
+    done = connected.split('class="tf-ops-steps"', 1)[1].split("</ol>", 1)[0]
+    assert done.count('<li data-state="done"') == 3, "Every step is done once the first call lands"
