@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import ast
 import collections
+import copy
 import datetime
 import inspect
 import json
@@ -102,6 +103,12 @@ class Day:
         self.last_tick = MONDAY + datetime.timedelta(minutes=15 * (len(summaries) - 1))
 
 
+@pytest.fixture(autouse=True)
+def a_stack_that_runs_the_fleet(monkeypatch):
+    """Every test here is on a stack whose DemoFleet is true, unless it says otherwise."""
+    monkeypatch.setenv(rollups.DEMO_FLEET_ENV, "true")
+
+
 @pytest.fixture(scope="module")
 def a_day() -> Day:
     """Ninety-six ticks, one simulated Monday, on a store of its own.
@@ -110,6 +117,7 @@ def a_day() -> Day:
     in this module runs on it.
     """
     with pytest.MonkeyPatch.context() as patch:
+        patch.setenv(rollups.DEMO_FLEET_ENV, "true")
         clock = SimulatedClock(MONDAY)
         clock.install(patch)
         evaluator = _fresh_evaluator()
@@ -637,10 +645,17 @@ def test_an_enforcing_rule_that_turns_noisy_goes_back_to_observing(monkeypatch) 
     moment = datetime.datetime.now(UTC)
     demo_fleet._sweep(evaluator, moment, summary, min_age=datetime.timedelta(0))
     assert summary.labelled["false_alarm"] == 1 and summary.false_alarms_in == {"Acme-Payments"}
+    promoted = evaluator.project_config("Acme-Payments", fresh=True)
     action = demo_fleet._observe_noisy(evaluator, "Acme-Payments", moment)
     assert action == {"action": "observe_noisy", "project": "Acme-Payments", "observe": [demo_fleet.NOISY_RULE]}
     config = evaluator.project_config("Acme-Payments", fresh=True)
     assert config["stage"] == stages.ENFORCE and demo_fleet.NOISY_RULE in config["observe_rules"]
+    assert config["promoted_at"] == promoted["promoted_at"], "Not a promotion: the cooldown still counts from the real one"
+    assert [entry["action"] for entry in config["history"]] == ["promote", "observe_noisy"]
+    entry = config["history"][-1]
+    assert entry["by"] == "fleet" and entry["at"] == moment.isoformat()
+    assert entry["observe"] == [demo_fleet.NOISY_RULE] and demo_fleet.NOISY_RULE not in entry["enforce"]
+    assert set(entry["enforce"]) == set(first["enforce"]) - {demo_fleet.NOISY_RULE}
     _seed(evaluator, "Acme-Payments", [NOISY_CALL])
     same = [row for row in _rows(evaluator) if row["target"] == NOISY_CALL[2]["file_path"]]
     assert [row["status"] for row in same] == ["BLOCKED_BOUNDARY_VIOLATION", "APPROVED"], (
@@ -721,18 +736,81 @@ class _Context:
 
 
 def test_a_tick_stops_sending_well_before_the_function_times_out() -> None:
-    """With less time left than the margin, nothing is sent and nothing is raised."""
+    """With less time left than the margin, nothing is sent, the operator does nothing, and nothing is raised."""
     answer = demo_fleet.run_scheduled_tick(_fresh_evaluator(), _Context(int(demo_fleet.STOP_BEFORE_DEADLINE_SECONDS * 1000) - 1))
     summary = answer["threefold_fleet"]
     assert summary["ok"] is True and summary["cut_short"] is True and summary["calls"] == 0
+    assert summary["operator_cut_short"] is True and summary["actions"] == []
 
 
 def test_a_tick_with_time_to_spare_runs_whole() -> None:
     answer = demo_fleet.run_scheduled_tick(_fresh_evaluator(), _Context(15000))
     summary = answer["threefold_fleet"]
-    assert summary["ok"] is True and summary["cut_short"] is False
+    assert summary["ok"] is True and summary["cut_short"] is False and summary["operator_cut_short"] is False
     assert demo_fleet.MIN_CALLS <= summary["calls"] <= demo_fleet.MAX_CALLS
-    assert set(summary) >= {"tick", "calls", "planned", "verdicts", "held_on_machine", "labelled", "actions", "stages", "seconds"}
+    assert set(summary) >= {"tick", "calls", "planned", "verdicts", "held_on_machine", "labelled", "actions", "stages",
+                            "seconds", "send_seconds", "operate_seconds", "operator_errors"}
+    assert 0 <= summary["send_seconds"] and 0 <= summary["operate_seconds"]
+    assert summary["send_seconds"] + summary["operate_seconds"] <= summary["seconds"] + 0.01
+
+
+class _SlowStore:
+    """A clock the test moves: every call the fleet sends costs `per_call` seconds, as on a slow table."""
+
+    def __init__(self, per_call: float) -> None:
+        self.now = 1000.0
+        self.per_call = per_call
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def slow(self, evaluate):
+        def call(request):
+            self.now += self.per_call
+            return evaluate(request)
+        return call
+
+
+def _four_enforcing(evaluator, now: datetime.datetime) -> None:
+    """More projects enforcing than the operator keeps, so it demotes one at once."""
+    long_ago = (now - datetime.timedelta(days=1)).isoformat()
+    demo_fleet._ensure_configured(evaluator, now)
+    for name in rollups.FLEET_PROJECTS[:4]:
+        keys = demo_fleet._keys(evaluator, name)
+        evaluator.save_project_config(name, stages.promoted(None, long_ago, "fleet", keys, keys))
+
+
+def test_calls_that_run_slow_leave_the_operator_its_share_of_the_time(monkeypatch) -> None:
+    """On a slow table the batch is cut short, and the operator still acts in the time kept for it."""
+    clock = _SlowStore(per_call=1.0)
+    monkeypatch.setattr(demo_fleet, "time", clock)
+    evaluator = _fresh_evaluator()
+    now = datetime.datetime.now(UTC)
+    _four_enforcing(evaluator, now)
+    evaluator.evaluate_tool_call = clock.slow(evaluator.evaluate_tool_call)
+    budget = 10.0
+    summary = demo_fleet.run_tick(evaluator, now=now, stop_at=clock.now + budget, timings=True)
+    assert summary["cut_short"] is True
+    assert summary["calls"] == round(budget * demo_fleet.SEND_SHARE), "The calls stop at their share of the time"
+    assert summary["send_seconds"] == pytest.approx(budget * demo_fleet.SEND_SHARE)
+    assert [action["action"] for action in summary["actions"]] == ["demote"], "The operator still ran"
+    assert summary["operator_cut_short"] is False
+    assert list(summary["stages"].values()).count(stages.ENFORCE) == 3
+
+
+def test_the_operator_s_steps_stop_when_its_time_does(monkeypatch) -> None:
+    """With the whole budget spent on the calls, no stage changes and nothing more is labelled."""
+    clock = _SlowStore(per_call=1.0)
+    monkeypatch.setattr(demo_fleet, "time", clock)
+    monkeypatch.setattr(demo_fleet, "SEND_SHARE", 1.0)
+    evaluator = _fresh_evaluator()
+    now = datetime.datetime.now(UTC)
+    _four_enforcing(evaluator, now)
+    evaluator.evaluate_tool_call = clock.slow(evaluator.evaluate_tool_call)
+    summary = demo_fleet.run_tick(evaluator, now=now, stop_at=clock.now + 10.0)
+    assert summary["cut_short"] is True and summary["operator_cut_short"] is True
+    assert summary["actions"] == [] and summary["labelled"] == {"correct": 0, "false_alarm": 0}
+    assert list(summary["stages"].values()).count(stages.ENFORCE) == 4
 
 
 def test_every_tick_leaves_one_line_in_the_function_s_log(caplog) -> None:
@@ -779,6 +857,21 @@ def test_a_tick_delivered_twice_sends_its_batch_once(monkeypatch) -> None:
     monkeypatch.setattr(demo_fleet, "_now", lambda: moment + datetime.timedelta(minutes=15))
     third = demo_fleet.run_scheduled_tick(evaluator, _Context(15000))["threefold_fleet"]
     assert third["ok"] is True and third["calls"] >= demo_fleet.MIN_CALLS, "The next quarter hour is a tick of its own"
+
+
+@pytest.mark.parametrize("value", [None, "false", ""])
+def test_a_stack_that_does_not_run_the_fleet_writes_nothing_for_its_event(value, monkeypatch) -> None:
+    """A private stack's function invoked with the tick's event: answered, and not even the claim is written."""
+    if value is None:
+        monkeypatch.delenv(rollups.DEMO_FLEET_ENV, raising=False)
+    else:
+        monkeypatch.setenv(rollups.DEMO_FLEET_ENV, value)
+    evaluator = _fresh_evaluator()
+    sent = []
+    evaluator.evaluate_tool_call = lambda request: sent.append(request)
+    answer = demo_fleet.run_scheduled_tick(evaluator, _Context(15000))
+    assert answer == {"threefold_fleet": {"ok": False, "skipped": "DemoFleet is not true on this stack"}}
+    assert not sent and not evaluator.session_repo._memory_store, "Nothing at all was written"
 
 
 def test_a_tick_whose_bucket_cannot_be_claimed_sends_nothing(monkeypatch) -> None:
@@ -833,3 +926,104 @@ def test_a_store_that_cannot_take_the_claim_fails_the_tick_before_it_sends_anyth
     evaluator.evaluate_tool_call = lambda request: sent.append(request)
     assert demo_fleet.run_scheduled_tick(evaluator, _Context(15000)) == {"threefold_fleet": {"ok": False}}
     assert not sent
+
+
+# ---------------------------------------------------------------- never over what it could not read
+
+
+class _FlakyTable:
+    """A table whose reads can fail while its writes still land, as they can on a cold container."""
+
+    def __init__(self) -> None:
+        self.items: Dict[tuple, Dict[str, Any]] = {}
+        self.reads_fail = False
+
+    def put_item(self, Item, ConditionExpression=None, **_):  # noqa: N803 - boto3 spells it this way
+        key = (Item["PK"], Item["SK"])
+        if ConditionExpression == "attribute_not_exists(PK)" and key in self.items:
+            error = type("ConditionalCheckFailedException", (Exception,), {})()
+            error.response = {"Error": {"Code": "ConditionalCheckFailedException"}}
+            raise error
+        self.items[key] = json.loads(json.dumps(Item))
+
+    def get_item(self, Key, **_):  # noqa: N803
+        if self.reads_fail:
+            raise ConnectionError("simulated throttling after the retries")
+        found = self.items.get((Key["PK"], Key["SK"]))
+        return {"Item": json.loads(json.dumps(found))} if found else {}
+
+    def query(self, **kwargs):
+        if self.reads_fail:
+            raise ConnectionError("simulated throttling after the retries")
+        partition = kwargs["ExpressionAttributeValues"][":pk"]
+        return {"Items": [dict(item) for (pk, _), item in sorted(self.items.items()) if pk == partition]}
+
+    def configs(self) -> Dict[tuple, Dict[str, Any]]:
+        prefixes = (dynamo_repo.PROJECT_CONFIG_PREFIX, dynamo_repo.PROJECT_INDEX_PARTITION)
+        return {key: item for key, item in self.items.items() if key[0].startswith(prefixes)}
+
+
+def _a_container(table: _FlakyTable) -> GovernanceEvaluator:
+    """A new container on the table: it holds nothing of its own yet."""
+    return GovernanceEvaluator(session_repo=_repo_on(table))
+
+
+def _an_enforcing_ledger(table: _FlakyTable) -> Dict[tuple, Dict[str, Any]]:
+    evaluator = _a_container(table)
+    now = datetime.datetime.now(UTC)
+    for name in rollups.FLEET_PROJECTS:
+        evaluator.save_project_config(name, stages.new_config(now.isoformat(), stage=stages.OBSERVE))
+    keys = demo_fleet._keys(evaluator, "Acme-Ledger")
+    evaluator.save_project_config("Acme-Ledger", stages.promoted(None, now.isoformat(), "fleet", keys, keys))
+    stored = table.items[("CONFIG#project#Acme-Ledger", "METADATA")]
+    assert stored["stage"] == stages.ENFORCE and len(stored["history"]) == 1 and stored["promoted_at"]
+    return copy.deepcopy(table.configs())
+
+
+def test_a_configuration_the_store_cannot_read_is_never_written_over() -> None:
+    """A cold container whose reads fail must not take "could not read" for "never configured"."""
+    table = _FlakyTable()
+    before = _an_enforcing_ledger(table)
+    table.reads_fail = True
+    with pytest.raises(ConnectionError):
+        demo_fleet._ensure_configured(_a_container(table), datetime.datetime.now(UTC))
+    assert table.configs() == before, "Acme-Ledger still enforces, with its history and its promotion"
+
+
+def test_a_tick_that_cannot_read_the_stages_sends_nothing_and_changes_nothing() -> None:
+    table = _FlakyTable()
+    before = _an_enforcing_ledger(table)
+    table.reads_fail = True
+    evaluator = _a_container(table)
+    sent = []
+    evaluator.evaluate_tool_call = lambda request: sent.append(request)
+    assert demo_fleet.run_scheduled_tick(evaluator, _Context(15000)) == {"threefold_fleet": {"ok": False}}
+    assert not sent and table.configs() == before
+
+
+def test_a_project_the_store_has_never_seen_is_created_in_observe() -> None:
+    table = _FlakyTable()
+    configs = demo_fleet._ensure_configured(_a_container(table), datetime.datetime.now(UTC))
+    assert set(configs) == set(rollups.FLEET_PROJECTS)
+    assert all(config["stage"] == stages.OBSERVE and config["history"] == [] for config in configs.values())
+    assert all(("CONFIG#project#" + name, "METADATA") in table.items for name in rollups.FLEET_PROJECTS)
+
+
+@pytest.mark.parametrize("change", ["promote", "demote", "observe_noisy"])
+def test_a_change_of_stage_that_cannot_read_the_configuration_changes_nothing(change: str, monkeypatch) -> None:
+    """Each change reads the stored configuration before it writes; a failed read leaves the store alone."""
+    monkeypatch.setattr(demo_fleet, "MIN_CALLS_OBSERVED", 0)
+    table = _FlakyTable()
+    before = _an_enforcing_ledger(table)
+    table.reads_fail = True
+    evaluator = _a_container(table)
+    now = datetime.datetime.now(UTC)
+    summary = demo_fleet.TickSummary(tick=0)
+    steps = {
+        "promote": lambda: demo_fleet._promote(evaluator, "Acme-Ledger", now, summary, None),
+        "demote": lambda: demo_fleet._demote(evaluator, "Acme-Ledger", now),
+        "observe_noisy": lambda: demo_fleet._observe_noisy(evaluator, "Acme-Ledger", now),
+    }
+    demo_fleet._act(summary, change, "Acme-Ledger", steps[change])
+    assert summary.operator_errors == 1 and summary.actions == []
+    assert table.configs() == before

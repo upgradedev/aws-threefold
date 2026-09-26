@@ -6,6 +6,10 @@ the calls and projects of each, and every `by_project` row and every
 `GET /api/projects` row gains `source`, so a page can say in words which of its
 numbers are synthetic. Read from rollup items built here, with no store.
 
+The six fleet names are the fleet's only on a stack that runs it (DEMO_FLEET,
+the template's DemoFleet parameter), which every test here is unless it says
+otherwise: anywhere else a team may name its own repository Acme-Payments.
+
 Names are synthetic, as the clean-room rule requires.
 """
 from __future__ import annotations
@@ -52,6 +56,11 @@ def _overview(items=ITEMS, **kwargs):
     return rollups.overview(items, CONFIGS, days=7, today=TODAY, **kwargs)
 
 
+@pytest.fixture(autouse=True)
+def a_stack_that_runs_the_fleet(monkeypatch):
+    monkeypatch.setenv(rollups.DEMO_FLEET_ENV, "true")
+
+
 @pytest.mark.parametrize(
     "project, source",
     [
@@ -74,6 +83,29 @@ def _overview(items=ITEMS, **kwargs):
 )
 def test_a_project_is_the_fleets_only_under_one_of_its_six_names_exactly(project, source) -> None:
     assert rollups.source_of(project) == source
+
+
+@pytest.mark.parametrize("value", [None, "", "false", "False", "0", "yes", "1", "on"])
+def test_where_the_fleet_does_not_run_its_six_names_are_other(value, monkeypatch) -> None:
+    """A private stack, or the service off AWS: an Acme-Payments there is a team's own repository."""
+    if value is None:
+        monkeypatch.delenv(rollups.DEMO_FLEET_ENV, raising=False)
+    else:
+        monkeypatch.setenv(rollups.DEMO_FLEET_ENV, value)
+    assert not rollups.fleet_runs_here()
+    assert {rollups.source_of(name) for name in rollups.FLEET_PROJECTS} == {"other"}
+    assert rollups.source_of(SANDBOX) == "sandbox"
+    payload = _overview()
+    assert payload["sources"]["fleet"] == {"calls": 0, "projects": 0}
+    assert payload["sources"]["other"] == {"calls": 91, "projects": 5}
+    assert {row["source"] for row in payload["by_project"]} == {"sandbox", "other"}
+    assert {row["source"] for row in rollups.projects_listing(ITEMS, CONFIGS)} == {"sandbox", "other"}
+
+
+@pytest.mark.parametrize("value", ["true", "TRUE", " true "])
+def test_the_stack_s_setting_is_read_as_the_template_writes_it(value, monkeypatch) -> None:
+    monkeypatch.setenv(rollups.DEMO_FLEET_ENV, value)
+    assert rollups.fleet_runs_here() and rollups.source_of("Acme-Ledger") == "fleet"
 
 
 def test_the_fleet_is_six_projects_and_the_three_sources_are_closed() -> None:
