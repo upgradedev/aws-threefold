@@ -2015,7 +2015,10 @@
         // A redraw replaces every row, and with them the focus. A reader typing
         // a note keeps the field; one working the queue gets the row back.
         if (typing) { refocus(document.getElementById(typing)); return; }
-        if (state.engaged && focusLost()) focusCurrent(false, false);
+        if (!focusLost()) return;
+        // Until the reader works the queue, the screen's title keeps the focus
+        // the route gave it; from then on, the row the keyboard is on does.
+        if (state.engaged) focusCurrent(false, false); else focusTitle();
       }
 
       function refocus(el) {
@@ -2077,17 +2080,19 @@
         return () => { state.saved = state.saved.filter(e => e !== entry); return undo(rows); };
       }
 
-      function sayError(text) {
+      // What went wrong, above the queue and in a toast, which is in view
+      // however far down the queue the reader is, and is read out.
+      function sayError(text, actionLabel, action) {
         const el = document.getElementById('review-error');
         if (el) el.textContent = text;
-        announce(text);
+        toast(text, actionLabel, action);
       }
 
       function label(rows, value, note) {
         if (!rows.length) return Promise.resolve();
         const projectName = rows[0].project_name;
         if (!mayLabel(state.who, projectName)) {
-          sayError('Labelling ' + T.projectNameText(projectName) + ' is the operator\'s, so nothing was sent. Sign in to label it; a visitor may label the calls in a sandbox.');
+          sayError('Labelling ' + T.projectNameText(projectName) + ' is the operator\'s, so nothing was sent. Sign in to label it; a visitor may label the calls in a sandbox.', 'Sign in', () => go(signinHref()));
           return Promise.resolve();
         }
         const ids = {};
