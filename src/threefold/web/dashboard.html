@@ -2652,7 +2652,7 @@
     function viewTry(ctx) {
       ensureTryStyle();
       const state = {
-        step: 1, project: '', stage: null, seeded: null, calls: null, callsError: null, readiness: null, before: null, observed: [], labels: {}, cursor: 0,
+        step: 1, project: '', stage: null, seeded: null, calls: null, callsError: null, readiness: null, before: null, observed: [], flaggedRead: false, labels: {}, cursor: 0,
         selected: null, promoted: null, observing: null, result: null, replay: null, planned: false, error: null, busy: false, who: null, play: {}, focusId: null,
         saves: [], rulesDef: null, lastLabel: null
       };
@@ -2717,6 +2717,9 @@
       // ------------------------------------------------------ the rail
 
       // What each step did, in the numbers its responses gave; empty until then.
+      // The flagged count waits for the list of flagged calls itself: a
+      // resumed sandbox has its readiness before that list, and a count of
+      // an unread list would read as zero.
       function railNotes() {
         const notes = ['', '', '', '', ''];
         const calls = Array.isArray(state.calls) ? state.calls : [];
@@ -2725,7 +2728,7 @@
           const agents = new Set(calls.map(r => r.agent)).size;
           notes[0] = plural(count, 'call') + (agents ? ' · ' + plural(agents, 'agent') : '');
         }
-        if (state.step >= 2 || state.readiness) notes[1] = plural(state.observed.length, 'call') + ' flagged';
+        if (state.flaggedRead) notes[1] = plural(state.observed.length, 'call') + ' flagged';
         if (state.step >= 3 && state.observed.length) {
           const c = labelCounts();
           notes[2] = labelledCount() === state.observed.length
@@ -3480,6 +3483,7 @@
           readinessRules().forEach(r => { state.before[r.rule_key] = r.state; });
           // Oldest first, the order they arrived in on step 1.
           state.observed = tryChronological(list && Array.isArray(list.items) ? list.items : []);
+          state.flaggedRead = true;
           state.labels = {};
           state.observed.forEach(r => { if (r.review === 'correct' || r.review === 'false_alarm') state.labels[r.verdict_id] = r.review; });
           const first = state.observed.findIndex(r => !state.labels[r.verdict_id]);
@@ -3843,7 +3847,7 @@
         'try-restart': () => {
           try { localStorage.removeItem(TRY_STORAGE); } catch (err) { /* nothing stored */ }
           Object.assign(state, {
-            step: 1, project: '', stage: null, seeded: null, calls: null, callsError: null, readiness: null, before: null, observed: [], labels: {}, cursor: 0,
+            step: 1, project: '', stage: null, seeded: null, calls: null, callsError: null, readiness: null, before: null, observed: [], flaggedRead: false, labels: {}, cursor: 0,
             selected: null, promoted: null, observing: null, result: null, replay: null, planned: false, error: null, busy: false, resume: null, saves: [], rulesDef: null, lastLabel: null
           });
           enter(1);

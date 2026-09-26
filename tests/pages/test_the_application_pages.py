@@ -1723,6 +1723,47 @@ def test_a_resumed_sandbox_that_was_promoted_reads_as_enforce_on_every_step(tmp_
     assert "calls judged in Observe" not in out["done"], "A call judged in Enforce is not counted as judged in Observe"
 
 
+def test_a_resumed_sandbox_s_rail_counts_only_the_lists_it_has_read(tmp_path: Path) -> None:
+    """The rail's note for step 2 waits for the list of flagged calls it counts.
+
+    A resumed sandbox reads its readiness on step 1, before that list, and the
+    rail once counted the empty list as "0 calls flagged" beside a project bar
+    that said, on the same screen, that five calls would refuse.
+    """
+    out = dash(
+        r"""
+  const P = 'Acme-Sandbox-0a1b2c3d';
+  const obs = (i, rule, target, extra) => row(i, Object.assign({ project_name: P, rule_key: rule, observed_rules: [rule], observed_rule: rule, target, observed_target: target }, extra || {}));
+  const observed = [
+    obs(2, 'python-domain-stays-pure', 'src/acme/domain/order.py'),
+    obs(3, 'PROTECTED_PATH', 'cat', { agent: 'codex', tool_name: 'shell', action_type: 'COMMAND_EXEC', observed_target: '', observed_reason: "Command 'cat .env' reaches a protected path or credential store" })
+  ];
+  const approved = row(4, { project_name: P, agent: 'antigravity', observed_rules: [], observed_rule: '', rule_key: 'NONE', target: 'README.md', observed_target: '' });
+  store['threefold-try'] = JSON.stringify({ project: P, at: Date.now() });
+  answer = api({
+    ['/api/projects/' + P]: { status: 200, body: { project: P, config: { stage: 'observe', sandbox: true }, readiness: { rules: [
+      { rule_key: 'python-domain-stays-pure', kind: 'layering', state: 'needs_review', would_refuse: 1, correct: 0, false_alarms: 0, unreviewed: 1 },
+      { rule_key: 'PROTECTED_PATH', kind: 'gate', state: 'needs_review', would_refuse: 1, correct: 0, false_alarms: 0, unreviewed: 1 }] } } },
+    '/api/decisions': u => ({ status: 200, body: { items: u.searchParams.get('kind') === 'observed' ? observed : observed.concat([approved]), next_cursor: null } })
+  });
+  function notes() {
+    return view().split('<li class="tf-try-step"').slice(1).map(li => { const m = /class="tf-try-step-note"[^>]*>([^<]*)</.exec(li); return m ? m[1] : ''; });
+  }
+  await visit('#/try');
+  await click('try-resume'); await tick();
+  out.resumed = notes();
+  out.bar = text(view());
+  await click('try-show'); await tick();
+  out.read = notes();
+""",
+        tmp_path,
+    )
+    assert out["resumed"][0] == "3 calls · 3 agents"
+    assert out["resumed"][1] == "", "The rail counted a list it had not read yet"
+    assert "2 would refuse" in out["bar"], "The project bar on the same screen reads the calls it has"
+    assert out["read"][1] == "2 calls flagged", "Once the list is read, the rail counts it"
+
+
 def test_the_walkthrough_escapes_every_value_the_service_sends(tmp_path: Path) -> None:
     """Every string the walkthrough shows from a response is escaped, on every step.
 
