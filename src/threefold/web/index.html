@@ -133,14 +133,21 @@
     .tf-stamp .tf-icon { width: 18px; height: 18px; }
     .tf-stamp-refused { color: var(--tf-refused-text); background: var(--tf-refused-soft); border-color: var(--tf-refused-line); }
     .tf-stamp-approved { color: var(--tf-approved-text); background: var(--tf-approved-soft); border-color: var(--tf-approved-line); }
-    .tf-demo-reason { margin: 0; padding-left: 12px; border-left: 2px solid var(--tf-refused-line); font-size: 0.8125rem; line-height: 1.3125rem; color: var(--tf-text-2); overflow-wrap: anywhere; }
+    /* The reason: one plain sentence first, the rule's id and the status under it. */
+    .tf-demo-reason { display: flex; flex-direction: column; gap: 4px; margin: 0; padding-left: 12px; border-left: 2px solid var(--tf-refused-line); min-width: 0; }
     .tf-demo-reason-approved { border-left-color: var(--tf-approved-line); }
-    .tf-demo-fix { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: var(--tf-radius-md); background: var(--tf-approved-soft); border: 1px solid var(--tf-approved-line); font-size: 0.8125rem; line-height: 1.25rem; color: var(--tf-text-2); }
+    .tf-demo-why { margin: 0; font-size: 0.875rem; line-height: 1.375rem; color: var(--tf-text); overflow-wrap: anywhere; text-wrap: pretty; }
+    .tf-demo-why code { font: 500 0.8125rem/1 var(--tf-font-mono); color: var(--tf-text); }
+    .tf-demo-ruleline { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; margin: 0; font: 500 0.6875rem/1rem var(--tf-font-mono); color: var(--tf-text-3); overflow-wrap: anywhere; }
+    .tf-demo-ruleline b { font-weight: 500; color: var(--tf-accent-text); }
+    .tf-demo-fix { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: var(--tf-radius-md); background: var(--tf-approved-soft); border: 1px solid var(--tf-approved-line); font-size: 0.8125rem; line-height: 1.25rem; color: var(--tf-text-2); }
+    @media (min-width: 640px) { .tf-demo-fix { padding: 12px 14px; } }
     .tf-demo-fix p { margin: 0; }
     .tf-demo-fix-title { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; font-weight: 600; color: var(--tf-approved-text); }
     .tf-demo-fix-title .tf-icon { width: 16px; height: 16px; }
-    .tf-demo-fix-files { display: flex; flex-wrap: wrap; gap: 6px; }
+    .tf-demo-fix-files { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
     .tf-demo-fix-files code { padding: 1px 6px; border-radius: var(--tf-radius-xs); background: var(--tf-inset); border: 1px solid var(--tf-hairline); font: 400 0.6875rem/1.125rem var(--tf-font-mono); color: var(--tf-text-2); overflow-wrap: anywhere; }
+    .tf-demo-fix-files .tf-micro { margin-left: 2px; }
     .tf-demo-fix-none { background: var(--tf-surface-2); border-color: var(--tf-hairline); }
     .tf-demo-fix-none .tf-demo-fix-title { color: var(--tf-text-2); }
     .tf-demo-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; padding: 12px 16px; border-top: 1px solid var(--tf-hairline); background: var(--tf-inset); font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-3); }
@@ -150,8 +157,8 @@
     @keyframes tf-stamp-in { 0% { opacity: 0; transform: scale(1.35); } 55% { opacity: 1; transform: scale(0.96); } 100% { opacity: 1; transform: none; } }
     .tf-demo[data-motion="on"] .tf-diff-line { animation: tf-type 280ms var(--tf-ease-out) both; animation-delay: calc(var(--i, 0) * 130ms + 140ms); }
     .tf-demo[data-motion="on"] .tf-stamp { animation: tf-stamp-in 460ms var(--tf-ease-out) both; }
-    .tf-demo[data-motion="on"] .tf-demo-rule { animation: tf-rise 320ms var(--tf-ease-out) 160ms both; }
-    .tf-demo[data-motion="on"] .tf-demo-reason { animation: tf-rise 320ms var(--tf-ease-out) 260ms both; }
+    .tf-demo[data-motion="on"] .tf-demo-why { animation: tf-rise 320ms var(--tf-ease-out) 180ms both; }
+    .tf-demo[data-motion="on"] .tf-demo-ruleline { animation: tf-rise 320ms var(--tf-ease-out) 300ms both; }
     .tf-demo[data-motion="on"] .tf-demo-fix { animation: tf-rise 360ms var(--tf-ease-out) 480ms both; }
 
     /* ------------------------------------------------------- the proof strip */
@@ -412,11 +419,11 @@
             <div id="hero-waiting" class="tf-waiting"><span class="tf-waiting-dot" aria-hidden="true"></span>Asking Threefold whether it may be written</div>
             <div id="hero-verdict" class="tf-demo-verdict" hidden></div>
           </div>
-          <p id="hero-reason" class="tf-demo-reason" hidden></p>
+          <div id="hero-reason" class="tf-demo-reason" hidden></div>
           <div id="hero-fix" class="tf-demo-fix" hidden></div>
         </div>
         <figcaption class="tf-demo-foot">
-          <p id="hero-caption">Asking this stack to judge the call, as a hook would.</p>
+          <p id="hero-caption">Asking this stack to judge the call.</p>
           <button type="button" id="hero-replay" class="tf-link-btn" hidden><span data-tf-icon="refresh" data-tf-size="14"></span>Replay</button>
         </figcaption>
       </figure>
@@ -1573,17 +1580,21 @@
     // ------------------------------------------------------------ the hero
     //
     // The product's core moment, once, as the page loads: the boundary write is
-    // drawn as the agent proposes it, this stack is asked about it exactly as a
-    // hook asks, and the verdict lands on the line it refuses. The answer is the
-    // stack's own when it gives one, labelled live, with its reason and the fix
-    // it checked; otherwise RECORDED.boundary is replayed, labelled recorded, and
-    // shows no fix, because a recording kept none. The call asks for no model
-    // sentence (explain false): a verdict is plain code, and a page view should
-    // not spend a Bedrock call. It is sent under a new sim- session like every
-    // scenario, so it is recorded in the public ledger as a page call.
+    // drawn as the agent proposes it, this stack is asked about it through the
+    // same route a hook uses, and the verdict lands on the line it refuses. The
+    // answer is the stack's own when it gives one, labelled live, with its reason
+    // and the fix it checked; otherwise RECORDED.boundary is replayed, labelled
+    // recorded, with a caption that says why, and shows no fix, because a
+    // recording kept none. The call asks for no model sentence (explain false):
+    // a verdict is plain code, and a page view should not spend a Bedrock call.
+    // It is sent under a new sim- session like every scenario, so it is recorded
+    // in the stack's ledger as a page call, and a page call is always enforced.
+    // It is sent only once the counts under the hero have been read, so the
+    // strip never counts the visit that is looking at it.
 
     const HERO_MIN_MS = 1000;
     const HERO_TIMEOUT_MS = 6000;
+    const HERO_COUNTS_WAIT_MS = 4000;
     const hero = { answer: null, motion: false };
 
     function heroCanAnimate() {
@@ -1597,7 +1608,7 @@
       const call = document.getElementById('hero-call');
       const diff = document.getElementById('hero-diff');
       if (!T || !call || !diff) return;
-      T.setHtml(call, T.html`<span class="tf-chip tf-chip-gray">${T.icon('code', 13)}${BOUNDARY_CALL.tool_name}</span><code>${args.TargetFile}</code><span>in ${DEMO_PROJECT}</span>`);
+      T.setHtml(call, T.html`<span class="tf-chip tf-chip-gray">${T.icon('code', 13)}${BOUNDARY_CALL.tool_name}</span><code>${args.TargetFile}</code><span class="tf-demo-project">in ${DEMO_PROJECT}</span>`);
       const lines = String(args.CodeContent).split('\n');
       T.setHtml(diff, T.html`${lines.map((line, i) => T.html`<li class="tf-diff-line" id="hero-line-${i}" style="--i:${i}"><span class="tf-diff-num" aria-hidden="true">${i + 1}</span><span class="tf-diff-sign" aria-hidden="true">+</span><code class="tf-diff-code">${line}</code><span class="tf-diff-tag">not written</span></li>`)}`);
     }
@@ -1614,39 +1625,120 @@
       return { source: 'live', status: data.status, reason: data.reason, fix: data.suggested_fix, ms: ms };
     }
 
+    // How long the answer took there and back: the browser's own record of the
+    // request when it keeps one, which a busy or hidden tab's timers cannot
+    // stretch, and the clock around the call otherwise.
+    function heroRoundTrip(url, clocked) {
+      try {
+        const perf = window.performance;
+        const entries = perf && typeof perf.getEntriesByName === 'function' ? perf.getEntriesByName(url) : [];
+        const last = entries && entries.length ? entries[entries.length - 1] : null;
+        if (last && typeof last.responseEnd === 'number' && last.startTime >= 0 && last.responseEnd > last.startTime) {
+          return Math.round(last.responseEnd - last.startTime);
+        }
+      } catch (err) { /* the clock stands in */ }
+      return clocked;
+    }
+
+    function formatRoundTrip(ms) {
+      if (typeof ms !== 'number' || !isFinite(ms) || ms < 0) return '';
+      return ms < 1000 ? Math.round(ms) + ' ms' : (ms / 1000).toFixed(1) + ' s';
+    }
+
+    // Asks the stack, and says exactly what happened when no verdict came back:
+    // it could not be reached, it did not answer in time, it answered but would
+    // not judge this browser's call, or it answered with something else.
     async function askHero() {
       let timer = null;
+      let why = { kind: 'network', http: 0 };
+      const control = typeof AbortController === 'function' ? new AbortController() : null;
       try {
-        const base = getApiBase();
+        const url = `${getApiBase()}/evaluate-tool-call`;
         const t0 = performance.now();
-        const answered = fetch(`${base}/evaluate-tool-call`, {
+        const init = {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(Object.assign({
             session_id: newSessionId(),
             project_name: DEMO_PROJECT
           }, BOUNDARY_CALL, { agent: 'page', origin: 'page', explain: false, developer: 'anonymous', developer_id: 'anonymous' }))
-        });
+        };
+        if (control) init.signal = control.signal;
+        const answered = fetch(url, init);
+        // A call that loses the race below is cancelled, and its failure is
+        // handled here rather than left for the console.
+        answered.catch(() => {});
         const late = new Promise(resolve => { timer = setTimeout(() => resolve(null), HERO_TIMEOUT_MS); });
         const res = await Promise.race([answered, late]);
-        if (res && res.ok) {
-          const data = await res.json();
-          const answer = heroAnswerFrom(data, Math.round(performance.now() - t0));
+        if (!res) {
+          why = { kind: 'timeout', http: 0 };
+          if (control) control.abort();
+        } else if (!res.ok) {
+          const status = Number(res.status) || 0;
+          why = { kind: status === 401 || status === 403 ? 'private' : status === 429 ? 'limited' : 'http', http: status };
+        } else {
+          let data = null;
+          try { data = await res.json(); } catch (err) { data = null; }
+          const answer = heroAnswerFrom(data, heroRoundTrip(url, Math.round(performance.now() - t0)));
           if (answer) return answer;
+          why = { kind: 'unreadable', http: Number(res.status) || 0 };
         }
       } catch (err) {
-        // The replay below stands in; the page does not depend on the stack.
+        why = { kind: 'network', http: 0 };
       } finally {
         if (timer) clearTimeout(timer);
       }
-      return { source: 'recorded', status: RECORDED.boundary.status, reason: RECORDED.boundary.reason, fix: null, ms: null };
+      return { source: 'recorded', status: RECORDED.boundary.status, reason: RECORDED.boundary.reason, fix: null, ms: null, why: why };
     }
 
-    function heroFixHtml(answer) {
+    // Why the recorded run is showing, in one sentence that is true of what
+    // this stack did: it is never said to be unreachable when it answered.
+    function heroRecordedCaption(why) {
+      const run = 'so this is a real run recorded against the live API on ' + RECORDED.recorded_at + ', replayed here.';
+      const kind = why && why.kind;
+      const http = why && why.http;
+      if (kind === 'timeout') return 'This stack did not answer within ' + Math.round(HERO_TIMEOUT_MS / 1000) + ' seconds, ' + run;
+      if (kind === 'private') return 'This stack judges only its operator’s calls (it answered HTTP ' + http + '), ' + run;
+      if (kind === 'limited') return 'This stack is limiting calls from this browser for now (HTTP 429), ' + run;
+      if (kind === 'http') return 'This stack answered HTTP ' + http + ' instead of a verdict, ' + run;
+      if (kind === 'unreadable') return 'This stack answered, but not with a verdict this page can read, ' + run;
+      return 'This stack could not be reached, ' + run;
+    }
+
+    // The reason as one plain sentence, taken apart from the service's own: the
+    // rule's sentence, then the file and the import that broke it. The rule's id
+    // and the status go on the line under it. A reason in any other shape is
+    // shown as the service wrote it, ended with a full stop. Nothing is added
+    // that the reason does not say.
+    function heroPlainReason(reason) {
+      const text = String(reason || '').trim();
+      const found = /Layering rule '([^']{1,80})' refuses this write: (.+?)\s*'([^']{1,200})' imports '([^']{1,120})'/.exec(text);
+      if (found) {
+        const said = found[2].replace(/[\s.]+$/, '');
+        if (said) return { said: said, path: found[3], module: found[4], rule: found[1] };
+      }
+      const rule = (/rule '([^']{1,80})'/.exec(text) || [])[1] || null;
+      return { said: text ? (/[.!?]$/.test(text) ? text : text + '.') : 'The service gave no reason.', path: null, module: null, rule: rule };
+    }
+
+    function heroReasonHtml(answer) {
+      const h = T.html;
+      const plain = heroPlainReason(answer.reason);
+      const sentence = plain.path
+        ? h`${plain.said}, and <code>${plain.path}</code> imports <code>${plain.module}</code>.`
+        : h`${plain.said}`;
+      return h`<p class="tf-demo-why" title="The service’s reason: ${answer.reason}">${sentence}</p>
+        <p class="tf-demo-ruleline">${plain.rule ? h`<span>rule <b>${plain.rule}</b></span><span aria-hidden="true">·</span>` : ''}<span title="The status the service returned">${answer.status}</span></p>`;
+    }
+
+    // The fix that came with a refusal. An approval needs none, so it gets no
+    // box at all; a replay says it kept none.
+    function heroFixHtml(answer, refused) {
       const h = T.html;
       if (answer.source !== 'live') {
         return { tone: 'none', markup: h`<p class="tf-demo-fix-title">${T.icon('info', 16)}No fix in a replay</p><p>A live answer carries a checked fix with every refusal. This recording kept only the verdict and its reason.</p>` };
       }
+      if (!refused) return null;
       const fix = answer.fix;
       if (!fix || typeof fix !== 'object' || typeof fix.summary !== 'string') {
         return { tone: 'none', markup: h`<p class="tf-demo-fix-title">${T.icon('info', 16)}No fix came with this answer</p>` };
@@ -1661,8 +1753,7 @@
         tone: fix.validated === true ? 'checked' : 'none',
         markup: h`<p class="tf-demo-fix-title">${title}</p>
           <p>${fix.summary}</p>
-          ${writes.length ? h`<div class="tf-demo-fix-files">${writes.map(w => h`<code>${w.path}${w.new_file === true ? ' · new' : ''}</code>`)}</div>` : ''}
-          <p class="tf-micro">A starting point, never applied automatically.</p>`
+          <div class="tf-demo-fix-files">${writes.map(w => h`<code>${w.path}${w.new_file === true ? ' · new' : ''}</code>`)}<span class="tf-micro">A starting point, never applied automatically.</span></div>`
       };
     }
 
@@ -1678,36 +1769,42 @@
       const refused = /^BLOCKED/.test(answer.status);
       const approved = /^APPROVED/.test(answer.status);
       const words = refused ? 'Refused before it was written' : approved ? 'Approved: the write would go ahead' : 'Answered';
-      const rule = (/rule '([^']{1,80})'/.exec(answer.reason) || [])[1];
       heroShowWaiting(false);
       card.setAttribute('data-verdict', refused ? 'refused' : approved ? 'approved' : 'other');
-      T.setHtml(verdict, h`<span id="hero-stamp" class="tf-stamp ${refused ? 'tf-stamp-refused' : approved ? 'tf-stamp-approved' : ''}">${T.icon(refused ? 'stop' : approved ? 'check' : 'info', 18)}${words}</span>
-        <span class="tf-demo-rule tf-chip tf-chip-gray tf-mono" title="The status the service returned">${answer.status}</span>
-        ${rule ? h`<span class="tf-demo-rule tf-chip tf-chip-purple tf-mono" title="The rule that decided">${rule}</span>` : ''}`);
+      T.setHtml(verdict, h`<span id="hero-stamp" class="tf-stamp ${refused ? 'tf-stamp-refused' : approved ? 'tf-stamp-approved' : ''}">${T.icon(refused ? 'stop' : approved ? 'check' : 'info', 18)}${words}</span>`);
       verdict.hidden = false;
       reason.className = 'tf-demo-reason' + (refused ? '' : ' tf-demo-reason-approved');
-      reason.textContent = answer.reason;
+      T.setHtml(reason, heroReasonHtml(answer));
       reason.hidden = false;
-      // The line the verdict is about: the one importing the module the reason names.
+      // The line the verdict is about: the one importing the module the service's
+      // own reason names.
       const module = (/imports '([A-Za-z0-9_.]{1,80})'/.exec(answer.reason) || [])[1];
       String(BOUNDARY_CALL.arguments.CodeContent).split('\n').forEach((line, i) => {
         const node = document.getElementById('hero-line-' + i);
         if (!node || !node.classList) return;
-        const hit = !!module && new RegExp('^\\s*(?:import|from)\\s+' + module.replace(/\./g, '\\.') + '\\b').test(line);
+        const hit = refused && !!module && new RegExp('^\\s*(?:import|from)\\s+' + module.replace(/\./g, '\\.') + '\\b').test(line);
         node.classList.toggle('is-flagged', hit);
       });
-      const fix = heroFixHtml(answer);
-      fixBox.className = 'tf-demo-fix' + (fix.tone === 'checked' ? '' : ' tf-demo-fix-none');
-      T.setHtml(fixBox, fix.markup);
-      fixBox.hidden = false;
+      const fix = heroFixHtml(answer, refused);
+      if (fix) {
+        fixBox.className = 'tf-demo-fix' + (fix.tone === 'checked' ? '' : ' tf-demo-fix-none');
+        T.setHtml(fixBox, fix.markup);
+        fixBox.hidden = false;
+      } else {
+        T.setHtml(fixBox, h``);
+        fixBox.hidden = true;
+      }
       if (answer.source === 'live') {
+        const took = formatRoundTrip(answer.ms);
         source.className = 'tf-chip tf-chip-emerald';
-        T.setHtml(source, h`${T.icon('bolt', 13)}Live${typeof answer.ms === 'number' ? h` · ${answer.ms} ms` : ''}`);
-        caption.textContent = 'Judged just now by this stack: POST /evaluate-tool-call, sent from this page as a hook would send it. It is in this stack’s ledger as a page call.';
+        source.setAttribute('title', 'A live answer from this stack' + (took ? ', ' + took + ' there and back from this browser' : ''));
+        T.setHtml(source, h`${T.icon('bolt', 13)}Live${took ? h` · ${took}` : ''}`);
+        caption.textContent = 'Judged just now by this stack through POST /evaluate-tool-call, and kept in its ledger as a page call, which is always enforced.';
       } else {
         source.className = 'tf-chip tf-chip-amber';
+        source.setAttribute('title', 'A recorded answer, replayed in this browser');
         T.setHtml(source, h`${T.icon('clock', 13)}Recorded ${RECORDED.recorded_at}, replayed offline`);
-        caption.textContent = 'This stack did not answer, so this is one real run recorded against the live API on ' + RECORDED.recorded_at + ', replayed without contacting it.';
+        caption.textContent = heroRecordedCaption(answer.why);
       }
       const replay = document.getElementById('hero-replay');
       if (replay) replay.hidden = !hero.motion;
@@ -1720,13 +1817,25 @@
       if (card) card.removeAttribute('data-verdict');
     }
 
-    async function runHeroDemo() {
+    // countsRead is the proof strip's read of GET /api/overview: the hero's call
+    // goes once that has been answered, or after HERO_COUNTS_WAIT_MS if it is
+    // slow, so the counts a visitor sees never include their own visit. The
+    // lines type in meanwhile; the wait adds nothing to the moment itself.
+    async function runHeroDemo(countsRead) {
       const card = document.getElementById('hero-demo');
       hero.motion = heroCanAnimate();
       if (card) card.setAttribute('data-motion', hero.motion ? 'on' : 'off');
       drawHeroCall();
       heroShowWaiting(true);
       const started = Date.now();
+      if (countsRead && typeof countsRead.then === 'function') {
+        let timer = null;
+        await Promise.race([
+          Promise.resolve(countsRead).catch(() => null),
+          new Promise(resolve => { timer = setTimeout(resolve, HERO_COUNTS_WAIT_MS); })
+        ]);
+        if (timer) clearTimeout(timer);
+      }
       const answer = await askHero();
       // The lines finish arriving before the verdict lands on them; with motion
       // off nothing waits.
@@ -1763,8 +1872,9 @@
     // Acme fleet, visitors' sandboxes, this page's own demos and the service's
     // probes. They show the stack at work, not how widely Threefold is used. A
     // count is a whole number or it is not shown, and a window that counted no
-    // call says so rather than drawing a row of zeros. Neither read is waited on
-    // by the demo, and neither ever rejects.
+    // call says so rather than drawing a row of zeros. Neither read ever
+    // rejects. The hero sends its own call only once the counts have been read,
+    // so a visit never counts itself.
 
     const PROOF_DAYS = 7;
 
@@ -2000,13 +2110,14 @@
         </div>`);
     }
 
-    // On load: the navigation and the links first, then the service, the hero's
-    // one call and the two reads, none of which waits for another.
+    // On load: the navigation and the links first, then the service and the two
+    // reads, and the hero's one call once the counts have been read, so the
+    // strip under it never counts this visit.
     linkHero();
     renderContractStrip();
     checkApiHealth();
-    runHeroDemo();
-    loadLiveTotals();
+    const countsRead = loadLiveTotals();
+    runHeroDemo(countsRead);
     loadBenchmark();
     (function () {
       const replay = document.getElementById('hero-replay');

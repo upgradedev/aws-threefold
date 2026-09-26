@@ -51,6 +51,10 @@ RECORDED_REASON = (
     "Clean Architecture violation: Layering rule 'python-domain-stays-pure' refuses this write: A Python file under "
     "domain/ may not import infrastructure or a driver. 'src/domain/user.py' imports 'boto3', which matches 'boto3'"
 )
+# The same reason as the hero says it: one plain sentence, then the rule's id
+# and the status on the line under it.
+PLAIN_REASON = "A Python file under domain/ may not import infrastructure or a driver, and src/domain/user.py imports boto3."
+RULE_LINE = "rule python-domain-stays-pure · BLOCKED_BOUNDARY_VIOLATION"
 PROOF_FILE = ROOT / "src" / "threefold" / "web" / "proof.json"
 
 # simulateLoop writes its terminal log with createElement and appendChild,
@@ -104,6 +108,11 @@ def _text(markup: str) -> str:
     return " ".join(html.unescape(re.sub(r"<[^>]+>", " ", markup)).split())
 
 
+def _read(markup: str) -> str:
+    """The words as a reader sees them: an inline tag ends no word, so no space is put before a stop."""
+    return re.sub(r" ([.,])", lambda m: m.group(1), _text(markup))
+
+
 def _overview(extra: str = "", **totals) -> str:
     """A /api/overview answer shaped as the contract fixes it, with these totals."""
     values = dict(calls=1284, approved=1190, refused=37, would_refuse=57, needs_review=21, false_alarms=4, projects=12, agents=3)
@@ -137,7 +146,7 @@ def _load(tmp_path: Path, overview: str = "'network'", hero: str = "'network'", 
   out.verdict = el('hero-verdict').innerHTML;
   out.verdictHidden = el('hero-verdict').hidden;
   out.waitingHidden = el('hero-waiting').hidden;
-  out.reason = el('hero-reason').textContent;
+  out.reason = el('hero-reason').innerHTML;
   out.reasonHidden = el('hero-reason').hidden;
   out.fix = el('hero-fix').innerHTML;
   out.fixHidden = el('hero-fix').hidden;
@@ -355,13 +364,17 @@ def test_the_hero_asks_the_stack_once_and_shows_its_live_answer(tmp_path: Path) 
     assert body["session_id"].startswith("sim-") and body["project_name"] == "Acme-Core"
     assert (body["agent"], body["origin"], body["explain"]) == ("page", "page", False), "A page call that spends no model call"
 
-    assert "Live" in out["source"] and "ms" in out["source"]
-    assert out["caption"].startswith("Judged just now by this stack: POST /evaluate-tool-call")
+    assert "Live" in out["source"] and re.search(r"Live · \d+ ms", _text(out["source"])), "The round trip, in milliseconds under a second"
+    assert out["caption"] == (
+        "Judged just now by this stack through POST /evaluate-tool-call, and kept in its ledger as a page call, "
+        "which is always enforced."
+    ), "A page call is enforced where a hook's call on an observing project would only be recorded, so it is not called a hook's"
     assert "import boto3" in out["diff"] and "class User:" in out["diff"] and "src/domain/user.py" in out["call"]
     assert not out["verdictHidden"] and out["waitingHidden"]
     assert "Refused before it was written" in out["verdict"]
-    assert "BLOCKED_BOUNDARY_VIOLATION" in out["verdict"] and "python-domain-stays-pure" in out["verdict"]
-    assert out["reason"] == RECORDED_REASON and not out["reasonHidden"]
+    reason = _read(out["reason"])
+    assert reason == PLAIN_REASON + " " + RULE_LINE and not out["reasonHidden"], "One plain sentence, the rule's id second"
+    assert "which matches" not in reason and "Clean Architecture violation:" not in reason, "The service's machine text is not the sentence"
     assert out["landed"] == "refused" and out["flagged"] == [True, False, False], "The verdict lands on the import line"
     fix = out["fix"]
     assert not out["fixHidden"] and "Checked by Threefold" in fix and "3 of 3 gate checks passed" in fix
@@ -371,18 +384,58 @@ def test_the_hero_asks_the_stack_once_and_shows_its_live_answer(tmp_path: Path) 
     assert out["scenarioFix"] == "" and out["freezeTitle"] == "", "The hero touches neither the scenarios' panel nor their session"
 
 
-def test_the_hero_replays_the_recorded_run_when_the_stack_does_not_answer(tmp_path: Path) -> None:
+def test_the_hero_asks_only_once_the_counts_are_read_so_a_visit_never_counts_itself(tmp_path: Path) -> None:
+    """The hero's call is a refused page call in the ledger; sent alongside the read, the strip could count it."""
+    out = run(
+        "index.html",
+        r"""
+  const heroCalls = () => calls.filter(c => c.url.indexOf('/evaluate-tool-call') !== -1).length;
+  out.overviewAsked = calls.filter(c => c.url.indexOf('/api/overview') !== -1).length;
+  out.heroWhileCounting = heroCalls();
+  out.waitingWhileCounting = !el('hero-waiting').hidden;
+  gate.release({ status: 200, body: OVERVIEW });
+  await tick();
+  out.heroAfter = heroCalls();
+  out.order = calls.map(c => c.url).filter(u => u.indexOf('/api/overview') !== -1 || u.indexOf('/evaluate-tool-call') !== -1);
+  out.live = el('proof-live').innerHTML;
+  out.verdict = el('hero-verdict').innerHTML;
+""",
+        tmp_path,
+        before=DEMO_DOM
+        + LIVE_REFUSAL
+        + "const gate = held();\nconst OVERVIEW = " + _overview() + ";\n"
+        + "answer = api({ '/status': { status: 200, body: { service: 'Threefold', status: 'HEALTHY' } }, "
+        + "'/api/overview': () => gate.promise, 'POST /evaluate-tool-call': { status: 200, body: LIVE_REFUSAL }, "
+        + "'/proof.json': 'network' });\n",
+    )
+    assert out["overviewAsked"] == 1 and out["heroWhileCounting"] == 0, "No call of the hero's own while the counts are read"
+    assert out["waitingWhileCounting"], "The demonstration says it is asking meanwhile"
+    assert out["heroAfter"] == 1, "Once the counts are in, the hero asks, once"
+    assert [u.rsplit("/", 1)[-1] for u in out["order"]] == ["overview?days=7", "evaluate-tool-call"]
+    assert _metrics(out["live"])["calls"] == "1,284" and "Refused before it was written" in out["verdict"]
+
+
+def test_the_hero_replays_the_recorded_run_and_says_truly_why(tmp_path: Path) -> None:
+    """The caption says what this stack did: never 'not contacted' when it answered."""
+    run_ = "so this is a real run recorded against the live API on 2026-09-25, replayed here."
     cases = {
-        "unreachable": "'network'",
-        "an error": "{ status: 500, body: { title: 'Internal' } }",
-        "a private stack": "{ status: 401, body: { title: 'Unauthorized' } }",
-        "not a verdict": "{ status: 200, body: { status: 7 } }",
+        "unreachable": ("'network'", "This stack could not be reached, " + run_),
+        "an error": ("{ status: 500, body: { title: 'Internal' } }", "This stack answered HTTP 500 instead of a verdict, " + run_),
+        "a private stack": ("{ status: 401, body: { title: 'Unauthorized' } }",
+                            "This stack judges only its operator’s calls (it answered HTTP 401), " + run_),
+        "a forbidden call": ("{ status: 403, body: { title: 'Forbidden' } }",
+                             "This stack judges only its operator’s calls (it answered HTTP 403), " + run_),
+        "a rate limit": ("{ status: 429, body: { title: 'Too Many Requests' } }",
+                         "This stack is limiting calls from this browser for now (HTTP 429), " + run_),
+        "not a verdict": ("{ status: 200, body: { status: 7 } }",
+                          "This stack answered, but not with a verdict this page can read, " + run_),
     }
-    for name, reply in cases.items():
+    for name, (reply, caption) in cases.items():
         out = _load(tmp_path, hero=reply)
         assert "Recorded 2026-09-25, replayed offline" in out["source"], name
-        assert "replayed without contacting it" in out["caption"], name
-        assert out["reason"] == RECORDED_REASON, name
+        assert out["caption"] == caption, name
+        assert "without contacting it" not in out["caption"], f"{name}: the stack was asked"
+        assert _read(out["reason"]) == PLAIN_REASON + " " + RULE_LINE, name
         assert "Refused before it was written" in out["verdict"] and out["flagged"] == [True, False, False], name
         assert "No fix in a replay" in out["fix"] and "Checked by Threefold" not in out["fix"], f"{name}: a replay invents no fix"
 
@@ -391,7 +444,10 @@ def test_the_hero_shows_an_answer_that_is_not_a_refusal_as_what_it_is(tmp_path: 
     out = _load(tmp_path, hero="{ status: 200, body: { status: 'APPROVED', reason: 'All deterministic governance invariants satisfied' } }")
     assert "Refused before it was written" not in out["verdict"]
     assert "Approved" in out["verdict"] and out["landed"] == "approved" and out["flagged"] == [False, False, False]
-    assert "No fix came with this answer" in out["fix"]
+    assert _read(out["reason"]) == "All deterministic governance invariants satisfied. APPROVED"
+    assert out["fixHidden"] and "fix" not in _text(out["fix"]).lower(), "An approved write needs no fix, so none is promised"
+    out = _load(tmp_path, hero="{ status: 200, body: { status: 'BLOCKED_BOUNDARY_VIOLATION', reason: 'Refused.' } }")
+    assert "No fix came with this answer" in out["fix"] and not out["fixHidden"], "A refusal that brought no fix says so"
 
 
 def test_the_hero_escapes_everything_the_stack_says(tmp_path: Path) -> None:
@@ -400,10 +456,11 @@ def test_the_hero_escapes_everything_the_stack_says(tmp_path: Path) -> None:
         hero="{ status: 200, body: { status: 'BLOCKED_' + EVIL, reason: EVIL + \" rule '\" + EVIL + \"'\", "
         "suggested_fix: { summary: EVIL, validated: true, writes: [{ path: EVIL, content: EVIL, new_file: true }], checks: [{ passed: true }] } } }",
     )
-    for markup in (out["verdict"], out["fix"]):
+    for markup in (out["verdict"], out["fix"], out["reason"]):
         assert "<img" not in markup and "<svg onload" not in markup, "Service data reached the page as markup"
-    assert "&lt;img" in out["verdict"] and out["fix"].count("&lt;img") >= 2
-    assert out["reason"].startswith('x"><svg'), "The reason is written as text, never as markup"
+    assert out["fix"].count("&lt;img") >= 2
+    assert out["reason"].count("&lt;img") >= 3, "The sentence, the rule and the status, each as text"
+    assert '"><svg' not in out["reason"], "Not even inside the attribute that keeps the service's own words"
 
 
 # ---------------------------------------------------------------- the proof strip
