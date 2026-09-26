@@ -278,3 +278,45 @@ def test_the_queue_is_worked_from_the_keyboard(tmp_path: Path) -> None:
     assert out["afterU"] == 2, "The undone call is back in the queue"
     assert out["typing"] is False and out["modified"] is False and out["ignored"], "A key typed in a field or with a modifier is left alone"
     assert out["gone"], "The keys leave with the screen"
+
+
+# ---------------------------------------------------------------------- proof
+
+
+def test_the_proof_page_leads_with_the_violation_rates_on_one_scale(tmp_path: Path) -> None:
+    import json
+
+    from test_the_proof_page import COMMITTED, PROOF_FIXTURES
+
+    out = run(
+        "dashboard.html",
+        r"""
+  answer = proofAnswer(COMMITTED);
+  await visit('#/proof');
+  out.view = view();
+  const pilot = JSON.parse(JSON.stringify(COMMITTED));
+  pilot.benchmarks.forEach(b => { b.pilot = true; });
+  answer = proofAnswer(pilot);
+  await visit('#/overview');
+  await visit('#/proof');
+  out.pilot = view();
+""",
+        tmp_path,
+        before=FIXTURES + OPS + PROOF_FIXTURES + f"\nconst COMMITTED = {json.dumps(COMMITTED)};\n",
+    )
+    page = out["view"]
+    series = COMMITTED["benchmarks"]
+    chart = page.split("Did a violation land?", 1)[1].split('data-proof="series"', 1)[0]
+    assert page.index("Did a violation land?") < page.index('data-proof="series"'), "The chart leads, the table follows"
+    assert chart.count('class="tf-ops-multiple"') == len(series), "One small chart a series, never pooled"
+    assert "0%" in chart and "100%" in chart, "Every series is drawn on the same 0 to 100% scale"
+    for section in series:
+        for condition in section["conditions"]:
+            v = condition["violation"]
+            assert f"{v['k']}/{v['n']}" in chart
+    governed = [next(c for c in s["conditions"] if c["condition"] == "threefold") for s in series]
+    if all(c["violation"]["k"] == 0 for c in governed):
+        assert f"No governed violation landed with Threefold enforcing, in any of the {len(series)} series" in chart
+    assert "data-metric" not in chart and "data-series=" not in chart and 'data-proof="provenance"' not in chart
+    assert 'class="tf-legend"' in chart, "Three conditions carry a legend as well as their own labels"
+    assert "Did a violation land?" not in out["pilot"], "A pilot proves the harness, not a rate, so it is not charted"

@@ -228,6 +228,9 @@
     .tf-ops-multiple-sub { display: block; font: 400 var(--tf-fs-micro)/1rem var(--tf-font-sans); color: var(--tf-text-3); }
     .tf-ops-multiple .tf-hbars { gap: 10px; }
     .tf-ops-multiple .tf-hbar-head > :first-child { font-family: var(--tf-font-sans); color: var(--tf-text-2); }
+    /* A measured zero is a tick at the baseline, so it reads as none rather than missing. */
+    .tf-ops-multiple .tf-hbar-fill[style="width:0%"] { position: relative; }
+    .tf-ops-multiple .tf-hbar-fill[style="width:0%"]::after { content: ''; position: absolute; left: 0; top: -2px; width: 3px; height: 12px; border-radius: 2px; background: var(--tf-text-3); }
     .tf-ops-scale { display: flex; justify-content: space-between; margin-top: -4px; font-size: 0.625rem; line-height: 0.875rem; color: var(--tf-text-3); font-variant-numeric: tabular-nums; }
     .tf-ops-verdict { display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px; border-radius: var(--tf-radius-md); background: var(--tf-accent-soft); border: 1px solid var(--tf-accent-line); }
     .tf-ops-verdict .tf-icon { width: 20px; height: 20px; color: var(--tf-accent-text); flex-shrink: 0; margin-top: 2px; }
@@ -3096,10 +3099,57 @@
         <p class="text-[11px] text-gray-500 mt-2">In the pressure series the developer's own prompt asks for the forbidden shortcut. Where Threefold's tests-passed rate is lower, the agent stopped and reported rather than land the violation.</p>`, 'min-w-0');
     }
 
+    // The proof's lead: how often a governed violation landed, per series and
+    // condition, every series on the same 0 to 100% scale. One small chart a
+    // series, never pooled, with each bar named where it is drawn; the table
+    // after it holds every figure with its interval. A pilot series is left
+    // out: it proves the harness, not a rate.
+    const CONDITION_ORDER = ['none', 'prompt', 'threefold'];
+    const CONDITION_COLORS = { threefold: T.CATEGORICAL[0], prompt: T.CATEGORICAL[1], none: T.CATEGORICAL[2] };
+
+    function conditionOf(b, name) {
+      return (Array.isArray(b.conditions) ? b.conditions : []).find(c => c && c.condition === name) || null;
+    }
+    function measured(stat) { return !!(stat && typeof stat.n === 'number' && stat.n > 0 && typeof stat.rate === 'number'); }
+
+    function violationChart(list) {
+      const shown = list.filter(b => b.pilot !== true && CONDITION_ORDER.some(name => { const c = conditionOf(b, name); return c && measured(c.violation); }));
+      if (!shown.length) return '';
+      const governed = shown.map(b => conditionOf(b, 'threefold')).filter(c => c && measured(c.violation));
+      const clean = governed.filter(c => c.violation.k === 0).length;
+      const baseline = shown.map(b => conditionOf(b, 'none')).filter(c => c && measured(c.violation));
+      const landed = baseline.filter(c => c.violation.k > 0).length;
+      const verdict = governed.length === shown.length && clean === shown.length
+        ? html`No governed violation landed with Threefold enforcing, in any of the ${plural(shown.length, 'series', 'series')}${baseline.length ? html`; with no guidance, one landed in ${num(landed)} of ${plural(baseline.length, 'series', 'series')}` : ''}.`
+        : html`With Threefold enforcing, a governed violation landed in ${num(governed.length - clean)} of ${plural(governed.length, 'measured series', 'measured series')}${baseline.length ? html`; with no guidance, in ${num(landed)} of ${plural(baseline.length, 'series', 'series')}` : ''}.`;
+      const legendKeys = CONDITION_ORDER.map(name => {
+        const c = shown.map(b => conditionOf(b, name)).find(Boolean);
+        return { label: c ? (c.label || name) : name, color: CONDITION_COLORS[name] };
+      });
+      const multiples = shown.map(b => {
+        const parts = String(b.label || (Array.isArray(b.models) ? b.models.join(', ') : 'Series')).split(' · ');
+        const rows = CONDITION_ORDER.map(name => conditionOf(b, name)).filter(c => c && measured(c.violation)).map(c => ({
+          label: c.label || c.condition,
+          value: html`${pct(c.violation.rate)} <span class="text-gray-500">· ${num(c.violation.k)}/${num(c.violation.n)}</span>`,
+          segments: [{ value: Math.round(c.violation.rate * 1000) / 10, label: '% of runs a violation landed', color: CONDITION_COLORS[c.condition] || T.CATEGORICAL_OTHER }]
+        }));
+        return html`<figure class="tf-ops-multiple">
+          <figcaption class="tf-ops-multiple-title">${parts[0]}${parts.length > 1 ? html`<span class="tf-ops-multiple-sub">${parts.slice(1).join(' · ')}</span>` : ''}</figcaption>
+          ${T.hbars(rows, { max: 100, title: 'Violation landed, ' + (b.label || 'series') })}
+          <div class="tf-ops-scale" aria-hidden="true"><span>0%</span><span>50%</span><span>100%</span></div>
+        </figure>`;
+      });
+      return card('Did a violation land?', 'The share of runs in which the benchmark\'s own checkers found a governed violation in what the agent left behind, per series, on one scale from 0 to 100%. An empty bar is none.', html`
+        <div class="tf-ops-verdict mb-4">${T.icon('shield', 20)}<p>${verdict}</p></div>
+        <div class="mb-3">${T.legend(legendKeys)}</div>
+        <div class="tf-ops-multiples">${multiples}</div>
+        <p class="text-[11px] text-gray-500 mt-3">Each bar is k of n runs of one series under one condition; the table below gives every figure with its 95% interval, and each series' own card follows it.</p>`, 'min-w-0');
+    }
+
     function benchmarkCards(proof) {
       const list = Array.isArray(proof.benchmarks) ? proof.benchmarks.filter(b => b && typeof b === 'object') : [];
       if (!list.length) return benchmarkCard(proof.benchmark);
-      return html`${seriesComparison(list)}${list.map(b => benchmarkCard(b, b.label))}`;
+      return html`${violationChart(list)}${seriesComparison(list)}${list.map(b => benchmarkCard(b, b.label))}`;
     }
 
     function benchmarkCard(b, label) {
