@@ -1240,17 +1240,24 @@ def test_the_walkthrough_runs_the_rollout_from_sandbox_to_a_real_refusal(tmp_pat
   await click('try-create'); await tick();
   out.step2 = text(view());
   await click('try-show'); await tick();
+  out.cards = text(view());
+  await click('try-review'); await tick();
   out.step3 = text(view());
   await click('try-label', { 'data-verdict': 'VERDICT-1', 'data-label': 'correct' });
   await click('try-label', { 'data-verdict': 'VERDICT-2', 'data-label': 'correct' });
   await click('try-label', { 'data-verdict': 'VERDICT-3', 'data-label': 'false_alarm' });
   await tick();
+  out.labelled = text(view());
   await click('try-readiness'); await tick();
   out.step4 = view();
   await click('try-promote'); await tick();
+  out.promoted = text(view());
+  await click('try-next'); await tick();
   out.step5 = text(view());
   await click('try-send'); await tick();
   out.done = text(view());
+  await click('try-finish'); await tick();
+  out.finish = view();
   out.sent = sent;
   out.saved = JSON.parse(store['threefold-try'] || 'null');
 """,
@@ -1259,11 +1266,26 @@ def test_the_walkthrough_runs_the_rollout_from_sandbox_to_a_real_refusal(tmp_pat
     assert "Make my sandbox" in out["step1"]
     assert out["sent"]["sandbox"] == {}
     assert "Acme-Sandbox-0a1b2c3d received 12 calls" in out["step2"]
+    # The calls as they arrived, in a lane per agent, and how many of them the list held.
+    for agent in ("Claude Code", "Codex", "Antigravity"):
+        assert agent in out["step2"], f"The timeline has no lane for {agent}"
+    assert "The list read back 3 of the 12 so far" in out["step2"], "A short read of the ledger is said, never padded"
+    # Step 2: each flagged call as a card of agent, file, rule and why.
+    cards = out["cards"]
+    assert "3 calls would have been refused" in cards
+    for part in ("Claude Code", "src/acme/domain/order.py", "python-domain-stays-pure", "PROTECTED_PATH", "imports javax.persistence into the domain"):
+        assert part in cards, f"The step-2 cards do not show {part!r}"
     assert "One of them is a false alarm" in out["step3"] and "docs/.git-hooks-howto.md" in out["step3"]
     assert [r["label"] for r in out["sent"]["reviews"]] == ["correct", "correct", "false_alarm"]
+    assert "3 of 3 labelled" in out["labelled"] and "Every call has a label" in out["labelled"]
     checked = dict(re.findall(r'data-rule="([^"]+)"\s*(checked)?', out["step4"]))
     assert checked == {"python-domain-stays-pure": "checked", "PROTECTED_PATH": "", "LOOP": "checked"}, "Ready and Quiet are checked; the noisy rule keeps observing"
+    # A rule's state animates from the one read before the labels to the one read after, and only where it changed.
+    assert out["step4"].count("tf-try-flipping") == 2, "python-domain-stays-pure and PROTECTED_PATH changed; LOOP did not"
     assert out["sent"]["promote"] == {"enforce": ["python-domain-stays-pure", "LOOP"]}
+    assert "Now in Enforce" in out["promoted"] and "Enforces" in out["promoted"] and "Keeps observing" in out["promoted"]
+    assert "now in Enforce. This time the rule in force refuses it" in out["step5"]
+    assert "src/acme/domain/order.py" in out["step5"] and "import boto3" in out["step5"]
     evaluate = out["sent"]["evaluate"]
     assert evaluate["origin"] == "hook" and evaluate["agent"] == "claude-code" and evaluate["explain"] is True
     assert evaluate["project_name"] == "Acme-Sandbox-0a1b2c3d" and evaluate["tool_name"] == "Write"
@@ -1271,6 +1293,104 @@ def test_the_walkthrough_runs_the_rollout_from_sandbox_to_a_real_refusal(tmp_pat
     assert "Refused, before it ran" in out["done"] and "BLOCKED_BOUNDARY_VIOLATION" in out["done"]
     assert "couples the model to infrastructure" in out["done"] and "Amazon Bedrock" in out["done"]
     assert out["saved"]["project"] == "Acme-Sandbox-0a1b2c3d", "A reload can resume the same sandbox"
+    # The completion screen: three facts read from the responses, and three ways on.
+    finish = out["finish"]
+    words = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", finish))
+    assert "That was the whole rollout" in words
+    assert "12 calls judged in Observe" in words and "3 calls would have been refused, and none was" in words
+    assert "You marked 2 calls correct and 1 call a false alarm, so PROTECTED_PATH stayed in Observe" in words
+    assert "2 rules moved to Enforce" in words
+    assert "Answered BLOCKED_BOUNDARY_VIOLATION and a sentence from Amazon Bedrock" in words
+    for href in ('href="#/connect"', 'href="#/projects/Acme-Sandbox-0a1b2c3d"', 'href="#/proof"'):
+        assert href in finish, f"The completion screen does not offer {href}"
+
+
+def test_the_walkthrough_is_labelled_by_keyboard_alone(tmp_path: Path) -> None:
+    """C and F label the call on top of the stack and the arrows move through it.
+
+    Only on the labelling step, never while the reader types or holds a
+    modifier, and not at all once the reader has left the walkthrough. The keys
+    go through the same path a click does, so each one is saved as a review.
+    """
+    out = dash(
+        r"""
+  const P = 'Acme-Sandbox-0a1b2c3d';
+  const obs = (i, rule, target, agent) => row(i, { project_name: P, rule_key: rule, observed_rules: [rule], observed_rule: rule, target, observed_target: target, agent });
+  const observed = [
+    obs(1, 'python-domain-stays-pure', 'src/acme/domain/order.py', 'claude-code'),
+    obs(2, 'python-domain-stays-pure', 'tests/domain/test_order_totals.py', 'codex'),
+    obs(3, 'web-domain-stays-pure', 'src/web/domain/cart.ts', 'antigravity')
+  ];
+  const reviews = [];
+  answer = api({
+    'POST /api/sandbox': { status: 200, body: { project: P, calls_seeded: 12 } },
+    ['/api/projects/' + P]: { status: 200, body: { project: P, config: { stage: 'observe' }, readiness: { rules: [] } } },
+    '/api/decisions': { status: 200, body: { items: observed, next_cursor: null } },
+    ['POST /api/projects/' + P + '/reviews']: (u, i, body) => { reviews.push([body.items[0].verdict_id, body.items[0].label]); return { status: 200, body: { updated: 1, skipped: [] } }; },
+    '/api/overview': { status: 200, body: overviewBody() }
+  });
+  function press(key, extra) {
+    const event = Object.assign({ key, target: el('view'), prevented: false, preventDefault() { this.prevented = true; } }, extra || {});
+    (docListeners.keydown || []).forEach(fn => fn(event));
+    return event;
+  }
+  await visit('#/try');
+  await click('try-create'); await tick();
+  await click('try-show'); await tick();
+  out.beforeTheStep = press('c').prevented;
+  await click('try-review'); await tick();
+  out.first = Dash.tryState.cursor;
+  out.order = Dash.tryState.observed.map(r => r.verdict_id);
+  out.hint = text(view());
+  out.c = press('c').prevented; await tick();
+  out.afterC = Dash.tryState.cursor;
+  out.focusAfterC = document.activeElement && document.activeElement.id;
+  out.typing = press('f', { target: { tagName: 'INPUT' } }).prevented;
+  out.modified = press('f', { ctrlKey: true }).prevented;
+  out.right = press('ArrowRight').prevented;
+  out.afterRight = Dash.tryState.cursor;
+  out.left = press('ArrowLeft').prevented;
+  out.afterLeft = Dash.tryState.cursor;
+  press('F'); await tick();
+  press('c'); await tick();
+  out.reviews = reviews.slice();
+  out.done = text(view());
+  out.focused = document.activeElement && document.activeElement.id;
+  await visit('#/overview');
+  press('c'); await tick();
+  out.afterLeaving = reviews.length;
+""",
+        tmp_path,
+    )
+    assert out["beforeTheStep"] is False, "A key does nothing before the labelling step"
+    assert out["first"] == 0 and out["c"] is True and out["afterC"] == 1, "C labels the top call and the next one comes up"
+    assert out["focusAfterC"] == "try-correct", "The keyboard stays on the stack"
+    assert "Keys: C correct F false alarm" in out["hint"]
+    assert out["typing"] is False and out["modified"] is False, "Typing and a held modifier are left alone"
+    assert out["right"] is True and out["afterRight"] == 2 and out["left"] is True and out["afterLeft"] == 1
+    # The stack runs in the order the calls arrived: VERDICT-3 is the oldest of the three.
+    assert out["order"] == ["VERDICT-3", "VERDICT-2", "VERDICT-1"]
+    assert out["reviews"] == [["VERDICT-3", "correct"], ["VERDICT-2", "false_alarm"], ["VERDICT-1", "correct"]]
+    assert "3 of 3 labelled" in out["done"] and "Every call has a label" in out["done"]
+    assert out["focused"] == "try-primary", "With every call labelled, the keyboard lands on the way on"
+    assert out["afterLeaving"] == 3, "The keys stop listening when the reader leaves the walkthrough"
+
+
+def test_the_walkthrough_moves_only_for_a_reader_who_has_not_asked_for_less() -> None:
+    """Every animation the walkthrough declares sits under prefers-reduced-motion: no-preference.
+
+    Its default styles are the final state, so a reader who asked for less
+    motion sees the same screens, still; the markup never waits on a timer.
+    """
+    body = page_source("dashboard.html")
+    css = body.split("const TRY_CSS = `", 1)[1].split("`;", 1)[0]
+    motion = css.split("@media (prefers-reduced-motion: no-preference) {", 1)
+    assert len(motion) == 2, "The walkthrough's motion is not gated on the reader's preference"
+    outside = motion[0] + motion[1].split(chr(10) + "}" + chr(10), 1)[1]
+    assert not re.search(r"(^|[;{\s])animation(-name)?\s*:", outside), "An animation runs whatever the reader asked for"
+    assert "infinite" not in css, "Nothing in the walkthrough loops"
+    view = body.split("function viewTry(ctx)", 1)[1].split("// ------------------------------------------------------------- proof", 1)[0]
+    assert "setTimeout" not in view and "setInterval" not in view, "A step's content never waits on a timer"
 
 
 def test_the_walkthrough_says_where_it_runs_when_the_stack_is_private(tmp_path: Path) -> None:
