@@ -532,12 +532,36 @@ def test_the_proof_page_leads_with_the_violation_rates_on_one_scale(tmp_path: Pa
     governed = [next(c for c in s["conditions"] if c["condition"] == "threefold") for s in series]
     if all(c["violation"]["k"] == 0 for c in governed):
         assert f"No governed violation landed with Threefold enforcing, in any of the {len(series)} series" in chart
+    assert "with no guidance, a violation landed in " in chart and "one landed" not in chart, "The verdict does not read as one violation"
+    assert "Rules in CLAUDE.md or AGENTS.md" in chart and "rules in CLAUDE.md<" not in chart, "The chart does not name Claude Code's file for Codex"
     assert "data-metric" not in chart and "data-series=" not in chart and 'data-proof="provenance"' not in chart
     assert 'class="tf-legend"' in chart, "Three conditions carry a legend as well as their own labels"
     assert "Did a violation land?" not in out["pilot"], "A pilot proves the harness, not a rate, so it is not charted"
 
 
 # -------------------------------------------------------------- call, connect
+
+
+def test_the_calls_screen_chooses_the_outcome_in_one_place(tmp_path: Path) -> None:
+    out = ops(
+        r"""
+  answer = contract();
+  await visit('#/calls?kind=observed&agent=codex&days=7');
+  out.view = view();
+  // The stub keeps no markup, so the fields hold what a browser would show.
+  el('f-review').value = 'unreviewed'; el('f-agent').value = 'codex'; el('f-days').value = '7';
+  click('filter');
+  await tick();
+  out.hash = location.hash;
+""",
+        tmp_path,
+    )
+    page = out["view"]
+    assert re.search(r'<span aria-current="true"[^>]*>.*?Would refuse</span>', page), "The tab on screen names the outcome"
+    assert '<select id="f-kind"' not in page and 'id="f-kind" value="observed"' in page, "The form carries the outcome, it does not ask again"
+    chips = page.split('aria-label="Filter the calls"', 1)[1]
+    assert "Remove the filter Codex" in chips and "Remove the filter Would refuse" not in chips, "No chip repeats the tab"
+    assert out["hash"] == "#/calls?kind=observed&review=unreviewed&agent=codex&days=7", "Applying the form keeps the outcome the tabs chose"
 
 
 def test_a_call_reads_as_an_incident_card(tmp_path: Path) -> None:

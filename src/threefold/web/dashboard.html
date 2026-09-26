@@ -2439,8 +2439,8 @@
         ? html`<a class="tf-btn tf-btn-sm" href="${callsHref(Object.assign({}, cleanFilters(f), { days: 30, day: '' }))}">Show 30 days</a>` : ''}<a class="tf-btn tf-btn-sm" href="#/calls">Clear every filter</a></div>`;
     }
 
-    // The outcome, one click away. The one on screen is not a link: a way out
-    // never leads back to the page it is on.
+    // The outcome, one click away, and the only place it is chosen. The one on
+    // screen is not a link: a way out never leads back to the page it is on.
     const KIND_ICONS = { refused: 'stop', observed: 'eye', approved: 'check' };
     function outcomeTabs(f) {
       return html`<nav class="tf-segmented mb-3" aria-label="Outcome">${KINDS.map(k => {
@@ -2454,9 +2454,8 @@
     function filterBar(f) {
       const agents = Object.keys(AGENT_LABELS).filter(a => a !== 'unknown');
       return html`<form class="tf-card p-4 mb-3" data-submit="filter" aria-label="Filter the calls">
-        <div class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3">
-          <label class="block"><span class="tf-label">Outcome</span>
-            <select id="f-kind" class="tf-select w-full" data-change="filter">${KINDS.map(k => html`<option value="${k.value}" ${k.value === f.kind ? raw('selected') : ''}>${k.label}</option>`)}</select></label>
+        <input type="hidden" id="f-kind" value="${f.kind}" />
+        <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
           <label class="block"><span class="tf-label">Review</span>
             <select id="f-review" class="tf-select w-full" data-change="filter">${REVIEW_FILTERS.map(r => html`<option value="${r.value}" ${r.value === f.review ? raw('selected') : ''}>${r.label}</option>`)}</select></label>
           <label class="block"><span class="tf-label">Window</span>
@@ -2467,7 +2466,7 @@
             <input id="f-project" class="tf-input w-full font-mono" value="${f.project}" placeholder="Acme-…" autocomplete="off" spellcheck="false" /></label>
           <label class="block"><span class="tf-label">Rule</span>
             <input id="f-rule" class="tf-input w-full font-mono" value="${f.rule}" placeholder="rule id or gate" autocomplete="off" spellcheck="false" /></label>
-          <label class="block col-span-2 md:col-span-1"><span class="tf-label">Session</span>
+          <label class="block"><span class="tf-label">Session</span>
             <input id="f-session" class="tf-input w-full font-mono" value="${f.session}" placeholder="session id" autocomplete="off" spellcheck="false" /></label>
         </div>
         <div class="mt-3 flex flex-wrap gap-2">
@@ -2477,10 +2476,11 @@
       </form>`;
     }
 
+    // The filters in force, each a chip that removes it. The outcome is not
+    // among them: the tabs above the form show it and change it.
     function activeChips(f) {
       const all = cleanFilters(f);
       const labels = {
-        kind: v => ({ refused: 'Refused', observed: 'Would refuse', approved: 'Approved' }[v]),
         review: v => ({ unreviewed: 'Unreviewed', correct: 'Correct', false_alarm: 'False alarm' }[v]),
         project: v => T.projectNameText(v), rule: v => 'rule ' + v, agent: v => agentLabel(v), session: v => 'session ' + v, day: v => shortDay(v)
       };
@@ -3457,7 +3457,7 @@
       return card('The benchmark, every series', 'Violation landed per condition, and whether the tests still passed with Threefold enforcing. Each row is one run of the matrix.', html`
         <div class="tf-scroll-x"><table class="tf-table" data-proof="series">
           <thead><tr>
-            <th scope="col">Series</th><th scope="col">No guidance</th><th scope="col">Rules in CLAUDE.md</th>
+            <th scope="col">Series</th><th scope="col">No guidance</th><th scope="col">Rules in CLAUDE.md or AGENTS.md</th>
             <th scope="col">Threefold enforcing</th><th scope="col">Tests passed, Threefold</th>
           </tr></thead>
           <tbody>${list.map(b => html`<tr data-series="${b.family || 'standard'}">
@@ -3478,6 +3478,12 @@
     // out: it proves the harness, not a rate.
     const CONDITION_ORDER = ['none', 'prompt', 'threefold'];
     const CONDITION_COLORS = { threefold: T.CATEGORICAL[0], prompt: T.CATEGORICAL[1], none: T.CATEGORICAL[2] };
+    // The chart names a condition by what it is for every agent: the rules go
+    // to CLAUDE.md for Claude Code and to AGENTS.md for Codex, so one name
+    // taken from one series would be wrong for the other. Each series' own
+    // card below keeps the snapshot's words.
+    const CONDITION_NAMES = { none: 'No guidance', prompt: 'Rules in CLAUDE.md or AGENTS.md', threefold: 'Threefold enforcing' };
+    function conditionName(c, name) { return CONDITION_NAMES[name] || (c && c.label) || name; }
 
     function conditionOf(b, name) {
       return (Array.isArray(b.conditions) ? b.conditions : []).find(c => c && c.condition === name) || null;
@@ -3492,16 +3498,16 @@
       const baseline = shown.map(b => conditionOf(b, 'none')).filter(c => c && measured(c.violation));
       const landed = baseline.filter(c => c.violation.k > 0).length;
       const verdict = governed.length === shown.length && clean === shown.length
-        ? html`No governed violation landed with Threefold enforcing, in any of the ${plural(shown.length, 'series', 'series')}${baseline.length ? html`; with no guidance, one landed in ${num(landed)} of ${plural(baseline.length, 'series', 'series')}` : ''}.`
+        ? html`No governed violation landed with Threefold enforcing, in any of the ${plural(shown.length, 'series', 'series')}${baseline.length ? html`; with no guidance, a violation landed in ${landed === baseline.length && baseline.length === shown.length ? 'every one of them' : html`${num(landed)} of ${plural(baseline.length, 'series', 'series')}`}` : ''}.`
         : html`With Threefold enforcing, a governed violation landed in ${num(governed.length - clean)} of ${plural(governed.length, 'measured series', 'measured series')}${baseline.length ? html`; with no guidance, in ${num(landed)} of ${plural(baseline.length, 'series', 'series')}` : ''}.`;
       const legendKeys = CONDITION_ORDER.map(name => {
         const c = shown.map(b => conditionOf(b, name)).find(Boolean);
-        return { label: c ? (c.label || name) : name, color: CONDITION_COLORS[name] };
+        return { label: conditionName(c, name), color: CONDITION_COLORS[name] };
       });
       const multiples = shown.map(b => {
         const parts = String(b.label || (Array.isArray(b.models) ? b.models.join(', ') : 'Series')).split(' · ');
         const rows = CONDITION_ORDER.map(name => conditionOf(b, name)).filter(c => c && measured(c.violation)).map(c => ({
-          label: c.label || c.condition,
+          label: conditionName(c, c.condition),
           value: html`${pct(c.violation.rate)} <span class="text-gray-500">· ${num(c.violation.k)}/${num(c.violation.n)}</span>`,
           segments: [{ value: Math.round(c.violation.rate * 1000) / 10, label: '% of runs a violation landed', color: CONDITION_COLORS[c.condition] || T.CATEGORICAL_OTHER }]
         }));
