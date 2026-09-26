@@ -663,14 +663,85 @@ def test_the_hero_replays_the_recorded_run_and_says_truly_why(tmp_path: Path) ->
     }
     for name, (reply, caption) in cases.items():
         out = _load(tmp_path, hero=reply)
-        assert "Recorded 2026-09-25, replayed offline" in out["source"], name
+        chip = _text(out["source"])
+        if name == "unreachable":
+            assert chip == "Recorded 2026-09-25, replayed offline", name
+        else:
+            assert chip == "Recorded 2026-09-25, replayed", f"{name}: a stack that answered was reached, so the chip does not say offline"
         assert out["dataSource"] == "recorded", f"{name}: a phone gives the recorded label the bar's room"
         assert out["caption"] == caption, name
         assert "without contacting it" not in out["caption"], f"{name}: the stack was asked"
         assert _read(out["reason"]) == PLAIN_REASON + " " + RULE_LINE, name
         assert "Refused before it was written" in out["verdict"] and out["flagged"] == [True, False, False], name
         assert "No fix in a replay" in out["fix"] and "Checked fix" not in out["fix"] and "gate checks" not in out["fix"], name
-        assert 'href="#scenario-boundary">Scenario 3 below</a> asks the stack again' in out["fix"], f"{name}: a replay invents no fix, and says where one is asked for"
+        assert '<a id="hero-ask-again" class="tf-link" href="#scenario-boundary">Ask the stack again in Scenario 3</a>' in out["fix"], \
+            f"{name}: a replay invents no fix, and says where one is asked for"
+
+
+def test_asking_again_from_a_replay_checks_the_stack_and_runs_scenario_three(tmp_path: Path) -> None:
+    """The replay's one way on runs the scenario it names, and asks the stack rather than replaying blindly.
+
+    The scenarios ask the stack only when the last /status check found it
+    answering; a replay means the load's check may not have, so the link checks
+    again before it runs Scenario 3, and the scenario then brings its result
+    into view under the header, as every scenario does.
+    """
+    out = _load(
+        tmp_path,
+        hero="'network'",
+        scenario=r"""
+  answer = api({ '/status': { status: 200, body: { service: 'Threefold', status: 'HEALTHY' } },
+    'POST /evaluate-tool-call': { status: 200, body: LIVE_REFUSAL } });
+  liveBackendActive = false;
+  const before = calls.length;
+  const scrolled = [];
+  el('result-panel').scrollIntoView = o => scrolled.push(o);
+  el('result-panel').getBoundingClientRect = () => ({ top: 2400, bottom: 3000 });
+  globalThis.innerHeight = 812;
+  let focused = null;
+  el('scenario-boundary').focus = o => { focused = o; };
+  let prevented = false;
+  el('hero-fix').listeners.click({ target: { closest: s => s === '#hero-ask-again' ? {} : null }, preventDefault() { prevented = true; } });
+  await tick();
+  out.asked = calls.slice(before).map(c => c.method + ' ' + c.url.replace('https://example.test/prod', ''));
+  out.prevented = prevented;
+  out.focused = focused;
+  out.scrolled = scrolled;
+  out.pressed = el('scenario-boundary').getAttribute('aria-pressed');
+  out.tag = el('verdict-tag').innerText;
+  out.scenarioFix = el('fix-box').innerHTML;
+  let other = false;
+  el('hero-fix').listeners.click({ target: { closest: () => null }, preventDefault() { other = true; } });
+  out.otherClickPrevented = other;
+""",
+    )
+    assert out["asked"][:2] == ["GET /status", "POST /evaluate-tool-call"], "The stack is checked, then asked"
+    assert out["prevented"] and out["focused"] == {"preventScroll": True}, "Focus moves to Scenario 3 without a jump of its own"
+    assert out["pressed"] == "true" and out["tag"] == "BLOCKED_BOUNDARY_VIOLATION" and "Move boto3 out of the domain" in out["scenarioFix"]
+    assert out["scrolled"] == [{"behavior": "auto", "block": "start"}] or out["scrolled"] == [{"behavior": "smooth", "block": "start"}], \
+        "The result comes into view"
+    assert out["otherClickPrevented"] is False, "Any other click in the fix box is left alone"
+    style = _style()
+    assert ".tf-landing > section, .tf-scenario { scroll-margin-top: calc(var(--tf-header-h) + 16px); }" in style, \
+        "Without script the link still lands the card clear of the sticky header"
+
+
+def test_a_kept_answer_is_labelled_as_one_before_its_verdict_lands(tmp_path: Path) -> None:
+    """While a kept answer's lines arrive, nothing on the card says the stack is being asked."""
+    out = _load(
+        tmp_path,
+        before="const REDUCE = false;\n" + MOTION + _kept(12),
+        scenario=r"""
+  out.early = { source: el('hero-source').innerHTML, caption: el('hero-caption').textContent,
+    waiting: el('hero-waiting-text').textContent, landed: el('hero-demo').getAttribute('data-verdict') };
+""",
+    )
+    early = out["early"]
+    assert early["landed"] is None, "Measured before the verdict lands"
+    assert _text(early["source"]) == "Live · 12 min ago" and "Asking" not in early["source"]
+    assert early["caption"].startswith("Judged by this stack 12 minutes ago") and "Asking" not in early["caption"]
+    assert early["waiting"] == "Showing the answer this stack gave 12 minutes ago"
+    assert out["heroAsked"] == []
 
 
 def test_the_hero_shows_an_answer_that_is_not_a_refusal_as_what_it_is(tmp_path: Path) -> None:

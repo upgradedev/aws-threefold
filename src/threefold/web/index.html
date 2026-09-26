@@ -39,7 +39,8 @@
       .tf-landing { gap: 112px; padding-top: var(--tf-space-3); }
       .tf-landing > #proof { margin-top: -68px; }
     }
-    .tf-landing > section { scroll-margin-top: calc(var(--tf-header-h) + 16px); min-width: 0; }
+    .tf-landing > section, .tf-scenario { scroll-margin-top: calc(var(--tf-header-h) + 16px); }
+    .tf-landing > section { min-width: 0; }
 
     .tf-sec-head { display: flex; flex-direction: column; gap: var(--tf-space-1h); max-width: 48rem; margin-bottom: var(--tf-space-4); }
     .tf-sec-head .tf-eyebrow { margin: 0; }
@@ -2005,7 +2006,7 @@
     function heroFixHtml(answer, refused) {
       const h = T.html;
       if (answer.source !== 'live') {
-        return { tone: 'none', markup: h`<p class="tf-demo-fix-title">${T.icon('info', 16)}<span>No fix in a replay</span></p><p class="tf-demo-fix-summary">This recording kept only the verdict and its reason; a live answer adds a checked fix where one can be made.</p><p class="tf-demo-fix-note"><a class="tf-link" href="#scenario-boundary">Scenario 3 below</a> asks the stack again</p>` };
+        return { tone: 'none', markup: h`<p class="tf-demo-fix-title">${T.icon('info', 16)}<span>No fix in a replay</span></p><p class="tf-demo-fix-summary">This recording kept only the verdict and its reason; a live answer adds a checked fix where one can be made.</p><p class="tf-demo-fix-note"><a id="hero-ask-again" class="tf-link" href="#scenario-boundary">Ask the stack again in Scenario 3</a></p>` };
       }
       if (!refused) return null;
       const fix = answer.fix;
@@ -2030,13 +2031,44 @@
       };
     }
 
+    // The chip in the bar and the caption under the card: where the answer
+    // came from. A kept answer is labelled as one the moment it is known, so
+    // the card never says it is asking while it shows an earlier answer.
+    function heroLabel(answer) {
+      const source = document.getElementById('hero-source');
+      const caption = document.getElementById('hero-caption');
+      if (!T || !source || !caption) return;
+      const h = T.html;
+      if (answer.source === 'live' && answer.kept) {
+        // Shown again, so the chip says when it was given rather than a round
+        // trip that did not happen now.
+        const took = formatRoundTrip(answer.ms);
+        source.className = 'tf-chip tf-chip-emerald';
+        source.setAttribute('title', 'A live answer this stack gave ' + heroAgo(answer.at) + (took ? ', ' + took + ' there and back' : '') + '; shown again, not asked again');
+        T.setHtml(source, h`${T.icon('bolt', 13)}Live · ${heroAgo(answer.at, true)}`);
+      } else if (answer.source === 'live') {
+        const took = formatRoundTrip(answer.ms);
+        source.className = 'tf-chip tf-chip-emerald';
+        source.setAttribute('title', 'A live answer from this stack' + (took ? ', ' + took + ' there and back from this browser' : ''));
+        T.setHtml(source, h`${T.icon('bolt', 13)}Live${took ? h` · ${took}` : ''}`);
+      } else {
+        // "Offline" only where this stack was not heard from at all; a stack
+        // that answered 401, 429 or 503 was reached, and the caption says what
+        // it answered.
+        const kind = answer.why && answer.why.kind;
+        const unheard = !kind || kind === 'network' || kind === 'timeout';
+        source.className = 'tf-chip tf-chip-amber';
+        source.setAttribute('title', 'A recorded answer, replayed in this browser');
+        T.setHtml(source, h`${T.icon('clock', 13)}Recorded ${RECORDED.recorded_at}, replayed${unheard ? ' offline' : ''}`);
+      }
+      caption.textContent = heroCaption(answer);
+    }
+
     function landHero(answer) {
       const card = document.getElementById('hero-demo');
       const verdict = document.getElementById('hero-verdict');
       const reason = document.getElementById('hero-reason');
       const fixBox = document.getElementById('hero-fix');
-      const source = document.getElementById('hero-source');
-      const caption = document.getElementById('hero-caption');
       if (!T || !card || !verdict) return;
       const h = T.html;
       const refused = /^BLOCKED/.test(answer.status);
@@ -2068,24 +2100,7 @@
         T.setHtml(fixBox, h``);
         fixBox.hidden = true;
       }
-      if (answer.source === 'live' && answer.kept) {
-        // Shown again, so the chip says when it was given rather than a round
-        // trip that did not happen now.
-        const took = formatRoundTrip(answer.ms);
-        source.className = 'tf-chip tf-chip-emerald';
-        source.setAttribute('title', 'A live answer this stack gave ' + heroAgo(answer.at) + (took ? ', ' + took + ' there and back' : '') + '; shown again, not asked again');
-        T.setHtml(source, h`${T.icon('bolt', 13)}Live · ${heroAgo(answer.at, true)}`);
-      } else if (answer.source === 'live') {
-        const took = formatRoundTrip(answer.ms);
-        source.className = 'tf-chip tf-chip-emerald';
-        source.setAttribute('title', 'A live answer from this stack' + (took ? ', ' + took + ' there and back from this browser' : ''));
-        T.setHtml(source, h`${T.icon('bolt', 13)}Live${took ? h` · ${took}` : ''}`);
-      } else {
-        source.className = 'tf-chip tf-chip-amber';
-        source.setAttribute('title', 'A recorded answer, replayed in this browser');
-        T.setHtml(source, h`${T.icon('clock', 13)}Recorded ${RECORDED.recorded_at}, replayed offline`);
-      }
-      caption.textContent = heroCaption(answer);
+      heroLabel(answer);
       // The verdict takes the ghost's place: the ghost is hidden, not removed,
       // so the card keeps its height.
       card.setAttribute('data-phase', 'landed');
@@ -2126,6 +2141,7 @@
       let answer = heroRemembered(base);
       if (answer) {
         heroShowWaiting(true, heroShowingWords(answer, false));
+        heroLabel(answer);
       } else {
         const slow = setTimeout(() => heroShowWaiting(true, 'Still waiting for this stack; the recorded run stands in after ' + Math.round(HERO_TIMEOUT_MS / 1000) + ' s'), HERO_SLOW_MS);
         if (countsRead && typeof countsRead.then === 'function') {
@@ -2166,6 +2182,20 @@
       await wait(HERO_MIN_MS);
       landHero(hero.answer);
       hero.replaying = false;
+    }
+
+    // From a replay, the one way on: Scenario 3 sends the same call. The
+    // stack is checked again first, because the scenarios ask it only when
+    // the last check found it answering, and a replay means it did not; the
+    // result panel then comes into view under the header, and focus goes to
+    // the scenario's own button, so the keyboard carries on from there.
+    async function askAgainInScenario() {
+      await checkApiHealth();
+      const button = document.getElementById('scenario-boundary');
+      if (button && typeof button.focus === 'function') {
+        try { button.focus({ preventScroll: true }); } catch (err) { /* focus is a courtesy */ }
+      }
+      await simulateBoundary();
     }
 
     // ---------------------------------------------------------- the proof strip
@@ -2466,6 +2496,18 @@
     (function () {
       const replay = document.getElementById('hero-replay');
       if (replay && typeof replay.addEventListener === 'function') replay.addEventListener('click', replayHero);
+      // The replay's link is drawn after load, so its click is caught where
+      // it lands; without script it is a plain link to the scenario.
+      const fix = document.getElementById('hero-fix');
+      if (fix && typeof fix.addEventListener === 'function') {
+        fix.addEventListener('click', event => {
+          const target = event && event.target;
+          const link = target && typeof target.closest === 'function' ? target.closest('#hero-ask-again') : null;
+          if (!link) return;
+          event.preventDefault();
+          askAgainInScenario();
+        });
+      }
     })();
   </script>
 </body>
