@@ -37,6 +37,9 @@
   - LIVE, the daily agent's projects as their own source: `source_of`, `SOURCES` and the project lists in `application/rollups.py`, the `source` enum in `web/openapi.json` and `docs/openapi.yaml`, the source sentence, chips and legend in `web/dashboard.html` and `web/index.html`, tests for these
   - PROBE, the probes read today's overview: `scripts/probe_live.py`, `tests/unit/test_probe_live.py`
   - ROLE, the GitHub deploy role: `deploy/iam/**`, `.github/workflows/deploy.yml`, section 8 of `docs/RUNBOOK.md`, tests for these
+- Judge readiness (2026-09-27 onward), each track in its own worktree:
+  - FACE-DOCS: `README.md`, `benchmark/README.md`; PUBLICATION: `docs/SUBMISSION_DOSSIER.md`, `docs/BUILDER_CENTER_ARTICLE.md`, `docs/VIDEO_SCRIPT.md`; ARCH-DOCS: `docs/ARCHITECTURE.md`, `docs/WELL_ARCHITECTED.md`; OPS-DOCS: `docs/PROOF_OF_AWS_AGENT.md`, `docs/RUNBOOK.md`; each with the tests that pin its strings
+  - UI FACE: `web/index.html` and its page tests; UI APP: `web/dashboard.html`, `web/assets/**`, the other pages and their tests
 - Shared, one dispatch line each: `src/threefold/interfaces/api_handlers.py`, `src/threefold/web/openapi.json`, `docs/openapi.yaml`
 - Owner: `STATE.md`, `LOG.md`, `TRAPS.md`, `CLAUDE.md`; merges and deploys
 
