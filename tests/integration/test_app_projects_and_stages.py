@@ -152,7 +152,7 @@ def test_a_rule_whose_only_record_is_the_demo_page_s_refusals_is_not_ready(obser
     """A judge reviewing the public demo: Ready, "Every call it flagged was marked correct", beside 0 correct.
 
     The project observes, so its agents' calls are never refused; the page's
-    are, because a page call always enforces, as the probes' do. Nobody
+    are, because a page call always enforces, as the probes' page calls do. Nobody
     labelled one, so nothing here is evidence the rule is right.
     """
     project = fresh_project()
@@ -165,7 +165,7 @@ def test_a_rule_whose_only_record_is_the_demo_page_s_refusals_is_not_ready(obser
     assert row["state"] == "quiet" and page["readiness"]["summary"]["rules_ready"] == 0
     assert "marked correct" not in row["recommendation"]
     assert row["recommendation"] == (
-        "Flagged nothing in this window, and nobody labelled the 3 call(s) it refused: nothing here shows it is ready to enforce."
+        "Nobody labelled the 3 call(s) it refused in this window, so nothing here shows it is ready to enforce."
     )
 
 

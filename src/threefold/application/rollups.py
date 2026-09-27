@@ -446,9 +446,9 @@ def _state(false_alarms: int, unreviewed: int, correct: int) -> str:
     Ready rests on labels alone: at least one call it flagged marked correct,
     none marked a false alarm, and none of its would-refuse calls waiting. A
     refusal nobody labelled is evidence of nothing either way. It may be a
-    visitor pressing a button on the demo page or one of the service's own
-    probes, whose calls always enforce whatever the project's stage, and a
-    rollup does not say which caller a rule refused; so a rule whose only
+    visitor pressing a button on the demo page, or a page call of the service's
+    own probes, and those always enforce whatever the project's stage; a
+    rollup does not say which caller a rule refused. So a rule whose only
     record is unlabelled refusals has flagged nothing anyone judged, and reads
     quiet, with its refusals beside it on the row.
     """
@@ -497,8 +497,8 @@ def _recommendation(state: str, mode: str, would_refuse: int, refused: int, corr
             f"Enforcing, and nobody labelled the {refused} call(s) it refused in this window, "
             "so nothing here shows it was right."
             if enforcing
-            else f"Flagged nothing in this window, and nobody labelled the {refused} call(s) it refused: "
-            "nothing here shows it is ready to enforce."
+            else f"Nobody labelled the {refused} call(s) it refused in this window, "
+            "so nothing here shows it is ready to enforce."
         )
     return (
         "Enforcing, and it flagged nothing in this window."
@@ -538,9 +538,10 @@ def readiness(
                 "mode_now": mode,
                 "would_refuse": observed,
                 # The calls it refused: an agent's while the rule enforced, or
-                # a page's or a probe's, which always enforce. Shown beside
-                # would_refuse, so a Quiet rule that refused calls says so and
-                # the state can be read off the row rather than taken on trust.
+                # the demo page's and the probes' page calls, which always
+                # enforce. Shown beside would_refuse, so a Quiet rule that
+                # refused calls says so and the state can be read off the row
+                # rather than taken on trust.
                 "refused": refused,
                 "correct": correct,
                 "false_alarms": false_alarms,

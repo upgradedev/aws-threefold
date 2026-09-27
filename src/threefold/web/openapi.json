@@ -2788,7 +2788,7 @@
                               },
                               "refused": {
                                 "type": "integer",
-                                "description": "Calls it refused while already enforcing, in the window."
+                                "description": "Calls it refused in the window: an agent's while the rule enforced, or a page call, the demo page's or the live probes', which always enforces whatever the stage. A refusal nobody labelled makes no rule ready."
                               },
                               "correct": {
                                 "type": "integer"
@@ -2813,7 +2813,7 @@
                                   "ready",
                                   "noisy"
                                 ],
-                                "description": "noisy if any false alarm, else needs_review if any unreviewed, else ready if it flagged anything, else quiet."
+                                "description": "noisy if any call it flagged was marked a false alarm, else needs_review if any would-refuse call has no label, else ready if at least one call it flagged, would-refuse or refused, was marked correct, else quiet. A refusal nobody labelled is evidence of nothing either way, so a rule whose only record is such refusals, the demo page's or the probes' among them, is quiet until one is labelled."
                               },
                               "recommendation": {
                                 "type": "string"
