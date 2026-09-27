@@ -337,8 +337,8 @@ def test_the_public_demo_names_the_daily_live_agent_as_real(tmp_path: Path) -> N
     note = _source_note(out["live"])
     words = html.unescape(re.sub(r"<[^>]+>", "", note))
     assert ("Where these calls come from, on this public demo: 3,210 from the synthetic Acme fleet, 6 projects whose "
-            "scheduled agents run through the real gates; 12 from the daily live agent: real Claude Code or Codex runs, "
-            "one Acme task a day, in projects that enforce; 96 from visitors' sandboxes; 41 from other callers") in words
+            "scheduled agents run through the real gates; 12 from the daily live agent: real Claude Code or Codex runs "
+            "on Acme tasks, in projects that enforce; 96 from visitors' sandboxes; 41 from other callers") in words
     assert "Daily live agent, real" in words, "The legend names the hue in words"
     live_hue = "#d55181"
     assert f'data-tf-tip="Daily live agent, real" data-tf-tip-value="12" data-tf-tip-color="{live_hue}"' in note
@@ -440,7 +440,7 @@ def test_a_live_project_carries_its_chip_in_the_portfolio(tmp_path: Path) -> Non
     page = out["view"]
     chip = re.search(r'<span class="tf-chip tf-chip-gray tf-ops-src" data-src="live" title="([^"]*)">Live</span>', page)
     assert chip, "A live project's row says Live, in a word beside its dot"
-    assert html.unescape(chip.group(1)) == "The daily live agent: a real Claude Code or Codex run on one Acme task a day, in a project that enforces"
+    assert html.unescape(chip.group(1)) == "The daily live agent: a real Claude Code or Codex run on an Acme task, in a project that enforces"
     assert 'data-src="fleet"' in page and ">Fleet<" in page
     other = re.search(r'<span class="tf-chip tf-chip-gray tf-ops-src" data-src="other" title="([^"]*)">Other</span>', page)
     assert other and html.unescape(other.group(1)) == (
@@ -659,6 +659,77 @@ def test_quiet_rules_that_did_nothing_share_one_row(tmp_path: Path) -> None:
     assert "CREDENTIAL" not in quiet, "A quiet rule that refused keeps its own row"
     assert "2 enforce and 1 observe" in re.sub(r"<[^>]+>", "", quiet)
     assert out["list"].count("Enforcing, and it flagged nothing in this window.") == 1, "The boilerplate is said once, not once a rule"
+
+
+def test_a_project_page_names_where_its_calls_come_from(tmp_path: Path) -> None:
+    """The chip beside the title is drawn from the project answer's own `source`, as its row in the listing is."""
+    out = ops(
+        r"""
+  out.heads = {};
+  const cases = [['Acme-Payments', 'fleet'], ['Acme-Live-billing-credit-limit', 'live'], ['Acme-Probe', 'probe'], ['Acme-Portal', 'other'], ['Acme-Billing', null]];
+  for (const [name, source] of cases) {
+    const body = Object.assign(detailBody('observe'), { project: name }, source ? { source } : {});
+    answer = contract({ ['/api/projects/' + name]: { status: 200, body } });
+    await visit('#/projects/' + name);
+    out.heads[source || 'older'] = view().split('id="view-title"')[1].split('class="tf-ops-hero"')[0];
+  }
+  const box = Object.assign(detailBody('observe'), { project: 'Acme-Sandbox-0a1b2c3d', source: 'sandbox' });
+  box.config = Object.assign({}, box.config, { sandbox: true });
+  answer = contract({ '/api/projects/Acme-Sandbox-0a1b2c3d': { status: 200, body: box } });
+  await visit('#/projects/Acme-Sandbox-0a1b2c3d');
+  out.heads.sandbox = view().split('id="view-title"')[1].split('class="tf-ops-hero"')[0];
+""",
+        tmp_path,
+    )
+    heads = out["heads"]
+    for source, word in (("fleet", ">Fleet<"), ("live", ">Live<"), ("probe", ">Probe, synthetic<"), ("other", ">Other<")):
+        assert f'data-src="{source}"' in heads[source] and word in heads[source], f"A {source} project's page says so beside its title"
+    assert "tf-ops-src" not in heads["older"], "A stack whose answer carries no source is not given one by the page"
+    sandbox = heads["sandbox"]
+    assert sandbox.count("tf-ops-src") == 1 and 'data-src="sandbox"' in sandbox and "Sandbox · expires within a day" in sandbox, \
+        "A sandbox wears one chip, which says when it goes"
+
+
+def test_the_agents_card_gives_a_hook_mode_only_to_calls_that_came_through_a_hook(tmp_path: Path) -> None:
+    """The demo page's calls, and calls that did not say how they came, are not an older hook.
+
+    A call that did not say how it came but did report a hook mode shows that
+    mode, as the ledger and the project list do: a review found the card saying
+    no mode was recorded while the list read "hooks managed".
+    """
+    out = ops(
+        r"""
+  const items = [
+    row(1, { origin: 'page', agent: 'page', hook_mode: 'unknown' }), row(2, { origin: 'page', agent: 'page', hook_mode: 'unknown' }),
+    row(3, { origin: 'unknown', agent: 'unknown', hook_mode: 'unknown' }),
+    row(4, { hook_mode: 'unknown' }), row(5),
+    row(6, { origin: 'unknown', agent: 'codex', hook_mode: 'managed' })
+  ];
+  answer = contract({ '/api/decisions': { status: 200, body: { items, next_cursor: null } } });
+  await visit('#/projects/Acme-Billing');
+  out.agents = view().split('id="agents-body"')[1].split('</section>')[0];
+  const probe = Object.assign(detailBody('observe'), { project: 'Acme-Probe', source: 'probe' });
+  answer = contract({ '/api/projects/Acme-Probe': { status: 200, body: probe }, '/api/decisions': { status: 200, body: { items: items.slice(0, 2).map(r => Object.assign({}, r, { project_name: 'Acme-Probe' })), next_cursor: null } } });
+  await visit('#/projects/Acme-Probe');
+  out.probe = view().split('id="agents-body"')[1].split('</section>')[0];
+""",
+        tmp_path,
+    )
+    cards = out["agents"].split("<li ")[1:]
+    words = [text_of(card) for card in cards]
+    page = next(w for w in words if "The demo page" in w)
+    assert "2 calls" in page and "no hook mode" in page and "always enforces" in page
+    assert "older hook" not in page and "unknown" not in page, "A page call is not a hook too old to say its mode"
+    other = next(w for w in words if "Unknown" in w)
+    assert "Sent without saying how it arrived, so no hook mode is recorded." in other and "older hook" not in other
+    claude = next(w for w in words if "Claude Code" in w)
+    assert "managed" in claude and "an older hook" in claude, "A hook that did not report its mode is still said to be one"
+    assert sum("older hook" in w for w in words) == 1
+    codex = next(w for w in words if "Codex" in w)
+    assert "Sent without saying how it arrived, though it reported a hook mode: managed follows the stage" in codex,         "A mode the call did report is shown, not said to be missing"
+    assert "no hook mode is recorded" not in codex and "older hook" not in codex
+    assert "The live probes" in text_of(out["probe"]) and "The demo page" not in text_of(out["probe"]), \
+        "On the probes' own project, their page calls are named as theirs"
 
 
 # ---------------------------------------------------------------- review keys
@@ -992,6 +1063,7 @@ def test_the_queue_counts_what_the_overview_counts(tmp_path: Path) -> None:
   out.view = view();
   await click('unfold'); await tick();
   out.unfolded = groupOrder();
+  out.after = view();
 """,
         tmp_path,
     )
@@ -1005,7 +1077,120 @@ def test_the_queue_counts_what_the_overview_counts(tmp_path: Path) -> None:
     assert "Your own sandbox comes first: you can label its calls." in words
     assert 'data-fold="sandboxes"' in out["view"] and "Show them" in words
     assert "2 calls waiting in 2 sandboxes, under 1 rule." in words
-    assert out["unfolded"] == ["Acme-Sandbox-aaaaaaa1", "Acme-Checkout", "Acme-Sandbox-aaaaaaa2", "Acme-Sandbox-aaaaaaa3"],         "Shown, the folded sandboxes take the place of their line, and the groups above keep theirs"
+    view = out["view"]
+    assert view.index('data-fold="sandboxes"') < view.index(">Acme-Checkout<"), \
+        "For a visitor, the line the other sandboxes fold into stands before the groups only the operator may label"
+    assert out["unfolded"] == ["Acme-Sandbox-aaaaaaa1", "Acme-Sandbox-aaaaaaa2", "Acme-Sandbox-aaaaaaa3", "Acme-Checkout"], \
+        "Shown, the folded sandboxes take the place of their line, and the groups above keep theirs"
+
+
+def test_a_visitor_s_keyboard_reaches_the_sandboxes_they_may_label(tmp_path: Path) -> None:
+    """Folded, the sandboxes are a place J and K stop at; shown, they come first, as the note says.
+
+    A review found the note saying the sandboxes came first while Show them
+    drew them last, and J and K walking only the rows a visitor may not label.
+    """
+    out = ops(
+        KEYS
+        + QUEUE
+        + r"""
+  const sent = [];
+  const record = (u, i, body) => { sent.push(u.pathname.replace(/^\/prod\/api\/projects\//, '')); return { status: 200, body: { updated: body.items.length, skipped: [] } }; };
+  const boxes = ['Acme-Sandbox-aaaaaaa2', 'Acme-Sandbox-aaaaaaa3'];
+  const items = [flagged(1, 'Acme-Checkout'), flagged(2, 'Acme-Checkout'), flagged(3, boxes[0]), flagged(4, boxes[1])];
+  answer = contract({
+    '/api/auth/whoami': PUBLIC,
+    '/api/projects': { status: 200, body: { projects: PROJECTS.projects.concat(['Acme-Checkout'].concat(boxes).map(project => Object.assign({}, PROJECTS.projects[1], { project }))) } },
+    '/api/decisions': { status: 200, body: { items, next_cursor: null } },
+    'POST /api/projects/Acme-Sandbox-aaaaaaa2/reviews': record
+  });
+  Threefold.whoami(true);
+  await visit('#/review');
+  const note = () => text(view().split('class="tf-ops-visitor')[1].split('font-medium">')[1].split('</p>')[0]);
+  const onFold = () => /data-fold="sandboxes" data-current="true"/.test(view());
+  out.first = { view: view(), note: note(), onFold: onFold() };
+  press('c'); await tick();
+  out.c = { focus: document.activeElement && document.activeElement.id, sent: sent.length, said: el('live-status').textContent };
+  press('j');
+  out.j = { row: currentRow(), onFold: onFold() };
+  press('k');
+  out.k = { focus: document.activeElement && document.activeElement.id, onFold: onFold() };
+  await click('unfold'); await tick();
+  out.shown = { order: groupOrder(), row: currentRow(), note: note(), folded: view().indexOf('data-fold=') !== -1 };
+  press('c'); await tick();
+  out.sent = sent;
+  answer = contract({
+    '/api/auth/whoami': PRIVATE,
+    '/api/projects': { status: 200, body: { projects: PROJECTS.projects.concat(['Acme-Checkout'].concat(boxes).map(project => Object.assign({}, PROJECTS.projects[1], { project }))) } },
+    '/api/decisions': { status: 200, body: { items: [flagged(1, 'Acme-Checkout'), flagged(3, boxes[0]), flagged(4, boxes[1])], next_cursor: null } }
+  });
+  Threefold.whoami(true);
+  await visit('#/review?days=7');
+  out.operator = { view: view(), start: currentRow() };
+  press('j');
+  out.operator.j = { focus: document.activeElement && document.activeElement.id, onFold: onFold() };
+""",
+        tmp_path,
+    )
+    first = out["first"]
+    assert first["view"].index('data-fold="sandboxes"') < first["view"].index(">Acme-Checkout<"), "The folded line stands first"
+    assert first["onFold"], "The keyboard starts on the one place a visitor can act from"
+    assert first["note"] == "You can label the calls in visitors' sandboxes, folded into one line at the top of the queue: Show them, then label."
+    assert out["c"]["sent"] == 0 and out["c"]["focus"] == "fold-show", "C on the folded line labels nothing and goes to Show them"
+    assert "Press Enter to show them" in out["c"]["said"]
+    assert out["j"] == {"row": "VERDICT-1", "onFold": False}, "J moves on to the next row"
+    assert out["k"] == {"focus": "fold-show", "onFold": True}, "K comes back to the folded line"
+    shown = out["shown"]
+    assert shown["order"] == ["Acme-Sandbox-aaaaaaa2", "Acme-Sandbox-aaaaaaa3", "Acme-Checkout"] and not shown["folded"]
+    assert shown["note"] == "You can label the 2 groups from visitors' sandboxes, which come first.", "The note is true of the order"
+    assert shown["row"] == "VERDICT-3", "Shown, the keyboard is on the first call it can label"
+    assert out["sent"] == ["Acme-Sandbox-aaaaaaa2/reviews"]
+    operator = out["operator"]
+    assert operator["view"].index(">Acme-Checkout<") < operator["view"].index('data-fold="sandboxes"'), \
+        "For the operator, the visitors' sandboxes follow the projects that are theirs"
+    assert operator["start"] == "VERDICT-1" and operator["j"] == {"focus": "fold-show", "onFold": True}, \
+        "The operator's J reaches the folded line after the last row"
+
+
+def test_a_visitor_s_first_j_lands_on_show_them_not_past_it(tmp_path: Path) -> None:
+    """The queue first draws with the folded line current and the focus on the title; the first J goes to Show them.
+
+    A review found the first J stepping past the folded line to a row only the
+    operator may label, while the line showed an Enter hint the focus did not
+    back. The hint is drawn only while Show them holds the focus (the style
+    below), and the first J takes the reader there.
+    """
+    out = ops(
+        KEYS
+        + QUEUE
+        + r"""
+  const boxes = ['Acme-Sandbox-aaaaaaa2', 'Acme-Sandbox-aaaaaaa3'];
+  answer = contract({
+    '/api/auth/whoami': PUBLIC,
+    '/api/projects': { status: 200, body: { projects: PROJECTS.projects.concat(['Acme-Checkout'].concat(boxes).map(project => Object.assign({}, PROJECTS.projects[1], { project }))) } },
+    '/api/decisions': { status: 200, body: { items: [flagged(1, 'Acme-Checkout'), flagged(2, 'Acme-Checkout'), flagged(3, boxes[0]), flagged(4, boxes[1])], next_cursor: null } }
+  });
+  Threefold.whoami(true);
+  await visit('#/review');
+  const onFold = () => /data-fold="sandboxes" data-current="true"/.test(view());
+  const focus = () => document.activeElement && document.activeElement.id;
+  out.load = { focus: focus(), onFold: onFold() };
+  press('j');
+  out.j1 = { focus: focus(), onFold: onFold(), row: currentRow(), said: el('live-status').textContent };
+  press('j');
+  out.j2 = { focus: focus(), onFold: onFold(), row: currentRow() };
+""",
+        tmp_path,
+    )
+    assert out["load"] == {"focus": "view-title", "onFold": True}, "The queue draws with the title focused and the folded line current"
+    assert out["j1"]["focus"] == "fold-show" and out["j1"]["onFold"] and out["j1"]["row"] is None, \
+        "The first J lands on Show them, not past it"
+    assert "Press Enter to show them" in out["j1"]["said"]
+    assert out["j2"] == {"focus": "qrow-0", "onFold": False, "row": "VERDICT-1"}, "The next J moves on to the first row"
+    from _browser import page_source
+    page = page_source("dashboard.html")
+    assert "#fold-show:not(:focus) .tf-ops-kbd-hint { display: none; }" in page, \
+        "The Enter hint shows only while Show them holds the focus"
 
 
 def test_a_name_with_no_call_and_no_configuration_is_not_a_project_to_promote(tmp_path: Path) -> None:

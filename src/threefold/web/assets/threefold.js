@@ -892,6 +892,62 @@
     return true;
   }
 
+  // ---------------------------------------------------------- scroll boxes
+  //
+  // A table wider than a phone sits in a box that scrolls sideways
+  // (.tf-scroll-x with data-tf-scroll="<its name>"). The box is a stop for
+  // the keyboard, a region a screen reader announces as scrolling, and its
+  // hint (the element before it, marked data-tf-scroll-hint) is shown, only
+  // while the table is wider than the box: on a desk where it fits, it is
+  // none of these, and Tab goes from link to link. The box is measured when
+  // a page asks (after it draws), when the window changes size, when the
+  // fonts arrive, and when the box or its table changes size.
+
+  var scrollWatch = null;
+
+  function fitScrollBox(box) {
+    if (!box || typeof box.getAttribute !== 'function') return;
+    var wide = typeof box.scrollWidth === 'number' && typeof box.clientWidth === 'number' && box.scrollWidth > box.clientWidth + 1;
+    var name = box.getAttribute('data-tf-scroll') || 'The table';
+    if (wide) {
+      box.setAttribute('tabindex', '0');
+      box.setAttribute('role', 'region');
+      box.setAttribute('aria-label', name + ' (scrolls sideways)');
+    } else if (typeof box.removeAttribute === 'function') {
+      box.removeAttribute('tabindex');
+      box.removeAttribute('role');
+      box.removeAttribute('aria-label');
+    }
+    var hint = box.previousElementSibling;
+    if (hint && typeof hint.hasAttribute === 'function' && hint.hasAttribute('data-tf-scroll-hint')) hint.hidden = !wide;
+  }
+
+  function fitScrollBoxes(scope) {
+    var boxes = all(scope || doc, '[data-tf-scroll]');
+    boxes.forEach(fitScrollBox);
+    if (!scrollWatch) {
+      scrollWatch = { observer: null, frame: 0 };
+      var again = function () {
+        if (scrollWatch.frame) return;
+        var later = typeof root.requestAnimationFrame === 'function' ? root.requestAnimationFrame.bind(root) : function (fn) { return setTimeout(fn, 16); };
+        scrollWatch.frame = later(function () { scrollWatch.frame = 0; all(doc, '[data-tf-scroll]').forEach(fitScrollBox); });
+      };
+      if (typeof root.addEventListener === 'function') root.addEventListener('resize', again);
+      if (doc && doc.fonts && doc.fonts.ready && typeof doc.fonts.ready.then === 'function') doc.fonts.ready.then(again, function () {});
+      if (typeof root.ResizeObserver === 'function') scrollWatch.observer = new root.ResizeObserver(again);
+    }
+    // The boxes on the page now, and only those: a box a redraw removed is
+    // let go rather than watched for the rest of the visit.
+    if (scrollWatch.observer) {
+      scrollWatch.observer.disconnect();
+      all(doc, '[data-tf-scroll]').forEach(function (box) {
+        scrollWatch.observer.observe(box);
+        if (box.firstElementChild) scrollWatch.observer.observe(box.firstElementChild);
+      });
+    }
+    return boxes.length;
+  }
+
   // ------------------------------------------------------------ components
 
   var STATUS = {
@@ -2147,6 +2203,7 @@
     animateNumbers: animateNumbers,
     reveal: reveal,
     pulse: pulse,
+    fitScrollBoxes: fitScrollBoxes,
     applyTailwindTheme: applyTailwindTheme,
     mountNav: mountNav,
     palette: {

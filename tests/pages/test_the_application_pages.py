@@ -1467,6 +1467,53 @@ def test_without_a_seeded_false_alarm_the_walkthrough_claims_none(tmp_path: Path
     assert "python-domain-stays-pure, once promoted, refuses tests/domain/test_order_totals.py." in decided
 
 
+def test_a_resumed_sandbox_still_asks_for_its_seeded_false_alarm(tmp_path: Path) -> None:
+    """A reload mid-walk resumed the sandbox without what the stack said it seeded, so step 3 no longer asked for it.
+
+    The browser's record of the sandbox keeps the stack's own answer about the
+    call it seeded; a record from before that is resumed without claiming one.
+    """
+    out = walk(
+        r"""
+  const P = 'Acme-Sandbox-0a1b2c3d';
+  const obs = (i, rule, target) => row(i, { project_name: P, rule_key: rule, observed_rules: [rule], observed_rule: rule, target, observed_target: target });
+  answer = api({
+    'POST /api/sandbox': { status: 200, body: { project: P, calls_seeded: 12, seeded_false_alarm: {
+      target: 'tests/domain/test_order_totals.py', rule_key: 'python-domain-stays-pure', why: 'A test module is not the domain layer.' } } },
+    ['/api/projects/' + P]: { status: 200, body: { project: P, config: { stage: 'observe', sandbox: true }, readiness: { rules: [] } } },
+    '/api/decisions': { status: 200, body: { items: [obs(1, 'python-domain-stays-pure', 'src/acme/domain/order.py'), obs(2, 'python-domain-stays-pure', 'tests/domain/test_order_totals.py')], next_cursor: null } },
+    ['POST /api/projects/' + P + '/reviews']: { status: 200, body: { updated: 1, skipped: [] } }
+  });
+  await visit('#/try');
+  await click('try-create'); await tick();
+  out.saved = JSON.parse(store['threefold-try'] || 'null');
+  await visit('#/overview'); await tick();
+  await visit('#/try'); await tick();
+  await click('try-resume'); await tick();
+  await click('try-show'); await tick();
+  await click('try-review'); await tick();
+  out.step3 = text(view());
+  await click('try-label', { 'data-verdict': 'VERDICT-1', 'data-label': 'correct' });
+  await click('try-label', { 'data-verdict': 'VERDICT-2', 'data-label': 'correct' });
+  await tick();
+  out.missed = view();
+  store['threefold-try'] = JSON.stringify({ project: P, at: Date.now() });
+  await visit('#/overview'); await tick();
+  await visit('#/try'); await tick();
+  await click('try-resume'); await tick();
+  await click('try-show'); await tick();
+  await click('try-review'); await tick();
+  out.older = text(view());
+""",
+        tmp_path,
+    )
+    assert out["saved"]["seeded_false_alarm"]["target"] == "tests/domain/test_order_totals.py", "The record keeps the stack's answer"
+    assert "One of them is a false alarm: spot it, and mark each call Correct or False alarm." in out["step3"]
+    assert 'data-seeded="missed"' in out["missed"], "A resumed walk still says whether the reader found it"
+    assert "Mark each call Correct or False alarm: a rule you mark wrong keeps observing." in out["older"], \
+        "A record from before names no seeded call, and none is promised"
+
+
 def test_the_completion_counts_the_rules_the_promotion_s_answer_put_in_force(tmp_path: Path) -> None:
     """The second completion fact reads the promotion as the service recorded it.
 

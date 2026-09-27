@@ -18,8 +18,9 @@
   <link rel="stylesheet" href="assets/threefold.css" />
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
-    body { font-family: 'Inter', sans-serif; background-color: #0a0d18; color: #f3f4f6; }
-    .font-mono { font-family: 'JetBrains Mono', monospace; }
+    /* The page's ground, type and colour are the design system's, as on
+       every other page; only Tailwind's font-mono is pointed at its mono. */
+    .font-mono { font-family: var(--tf-font-mono); }
   </style>
   <style>
     /* OPS: the operator's screens (every route but #/try). Components built on
@@ -27,6 +28,11 @@
        colour or a size of its own that a token already names. A background on
        a button is declared for button.x as well, for Tailwind's preflight. */
 
+    /* A screen's head is the design system's page head; what follows it
+       stands a page's gap below, as on the other pages (tf-main's gap). */
+    .tf-view-head { margin-bottom: var(--tf-space-3); }
+    @media (min-width: 768px) { .tf-view-head { margin-bottom: var(--tf-space-4); } }
+    .tf-view-head .tf-actions { flex-wrap: wrap; }
     .tf-ops-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: var(--tf-space-1h) var(--tf-space-2); margin-bottom: var(--tf-space-1h); }
     .tf-ops-head > :first-child { min-width: 0; flex: 1 1 22rem; }
     /* A screen's title takes the focus when the screen opens, so a screen
@@ -114,6 +120,10 @@
     .tf-ops-fold { display: grid; grid-template-columns: 32px minmax(0, 1fr); align-items: start; gap: 12px 14px; padding: 16px 20px; }
     .tf-ops-fold > .flex { grid-column: 1 / -1; }
     @media (min-width: 768px) { .tf-ops-fold { grid-template-columns: 32px minmax(0, 1fr) auto; align-items: center; } .tf-ops-fold > .flex { grid-column: auto; } }
+    /* The keyboard is on the folded line, as it would be on a row. */
+    .tf-ops-fold[data-current="true"] { background: var(--tf-accent-soft); border-color: var(--tf-accent-line); }
+    /* Enter works on Show them only while it holds the focus, so only then is it hinted. */
+    #fold-show:not(:focus) .tf-ops-kbd-hint { display: none; }
 
     /* A small meter: how much of what a project's rules flagged has a label. */
     .tf-ops-meter { display: flex; align-items: center; gap: 8px; min-width: 7rem; }
@@ -326,18 +336,16 @@
       .tf-ops-connect .tf-pre, .tf-ops-signin .tf-pre { padding: 44px 14px 14px; }
     }
 
-    /* Sign-in: the brand, and what is and is not kept. */
-    .tf-ops-signin { max-width: 44rem; margin: var(--tf-space-2) auto 0; }
+    /* Sign-in: under the page head, one card: the command, and what is and is not kept. */
+    .tf-ops-signin { max-width: 44rem; }
     .tf-ops-signin-card { padding: var(--tf-space-4) var(--tf-space-3); border-radius: var(--tf-radius-xl); border: 1px solid var(--tf-hairline-strong); background: radial-gradient(520px 220px at 50% -40px, rgba(139, 92, 246, 0.22), transparent 70%), var(--tf-surface-1); box-shadow: var(--tf-shadow-3); }
     @media (min-width: 768px) { .tf-ops-signin-card { padding: var(--tf-space-5) var(--tf-space-5); } }
-    .tf-ops-mark { display: inline-flex; align-items: center; justify-content: center; width: 52px; height: 52px; border-radius: 15px; color: #fff; background: radial-gradient(120% 120% at 20% 0%, #a78bfa 0%, #7c3aed 45%, #5b21b6 100%); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 14px 34px -10px rgba(124, 58, 237, 0.8); }
-    .tf-ops-mark .tf-icon { width: 26px; height: 26px; }
     .tf-ops-promise { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: 1fr; gap: 8px; }
     @media (min-width: 640px) { .tf-ops-promise { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
     .tf-ops-promise li { display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: var(--tf-radius-md); background: rgba(8, 11, 21, 0.6); border: 1px solid var(--tf-hairline); font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-2); }
     .tf-ops-promise li .tf-icon { width: 16px; height: 16px; color: var(--tf-approved-text); }
     .tf-ops-promise li b { font-weight: 600; color: var(--tf-text); }
-    .tf-ops-signin-why { margin: 0; text-align: center; font-size: var(--tf-fs-small); line-height: var(--tf-lh-small); color: var(--tf-text-2); }
+    .tf-ops-signin-why { margin: 0; font-size: var(--tf-fs-small); line-height: var(--tf-lh-small); color: var(--tf-text-2); }
 
     /* Proof: every series on one scale, in one figure. A row a series, a
        lane a condition; the gridlines, the ticks and the tip labels share
@@ -379,8 +387,8 @@
     .tf-ops-vgroup { margin: 16px 0 2px; font: 600 0.8125rem/1.25rem var(--tf-font-sans); color: var(--tf-text-2); }
     .tf-ops-vgroup:first-of-type { margin-top: 4px; }
     .tf-ops-vgroup small { font-weight: 400; color: var(--tf-text-3); }
+    /* Shown by the design system only while the table after it is wider than its box. */
     .tf-ops-scroll-hint { display: flex; align-items: center; gap: 6px; margin: 0 0 8px; font-size: 0.75rem; line-height: 1rem; color: var(--tf-text-3); }
-    @media (min-width: 1024px) { .tf-ops-scroll-hint { display: none; } }
     .tf-ops-verdict { display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px; border-radius: var(--tf-radius-md); background: var(--tf-accent-soft); border: 1px solid var(--tf-accent-line); }
     .tf-ops-verdict .tf-icon { width: 20px; height: 20px; color: var(--tf-accent-text); flex-shrink: 0; margin-top: 2px; }
     .tf-ops-verdict p { margin: 0; font-size: 0.9375rem; line-height: 1.375rem; color: var(--tf-text); }
@@ -396,32 +404,29 @@
   <script src="assets/threefold.js"></script>
 </head>
 <body class="min-h-screen flex flex-col overflow-x-hidden">
-  <a href="#view" class="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[80] tf-btn">Skip to content</a>
+  <a class="tf-skip" href="#view">Skip to content</a>
 
-  <header class="sticky top-0 z-40 border-b border-gray-800 bg-gray-950/85 backdrop-blur">
-    <div class="tf-container h-14 flex items-center gap-3">
-      <a href="#/overview" class="flex items-center gap-2.5 shrink-0" aria-label="Threefold overview">
-        <span class="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 via-purple-600 to-pink-600 flex items-center justify-center shadow-lg shadow-purple-500/20" aria-hidden="true">
-          <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="#fff" stroke-width="1.8"><path d="M10 2.5 16 5v4.5c0 4-2.6 6.8-6 8-3.4-1.2-6-4-6-8V5l6-2.5z"/><path d="m7.5 10 1.8 1.8L13 8"/></svg>
-        </span>
-        <span class="hidden sm:block">
-          <span class="block text-sm font-bold tracking-tight text-white leading-4">Threefold</span>
-          <span class="block text-[11px] text-gray-500 leading-4">Agent governance</span>
-        </span>
+  <!-- The shell every page wears, the same markup as the other pages', so the
+       header, the navigation and the title stand still from page to page. -->
+  <header class="tf-header">
+    <div class="tf-container tf-header-inner">
+      <a class="tf-brand" href="#/overview" aria-label="Threefold, the overview">
+        <span class="tf-brand-mark" aria-hidden="true" data-tf-icon="shield" data-tf-size="18"></span>
+        <span class="tf-brand-text"><span class="tf-brand-name">Threefold</span><span class="tf-brand-sub">Agent governance</span></span>
       </a>
-      <div id="tf-nav" class="flex-1 min-w-0 flex items-center justify-end">
+      <div id="tf-nav" class="tf-nav-mount">
         <!-- Without script, the pages this app links to are still reachable. -->
-        <nav aria-label="Threefold" class="flex items-center gap-3 text-xs text-gray-400">
-          <a href="index.html" class="underline">Demo</a>
-          <a href="rules.html" class="underline">Rules</a>
-          <a href="sessions.html" class="underline">Sessions</a>
-          <a href="connect.html" class="underline">Connect</a>
+        <nav aria-label="Threefold" class="tf-nav-fallback">
+          <a href="index.html">Demo</a>
+          <a href="rules.html">Rules</a>
+          <a href="sessions.html">Sessions</a>
+          <a href="connect.html">Connect</a>
         </nav>
       </div>
     </div>
   </header>
 
-  <main class="flex-1 tf-container py-6">
+  <main class="tf-main">
     <div id="view" tabindex="-1" class="outline-none">
       <noscript>
         <div class="tf-card p-6 space-y-2">
@@ -436,8 +441,11 @@
   <div id="modal-root"></div>
   <div id="toast-root" class="tf-toast-root" aria-live="polite"></div>
 
-  <footer class="border-t border-gray-800 py-4 text-center text-xs text-gray-500 px-4">
-    Threefold · AWS Zero to Shipped Hackathon 2026 · <span id="foot-words">Every number on this page is read from the API as you look at it</span>
+  <footer class="tf-footer">
+    <div class="tf-container">
+      <span>Threefold · AWS Zero to Shipped Hackathon 2026 · Built with Amazon Bedrock &amp; AWS Serverless</span>
+      <span id="foot-words">Every number on this page is read from the API as you look at it</span>
+    </div>
   </footer>
 
   <script>
@@ -645,21 +653,38 @@
 
     function sum(list, key) { return (list || []).reduce((s, r) => s + (typeof r[key] === 'number' ? r[key] : 0), 0); }
 
-    function pageTitle(title, sub, actions) {
-      return html`<div class="flex flex-wrap items-end justify-between gap-4 mb-5">
-        <div class="min-w-0">
-          <h1 id="view-title" tabindex="-1" class="text-xl md:text-2xl font-semibold tracking-tight text-white outline-none tf-break">${title}</h1>
-          ${sub ? html`<p class="text-xs md:text-sm text-gray-400 mt-1 max-w-3xl">${sub}</p>` : ''}
+    // Every screen's head is the design system's page head, the one the
+    // other pages wear: an eyebrow naming the section (or the breadcrumb in
+    // its place), the title and the lede, so moving between a screen here
+    // and a page there, the title stands where it stood. `lead` is a
+    // breadcrumb (crumbs()); `after` sits under the lede.
+    const EYEBROWS = {
+      overview: ['grid', 'Operations'], review: ['inbox', 'Operations'], projects: ['folder', 'Operations'],
+      connect: ['plug', 'Connect'], proof: ['flask', 'Evidence']
+    };
+    function eyebrow() {
+      const e = current.route ? EYEBROWS[current.route.nav] || ['grid', 'Operations'] : ['search', 'Not found'];
+      return html`<p class="tf-eyebrow">${T.icon(e[0], 16)}${e[1]}</p>`;
+    }
+    function pageTitle(title, sub, actions, lead, after) {
+      return html`<div class="tf-page-head tf-view-head">
+        <div>
+          ${lead || eyebrow()}
+          <h1 id="view-title" tabindex="-1" class="tf-h1 tf-break">${title}</h1>
+          ${sub ? html`<p class="tf-lede">${sub}</p>` : ''}
+          ${after || ''}
         </div>
-        ${actions ? html`<div class="flex flex-wrap items-center gap-2">${actions}</div>` : ''}
+        ${actions ? html`<div class="tf-actions">${actions}</div>` : ''}
       </div>`;
     }
 
+    // A screen deeper than a section names the way back in the eyebrow's
+    // place: one line, the last part cut with an ellipsis where it is long.
     function crumbs(items) {
-      return html`<nav aria-label="Breadcrumb" class="text-xs text-gray-500 mb-2 flex flex-wrap items-center gap-1">
-        ${items.map((item, i) => html`${i ? html`<span aria-hidden="true">/</span>` : ''}${item.href
-          ? html`<a href="${item.href}" class="hover:text-gray-300 underline-offset-2 hover:underline">${item.label}</a>`
-          : html`<span class="text-gray-400 tf-break" aria-current="page">${item.label}</span>`}`)}
+      return html`<nav aria-label="Breadcrumb" class="tf-crumbs">
+        ${items.map((item, i) => html`${i ? html`<span class="tf-crumb-sep" aria-hidden="true">/</span>` : ''}${item.href
+          ? html`<a href="${item.href}">${item.label}</a>`
+          : html`<span aria-current="page">${item.label}</span>`}`)}
       </nav>`;
     }
 
@@ -711,8 +736,8 @@
       return html`<div class="tf-card p-5" aria-hidden="true"><div class="tf-skeleton h-48 w-full"></div></div>`;
     }
 
-    function loadingView(title, sub, kinds) {
-      return html`${pageTitle(title, sub)}<div class="space-y-4" aria-busy="true"><p class="sr-only">Loading</p>${(kinds || ['table']).map(skeleton)}</div>`;
+    function loadingView(title, sub, kinds, lead) {
+      return html`${pageTitle(title, sub, null, lead)}<div class="space-y-4" aria-busy="true"><p class="sr-only">Loading</p>${(kinds || ['table']).map(skeleton)}</div>`;
     }
 
     // The state for a failed read: signed out when the stack refused, an error
@@ -992,9 +1017,11 @@
     // Where a project's calls come from, on a stack that says so. A stack from
     // before the field says only whether a project is a visitor's sandbox, and
     // one from before `live` calls the daily live agent's projects Other.
+    // No cadence is claimed for it, as on the first screen: until a schedule
+    // starts it, a day's run is started by hand.
     const SOURCES = {
       fleet: { label: 'Fleet', says: 'The synthetic Acme fleet: scheduled agents whose calls run through the real gates' },
-      live: { label: 'Live', says: 'The daily live agent: a real Claude Code or Codex run on one Acme task a day, in a project that enforces' },
+      live: { label: 'Live', says: 'The daily live agent: a real Claude Code or Codex run on an Acme task, in a project that enforces' },
       sandbox: { label: 'Sandbox', says: 'A visitor\'s sandbox, seeded with synthetic calls by the walkthrough' },
       probe: { label: 'Probe, synthetic', says: 'The service\'s own probes: synthetic calls that check the live stack\'s gates and pages' },
       other: { label: 'Other', says: 'Not the fleet, the daily live agent or a sandbox: the service\'s own probes, the demo page, or a connected repository' }
@@ -1274,7 +1301,7 @@
         const probesApart = !!s.probe && (some(s.probe) || (typeof fleet.projects === 'number' && fleet.projects > 0));
         clauses = [
           some(s.fleet) && html`<strong>${num(count(s.fleet))}</strong> from the synthetic Acme fleet, ${typeof fleet.projects === 'number' ? plural(fleet.projects, 'project') : 'projects'} whose scheduled agents run through the real gates`,
-          live > 0 && html`<strong>${num(live)}</strong> from the daily live agent: real Claude Code or Codex runs, one Acme task a day, in projects that enforce`,
+          live > 0 && html`<strong>${num(live)}</strong> from the daily live agent: real Claude Code or Codex runs on Acme tasks, in projects that enforce`,
           some(s.sandbox) && html`<strong>${num(count(s.sandbox))}</strong> from visitors' sandboxes`,
           some(s.probe) && html`<strong>${num(count(s.probe))}</strong> from the service's own probes, synthetic`,
           some(s.other) && html`<strong>${num(count(s.other))}</strong> from other callers: ${probesApart ? '' : "the service's own probes, "}the demo page, or a repository connected to this stack`
@@ -1672,9 +1699,12 @@
       }
       const sorted = rows.slice().sort((a, b) => (isProbe(a) ? 1 : 0) - (isProbe(b) ? 1 : 0) || (b.needs_review || 0) - (a.needs_review || 0) || (b.calls || 0) - (a.calls || 0));
       const numLink = (value, params, tone) => html`<a href="${callsHref(Object.assign({ days }, params))}" class="tf-num-link ${value ? tone : 'text-gray-500'}">${num(value)}</a>`;
+      // A hook mode is a hook's: a project whose calls came only from a page
+      // or from callers that named no agent is given none.
+      const hooked = p => Array.isArray(p.agents) && p.agents.some(a => a !== 'page' && a !== 'unknown');
       const meta = p => compact
         ? html`last seen ${timeAgo(p.last_seen)}`
-        : html`${Array.isArray(p.agents) && p.agents.length ? p.agents.map(agentLabel).join(', ') : 'no agent yet'} · hooks ${chipWords(p.hook_modes)} · last seen ${timeAgo(p.last_seen)}`;
+        : html`${Array.isArray(p.agents) && p.agents.length ? p.agents.map(agentLabel).join(', ') : 'no agent yet'}${hooked(p) || !Array.isArray(p.agents) || !p.agents.length ? html` · hooks ${chipWords(p.hook_modes)}` : ''} · last seen ${timeAgo(p.last_seen)}`;
       const desktop = html`<div class="hidden md:block tf-scroll-x tf-ops-portfolio">
         <table class="tf-table">
           <thead><tr>
@@ -2036,7 +2066,7 @@
       // below sends; T.projectName adds the reader's own name for display only.
       const shown = T.projectName(name);
       const crumb = crumbs([{ label: 'Projects', href: '#/projects' }, { label: shown }]);
-      ctx.render(html`${crumb}${loadingView(shown, 'Reading its stage and readiness…', ['hero', 'tiles', 'table'])}`);
+      ctx.render(loadingView(shown, 'Reading its stage and readiness…', ['hero', 'tiles', 'table'], crumb));
 
       // The stage and readiness first: the screen is drawn as soon as they
       // land. The recent calls and the refused calls follow, each drawn into
@@ -2068,10 +2098,10 @@
         }, err => {
           if (!ctx.alive()) return;
           if (err && err.kind === 'not_found') {
-            ctx.render(html`${crumb}${pageTitle(shown, null)}${emptyNote('This stack has no record of a project by this name: no configuration, and no call in the window.', html`If it was just connected, its first call may still be on its way. <a class="tf-link" href="#/connect">Connect it</a>, or go back to <a class="tf-link" href="#/projects">the projects</a>.`)}`);
+            ctx.render(html`${pageTitle(shown, null, null, crumb)}${emptyNote('This stack has no record of a project by this name: no configuration, and no call in the window.', html`If it was just connected, its first call may still be on its way. <a class="tf-link" href="#/connect">Connect it</a>, or go back to <a class="tf-link" href="#/projects">the projects</a>.`)}`);
             return;
           }
-          ctx.render(html`${crumb}${pageTitle(shown, null)}${failure(err, 'this project')}`);
+          ctx.render(html`${pageTitle(shown, null, null, crumb)}${failure(err, 'this project')}`);
         });
       }
 
@@ -2089,7 +2119,7 @@
         // mistyped. A project whose calls came only from a page (which the
         // readiness does not count as observed) still has calls, and is drawn.
         if (looksEmpty(d) && Array.isArray(state.recent) && state.recent.length === 0) {
-          ctx.render(html`${crumb}${pageTitle(html`<span class="font-mono">${shown}</span>`, null)}
+          ctx.render(html`${pageTitle(html`<span class="font-mono">${shown}</span>`, null, null, crumb)}
             <div class="tf-card p-6 md:p-8 space-y-3" data-state="empty">
               <h2 class="text-lg font-semibold text-white">No call from this project in ${windowWords(days)}</h2>
               <p class="text-sm text-gray-400 max-w-2xl">This stack has no configuration for <span class="font-mono text-gray-200">${shown}</span>, and no call from it in ${windowWords(days)}. Connect it, or check the name.</p>
@@ -2117,8 +2147,12 @@
         </div>`;
 
 
-        ctx.render(html`${crumb}
-          ${pageTitle(html`<span class="font-mono">${shown}</span>`, null, html`${stageChip(stage, config ? true : false)}${sourceBadge({ project: name, sandbox, source: d.source })}${sandbox ? html`<span class="tf-chip tf-chip-sky" title="A sandbox made by the walkthrough; its stage expires on its own">Sandbox · expires within a day</span>` : ''}`)}
+        // Where its calls come from, as its row in the listing says (the
+        // answer's `source`). A sandbox's one chip says when it goes.
+        const from = sandbox
+          ? html`<span class="tf-chip tf-chip-gray tf-ops-src" data-src="sandbox" title="${SOURCES.sandbox.says}; its stage expires on its own">Sandbox · expires within a day</span>`
+          : sourceBadge({ project: name, source: d.source });
+        ctx.render(html`${pageTitle(html`<span class="font-mono">${shown}</span>`, null, html`${stageChip(stage, config ? true : false)}${from}`, crumb)}
           <div class="space-y-6">
             ${stageHero(name, stage, config, readiness, days, { canWrite, refused: state.refused })}
             ${statTiles}
@@ -2152,31 +2186,55 @@
       function agentsPart(stage) {
         const recent = state.recent;
         if (recent === undefined) return html`<div class="tf-skeleton h-16 w-full" aria-hidden="true"></div>`;
-        return html`${recent && recent.length ? html`<p class="tf-section-sub mb-3">From the latest ${plural(recent.length, 'call')}.</p>` : ''}${agentsPanel(recent, stage)}`;
+        return html`${recent && recent.length ? html`<p class="tf-section-sub mb-3">From the latest ${plural(recent.length, 'call')}.</p>` : ''}${agentsPanel(recent, stage, state.detail && state.detail.source)}`;
       }
       function drawRecent() { keepFocus(draw); }
       function drawRefused() { keepFocus(draw); }
 
-      function agentsPanel(recent, stage) {
+      // Who sent the latest calls, and how. A hook mode is a hook's: only a
+      // call that came through an agent's hook or CI has one. A call from a
+      // page (the demo page's buttons, or the probes pressing them) is named
+      // for what it is, with no mode, rather than as a hook too old to report
+      // one. A call that did not say how it arrived is not counted as a
+      // hook's, but a mode it did report is shown, as the ledger and the
+      // project list show it.
+      function agentsPanel(recent, stage, source) {
         if (!recent || !recent.length) return emptyNote('No agent has sent a call from this project in the window.');
-        const byAgent = {};
+        const callers = {};
+        const order = [];
         recent.forEach(row => {
+          const how = row.origin === 'page' || row.agent === 'page' ? 'page' : row.origin === 'hook' || row.origin === 'ci' ? 'hook' : 'other';
           const agent = row.agent || 'unknown';
-          const mode = row.hook_mode || 'unknown';
-          byAgent[agent] = byAgent[agent] || { modes: {}, last: row.timestamp, calls: 0 };
-          byAgent[agent].modes[mode] = true;
-          byAgent[agent].calls += 1;
+          const key = how === 'page' ? 'page' : how + ':' + agent;
+          if (!callers[key]) { callers[key] = { how, agent, modes: {}, last: row.timestamp, calls: 0 }; order.push(key); }
+          if (how === 'hook') callers[key].modes[row.hook_mode || 'unknown'] = true;
+          else if (how === 'other' && row.hook_mode && row.hook_mode !== 'unknown') callers[key].modes[row.hook_mode] = true;
+          callers[key].calls += 1;
         });
-        return html`<ul class="space-y-3">${Object.keys(byAgent).map(agent => {
-          const info = byAgent[agent];
+        const probes = source === 'probe';
+        return html`<ul class="space-y-3">${order.map(key => {
+          const info = callers[key];
           const modes = Object.keys(info.modes);
-          const capped = stage === 'enforce' && modes.indexOf('observe') !== -1;
+          const capped = info.how === 'hook' && stage === 'enforce' && modes.indexOf('observe') !== -1;
+          const chips = html`<div class="flex flex-wrap items-center gap-x-2 gap-y-1">${modes.map(m => html`<span class="tf-chip ${m === 'observe' ? 'tf-chip-amber' : m === 'managed' ? 'tf-chip-emerald' : 'tf-chip-gray'}" title="${HOOK_MODES[m] || m}">${m}</span><span class="text-xs text-gray-400">${HOOK_MODE_WORDS[m] || HOOK_MODES[m] || m}</span>`)}</div>`;
+          const name = info.how === 'page'
+            ? html`${T.icon('play', 16)}${probes ? 'The live probes' : 'The demo page'}`
+            : html`${T.icon('terminal', 16)}${agentLabel(info.agent)}`;
+          const how = info.how === 'page'
+            ? html`<p class="text-xs text-gray-400" data-caller="page">${probes
+              ? 'The service\'s own probes, sending the calls a page sends: not through a hook, so there is no hook mode. A page call always enforces, whatever the stage.'
+              : 'Buttons pressed on a page here: not through a hook, so there is no hook mode. A page call always enforces, whatever the stage.'}</p>`
+            : info.how === 'other'
+              ? modes.length
+                ? html`<p class="text-xs text-gray-400" data-caller="other">Sent without saying how it arrived, though it reported ${modes.length === 1 ? 'a hook mode' : 'hook modes'}:</p>${chips}`
+                : html`<p class="text-xs text-gray-400" data-caller="other">Sent without saying how it arrived, so no hook mode is recorded.</p>`
+              : chips;
           return html`<li class="tf-card-quiet p-3 space-y-1.5">
             <div class="flex flex-wrap items-center justify-between gap-2">
-              <span class="text-sm text-white inline-flex items-center gap-2">${T.icon('terminal', 16)}${agentLabel(agent)}</span>
+              <span class="text-sm text-white inline-flex items-center gap-2">${name}</span>
               <span class="text-xs text-gray-500">${plural(info.calls, 'call')} · last ${timeAgo(info.last)}</span>
             </div>
-            <div class="flex flex-wrap items-center gap-x-2 gap-y-1">${modes.map(m => html`<span class="tf-chip ${m === 'observe' ? 'tf-chip-amber' : m === 'managed' ? 'tf-chip-emerald' : 'tf-chip-gray'}" title="${HOOK_MODES[m] || m}">${m}</span><span class="text-xs text-gray-400">${HOOK_MODE_WORDS[m] || HOOK_MODES[m] || m}</span>`)}</div>
+            ${how}
             ${capped ? html`<p class="text-xs text-amber-300" role="note">This project is in Enforce, but this agent's hook is capped to observe on its machine, so its calls are never refused. On that machine, run <span class="font-mono">python threefold.py connect --mode managed</span>.</p>` : ''}
           </li>`;
         })}</ul>`;
@@ -2522,19 +2580,33 @@
         return !state.unfold && count >= 2 ? { rows: theirs, names, sandboxes: count, rules: Object.keys(rules).length } : null;
       }
 
-      // The groups on screen, in this visit's order. Each keeps its calls
-      // newest first, and its place in the order names its note and heading.
-      function groups() {
+      // Every group, folded or not, in this visit's order. The order is taken
+      // over the folded groups too, so the line they are folded into stands
+      // where they would, and showing them puts them there: a visitor's
+      // sandboxes first, the operator's after their own projects.
+      function allGroups() {
         const map = {};
         const keys = [];
-        const fold = folded();
-        state.items.filter(row => !(fold && fold.names[row.project_name])).forEach(row => {
+        state.items.forEach(row => {
           const key = groupKey(row);
           if (!map[key]) { map[key] = { key, project: row.project_name || '', rule: ruleKeyOf(row), items: [] }; keys.push(key); }
           map[key].items.push(row);
         });
         settleOrder(keys.map(k => map[k]));
         return state.order.filter(k => map[k]).map(k => Object.assign(map[k], { slot: state.order.indexOf(k), open: mayLabel(state.who, map[k].project) }));
+      }
+
+      // The groups on screen, in this visit's order. Each keeps its calls
+      // newest first, and its place in the order names its note and heading.
+      function groups() {
+        const fold = folded();
+        return allGroups().filter(g => !(fold && fold.names[g.project]));
+      }
+
+      // Where the folded line stands: the place of the first group in it.
+      function foldSlot(fold) {
+        const first = fold ? allGroups().find(g => fold.names[g.project]) : null;
+        return first ? first.slot : -1;
       }
 
       // Every row, in the order the groups draw them, with its group.
@@ -2544,11 +2616,30 @@
         return rows;
       }
 
-      // Where the keyboard is: the row held in `at`, or the first row when
-      // that one has left the queue some other way.
+      // The places J and K move through: every row, and the folded line
+      // where it stands, whose Show them the keyboard lands on. A visitor
+      // whose only labels are in folded sandboxes reaches them this way.
+      const FOLD_STOP = 'fold';
+      function stops() {
+        const rows = ordered();
+        const fold = folded();
+        const keys = rows.map(x => rowKey(x.row));
+        if (!fold) return keys;
+        const at = foldSlot(fold);
+        const before = rows.findIndex(x => x.g.slot > at);
+        keys.splice(before < 0 ? keys.length : before, 0, FOLD_STOP);
+        return keys;
+      }
+      function onFold() { return state.at === FOLD_STOP && !!folded(); }
+
+      // Where the keyboard is: the row held in `at`, or the folded line; else
+      // the first place, when that one has left the queue some other way.
       function currentIndex(rows) {
+        if (onFold()) return -1;
         const at = rows.findIndex(x => rowKey(x.row) === state.at);
         if (at >= 0) return at;
+        const first = stops()[0];
+        if (first === FOLD_STOP) { state.at = FOLD_STOP; return -1; }
         state.at = rows.length ? rowKey(rows[0].row) : null;
         return rows.length ? 0 : -1;
       }
@@ -2608,12 +2699,12 @@
               : open.length
                 ? html`You can label the ${plural(open.length, 'group')} from visitors' sandboxes, which come first.`
                 : fold
-                  ? 'You can label the calls in visitors\' sandboxes, folded at the end of the queue.'
+                  ? 'You can label the calls in visitors\' sandboxes, folded into one line at the top of the queue: Show them, then label.'
                   : 'You are not signed in, and none of these groups is a sandbox\'s.'}</p>
             <p class="text-xs text-gray-400">Anyone may label a sandbox's calls on this public demo. The other projects' labels are the operator's; their groups read Operator only.</p>
           </div>
           <div class="flex flex-wrap gap-2">
-            <a class="tf-btn tf-btn-sm${open.length ? '' : ' tf-btn-primary'}" href="#/try">Try it with your own sandbox</a>
+            <a class="tf-btn tf-btn-sm${open.length || fold ? '' : ' tf-btn-primary'}" href="#/try">Try it with your own sandbox</a>
             <a class="tf-btn tf-btn-quiet tf-btn-sm" href="${signinHref()}">${T.icon('signin', 14)}Sign in</a>
           </div>
         </div>`;
@@ -2769,27 +2860,32 @@
         }
         let index = -1;
         const fold = folded();
-        const foldCard = fold ? html`<section class="tf-card tf-ops-fold" data-fold="sandboxes" aria-labelledby="fold-title">
+        // The folded line stands where its groups would, and is a place the
+        // keyboard stops at: on it, Show them has the focus.
+        const foldHere = onFold();
+        const foldCard = fold ? html`<section class="tf-card tf-ops-fold" data-fold="sandboxes" data-current="${foldHere ? 'true' : 'false'}" aria-labelledby="fold-title">
             <span class="tf-ops-att-icon" aria-hidden="true">${T.icon('flask', 16)}</span>
             <div class="min-w-0">
               <h2 id="fold-title" class="tf-ops-group-title">Visitors' sandboxes <span class="tf-ops-count">${num(fold.rows.length)}</span></h2>
               <p class="text-xs text-gray-400 mt-1">${plural(fold.rows.length, 'call')} waiting in ${num(fold.sandboxes)} sandboxes, under ${plural(fold.rules, 'rule')}. Each is a visitor's walkthrough, seeded with the same synthetic calls, and anyone may label them.</p>
             </div>
             <div class="flex flex-wrap gap-2">
-              <button type="button" class="tf-btn tf-btn-sm" data-action="unfold">Show them</button>
+              <button type="button" id="fold-show" class="tf-btn tf-btn-sm${isVisitor(state.who) ? ' tf-btn-primary' : ''}" data-action="unfold" aria-describedby="fold-title">Show them${foldHere ? html`<kbd class="tf-kbd tf-ops-kbd-hint" aria-hidden="true">Enter</kbd>` : ''}</button>
               ${mine ? '' : html`<a class="tf-btn tf-btn-quiet tf-btn-sm" href="#/try">Make your own</a>`}
             </div>
           </section>` : '';
+        const sectionList = sections(list);
+        const foldAt = fold ? sectionList.findIndex(sec => sec.groups[0].slot > foldSlot(fold)) : -1;
         ctx.render(html`${head}
           ${progress(list, fold)}
           ${visitorNote(list, fold)}
           ${keysLegend()}
           <p id="review-error" class="text-xs text-rose-300 mb-3" role="alert"></p>
-          <div class="space-y-4">${sections(list).map((sec, si) => {
+          <div class="space-y-4">${sectionList.map((sec, si) => {
             const w = ruleWords(sec.rule, sec.groups.reduce((all, g) => all.concat(g.items), []));
             const sandboxes = sec.groups.every(g => SANDBOX_NAME.test(g.project));
             const calls = sec.groups.reduce((n, g) => n + g.items.length, 0);
-            return html`<section class="tf-card tf-ops-rsec" aria-labelledby="rule-${si}" data-open="${sec.open ? 'true' : 'false'}">
+            return html`${si === foldAt ? foldCard : ''}<section class="tf-card tf-ops-rsec" aria-labelledby="rule-${si}" data-open="${sec.open ? 'true' : 'false'}">
             <div class="tf-ops-rsec-head">
               <h2 id="rule-${si}" class="tf-ops-group-title">
                 <span class="tf-chip tf-chip-amber font-mono">${T.icon('eye', 13)}${sec.rule}</span>
@@ -2819,7 +2915,7 @@
               })}</ul>
             </div>`)}
           </section>`;
-          })}${foldCard}</div>
+          })}${foldAt < 0 ? foldCard : ''}</div>
           ${state.cursor ? html`<div class="mt-4"><button type="button" class="tf-btn" data-action="more" ${state.loadingMore ? raw('disabled') : ''}>${state.loadingMore ? 'Loading…' : state.full ? 'Load more' : 'Look further back'}</button></div>` : ''}`);
         // A redraw replaces every row, and with them the focus. A reader typing
         // a note keeps the field; one working the queue gets the row back.
@@ -2978,6 +3074,14 @@
       function focusCurrent(say, scroll) {
         const rows = ordered();
         const here = currentIndex(rows);
+        if (onFold()) {
+          const fold = folded();
+          const button = document.getElementById('fold-show');
+          refocus(button);
+          if (scroll !== false && button && typeof button.scrollIntoView === 'function') { try { button.scrollIntoView({ block: 'nearest' }); } catch (err) { /* courtesy */ } }
+          if (say) announce('Visitors\' sandboxes: ' + plural(fold.rows.length, 'call') + ' folded into one line. Press Enter to show them.');
+          return;
+        }
         if (here < 0) return;
         const el = document.getElementById('qrow-' + here);
         refocus(el);
@@ -2987,9 +3091,16 @@
 
       function move(step) {
         const rows = ordered();
-        if (!rows.length) return;
-        const here = currentIndex(rows);
-        state.at = rowKey(rows[Math.max(0, Math.min(rows.length - 1, here + step))].row);
+        const places = stops();
+        if (!places.length) return;
+        currentIndex(rows);
+        // The folded line is worked from its Show them, which needs the focus.
+        // A reader whose keyboard stands on the line while the focus is
+        // elsewhere, as a visitor's does when the queue first draws, is taken
+        // to Show them by the first J or K rather than past it.
+        if (onFold() && document.activeElement !== document.getElementById('fold-show')) { draw(); focusCurrent(true); return; }
+        const here = Math.max(0, places.indexOf(state.at));
+        state.at = places[Math.max(0, Math.min(places.length - 1, here + step))];
         draw();
         focusCurrent(true);
       }
@@ -2997,6 +3108,9 @@
       function labelCurrent(value) {
         const rows = ordered();
         const here = currentIndex(rows);
+        // The folded line holds calls, but none is on screen to label: the
+        // key takes the reader to Show them instead.
+        if (onFold()) { focusCurrent(true); return; }
         if (here < 0) return;
         const done = label([rows[here].row], value, noteFor(rows[here].g));
         focusCurrent(false);
@@ -3072,10 +3186,17 @@
           const key = el.getAttribute('data-group');
           if (key) state.notes[key] = typeof el.value === 'string' ? el.value.slice(0, 200) : '';
         },
+        // Shown, the folded groups stand where their line stood, and the
+        // keyboard goes to the first of their calls.
         unfold: () => {
+          const fold = folded();
           state.unfold = true;
+          const first = fold ? ordered().find(x => fold.names[x.row.project_name]) : null;
+          if (!first) { draw(); focusTitle(); return; }
+          state.at = rowKey(first.row);
+          state.engaged = true;
           draw();
-          focusTitle();
+          focusCurrent(true);
         },
         'queue-pick': el => {
           const key = el.getAttribute('data-row');
@@ -3151,7 +3272,7 @@
       const f = readCallFilters(ctx.params);
       const state = { items: [], cursor: null, loadingMore: false, scanned: 0 };
       const sub = describeFilters(f) + '.';
-      ctx.render(html`${crumbs([{ label: 'Overview', href: '#/overview' }, { label: 'Calls' }])}${loadingView('Calls', sub, ['table'])}`);
+      ctx.render(loadingView('Calls', sub, ['table'], crumbs([{ label: 'Overview', href: '#/overview' }, { label: 'Calls' }])));
 
       // A day is filtered here, over rows the route returns newest first, so a
       // day-filtered read asks for the largest page the contract allows (200)
@@ -3192,14 +3313,13 @@
           state.cursor = next;
           draw();
         }, err => {
-          if (ctx.alive()) ctx.render(html`${crumbs([{ label: 'Overview', href: '#/overview' }, { label: 'Calls' }])}${pageTitle('Calls', sub)}${filterBar(f)}${failure(err, 'the calls')}`);
+          if (ctx.alive()) ctx.render(html`${pageTitle('Calls', sub, null, crumbs([{ label: 'Overview', href: '#/overview' }, { label: 'Calls' }]))}${filterBar(f)}${failure(err, 'the calls')}`);
         });
       }
 
       function draw() {
         const chips = activeChips(f);
-        ctx.render(html`${crumbs([{ label: 'Overview', href: '#/overview' }, { label: 'Calls' }])}
-          ${pageTitle('Calls', sub)}
+        ctx.render(html`${pageTitle('Calls', sub, null, crumbs([{ label: 'Overview', href: '#/overview' }, { label: 'Calls' }]))}
           ${outcomeTabs(f)}
           ${filterBar(f)}
           ${chips}
@@ -3416,10 +3536,10 @@
       const verdict = ctx.params.verdict_id || '';
       const crumb = crumbs([{ label: 'Overview', href: '#/overview' }, { label: 'Calls', href: '#/calls' }, { label: verdict || 'Call' }]);
       if (!stamp || !verdict) {
-        ctx.render(html`${crumb}${pageTitle('Which call?', 'A call is opened from a list, which names its time and verdict id.')}<a class="tf-btn tf-btn-primary" href="#/calls">Open the calls</a>`);
+        ctx.render(html`${pageTitle('Which call?', 'A call is opened from a list, which names its time and verdict id.', null, crumb)}<a class="tf-btn tf-btn-primary" href="#/calls">Open the calls</a>`);
         return;
       }
-      ctx.render(html`${crumb}${loadingView('Call', 'Reading the decision…', ['hero', 'table'])}`);
+      ctx.render(loadingView('Call', 'Reading the decision…', ['hero', 'table'], crumb));
       const state = { data: null, who: null };
 
       function load() {
@@ -3431,10 +3551,10 @@
         }, err => {
           if (!ctx.alive()) return;
           if (err && err.kind === 'not_found') {
-            ctx.render(html`${crumb}${pageTitle('This call is not in the ledger', null)}${emptyNote('No decision was recorded with this time and verdict id. It may be older than the ledger keeps, or the link was cut short.', html`<a class="tf-link" href="#/calls">Back to the calls</a>`)}`);
+            ctx.render(html`${pageTitle('This call is not in the ledger', null, null, crumb)}${emptyNote('No decision was recorded with this time and verdict id. It may be older than the ledger keeps, or the link was cut short.', html`<a class="tf-link" href="#/calls">Back to the calls</a>`)}`);
             return;
           }
-          ctx.render(html`${crumb}${pageTitle('Call', null)}${failure(err, 'this call')}`);
+          ctx.render(html`${pageTitle('Call', null, null, crumb)}${failure(err, 'this call')}`);
         });
       }
 
@@ -3596,10 +3716,9 @@
             </div>`
           : '';
 
-        ctx.render(html`${crumb}
-          ${pageTitle(html`<span class="font-mono">${row.tool_name || 'Call'}</span> <span class="font-mono text-gray-400 text-base md:text-lg tf-break">${targetOf(row)}</span>`,
+        ctx.render(html`${pageTitle(html`<span class="font-mono">${row.tool_name || 'Call'}</span> <span class="font-mono text-gray-400 text-base md:text-lg tf-break">${targetOf(row)}</span>`,
             null,
-            html`<a class="tf-btn tf-btn-quiet tf-btn-sm" href="${T.specHref('get', '/api/decision')}">GET /api/decision in the API document</a>`)}
+            html`<a class="tf-btn tf-btn-quiet tf-btn-sm" href="${T.specHref('get', '/api/decision')}">GET /api/decision in the API document</a>`, crumb)}
           <div class="space-y-4">
             ${incident}
             <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -3962,17 +4081,13 @@
       ['clock', 'A link works once', 'Whoever opens it first is signed in, so treat it like the key. Once used, or after a short while, it opens nothing.']
     ];
 
+    // Sign-in wears the page head every screen wears, so from the header's
+    // Sign in the title stands where it stood; what to do is in the card.
     function signinFrame(title, sub, body) {
-      return html`<div class="tf-ops-signin">
-        <div class="tf-ops-signin-card space-y-6">
-          <div class="text-center space-y-3">
-            <span class="tf-ops-mark" aria-hidden="true">${T.icon('shield', 26)}</span>
-            <h1 id="view-title" tabindex="-1" class="text-2xl md:text-3xl font-semibold tracking-tight text-white outline-none">${title}</h1>
-            ${sub ? html`<p class="text-sm text-gray-300 max-w-xl mx-auto">${sub}</p>` : ''}
-          </div>
-          ${body}
-        </div>
-      </div>`;
+      return html`${pageTitle(title, sub, null, html`<p class="tf-eyebrow">${T.icon('signin', 16)}Operator sign-in</p>`)}
+        <div class="tf-ops-signin">
+          <div class="tf-ops-signin-card space-y-6">${body}</div>
+        </div>`;
     }
 
     function viewSignin(ctx) {
@@ -3994,12 +4109,12 @@
             <p class="text-xs text-gray-400">It asks the stack for a one-time link and opens it in this browser.</p>
           </div>
           <ul class="tf-ops-promise">${SIGNIN_PROMISES.map(([icon, head, words]) => html`<li>${T.icon(icon, 16)}<b>${head}</b><span>${words}</span></li>`)}</ul>
-          <p class="text-xs text-gray-500 text-center">No <span class="font-mono">threefold.py</span> yet? <a class="tf-link" href="#/connect">Connect a repository</a> first. On the public demo, reading needs no sign-in at all.</p>`));
+          <p class="text-xs text-gray-500">No <span class="font-mono">threefold.py</span> yet? <a class="tf-link" href="#/connect">Connect a repository</a> first. On the public demo, reading needs no sign-in at all.</p>`));
         return;
       }
 
       function attempt() {
-        ctx.render(signinFrame('Signing you in…', 'Trading the one-time link for a sign-in session. This takes a moment.', html`<div class="space-y-3" aria-busy="true"><div class="tf-skeleton h-4 w-2/3 mx-auto"></div><div class="tf-skeleton h-4 w-1/2 mx-auto"></div></div>`));
+        ctx.render(signinFrame('Signing you in…', 'Trading the one-time link for a sign-in session. This takes a moment.', html`<div class="space-y-3" aria-busy="true"><div class="tf-skeleton h-4 w-2/3"></div><div class="tf-skeleton h-4 w-1/2"></div></div>`));
         return T.api('/api/auth/sessions', { method: 'POST', body: { code } }).then(body => {
           if (!body || typeof body.token !== 'string' || !body.token) {
             // The stack took the link and gave no session back, so the link
@@ -4031,7 +4146,7 @@
           // The stack did not answer, or answered with an error of its own:
           // the link may not have been spent, so trying it again comes first.
           ctx.render(signinFrame('The sign-in did not complete', html`${trimStop(err && err.message ? err.message : 'The stack did not answer')}. Nothing was kept in this browser.`, freshLink(html`
-            <div class="flex flex-wrap justify-center gap-2"><button type="button" class="tf-btn tf-btn-primary" data-action="signin-retry">${T.icon('refresh', 16)}Try the link again</button></div>
+            <div class="flex flex-wrap gap-2"><button type="button" class="tf-btn tf-btn-primary" data-action="signin-retry">${T.icon('refresh', 16)}Try the link again</button></div>
             <p class="tf-ops-signin-why">If it keeps failing, ask for a fresh link on the machine that holds the operator key:</p>`)));
         });
       }
@@ -4042,7 +4157,7 @@
         return html`<div class="space-y-3" role="alert" data-state="signin-failed">
           ${lead}
           ${T.commandBlock('python threefold.py open', 'Sign-in command')}
-          <p class="text-xs text-gray-500 text-center"><a class="tf-link" href="#/overview">Go to the overview</a>. On the public demo, reading needs no sign-in at all.</p>
+          <p class="text-xs text-gray-500"><a class="tf-link" href="#/overview">Go to the overview</a>. On the public demo, reading needs no sign-in at all.</p>
         </div>`;
       }
       ctx.actions({ 'signin-retry': () => attempt() });
@@ -4078,15 +4193,8 @@
     const TRY_CSS = `
 .tf-try { display: flex; flex-direction: column; gap: 16px; }
 .tf-try-side { display: contents; }
-.tf-try-head { min-width: 0; }
-.tf-try-title { margin: 0; font: 650 1.125rem/1.5rem var(--tf-font-sans); letter-spacing: -0.01em; color: var(--tf-text); outline: none; }
-.tf-try-title:focus-visible, .tf-try-h2:focus-visible { outline: none; }
-.tf-try-head .tf-eyebrow { margin-bottom: 6px; }
-.tf-try-lede { display: none; margin: 8px 0 0; font-size: var(--tf-fs-small); line-height: var(--tf-lh-small); color: var(--tf-text-2); }
-.tf-try-lede-short { margin: 4px 0 0; font-size: 0.8125rem; line-height: 1.25rem; color: var(--tf-text-2); }
-.tf-try-tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 0; }
+.tf-try-h2:focus-visible { outline: none; }
 .tf-try .tf-try-restart { display: none; }
-@media (min-width: 640px) { .tf-try-lede { display: block; } .tf-try-lede-short { display: none; } }
 
 .tf-try-rail { position: sticky; top: var(--tf-header-h); z-index: 30; margin: 0 calc(-1 * var(--tf-gutter)); padding: 10px var(--tf-gutter);
   background: color-mix(in srgb, var(--tf-bg) 90%, transparent); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
@@ -4105,6 +4213,7 @@
 
 @media (min-width: 1024px) {
   .tf-try { display: grid; grid-template-columns: 17rem minmax(0, 1fr); gap: 32px; align-items: start; }
+  .tf-try[data-closed="true"] { grid-template-columns: minmax(0, 1fr); }
   .tf-try-side { display: flex; flex-direction: column; gap: 28px; position: sticky; top: calc(var(--tf-header-h) + 24px); }
   .tf-try-rail { position: static; margin: 0; padding: 0; background: none; -webkit-backdrop-filter: none; backdrop-filter: none; border: 0; }
   .tf-try-steps { flex-direction: column; align-items: stretch; gap: 0; }
@@ -4729,13 +4838,22 @@
         selected: null, promoted: null, observing: null, result: null, replay: null, planned: false, error: null, busy: false, who: null, play: {}, focusId: null,
         saves: [], rulesDef: null, lastLabel: null, seededAlarm: null
       };
+      // A sandbox made earlier in this browser can be resumed. Its record
+      // keeps what the stack answered about the call it seeded as a false
+      // alarm, so a resumed walk still asks the reader to find it and says
+      // whether they did; a record from before that is resumed without it.
+      let resumeAlarm = null;
       try {
         const saved = JSON.parse(localStorage.getItem(TRY_STORAGE) || 'null');
-        if (saved && /^Acme-Sandbox-[0-9a-f]{8}$/.test(saved.project || '') && Date.now() - (saved.at || 0) < 20 * 3600 * 1000) state.resume = saved.project;
+        if (saved && /^Acme-Sandbox-[0-9a-f]{8}$/.test(saved.project || '') && Date.now() - (saved.at || 0) < 20 * 3600 * 1000) {
+          state.resume = saved.project;
+          resumeAlarm = seededAlarmOf(saved);
+        }
       } catch (err) { /* nothing to resume */ }
 
       function remember() {
-        try { localStorage.setItem(TRY_STORAGE, JSON.stringify({ project: state.project, at: Date.now() })); } catch (err) { /* resuming is a convenience */ }
+        const record = Object.assign({ project: state.project, at: Date.now() }, state.seededAlarm ? { seeded_false_alarm: state.seededAlarm } : {});
+        try { localStorage.setItem(TRY_STORAGE, JSON.stringify(record)); } catch (err) { /* resuming is a convenience */ }
       }
 
       function labelledCount() { return state.observed.filter(r => state.labels[r.verdict_id]).length; }
@@ -4744,6 +4862,8 @@
         state.observed.forEach(r => { const l = state.labels[r.verdict_id]; if (l === 'correct' || l === 'false_alarm') c[l] += 1; });
         return c;
       }
+      // How many calls a label went to, as a reader says it: "no call", not "0 calls".
+      function marked(n) { return n === 0 ? 'no call' : plural(n, 'call'); }
       function readinessRules() { return (state.readiness && Array.isArray(state.readiness.rules)) ? state.readiness.rules : []; }
 
       // Below 640px the labels move to the sticky bar (see verdicts()), and
@@ -4841,18 +4961,23 @@
         </div>`;
       }
 
+      // On a private stack no step can be taken, so no step is drawn.
+      function closedHere() { return !!(state.who && state.who.reads_public === false); }
+
+      // The design system's page head, as every other screen wears it, so
+      // the title stands where it stands there; the steps and the way back
+      // to a new sandbox are the column beside the stage.
+      function head() {
+        return pageTitle('Try the two-stage rollout',
+          'About two minutes on the public demo, from a sandbox of your own to a real refusal.',
+          closedHere() ? null : html`<span class="tf-chip tf-chip-sky">${T.icon('flask', 13)}Synthetic sandbox</span><span class="tf-chip tf-chip-gray">${T.icon('lock', 13)}No account</span>`,
+          html`<p class="tf-eyebrow">${T.icon('play', 16)}The two-minute walkthrough</p>`);
+      }
+
       function side() {
-        // On a private stack no step can be taken, so no step is drawn as current.
-        const closed = !!(state.who && state.who.reads_public === false);
+        if (closedHere()) return '';
         return html`<div class="tf-try-side">
-          <div class="tf-try-head">
-            <p class="tf-eyebrow">${T.icon('play', 16)}The two-minute walkthrough</p>
-            <h1 id="view-title" tabindex="-1" class="tf-try-title">Try the two-stage rollout</h1>
-            <p class="tf-try-lede">About two minutes on the public demo, from a sandbox of your own to a real refusal.</p>
-            <p class="tf-try-lede-short">Watch in Observe, then promote to Enforce.</p>
-            ${closed ? '' : html`<p class="tf-try-tags"><span class="tf-chip tf-chip-sky">${T.icon('flask', 13)}Synthetic sandbox</span><span class="tf-chip tf-chip-gray">${T.icon('lock', 13)}No account</span></p>`}
-          </div>
-          ${closed ? '' : rail()}
+          ${rail()}
           ${state.project && state.step > 1 ? html`<button type="button" class="tf-link-btn tf-try-restart" data-action="try-restart">${T.icon('refresh', 14)}Start again with a new sandbox</button>` : ''}
         </div>`;
       }
@@ -5221,7 +5346,7 @@
           kicker: 'Step 3 of 5',
           title: total && done ? 'Every call has a label' : 'Was the rule right?',
           sentence: total && done
-            ? 'You marked ' + plural(labelCounts().correct, 'call') + ' correct and ' + plural(labelCounts().false_alarm, 'call') + ' a false alarm, and each rule reads its state from those labels.'
+            ? 'You marked ' + marked(labelCounts().correct) + ' correct and ' + marked(labelCounts().false_alarm) + ' a false alarm, and each rule reads its state from those labels.'
             : state.seededAlarm
               ? 'One of them is a false alarm: spot it, and mark each call Correct or False alarm.'
               : 'Mark each call Correct or False alarm: a rule you mark wrong keeps observing.',
@@ -5577,7 +5702,7 @@
         facts.push({
           figure: p ? num(p.enforce.length) : '—',
           label: p && p.enforce.length === 1 ? 'rule moved to Enforce' : 'rules moved to Enforce',
-          text: 'You marked ' + plural(c.correct, 'call') + ' correct and ' + plural(c.false_alarm, 'call') + ' a false alarm' + (noisy.length ? ', so ' + tryList(noisy) + ' stayed in Observe.' : '.'),
+          text: 'You marked ' + marked(c.correct) + ' correct and ' + marked(c.false_alarm) + ' a false alarm' + (noisy.length ? ', so ' + tryList(noisy) + ' stayed in Observe.' : '.'),
           source: 'POST …/reviews · GET …/projects · POST …/promote'
         });
         const r = state.result || {};
@@ -5653,7 +5778,7 @@
         const play = state.play || {};
         state.play = {};
         const s = screen(play);
-        ctx.render(html`<div class="tf-try${play.enter ? ' tf-try-entering' : ''}" data-step="${state.step}">
+        ctx.render(html`${head()}<div class="tf-try${play.enter ? ' tf-try-entering' : ''}" data-step="${state.step}"${closedHere() ? raw(' data-closed="true"') : ''}>
           ${side()}
           <section id="try-stage" class="tf-card tf-try-stage${play.enter ? ' tf-try-enter' : ''}" data-tone="${s.tone || ''}" aria-labelledby="try-step-title">
             <header class="tf-try-stage-head">
@@ -5680,8 +5805,9 @@
         }
       }
 
-      // A new step starts at the top of the stage: on a desk that is the top of
-      // the page, and on a phone the stage's title just under the sticky rail.
+      // A new step starts at the top of the stage: on a desk the page goes back
+      // to its top, where the page head stands above the stage and both are in
+      // view, and on a phone to the stage's title just under the sticky rail.
       function scrollToStage() {
         if (typeof window.scrollTo !== 'function') return;
         let y = 0;
@@ -5998,7 +6124,9 @@
           }, err => { if (ctx.alive()) fail(err, 'create'); });
         },
         'try-resume': () => {
-          state.project = state.resume; state.seeded = null; state.stage = null; state.busy = true; state.error = null; draw();
+          state.project = state.resume; state.seeded = null; state.stage = null; state.busy = true; state.error = null;
+          state.seededAlarm = resumeAlarm;
+          draw();
           // Its stage too: it may have been promoted since it was made.
           const detail = T.api('/api/projects/' + encodeURIComponent(state.project) + query({ days: 1 })).then(d => {
             state.readiness = (d && d.readiness) || state.readiness;
@@ -6247,8 +6375,8 @@
         return c && c[field] ? share(c[field]) : html`<span class="text-gray-500">not measured</span>`;
       };
       return card('The benchmark, every series', 'Violation landed per condition, and whether the tests still passed with Threefold enforcing. Each row is one run of the matrix.', html`
-        <p class="tf-ops-scroll-hint">${T.icon('arrowright', 14)}The table scrolls sideways: Threefold enforcing and its tests passed are to the right.</p>
-        <div class="tf-scroll-x" tabindex="0" role="region" aria-label="The benchmark, every series (scrolls sideways)"><table class="tf-table" data-proof="series">
+        <p class="tf-ops-scroll-hint" data-tf-scroll-hint hidden>${T.icon('arrowright', 14)}The table scrolls sideways: Threefold enforcing and its tests passed are to the right.</p>
+        <div class="tf-scroll-x" data-tf-scroll="The benchmark, every series"><table class="tf-table" data-proof="series">
           <thead><tr>
             <th scope="col">Series</th><th scope="col">No guidance</th><th scope="col">Rules in CLAUDE.md or AGENTS.md</th>
             <th scope="col">Threefold enforcing</th><th scope="col">Tests passed, Threefold</th>
@@ -6433,7 +6561,7 @@
           <p class="text-sm font-semibold text-amber-200">PILOT: not a result</p>
           <p class="text-xs text-amber-100/80">These runs prove the harness end to end. No figure below should be quoted as a measurement.</p>
         </div>` : '';
-      const table = conditions.length ? html`<p class="tf-ops-scroll-hint mt-4">${T.icon('arrowright', 14)}The table scrolls sideways.</p><div class="tf-scroll-x mt-4" tabindex="0" role="region" aria-label="${title}, by condition (scrolls sideways)"><table class="tf-table">
+      const table = conditions.length ? html`<div class="mt-4"><p class="tf-ops-scroll-hint" data-tf-scroll-hint hidden>${T.icon('arrowright', 14)}The table scrolls sideways.</p><div class="tf-scroll-x" data-tf-scroll="${title}, by condition"><table class="tf-table">
           <thead><tr>
             <th scope="col">Condition</th><th scope="col" class="num">Runs measured</th>
             <th scope="col">Violation landed</th><th scope="col">Tests passed</th>
@@ -6447,7 +6575,7 @@
             <td>${correctedCell(c)}</td>
             <td>${overheadCell(c)}</td>
           </tr>`)}</tbody>
-        </table></div>` : notMeasured('The snapshot names no condition.');
+        </table></div></div>` : notMeasured('The snapshot names no condition.');
       const facts = [
         ['Model', list(b.models)],
         ['Agent', (b.agent || 'not recorded') + (Array.isArray(b.agent_versions) && b.agent_versions.length ? ' ' + b.agent_versions.join(', ') : '')],
@@ -6550,13 +6678,16 @@
         const written = typeof proof.generated_at === 'string' && proof.generated_at
           ? html`Snapshot written ${when(proof.generated_at)}` : 'The snapshot does not record when it was written';
         const by = typeof proof.generated_by === 'string' && proof.generated_by ? html` by <span class="font-mono">${proof.generated_by}</span>` : '';
-        ctx.render(html`${pageTitle('Proof', PROOF_SUB)}
-          <p class="text-xs text-gray-500 -mt-3 mb-4" data-proof="generated">${written}${by}. It changes only when a new one is deployed.</p>
+        ctx.render(html`${pageTitle('Proof', PROOF_SUB, null, null, html`<p class="tf-ops-sub mt-2" data-proof="generated">${written}${by}. It changes only when a new one is deployed.</p>`)}
           <div class="space-y-4">
             ${benchmarkCards(proof)}
             ${ownUseCard(proof.private)}
             ${methodCard(proof)}
           </div>`);
+        // A table's box is a keyboard stop, announced as scrolling, only
+        // while the table is wider than it: measured now it is drawn, and
+        // again by the design system when the width or the fonts change.
+        T.fitScrollBoxes(document.getElementById('view'));
       }, err => {
         if (!ctx.alive()) return;
         if (err && err.kind === 'not_found') {

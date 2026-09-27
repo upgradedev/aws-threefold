@@ -238,8 +238,26 @@ svg a:focus-visible .tf-mark, svg g:focus-visible .tf-mark { stroke: #ffffff; st
 .tf-main:focus { outline: none; }
 @media (min-width: 768px) { .tf-main { padding-top: var(--tf-space-5); gap: var(--tf-space-4); } }
 
+/* A page's head, the one title primitive every page and every screen of the
+   dashboard wears: an eyebrow (or, on a screen deeper than a section, the
+   breadcrumb in its place), the title and the lede. The eyebrow and the
+   breadcrumb are one line of the same height, so the title stands at the
+   same place from page to page. */
 .tf-page-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: var(--tf-space-3); }
 .tf-page-head > :first-child { min-width: 0; flex: 1 1 32rem; }
+.tf-page-head .tf-eyebrow { display: flex; }
+/* One line whatever its length: a long name ends in an ellipsis rather than
+   wrapping, and the padding, taken back by the margins, keeps a link's focus
+   ring inside the box that clips the line. */
+.tf-crumbs {
+  display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; white-space: nowrap;
+  padding: 3px; margin: -3px -3px calc(var(--tf-space-1h) - 3px);
+  font: 500 0.75rem/var(--tf-lh-micro) var(--tf-font-sans); color: var(--tf-text-3);
+}
+.tf-crumbs a { flex-shrink: 0; color: var(--tf-text-2); text-decoration: none; }
+.tf-crumbs a:hover { color: var(--tf-text); text-decoration: underline; text-underline-offset: 3px; }
+.tf-crumbs [aria-current="page"] { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tf-crumb-sep { flex-shrink: 0; color: var(--tf-text-decor); }
 .tf-eyebrow {
   display: inline-flex; align-items: center; gap: var(--tf-space-1); margin: 0 0 var(--tf-space-1h);
   font: 600 var(--tf-fs-micro)/var(--tf-lh-micro) var(--tf-font-sans); letter-spacing: var(--tf-track-caps);

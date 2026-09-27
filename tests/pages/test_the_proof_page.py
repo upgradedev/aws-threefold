@@ -15,7 +15,10 @@ import json
 import re
 from pathlib import Path
 
+import pytest
+
 from _browser import WEB, page_source, run
+from _headless import measure
 from test_the_application_pages import FIXTURES
 
 COMMITTED = json.loads((WEB / "proof.json").read_text(encoding="utf-8"))
@@ -462,7 +465,10 @@ def test_each_series_names_its_own_evidence_and_every_path_opens(tmp_path: Path)
     for markup, b in zip(lists, series):
         for item in b["evidence"]:
             assert f'href="https://github.com/upgradedev/aws-threefold/blob/main/{item["path"]}"' in markup
-    assert 'tabindex="0" role="region" aria-label="The benchmark, every series (scrolls sideways)"' in page, "A keyboard can scroll the table"
+    # Whether the box is a keyboard stop is measured in a real browser, in
+    # test_a_table_box_is_a_stop_only_while_it_scrolls: here, that it is marked.
+    assert '<div class="tf-scroll-x" data-tf-scroll="The benchmark, every series">' in page, "The table's box is one the design system measures"
+    assert '<p class="tf-ops-scroll-hint" data-tf-scroll-hint hidden>' in page, "Its hint waits for the measurement"
 
 
 def _shared_and_unlinked(snapshot: dict) -> dict:
@@ -554,3 +560,53 @@ def test_the_proof_says_its_figures_are_a_snapshot_and_its_times_are_read_in_utc
     assert out["overviewFoot"] == "Every number on this page is read from the API as you look at it"
     assert '<time datetime="2026-09-29T08:00:00+00:00">29 Sep 2026, 08:00 UTC</time>' in out["view"]
     assert '<time datetime="2026-09-30">30 Sep 2026</time>' in out["view"]
+
+
+# Each table's box, as a real browser lays it out: whether the table is wider
+# than its box, and what the box then says about itself.
+BOXES = r"""() => Array.from(document.querySelectorAll('[data-tf-scroll]')).map(b => {
+  const hint = b.previousElementSibling;
+  return {
+    name: b.getAttribute('data-tf-scroll'), wide: b.scrollWidth > b.clientWidth + 1,
+    tabindex: b.getAttribute('tabindex'), role: b.getAttribute('role'), label: b.getAttribute('aria-label'),
+    hint: !!(hint && hint.hasAttribute('data-tf-scroll-hint') && !hint.hidden && hint.getClientRects().length > 0)
+  };
+})"""
+
+
+@pytest.mark.parametrize("width", [1440, 375])
+def test_a_table_box_is_a_stop_only_while_it_scrolls(tmp_path: Path, width: int) -> None:
+    """At 1440 px every table fits and no box is a Tab stop; on a phone a box whose table is wider says it scrolls.
+
+    Seven boxes on #/proof were once focusable regions announced "(scrolls
+    sideways)" at every width, so a desk's Tab went through seven stops where
+    nothing scrolls. The committed snapshot is served as it is on disk.
+    """
+    result = measure(
+        "dashboard.html",
+        tmp_path,
+        width=width,
+        height=900,
+        replies={
+            "/proof.json": {"status": 200, "body": COMMITTED},
+            "/api/auth/whoami": {"status": 200, "body": {"authenticated": False, "via": None, "reads_public": True, "sandbox_writes": True}},
+        },
+        moments={"drawn": 1500},
+        probe=BOXES,
+        # No network reaches the Tailwind CDN here, so the page's one line of
+        # Tailwind configuration is given something to configure.
+        before="window.tailwind = {}; history.replaceState(null, '', '#/proof');",
+    )
+    boxes = result["taken"]["drawn"]
+    series = [b for b in COMMITTED["benchmarks"] if b.get("conditions")]
+    assert len(boxes) == 1 + len(series), "The series table and one table of conditions a series"
+    for box in boxes:
+        said = (box["tabindex"], box["role"], box["label"], box["hint"])
+        if box["wide"]:
+            assert said == ("0", "region", box["name"] + " (scrolls sideways)", True), f"{box['name']} scrolls, and says so"
+        else:
+            assert said == (None, None, None, False), f"{box['name']} fits, so it is not a stop and says nothing of scrolling"
+    if width == 1440:
+        assert not any(box["wide"] for box in boxes), "Nothing scrolls sideways on a desk"
+    else:
+        assert all(box["wide"] for box in boxes), "On a phone every one of these tables is wider than its box"
