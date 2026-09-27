@@ -1237,7 +1237,9 @@
     });
     var primary = links.filter(function (l) { return l.item.primary; });
     var more = links.filter(function (l) { return !l.item.primary; });
-    var moreCurrent = more.some(function (l) { return l.current; });
+    // The front page is not a page kept under More, so on it (and on the
+    // walkthrough, filed beside it) no item of the bar reads as current.
+    var moreCurrent = more.some(function (l) { return l.current && l.item.id !== 'demo'; });
     var menuId = 'tf-more-' + entry.index;
     var mod = isMac() ? '⌘' : 'Ctrl';
     setHtml(entry.el, html`<div class="tf-shell">
@@ -1394,7 +1396,7 @@
     });
     items.splice(3, 0, { group: 'Go to', id: 'go-calls', text: 'Calls', icon: 'list', hint: 'Every judged call, filtered by project, rule or agent', href: route('dashboard.html', '#/calls'), keywords: ['ledger', 'decisions'] });
     items.push({ group: 'Go to', id: 'go-names', text: 'Your own names for projects', icon: 'user', hint: 'Kept in this browser, never sent', href: route('settings.html#local-names'), keywords: ['labels', 'aliases'] });
-    items.push({ group: 'Actions', id: 'do-try', text: 'Try the two-stage rollout', icon: 'sparkles', hint: 'A sandbox project: label, promote, watch a call be stopped. About a minute', href: route('dashboard.html', '#/try'), keywords: ['walkthrough', 'sandbox', 'demo', 'observe', 'enforce'] });
+    items.push({ group: 'Actions', id: 'do-try', text: 'Try the two-stage rollout', icon: 'sparkles', hint: 'A sandbox project: label, promote, watch a call be stopped. About two minutes', href: route('dashboard.html', '#/try'), keywords: ['walkthrough', 'sandbox', 'demo', 'observe', 'enforce'] });
     items.push({ group: 'Actions', id: 'do-connect', text: 'Connect a repository', icon: 'plug', hint: 'One command. It starts in Observe, so nothing is blocked', href: route('dashboard.html', '#/connect'), keywords: ['install', 'hook', 'setup'] });
     items.push({ group: 'Actions', id: 'do-proof', text: 'Open the proof', icon: 'flask', hint: 'The benchmark: the same tasks with and without Threefold', href: route('dashboard.html', '#/proof'), keywords: ['benchmark', 'evidence'] });
     if (Object.keys(readLocalNames()).length) {

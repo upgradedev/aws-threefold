@@ -32,6 +32,10 @@ function session(id, project, tripped) {
 """
 
 
+def text_of(markup: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", markup))
+
+
 def ops(scenario: str, tmp_path: Path) -> dict:
     return run("dashboard.html", scenario, tmp_path, before=FIXTURES + OPS)
 
@@ -583,12 +587,14 @@ def test_the_stage_hero_is_a_headline_a_consequence_and_the_action(tmp_path: Pat
     )
     observe = out["observe"]
     lead, rest = observe.split('<p class="tf-ops-hero-text">', 1)[1].split("</p>", 1)
-    assert re.sub(r"<[^>]+>", "", lead) == "2 of 3 rules could enforce today; 1 call waits for a label."
+    # Ready and nothing to go on are said apart, as the promote dialog checks only the Ready ones.
+    assert re.sub(r"<[^>]+>", "", lead) == "1 of 3 rules reads Ready, and 1 has nothing to go on yet; 1 call waits for a label."
     assert observe.count('class="tf-ops-hero-text"') == 1, "One line of consequence, not paragraphs"
     assert rest.index('data-action="promote-open"') < rest.index("<details"), "The action comes before how the stage works"
     assert "False-alarm rate 14% over 7 labelled calls." in observe
     unlabelled = out["unlabelled"]
-    assert "Every rule reads Ready or Quiet: promote, and it refuses from the next call." in unlabelled
+    assert "No rule has anything to go on yet: none flagged an agent's call in the last 7 days." in unlabelled
+    assert "Every rule reads Ready" not in unlabelled
     assert "No flagged call is labelled yet, so there is no false-alarm rate." in unlabelled
     assert "False-alarm rate" not in unlabelled and "over 0" not in unlabelled, "No rate is shown over nothing"
 
@@ -792,7 +798,7 @@ def test_a_rule_says_its_sentence_once_and_each_call_what_differs(tmp_path: Path
     assert "src/acme/domain/order_1.py' imports" not in words, "The file is on the row already"
     assert "Command 'cat .env' reaches a protected path or credential store" in words, "A lone call's reason is shown whole"
     assert out["order"] == ["Acme-Checkout", "Acme-Ledger", "Acme-Ledger"]
-    assert "4 calls waiting, under 2 rules in 2 projects" in out["count"]
+    assert "4 calls waiting in the last 7 days, under 2 rules in 2 projects" in out["count"]
     assert page.count('data-action="label-group"') == 2, "Bulk labels only where a project holds more than one call"
 
 
@@ -921,6 +927,7 @@ def test_a_visitor_is_told_which_groups_they_may_label(tmp_path: Path) -> None:
   const record = (u, i, body) => { sent.push(u.pathname.replace(/^\/prod\/api\/projects\//, '')); return { status: 200, body: { updated: body.items.length, skipped: [] } }; };
   answer = contract({
     '/api/auth/whoami': PUBLIC,
+    '/api/projects': { status: 200, body: { projects: PROJECTS.projects.concat([Object.assign({}, PROJECTS.projects[1], { project: 'Acme-Sandbox-0a1b2c3d', source: 'sandbox' })]) } },
     '/api/decisions': { status: 200, body: { items: [flagged(1, 'Acme-Checkout'), flagged(2, 'Acme-Checkout'), flagged(3, 'Acme-Sandbox-0a1b2c3d')], next_cursor: null } },
     'POST /api/projects/Acme-Checkout/reviews': record,
     'POST /api/projects/Acme-Sandbox-0a1b2c3d/reviews': record
@@ -953,6 +960,302 @@ def test_a_visitor_is_told_which_groups_they_may_label(tmp_path: Path) -> None:
     assert "is the operator's, so nothing was sent" in out["refused"] and out["stillThere"], "C on a project a visitor may not label sends nothing and removes nothing"
     assert out["sent"] == ["Acme-Sandbox-0a1b2c3d/reviews"]
     assert "tf-ops-visitor" not in out["operator"] and "Operator only" not in out["operator"]
+
+
+def test_the_queue_counts_what_the_overview_counts(tmp_path: Path) -> None:
+    """The queue reads the same week the overview does, and leaves out what the overview leaves out.
+
+    A review of the live site found the overview saying 81 calls waited and
+    the queue, over 30 days, 156: most of the difference was sandboxes whose
+    stage had expired, which the overview and the project list no longer
+    count. Other visitors' sandboxes, each with the same seeded calls, now
+    fold into one line, and the reader's own sandbox leads.
+    """
+    out = ops(
+        QUEUE
+        + r"""
+  const live = ['Acme-Sandbox-aaaaaaa1', 'Acme-Sandbox-aaaaaaa2', 'Acme-Sandbox-aaaaaaa3'];
+  store['threefold-try'] = JSON.stringify({ project: 'Acme-Sandbox-aaaaaaa1', at: Date.now() });
+  answer = contract({
+    '/api/auth/whoami': PUBLIC,
+    '/api/projects': { status: 200, body: { projects: PROJECTS.projects.concat(['Acme-Checkout'].concat(live).map(project => Object.assign({}, PROJECTS.projects[1], { project }))) } },
+    '/api/decisions': { status: 200, body: { items: [
+      flagged(1, 'Acme-Checkout'), flagged(2, 'Acme-Checkout'), flagged(3, 'Acme-Sandbox-aaaaaaa1'), flagged(4, 'Acme-Sandbox-aaaaaaa2'),
+      flagged(5, 'Acme-Sandbox-aaaaaaa3'), flagged(6, 'Acme-Sandbox-dead0001'), flagged(7, 'Acme-Sandbox-dead0001')
+    ], next_cursor: null } }
+  });
+  Threefold.whoami(true);
+  await visit('#/review');
+  out.read = calls.filter(c => c.url.indexOf('/api/decisions') !== -1).pop().url;
+  out.order = groupOrder();
+  out.text = text(view());
+  out.view = view();
+  await click('unfold'); await tick();
+  out.unfolded = groupOrder();
+""",
+        tmp_path,
+    )
+    assert "days=7" in out["read"], "The queue reads the same week as every other screen"
+    words = out["text"]
+    assert "5 calls waiting in the last 7 days" in words
+    assert "2 of them in 2 visitors' sandboxes, folded below" in words
+    assert "Left out: 2 calls from visitors' sandboxes that have expired, which the overview no longer counts either." in words
+    assert "Acme-Sandbox-dead0001" not in out["view"], "An expired sandbox's calls are not in the queue"
+    assert out["order"] == ["Acme-Sandbox-aaaaaaa1", "Acme-Checkout"], "The reader's own sandbox leads; the others are folded"
+    assert "Your own sandbox comes first: you can label its calls." in words
+    assert 'data-fold="sandboxes"' in out["view"] and "Show them" in words
+    assert "2 calls waiting in 2 sandboxes, under 1 rule." in words
+    assert out["unfolded"] == ["Acme-Sandbox-aaaaaaa1", "Acme-Checkout", "Acme-Sandbox-aaaaaaa2", "Acme-Sandbox-aaaaaaa3"],         "Shown, the folded sandboxes take the place of their line, and the groups above keep theirs"
+
+
+def test_a_name_with_no_call_and_no_configuration_is_not_a_project_to_promote(tmp_path: Path) -> None:
+    """A mistyped or old name drew as a project in Observe, every rule Quiet, with Promote on offer."""
+    out = ops(
+        r"""
+  const detail = detailBody('observe', RULES.map(r => Object.assign({}, r, { would_refuse: 0, correct: 0, false_alarms: 0, unreviewed: 0, state: 'quiet' })));
+  detail.project = 'Acme-Nope-Missing';
+  detail.config = null;
+  detail.readiness.summary = Object.assign({}, detail.readiness.summary, { calls_observed: 0, days_observed: 0, would_have_refused: 0, reviewed: 0 });
+  answer = contract({ '/api/projects/Acme-Nope-Missing': { status: 200, body: detail }, '/api/decisions': { status: 200, body: { items: [], next_cursor: null } } });
+  await visit('#/projects/Acme-Nope-Missing');
+  await tick();
+  out.view = view();
+  // The same readiness with a call from a page in the window: a project.
+  answer = contract({ '/api/projects/Acme-Nope-Missing': { status: 200, body: detail }, '/api/decisions': { status: 200, body: { items: [row(1, { project_name: 'Acme-Nope-Missing', origin: 'page', agent: 'page' })], next_cursor: null } } });
+  await visit('#/projects/Acme-Nope-Missing?days=7');
+  await tick();
+  out.called = view();
+""",
+        tmp_path,
+    )
+    page = out["view"]
+    assert "No call from this project in the last 14 days" in page
+    assert "Connect it, or check the name." in page
+    assert 'data-action="promote-open"' not in page, "There is nothing to promote"
+    assert 'href="#/connect"' in page and 'href="#/projects"' in page
+    assert "No call from this project" not in out["called"] and 'data-action="promote-open"' in out["called"], "A project with calls is drawn as one"
+
+
+def test_a_visitor_sees_the_stage_and_label_controls_off_where_only_the_operator_may_act(tmp_path: Path) -> None:
+    """Promote and the labels are drawn off, with why, before anything is pressed.
+
+    On a fleet project an anonymous visitor could open the promotion dialog,
+    press Promote, and only then read that it needs the operator; the Review
+    screen already said so up front.
+    """
+    out = ops(
+        r"""
+  answer = contract({ '/api/auth/whoami': PUBLIC });
+  Threefold.whoami(true);
+  await visit('#/projects/Acme-Billing');
+  out.project = view();
+  await click('promote-open'); await tick();
+  out.dialog = el('modal-root').innerHTML;
+  await visit('#/call?timestamp=t&verdict_id=VERDICT-1');
+  out.call = view();
+  answer = contract({ '/api/auth/whoami': PRIVATE });
+  Threefold.whoami(true);
+  await visit('#/projects/Acme-Billing');
+  out.operator = view();
+""",
+        tmp_path,
+    )
+    project = out["project"]
+    assert re.search(r'data-action="promote-open"[^>]*disabled', project), "Promote is off for a visitor"
+    assert "Operator only" in project and "Sign in to promote" in project and 'href="#/try"' in project
+    assert "tf-dialog" not in out["dialog"], "The dialog does not open for a visitor"
+    call = out["call"]
+    assert re.search(r'data-action="call-label" data-label="correct"[^>]*disabled', call)
+    assert "Sign in to label" in call and "Operator only" in call
+    assert not re.search(r'data-action="promote-open"[^>]*disabled', out["operator"]) and "Operator only" not in out["operator"]
+
+
+def test_an_observe_project_says_why_it_still_shows_refused_calls(tmp_path: Path) -> None:
+    """A project in Observe refuses no agent's call; its refused calls say how they arrived.
+
+    The screen said "refuse nothing" beside a rule that had refused 74 calls,
+    every one from the demo page, which always enforces.
+    """
+    out = ops(
+        r"""
+  const rules = [Object.assign({}, RULES[0], { mode_now: 'observe', refused: 3 })].concat(RULES.slice(1));
+  answer = contract({
+    '/api/projects/Acme-Billing': { status: 200, body: detailBody('observe', rules) },
+    '/api/decisions': u => u.searchParams.get('kind') === 'refused'
+      ? { status: 200, body: { items: [1, 2, 3].map(i => row(i, { status: 'BLOCKED_BOUNDARY_VIOLATION', origin: 'page', agent: 'page', observed_rules: [], observed_rule: '' })), next_cursor: null } }
+      : { status: 200, body: { items: [row(4)], next_cursor: null } }
+  });
+  await visit('#/projects/Acme-Billing');
+  await tick();
+  out.text = text(view());
+  answer = contract();
+  await visit('#/projects');
+  out.projects = text(view());
+""",
+        tmp_path,
+    )
+    words = re.sub(r"\s+([,.:)])", r"\1", out["text"])
+    assert "In Observe: agents' calls are recorded, never refused" in words
+    assert "3 calls were refused here in the last 14 days all the same: all 3 from the demo page, which always enforces." in words
+    assert "3 refused (all 3 from the demo page)" in words
+    projects = out["projects"]
+    assert "agents' calls recorded, never refused" in projects
+    assert "Calls from the demo page always enforce, and a credential is always refused, so a project in Observe can still show refused calls." in projects
+
+
+def test_a_rule_ready_only_on_the_demo_page_s_refusals_has_nothing_from_agents(tmp_path: Path) -> None:
+    """A rule the service reads Ready only because the demo page's calls were refused is not Ready.
+
+    The service's probe project read "Ready" with "Every call it flagged was
+    marked correct" beside 0 correct, 0 flagged and 6 refused, all 6 from the
+    demo page, which always enforces; and the hero said "Every rule reads
+    Ready or Quiet: promote" beside 0 calls observed. The chip, the sentence,
+    the tally, the headline and the promote dialog now say the same thing,
+    and nothing reads Ready while the refused calls are still being read.
+    """
+    out = ops(
+        r"""
+  const probe = { rule_key: 'python-domain-stays-pure', kind: 'layering', mode_now: 'observe', would_refuse: 0, correct: 0, false_alarms: 0, unreviewed: 0,
+    refused: 6, last_seen: NOW, state: 'ready', recommendation: 'Every call it flagged was marked correct: ready to enforce.' };
+  const quiet = { rule_key: 'LOOP', kind: 'gate', mode_now: 'observe', would_refuse: 0, correct: 0, false_alarms: 0, unreviewed: 0, refused: 0, last_seen: null, state: 'quiet', recommendation: '' };
+  const body = detailBody('observe', [probe, quiet]);
+  body.config = null;
+  Object.assign(body.readiness.summary, { calls_observed: 0, days_observed: 0, would_have_refused: 0, reviewed: 0, false_alarms: 0, false_alarm_rate: 0, rules_ready: 1, rules_quiet: 1, rules_noisy: 0 });
+  const pageRefusals = { status: 200, body: { items: [1, 2, 3, 4, 5, 6].map(i => row(i, { status: 'BLOCKED_BOUNDARY_VIOLATION', origin: 'page', agent: 'page', rule_key: 'python-domain-stays-pure', observed_rules: [], observed_rule: '' })), next_cursor: null } };
+  const refusedRead = held();
+  answer = contract({
+    '/api/auth/whoami': PRIVATE,
+    '/api/projects/Acme-Probe': { status: 200, body },
+    '/api/decisions': u => u.searchParams.get('kind') === 'refused' ? refusedRead.promise.then(() => pageRefusals) : { status: 200, body: { items: [row(7, { project_name: 'Acme-Probe', agent: 'page', origin: 'page' })], next_cursor: null } }
+  });
+  Threefold.whoami(true);
+  await visit('#/projects/Acme-Probe');
+  out.reading = view();
+  refusedRead.release();
+  await tick();
+  out.read = view();
+  click('promote-open');
+  out.dialog = el('modal-root').innerHTML;
+  out.checked = {};
+  out.dialog.replace(/data-rule="([^"]+)"\s*(checked)?/g, (m, rule, checked) => { out.checked[rule] = !!checked; return m; });
+  click('close-dialog');
+  // The same rule, its refusals from an agent's hook (made while the project enforced): the service's Ready stands.
+  const hooked = { status: 200, body: { items: [1, 2, 3, 4, 5, 6].map(i => row(i, { status: 'BLOCKED_BOUNDARY_VIOLATION', origin: 'hook', rule_key: 'python-domain-stays-pure' })), next_cursor: null } };
+  const withAgents = detailBody('observe', [probe, quiet]);
+  answer = contract({
+    '/api/auth/whoami': PRIVATE,
+    '/api/projects/Acme-Probe': { status: 200, body: withAgents },
+    '/api/decisions': u => u.searchParams.get('kind') === 'refused' ? hooked : { status: 200, body: { items: [row(8)], next_cursor: null } }
+  });
+  await visit('#/projects/Acme-Probe?days=7');
+  await tick();
+  out.hooked = view();
+  // A read the ledger could carry on into older days, holding every refusal the service counts: decided all the same.
+  const continued = { status: 200, body: { items: pageRefusals.body.items, next_cursor: 'older-days' } };
+  answer = contract({
+    '/api/auth/whoami': PRIVATE,
+    '/api/projects/Acme-Probe': { status: 200, body: withAgents },
+    '/api/decisions': u => u.searchParams.get('kind') === 'refused' ? continued : { status: 200, body: { items: [row(9)], next_cursor: null } }
+  });
+  await visit('#/projects/Acme-Probe?days=30');
+  await tick();
+  out.continued = view();
+  // Fewer than the service counts, with older days unread: nothing is concluded, and the service's Ready stands.
+  const short = { status: 200, body: { items: pageRefusals.body.items.slice(0, 4), next_cursor: 'older-days' } };
+  answer = contract({
+    '/api/auth/whoami': PRIVATE,
+    '/api/projects/Acme-Probe': { status: 200, body: withAgents },
+    '/api/decisions': u => u.searchParams.get('kind') === 'refused' ? short : { status: 200, body: { items: [row(10)], next_cursor: null } }
+  });
+  await visit('#/projects/Acme-Probe?days=14');
+  await tick();
+  out.short = view();
+  // The portfolio: a project whose only agent is the page reads Nothing from agents, not Ready.
+  answer = contract({ '/api/projects': { status: 200, body: { projects: [
+    { project: 'Acme-Probe', stage: 'observe', configured: false, observe_rules: [], created_at: null, promoted_at: null, last_seen: NOW, calls: 6, refused: 6, would_refuse: 0, needs_review: 0, agents: ['page'], hook_modes: ['unknown'] }
+  ] } }, '/api/decisions': { status: 200, body: { items: [], next_cursor: null } } });
+  await visit('#/projects');
+  await tick();
+  out.portfolio = view();
+""",
+        tmp_path,
+    )
+    reading = out["reading"]
+    rule = reading.split('data-state=""')[1].split("</li>")[0] if 'data-state=""' in reading else ""
+    assert rule and "tf-ops-chip-wait" in rule and ">Ready<" not in rule, "Nothing reads Ready while the refused calls are read"
+    assert "Every call it flagged was marked correct" not in reading
+    read = out["read"]
+    row = read.split('data-state="untested"')[1].split("</li>")[0]
+    assert ">Nothing from agents<" in row and ">Ready<" not in row
+    said = text_of(row).replace("&#039;", "'")
+    assert "Nothing from agents to go on: every call it refused came from the demo page, which always enforces, and no agent's call was flagged by it." in said
+    assert "6 refused (all 6 from the demo page)" in re.sub(r"\s+([,.:)])", r"\1", said)
+    assert "Every call it flagged was marked correct" not in read
+    hero = read.split('class="tf-ops-hero"')[1].split("</section>")[0]
+    lead = re.sub(r"<[^>]+>", "", hero.split('<p class="tf-ops-hero-text">', 1)[1].split("</p>", 1)[0])
+    assert lead == "No agent's call was observed here in the last 14 days, so no rule has anything to go on yet."
+    tally = dict(re.findall(r'data-tally="([a-z_]+)"><b[^>]*>([^<]*)</b>', hero))
+    assert tally == {"ready": "0", "quiet": "1", "needs_review": "0", "noisy": "0", "untested": "1"}, "The tally counts the rules as their rows state them"
+    assert out["checked"] == {"python-domain-stays-pure": False, "LOOP": False}, "A rule with nothing from agents is not checked for the reader"
+    dialog = re.sub(r"\s+([,.:;])", r"\1", text_of(out["dialog"])).replace("&#039;", "'")
+    assert "No rule reads Ready, so none is checked for you." in dialog
+    assert "Flagged no agent's call here No agent's call here tested these; check one to enforce it anyway." in dialog
+    hooked = out["hooked"]
+    assert 'data-state="ready"' in hooked and 'data-state="untested"' not in hooked, "Refusals of an agent's calls keep the service's Ready"
+    assert 'data-state="untested"' in out["continued"], "A read holding every refusal the service counts decides, whatever older days remain"
+    short = out["short"]
+    assert 'data-state="ready"' in short and 'data-state="untested"' not in short and "(all" not in short, "A short read concludes nothing"
+    portfolio = out["portfolio"]
+    cell = portfolio.split('class="tf-ops-ready" data-state="untested"')[1].split("</span></span>")[0]
+    assert ">Nothing from agents<" in cell and "demo-page calls only" in cell
+    assert 'data-state="ready"' not in portfolio
+
+
+def test_the_service_s_probes_are_labelled_synthetic_where_the_stack_names_them(tmp_path: Path) -> None:
+    """A probe project is a synthetic source of its own: named so, drawn so, and not work for the operator."""
+    out = ops(
+        r"""
+  const sources = { fleet: { calls: 3210, projects: 6 }, sandbox: { calls: 96, projects: 8 }, probe: { calls: 40, projects: 1 }, other: { calls: 41, projects: 2 } };
+  const body = Object.assign(overviewBody(), { sources });
+  body.by_project = body.by_project.concat([{ project: 'Acme-Probe', source: 'probe', stage: 'observe', configured: false, calls: 40, refused: 30, would_refuse: 36, needs_review: 36, last_seen: NOW }]);
+  answer = contract({ '/api/auth/whoami': PUBLIC, '/api/overview': { status: 200, body } });
+  Threefold.whoami(true);
+  await visit('#/overview?days=7');
+  await tick();
+  out.view = view();
+""",
+        tmp_path,
+    )
+    page = out["view"]
+    words = html.unescape(re.sub(r"<[^>]+>", "", page))
+    assert "40 from the service's own probes, synthetic" in words
+    assert "41 from other callers: the demo page, or a repository connected to this stack" in words, "Other no longer claims the probes"
+    assert "Probes, synthetic" in words, "The legend names the probes"
+    reviews = page.split('data-slot="reviews"')[1].split("</article>")[0]
+    assert "Acme-Probe" not in reviews and "Left out: 36 calls in the service's own probes, which are synthetic." in html.unescape(re.sub(r"<[^>]+>", "", reviews))
+    table = page.split("By project")[1]
+    assert 'data-src="probe"' in table and "Probe, synthetic" in table
+    assert table.index("Acme-Probe") > table.index("Acme-Catalog"), "The probe comes after the projects someone works in"
+
+
+def test_a_reason_the_ledger_cut_says_so_and_the_record_names_its_extra_fields(tmp_path: Path) -> None:
+    """A reason cut at 240 characters ends in an ellipsis and a note, not mid-word; repeated fields are not listed twice."""
+    out = ops(
+        r"""
+  const cut = ('The rule found an import ' + 'x'.repeat(300)).slice(0, 240);
+  const decision = Object.assign({}, DECISION, { decision: row(1, { observed_reason: cut, category: 'LAYERING', model: 'default', surprise: 'kept' }) });
+  answer = contract({ '/api/decision': { status: 200, body: decision } });
+  await visit('#/call?timestamp=t&verdict_id=VERDICT-1');
+  out.view = view();
+""",
+        tmp_path,
+    )
+    page = out["view"]
+    assert page.count("cut at 240 characters by the ledger") == 2, "The hero and the record each say the reason was cut"
+    assert "xxxx…" in page
+    assert "Model default" in text_of(page), "A field the list does not name, but the page knows, is named"
+    assert ">category</dt>" not in page.replace("\n", "") and ">observed_rule</dt>" not in page.replace("\n", ""), "A field that repeats a listed one is left out"
+    assert "Other fields the ledger returned (1)" in page and "surprise" in page
 
 
 # ---------------------------------------------------------------------- proof

@@ -272,6 +272,22 @@ def test_the_shell_has_five_destinations_more_and_a_search_that_says_its_keys(tm
     assert 'data-tf-menu aria-expanded="false" aria-controls="tf-menu"' in nav
 
 
+def test_the_front_page_marks_no_item_of_the_bar_as_current(tmp_path: Path) -> None:
+    """On the front page More read as the current page, because the front page is filed under it as Demo."""
+    out = run(
+        "settings.html",
+        r"""
+  Threefold.mountNav(el('page-nav'), { active: 'demo' });
+  out.nav = el('page-nav').innerHTML;
+""",
+        tmp_path,
+    )
+    nav = out["nav"]
+    assert "tf-nav-current" not in nav and "tf-nav-dot" not in nav, "No item of the bar reads as the page the reader is on"
+    more = nav.split("data-tf-more-menu", 1)[1].split("</div>", 1)[0]
+    assert 'aria-current="page"' in more, "Inside the menu, Demo still says it is the page the reader is on"
+
+
 @pytest.mark.parametrize("page", SHELL_PAGES)
 def test_every_page_wears_the_same_header_and_a_skip_link(page: str) -> None:
     body = page_source(page)
@@ -630,3 +646,43 @@ def test_the_palette_signs_out_only_a_signed_in_reader_and_works_outside_the_das
         before=EVENTS,
     )
     assert away["assigned"] == ["https://example.test/prod/dashboard.html#/overview"], "Off the dashboard, a route is the page"
+
+
+def test_the_sessions_table_keeps_an_id_readable_and_the_last_write_neutral() -> None:
+    """At 1440 px the Session column was 70 px wide, an id broke every six characters, and State took 332 px.
+
+    The table now takes three quarters of a wide screen, an id keeps at least
+    22 characters and ends in an ellipsis with the whole id in its title, and a
+    breaker's reason keeps to its column. The Last write chip, amber, read as a
+    warning that nothing is kept; it is neutral, and what it measures is said
+    on the page rather than in a tooltip alone.
+    """
+    page = page_source("sessions.html")
+    assert '<section class="lg:col-span-3 tf-card tf-panel min-w-0" aria-labelledby="sessions-title">' in page
+    assert ".tf-session-cell { min-width: 22ch; }" in page
+    assert "'<td data-label=\"Session\" class=\"tf-session-cell\"><span class=\"tf-session-id font-mono text-violet-300\" title=\"' + escapeHtml(s.session_id) + '\">'" in page
+    persistence = page.split("function setPersistence(mode) {", 1)[1].split("}", 1)[0]
+    assert "tf-chip-amber" not in persistence and "badge.className = 'tf-chip tf-chip-gray';" in persistence
+    assert "chip says only where the answering container's most recent session write" in " ".join(page.split())
+
+
+def test_the_api_document_s_faint_parts_are_set_to_what_the_inversion_makes_readable() -> None:
+    """Measured on the rendered page, GET and POST badges were 3.15:1 and 3.06:1, and a schema's name 1.31:1.
+
+    The filter is affine, so the colour each part is set in is the one that
+    renders readable: re-sampled at 6.74:1, 7.04:1 and 11.66:1.
+    """
+    page = page_source("swagger.html")
+    for rule in (
+        ".swagger-ui .opblock.opblock-get .opblock-summary-method { background: #1e63ae; }",
+        ".swagger-ui .opblock.opblock-post .opblock-summary-method { background: #0a6e46; }",
+        ".swagger-ui .json-schema-2020-12-accordion { background: transparent; }",
+        ".swagger-ui .json-schema-2020-12__title { color: #111; }",
+    ):
+        assert rule in page, rule
+    assert page.index(".swagger-ui { filter: invert(90%) hue-rotate(180deg); }") < page.index("opblock-get .opblock-summary-method")
+
+
+def test_a_code_block_that_scrolls_keeps_its_first_line_clear_of_the_copy_button() -> None:
+    css = page_source("assets/threefold.css")
+    assert ".tf-command > pre.code { padding-top: 44px; padding-right: 16px; }" in css

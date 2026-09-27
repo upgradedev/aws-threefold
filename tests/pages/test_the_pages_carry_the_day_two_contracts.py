@@ -488,6 +488,7 @@ def test_the_installer_command_carries_every_flag_and_the_endpoint_in_the_bar(tm
   out.config = el('threefold-json-snippet').textContent;
   out.enforce = el('enforce-snippet').textContent;
   out.uninstall = el('uninstall-snippet').textContent;
+  out.older = el('older-snippet').textContent;
   el('apiBaseInput').value = 'https://acme-governance.example.test/prod/';
   renderSnippets();
   out.installElsewhere = el('install-snippet').textContent;
@@ -495,33 +496,38 @@ def test_the_installer_command_carries_every_flag_and_the_endpoint_in_the_bar(tm
         tmp_path,
     )
     install = out["install"]
-    for flag in ("--repo ", "--project Acme-", "--mode observe", "--endpoint https://example.test/prod", "--api-key-file "):
+    # The command is the file the one command above downloads, run as `connect`:
+    # a visitor has that file, not a checkout of the repository.
+    for flag in ("threefold.py connect", "--project Acme-", "--endpoint https://example.test/prod", "--api-key-file "):
         assert flag in install, f"The installer command lacks {flag.strip()}"
+    assert "scripts/threefold_install.py" not in install and "--repo" not in install
     assert "--endpoint https://acme-governance.example.test/prod " in out["installElsewhere"]
 
     config = json.loads(out["config"])
     assert set(config) == {"project", "endpoint", "mode", "api_key_file"}, "Only the keys the contract fixes"
-    assert config["mode"] == "observe"
+    assert config["mode"] == "managed", "connect installs managed: the project's stage decides"
     assert re.match(_deployed_project_pattern(), config["project"])
-    assert "--mode managed" in out["enforce"], "Step 1 stops the dry runs; it does not enforce by itself"
-    assert "dashboard.html#/projects/Acme-" in out["enforce"], "Step 2 is the promotion that enforces"
-    assert "--uninstall" in out["uninstall"]
+    assert "dashboard.html#/projects/Acme-" in out["enforce"], "The promotion is what enforces"
+    assert "The one step, on the service: promote the project" in out["enforce"]
+    assert "threefold.py disconnect" in out["uninstall"] and "threefold.py status" in out["uninstall"]
+    assert "--repo" in out["older"] and "--uninstall" in out["older"], "The older form is kept, as a note"
     assert "a call carrying a credential is still refused on this machine" in install
 
 
-def test_the_page_puts_enforcement_two_steps_away_as_the_stage_contract_has_it() -> None:
-    """`--mode enforce` sends calls the way `managed` does; the stage enforces.
+def test_the_page_puts_enforcement_on_the_stage_as_the_contract_has_it() -> None:
+    """`connect` installs managed, so the stage decides; promoting on the dashboard enforces.
 
     STATE's stage contract puts the stage on the service, so reinstalling alone
     leaves a project in Observe and a forbidden write is still only recorded.
-    The page used to promise the next call was judged for real.
+    The page used to promise the next call was judged for real, and later
+    asked for a reinstall in managed mode that `connect` already does.
     """
     section = _plain(_section(_page("/connect.html"), "govern-your-repositories"))
     assert "The next call is judged for real" not in section, "Reinstalling alone judges nothing"
-    assert "enforcement takes two steps" in section
-    assert "Promote the project on the dashboard" in section
+    assert "enforcement is one step: promote the project on the dashboard" in section
+    assert "Nothing needs to be installed again" in section
     assert "Until it is promoted the project stays in Observe whatever mode your machine is in" in section
-    assert "sends them exactly the same way" in section, "--mode enforce differs only on the machine"
+    assert "sends calls exactly the same way as managed" in section, "--mode enforce differs only on the machine"
 
     # Both "run the hook yourself" snippets say what an Observe project prints,
     # so a reader who gets no deny does not read it as the hook being broken.

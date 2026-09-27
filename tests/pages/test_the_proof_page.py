@@ -351,3 +351,125 @@ def test_the_project_page_shows_the_same_figure_for_its_project(tmp_path: Path) 
     assert "no agent (hook or CI) refusal in this window" in out["quiet"]
     # A read cut short spent its rows on every project, not this one alone.
     assert "read stopped after the newest 2,000 calls of every project" in out["partial"]
+
+
+
+def test_the_lead_lane_is_told_apart_at_zero_and_no_lane_is_a_tab_stop(tmp_path: Path) -> None:
+    """At 0% a lane is only its tick: the tick wears the lane's colour, and the Threefold lane names itself.
+
+    A review found "Rules in CLAUDE.md" and "Threefold enforcing" drawn the
+    same, as one grey tick each, in every series where both were 0%; and 18
+    lanes were 18 tab stops before the evidence, with the same figures in the
+    table right after the chart.
+    """
+    out = proof(
+        r"""
+  answer = proofAnswer(COMMITTED);
+  await visit('#/proof');
+  out.view = view();
+""",
+        tmp_path,
+    )
+    chart = out["view"].split("Did a violation land?")[1].split('data-proof="series"')[0]
+    lanes = re.findall(r'<div class="tf-ops-vlane"[^>]*>', chart)
+    assert lanes and not any("tabindex" in lane for lane in lanes), "A lane is not a tab stop; the table holds its figures"
+    threefold = [lane for lane in lanes if "Threefold enforcing:" in lane]
+    assert threefold and all("--c:#8b5cf6" in lane for lane in threefold)
+    assert chart.count("<b>Threefold</b>") == len(threefold), "Each Threefold lane at or under half names itself"
+    css = page_source("dashboard.html")
+    assert "top: 2px; bottom: 2px; width: 3px; border-radius: 1px; background: var(--c); }" in css, "The tick wears the lane's colour"
+
+
+def test_each_series_names_its_own_evidence_and_the_repository_is_linked(tmp_path: Path) -> None:
+    out = proof(
+        r"""
+  answer = proofAnswer(COMMITTED);
+  await visit('#/proof');
+  out.view = view();
+""",
+        tmp_path,
+    )
+    page = out["view"]
+    series = [b for b in COMMITTED["benchmarks"] if b.get("evidence")]
+    assert page.count('data-proof="series-evidence"') == len(series), "Every series with evidence names it on its own card"
+    for b in series:
+        for item in b["evidence"]:
+            assert item["path"] in page
+    assert 'tabindex="0" role="region" aria-label="The benchmark, every series (scrolls sideways)"' in page, "A keyboard can scroll the table"
+    assert 'href="https://github.com/upgradedev/aws-threefold"' in page and "github.com/upgradedev/aws-threefold</a>, at the path shown" in page
+
+
+def test_a_report_two_series_are_given_is_named_on_neither_card_and_each_path_opens(tmp_path: Path) -> None:
+    """No card cites a report about another model, and every evidence path is a link.
+
+    The committed snapshot gives the Sonnet and the Haiku series one report,
+    BENCHMARK_2026-09-22.md, whose Source rows line names the Sonnet rows; the
+    Haiku card cited it. A report two series with different rows are given is
+    left off both cards (it stays in the Evidence list, under the lead series),
+    and a card with no report of its own says where its report is found. Each
+    path the snapshot gives without a link opens in the public repository.
+    """
+    out = proof(
+        r"""
+  answer = proofAnswer(COMMITTED);
+  await visit('#/proof');
+  out.view = view();
+""",
+        tmp_path,
+    )
+    page = out["view"]
+    cards = page.split("How this was measured")[0]
+    shared = "docs/evidence/BENCHMARK_2026-09-22.md"
+    claims = [b for b in COMMITTED["benchmarks"] if any(i.get("path") == shared for i in b.get("evidence", []))]
+    assert len({b["source"] for b in claims}) > 1, "The committed snapshot no longer gives one report to two series; this test guards that case"
+    lists = re.findall(r'data-proof="series-evidence">(.*?)</ul>', cards, re.S)
+    assert lists and not any(shared in markup for markup in lists), "A report two series are given is named on neither card"
+    method = page.split("How this was measured")[1]
+    assert shared in method, "It stays in the Evidence list"
+    said = re.sub(r"\s+([,.])", r"\1", re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", cards)))
+    for b in COMMITTED["benchmarks"]:
+        rows = [i["path"] for i in b.get("evidence", []) if i["path"].endswith(".jsonl")]
+        assert f"is the file in docs/evidence/ whose Source rows line names {', '.join(rows)}." in said, f"{b['label']} does not say where its report is"
+    assert said.count("This snapshot names one report for this series and for a series with other result rows, so it is not listed here.") == len(claims)
+    assert 'href="https://github.com/upgradedev/aws-threefold/tree/main/docs/evidence"' in cards
+    for b in COMMITTED["benchmarks"]:
+        for item in b.get("evidence", []):
+            assert f'href="https://github.com/upgradedev/aws-threefold/blob/main/{item["path"]}"' in page
+    assert "each path opens it on the main branch" in method
+
+
+def test_a_false_alarm_rate_over_a_handful_of_labels_is_said_as_a_count(tmp_path: Path) -> None:
+    """0% over 5 labels read as a strong claim; below 30 labels the tile gives the count and says why."""
+    out = proof(
+        r"""
+  const few = JSON.parse(JSON.stringify(MEASURED));
+  Object.assign(few.private, { reviewed: 5, false_alarms: 0, false_alarm_rate: 0, would_refuse: 139 });
+  answer = proofAnswer(few);
+  await visit('#/proof');
+  out.text = text(view());
+  out.metrics = metrics(view());
+""",
+        tmp_path,
+    )
+    assert out["metrics"]["false_alarm_rate"] == "0 of 5"
+    assert "too few labels for a rate: 5 of 139 would-refuse calls reviewed" in out["text"]
+    assert "False-alarm rate" not in out["text"].split("How this was measured")[0]
+
+
+def test_the_proof_says_its_figures_are_a_snapshot_and_its_times_are_read_in_utc(tmp_path: Path) -> None:
+    out = proof(
+        r"""
+  answer = proofAnswer(MEASURED);
+  await visit('#/proof');
+  out.view = view();
+  out.foot = el('foot-words').textContent;
+  answer = contract();
+  await visit('#/overview');
+  out.overviewFoot = el('foot-words').textContent;
+""",
+        tmp_path,
+    )
+    assert out["foot"] == "The figures on this page come from a committed snapshot, served by the API"
+    assert out["overviewFoot"] == "Every number on this page is read from the API as you look at it"
+    assert '<time datetime="2026-09-29T08:00:00+00:00">29 Sep 2026, 08:00 UTC</time>' in out["view"]
+    assert '<time datetime="2026-09-30">30 Sep 2026</time>' in out["view"]

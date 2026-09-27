@@ -39,6 +39,17 @@
     .swagger-ui .wrapper { padding: 0 8px; max-width: none; }
     .swagger-ui .opblock { border-radius: 10px; box-shadow: none; }
     .swagger-ui .opblock .opblock-summary { border-radius: 10px; }
+    /* Parts the inversion leaves too faint, each set in the colour that the
+       filter turns into a readable one (it is affine: grey c renders as
+       229.5 - 0.8c). A method's white word renders dark, so its badge renders
+       light: GET #1e63ae and POST #0a6e46 come out near rgb(110,165,225) and
+       rgb(100,180,148), over 6.7:1 with the word; DELETE already passes. A
+       schema's name sat grey on grey; its box is left clear and its name set
+       near black, which renders near white on the dark page. */
+    .swagger-ui .opblock.opblock-get .opblock-summary-method { background: #1e63ae; }
+    .swagger-ui .opblock.opblock-post .opblock-summary-method { background: #0a6e46; }
+    .swagger-ui .json-schema-2020-12-accordion { background: transparent; }
+    .swagger-ui .json-schema-2020-12__title { color: #111; }
     #swagger-ui:empty::before {
       content: 'Reading the document…'; display: block; padding: 32px 16px; text-align: center;
       font-size: var(--tf-fs-small); color: var(--tf-text-3);

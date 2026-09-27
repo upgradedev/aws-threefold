@@ -570,7 +570,7 @@ def test_the_project_screen_explains_the_stage_and_each_rules_readiness(tmp_path
         tmp_path,
     )
     observe = out["observe"]
-    assert "In Observe: the rules record, and refuse nothing" in observe
+    assert "In Observe: agents&#039; calls are recorded, never refused" in observe or "In Observe: agents' calls are recorded, never refused" in observe
     assert "a call carrying a credential, which the hook refuses on the machine" in observe
     for chip in (">Ready<", ">Quiet<", ">Noisy<"):
         assert chip in observe
@@ -586,7 +586,14 @@ def test_the_project_screen_explains_the_stage_and_each_rules_readiness(tmp_path
     assert "https://example.test/prod/api/projects/Acme-Billing?days=14" in out["calls"]
 
 
-def test_promote_preselects_ready_and_quiet_rules_and_sends_the_choice(tmp_path: Path) -> None:
+def test_promote_preselects_ready_rules_only_and_sends_the_choice(tmp_path: Path) -> None:
+    """The project's dialog checks what the walkthrough's step 4 checks: the Ready rules, never a Quiet one.
+
+    It checked Ready and Quiet rules while the walkthrough checked Ready
+    only, so a reader who ran #/try and then opened the sandbox's own page
+    met the opposite default. A Quiet rule flagged nothing, so nothing
+    tested it; it sits under the walkthrough's own sentence, unchecked.
+    """
     out = dash(
         r"""
   let promoted = null;
@@ -601,8 +608,9 @@ def test_promote_preselects_ready_and_quiet_rules_and_sends_the_choice(tmp_path:
   await tick();
   out.first = promoted;
   click('promote-open');
+  click('promote-toggle', { 'data-rule': 'java-domain-stays-pure', checked: false });
   click('promote-toggle', { 'data-rule': 'PROTECTED_PATH', checked: true });
-  click('promote-toggle', { 'data-rule': 'LOOP', checked: false });
+  click('promote-toggle', { 'data-rule': 'LOOP', checked: true });
   await click('promote-confirm');
   await tick();
   out.second = promoted;
@@ -610,10 +618,16 @@ def test_promote_preselects_ready_and_quiet_rules_and_sends_the_choice(tmp_path:
 """,
         tmp_path,
     )
-    assert out["checked"] == {"java-domain-stays-pure": True, "LOOP": True, "PROTECTED_PATH": False}
-    assert "Unchecked rules keep observing" in out["dialogText"]
-    assert out["first"] == {"enforce": ["java-domain-stays-pure", "LOOP"]}
-    assert out["second"] == {"enforce": ["java-domain-stays-pure", "PROTECTED_PATH"]}
+    assert out["checked"] == {"java-domain-stays-pure": True, "LOOP": False, "PROTECTED_PATH": False}
+    said = re.sub(r"\s+([,.:;])", r"\1", out["dialogText"])
+    assert "Unchecked rules keep observing" in said
+    assert "Ready rules are checked for you: every call they flagged was marked correct." in said
+    assert "Ready and Quiet" not in said
+    # The Quiet rule under the walkthrough's own heading and sentence.
+    assert "Flagged nothing here No call here tested this rule; check one to enforce it anyway." in said
+    assert out["first"] == {"enforce": ["java-domain-stays-pure"]}
+    # A rule checked for the reader is dropped when unchecked; rules left unchecked are sent when checked.
+    assert out["second"] == {"enforce": ["LOOP", "PROTECTED_PATH"]}
     assert "Acme-Billing is in Enforce" in out["toast"]
 
 
@@ -688,7 +702,7 @@ def test_the_review_queue_groups_calls_by_project_and_rule(tmp_path: Path) -> No
 """,
         tmp_path,
     )
-    assert out["read"] == "https://example.test/prod/api/decisions?kind=observed&review=unreviewed&days=30&limit=200"
+    assert out["read"] == "https://example.test/prod/api/decisions?kind=observed&review=unreviewed&days=7&limit=200"
     page = out["view"]
     assert page.count("<section") == 2, "Two groups: Acme-Billing under one rule, Acme-Catalog under another"
     assert "All 2 correct" in page, "A group of several calls can be labelled at once"
@@ -1321,21 +1335,33 @@ def test_the_walkthrough_runs_the_rollout_from_sandbox_to_a_real_refusal(tmp_pat
     for agent in ("Claude Code", "Codex", "Antigravity"):
         assert agent in out["step2"], f"The timeline has no lane for {agent}"
     assert "The list read back 3 of the 12 so far" in out["step2"], "A short read of the ledger is said, never padded"
-    # Step 2: each flagged call as a card of agent, file, rule and why.
+    # Step 2: the flagged calls under the rule that flagged them: the rule, its reason once, and each call's agent and file.
     cards = out["cards"]
     assert "3 calls would have been refused" in cards
     for part in ("Claude Code", "src/acme/domain/order.py", "python-domain-stays-pure", "PROTECTED_PATH", "imports javax.persistence into the domain"):
         assert part in cards, f"The step-2 cards do not show {part!r}"
-    assert "One of them is a false alarm" in out["step3"] and "docs/.git-hooks-howto.md" in out["step3"]
+    assert cards.count("imports javax.persistence into the domain") == 2, "A rule's reason is said once per rule, not once per call"
+    # Without the sandbox naming the call it seeded, no false alarm is promised: nothing could say whether it was found.
+    assert "Mark each call Correct or False alarm: a rule you mark wrong keeps observing." in out["step3"] and "docs/.git-hooks-howto.md" in out["step3"]
+    assert "One of them is a false alarm" not in out["step3"] and "spot" not in out["step1"]
+    assert "You say whether each rule was right, call by call: Correct, or False alarm." in out["step1"]
     assert [r["label"] for r in out["sent"]["reviews"]] == ["correct", "correct", "false_alarm"]
     assert "3 of 3 labelled" in out["labelled"] and "Every call has a label" in out["labelled"]
+    # What the labels decide, read from the labels and the calls alone.
+    decided = re.sub(r"\s+([,.:])", r"\1", out["labelled"])
+    assert "What your labels decide" in decided
+    assert "python-domain-stays-pure, once promoted, refuses src/acme/domain/invoice.py and src/acme/domain/order.py." in decided
+    assert "PROTECTED_PATH has a false alarm, so it keeps observing: docs/.git-hooks-howto.md keeps running." in decided
     checked = dict(re.findall(r'data-rule="([^"]+)"\s*(checked)?', out["step4"]))
-    assert checked == {"python-domain-stays-pure": "checked", "PROTECTED_PATH": "", "LOOP": "checked"}, "Ready and Quiet are checked; the noisy rule keeps observing"
+    assert checked == {"python-domain-stays-pure": "checked", "PROTECTED_PATH": "", "LOOP": ""}, "Only Ready is checked: a Quiet rule has no evidence either way, and the noisy rule keeps observing"
+    assert "Ready rules are checked: you marked every call they flagged correct." in text_of(out["step4"])
+    assert "No call here tested this rule; check one to enforce it anyway." in text_of(out["step4"])
     # A rule's state animates from the one read before the labels to the one read after, and only where it changed.
     assert out["step4"].count("tf-try-flipping") == 2, "python-domain-stays-pure and PROTECTED_PATH changed; LOOP did not"
-    assert out["sent"]["promote"] == {"enforce": ["python-domain-stays-pure", "LOOP"]}
+    assert out["sent"]["promote"] == {"enforce": ["python-domain-stays-pure"]}
     assert "Now in Enforce" in out["promoted"] and "Enforces" in out["promoted"] and "Keeps observing" in out["promoted"]
-    assert "now in Enforce. This time the rule in force refuses it" in out["step5"]
+    assert "now in Enforce. Send it and see what the rule in force answers" in out["step5"]
+    assert "This time the rule in force refuses it" not in out["step5"], "Step 5 states the answer before the service gives it"
     assert "src/acme/domain/order.py" in out["step5"] and "import boto3" in out["step5"]
     evaluate = out["sent"]["evaluate"]
     assert evaluate["origin"] == "hook" and evaluate["agent"] == "claude-code" and evaluate["explain"] is True
@@ -1350,11 +1376,95 @@ def test_the_walkthrough_runs_the_rollout_from_sandbox_to_a_real_refusal(tmp_pat
     assert "That was the whole rollout" in words
     assert "12 calls judged in Observe" in words and "3 calls would have been refused, and none was" in words
     assert "You marked 2 calls correct and 1 call a false alarm, so PROTECTED_PATH stayed in Observe" in words
-    assert "2 rules moved to Enforce" in words
+    assert "1 rule moved to Enforce" in words
     # Plain words first, the precise verdict second.
     assert "Stopped by python-domain-stays-pure before it ran, with a sentence from Amazon Bedrock. Its verdict: BLOCKED_BOUNDARY_VIOLATION." in words
     for href in ('href="#/connect"', 'href="#/projects/Acme-Sandbox-0a1b2c3d"', 'href="#/proof"'):
         assert href in finish, f"The completion screen does not offer {href}"
+
+
+def test_the_walkthrough_says_whether_the_reader_found_the_false_alarm_the_sandbox_seeded(tmp_path: Path) -> None:
+    """Step 3 tells the reader whether they spotted the false alarm, from the sandbox's own answer.
+
+    It asked them to spot one and never said whether they had: marked all
+    Correct, the test module's rule was quietly promoted, and nothing said
+    so. The page does not decide which call was wrong; POST /api/sandbox
+    names the call it seeded, and without that nothing is claimed. A miss is
+    one click from undone.
+    """
+    out = walk(
+        r"""
+  const P = 'Acme-Sandbox-0a1b2c3d';
+  const obs = (i, rule, target, extra) => row(i, Object.assign({ project_name: P, rule_key: rule, observed_rules: [rule], observed_rule: rule, target, observed_target: target }, extra || {}));
+  const observed = [
+    obs(1, 'python-domain-stays-pure', 'src/acme/domain/order.py', { agent: 'claude-code' }),
+    obs(2, 'python-domain-stays-pure', 'tests/domain/test_order_totals.py', { agent: 'codex', tool_name: 'apply_patch' })
+  ];
+  const sent = [];
+  answer = api({
+    'POST /api/sandbox': { status: 200, body: { project: P, calls_seeded: 12, seeded_false_alarm: {
+      target: 'tests/domain/test_order_totals.py', rule_key: 'python-domain-stays-pure',
+      why: "The rule's **/domain/** path also matches tests/domain/, and a test module is not the domain layer" } } },
+    ['/api/projects/' + P]: { status: 200, body: { project: P, config: { stage: 'observe', sandbox: true }, readiness: { rules: [] } } },
+    '/api/decisions': { status: 200, body: { items: observed, next_cursor: null } },
+    ['POST /api/projects/' + P + '/reviews']: (u, i, body) => { sent.push(body.items[0]); return { status: 200, body: { updated: 1, skipped: [] } }; }
+  });
+  await visit('#/try');
+  await click('try-create'); await tick();
+  await click('try-show'); await tick();
+  await click('try-review'); await tick();
+  out.step3 = text(view());
+  await click('try-label', { 'data-verdict': 'VERDICT-1', 'data-label': 'correct' });
+  await click('try-label', { 'data-verdict': 'VERDICT-2', 'data-label': 'correct' });
+  await tick();
+  out.missed = view();
+  await click('try-label', { 'data-verdict': 'VERDICT-2', 'data-label': 'false_alarm' });
+  await tick();
+  out.found = view();
+  out.sent = sent;
+""",
+        tmp_path,
+    )
+    said = lambda markup: re.sub(r"\s+([,.:])", r"\1", text_of(markup)).replace("&#039;", "'")
+    # Named by the sandbox, the false alarm is promised: the reader is told below whether they found it.
+    assert "One of them is a false alarm: spot it, and mark each call Correct or False alarm." in out["step3"]
+    missed = said(out["missed"])
+    assert 'data-seeded="missed"' in out["missed"]
+    assert ("The sandbox seeded tests/domain/test_order_totals.py as a false alarm. The rule's **/domain/** path also matches tests/domain/, "
+            "and a test module is not the domain layer. Marked Correct, python-domain-stays-pure would refuse it once promoted.") in missed
+    assert re.search(r'data-action="try-label" data-verdict="VERDICT-2" data-label="false_alarm"[^>]*>.*?Mark it False alarm', out["missed"], re.S)
+    found = said(out["found"])
+    assert 'data-seeded="found"' in out["found"] and 'data-seeded="missed"' not in out["found"]
+    assert ("You found it: tests/domain/test_order_totals.py is the call the sandbox seeded as a false alarm. The rule's **/domain/** path also "
+            "matches tests/domain/, and a test module is not the domain layer. So python-domain-stays-pure keeps observing.") in found
+    assert [r["label"] for r in out["sent"]] == ["correct", "correct", "false_alarm"], "The one click saves the label"
+
+
+def test_without_a_seeded_false_alarm_the_walkthrough_claims_none(tmp_path: Path) -> None:
+    """A stack whose sandbox answer names no seeded call gets no found-or-missed line, only what the labels decide."""
+    out = walk(
+        r"""
+  const P = 'Acme-Sandbox-0a1b2c3d';
+  const obs = (i, rule, target) => row(i, { project_name: P, rule_key: rule, observed_rules: [rule], observed_rule: rule, target, observed_target: target });
+  answer = api({
+    'POST /api/sandbox': { status: 200, body: { project: P, calls_seeded: 12 } },
+    ['/api/projects/' + P]: { status: 200, body: { project: P, config: { stage: 'observe', sandbox: true }, readiness: { rules: [] } } },
+    '/api/decisions': { status: 200, body: { items: [obs(1, 'python-domain-stays-pure', 'tests/domain/test_order_totals.py')], next_cursor: null } },
+    ['POST /api/projects/' + P + '/reviews']: { status: 200, body: { updated: 1, skipped: [] } }
+  });
+  await visit('#/try');
+  await click('try-create'); await tick();
+  await click('try-show'); await tick();
+  await click('try-review'); await tick();
+  await click('try-label', { 'data-verdict': 'VERDICT-1', 'data-label': 'correct' });
+  await tick();
+  out.done = view();
+""",
+        tmp_path,
+    )
+    assert "data-seeded" not in out["done"] and "seeded" not in text_of(out["done"])
+    decided = re.sub(r"\s+([,.:])", r"\1", text_of(out["done"]))
+    assert "python-domain-stays-pure, once promoted, refuses tests/domain/test_order_totals.py." in decided
 
 
 def test_the_completion_counts_the_rules_the_promotion_s_answer_put_in_force(tmp_path: Path) -> None:
@@ -1388,6 +1498,7 @@ def test_the_completion_counts_the_rules_the_promotion_s_answer_put_in_force(tmp
   await click('try-label', { 'data-verdict': 'VERDICT-1', 'data-label': 'correct' }); await tick();
   await click('try-readiness'); await tick();
   out.step4 = view();
+  await click('try-toggle', { 'data-rule': 'LOOP', checked: true });
   await click('try-promote'); await tick();
   out.sent = calls.filter(c => c.url.indexOf('/promote') !== -1).pop().body;
   out.promoted = text(view());
@@ -1479,6 +1590,35 @@ def test_the_walkthrough_is_labelled_by_keyboard_alone(tmp_path: Path) -> None:
     assert "3 of 3 labelled" in out["done"] and "Every call has a label" in out["done"]
     assert out["focused"] == "try-primary", "With every call labelled, the keyboard lands on the way on"
     assert out["afterLeaving"] == 3, "The keys stop listening when the reader leaves the walkthrough"
+
+
+def test_a_failed_sandbox_says_what_happened_once_and_without_transport_words(tmp_path: Path) -> None:
+    """A throttled create says the demo is busy; any other failure gives the service's words once.
+
+    The callout read "That did not work: HTTP 429: Too many sandboxes from
+    this address; try again in a minute. Try again.": a status code a visitor
+    need not read, and two instructions.
+    """
+    out = walk(
+        r"""
+  let reply = { status: 429, body: { detail: 'Too many sandboxes from this address; try again in a minute.' } };
+  answer = api({ 'POST /api/sandbox': () => reply });
+  await visit('#/try');
+  await click('try-create'); await tick();
+  out.busy = text(view());
+  reply = { status: 500, body: { detail: 'The store did not answer' } };
+  await click('try-create'); await tick();
+  out.down = text(view());
+  reply = { status: 503, body: { detail: 'Busy; try again in a minute' } };
+  await click('try-create'); await tick();
+  out.said = text(view());
+""",
+        tmp_path,
+    )
+    assert "The demo is busy: wait a minute and press Make my sandbox again." in out["busy"]
+    assert "HTTP 429" not in out["busy"]
+    assert "That did not work: The store did not answer. Try again." in out["down"] and "HTTP 500" not in out["down"]
+    assert "That did not work: Busy; try again in a minute." in out["said"] and "minute. Try again" not in out["said"]
 
 
 def test_a_held_key_labels_one_call_and_a_failed_label_keeps_the_keyboard_on_the_stack(tmp_path: Path) -> None:
@@ -1812,7 +1952,7 @@ def test_the_replay_sends_the_call_as_the_agent_and_tool_that_made_it(tmp_path: 
     assert web["sent"]["arguments"] == {"file_path": "src/web/domain/cart.ts", "content": "import axios from 'axios';\n"}
     send = web["send"]
     assert "Send the same call again" in send
-    assert "Same agent, same file, same import, and your sandbox is now in Enforce. This time the rule in force refuses it." in send
+    assert "Same agent, same file, same import, and your sandbox is now in Enforce. Send it and see what the rule in force answers." in send
     assert "Now, in Enforce · as Antigravity's hook sends it" in send and "write_to_file · Antigravity · hook" in send
     assert "Agent the same" in send and "File the same" in send and "Import the same" in send and "Stage Observe → Enforce" in send
     assert "The write that ran in Observe is refused in Enforce: same agent, same file, same import, a new stage." in web["climax"]
@@ -1979,15 +2119,19 @@ def test_the_flagged_cards_name_the_whole_command_and_an_import_the_reason_cut(t
   out.cards = text(view());
   await click('try-review'); await tick();
   out.stack = text(view());
+  await click('try-move', { 'data-move': '1', id: 'try-next' }); await tick();
+  out.stack += ' ' + text(view());
 """,
         tmp_path,
     )
     cards = out["cards"]
-    assert "It imports from javax.persistence , a package the rule forbids." in cards
     assert "javax.persistence.Enti" not in cards, "A cut import is shown as if it were the import"
-    assert "Command cat .env" in cards, "The command row names the program alone"
+    assert "Codex cat .env" in cards, "The command row names the program alone"
     assert "It reaches a protected path or credential store." in cards
-    assert "cat .env" in out["stack"]
+    stack = out["stack"]
+    assert "It imports from javax.persistence , a package the rule forbids." in stack
+    assert "javax.persistence.Enti" not in stack, "A cut import is shown as if it were the import"
+    assert "cat .env" in stack
 
 
 def test_a_sandbox_with_nothing_flagged_says_so_and_offers_a_second_read(tmp_path: Path) -> None:
@@ -2157,8 +2301,9 @@ def test_the_walkthrough_words_the_service_s_counts_and_its_sources_plainly(tmp_
     assert "1 false alarm: keep it observing, or refine the rule" in out["step4"]
     assert "2 flagged calls not reviewed" in out["step4"] and "(s)" not in out["step4"]
     climax = out["climax"]
-    assert re.search(r'class="tf-try-quote-src">\s*<svg[^>]*>.*?</svg>\s*Deterministic explanation</figcaption>', climax, re.S)
-    assert "Amazon Bedrock was asked and did not answer, so this sentence is the service's own." in text_of(climax).replace("&#039;", "'")
+    # A sentence the model did not write is not quoted as if it were one: one quiet line says so, and the fix has the width.
+    assert "tf-try-quote" not in climax and "The domain reached for an AWS client." not in climax
+    assert "No model sentence this time: Amazon Bedrock was asked and did not answer." in text_of(climax).replace("&#039;", "'")
     assert 'data-tone="refused">Refused<' in climax, "The rail's note for the refusal is not in the refusal's colour"
 
 
