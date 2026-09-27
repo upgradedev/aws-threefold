@@ -238,7 +238,7 @@ TERMINAL = r"""() => {
 }"""
 
 
-@pytest.mark.parametrize("width,height", [(375, 812), (1100, 900), (1440, 900)])
+@pytest.mark.parametrize("width,height", [(375, 812), (768, 1024), (1100, 900), (1440, 900)])
 def test_the_terminal_is_as_tall_as_its_lines(tmp_path: Path, width: int, height: int) -> None:
     """A review found the idle guide cut off on a phone, and four lines in a 600 px black pane on a desk.
 
