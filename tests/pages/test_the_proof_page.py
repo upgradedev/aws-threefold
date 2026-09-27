@@ -71,6 +71,16 @@ def _unescaped(markup: str) -> str:
             .replace("&#039;", "'").replace("&amp;", "&"))
 
 
+def _card(page: str, title: str) -> str:
+    """The one card drawn under this title. A series' label is also a row of the comparison table, so the heading decides."""
+    (found,) = [part for part in page.split("<section")[1:] if f'<h2 class="tf-section-title">{title}</h2>' in part]
+    return found
+
+
+def _series_evidence(card: str) -> str:
+    return card.split('data-proof="series-evidence"', 1)[1].split("</ul>", 1)[0]
+
+
 # ------------------------------------------------------------------- the route
 
 
@@ -115,8 +125,19 @@ def test_the_committed_snapshot_is_shown_as_it_was_written(tmp_path: Path) -> No
     assert 'data-proof="pilot"' not in out["view"], "no committed series is a pilot"
     if "private" in COMMITTED:
         assert out["metrics"].get("calls_governed") == f"{COMMITTED['private']['calls_governed']:,}"
+    # Each series' card cites the evidence the snapshot gives that series, and
+    # the method's card only the method.
+    for section in series:
+        own = _series_evidence(_card(page, section["label"]))
+        assert own.count("<li") == len(section["evidence"]), section["label"]
+        for item in section["evidence"]:
+            assert item["path"] in own, f"{section['label']} does not cite {item['path']}"
+            if "href" in item:
+                assert f'href="{item["href"]}"' in own
+    method = _card(page, "How this was measured")
     for item in COMMITTED["method"]:
-        assert item["path"] in page
+        assert item["path"] in method
+    assert "docs/evidence/" not in method and "benchmark/results/" not in method
 
 
 def test_a_pilot_snapshot_says_it_is_not_a_result(tmp_path: Path) -> None:
@@ -166,6 +187,43 @@ def test_a_measured_snapshot_shows_each_figure_with_its_source_and_its_date(tmp_
     # An evidence link is followed only when it is an https address.
     assert 'href="https://example.test/acme/threefold/blob/main/docs/evidence/BENCHMARK_2026-09-30.md"' in out["view"]
     assert "javascript:" not in out["view"]
+
+
+def test_each_series_card_cites_its_own_report_and_never_another_series(tmp_path: Path) -> None:
+    """Two series of one day: each card lists its own report and rows, and the method's card neither."""
+    out = proof(
+        r"""
+  const sonnet = JSON.parse(JSON.stringify(MEASURED.benchmark));
+  sonnet.label = 'Standard tasks · Claude Code · claude-sonnet-5';
+  const haiku = JSON.parse(JSON.stringify(MEASURED.benchmark));
+  Object.assign(haiku, {
+    label: 'Standard tasks · Claude Code · claude-haiku-4-5', models: ['claude-haiku-4-5'], run_ids: ['20260930T100000Z'],
+    source: 'benchmark/report.py over benchmark/results/20260930T100000Z.jsonl',
+    evidence: [
+      { label: 'The report', path: 'docs/evidence/BENCHMARK_2026-09-30-HAIKU.md', href: 'https://example.test/acme/threefold/blob/main/docs/evidence/BENCHMARK_2026-09-30-HAIKU.md' },
+      { label: 'The rows', path: 'benchmark/results/20260930T100000Z.jsonl' }
+    ]
+  });
+  answer = proofAnswer(Object.assign({}, MEASURED, { benchmarks: [sonnet, haiku], benchmark: sonnet }));
+  await visit('#/proof');
+  out.view = view();
+""",
+        tmp_path,
+    )
+    page = _unescaped(out["view"])
+    sonnet = _series_evidence(_card(page, "Standard tasks · Claude Code · claude-sonnet-5"))
+    haiku = _series_evidence(_card(page, "Standard tasks · Claude Code · claude-haiku-4-5"))
+    assert 'href="https://example.test/acme/threefold/blob/main/docs/evidence/BENCHMARK_2026-09-30.md"' in sonnet
+    assert "benchmark/results/20260930T090000Z.jsonl" in sonnet
+    assert "BENCHMARK_2026-09-30-HAIKU.md" not in sonnet and "20260930T100000Z" not in sonnet
+    assert 'href="https://example.test/acme/threefold/blob/main/docs/evidence/BENCHMARK_2026-09-30-HAIKU.md"' in haiku
+    assert "benchmark/results/20260930T100000Z.jsonl" in haiku
+    assert "BENCHMARK_2026-09-30.md" not in haiku and "20260930T090000Z" not in haiku
+    # A path is listed even when its link is not an https address, and that link is dropped.
+    assert "javascript:" not in out["view"]
+    method = _card(page, "How this was measured")
+    assert "scripts/build_proof.py" in method
+    assert "docs/evidence/" not in method and "benchmark/results/" not in method, "The first series' report would read as every series'"
 
 
 def test_a_false_alarm_rate_the_totals_cannot_give_says_why(tmp_path: Path) -> None:
@@ -380,34 +438,11 @@ def test_the_lead_lane_is_told_apart_at_zero_and_no_lane_is_a_tab_stop(tmp_path:
     assert "top: 2px; bottom: 2px; width: 3px; border-radius: 1px; background: var(--c); }" in css, "The tick wears the lane's colour"
 
 
-def test_each_series_names_its_own_evidence_and_the_repository_is_linked(tmp_path: Path) -> None:
-    out = proof(
-        r"""
-  answer = proofAnswer(COMMITTED);
-  await visit('#/proof');
-  out.view = view();
-""",
-        tmp_path,
-    )
-    page = out["view"]
-    series = [b for b in COMMITTED["benchmarks"] if b.get("evidence")]
-    assert page.count('data-proof="series-evidence"') == len(series), "Every series with evidence names it on its own card"
-    for b in series:
-        for item in b["evidence"]:
-            assert item["path"] in page
-    assert 'tabindex="0" role="region" aria-label="The benchmark, every series (scrolls sideways)"' in page, "A keyboard can scroll the table"
-    assert 'href="https://github.com/upgradedev/aws-threefold"' in page and "github.com/upgradedev/aws-threefold</a>, at the path shown" in page
+def test_each_series_names_its_own_evidence_and_every_path_opens(tmp_path: Path) -> None:
+    """Each series cites the report made from its own rows, on its own card, and each path is a link.
 
-
-def test_a_report_two_series_are_given_is_named_on_neither_card_and_each_path_opens(tmp_path: Path) -> None:
-    """No card cites a report about another model, and every evidence path is a link.
-
-    The committed snapshot gives the Sonnet and the Haiku series one report,
-    BENCHMARK_2026-09-22.md, whose Source rows line names the Sonnet rows; the
-    Haiku card cited it. A report two series with different rows are given is
-    left off both cards (it stays in the Evidence list, under the lead series),
-    and a card with no report of its own says where its report is found. Each
-    path the snapshot gives without a link opens in the public repository.
+    The committed snapshot is built with --evidence-base, so every path it
+    gives already carries its address in the public repository.
     """
     out = proof(
         r"""
@@ -419,22 +454,68 @@ def test_a_report_two_series_are_given_is_named_on_neither_card_and_each_path_op
     )
     page = out["view"]
     cards = page.split("How this was measured")[0]
+    series = [b for b in COMMITTED["benchmarks"] if b.get("evidence")]
+    lists = re.findall(r'data-proof="series-evidence">(.*?)</ul>', cards, re.S)
+    assert len(lists) == len(series), "Every series with evidence names it on its own card"
+    reports = [[i["path"] for i in b["evidence"] if i["path"].endswith(".md")] for b in series]
+    assert all(len(r) == 1 for r in reports) and len({r[0] for r in reports}) == len(series), "Each series has a report of its own"
+    for markup, b in zip(lists, series):
+        for item in b["evidence"]:
+            assert f'href="https://github.com/upgradedev/aws-threefold/blob/main/{item["path"]}"' in markup
+    assert 'tabindex="0" role="region" aria-label="The benchmark, every series (scrolls sideways)"' in page, "A keyboard can scroll the table"
+
+
+def _shared_and_unlinked(snapshot: dict) -> dict:
+    """An older snapshot: paths without links, and the Haiku series given the Sonnet series' report."""
+    older = json.loads(json.dumps(snapshot))
+    for item in [i for b in older["benchmarks"] for i in b.get("evidence", [])] + older.get("method", []) + older["benchmark"].get("evidence", []):
+        item.pop("href", None)
+    haiku = next(b for b in older["benchmarks"] if "haiku" in b["label"] and b["label"].startswith("Standard"))
+    haiku["evidence"] = [
+        dict(i, path="docs/evidence/BENCHMARK_2026-09-22.md") if i["path"].endswith(".md") else i for i in haiku["evidence"]
+    ]
+    return older
+
+
+def test_a_report_two_series_are_given_is_named_on_neither_card_and_each_path_opens(tmp_path: Path) -> None:
+    """No card cites a report about another model, and every evidence path is a link.
+
+    A snapshot built before each series was matched to its own report gave the
+    Sonnet and the Haiku series one report, BENCHMARK_2026-09-22.md, whose
+    Source rows line names the Sonnet rows, and the Haiku card cited it. A
+    report two series with different rows are given is left off both cards and
+    named once in the method card's Evidence list, and a card with no report of
+    its own says where its report is found. Each path a snapshot gives without
+    a link opens in the public repository.
+    """
+    older = _shared_and_unlinked(COMMITTED)
+    out = proof(
+        f"""
+  answer = proofAnswer({json.dumps(older)});
+  await visit('#/proof');
+  out.view = view();
+""",
+        tmp_path,
+    )
+    page = out["view"]
+    cards = page.split("How this was measured")[0]
     shared = "docs/evidence/BENCHMARK_2026-09-22.md"
-    claims = [b for b in COMMITTED["benchmarks"] if any(i.get("path") == shared for i in b.get("evidence", []))]
-    assert len({b["source"] for b in claims}) > 1, "The committed snapshot no longer gives one report to two series; this test guards that case"
+    claims = [b for b in older["benchmarks"] if any(i.get("path") == shared for i in b.get("evidence", []))]
+    assert len({b["source"] for b in claims}) > 1
     lists = re.findall(r'data-proof="series-evidence">(.*?)</ul>', cards, re.S)
     assert lists and not any(shared in markup for markup in lists), "A report two series are given is named on neither card"
     method = page.split("How this was measured")[1]
-    assert shared in method, "It stays in the Evidence list"
+    assert method.count(shared + "</a>") == 1, "It is named once, in the method card's Evidence list"
     said = re.sub(r"\s+([,.])", r"\1", re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", cards)))
-    for b in COMMITTED["benchmarks"]:
+    for b in claims:
         rows = [i["path"] for i in b.get("evidence", []) if i["path"].endswith(".jsonl")]
         assert f"is the file in docs/evidence/ whose Source rows line names {', '.join(rows)}." in said, f"{b['label']} does not say where its report is"
     assert said.count("This snapshot names one report for this series and for a series with other result rows, so it is not listed here.") == len(claims)
     assert 'href="https://github.com/upgradedev/aws-threefold/tree/main/docs/evidence"' in cards
-    for b in COMMITTED["benchmarks"]:
+    for b in older["benchmarks"]:
         for item in b.get("evidence", []):
             assert f'href="https://github.com/upgradedev/aws-threefold/blob/main/{item["path"]}"' in page
+    assert 'href="https://github.com/upgradedev/aws-threefold"' in method and "github.com/upgradedev/aws-threefold</a>, at the path shown" in method
     assert "each path opens it on the main branch" in method
 
 

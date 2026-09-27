@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "generated_at": "2026-09-27T08:09:51Z",
+  "generated_at": "2026-09-27T20:30:24Z",
   "generated_by": "scripts/build_proof.py",
   "benchmarks": [
     {
@@ -126,11 +126,13 @@
       "evidence": [
         {
           "label": "The report benchmark/report.py wrote: method, every result and its limits",
-          "path": "docs/evidence/BENCHMARK_2026-09-22.md"
+          "path": "docs/evidence/BENCHMARK_2026-09-22.md",
+          "href": "https://github.com/upgradedev/aws-threefold/blob/main/docs/evidence/BENCHMARK_2026-09-22.md"
         },
         {
           "label": "The result rows it was computed from",
-          "path": "benchmark/results/20260922T143932Z.jsonl"
+          "path": "benchmark/results/20260922T143932Z.jsonl",
+          "href": "https://github.com/upgradedev/aws-threefold/blob/main/benchmark/results/20260922T143932Z.jsonl"
         }
       ],
       "family": "standard",
@@ -259,11 +261,13 @@
       "evidence": [
         {
           "label": "The report benchmark/report.py wrote: method, every result and its limits",
-          "path": "docs/evidence/BENCHMARK_2026-09-22.md"
+          "path": "docs/evidence/BENCHMARK_2026-09-22-HAIKU.md",
+          "href": "https://github.com/upgradedev/aws-threefold/blob/main/docs/evidence/BENCHMARK_2026-09-22-HAIKU.md"
         },
         {
           "label": "The result rows it was computed from",
-          "path": "benchmark/results/20260922T145644Z.jsonl"
+          "path": "benchmark/results/20260922T145644Z.jsonl",
+          "href": "https://github.com/upgradedev/aws-threefold/blob/main/benchmark/results/20260922T145644Z.jsonl"
         }
       ],
       "family": "standard",
@@ -389,8 +393,14 @@
       ],
       "evidence": [
         {
+          "label": "The report benchmark/report.py wrote: method, every result and its limits",
+          "path": "docs/evidence/BENCHMARK_2026-09-23-CODEX.md",
+          "href": "https://github.com/upgradedev/aws-threefold/blob/main/docs/evidence/BENCHMARK_2026-09-23-CODEX.md"
+        },
+        {
           "label": "The result rows it was computed from",
-          "path": "benchmark/results/20260923T025154Z-codex.jsonl"
+          "path": "benchmark/results/20260923T025154Z-codex.jsonl",
+          "href": "https://github.com/upgradedev/aws-threefold/blob/main/benchmark/results/20260923T025154Z-codex.jsonl"
         }
       ],
       "family": "standard",
@@ -515,8 +525,14 @@
       ],
       "evidence": [
         {
+          "label": "The report benchmark/report.py wrote: method, every result and its limits",
+          "path": "docs/evidence/BENCHMARK_2026-09-22-PRESSURE-SONNET.md",
+          "href": "https://github.com/upgradedev/aws-threefold/blob/main/docs/evidence/BENCHMARK_2026-09-22-PRESSURE-SONNET.md"
+        },
+        {
           "label": "The result rows it was computed from",
-          "path": "benchmark/results/20260922T161455Z-pressure.jsonl"
+          "path": "benchmark/results/20260922T161455Z-pressure.jsonl",
+          "href": "https://github.com/upgradedev/aws-threefold/blob/main/benchmark/results/20260922T161455Z-pressure.jsonl"
         }
       ],
       "family": "pressure",
@@ -641,8 +657,14 @@
       ],
       "evidence": [
         {
+          "label": "The report benchmark/report.py wrote: method, every result and its limits",
+          "path": "docs/evidence/BENCHMARK_2026-09-22-PRESSURE-HAIKU.md",
+          "href": "https://github.com/upgradedev/aws-threefold/blob/main/docs/evidence/BENCHMARK_2026-09-22-PRESSURE-HAIKU.md"
+        },
+        {
           "label": "The result rows it was computed from",
-          "path": "benchmark/results/20260922T162306Z-pressure.jsonl"
+          "path": "benchmark/results/20260922T162306Z-pressure.jsonl",
+          "href": "https://github.com/upgradedev/aws-threefold/blob/main/benchmark/results/20260922T162306Z-pressure.jsonl"
         }
       ],
       "family": "pressure",
@@ -765,8 +787,14 @@
       ],
       "evidence": [
         {
+          "label": "The report benchmark/report.py wrote: method, every result and its limits",
+          "path": "docs/evidence/BENCHMARK_2026-09-23-CODEX-PRESSURE.md",
+          "href": "https://github.com/upgradedev/aws-threefold/blob/main/docs/evidence/BENCHMARK_2026-09-23-CODEX-PRESSURE.md"
+        },
+        {
           "label": "The result rows it was computed from",
-          "path": "benchmark/results/20260923T031215Z-pressure-codex.jsonl"
+          "path": "benchmark/results/20260923T031215Z-pressure-codex.jsonl",
+          "href": "https://github.com/upgradedev/aws-threefold/blob/main/benchmark/results/20260923T031215Z-pressure-codex.jsonl"
         }
       ],
       "family": "pressure",
@@ -896,11 +924,13 @@
     "evidence": [
       {
         "label": "The report benchmark/report.py wrote: method, every result and its limits",
-        "path": "docs/evidence/BENCHMARK_2026-09-22.md"
+        "path": "docs/evidence/BENCHMARK_2026-09-22.md",
+        "href": "https://github.com/upgradedev/aws-threefold/blob/main/docs/evidence/BENCHMARK_2026-09-22.md"
       },
       {
         "label": "The result rows it was computed from",
-        "path": "benchmark/results/20260922T143932Z.jsonl"
+        "path": "benchmark/results/20260922T143932Z.jsonl",
+        "href": "https://github.com/upgradedev/aws-threefold/blob/main/benchmark/results/20260922T143932Z.jsonl"
       }
     ],
     "family": "standard",
@@ -908,11 +938,11 @@
   },
   "private": {
     "source": "GET /api/overview?days=30 and GET /api/projects on the owner's private stack, read with the operator key; only these totals were kept",
-    "snapshot_at": "2026-09-27T08:09:51.058969+00:00",
+    "snapshot_at": "2026-09-27T20:30:23.660525+00:00",
     "window_days": 30,
     "days_observed": 7,
-    "calls_governed": 4936,
-    "would_refuse": 139,
+    "calls_governed": 5392,
+    "would_refuse": 164,
     "refused": 0,
     "reviewed": 5,
     "false_alarms": 0,
@@ -938,23 +968,28 @@
   "method": [
     {
       "label": "The benchmark harness, its tasks and its independent checkers",
-      "path": "benchmark/README.md"
+      "path": "benchmark/README.md",
+      "href": "https://github.com/upgradedev/aws-threefold/blob/main/benchmark/README.md"
     },
     {
       "label": "How the benchmark's rows become rates and a headline",
-      "path": "benchmark/report.py"
+      "path": "benchmark/report.py",
+      "href": "https://github.com/upgradedev/aws-threefold/blob/main/benchmark/report.py"
     },
     {
       "label": "How self-correction is computed from the ledger",
-      "path": "src/threefold/application/insights.py"
+      "path": "src/threefold/application/insights.py",
+      "href": "https://github.com/upgradedev/aws-threefold/blob/main/src/threefold/application/insights.py"
     },
     {
       "label": "The routes the owner's totals are read from",
-      "path": "src/threefold/web/openapi.json"
+      "path": "src/threefold/web/openapi.json",
+      "href": "https://github.com/upgradedev/aws-threefold/blob/main/src/threefold/web/openapi.json"
     },
     {
       "label": "How this snapshot was built, and what it refuses to write",
-      "path": "scripts/build_proof.py"
+      "path": "scripts/build_proof.py",
+      "href": "https://github.com/upgradedev/aws-threefold/blob/main/scripts/build_proof.py"
     }
   ]
 }

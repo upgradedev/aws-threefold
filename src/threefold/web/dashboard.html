@@ -6392,9 +6392,9 @@
 
     // A report is a series' own only when no series with other result rows
     // names the same file. A snapshot can give one report to two series run
-    // on the same day; such a report is named on neither card (it stays in
-    // the Evidence list below, under the lead series), so no card cites a
-    // document about another model.
+    // on the same day; such a report is named on neither card (the method
+    // card's Evidence list names it once), so no card cites a document about
+    // another model.
     function sharedReports(list) {
       const sources = {};
       list.forEach(b => (Array.isArray(b.evidence) ? b.evidence : []).forEach(item => {
@@ -6508,9 +6508,21 @@
         : html`<span class="font-mono text-xs text-gray-200 tf-break">${item.path}</span>`}<span class="text-xs text-gray-500">${item.label || ''}</span></li>`;
     }
 
+    // The files behind the method, for every series alike. A series' own
+    // report and rows are on its card: listed here too, the first series'
+    // report would read as the evidence for all of them.
     function methodCard(proof) {
-      const b = proof.benchmark && typeof proof.benchmark === 'object' ? proof.benchmark : {};
-      const items = [].concat(Array.isArray(b.evidence) ? b.evidence : [], Array.isArray(proof.method) ? proof.method : []);
+      // A report the snapshot gives to two series with other rows is named on
+      // neither card (sharedReports), so it is listed here, once, beside the
+      // files behind the method. A series' own report stays on its card.
+      const list = Array.isArray(proof.benchmarks) ? proof.benchmarks.filter(b => b && typeof b === 'object') : [];
+      const shared = sharedReports(list);
+      const seen = new Set();
+      const sharedItems = [];
+      list.forEach(b => (Array.isArray(b.evidence) ? b.evidence : []).forEach(i => {
+        if (i && typeof i.path === 'string' && shared.has(i.path) && !seen.has(i.path)) { seen.add(i.path); sharedItems.push(i); }
+      }));
+      const items = sharedItems.concat(Array.isArray(proof.method) ? proof.method : []);
       const linked = items.some(i => i && typeof i.href === 'string' && /^https:\/\//.test(i.href));
       const terms = [
         ['Violation landed', 'the benchmark\'s own checkers found a governed violation in the files the agent left behind.'],
@@ -6520,7 +6532,7 @@
         ['Overhead', 'the mean turns, seconds and cost of a run under a condition, over the same means with no guidance.'],
         ['Reviewed and false-alarm rate', 'the would-refuse calls the owner labelled, and the share of them labelled false alarm. The rate is given only for a window in which nothing was refused: the totals count false alarms on refused calls as well, and reviewed calls on would-refuse calls only.']
       ];
-      return card('How this was measured', 'The definitions behind every figure above, and the files that hold the evidence.', html`
+      return card('How this was measured', 'The definitions behind every figure above, and the files that compute them. Each series cites its own report and rows on its card.', html`
         <dl class="space-y-2">${terms.map(([term, text]) => html`<div class="text-xs"><dt class="inline font-semibold text-gray-200">${term}:</dt> <dd class="inline text-gray-400">${text}</dd></div>`)}</dl>
         <div class="mt-4 pt-3 border-t border-gray-800">
           <p class="tf-label">Evidence</p>

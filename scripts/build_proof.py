@@ -1,9 +1,10 @@
 """Builds src/threefold/web/proof.json, the snapshot the dashboard's #/proof page shows.
 
-    python scripts/build_proof.py --benchmark benchmark/results/<run-id>.jsonl [--benchmark <more>]
-    python scripts/build_proof.py --benchmark <rows or summary> \\
+    python scripts/build_proof.py --series benchmark/results/<run-id>.jsonl [--series <another run>]
+    python scripts/build_proof.py --series <run> [--series <another run>] \\
         --private-endpoint https://<host>/<stage>/ --key-file <file holding the operator key> \\
-        [--evidence-base https://<where the repository's files can be read>/]
+        [--evidence-base https://github.com/<owner>/<repository>/blob/main]
+    python scripts/build_proof.py --benchmark <rows or summary> [--benchmark <more>]
 
 Two sections, each optional, each naming where it came from and when its
 snapshot was taken. A section that was not measured is left out, and the page
@@ -13,7 +14,10 @@ benchmark   What benchmark/report.py computes from the result rows given, or
             from a summary its aggregate() produced, per condition, with its
             headline sentence exactly as report.headline() words it. Nothing
             here recomputes a rate: the numbers are report.py's own, so the
-            page and docs/evidence/BENCHMARK_*.md cannot disagree.
+            page and docs/evidence/BENCHMARK_*.md cannot disagree. The
+            report a series cites is the one that says it was made from
+            exactly that series' rows; a series no report was made from
+            cites none.
 
 private     The owner's own use, from GET api/overview?days=30 and GET
             api/projects on a private stack, read with the operator key. Only
@@ -231,6 +235,38 @@ def _condition(name: str, stat: Mapping[str, Any], base: Optional[Mapping[str, A
     }
 
 
+# Where benchmark/report.py writes its reports, each ending with the line that
+# names the rows it was made from, as render() words it:
+#     Source rows: `benchmark/results/<run-id>.jsonl`, `<more>`. Run ids: <run-id>, <more>.
+EVIDENCE_DIR = report.EVIDENCE_DIR
+SOURCE_ROWS = "Source rows: "
+
+
+def reports_made_from(sources: Sequence[str]) -> List[Path]:
+    """The reports in docs/evidence/ made from exactly these rows, by the line each names them on.
+
+    A report is found by what it says it was made from, never by its name:
+    report.py names a report by its date, so a Sonnet and a Haiku matrix run
+    on one day both lead to the one report that carries the date. A report
+    made from more rows or fewer holds other figures, so it is not these
+    rows' report either, and rows no report was made from cite none rather
+    than a neighbour's. The rows are compared as report.py and this script
+    both name them: a path in the repository, or a file name alone.
+    """
+    wanted = set(sources)
+    found = []
+    for path in sorted(EVIDENCE_DIR.glob("BENCHMARK_*.md")):
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeDecodeError):
+            continue
+        # The last such line is the one render() ends the report with.
+        named = [line for line in lines if line.startswith(SOURCE_ROWS)]
+        if named and set(re.findall(r"`([^`]+)`", named[-1].split(". Run ids:", 1)[0])) == wanted:
+            found.append(path)
+    return found
+
+
 def benchmark_section(summary: Mapping[str, Any], sources: Sequence[str]) -> Dict[str, Any]:
     stats = summary["by_condition"]
     names = list(HEADLINE_CONDITIONS) + [name for name in summary.get("conditions") or [] if name not in HEADLINE_CONDITIONS]
@@ -240,11 +276,8 @@ def benchmark_section(summary: Mapping[str, Any], sources: Sequence[str]) -> Dic
         _condition(name, stats.get(name) or report.condition_stats([]), base, unmeasured.get(name, 0))
         for name in names
     ]
-    evidence = []
-    written = report.default_output(summary)
-    if written.is_file():
-        evidence.append({"label": "The report benchmark/report.py wrote: method, every result and its limits",
-                         "path": _relative(written)})
+    evidence = [{"label": "The report benchmark/report.py wrote: method, every result and its limits",
+                 "path": _relative(written)} for written in reports_made_from(sources)]
     evidence += [{"label": "The result rows it was computed from", "path": source} for source in sources]
     dates = list(summary.get("dates") or [])
     return {
@@ -517,7 +550,11 @@ def evidence_base(url: Optional[str]) -> Optional[str]:
     """Where the repository's files can be read, for the evidence links, or None to list paths only.
 
     Given by the owner, never guessed: a link to a repository that is not
-    there is worse than a path a reader can look up.
+    there is worse than a path a reader can look up. Each link is this
+    address followed by the file's path in the repository, so for a
+    repository on GitHub it is the address files are shown under,
+    https://github.com/<owner>/<repository>/blob/main, not the repository's
+    own, under which those paths lead nowhere.
     """
     if url is None:
         return None
@@ -528,9 +565,20 @@ def evidence_base(url: Optional[str]) -> Optional[str]:
 
 
 def _linked(items: Iterable[Mapping[str, Any]], base: Optional[str]) -> List[Dict[str, Any]]:
+    """The items, each with its absolute address under the base when its path is a file in the working tree.
+
+    The working tree stands in for the repository the base shows: the owner
+    builds the snapshot in the checkout it is committed from, and a file
+    present here but not yet pushed leads nowhere until it is. A file read
+    from outside the repository is named by its file name alone, which may
+    also be the name of a file at the repository's root, so a path with no
+    folder is listed and never linked; every evidence file of the repository
+    lives in a folder.
+    """
     if base is None:
         return [dict(item) for item in items]
-    return [dict(item, href=base + urllib.parse.quote(str(item["path"]))) for item in items]
+    return [dict(item, href=base + urllib.parse.quote(str(item["path"])))
+            if "/" in str(item["path"]) and (REPO_ROOT / str(item["path"])).is_file() else dict(item) for item in items]
 
 
 # ---------------------------------------------------------------- the check before writing
