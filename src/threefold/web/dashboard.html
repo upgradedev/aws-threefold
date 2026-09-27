@@ -2195,9 +2195,11 @@
 
       // Who sent the latest calls, and how. A hook mode is a hook's: only a
       // call that came through an agent's hook or CI has one. A call from a
-      // page (the demo page's buttons, or the probes pressing them) and a
-      // call that did not say how it arrived are named for what they are,
-      // with no mode, rather than as a hook too old to report one.
+      // page (the demo page's buttons, or the probes pressing them) is named
+      // for what it is, with no mode, rather than as a hook too old to report
+      // one. A call that did not say how it arrived is not counted as a
+      // hook's, but a mode it did report is shown, as the ledger and the
+      // project list show it.
       function agentsPanel(recent, stage, source) {
         if (!recent || !recent.length) return emptyNote('No agent has sent a call from this project in the window.');
         const callers = {};
@@ -2208,13 +2210,15 @@
           const key = how === 'page' ? 'page' : how + ':' + agent;
           if (!callers[key]) { callers[key] = { how, agent, modes: {}, last: row.timestamp, calls: 0 }; order.push(key); }
           if (how === 'hook') callers[key].modes[row.hook_mode || 'unknown'] = true;
+          else if (how === 'other' && row.hook_mode && row.hook_mode !== 'unknown') callers[key].modes[row.hook_mode] = true;
           callers[key].calls += 1;
         });
         const probes = source === 'probe';
         return html`<ul class="space-y-3">${order.map(key => {
           const info = callers[key];
           const modes = Object.keys(info.modes);
-          const capped = stage === 'enforce' && modes.indexOf('observe') !== -1;
+          const capped = info.how === 'hook' && stage === 'enforce' && modes.indexOf('observe') !== -1;
+          const chips = html`<div class="flex flex-wrap items-center gap-x-2 gap-y-1">${modes.map(m => html`<span class="tf-chip ${m === 'observe' ? 'tf-chip-amber' : m === 'managed' ? 'tf-chip-emerald' : 'tf-chip-gray'}" title="${HOOK_MODES[m] || m}">${m}</span><span class="text-xs text-gray-400">${HOOK_MODE_WORDS[m] || HOOK_MODES[m] || m}</span>`)}</div>`;
           const name = info.how === 'page'
             ? html`${T.icon('play', 16)}${probes ? 'The live probes' : 'The demo page'}`
             : html`${T.icon('terminal', 16)}${agentLabel(info.agent)}`;
@@ -2223,8 +2227,10 @@
               ? 'The service\'s own probes, sending the calls a page sends: not through a hook, so there is no hook mode. A page call always enforces, whatever the stage.'
               : 'Buttons pressed on a page here: not through a hook, so there is no hook mode. A page call always enforces, whatever the stage.'}</p>`
             : info.how === 'other'
-              ? html`<p class="text-xs text-gray-400" data-caller="other">Sent without saying how it arrived, so no hook mode is recorded.</p>`
-              : html`<div class="flex flex-wrap items-center gap-x-2 gap-y-1">${modes.map(m => html`<span class="tf-chip ${m === 'observe' ? 'tf-chip-amber' : m === 'managed' ? 'tf-chip-emerald' : 'tf-chip-gray'}" title="${HOOK_MODES[m] || m}">${m}</span><span class="text-xs text-gray-400">${HOOK_MODE_WORDS[m] || HOOK_MODES[m] || m}</span>`)}</div>`;
+              ? modes.length
+                ? html`<p class="text-xs text-gray-400" data-caller="other">Sent without saying how it arrived, though it reported ${modes.length === 1 ? 'a hook mode' : 'hook modes'}:</p>${chips}`
+                : html`<p class="text-xs text-gray-400" data-caller="other">Sent without saying how it arrived, so no hook mode is recorded.</p>`
+              : chips;
           return html`<li class="tf-card-quiet p-3 space-y-1.5">
             <div class="flex flex-wrap items-center justify-between gap-2">
               <span class="text-sm text-white inline-flex items-center gap-2">${name}</span>

@@ -691,13 +691,19 @@ def test_a_project_page_names_where_its_calls_come_from(tmp_path: Path) -> None:
 
 
 def test_the_agents_card_gives_a_hook_mode_only_to_calls_that_came_through_a_hook(tmp_path: Path) -> None:
-    """The demo page's calls, and calls that did not say how they came, are not an older hook."""
+    """The demo page's calls, and calls that did not say how they came, are not an older hook.
+
+    A call that did not say how it came but did report a hook mode shows that
+    mode, as the ledger and the project list do: a review found the card saying
+    no mode was recorded while the list read "hooks managed".
+    """
     out = ops(
         r"""
   const items = [
     row(1, { origin: 'page', agent: 'page', hook_mode: 'unknown' }), row(2, { origin: 'page', agent: 'page', hook_mode: 'unknown' }),
     row(3, { origin: 'unknown', agent: 'unknown', hook_mode: 'unknown' }),
-    row(4, { hook_mode: 'unknown' }), row(5)
+    row(4, { hook_mode: 'unknown' }), row(5),
+    row(6, { origin: 'unknown', agent: 'codex', hook_mode: 'managed' })
   ];
   answer = contract({ '/api/decisions': { status: 200, body: { items, next_cursor: null } } });
   await visit('#/projects/Acme-Billing');
@@ -719,6 +725,9 @@ def test_the_agents_card_gives_a_hook_mode_only_to_calls_that_came_through_a_hoo
     claude = next(w for w in words if "Claude Code" in w)
     assert "managed" in claude and "an older hook" in claude, "A hook that did not report its mode is still said to be one"
     assert sum("older hook" in w for w in words) == 1
+    codex = next(w for w in words if "Codex" in w)
+    assert "Sent without saying how it arrived, though it reported a hook mode: managed follows the stage" in codex,         "A mode the call did report is shown, not said to be missing"
+    assert "no hook mode is recorded" not in codex and "older hook" not in codex
     assert "The live probes" in text_of(out["probe"]) and "The demo page" not in text_of(out["probe"]), \
         "On the probes' own project, their page calls are named as theirs"
 
