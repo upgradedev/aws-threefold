@@ -466,14 +466,17 @@ metadata, in pages of at least 100 items and at most 50 pages per request.
 - **Logs.** The function's log group keeps 30 days; the API access log keeps 14
   days, because every line holds a client address.
 - **Metrics.** The function writes one CloudWatch Embedded Metric Format record
-  per call evaluated through the HTTP routes to `Threefold/Governance`
-  (dimensions `Project` and `Environment`); the fleet's tick calls the
-  evaluator directly and writes no such record, so the call-volume alarm
-  counts callers of the API only. Both stacks write that namespace, so five
-  metric filters read the same records from each stack's own log group into
-  `Threefold/<stack name>`:
+  to `Threefold/Governance` per call to `POST /evaluate-tool-call` (dimensions
+  `Project` and `Environment`) and one per call to the universal adapter
+  (dimension `Format`). `/simulate-loop`, `/simulate-secret`, the sandbox's
+  seeded calls and the fleet's tick call the evaluator without writing either
+  record, so the call-volume alarm counts calls to `/evaluate-tool-call` and
+  the universal adapter only. Both stacks write that namespace, so five metric
+  filters, each starting from either record, read the same records from each
+  stack's own log group into `Threefold/<stack name>`:
   `ToolCallsEvaluated`, `VerdictApproved`, `CircuitBreakerTripped`, `LatencyMs`,
-  `CurrentSessionCostUSD`.
+  `CurrentSessionCostUSD`. The last three are carried by the first route's
+  record alone.
 - **Alarms (11).** Function errors, throttles and an invocation over 12 seconds,
   near the 15-second timeout; API p95 latency, 5xx rate and 4xx rate; table
   throttled requests and system errors; calls into halted sessions; average
@@ -507,7 +510,7 @@ metadata, in pages of at least 100 items and at most 50 pages per request.
 |---|---|---|
 | Stack | `threefold-prod`, eu-west-1, with `threefold-prod-edge` in us-east-1 in front | a second stack from the same `deploy/template.yml` |
 | `PublicReads` | `true` | `false`: the ledger, sessions, rules and policy need the operator |
-| Operator key | none, so policy, rules and stage writes are refused and sign-in is closed | set, so the owner signs in with `threefold.py open` |
+| Operator key | none, so policy and rules writes and every stage write outside the `Acme-Sandbox-<8 hex>` projects are refused, and sign-in is closed | set, so the owner signs in with `threefold.py open` |
 | `DemoFleet` | `true`, so the fleet's schedule exists **[STATE-FILE]** | `false`, the default, so there is none **[STATE-FILE]** |
 | Traffic | the demo, the sandbox walkthrough, probes, visitors, the synthetic fleet, and a real coding agent's runs | the owner's own work at nine locations under `Acme-Proj-*` aliases **[STATE-FILE]**, every project in Observe in the snapshot of 2026-09-27 (`src/threefold/web/proof.json`) |
 | In this repository | its URLs, its evidence | its stack name only; its address and key live on the owner's machine and are never committed |
@@ -519,7 +522,8 @@ the real evaluator with `explain: false`, so no tick calls Bedrock. Now and
 then it also acts as an operator would: it labels would-refuse calls, promotes
 a project whose rules are ready and, rarely, demotes one. Those actions are
 made in process, not through the API, which is how fleet projects reach
-Enforce on a stack whose API refuses every stage write. The function accepts the tick only
+Enforce on a stack whose API refuses every stage write outside the
+`Acme-Sandbox-<8 hex>` projects. The function accepts the tick only
 from an event with no HTTP request context, so no caller of the API can
 trigger one; Lambda does not retry it, and a tick delivered twice finds its
 quarter hour claimed (`RUNCLAIM#`, section 5) and sends nothing. Nothing is
