@@ -32,6 +32,11 @@ ENFORCE = "enforce"
 OBSERVE = "observe"
 MODES = (ENFORCE, OBSERVE)
 
+# The keys the gates themselves are counted under (application/rule_keys.py,
+# FIXED_KEYS; a test keeps the two lists equal). A rule with one of these ids
+# would be keyed, rolled up and given fixes as that gate everywhere.
+RESERVED_IDS = ("LOOP", "PROTECTED_PATH", "UNREADABLE_WRITE", "CREDENTIAL", "BUDGET", "HALTED_SESSION", "NONE")
+
 # What ships, and what a deployment enforces until an architect replaces it.
 # The first rule is the behaviour this product had before rules existed, kept so
 # that turning the format on changes nothing until someone means it to. The rest
@@ -224,6 +229,9 @@ def validate_rules(raw: Any) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]
             refuse(f"mode must be \"enforce\" or \"observe\", not {raw_mode!r}")
             continue
         rule_id = str(entry.get("id") or f"rule-{len(usable) + 1}")[:80]
+        if rule_id in RESERVED_IDS:
+            refuse(f"id {rule_id!r} is the key a gate is counted under, so a rule may not take it")
+            continue
         if rule_id in seen_ids:
             refuse(f"id {rule_id!r} is used by an earlier rule, and a refusal must name one rule")
             continue

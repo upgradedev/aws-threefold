@@ -11,6 +11,7 @@ import base64
 import json
 import logging
 import sys
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -69,10 +70,14 @@ class ThreefoldHTTPRequestHandler(BaseHTTPRequestHandler):
             "headers": dict(self.headers),
             "body": body_bytes.decode("utf-8") if body_bytes else None,
             "requestContext": {
+                # A fresh id a request, as API Gateway gives one: the demo's
+                # scenarios name their session after it, so without it every
+                # local click would land in the same, already halted session.
+                "requestId": uuid.uuid4().hex,
                 "http": {
                     "method": method,
                     "path": path,
-                }
+                },
             },
         }
 

@@ -123,7 +123,10 @@ def shown_row(row: Mapping[str, Any]) -> Dict[str, Any]:
     """A ledger row as the application's pages show it."""
     shown = public_row({key: value for key, value in row.items() if not key.startswith("_")})
     key = stored_rule_key(shown)
-    category = category_for(key)
+    # A refusal no gate key names is Other, as /api/insights counts it (insights.categorise):
+    # the NONE category reads Allowed, which a refused call never was.
+    refused = str(shown.get("status") or "").upper().startswith("BLOCKED")
+    category = "OTHER" if refused and key == NONE else category_for(key)
     shown.update(
         rule_key=key,
         stage=shown.get("stage") or ("observe" if shown.get("dry_run") else "enforce"),
