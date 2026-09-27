@@ -41,6 +41,7 @@
   - FACE-DOCS: `README.md`, `benchmark/README.md`; PUBLICATION: `docs/SUBMISSION_DOSSIER.md`, `docs/BUILDER_CENTER_ARTICLE.md`, `docs/VIDEO_SCRIPT.md`; ARCH-DOCS: `docs/ARCHITECTURE.md`, `docs/WELL_ARCHITECTED.md`; OPS-DOCS: `docs/PROOF_OF_AWS_AGENT.md`, `docs/RUNBOOK.md`; each with the tests that pin its strings
   - UI FACE: `web/index.html` and its page tests; UI APP: `web/dashboard.html`, `web/assets/**`, the other pages and their tests
   - Round two, the server side of what the judges' review found: ROLLUPS `application/rollups.py` (a probe source, honest readiness) with the source enum in both OpenAPI documents; SANDBOX `application/sandbox.py` and the sandbox response in both OpenAPI documents, plus the drafting budget's wording wherever it says account-wide; PROOF `scripts/build_proof.py`; EDGE-404 `deploy/edge.yml`, `web/404.html`, `tests/unit/test_edge_*.py`; RULE-KEYS `application/rule_keys.py`; each with its tests
+  - Round three, the finish: UI-APP `web/dashboard.html`, `web/assets/**`, the shell pages and their tests, with `interfaces/app_routes.py` for the project answer's `source`; UI-FACE `web/index.html` and its tests; DOC-SYNC `README.md`, `benchmark/README.md`, `docs/*.md` (not STATE, LOG); SERVER2 `application/insights.py` (categorise), `application/fix_proposer.py` (the fix family), and their tests
 - Shared, one dispatch line each: `src/threefold/interfaces/api_handlers.py`, `src/threefold/web/openapi.json`, `docs/openapi.yaml`
 - Owner: `STATE.md`, `LOG.md`, `TRAPS.md`, `CLAUDE.md`; merges and deploys
 
