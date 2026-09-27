@@ -566,7 +566,7 @@ class FakeStack:
 
     def _application(self, verb, path, query, headers, body) -> Optional[Response]:
         if verb == "GET" and path == "/api/overview":
-            return self._json(200, self._overview(query))
+            return self._json(200, [] if "overview_not_object" in self.defects else self._overview(query))
         if verb == "GET" and path == "/api/decisions":
             rows = self._rows(query)
             limit = min(int(query.get("limit", 50)), 200)
@@ -858,7 +858,8 @@ OVERVIEW_SINCE_CHECKS = (
 
 
 def test_the_overview_s_fields_added_since_the_contract_are_checked_where_they_are_answered(monkeypatch):
-    probe, _ = _run(monkeypatch, FakeStack(), groups=["governance", "application"], expect="public")
+    stack = FakeStack()
+    probe, _ = _run(monkeypatch, stack, groups=["governance", "application"], expect="public")
     checks = _by_name(probe)
     for name in OVERVIEW_SINCE_CHECKS:
         assert checks[name].status == probe_live.PASS, checks[name]
@@ -866,8 +867,18 @@ def test_the_overview_s_fields_added_since_the_contract_are_checked_where_they_a
     assert re.search(r"fleet 4 \+ other \d+ \+ sandbox 3 = totals\.calls \d+", checks[OVERVIEW_SINCE_CHECKS[0]].evidence)
     assert "3 coding agent(s) = totals.coding_agents" in checks[OVERVIEW_SINCE_CHECKS[1]].evidence
     assert "6 of 9 refusals with a later call corrected, rate 0.6667" in checks[OVERVIEW_SINCE_CHECKS[3]].evidence
-    # The one answer is read for all of them: no second request, no second bounded ledger read on the stack.
-    assert sum(1 for c in probe.results if c.name.startswith("overview")) == 6
+    # The one answer is read for all of them: no second request, so no second bounded ledger read on the stack.
+    assert sum(1 for _, url, _, _ in stack.log if urlparse(url).path.endswith("/api/overview")) == 1
+
+
+def test_an_overview_that_is_not_an_object_fails_the_newer_checks_rather_than_passing_for_an_older_stack(monkeypatch):
+    probe, _ = _run(
+        monkeypatch, FakeStack(defects=("overview_not_object",)), groups=["governance", "application"], expect="public"
+    )
+    checks = _by_name(probe)
+    for name in OVERVIEW_SINCE_CHECKS:
+        assert checks[name].status == probe_live.FAIL, checks[name]
+        assert "not a JSON object" in checks[name].evidence, checks[name]
 
 
 def test_a_stack_that_predates_the_overview_s_newer_fields_is_skipped_on_them_not_failed(monkeypatch):

@@ -1806,6 +1806,10 @@ class Probe:
             return absent
         if got.status != 200:
             return FAIL, f"GET /api/overview {self.describe(got)}"
+        # Read as an object, a body that is not one has no key at all, and
+        # would pass for a stack that predates every field.
+        if not isinstance(got.json(), dict):
+            return FAIL, f"GET /api/overview answers 200 with a body that is not a JSON object: {self.snippet(got, 60)}"
         problems = problems_of(got.obj())
         if problems is None:
             return (FAIL if self.strict else SKIP), f"not deployed yet: GET /api/overview has no {lacks}"
