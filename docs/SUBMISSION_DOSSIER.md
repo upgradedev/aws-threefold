@@ -61,7 +61,8 @@ so the rollout had to show what a rule would stop before it stops anything.
    A stack can name projects that start in Enforce instead
    (`EnforceProjectPattern`); the public stack names the `Acme-Live-*`
    projects a real coding agent works in (section 6), since no operator is
-   there to promote them.
+   there to promote them. Both such projects read Enforce on the overview
+   with no stage stored for them [PRIMARY, 2026-09-27: `GET /api/overview`].
 4. **Suggests a validated fix with every refusal it can.** A rewritten file,
    a port and an adapter, or an environment lookup in place of a literal
    credential, run back through the same gates before it is offered; the hook
@@ -72,7 +73,8 @@ so the rollout had to show what a rule would stop before it stops anything.
    sign-in, the `#/try` sandbox walkthrough and a `#/proof` page. Daily rollups
    keep the charts exact however busy the ledger is. On the public stack the
    overview says where its calls came from: the synthetic Acme fleet, the
-   live agent, visitors' sandboxes, or anything else.
+   live agent, visitors' sandboxes, or anything else [PRIMARY, 2026-09-27:
+   `GET /api/overview`, its `sources`].
 6. **Connects in one command and signs in without a key.** `install.py`, served
    by the stack with its own address written in, installs the hook for the
    agents it finds; `threefold.py open` signs the operator in through a
@@ -101,8 +103,9 @@ so the rollout had to show what a rule would stop before it stops anything.
   metrics read into a namespace per stack, an SNS topic.
 - **Demo data:** on the public stack only (`DemoFleet`), an Amazon EventBridge
   Scheduler schedule sends a synthetic Acme fleet's calls through the real
-  gates every 15 minutes, and the overview and the first screen count those
-  calls apart and call them synthetic.
+  gates every 15 minutes [STATE-FILE], and the overview and the first screen
+  count those calls apart and call them synthetic [PRIMARY, 2026-09-27:
+  `GET /api/overview`, its `sources`, and the first screen].
 - **Code:** clean architecture with a standard-library domain, no build step,
   no chart library, no npm. The hook and the installer are single
   standard-library files.
@@ -156,13 +159,16 @@ so the rollout had to show what a rule would stop before it stops anything.
   2026-09-27], and the private stack 101 PASS, 0 FAIL, read-only
   [STATE-FILE].
 - A real coding agent works on the public stack.
-  `scripts/daily_live_agent.py` gives Claude Code or Codex, on alternate days,
-  one of the benchmark's Acme tasks in an `Acme-Live-*` project that starts in
-  Enforce, and the overview counts its calls as a source of their own. Two
-  runs as of 2026-09-27: Codex on 2026-09-26, 8 calls, one refused (falsely, challenge
-  5), and Claude Code on 2026-09-27, 4 calls, none refused; in both no
-  violation landed and the acceptance tests passed
-  (`benchmark/results/live/`) [PRIMARY, 2026-09-27].
+  `scripts/daily_live_agent.py` gives Claude Code or Codex, alternating by
+  date, one of the benchmark's Acme tasks in an `Acme-Live-*` project that
+  starts in Enforce, and the overview counts its calls as a source of their
+  own. Until the owner creates its scheduled task, a day runs only when the
+  script is started by hand [STATE-FILE]. Two runs as of 2026-09-27: Codex on
+  2026-09-26, 8 calls, one refused (falsely, challenge 5), and Claude Code on
+  2026-09-27, 4 calls, none refused; the overview's live source held those
+  12 calls in 2 projects [PRIMARY, 2026-09-27: `GET /api/overview`]. In both
+  runs no violation landed and the acceptance tests passed, by their rows in
+  `benchmark/results/live/`.
 - Threefold was measured against the alternative rather than asserted over it.
   162 Claude Code runs on 2026-09-22, two models, two task families, graded by
   a checker that does not import Threefold: a governed violation landed in

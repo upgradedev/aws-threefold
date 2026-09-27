@@ -30,7 +30,7 @@
   > Amazon Bedrock never decides. It explains a refusal to a person, and every
   > response says which one you are reading."
 
-## Scene 3: the two-stage rollout, live (0:45 to 1:45)
+## Scene 3: the two-stage rollout, live (0:45 to 1:40)
 
 - **Visual:** open `https://d1og72wpk4aqig.cloudfront.net/dashboard.html#/try`
   and walk the five steps. Note the sandbox's name: scene 4 uses it.
@@ -63,7 +63,7 @@
   > about the call changed; the stage did. Next, the same promotion refuses a
   > real agent. Demote is one click."
 
-## Scene 4: one command, and a real agent refused (1:45 to 2:15)
+## Scene 4: one command, and a real agent refused (1:40 to 2:15)
 
 - **Visual:** the dashboard's `#/connect` page, then the command run in a
   synthetic repository, with the sandbox from scene 3 as the project:
@@ -95,23 +95,21 @@
   calls come from (the synthetic Acme fleet among them) in frame; the
   CloudWatch dashboard `threefold-prod-operations` with its alarms; then the
   dashboard's `#/proof` page, on its chart "Did a violation land?", which
-  shows the six measured series (four of Claude Code, two of Codex). Hold on
-  the Threefold lane, which reads 0% in every row, and let the pressure rows'
-  "Tests passed, Threefold" figures (67%, 44% and 67%) stay readable in the
-  same shot: the cost is part of the claim, not a footnote.
+  shows the six measured series (four of Claude Code, two of Codex). Keep the
+  card's verdict above the chart in frame: its cost sentence, 16 of 27 runs
+  of the pressure tasks across both agents, is the figure the narration
+  speaks. Hold on the Threefold lane, which reads 0% in every row, and let
+  the pressure rows' "Tests passed, Threefold" figures (67%, 44% and 67%)
+  stay readable in the same shot: the cost is part of the claim, not a
+  footnote.
 - **Narration:**
-  > "It runs on AWS behind CloudFront and AWS WAF, on one Lambda function and one
-  > DynamoDB table, with eleven CloudWatch alarms and point-in-time recovery. A
-  > live probe checks the project's claims against the deployed stack. And we
-  > measured it: a hundred and sixty-two headless Claude Code runs, two models,
-  > graded by a checker that does not import Threefold. With the rules only
-  > written in CLAUDE.md, the stronger model kept them and the cheaper one did
-  > not — violations landed in seventeen per cent of ordinary runs, and in more
-  > than half of the runs where the prompt itself asked for the shortcut. With
-  > Threefold enforcing, none landed, in any series. The cost is honest too:
-  > under those prompts the agent finished ten of eighteen runs and otherwise
-  > stopped and reported the conflict. Try the rollout yourself at the link
-  > below. It takes a minute."
+  > "On AWS, eleven CloudWatch alarms watch it. We measured it on Claude Code
+  > and Codex, graded by a checker that does not import Threefold. A violation
+  > landed in every series with no guidance, in three with the rules only
+  > written down, and in none with Threefold enforcing. The cost: where the
+  > prompt asked for the shortcut, the agents finished sixteen of twenty-seven
+  > runs, and otherwise stopped and reported the conflict. Try it at the link
+  > below."
 - **End card:** `https://d1og72wpk4aqig.cloudfront.net/dashboard.html#/try`
 
 ---
@@ -124,11 +122,8 @@
 | The walkthrough's last call is decided by the promotion | `dashboard.html` sends it with `session_id` from `T.newSessionId('try-')`, so `application/projects.py`, `stage_applies`, applies the project's stage to it as to any hook's call. `tests/pages/test_the_walkthrough_proves_the_promotion.py` sends that call to a fresh sandbox before and after promoting it: `APPROVED` with `project_stage` `observe`, then `BLOCKED_BOUNDARY_VIOLATION` with `enforce` |
 | Visitors can promote only sandbox projects on the public stack | `infrastructure/security_middleware.py`: a project write is open without a key only where reads are public and the name is `Acme-Sandbox-<8 hex>`; the public stack has no operator key [STATE-FILE] |
 | A refused file is not created: Claude Code and Antigravity, and Codex over its patch tool | [STATE-FILE], `docs/evidence/ENFORCEMENT_2026-09-21.md` and `docs/evidence/ENFORCEMENT_2026-09-23.md`. Codex is one run, over `apply_patch`; its shell route is not measured |
-| Behind CloudFront and AWS WAF | [PRIMARY, 2026-09-22] `aws cloudfront list-distributions`: the distribution behind `d1og72wpk4aqig.cloudfront.net` is `Deployed` with the web ACL `threefold-prod-edge-web-acl` attached |
 | Eleven CloudWatch alarms | [PRIMARY, 2026-09-27] `aws cloudwatch describe-alarms --alarm-name-prefix threefold-prod-`: 11 alarms, all `OK` |
-| Point-in-time recovery | [PRIMARY, 2026-09-22] `aws dynamodb describe-continuous-backups`: `ENABLED` |
-| A live probe checks the claims | [PRIMARY, 2026-09-27] `docs/evidence/PROBES_2026-09-27-2-edge.md` and `docs/evidence/PROBES_2026-09-27-2.md`, run through the edge and at the API origin after that day's deploy: 117 PASS, 0 FAIL, 3 SKIP each |
-| 162 headless runs, two models, no violation under Threefold, and 10 of 18 pressure runs finished | [PRIMARY, 2026-09-22] the four reports `docs/evidence/BENCHMARK_2026-09-22.md`, `-HAIKU.md`, `-PRESSURE-SONNET.md` and `-PRESSURE-HAIKU.md`, from `benchmark/results/20260922T143932Z.jsonl`, `…145644Z.jsonl`, `…161455Z-pressure.jsonl` and `…162306Z-pressure.jsonl`. Violation landed, no guidance / rules in `CLAUDE.md` / Threefold: 17% / 0% / 0%, then 39% / 17% / 0%, then 67% / 0% / 0%, then 100% / 56% / 0%; acceptance tests passed under Threefold 100% (18/18), 100% (18/18), 67% (6/9), 44% (4/9). Grading is `benchmark/checks.py`, which does not import Threefold |
+| Claude Code and Codex, graded by a checker that does not import Threefold: a violation landed in every series with no guidance, in three with the rules only written down, and in none with Threefold enforcing; 16 of 27 pressure runs finished | [PRIMARY, 2026-09-22] the four Claude Code reports `docs/evidence/BENCHMARK_2026-09-22.md`, `-HAIKU.md`, `-PRESSURE-SONNET.md` and `-PRESSURE-HAIKU.md`, 162 runs from `benchmark/results/20260922T143932Z.jsonl`, `…145644Z.jsonl`, `…161455Z-pressure.jsonl` and `…162306Z-pressure.jsonl`; [PRIMARY, 2026-09-23] the two Codex reports `docs/evidence/BENCHMARK_2026-09-23-CODEX.md` and `-CODEX-PRESSURE.md`, 81 runs from `benchmark/results/20260923T025154Z-codex.jsonl` and `…031215Z-pressure-codex.jsonl`. Violation landed, no guidance / rules only written down (in `CLAUDE.md`, or `AGENTS.md` for Codex) / Threefold: 17% / 0% / 0%, then 39% / 17% / 0%, then 67% / 0% / 0%, then 100% / 56% / 0% for Claude Code, and 17% / 0% / 0%, then 100% / 11% / 0% for Codex; acceptance tests passed under Threefold 100% (18/18), 100% (18/18), 67% (6/9), 44% (4/9), then 100% (18/18), 67% (6/9). The pressure runs finished: Claude Code's two series 10 of 18, Codex's 6 of 9, 16 of 27 in all, the figure the live `#/proof` card's verdict states for the pressure tasks across both agents [PRIMARY, 2026-09-27: `GET /proof.json`, snapshot 2026-09-27T08:09:51Z]. Grading is `benchmark/checks.py`, which does not import Threefold |
 
 ---
 

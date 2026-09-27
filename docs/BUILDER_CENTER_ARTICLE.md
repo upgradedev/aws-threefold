@@ -118,6 +118,7 @@ browser ─────────────────────►├─
                               │                 ├─► DynamoDB, one table
                               │                 ├─► Bedrock, Claude Haiku 4.5
                               │                 └─► CloudWatch: EMF, 11 alarms, X-Ray
+EventBridge Scheduler (public stack only) ─► the same Lambda, every 15 minutes
 ```
 
 Checked on the live stacks **[PRIMARY, 2026-09-22]**: the web ACL is attached
@@ -131,11 +132,10 @@ and the function runs at 1,024 MB with a reserved concurrency of 25
 
 - **One Lambda function** answers every route, so the page's "try it" and a
   hook's verdict run the same code. The price: page reads and verdicts share one
-  reserved concurrency of 25 [PRIMARY, 2026-09-22: `get-function-concurrency`],
-  and nothing keeps them apart. API Gateway's throttle (100 requests a second,
-  burst 200) applies to each route separately, and the edge limits each
-  address; both bound a flood, and neither stops dashboard loads from crowding
-  out verdicts.
+  reserved concurrency of 25, and nothing keeps them apart. API Gateway's
+  throttle (100 requests a second, burst 200) applies to each route
+  separately, and the edge limits each address; both bound a flood, and
+  neither stops dashboard loads from crowding out verdicts.
 - **One DynamoDB table** holds sessions, the decision ledger by day, daily
   rollups written with `ADD` so charts stay exact however busy the ledger is,
   rules, project stages and sign-in records (stored only as hashes). All of it
@@ -208,12 +208,15 @@ and the function runs at 1,024 MB with a reserved concurrency of 25
   Threefold: rates under temptation, not base rates
   (`docs/evidence/BENCHMARK_2026-09-22*.md`).
 - **Does it hold for a real agent on the live stack?**
-  `scripts/daily_live_agent.py` gives Claude Code or Codex, on alternate days,
-  one of the benchmark's tasks in an `Acme-Live-*` project on the public
-  stack, which starts in Enforce. It had run twice by 2026-09-27
-  **[PRIMARY]**, `benchmark/results/live/`: Codex on 2026-09-26, 8 calls,
-  and Claude Code on 2026-09-27, 4 calls; in both no violation landed and the
-  acceptance tests passed. Codex's one refusal was false: a read ending in
+  `scripts/daily_live_agent.py` gives Claude Code or Codex, alternating by
+  date, one of the benchmark's tasks in an `Acme-Live-*` project on the public
+  stack, which starts in Enforce. Until the owner creates its scheduled task,
+  a day runs only when the script is started by hand **[STATE-FILE]**. It had
+  run twice by 2026-09-27: Codex on 2026-09-26, 8 calls, and Claude Code on
+  2026-09-27, 4 calls **[PRIMARY, 2026-09-27: `GET /api/overview`, the live
+  source at 12 calls in 2 projects]**. In both runs no violation landed and
+  the acceptance tests passed, by their rows in `benchmark/results/live/`.
+  Codex's one refusal was false: a read ending in
   PowerShell's `2>$null`, which the command check took for a write. The fix
   was deployed the next day, and looking for a way around it closed an older
   hole: `bash -c "echo ... > src/domain/\$f"` had been approved
