@@ -4,8 +4,11 @@ A review of the live edge found a mistyped address answered with the bucket's
 raw XML error: no Threefold chrome, no link home, and the bucket's request ids
 on show. `404.html` is that page. It is answered at any depth (`/nope.html`,
 `/app/nothing`), so the shared layer is linked from the site's root, not from
-beside the address asked for. Serving it with status 404 for the bucket's
-behavior alone is the edge's part, in `deploy/edge.yml`.
+beside the address asked for. The edge serves it with status 404 on the pages'
+behavior alone, and only for a page address (no file type, or .html): the two
+functions in `deploy/edge.yml`, held by `tests/unit/test_edge_page_not_found.py`.
+A missing script keeps the bucket's 404 and an API path its problem document,
+so the page claims no more than that.
 """
 from __future__ import annotations
 
@@ -31,6 +34,13 @@ def test_the_shared_layer_is_linked_from_the_root_so_any_depth_finds_it() -> Non
     assert '<link rel="stylesheet" href="__THREEFOLD_BASE_PATH__/assets/threefold.css" />' in page
     assert '<script src="__THREEFOLD_BASE_PATH__/assets/threefold.js"></script>' in page
     assert not re.search(r'(?:href|src)="assets/', page), "A relative asset breaks at /app/nothing"
+
+
+def test_the_page_claims_only_the_addresses_the_edge_answers_it_for() -> None:
+    page = _page()
+    assert "<span>Served with status 404 for a page address that has no page</span>" in page
+    assert "any address" not in page, "a missing script or an API path is not answered with this page"
+    assert "/docs/x.md" not in page, "a file of another type keeps the bucket's own 404"
 
 
 def test_the_address_asked_for_is_shown_as_text_only() -> None:

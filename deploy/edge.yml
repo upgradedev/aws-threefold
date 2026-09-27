@@ -151,13 +151,13 @@ Resources:
           # the bucket itself. S3 answers a request for a key that does not exist
           # with AccessDenied (403) to a reader that may not list the bucket, and
           # with NoSuchKey (404) to one that may, so the second grant is what lets
-          # a mistyped page answer 404. A distribution-wide custom error response
-          # would have been the other way to get there, and it is not used: it
-          # would also replace the API's own RFC 7807 problem documents, which are
-          # 403s and 404s too. The grant cannot be turned into a listing through
-          # the edge: the page behaviors forward no query string, so no list
-          # parameter reaches the bucket, and a request for the root is answered
-          # with DefaultRootObject rather than with the bucket.
+          # a file MissingPageFunction leaves alone answer 404. A distribution-wide
+          # custom error response would have been the other way to get there, and
+          # it is not used: it would also replace the API's own RFC 7807 problem
+          # documents, which are 403s and 404s too. The grant cannot be turned
+          # into a listing through the edge: the page behaviors forward no query
+          # string, so no list parameter reaches the bucket, and a request for the
+          # root is answered with DefaultRootObject rather than with the bucket.
           - Sid: CloudFrontReadsThroughOriginAccessControl
             Effect: Allow
             Principal:
@@ -540,6 +540,79 @@ Resources:
             return request;
         }
 
+  # --- a page that does not exist ------------------------------------------------------
+
+  # The pages' own not-found answer, on the default behavior alone (a custom
+  # error response would replace the API's problems too). MissingPageFunction
+  # sends a page address (no file type, or .html) that names no published page
+  # to /404.html and marks it; MissingPageStatusFunction makes that 200 a 404.
+  # Other missing files keep S3's own 404. PAGES is what publish_web.py writes
+  # but the assets, plus the root: a new page answers 404 until this stack is
+  # deployed with it. The status function repeats the page test, because whether
+  # it is handed the rewritten request is not documented. The rest is in
+  # tests/unit/test_edge_page_not_found.py.
+  MissingPageFunction:
+    Type: AWS::CloudFront::Function
+    Properties:
+      Name: !Sub '${AWS::StackName}-missing-page'
+      AutoPublish: true
+      FunctionConfig:
+        Comment: Sends a page address with no page to /404.html, marked.
+        Runtime: cloudfront-js-2.0
+      FunctionCode: |
+        var PAGES = {
+            '/': true, '/404.html': true, '/app': true, '/connect.html': true, '/console.html': true,
+            '/dashboard.html': true, '/index.html': true, '/rules.html': true, '/sessions.html': true,
+            '/settings.html': true, '/swagger.html': true
+        };
+        var MARK = 'x-threefold-page-not-found';
+
+        function isMissingPage(uri) {
+            var type = /\.([^./]+)$/.exec(uri);
+            return (!type || type[1].toLowerCase() === 'html') && PAGES[uri] !== true;
+        }
+
+        function handler(event) {
+            var request = event.request;
+            delete request.headers[MARK];
+            if (isMissingPage(request.uri)) {
+                request.uri = '/404.html';
+                request.headers[MARK] = { value: '1' };
+            }
+            return request;
+        }
+
+  MissingPageStatusFunction:
+    Type: AWS::CloudFront::Function
+    Properties:
+      Name: !Sub '${AWS::StackName}-missing-page-status'
+      AutoPublish: true
+      FunctionConfig:
+        Comment: Answers 404 where MissingPageFunction served /404.html.
+        Runtime: cloudfront-js-2.0
+      FunctionCode: |
+        var PAGES = {
+            '/': true, '/404.html': true, '/app': true, '/connect.html': true, '/console.html': true,
+            '/dashboard.html': true, '/index.html': true, '/rules.html': true, '/sessions.html': true,
+            '/settings.html': true, '/swagger.html': true
+        };
+        var MARK = 'x-threefold-page-not-found';
+
+        function isMissingPage(uri) {
+            var type = /\.([^./]+)$/.exec(uri);
+            return (!type || type[1].toLowerCase() === 'html') && PAGES[uri] !== true;
+        }
+
+        function handler(event) {
+            var request = event.request;
+            var response = event.response;
+            if (response.statusCode === 200 && (request.headers[MARK] || isMissingPage(request.uri))) {
+                response.statusCode = 404;
+                response.statusDescription = 'Not Found';
+            }
+            return response;
+        }
+
   # --- the distribution -----------------------------------------------------------------
 
   # One origin for the pages and the API twice. The default behavior serves the
@@ -660,6 +733,11 @@ Resources:
           CachedMethods: [GET, HEAD]
           Compress: true
           CachePolicyId: !Ref PageCachePolicy
+          FunctionAssociations:
+            - EventType: viewer-request
+              FunctionARN: !GetAtt MissingPageFunction.FunctionMetadata.FunctionARN
+            - EventType: viewer-response
+              FunctionARN: !GetAtt MissingPageStatusFunction.FunctionMetadata.FunctionARN
           ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
         # CloudFront matches these in order and takes the first. The API paths
         # use https-only rather than a redirect, because a redirected POST arrives

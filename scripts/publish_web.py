@@ -18,14 +18,20 @@ openapi.json is not uploaded: the function serves the document deployed with
 its code, and deploy/edge.yml sends /openapi.json to the function.
 
 A publish only adds and overwrites. A page deleted from src/threefold/web stays
-in the bucket, and the edge keeps serving it, until it is removed: --prune does
-that after the uploads, deleting every key this script could have written (a
-top-level .html page, "app", anything under assets/) that the publish did not
-just write. Keys of any other shape are listed and left alone, so a wrong
-bucket loses nothing but pages. The bucket is versioned, so a deletion leaves a
-delete marker, and the removed version stays restorable until the lifecycle
-rule expires it 30 days later; the same holds for every page a publish
-overwrites.
+in the bucket until it is removed: --prune does that after the uploads,
+deleting every key this script could have written (a top-level .html page,
+"app", anything under assets/) that the publish did not just write. Keys of any
+other shape are listed and left alone, so a wrong bucket loses nothing but
+pages. The bucket is versioned, so a deletion leaves a delete marker, and the
+removed version stays restorable until the lifecycle rule expires it 30 days
+later; the same holds for every page a publish overwrites.
+
+The edge serves a page only at an address deploy/edge.yml lists: its
+missing-page functions answer any other page address with 404.html and status
+404, and tests/unit/test_edge_page_not_found.py holds that list to the pages
+this script publishes. So a new page answers 404 at the edge until the edge
+stack is deployed with it listed, and a deleted one keeps being served, if it
+is still in the bucket, until the edge is deployed without it.
 
 --stack-name reads WebBucketName and DistributionId from the edge stack's
 outputs with "aws cloudformation describe-stacks". --dry-run prints every step,
