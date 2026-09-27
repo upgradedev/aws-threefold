@@ -7,7 +7,7 @@ import os
 import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 from threefold.domain.models import AgentSession, StoredVerdict, ToolActionType, ToolInvocation
 
 logger = logging.getLogger(__name__)
@@ -183,6 +183,46 @@ def clean_decision(row: Dict[str, Any]) -> Dict[str, Any]:
         cleaned["suggested_fix_kind"] = str(row["suggested_fix_kind"])
         cleaned["suggested_fix_validated"] = row.get("suggested_fix_validated") is True
     return cleaned
+
+
+# The stored attributes a field of clean_decision is read from, where that is
+# more than the attribute of the same name, so a read of some fields fetches
+# everything those fields are made of.
+_CLEANED_FROM = {
+    "stage": ("stage", "dry_run"),
+    "observed_rules": ("observed_rules", "observed_rule"),
+    "suggested_fix_kind": ("suggested_fix_kind",),
+    "suggested_fix_validated": ("suggested_fix_kind", "suggested_fix_validated"),
+}
+
+
+def decision_projection(fields: Sequence[str]) -> Dict[str, Any]:
+    """The Query arguments that fetch only what `fields` of a cleaned ledger row are made of.
+
+    The sort key always, because every row a page returns carries it as `_sk`.
+    Every name goes through a placeholder: `status` and `timestamp` are among
+    DynamoDB's reserved words, and a projection that named them bare would be
+    refused.
+    """
+    stored = ["SK"]
+    for name in fields:
+        stored.extend(_CLEANED_FROM.get(name, (name,)))
+    names = {f"#f{index}": name for index, name in enumerate(dict.fromkeys(stored))}
+    return {"ProjectionExpression": ", ".join(names), "ExpressionAttributeNames": names}
+
+
+def _cleaned_page(
+    items: List[Tuple[str, Dict[str, Any]]], fields: Optional[Sequence[str]]
+) -> List[Dict[str, Any]]:
+    """Each (sort key, stored item) as a reader gets it: cleaned, with `_sk`, and only `fields` when named."""
+    rows = []
+    for sort_key, item in items:
+        row = clean_decision(item)
+        if fields is not None:
+            row = {name: row[name] for name in fields if name in row}
+        row["_sk"] = sort_key
+        rows.append(row)
+    return rows
 
 
 def _plain(value: Any) -> Any:
@@ -679,7 +719,13 @@ class DynamoDBSessionRepository:
         return cleaned[:limit]
 
     def read_decision_day(
-        self, day: str, after: Optional[str] = None, limit: int = 200, *, raise_errors: bool = False
+        self,
+        day: str,
+        after: Optional[str] = None,
+        limit: int = 200,
+        *,
+        raise_errors: bool = False,
+        fields: Optional[Sequence[str]] = None,
     ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
         """One page of one day's decisions, newest first, and where the next page starts.
 
@@ -693,6 +739,15 @@ class DynamoDBSessionRepository:
         which a listing can live with. `raise_errors` lets it through instead,
         for a caller that reports whether it read the whole window: an empty
         day and an unreadable one must not look the same to it.
+
+        `fields`, for a caller that reads only some of a row, names them: the
+        table then sends only those, and each row holds them and `_sk` and
+        nothing else, so a field the caller forgot to name is missing rather
+        than quietly defaulted. On a busy day this is most of what a page
+        costs, because every attribute of every row is parsed on the way in
+        and a row carries some thirty. The page is the same rows either way:
+        `limit` counts rows, and a page of them is far below the megabyte at
+        which the table would cut one short.
         """
         partition = f"{DECISION_PARTITION}#{day}"
         if self._table is not None:
@@ -702,6 +757,8 @@ class DynamoDBSessionRepository:
                 "ScanIndexForward": False,
                 "Limit": max(1, int(limit)),
             }
+            if fields is not None:
+                kwargs.update(decision_projection(fields))
             if after:
                 kwargs["ExclusiveStartKey"] = {"PK": partition, "SK": after}
             try:
@@ -713,7 +770,7 @@ class DynamoDBSessionRepository:
             else:
                 items = response.get("Items", [])
                 last = response.get("LastEvaluatedKey") or {}
-                rows = [dict(clean_decision(item), _sk=str(item.get("SK", ""))) for item in items]
+                rows = _cleaned_page([(str(item.get("SK", "")), item) for item in items], fields)
                 return rows, (str(last["SK"]) if last.get("SK") else None)
         prefix = f"{partition}#"
         keyed = sorted(
@@ -724,7 +781,7 @@ class DynamoDBSessionRepository:
         if after:
             keyed = [pair for pair in keyed if pair[0] < after]
         page = keyed[: max(1, int(limit))]
-        rows = [dict(clean_decision(item), _sk=sort_key) for sort_key, item in page]
+        rows = _cleaned_page(page, fields)
         more = len(keyed) > len(page)
         return rows, (page[-1][0] if more and page else None)
 
