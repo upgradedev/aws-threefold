@@ -608,6 +608,7 @@ def test_promote_preselects_ready_rules_only_and_sends_the_choice(tmp_path: Path
   await tick();
   out.first = promoted;
   click('promote-open');
+  click('promote-toggle', { 'data-rule': 'java-domain-stays-pure', checked: false });
   click('promote-toggle', { 'data-rule': 'PROTECTED_PATH', checked: true });
   click('promote-toggle', { 'data-rule': 'LOOP', checked: true });
   await click('promote-confirm');
@@ -625,7 +626,8 @@ def test_promote_preselects_ready_rules_only_and_sends_the_choice(tmp_path: Path
     # The Quiet rule under the walkthrough's own heading and sentence.
     assert "Flagged nothing here No call here tested this rule; check one to enforce it anyway." in said
     assert out["first"] == {"enforce": ["java-domain-stays-pure"]}
-    assert out["second"] == {"enforce": ["java-domain-stays-pure", "LOOP", "PROTECTED_PATH"]}
+    # A rule checked for the reader is dropped when unchecked; rules left unchecked are sent when checked.
+    assert out["second"] == {"enforce": ["LOOP", "PROTECTED_PATH"]}
     assert "Acme-Billing is in Enforce" in out["toast"]
 
 
