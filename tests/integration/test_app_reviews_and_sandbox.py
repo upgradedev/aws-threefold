@@ -4,7 +4,8 @@ A label lives on the ledger row it is about, only a row of the project named in
 the path can be labelled through it, and who labelled it is kept as a short
 hash of the credential presented, never the credential. The labels move the
 review counts the tiles read. The sandbox is a real project, seeded through the
-real evaluator, with one flagged call a reviewer should reject.
+real evaluator, with one flagged call a reviewer should reject, which its
+answer names.
 
 Names are synthetic, as the clean-room rule requires.
 """
@@ -17,6 +18,7 @@ import pytest
 
 from test_app_support import DOMAIN_WRITE, JAVA_WRITE, README, fresh_project, get, hook_call, post, request
 from threefold.application.projects import SANDBOX_PATTERN
+from threefold.application.sandbox import seeded_false_alarm
 from threefold.infrastructure.dynamo_repo import PROJECT_CONFIG_PREFIX
 from threefold.interfaces.api_handlers import _evaluator
 
@@ -154,6 +156,25 @@ def test_a_sandbox_is_an_observed_project_seeded_through_the_evaluator() -> None
 
     summary = page["readiness"]["summary"]
     assert summary["would_have_refused"] == len(flagged) and summary["rules_needing_review"] >= 2
+
+
+def test_the_sandbox_names_its_false_alarm_as_the_published_document_says() -> None:
+    """The walkthrough asks a visitor to spot the false alarm only when the answer names it.
+
+    The call is named from the seed, and the ledger row the page finds by it is
+    the one flagged by the rule named. Every key answered is documented.
+    """
+    created = post("/api/sandbox", {})
+    named = created["seeded_false_alarm"]
+    assert named == seeded_false_alarm()
+    rows = get("/api/decisions", project=created["project"])["items"]
+    assert [row["rule_key"] for row in rows if row["target"] == named["target"]] == [named["rule_key"]]
+
+    schema = get("/openapi.json")["paths"]["/api/sandbox"]["post"]["responses"]["200"]["content"][
+        "application/json"]["schema"]
+    assert set(schema["properties"]) == set(created)
+    documented = schema["properties"]["seeded_false_alarm"]
+    assert set(documented["properties"]) == set(documented["required"]) == set(named)
 
 
 def test_a_sandbox_expires_after_a_day() -> None:

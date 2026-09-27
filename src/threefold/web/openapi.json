@@ -3108,7 +3108,7 @@
     "/api/sandbox": {
       "post": {
         "summary": "A throwaway project, seeded, for trying the review and promotion walk",
-        "description": "Creates Acme-Sandbox-<8 hex> in observe with sandbox true and a 24 hour expiry, and sends a dozen synthetic hook calls from claude-code, codex and antigravity through the real evaluator. Several would be refused under more than one rule, and one of them is a false alarm: a test module under tests/domain/ that the domain rule's path pattern also covers.",
+        "description": "Creates Acme-Sandbox-<8 hex> in observe with sandbox true and a 24 hour expiry, and sends a dozen synthetic hook calls from claude-code, codex and antigravity through the real evaluator. Several would be refused under more than one rule, and one of them is a false alarm: a test module under tests/domain/ that the domain rule's path pattern also covers. The answer names that call in seeded_false_alarm, read off the seed rather than off the ledger, so a page can ask a visitor to spot it and tell them whether they did.",
         "requestBody": {
           "required": false,
           "content": {
@@ -3121,7 +3121,7 @@
         },
         "responses": {
           "200": {
-            "description": "project, calls_seeded and the dashboard url",
+            "description": "project, calls_seeded, the dashboard url and seeded_false_alarm",
             "content": {
               "application/json": {
                 "schema": {
@@ -3136,6 +3136,31 @@
                     "url": {
                       "type": "string",
                       "example": "dashboard.html#/projects/Acme-Sandbox-0a1b2c3d"
+                    },
+                    "seeded_false_alarm": {
+                      "type": "object",
+                      "description": "The one seeded call a reviewer should mark a false alarm, named by the seed itself: its row in GET /api/decisions is the one with this target and this rule_key.",
+                      "required": [
+                        "target",
+                        "rule_key",
+                        "why"
+                      ],
+                      "properties": {
+                        "target": {
+                          "type": "string",
+                          "description": "The path the call writes, as its ledger row records it in target.",
+                          "example": "tests/domain/test_order_totals.py"
+                        },
+                        "rule_key": {
+                          "type": "string",
+                          "description": "The rule that flags it, as its ledger row records it in rule_key.",
+                          "example": "python-domain-stays-pure"
+                        },
+                        "why": {
+                          "type": "string",
+                          "description": "One plain sentence, no Markdown, saying why the rule is wrong about this call."
+                        }
+                      }
                     }
                   }
                 }
