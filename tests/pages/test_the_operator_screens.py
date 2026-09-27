@@ -1150,6 +1150,26 @@ def test_a_rule_ready_only_on_the_demo_page_s_refusals_has_nothing_from_agents(t
   await visit('#/projects/Acme-Probe?days=7');
   await tick();
   out.hooked = view();
+  // A read the ledger could carry on into older days, holding every refusal the service counts: decided all the same.
+  const continued = { status: 200, body: { items: pageRefusals.body.items, next_cursor: 'older-days' } };
+  answer = contract({
+    '/api/auth/whoami': PRIVATE,
+    '/api/projects/Acme-Probe': { status: 200, body: withAgents },
+    '/api/decisions': u => u.searchParams.get('kind') === 'refused' ? continued : { status: 200, body: { items: [row(9)], next_cursor: null } }
+  });
+  await visit('#/projects/Acme-Probe?days=30');
+  await tick();
+  out.continued = view();
+  // Fewer than the service counts, with older days unread: nothing is concluded, and the service's Ready stands.
+  const short = { status: 200, body: { items: pageRefusals.body.items.slice(0, 4), next_cursor: 'older-days' } };
+  answer = contract({
+    '/api/auth/whoami': PRIVATE,
+    '/api/projects/Acme-Probe': { status: 200, body: withAgents },
+    '/api/decisions': u => u.searchParams.get('kind') === 'refused' ? short : { status: 200, body: { items: [row(10)], next_cursor: null } }
+  });
+  await visit('#/projects/Acme-Probe?days=14');
+  await tick();
+  out.short = view();
   // The portfolio: a project whose only agent is the page reads Nothing from agents, not Ready.
   answer = contract({ '/api/projects': { status: 200, body: { projects: [
     { project: 'Acme-Probe', stage: 'observe', configured: false, observe_rules: [], created_at: null, promoted_at: null, last_seen: NOW, calls: 6, refused: 6, would_refuse: 0, needs_review: 0, agents: ['page'], hook_modes: ['unknown'] }
@@ -1182,6 +1202,9 @@ def test_a_rule_ready_only_on_the_demo_page_s_refusals_has_nothing_from_agents(t
     assert "Flagged no agent's call here No agent's call here tested these; check one to enforce it anyway." in dialog
     hooked = out["hooked"]
     assert 'data-state="ready"' in hooked and 'data-state="untested"' not in hooked, "Refusals of an agent's calls keep the service's Ready"
+    assert 'data-state="untested"' in out["continued"], "A read holding every refusal the service counts decides, whatever older days remain"
+    short = out["short"]
+    assert 'data-state="ready"' in short and 'data-state="untested"' not in short and "(all" not in short, "A short read concludes nothing"
     portfolio = out["portfolio"]
     cell = portfolio.split('class="tf-ops-ready" data-state="untested"')[1].split("</span></span>")[0]
     assert ">Nothing from agents<" in cell and "demo-page calls only" in cell

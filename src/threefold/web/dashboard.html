@@ -1822,18 +1822,19 @@
     // demo page always enforces and is not an agent's, so a rule whose every
     // refusal came from the page, with nothing flagged in Observe and no
     // label, has nothing from agents to go on ('untested', drawn "Nothing
-    // from agents"). That is read from
-    // the project's refused calls (refusedSplit). While they are on their
-    // way such a rule's state is left unsaid (''), so Ready is never drawn
-    // and taken back; a read that failed or stopped short leaves the
-    // service's state as it is.
+    // from agents"). That is read from the project's refused calls
+    // (refusedSplit). While they are on their way such a rule's state is
+    // left unsaid (''), so Ready is never drawn and taken back. The read has
+    // every refusal of the rule when it holds as many as the service counts
+    // (`refused`), even where the ledger offers older days to read; with
+    // fewer, or a read that failed, the service's state stands.
     function readyOnRefusalsAlone(r) {
       return r.state === 'ready' && !(r.correct > 0) && !(r.would_refuse > 0) && typeof r.refused === 'number' && r.refused > 0;
     }
     function ruleState(r, split) {
       if (!readyOnRefusalsAlone(r)) return r.state;
       if (split === undefined) return '';
-      const mine = split && !split.partial ? split.byRule[r.rule_key] : null;
+      const mine = split ? split.byRule[r.rule_key] : null;
       return mine && mine.total === r.refused && mine.by.page === r.refused ? 'untested' : r.state;
     }
     const UNTESTED_SAYS = 'Nothing from agents to go on: every call it refused came from the demo page, which always enforces, and no agent\'s call was flagged by it.';
@@ -1958,8 +1959,9 @@
     // their label; every part opens those calls.
     function ruleRow(name, r, days, split) {
       const would = typeof r.would_refuse === 'number' ? r.would_refuse : 0;
-      // A rule that observes and still shows refusals: how they arrived.
-      const mine = split && !split.partial && r.mode_now !== 'enforce' ? split.byRule[r.rule_key] : null;
+      // A rule that observes and still shows refusals: how they arrived,
+      // when the read holds every one the service counts for it.
+      const mine = split && r.mode_now !== 'enforce' ? split.byRule[r.rule_key] : null;
       const arrived = mine && mine.total === r.refused ? html` <span class="text-gray-500">(${arrivedWords(mine.by, mine.total, ARRIVED_SHORT)})</span>` : '';
       const parts = [
         { key: 'correct', value: r.correct || 0, label: 'correct', color: C.approved, href: callsHref({ project: name, rule: r.rule_key, review: 'correct', days }) },
