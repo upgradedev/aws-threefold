@@ -50,18 +50,22 @@ def is_sandbox(project: Any) -> bool:
 
 
 # Where a project's calls come from, so a page can say which numbers are
-# synthetic. `fleet` is the synthetic Acme fleet that application/demo_fleet.py
-# runs on the public stack, `sandbox` a visitor's sandbox, and `other`
-# everything else: the service's own probes, the demo's page calls, and on a
-# private stack the governed repositories themselves. The fleet's projects are
-# these six names exactly, and only on a stack that runs the fleet (DEMO_FLEET,
-# the template's DemoFleet parameter): elsewhere a team may call its own
-# repository Acme-Payments, as the installer's examples do, and its calls are
-# not synthetic. `Acme-Treasury-2` or `Acme-Payments-Internal` is other anywhere.
+# synthetic and which are real agents'. `fleet` is the synthetic Acme fleet that
+# application/demo_fleet.py runs on the public stack, `live` the daily live
+# agent (scripts/daily_live_agent.py), a real Claude Code or Codex run on one of
+# the benchmark's standard Acme tasks, `sandbox` a visitor's sandbox, and
+# `other` everything else: the service's own probes, the demo's page calls, and
+# on a private stack the governed repositories themselves. The fleet's projects
+# are these six names exactly, and only on a stack that runs the fleet
+# (DEMO_FLEET, the template's DemoFleet parameter): elsewhere a team may call
+# its own repository Acme-Payments, as the installer's examples do, and its
+# calls are not synthetic. `Acme-Treasury-2` or `Acme-Payments-Internal` is
+# other anywhere.
 FLEET = "fleet"
+LIVE = "live"
 SANDBOX = "sandbox"
 OTHER = "other"
-SOURCES = (FLEET, SANDBOX, OTHER)
+SOURCES = (FLEET, LIVE, SANDBOX, OTHER)
 FLEET_PROJECTS = (
     "Acme-Payments",
     "Acme-Checkout",
@@ -70,6 +74,21 @@ FLEET_PROJECTS = (
     "Acme-Mobile",
     "Acme-Platform",
 )
+
+# The benchmark's six standard tasks, which the daily live agent draws from in
+# turn, and the projects it reports them as, `Acme-Live-<task>` exactly. Named
+# here because the function does not ship benchmark/; a unit test reads the
+# script's own list and fails when the two drift. A pressure task, a suffix or
+# another case is not one of them.
+LIVE_TASKS = (
+    "billing-credit-limit",
+    "catalog-vat-regen",
+    "collections-webhook",
+    "orders-s3-archive",
+    "payments-staging-key",
+    "warehouse-carrier-notify",
+)
+LIVE_PROJECTS = tuple(f"Acme-Live-{task}" for task in LIVE_TASKS)
 
 
 # Set by the template from its DemoFleet parameter: "true" where the schedule
@@ -84,11 +103,19 @@ def fleet_runs_here() -> bool:
 
 
 def source_of(project: Any) -> str:
-    """fleet, sandbox or other: where a project's calls come from, read off its name and the stack."""
-    if is_sandbox(project):
+    """fleet, live, sandbox or other: where a project's calls come from, read off its name and the stack."""
+    name = str(project or "")
+    if is_sandbox(name):
         return SANDBOX
-    if str(project or "") in FLEET_PROJECTS and fleet_runs_here():
+    if name in FLEET_PROJECTS and fleet_runs_here():
         return FLEET
+    # The daily live agent reports only to the public stack, whose DemoFleet is
+    # true, so the six live names are its only there. Anywhere else they are a
+    # team's own: benchmark/run.py's --threefold-endpoint names its projects
+    # Acme-Live-<task> on whatever stack it is pointed at, and a page must not
+    # present those calls as the public demo's daily run.
+    if name in LIVE_PROJECTS and fleet_runs_here():
+        return LIVE
     return OTHER
 
 
@@ -227,7 +254,7 @@ def _sources(rows: List[Mapping[str, Any]], rollups: List[Mapping[str, Any]]) ->
     """sources: the calls and the projects of the window by where they come from.
 
     Computed over the same projects as the totals, so each figure adds up to
-    its total: the three `calls` to `totals.calls`, the three `projects` to
+    its total: the four `calls` to `totals.calls`, the four `projects` to
     `totals.projects`.
     """
     calls: Counter = Counter()
@@ -264,9 +291,10 @@ def overview(
     totals for visitors' sandboxes and for every other project, each by_agent
     entry carries its `kind` and its `calls_in_sandboxes`, and `coding_agents`
     lists the coding agents alone, so a page can say what each number is made
-    of. `sources` gives the calls and projects of the synthetic fleet, of
-    sandboxes and of everything else, and each by_project row names its
-    `source`. A sandbox whose configuration has expired stays out of all of them.
+    of. `sources` gives the calls and projects of the synthetic fleet, of the
+    daily live agent, of sandboxes and of everything else, and each by_project
+    row names its `source`. A sandbox whose configuration has expired stays out
+    of all of them.
     """
     today = today or datetime.datetime.now(datetime.timezone.utc).date()
     days_covered = _window(days, today)
@@ -310,9 +338,10 @@ def overview(
             "sandbox": _part_totals([row for row in by_project if row["sandbox"]], shown, True),
             "elsewhere": _part_totals([row for row in by_project if not row["sandbox"]], shown, False),
         },
-        # Where the calls come from: the synthetic fleet, visitors' sandboxes,
-        # or anything else. A public page says in words that the fleet is
-        # synthetic; this is the figure it says it with.
+        # Where the calls come from: the synthetic fleet, the daily live
+        # agent, visitors' sandboxes, or anything else. A public page says in
+        # words that the fleet is synthetic and the live agent real; these are
+        # the figures it says it with.
         "sources": _sources(by_project, shown),
         "series": [
             {

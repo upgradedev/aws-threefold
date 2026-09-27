@@ -108,9 +108,9 @@ def test_the_stack_s_setting_is_read_as_the_template_writes_it(value, monkeypatc
     assert rollups.fleet_runs_here() and rollups.source_of("Acme-Treasury") == "fleet"
 
 
-def test_the_fleet_is_six_projects_and_the_three_sources_are_closed() -> None:
+def test_the_fleet_is_six_projects_and_the_four_sources_are_closed() -> None:
     assert len(rollups.FLEET_PROJECTS) == len(set(rollups.FLEET_PROJECTS)) == 6
-    assert rollups.SOURCES == ("fleet", "sandbox", "other")
+    assert rollups.SOURCES == ("fleet", "live", "sandbox", "other")
     assert not any(rollups.is_sandbox(name) for name in rollups.FLEET_PROJECTS)
 
 
@@ -118,6 +118,7 @@ def test_sources_count_the_calls_and_projects_of_each_and_add_up_to_the_totals()
     payload = _overview()
     assert payload["sources"] == {
         "fleet": {"calls": 75, "projects": 2},
+        "live": {"calls": 0, "projects": 0},
         "sandbox": {"calls": 12, "projects": 1},
         "other": {"calls": 16, "projects": 3},
     }
@@ -185,6 +186,8 @@ def test_the_published_contract_documents_the_new_fields() -> None:
         assert row["source"]["enum"] == list(rollups.SOURCES)
         for name in rollups.FLEET_PROJECTS:
             assert name in row["source"]["description"], f"{name} is not documented as the fleet's"
+        for name in rollups.LIVE_PROJECTS:
+            assert name in row["source"]["description"], f"{name} is not documented as the live agent's"
 
 
 def test_the_yaml_twin_carries_the_same_fields() -> None:
