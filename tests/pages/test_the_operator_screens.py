@@ -338,7 +338,7 @@ def test_the_public_demo_names_the_daily_live_agent_as_real(tmp_path: Path) -> N
     words = html.unescape(re.sub(r"<[^>]+>", "", note))
     assert ("Where these calls come from, on this public demo: 3,210 from the synthetic Acme fleet, 6 projects whose "
             "scheduled agents run through the real gates; 12 from the daily live agent: real Claude Code or Codex runs "
-            "on Acme tasks, scheduled once a day, in projects that enforce; 96 from visitors' sandboxes; 41 from other callers") in words
+            "on Acme tasks, in projects that enforce; 96 from visitors' sandboxes; 41 from other callers") in words
     assert "Daily live agent, real" in words, "The legend names the hue in words"
     live_hue = "#d55181"
     assert f'data-tf-tip="Daily live agent, real" data-tf-tip-value="12" data-tf-tip-color="{live_hue}"' in note
@@ -440,7 +440,7 @@ def test_a_live_project_carries_its_chip_in_the_portfolio(tmp_path: Path) -> Non
     page = out["view"]
     chip = re.search(r'<span class="tf-chip tf-chip-gray tf-ops-src" data-src="live" title="([^"]*)">Live</span>', page)
     assert chip, "A live project's row says Live, in a word beside its dot"
-    assert html.unescape(chip.group(1)) == "The daily live agent: a real Claude Code or Codex run on an Acme task, scheduled once a day, in a project that enforces"
+    assert html.unescape(chip.group(1)) == "The daily live agent: a real Claude Code or Codex run on an Acme task, in a project that enforces"
     assert 'data-src="fleet"' in page and ">Fleet<" in page
     other = re.search(r'<span class="tf-chip tf-chip-gray tf-ops-src" data-src="other" title="([^"]*)">Other</span>', page)
     assert other and html.unescape(other.group(1)) == (

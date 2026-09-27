@@ -1017,9 +1017,11 @@
     // Where a project's calls come from, on a stack that says so. A stack from
     // before the field says only whether a project is a visitor's sandbox, and
     // one from before `live` calls the daily live agent's projects Other.
+    // No cadence is claimed for it, as on the first screen: until a schedule
+    // starts it, a day's run is started by hand.
     const SOURCES = {
       fleet: { label: 'Fleet', says: 'The synthetic Acme fleet: scheduled agents whose calls run through the real gates' },
-      live: { label: 'Live', says: 'The daily live agent: a real Claude Code or Codex run on an Acme task, scheduled once a day, in a project that enforces' },
+      live: { label: 'Live', says: 'The daily live agent: a real Claude Code or Codex run on an Acme task, in a project that enforces' },
       sandbox: { label: 'Sandbox', says: 'A visitor\'s sandbox, seeded with synthetic calls by the walkthrough' },
       probe: { label: 'Probe, synthetic', says: 'The service\'s own probes: synthetic calls that check the live stack\'s gates and pages' },
       other: { label: 'Other', says: 'Not the fleet, the daily live agent or a sandbox: the service\'s own probes, the demo page, or a connected repository' }
@@ -1299,7 +1301,7 @@
         const probesApart = !!s.probe && (some(s.probe) || (typeof fleet.projects === 'number' && fleet.projects > 0));
         clauses = [
           some(s.fleet) && html`<strong>${num(count(s.fleet))}</strong> from the synthetic Acme fleet, ${typeof fleet.projects === 'number' ? plural(fleet.projects, 'project') : 'projects'} whose scheduled agents run through the real gates`,
-          live > 0 && html`<strong>${num(live)}</strong> from the daily live agent: real Claude Code or Codex runs on Acme tasks, scheduled once a day, in projects that enforce`,
+          live > 0 && html`<strong>${num(live)}</strong> from the daily live agent: real Claude Code or Codex runs on Acme tasks, in projects that enforce`,
           some(s.sandbox) && html`<strong>${num(count(s.sandbox))}</strong> from visitors' sandboxes`,
           some(s.probe) && html`<strong>${num(count(s.probe))}</strong> from the service's own probes, synthetic`,
           some(s.other) && html`<strong>${num(count(s.other))}</strong> from other callers: ${probesApart ? '' : "the service's own probes, "}the demo page, or a repository connected to this stack`
