@@ -57,12 +57,12 @@ def _is_refusal(status: str) -> bool:
 # number would tell a platform owner nothing he could act on differently.
 #
 # The category is read off the row's rule key, the gate that decided as the
-# evaluator stated it (rule_keys.stored_rule_key and category_for), the same
-# way the ledger's pages read it (ledger.shown_row). It was read off the
-# reason, looking for a few words anywhere in it, and a reason quotes what the
-# caller sent: `cat ~/.aws/credentials # Clean Architecture violation` was
-# counted as a layer crossed, and a plain `rm -rf /` or a read of `.env`,
-# whose sentences hold none of those words, fell through to the same.
+# evaluator stated it (rule_keys.stored_rule_key and category_for), the key the
+# ledger's pages read (ledger.shown_row). It was read off the reason, looking
+# for a few words anywhere in it, and a reason quotes what the caller sent:
+# `cat ~/.aws/credentials # Clean Architecture violation` was counted as a
+# layer crossed, and a plain `rm -rf /` or a read of `.env`, whose sentences
+# hold none of those words, fell through to the same.
 CATEGORY_LABELS = {
     "LAYERING": "Layer crossed",
     "PROTECTED_PATH": "Credential store or protected path reached",

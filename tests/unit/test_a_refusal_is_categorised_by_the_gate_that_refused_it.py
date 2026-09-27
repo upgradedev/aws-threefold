@@ -12,8 +12,9 @@ crossed too. Every spend ceiling was counted as a session already halted.
 
 The category now comes from the row's rule key, the gate the evaluator says
 decided, by the mapping the ledger's pages already use, so `/api/insights` and
-`/api/decisions` name every refusal the same way. Every row here is made by the
-real evaluator; each is also read with its key taken away, which is what a row
+`/api/decisions` name every refusal a gate keyed the same way. A refusal no key
+names is OTHER on the console, never NONE. Every row here is made by the real
+evaluator; each is also read with its key taken away, which is what a row
 written before the key existed looks like.
 
 Names are synthetic, as the clean-room rule requires.
