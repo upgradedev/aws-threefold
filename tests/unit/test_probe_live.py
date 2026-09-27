@@ -1582,7 +1582,7 @@ def test_the_checks_hold_for_what_the_code_itself_writes(monkeypatch):
     from threefold.application import projects as stages
     from threefold.application import rollups
 
-    # A stack that runs the fleet, so all three sources have calls.
+    # A stack that runs the fleet, so every source has calls, the daily live agent's included.
     monkeypatch.setenv(rollups.DEMO_FLEET_ENV, "true")
     today = datetime.date(2026, 9, 27)
     created = "2026-09-27T06:00:00+00:00"
@@ -1594,6 +1594,7 @@ def test_the_checks_hold_for_what_the_code_itself_writes(monkeypatch):
     items = [
         rollup("Acme-Payments", calls=30, approved=27, observed=2, refused=3, **{"agent:codex": 20, "agent:claude-code": 10}),
         rollup("Acme-Treasury", calls=12, approved=12, **{"agent:antigravity": 12, "review:false_alarm": 1}),
+        rollup("Acme-Live-billing-credit-limit", calls=4, approved=3, refused=1, **{"agent:claude-code": 4}),
         rollup(sandbox, calls=8, approved=8, observed=4, **{"reviewed:observed": 1, "agent:claude-code": 4, "agent:codex": 4}),
         rollup("Acme-Probe", calls=5, approved=3, refused=2, **{"agent:page": 3, "agent:claude-code": 2}),
         rollup("Acme-Tools", calls=2, approved=2, **{"agent:pre-commit": 1, "agent:acme-bot": 1}),
@@ -1627,7 +1628,7 @@ def test_the_checks_hold_for_what_the_code_itself_writes(monkeypatch):
     )
     overview = json.loads(json.dumps(payload))
     # Real figures, not zeros: every source, a coding agent in a sandbox, and a rate to round.
-    assert {name: value["calls"] for name, value in overview["sources"].items()} == {"fleet": 42, "sandbox": 8, "other": 7}
+    assert {name: value["calls"] for name, value in overview["sources"].items()} == {"fleet": 42, "live": 4, "sandbox": 8, "other": 7}
     assert [entry["kind"] for entry in overview["by_agent"]] == [
         "coding_agent", "coding_agent", "coding_agent", "page", "unknown", "ci"
     ]
