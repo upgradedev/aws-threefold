@@ -364,17 +364,22 @@
     .tf-ops-vlane:focus-visible { box-shadow: 0 0 0 2px var(--tf-focus); }
     .tf-ops-vtrack { position: relative; display: flex; align-items: center; height: 100%; flex: 0 0 calc(100% - var(--tf-ops-vgut)); }
     /* Every lane starts at a tick on its baseline, so a measured zero reads as none rather than missing. */
-    .tf-ops-vtrack::before { content: ''; position: absolute; left: 0; top: 3px; bottom: 3px; width: 2px; border-radius: 1px; background: var(--tf-text-3); }
+    /* A lane's baseline tick wears the lane's own colour, so a lane at 0% is
+       still told apart from its neighbours at 0%. */
+    .tf-ops-vtrack::before { content: ''; position: absolute; left: 0; top: 2px; bottom: 2px; width: 3px; border-radius: 1px; background: var(--c); }
     .tf-ops-vfill { display: block; height: 8px; width: calc(var(--v) * 100%); border-radius: 0 4px 4px 0; background: var(--c); }
     .tf-ops-vlane:hover .tf-ops-vfill, .tf-ops-vlane:focus-visible .tf-ops-vfill { filter: brightness(1.18); }
     .tf-ops-vval { position: absolute; left: calc((100% - var(--tf-ops-vgut)) * var(--v) + 8px); white-space: nowrap; font-size: 0.75rem; line-height: 1rem; color: var(--tf-text-2); font-variant-numeric: tabular-nums; }
     .tf-ops-vval small { font-size: 0.75rem; color: var(--tf-text-3); }
+    .tf-ops-vval b { font-weight: 600; color: var(--tf-text); }
     .tf-ops-vpass { text-align: right; display: flex; flex-direction: column; font: 600 0.9375rem/1.25rem var(--tf-font-sans); color: var(--tf-text); font-variant-numeric: tabular-nums; }
     .tf-ops-vpass small { font: 400 0.75rem/1rem var(--tf-font-sans); color: var(--tf-text-3); }
     .tf-ops-vpass .tf-icon { display: inline-block; width: 14px; height: 14px; margin-right: 4px; vertical-align: -2px; color: var(--tf-observed-text); }
     .tf-ops-vgroup { margin: 16px 0 2px; font: 600 0.8125rem/1.25rem var(--tf-font-sans); color: var(--tf-text-2); }
     .tf-ops-vgroup:first-of-type { margin-top: 4px; }
     .tf-ops-vgroup small { font-weight: 400; color: var(--tf-text-3); }
+    .tf-ops-scroll-hint { display: flex; align-items: center; gap: 6px; margin: 0 0 8px; font-size: 0.75rem; line-height: 1rem; color: var(--tf-text-3); }
+    @media (min-width: 1024px) { .tf-ops-scroll-hint { display: none; } }
     .tf-ops-verdict { display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px; border-radius: var(--tf-radius-md); background: var(--tf-accent-soft); border: 1px solid var(--tf-accent-line); }
     .tf-ops-verdict .tf-icon { width: 20px; height: 20px; color: var(--tf-accent-text); flex-shrink: 0; margin-top: 2px; }
     .tf-ops-verdict p { margin: 0; font-size: 0.9375rem; line-height: 1.375rem; color: var(--tf-text); }
@@ -431,7 +436,7 @@
   <div id="toast-root" class="tf-toast-root" aria-live="polite"></div>
 
   <footer class="border-t border-gray-800 py-4 text-center text-xs text-gray-500 px-4">
-    Threefold · AWS Zero to Shipped Hackathon 2026 · Every number on this page is read from the API as you look at it
+    Threefold · AWS Zero to Shipped Hackathon 2026 · <span id="foot-words">Every number on this page is read from the API as you look at it</span>
   </footer>
 
   <script>
@@ -781,6 +786,11 @@
       const found = resolve(path);
       current = { token, route: found ? found.route : null, params, args: found ? found.args : [], leave: [], actions: {} };
       T.mountNav(document.getElementById('tf-nav'), { active: found ? found.route.nav : '', inDashboard: true });
+      // The proof is a committed snapshot, not a live read, and says so.
+      const foot = document.getElementById('foot-words');
+      if (foot) foot.textContent = found && found.route.path === '/proof'
+        ? 'The figures on this page come from a committed snapshot, served by the API'
+        : 'Every number on this page is read from the API as you look at it';
       const ctx = makeContext(token, params, current.args);
       if (!found) {
         document.title = 'Not found — Threefold';
@@ -6075,6 +6085,10 @@
     // section the snapshot does not carry reads "not measured yet", never a
     // zero. Nothing here computes a figure of its own.
     const PROOF_SUB = 'What Threefold has been measured to do, and how. Every figure names where it came from and when it was taken.';
+    // The public repository the evidence files are in.
+    const REPOSITORY = 'https://github.com/upgradedev/aws-threefold';
+    // Below this many labels, a false-alarm rate says more than it knows.
+    const FEW_LABELS = 30;
 
     function notMeasured(what, next) {
       return html`<div class="rounded-xl border border-dashed border-gray-800 p-4 space-y-1" data-state="empty">
@@ -6084,8 +6098,17 @@
       </div>`;
     }
 
+    // A snapshot's time in a reader's words, in UTC, with the service's own
+    // value kept in the element for a machine.
     function when(value) {
-      return typeof value === 'string' && value ? html`<time datetime="${value}">${value}</time>` : 'not recorded';
+      if (typeof value !== 'string' || !value) return 'not recorded';
+      const two = n => String(n).padStart(2, '0');
+      const at = new Date(value);
+      const shown = /^\d{4}-\d{2}-\d{2}$/.test(value)
+        ? shortDay(value) + ' ' + value.slice(0, 4)
+        : isNaN(at.getTime()) ? value
+          : shortDay(at.toISOString().slice(0, 10)) + ' ' + at.getUTCFullYear() + ', ' + two(at.getUTCHours()) + ':' + two(at.getUTCMinutes()) + ' UTC';
+      return html`<time datetime="${value}">${shown}</time>`;
     }
 
     function provenance(source, snapshot) {
@@ -6128,7 +6151,8 @@
         return c && c[field] ? share(c[field]) : html`<span class="text-gray-500">not measured</span>`;
       };
       return card('The benchmark, every series', 'Violation landed per condition, and whether the tests still passed with Threefold enforcing. Each row is one run of the matrix.', html`
-        <div class="tf-scroll-x"><table class="tf-table" data-proof="series">
+        <p class="tf-ops-scroll-hint">${T.icon('arrowright', 14)}The table scrolls sideways: Threefold enforcing and its tests passed are to the right.</p>
+        <div class="tf-scroll-x" tabindex="0" role="region" aria-label="The benchmark, every series (scrolls sideways)"><table class="tf-table" data-proof="series">
           <thead><tr>
             <th scope="col">Series</th><th scope="col">No guidance</th><th scope="col">Rules in CLAUDE.md or AGENTS.md</th>
             <th scope="col">Threefold enforcing</th><th scope="col">Tests passed, Threefold</th>
@@ -6216,9 +6240,13 @@
         const v = c.violation;
         const color = CONDITION_COLORS[name] || T.CATEGORICAL_OTHER;
         const said = conditionName(c, name) + ': ' + pct(v.rate) + ', ' + num(v.k) + ' of ' + num(v.n) + ' runs';
-        return html`<div class="tf-ops-vlane" tabindex="0" role="img" aria-label="${partsOf(b).join(', ')}. ${said}" data-tf-tip="${partsOf(b).slice(1).join(' · ') || partsOf(b)[0]} · ${conditionName(c, name)}" data-tf-tip-value="${pct(v.rate)} · ${num(v.k)}/${num(v.n)} runs" data-tf-tip-color="${color}" style="--v:${Math.max(0, Math.min(1, v.rate))};--c:${color}">
+        // The lead lane names itself where its bar is short: at 0% its bar
+        // is only the tick, and the name says which lane that is. The lanes
+        // are not tab stops; the table after the chart holds every figure.
+        const named = name === 'threefold' && v.rate <= 0.5;
+        return html`<div class="tf-ops-vlane" role="img" aria-label="${partsOf(b).join(', ')}. ${said}" data-tf-tip="${partsOf(b).slice(1).join(' · ') || partsOf(b)[0]} · ${conditionName(c, name)}" data-tf-tip-value="${pct(v.rate)} · ${num(v.k)}/${num(v.n)} runs" data-tf-tip-color="${color}" style="--v:${Math.max(0, Math.min(1, v.rate))};--c:${color}">
           <span class="tf-ops-vtrack"><span class="tf-ops-vfill"></span></span>
-          <span class="tf-ops-vval" aria-hidden="true">${pct(v.rate)} <small>${num(v.k)}/${num(v.n)}</small></span>
+          <span class="tf-ops-vval" aria-hidden="true">${named ? html`<b>Threefold</b> ` : ''}${pct(v.rate)} <small>${num(v.k)}/${num(v.n)}</small></span>
         </div>`;
       };
       const passCell = b => {
@@ -6249,7 +6277,7 @@
         <div class="tf-ops-verdict mb-4">${T.icon('shield', 20)}<div class="min-w-0"><p>${verdict}</p>${cost ? html`<p data-proof="cost">${cost}</p>` : ''}</div></div>
         <div class="mb-3">${T.legend(legendKeys)}</div>
         ${figure}
-        <p class="text-xs text-gray-500 mt-3">Each lane is k of n runs of one series under one condition; the table below gives every figure with its 95% interval, and each series' own card follows it.</p>`, 'min-w-0');
+        <p class="text-xs text-gray-500 mt-3">Each lane is k of n runs of one series under one condition, and its tick at 0% wears its colour; the table below gives every figure with its 95% interval, and each series' own card follows it.</p>`, 'min-w-0');
     }
 
     function benchmarkCards(proof) {
@@ -6270,7 +6298,7 @@
           <p class="text-sm font-semibold text-amber-200">PILOT: not a result</p>
           <p class="text-xs text-amber-100/80">These runs prove the harness end to end. No figure below should be quoted as a measurement.</p>
         </div>` : '';
-      const table = conditions.length ? html`<div class="tf-scroll-x mt-4"><table class="tf-table">
+      const table = conditions.length ? html`<p class="tf-ops-scroll-hint mt-4">${T.icon('arrowright', 14)}The table scrolls sideways.</p><div class="tf-scroll-x mt-4" tabindex="0" role="region" aria-label="${title}, by condition (scrolls sideways)"><table class="tf-table">
           <thead><tr>
             <th scope="col">Condition</th><th scope="col" class="num">Runs measured</th>
             <th scope="col">Violation landed</th><th scope="col">Tests passed</th>
@@ -6297,7 +6325,9 @@
         <p class="text-xs text-gray-500 mt-1">The headline sentence exactly as benchmark/report.py computed it from the rows.</p>
         <dl class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4">${facts.map(([label, value]) => html`<div class="tf-card-quiet p-3 min-w-0"><dt class="tf-label">${label}</dt><dd class="text-xs text-gray-200 tf-break">${value}</dd></div>`)}</dl>
         ${table}
-        ${provenance(b.source, b.snapshot_at)}`, 'min-w-0');
+        ${provenance(b.source, b.snapshot_at)}
+        ${Array.isArray(b.evidence) && b.evidence.some(i => i && typeof i.path === 'string')
+          ? html`<div class="mt-3"><p class="tf-label">This series' evidence</p><ul class="space-y-1.5" data-proof="series-evidence">${b.evidence.map(evidenceItem)}</ul></div>` : ''}`, 'min-w-0');
     }
 
     function ownUseCard(p) {
@@ -6307,14 +6337,18 @@
         return card(title, sub, notMeasured('This snapshot carries no totals from the owner\'s own work.',
           'They are read from the owner\'s private stack with the operator key, and only the totals are kept.'));
       }
+      // A rate over a handful of labels is said as the count it is.
+      const few = typeof p.false_alarm_rate === 'number' && typeof p.false_alarms === 'number' && typeof p.reviewed === 'number' && p.reviewed < FEW_LABELS;
       const tiles = [
         ['Days observed', num(p.days_observed), 'days_observed', typeof p.window_days === 'number' ? 'with a governed call, of the last ' + num(p.window_days) : 'with a governed call'],
         ['Calls governed', num(p.calls_governed), 'calls_governed', 'judged and recorded'],
         ['Would refuse', num(p.would_refuse), 'would_refuse', 'ran; a rule in Observe would have refused them'],
         ['Reviewed', num(p.reviewed), 'reviewed', 'would-refuse calls the owner labelled'],
-        ['False-alarm rate', pct(p.false_alarm_rate), 'false_alarm_rate', typeof p.false_alarm_rate === 'number' && typeof p.false_alarms === 'number' && typeof p.reviewed === 'number'
-          ? num(p.false_alarms) + ' of ' + num(p.reviewed) + ' reviewed'
-          : (typeof p.refused === 'number' && p.refused > 0 ? 'not given: calls were refused in this window, and these totals count their labels too' : 'not measured')],
+        few
+          ? ['False alarms', num(p.false_alarms) + ' of ' + num(p.reviewed), 'false_alarm_rate', 'too few labels for a rate: ' + num(p.reviewed) + (typeof p.would_refuse === 'number' ? ' of ' + num(p.would_refuse) + ' would-refuse calls' : '') + ' reviewed']
+          : ['False-alarm rate', pct(p.false_alarm_rate), 'false_alarm_rate', typeof p.false_alarm_rate === 'number' && typeof p.false_alarms === 'number' && typeof p.reviewed === 'number'
+            ? num(p.false_alarms) + ' of ' + num(p.reviewed) + ' reviewed'
+            : (typeof p.refused === 'number' && p.refused > 0 ? 'not given: calls were refused in this window, and these totals count their labels too' : 'not measured')],
         ['Projects', num(p.projects), 'projects', 'counted, never named'],
         ['Agents', num(p.agents), 'agents', 'counted, never named']
       ];
@@ -6351,7 +6385,7 @@
         <div class="mt-4 pt-3 border-t border-gray-800">
           <p class="tf-label">Evidence</p>
           ${items.length ? html`<ul class="space-y-1.5" data-proof="evidence">${items.map(evidenceItem)}</ul>` : notMeasured('The snapshot names no evidence file.')}
-          ${items.length && !linked ? html`<p class="text-xs text-gray-500 mt-2">Each is a file in the Threefold repository, at the path shown.</p>` : ''}
+          ${items.length && !linked ? html`<p class="text-xs text-gray-500 mt-2">Each is a file in the Threefold repository, <a class="tf-link" href="${REPOSITORY}" rel="noopener">${REPOSITORY.replace(/^https:\/\//, '')}</a>, at the path shown. Each series' card above names its own.</p>` : ''}
           <p class="text-xs text-gray-500 mt-2">The live figures on this stack are read from <a class="tf-link" href="${T.specHref('GET', '/api/overview')}">GET /api/overview</a>, and this snapshot from <a class="tf-link" href="${T.specHref('GET', '/proof.json')}">GET /proof.json</a>.</p>
         </div>`, 'min-w-0');
     }

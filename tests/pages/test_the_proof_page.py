@@ -351,3 +351,86 @@ def test_the_project_page_shows_the_same_figure_for_its_project(tmp_path: Path) 
     assert "no agent (hook or CI) refusal in this window" in out["quiet"]
     # A read cut short spent its rows on every project, not this one alone.
     assert "read stopped after the newest 2,000 calls of every project" in out["partial"]
+
+
+
+def test_the_lead_lane_is_told_apart_at_zero_and_no_lane_is_a_tab_stop(tmp_path: Path) -> None:
+    """At 0% a lane is only its tick: the tick wears the lane's colour, and the Threefold lane names itself.
+
+    A review found "Rules in CLAUDE.md" and "Threefold enforcing" drawn the
+    same, as one grey tick each, in every series where both were 0%; and 18
+    lanes were 18 tab stops before the evidence, with the same figures in the
+    table right after the chart.
+    """
+    out = proof(
+        r"""
+  answer = proofAnswer(COMMITTED);
+  await visit('#/proof');
+  out.view = view();
+""",
+        tmp_path,
+    )
+    chart = out["view"].split("Did a violation land?")[1].split('data-proof="series"')[0]
+    lanes = re.findall(r'<div class="tf-ops-vlane"[^>]*>', chart)
+    assert lanes and not any("tabindex" in lane for lane in lanes), "A lane is not a tab stop; the table holds its figures"
+    threefold = [lane for lane in lanes if "Threefold enforcing:" in lane]
+    assert threefold and all("--c:#8b5cf6" in lane for lane in threefold)
+    assert chart.count("<b>Threefold</b>") == len(threefold), "Each Threefold lane at or under half names itself"
+    css = page_source("dashboard.html")
+    assert "top: 2px; bottom: 2px; width: 3px; border-radius: 1px; background: var(--c); }" in css, "The tick wears the lane's colour"
+
+
+def test_each_series_names_its_own_evidence_and_the_repository_is_linked(tmp_path: Path) -> None:
+    out = proof(
+        r"""
+  answer = proofAnswer(COMMITTED);
+  await visit('#/proof');
+  out.view = view();
+""",
+        tmp_path,
+    )
+    page = out["view"]
+    series = [b for b in COMMITTED["benchmarks"] if b.get("evidence")]
+    assert page.count('data-proof="series-evidence"') == len(series), "Every series with evidence names it on its own card"
+    for b in series:
+        for item in b["evidence"]:
+            assert item["path"] in page
+    assert 'tabindex="0" role="region" aria-label="The benchmark, every series (scrolls sideways)"' in page, "A keyboard can scroll the table"
+    assert 'href="https://github.com/upgradedev/aws-threefold"' in page and "github.com/upgradedev/aws-threefold</a>, at the path shown" in page
+
+
+def test_a_false_alarm_rate_over_a_handful_of_labels_is_said_as_a_count(tmp_path: Path) -> None:
+    """0% over 5 labels read as a strong claim; below 30 labels the tile gives the count and says why."""
+    out = proof(
+        r"""
+  const few = JSON.parse(JSON.stringify(MEASURED));
+  Object.assign(few.private, { reviewed: 5, false_alarms: 0, false_alarm_rate: 0, would_refuse: 139 });
+  answer = proofAnswer(few);
+  await visit('#/proof');
+  out.text = text(view());
+  out.metrics = metrics(view());
+""",
+        tmp_path,
+    )
+    assert out["metrics"]["false_alarm_rate"] == "0 of 5"
+    assert "too few labels for a rate: 5 of 139 would-refuse calls reviewed" in out["text"]
+    assert "False-alarm rate" not in out["text"].split("How this was measured")[0]
+
+
+def test_the_proof_says_its_figures_are_a_snapshot_and_its_times_are_read_in_utc(tmp_path: Path) -> None:
+    out = proof(
+        r"""
+  answer = proofAnswer(MEASURED);
+  await visit('#/proof');
+  out.view = view();
+  out.foot = el('foot-words').textContent;
+  answer = contract();
+  await visit('#/overview');
+  out.overviewFoot = el('foot-words').textContent;
+""",
+        tmp_path,
+    )
+    assert out["foot"] == "The figures on this page come from a committed snapshot, served by the API"
+    assert out["overviewFoot"] == "Every number on this page is read from the API as you look at it"
+    assert '<time datetime="2026-09-29T08:00:00+00:00">29 Sep 2026, 08:00 UTC</time>' in out["view"]
+    assert '<time datetime="2026-09-30">30 Sep 2026</time>' in out["view"]
