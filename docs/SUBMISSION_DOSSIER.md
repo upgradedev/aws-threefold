@@ -7,7 +7,7 @@ check it says so; where it rests on `STATE.md` it is tagged [STATE-FILE].
 **Application name:** Threefold
 **Category:** `#workplace-efficiency` · **Lane:** `#community`
 **Tagline:** Threefold refuses a coding agent's edit the moment it is made, not after the commit, so your architecture does not rot while you sleep.
-**Live application:** <https://d1og72wpk4aqig.cloudfront.net/> (CloudFront edge), origin <https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/> (API Gateway). Both answered anonymously with 200 on 2026-09-22 [PRIMARY, 2026-09-22].
+**Live application:** <https://d1og72wpk4aqig.cloudfront.net/> (CloudFront edge), origin <https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/> (API Gateway). Both answered anonymously with 200 on 2026-09-27 (`docs/evidence/PROBES_2026-09-27-2-edge.md`, `docs/evidence/PROBES_2026-09-27-2.md`) [PRIMARY, 2026-09-27].
 **Try it in a minute, no account:** <https://d1og72wpk4aqig.cloudfront.net/dashboard.html#/try>
 
 ---
@@ -20,8 +20,8 @@ AWS about each write or command before it runs. Deterministic gates decide: a
 domain file importing infrastructure under the architect's layering rules, a
 credential in the arguments, a write that switches the hooks off, the same call
 repeating, a spend ceiling. A team connects a repository with one command.
-Every project starts in Observe, where calls are judged and recorded and no
-rule refuses anything; a credential is still refused on the developer's
+By default a project starts in Observe, where calls are judged and recorded
+and no rule refuses anything; a credential is still refused on the developer's
 machine, and so is a request the service cannot take at all, such as a body
 over 1 MB, because the hook reads any 4xx other than 429 as a refusal. The
 operations dashboard shows what each rule would have refused; the operator labels each of those
@@ -58,6 +58,10 @@ so the rollout had to show what a rule would stop before it stops anything.
 3. **Rolls out in two stages.** Observe, review, readiness per rule (Ready,
    Quiet, Needs review, Noisy), Promote with the chosen rules, Demote in one
    click. Page and demo calls always enforce, so the public demo is unaffected.
+   A stack can name projects that start in Enforce instead
+   (`EnforceProjectPattern`); the public stack names the `Acme-Live-*`
+   projects a real coding agent works in (section 6), since no operator is
+   there to promote them.
 4. **Suggests a validated fix with every refusal it can.** A rewritten file,
    a port and an adapter, or an environment lookup in place of a literal
    credential, run back through the same gates before it is offered; the hook
@@ -66,7 +70,9 @@ so the rollout had to show what a rule would stop before it stops anything.
    charts that open the calls behind them, projects, a project page with
    readiness per rule, the review queue, call drill-down, a connect wizard,
    sign-in, the `#/try` sandbox walkthrough and a `#/proof` page. Daily rollups
-   keep the charts exact however busy the ledger is.
+   keep the charts exact however busy the ledger is. On the public stack the
+   overview says where its calls came from: the synthetic Acme fleet, the
+   live agent, visitors' sandboxes, or anything else.
 6. **Connects in one command and signs in without a key.** `install.py`, served
    by the stack with its own address written in, installs the hook for the
    agents it finds; `threefold.py open` signs the operator in through a
@@ -91,18 +97,20 @@ so the rollout had to show what a rule would stop before it stops anything.
   recovery.
 - **AI:** Amazon Bedrock, Claude Haiku 4.5 through the `eu.` cross-region
   inference profile, Converse API, only for page explanations and rule drafts.
-- **Operations:** ten CloudWatch alarms, a dashboard, Embedded Metric Format
+- **Operations:** eleven CloudWatch alarms, a dashboard, Embedded Metric Format
   metrics read into a namespace per stack, an SNS topic.
+- **Demo data:** on the public stack only (`DemoFleet`), an Amazon EventBridge
+  Scheduler schedule sends a synthetic Acme fleet's calls through the real
+  gates every 15 minutes, and every page that shows them calls them synthetic.
 - **Code:** clean architecture with a standard-library domain, no build step,
   no chart library, no npm. The hook and the installer are single
   standard-library files.
 - **Infrastructure as code:** two CloudFormation templates, `deploy/template.yml`
   (SAM transform) and `deploy/edge.yml`.
-- **Checking it live:** `scripts/probe_live.py`: 113 PASS, 0 FAIL, 3 SKIP
-  against the public origin on 2026-09-22 (`docs/evidence/PROBES_2026-09-22.md`),
-  rerun on 2026-09-25 after the behavior batch deployed with the same counts on
-  the API and on the edge (`docs/evidence/PROBES_2026-09-25-437df7c8.md`,
-  `docs/evidence/PROBES_2026-09-25-945ec047.md`).
+- **Checking it live:** `scripts/probe_live.py`: 117 PASS, 0 FAIL, 3 SKIP
+  through the edge and the same at the API origin on 2026-09-27, after that
+  day's deploy (`docs/evidence/PROBES_2026-09-27-2-edge.md`,
+  `docs/evidence/PROBES_2026-09-27-2.md`) [PRIMARY, 2026-09-27].
 
 ## 5. Challenges we ran into
 
@@ -128,13 +136,32 @@ so the rollout had to show what a rule would stop before it stops anything.
    firewall. A secret origin header, and a CloudFront Function copying the
    viewer's host, fixed both; the installer fetched from the edge names the edge
    [PRIMARY, 2026-09-22].
+5. **A false refusal a real agent found.** The live agent's first run (section
+   6), Codex on 2026-09-26, was refused a read ending in PowerShell's `2>$null`,
+   which the command check took for a write to a shell expansion. Fixed and
+   deployed on 2026-09-27
+   (`tests/security/test_discarding_errors_in_powershell_is_not_a_write.py`).
+   Looking for a way around the fix found an older hole, closed in the same
+   change: inside double quotes the shell drops the backslash before `$`, so
+   `bash -c "echo ... > src/domain/\$f"` had been approved [STATE-FILE].
 
 ## 6. Accomplishments we are proud of
 
 - The owner's own work has been governed since 2026-09-22 at nine locations,
   under `Acme-Proj-*` aliases, in Observe, reporting to a private stack from the
   same template [STATE-FILE].
-- The public stack passed its own live probe, 113 checks PASS, 0 FAIL, 3 SKIP.
+- The public stack passed its own live probe on 2026-09-27, 117 checks PASS,
+  0 FAIL, 3 SKIP through the edge and the same at the API [PRIMARY,
+  2026-09-27], and the private stack 101 PASS, 0 FAIL, read-only
+  [STATE-FILE].
+- A real coding agent works on the public stack.
+  `scripts/daily_live_agent.py` gives Claude Code or Codex, on alternate days,
+  one of the benchmark's Acme tasks in an `Acme-Live-*` project that starts in
+  Enforce, and the overview counts its calls as a source of their own. Two
+  runs so far: Codex on 2026-09-26, 8 calls, one refused (falsely, challenge
+  5), and Claude Code on 2026-09-27, 4 calls, none refused; in both no
+  violation landed and the acceptance tests passed
+  (`benchmark/results/live/`) [PRIMARY, 2026-09-27].
 - Threefold was measured against the alternative rather than asserted over it.
   162 Claude Code runs on 2026-09-22, two models, two task families, graded by
   a checker that does not import Threefold: a governed violation landed in
@@ -164,7 +191,8 @@ so the rollout had to show what a rule would stop before it stops anything.
   violation landed in 17% / 0% / 0%, 39% / 17% / 0% and 17% / 0% / 0% on the
   standard tasks, and 67% / 0% / 0%, 100% / 56% / 0% and 100% / 11% / 0% on the
   pressure ones: no violation under Threefold in any series, while the rules in
-  the prompt alone held everywhere with `claude-sonnet-5` and nowhere else.
+  the prompt alone held in both families with `claude-sonnet-5`, on the
+  standard tasks only with Codex, and in neither with `claude-haiku-4-5`.
   The price is in the pressure series, where the governed agent finished 10 of
   18 runs in the two Claude series (16 of 27 counting Codex) and otherwise
   stopped and reported the conflict

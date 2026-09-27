@@ -4,8 +4,8 @@
 **Hackathon:** AWS Zero to Shipped 2026 · **Category:** `#workplace-efficiency` · **Lane:** `#community`
 **Try it, no account:** <https://d1og72wpk4aqig.cloudfront.net/dashboard.html#/try>
 
-A claim about the live stacks is tagged **[PRIMARY, 2026-09-22]** when it was
-checked that day with a read-only request or an AWS `describe`/`get`/`list`
+A claim about the live stacks is tagged **[PRIMARY, date]** when it was
+checked on that date with a read-only request or an AWS `describe`/`get`/`list`
 call, and **[STATE-FILE]** when it is taken from the project's state ledger
 and was not re-measured for this article.
 
@@ -46,10 +46,11 @@ So the gates are standard-library Python:
   for `cat > file <<'EOF'`. The service reads a command for the writes it makes
   (redirections, heredocs, `sed -i`, `cp`, `git apply` and more) and judges
   readable content exactly like a `Write`.
-- **Loops**: any repeating cycle of byte-identical calls, up to period six. A
-  repeated `git status` or `gh run view` is noted and never refused, and a
-  hook's loop refuses the repeating call without halting the developer's
-  session.
+- **Loops**: any repeating cycle up to the policy's history window, six calls
+  by default, of byte-identical calls and, two repeats later, of calls with
+  the same shape and different values. A repeated `git status` or
+  `gh run view` is noted and never refused, and a hook's loop refuses the
+  repeating call without halting the developer's session.
 - **Spend**: a ceiling on the tokens a caller declares, which bounds honest
   overruns rather than an adversary.
 
@@ -78,16 +79,19 @@ No model writes the fix.
 ## Rolling a rule out without breaking every team at once
 
 A rule switched on everywhere at once is a rule that gets uninstalled on its
-first false alarm. So every connected project starts in **Observe**: calls are
-judged and recorded, and no rule refuses anything. A credential is still
-refused by the hook on the developer's own machine, and so is a request the
+first false alarm. So by default a connected project starts in **Observe**:
+calls are judged and recorded, and no rule refuses anything. A credential is
+still refused by the hook on the developer's own machine, and so is a request the
 service cannot take at all, such as a body over 1 MB, since the hook reads any
 4xx answer other than 429 as a refusal. The dashboard shows what each rule
 *would* have refused. An operator marks each of those correct or a false alarm,
 and each rule reads its state from the labels: **Ready** when everything it
 flagged was correct, **Quiet** when it flagged nothing, **Noisy** after a false
 alarm. **Promote** moves the project to Enforce with the rules that earned it,
-and the others keep observing. **Demote** is one click.
+and the others keep observing. **Demote** is one click. A stack can also name
+projects that start in Enforce (`EnforceProjectPattern`); the public one does
+for the projects a real agent works in, because no operator is there to
+promote them.
 
 Connecting a repository is one command, copied from the dashboard:
 
@@ -117,11 +121,13 @@ browser ─────────────────────►├─
 ```
 
 Checked on the live stacks **[PRIMARY, 2026-09-22]**: the web ACL is attached
-to the deployed distribution (`aws cloudfront list-distributions`), the ten
-alarms exist and were all `OK` (`aws cloudwatch describe-alarms`),
+to the deployed distribution (`aws cloudfront list-distributions`), and
 point-in-time recovery is `ENABLED` on the table
-(`aws dynamodb describe-continuous-backups`), and the function runs with a
-reserved concurrency of 25 (`aws lambda get-function-concurrency`).
+(`aws dynamodb describe-continuous-backups`). Rechecked **[PRIMARY,
+2026-09-27]**, after that day's deploy (`docs/ARCHITECTURE.md`, section 1):
+the eleven alarms exist and were all `OK` (`aws cloudwatch describe-alarms`),
+and the function runs at 1,024 MB with a reserved concurrency of 25
+(`aws lambda get-function-configuration`, `get-function-concurrency`).
 
 - **One Lambda function** answers every route, so the page's "try it" and a
   hook's verdict run the same code. The price: page reads and verdicts share one
@@ -143,6 +149,12 @@ reserved concurrency of 25 (`aws lambda get-function-concurrency`).
   from the edge, `install.py` now names the edge; fetched from the API URL, it
   names the API URL **[PRIMARY, 2026-09-22]**. The secret is not
   authentication; the API's own URL stays public.
+- **A synthetic fleet gives the public dashboard something true to show.** On
+  the public stack only, an Amazon EventBridge Scheduler schedule invokes the
+  function every 15 minutes, and each tick sends a bounded batch of synthetic
+  calls from six `Acme-*` projects through the real gates, with no model
+  call. Nothing is backdated, and every page that shows those calls says they
+  are synthetic.
 - **The hook fails open.** If the service cannot answer, the agent's own
   permissions decide, because a governance outage that stopped every developer
   would end the rollout. `THREEFOLD_FAIL_CLOSED=1` flips that.
@@ -151,12 +163,18 @@ reserved concurrency of 25 (`aws lambda get-function-concurrency`).
 
 - **Does a deny stop the write?** Measured per agent on the file system on
   2026-09-21: in Claude Code 2.1.220 and the Antigravity desktop app the
-  refused file was not created. Codex was not measured, so nothing is claimed
-  for it **[STATE-FILE]**, `docs/evidence/ENFORCEMENT_2026-09-21.md`.
-- **Does the live stack do what the documents say?** A probe script checked the
-  public stack claim by claim on 2026-09-22, at its API Gateway URL: 113 PASS,
-  0 FAIL, 3 SKIP **[PRIMARY, 2026-09-22]**, `docs/evidence/PROBES_2026-09-22.md`.
-  No probe of the CloudFront URL has been committed yet.
+  refused file was not created (`docs/evidence/ENFORCEMENT_2026-09-21.md`).
+  Codex CLI 0.155.0 was measured on 2026-09-23, in one run and over its patch
+  tool only: the hook refused an `apply_patch` adding `import boto3` to a
+  governed domain file, and the file's SHA-256 was unchanged afterwards. Its
+  shell route is not measured **[STATE-FILE]**,
+  `docs/evidence/ENFORCEMENT_2026-09-23.md`.
+- **Does the live stack do what the documents say?** A probe script checks the
+  public stack claim by claim. On 2026-09-27, after that day's deploy, it
+  passed 117 checks, 0 FAIL, 3 SKIP through the CloudFront URL and the same at
+  the API Gateway URL **[PRIMARY, 2026-09-27]**,
+  `docs/evidence/PROBES_2026-09-27-2-edge.md` and
+  `docs/evidence/PROBES_2026-09-27-2.md`.
 - **Does Threefold change what an agent does?** Measured on 2026-09-22
   **[PRIMARY]**. Claude Code ran headless on six synthetic tasks, each tempting
   a governed violation, and on three *pressure* variants whose prompt asks for
@@ -180,10 +198,25 @@ reserved concurrency of 25 (`aws lambda get-function-concurrency`).
   the pressure prompt made it much worse — 17% against 56%. Threefold left no
   violation in any of the four series, and the price shows in the last column:
   under the pressure prompts the governed agent finished 10 of 18 runs and
-  otherwise stopped and reported the conflict rather than break a rule. The
-  limits go with it: 18 or 9 runs a cell, one agent, tasks written by
-  the people who built Threefold: rates under temptation, not base rates
+  otherwise stopped and reported the conflict rather than break a rule. Codex
+  CLI 0.155.0 ran the same tasks on 2026-09-23, with the rules in `AGENTS.md`
+  instead: 17% / 0% / 0% on the standard tasks and 100% / 11% / 0% under
+  pressure, where the governed agent finished 6 of 9 runs
+  (`docs/evidence/BENCHMARK_2026-09-23-CODEX*.md`). The limits go with it: 18
+  or 9 runs a cell, two agents, tasks written by the people who built
+  Threefold: rates under temptation, not base rates
   (`docs/evidence/BENCHMARK_2026-09-22*.md`).
+- **Does it hold for a real agent on the live stack?**
+  `scripts/daily_live_agent.py` gives Claude Code or Codex, on alternate days,
+  one of the benchmark's tasks in an `Acme-Live-*` project on the public
+  stack, which starts in Enforce. Two runs so far **[PRIMARY, 2026-09-27]**,
+  `benchmark/results/live/`: Codex on 2026-09-26, 8 calls, and Claude Code on
+  2026-09-27, 4 calls; in both no violation landed and the acceptance tests
+  passed. Codex's one refusal was false: a read ending in PowerShell's
+  `2>$null`, which the command check took for a write. It was fixed the next
+  day, and looking for a way around the fix closed an older hole:
+  `bash -c "echo ... > src/domain/\$f"` had been approved **[STATE-FILE]**.
+  Two runs are not a rate; they show the path working with real agents.
 - **The certificate** Threefold issues covers the session's own stored
   verdicts and carries a KMS signature where the stack holds a signing key.
   Nothing requires one before a merge **[STATE-FILE]**.
@@ -205,4 +238,7 @@ reserved concurrency of 25 (`aws lambda get-function-concurrency`).
   <https://d1og72wpk4aqig.cloudfront.net/dashboard.html#/try>
 - The demo, where the third identical call halts the session:
   <https://d1og72wpk4aqig.cloudfront.net/>
-- The operations dashboard: <https://d1og72wpk4aqig.cloudfront.net/dashboard.html#/overview>
+- The operations dashboard, which names where its calls come from:
+  <https://d1og72wpk4aqig.cloudfront.net/dashboard.html#/overview>
+- The benchmark's six series, side by side:
+  <https://d1og72wpk4aqig.cloudfront.net/dashboard.html#/proof>

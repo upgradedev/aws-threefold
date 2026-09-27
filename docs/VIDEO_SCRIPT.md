@@ -2,7 +2,7 @@
 
 **Category:** `#workplace-efficiency` · **Lane:** `#community`
 **Target length:** 2:45, under a 3:00 hard cap
-**What is on screen:** the public site <https://d1og72wpk4aqig.cloudfront.net/> and its pages; a real Claude Code session in a synthetic `Acme-*` repository connected to that same public stack; and, in scene 5, the public stack's CloudWatch dashboard in the AWS console, which needs the operator's own AWS sign-in. Nothing is mocked and no other stack appears. Every sentence of narration is something the screen shows or the code does; where each spoken claim comes from is listed after the scenes.
+**What is on screen:** the public site <https://d1og72wpk4aqig.cloudfront.net/> and its pages; a real Claude Code session in a synthetic `Acme-*` repository connected to that same public stack; and, in scene 5, the public stack's CloudWatch dashboard in the AWS console, which needs the operator's own AWS sign-in. Nothing is mocked and no other stack appears. Most calls on the overview come from the public stack's synthetic Acme fleet, sent through the real gates every 15 minutes, and the page calls them synthetic; nothing in the video presents them as real use. Every sentence of narration is something the screen shows or the code does; where each spoken claim comes from is listed after the scenes.
 
 ---
 
@@ -48,13 +48,13 @@
      from Amazon Bedrock. This call runs in a `try-` session, which the
      project's stage decides exactly as it decides a real hook's call, so the
      refusal is evidence that the promotion caused it: the same call was
-     recorded and approved one step earlier, in Observe. The step-5 card's own
-     sentence ("now in Enforce. This time the rule in force refuses it") can
-     stay in frame.
+     recorded and approved when step 1 seeded the sandbox, in Observe. The
+     step-5 card's own sentence ("now in Enforce. This time the rule in force
+     refuses it") can stay in frame.
 - **Narration:**
-  > "Every project starts in Observe. Calls are judged and recorded, and the
-  > dashboard shows what each rule would have refused. You mark each one correct
-  > or a false alarm. A rule whose every flag was correct is Ready; the one with
+  > "By default, a project starts in Observe. Calls are judged and recorded,
+  > and the dashboard shows what each rule would have refused. You mark each
+  > one correct or a false alarm. A rule whose every flag was correct is Ready; the one with
   > a false alarm is Noisy and keeps observing. Promote the project with the
   > rules that earned it, and from then on a hook's call that breaks one of them
   > is refused. The walkthrough sends that same call again, and this time it is
@@ -91,15 +91,17 @@
 
 ## Scene 5: running it, and what the benchmark says (2:15 to 2:45)
 
-- **Visual:** the dashboard's overview; the CloudWatch dashboard
-  `threefold-prod-operations` with its alarms; then the dashboard's `#/proof`
-  page, on the table of the four measured series. Hold on the Threefold
-  column, which reads 0% in every row, and let the pressure rows' "tests
-  passed" figures (67% and 44%) stay readable in the same shot: the cost is
-  part of the claim, not a footnote.
+- **Visual:** the dashboard's overview, with the line that says where its
+  calls come from (the synthetic Acme fleet among them) in frame; the
+  CloudWatch dashboard `threefold-prod-operations` with its alarms; then the
+  dashboard's `#/proof` page, on its chart "Did a violation land?", which
+  shows the six measured series (four of Claude Code, two of Codex). Hold on
+  the Threefold lane, which reads 0% in every row, and let the pressure rows'
+  "Tests passed, Threefold" figures (67%, 44% and 67%) stay readable in the
+  same shot: the cost is part of the claim, not a footnote.
 - **Narration:**
   > "It runs on AWS behind CloudFront and AWS WAF, on one Lambda function and one
-  > DynamoDB table, with ten CloudWatch alarms and point-in-time recovery. A
+  > DynamoDB table, with eleven CloudWatch alarms and point-in-time recovery. A
   > live probe checks the project's claims against the deployed stack. And we
   > measured it: a hundred and sixty-two headless Claude Code runs, two models,
   > graded by a checker that does not import Threefold. With the rules only
@@ -118,14 +120,14 @@
 
 | Claim | Source |
 |---|---|
-| A promoted sandbox refuses a real hook's call, and a demoted one records it | [PRIMARY, 2026-09-22] `docs/evidence/PROBES_2026-09-22.md`, group "application": a hook `Write` of `import boto3` into `src/domain/` answered `APPROVED` with the would-refuse recorded before promotion, `BLOCKED_BOUNDARY_VIOLATION` with `project_stage` `enforce` after it, and `APPROVED` again after demotion. The probe's sessions are named `probe-<run id>-*`, not `sim-` |
+| A promoted sandbox refuses a real hook's call, and a demoted one records it | [PRIMARY, 2026-09-27] `docs/evidence/PROBES_2026-09-27-2-edge.md`, through the edge the video shows (first on 2026-09-22, `docs/evidence/PROBES_2026-09-22.md`), group "application": a hook `Write` of `import boto3` into `src/domain/` answered `APPROVED` with the would-refuse recorded before promotion, `BLOCKED_BOUNDARY_VIOLATION` with `project_stage` `enforce` after it, and `APPROVED` again after demotion. The probe's sessions are named `probe-<run id>-*`, not `sim-` |
 | The walkthrough's last call is decided by the promotion | `dashboard.html` sends it with `session_id` from `T.newSessionId('try-')`, so `application/projects.py`, `stage_applies`, applies the project's stage to it as to any hook's call. `tests/pages/test_the_walkthrough_proves_the_promotion.py` sends that call to a fresh sandbox before and after promoting it: `APPROVED` with `project_stage` `observe`, then `BLOCKED_BOUNDARY_VIOLATION` with `enforce` |
 | Visitors can promote only sandbox projects on the public stack | `infrastructure/security_middleware.py`: a project write is open without a key only where reads are public and the name is `Acme-Sandbox-<8 hex>`; the public stack has no operator key [STATE-FILE] |
 | A refused file is not created: Claude Code and Antigravity, and Codex over its patch tool | [STATE-FILE], `docs/evidence/ENFORCEMENT_2026-09-21.md` and `docs/evidence/ENFORCEMENT_2026-09-23.md`. Codex is one run, over `apply_patch`; its shell route is not measured |
 | Behind CloudFront and AWS WAF | [PRIMARY, 2026-09-22] `aws cloudfront list-distributions`: the distribution behind `d1og72wpk4aqig.cloudfront.net` is `Deployed` with the web ACL `threefold-prod-edge-web-acl` attached |
 | Eleven CloudWatch alarms | [PRIMARY, 2026-09-27] `aws cloudwatch describe-alarms --alarm-name-prefix threefold-prod-`: 11 alarms, all `OK` |
 | Point-in-time recovery | [PRIMARY, 2026-09-22] `aws dynamodb describe-continuous-backups`: `ENABLED` |
-| A live probe checks the claims | [PRIMARY, 2026-09-22] `docs/evidence/PROBES_2026-09-22.md`, run against the public origin URL: 113 PASS, 0 FAIL, 3 SKIP |
+| A live probe checks the claims | [PRIMARY, 2026-09-27] `docs/evidence/PROBES_2026-09-27-2-edge.md` and `docs/evidence/PROBES_2026-09-27-2.md`, run through the edge and at the API origin after that day's deploy: 117 PASS, 0 FAIL, 3 SKIP each |
 | 162 headless runs, two models, no violation under Threefold, and 10 of 18 pressure runs finished | [PRIMARY, 2026-09-22] the four reports `docs/evidence/BENCHMARK_2026-09-22.md`, `-HAIKU.md`, `-PRESSURE-SONNET.md` and `-PRESSURE-HAIKU.md`, from `benchmark/results/20260922T143932Z.jsonl`, `…145644Z.jsonl`, `…161455Z-pressure.jsonl` and `…162306Z-pressure.jsonl`. Violation landed, no guidance / rules in `CLAUDE.md` / Threefold: 17% / 0% / 0%, then 39% / 17% / 0%, then 67% / 0% / 0%, then 100% / 56% / 0%; acceptance tests passed under Threefold 100% (18/18), 100% (18/18), 67% (6/9), 44% (4/9). Grading is `benchmark/checks.py`, which does not import Threefold |
 
 ---
@@ -148,13 +150,15 @@
       repository after connecting. No real project or company name on screen.
 - [ ] CloudWatch console: `threefold-prod-operations` in eu-west-1, signed in
       as the operator. No account id, email address or other stack in frame.
-- [ ] Do not show a test count. Benchmark numbers are fine now that four
-      matrices are measured, but only as the reports and `#/proof` state them,
-      with the two families apart and the pressure series' completion rate in
-      the same shot as its violation rate.
-- [ ] Before filming scene 5, check that the live `#/proof` page shows the four
-      series and not the PILOT banner: the snapshot in `src/threefold/web/`
-      reaches the page only with the next regional deploy (`docs/RUNBOOK.md`
-      section 1). Narrating measured results over that banner is the one thing
-      this scene must not do.
+- [ ] Do not show a test count. Benchmark numbers are fine now that six
+      series are measured (four of Claude Code, two of Codex), but only as
+      the reports and `#/proof` state them, with the two families apart and
+      the pressure series' completion rate in the same shot as its violation
+      rate.
+- [ ] Before filming scene 5, check that the live `#/proof` page still shows
+      the six series and no PILOT banner, as it did on 2026-09-27 with the
+      snapshot written at 2026-09-27T08:09:51Z [PRIMARY, 2026-09-27]: a new
+      snapshot in `src/threefold/web/proof.json` reaches the page only with a
+      regional deploy (`docs/RUNBOOK.md` section 1). Narrating measured results
+      over a PILOT banner is the one thing this scene must not do.
 - [ ] Final length between 2:35 and 2:45.
