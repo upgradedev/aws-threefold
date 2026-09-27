@@ -95,7 +95,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 from threefold.application import ledger, rollups
 from threefold.application import projects as stages
 from threefold.application.dtos import ToolCallRequestDTO
-from threefold.application.rule_keys import NONE, kind_of, rule_key, stored_rule_key, stored_rule_keys
+from threefold.application.rule_keys import NONE, kind_of, stored_rule_key, stored_rule_keys
 from threefold.domain.boundary_guard import SecretScanner
 
 logger = logging.getLogger("threefold.fleet")
@@ -961,12 +961,16 @@ def _ensure_configured(evaluator: Any, now: datetime.datetime) -> Dict[str, Opti
 
 
 def _key_of(result: Any) -> str:
-    """The rule key the ledger recorded for a verdict: the gate that decided, as the evaluator reads it."""
-    decided = getattr(result, "decided_key", None)
-    if isinstance(decided, str) and decided:
-        return decided
-    return rule_key(
+    """The rule key the ledger recorded for a verdict: the gate that decided, as the evaluator reads it.
+
+    The verdict is read as the row the ledger stores for it, by the rule that
+    gives a stored row its key: the gate the evaluator carried beside the
+    verdict, and only for a verdict that carries none, the gate's own words at
+    the head of its reason.
+    """
+    return stored_rule_key(
         {
+            "rule_key": getattr(result, "decided_key", None),
             "status": result.status,
             "reason": result.reason,
             "observed_rules": getattr(result, "observed_rules", None),
