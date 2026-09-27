@@ -494,6 +494,10 @@
     .tf-inv-value { font: 600 0.6875rem/1rem var(--tf-font-mono); color: var(--tf-text-3); white-space: nowrap; }
     .tf-explain { padding: 12px 14px; border-radius: var(--tf-radius-md); background: var(--tf-accent-soft); border: 1px solid color-mix(in srgb, var(--tf-accent) 28%, transparent); font-size: 0.8125rem; line-height: 1.3125rem; color: var(--tf-text-2); overflow-wrap: anywhere; }
     .tf-explain strong { color: var(--tf-accent-text); font-weight: 600; }
+    /* The rest of a long explanation, one click under its first sentence. */
+    .tf-explain-more { margin-top: 8px; }
+    .tf-explain-more > summary { width: fit-content; cursor: pointer; font-size: 0.75rem; line-height: 1.5rem; color: var(--tf-accent-text); }
+    .tf-explain-more > p { margin: 4px 0 0; white-space: pre-line; }
     .tf-fix { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: var(--tf-radius-md); background: var(--tf-inset); border: 1px solid var(--tf-hairline); font-size: 0.8125rem; line-height: 1.25rem; color: var(--tf-text-2); overflow-wrap: anywhere; }
     .tf-fix p, .tf-fix ol { margin: 0; }
     .tf-fix ol { padding-left: 20px; color: var(--tf-text-3); }
@@ -1094,9 +1098,68 @@
           : source === "deterministic_fallback"
             ? "Deterministic explanation, the model was asked and did not answer"
             : "Deterministic explanation";
+      // A long answer shows its first sentence or two, and the whole of it
+      // one click under them, in the same plain words.
+      const lines = plainExplanation(text);
+      const whole = lines.join(' ') || "No explanation returned.";
+      const lead = whole.length > EXPLANATION_SHOWN_CHARS ? leadSentences(whole) : whole;
+      const more = lead.length < whole.length
+        ? `<details class="tf-explain-more"><summary>The whole explanation</summary><p>${escapeHtml(lines.join('\n'))}</p></details>`
+        : '';
       document.getElementById('bedrock-box').innerHTML =
-        `<strong>${label}:</strong> ${escapeHtml(text)}`;
+        `<strong>${label}:</strong> ${escapeHtml(lead)}${more}`;
       document.getElementById('terminal-badge').innerText = 'Live answer';
+    }
+
+    // What an explanation says, in plain words. A model asked for a sentence
+    // sometimes answers in Markdown, and printed as it came that read
+    // "# Threefold Governance Decision: … **Decision Explanation:** …" under
+    // "Why, in a sentence". It is never rendered as markup: its words are
+    // taken out of it (a heading dropped, whether it stands on its own line or
+    // runs into the text; a bold label opening a line dropped; `**`, backticks,
+    // list and quote markers removed; a link reduced to its text), and they
+    // are escaped where they are shown. Underscores are left alone, because
+    // the names the service uses carry them (BLOCKED_LOOP_DETECTED, edit_file).
+    // Returns the lines that remain; plain text comes back as it was.
+    const EXPLANATION_SHOWN_CHARS = 240;
+    function plainExplanation(text) {
+      const headings = [];
+      const kept = [];
+      String(text).replace(/\r\n?/g, '\n').split('\n').forEach(line => {
+        let rest = line.trim();
+        const heading = /^#{1,6}\s+/.exec(rest);
+        if (heading) {
+          rest = rest.slice(heading[0].length);
+          const into = rest.indexOf(' **');
+          if (into === -1) { headings.push(rest); return; }
+          headings.push(rest.slice(0, into));
+          rest = rest.slice(into + 1);
+        }
+        if (/^(?:[-*_]\s*){3,}$/.test(rest)) return;
+        rest = rest.replace(/^>\s?/, '').replace(/^(?:[-*+]|\d+[.)])\s+/, '');
+        if (rest) kept.push(rest);
+      });
+      const words = line => line
+        .replace(/^\*\*[^*]{1,60}?(?::\*\*|\*\*:)\s*/, '')
+        .replace(/\[([^\]]+)\]\((?:[^()\s]|\([^()\s]*\))*\)/g, '$1')
+        .replace(/\*\*|`+/g, '')
+        .replace(/(^|[\s(])\*(?=\S)([^*]*?\S)\*(?=[\s).,;:!?]|$)/g, '$1$2')
+        .replace(/\s+/g, ' ')
+        .trim();
+      const lines = kept.map(words).filter(Boolean);
+      return lines.length ? lines : headings.map(words).filter(Boolean);
+    }
+
+    // The first sentence, and the second when the first is short. A sentence
+    // ends at a stop followed by a space and a capital, so "$0.0270" and
+    // "user.py" never end one.
+    function leadSentences(text) {
+      const first = /^(.+?[.!?])\s+(?=["'(]?[A-Z])/.exec(text);
+      if (!first) return text;
+      const rest = text.slice(first[0].length);
+      const second = /^(.+?[.!?])(?:\s+(?=["'(]?[A-Z])|$)/.exec(rest);
+      const both = second ? first[1] + ' ' + second[1] : '';
+      return first[1].length < 80 && both && both.length <= EXPLANATION_SHOWN_CHARS ? both : first[1];
     }
 
     // One real run of each scenario, recorded against the live API and replayed

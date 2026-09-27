@@ -1215,6 +1215,65 @@ def test_a_live_answer_shows_the_session_spend_it_carries(tmp_path: Path) -> Non
     assert out["unread"] == [["none yet", True]] * 4, "A cost that is not a finite, non-negative number is not shown"
 
 
+def _explained(tmp_path: Path, text: str, source: str = "bedrock") -> dict:
+    """What "Why, in a sentence" shows for a live loop refusal explained in these words."""
+    body = {"status": "BLOCKED_LOOP_DETECTED", "reason": "Loop detected", "session_id": "sim-1", "session_tripped": True,
+            "bedrock_explanation": text, "explanation_source": source}
+    return run(
+        "index.html",
+        r"""
+  answer = api({ '/status': { status: 200, body: { service: 'Threefold', status: 'HEALTHY' } },
+    'POST /simulate-loop': { status: 200, body: """ + json.dumps(body) + r""" } });
+  await checkApiHealth();
+  await simulateLoop(); await tick();
+  out.box = el('bedrock-box').innerHTML;
+""",
+        tmp_path,
+        before=DEMO_DOM,
+    )["box"]
+
+
+def test_an_explanation_in_markdown_is_shown_as_plain_sentences(tmp_path: Path) -> None:
+    """A review saw "# Threefold Governance Decision: BLOCKED_LOOP_DETECTED **Decision Explanation:** …" under "Why, in a sentence".
+
+    The words are taken out of the Markdown, never rendered as it: the heading
+    and the bold label go, the first sentence or two are shown, and the whole
+    text, in the same plain words, is one click under them.
+    """
+    explanation = (
+        "# Threefold Governance Decision: BLOCKED_LOOP_DETECTED\n\n"
+        "**Decision Explanation:** This block stops a runaway agent from paying for the same edit again. "
+        "The tool `edit_file` was called with identical arguments three times, at $0.0270 so far.\n\n"
+        "## Why it matters\n"
+        "- Each repeat costs tokens and changes nothing in `src/service.py`.\n"
+        "- The session is halted until an operator resumes it, see [the runbook](https://example.test/runbook).\n"
+    )
+    box = _explained(tmp_path, explanation)
+    lead, more = box.split("<details", 1)
+    assert _text(lead) == ("Amazon Bedrock (Claude Haiku 4.5): This block stops a runaway agent from paying for the same edit again. "
+                           "The tool edit_file was called with identical arguments three times, at $0.0270 so far.")
+    assert '<summary>The whole explanation</summary>' in more
+    whole = _text(more)
+    assert "Each repeat costs tokens and changes nothing in src/service.py." in whole and "see the runbook." in whole
+    for mark in ("#", "**", "`", "](", "<h", "<ul", "<code", "<a "):
+        assert mark not in box.replace("<details", "").replace("</details>", ""), f"{mark!r} reached the page"
+    one_line = explanation.replace("\n\n", " ", 1)
+    assert _text(_explained(tmp_path, one_line).split("<details", 1)[0]).startswith(
+        "Amazon Bedrock (Claude Haiku 4.5): This block stops a runaway agent"), "A heading that runs into the text on one line is dropped too"
+
+
+def test_a_plain_explanation_is_shown_whole_and_escaped(tmp_path: Path) -> None:
+    reason = ("Clean Architecture violation: Layering rule 'python-domain-stays-pure' refuses this write: A Python file under "
+              "domain/ may not import infrastructure or a driver. 'src/domain/user.py' imports 'boto3', which matches 'boto3'")
+    box = _explained(tmp_path, reason, "deterministic")
+    assert "<details" not in box and _text(box) == "Deterministic explanation, the model is not asked for this verdict: " + reason, \
+        "A short answer is shown whole, as it came"
+    hostile = "# <img src=x onerror=alert(1)>\n**Why:** `<script>alert(2)</script>` [click](javascript:alert(3)) was refused. " + "x" * 300
+    box = _explained(tmp_path, hostile)
+    assert "<img" not in box and "<script" not in box and "javascript:" not in box and "<a " not in box
+    assert "&lt;script&gt;alert(2)&lt;/script&gt; click was refused." in box, "The words are escaped after the markup is taken out"
+
+
 def test_the_four_scenarios_carry_the_numbers_the_readme_gives_them() -> None:
     gates = _section("watch-the-gates")
     cards = re.findall(r'<button type="button" id="scenario-(\w+)".*?</button>', gates, re.S)
