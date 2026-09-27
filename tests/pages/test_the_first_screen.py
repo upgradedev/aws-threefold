@@ -1,8 +1,8 @@
 """The first screen says what Threefold is, shows it working, and proves it, in that order.
 
 A judge who opens the public URL meets the hero before anything else: one
-promise line under twelve words, one sentence of how, "Watch it stop a bad
-write — 60 s", "Open the live dashboard" and a quiet "Connect your
+promise line under twelve words, one sentence of how, "Try the two-stage
+rollout — 60 s", "Open the live dashboard" and a quiet "Connect your
 repository", and beside them the product's core moment. That moment is one
 proposed write, the boundary write RECORDED.boundary was recorded from, asked
 of this stack through the route a hook asks: the answer is the stack's own when
@@ -37,7 +37,7 @@ SENTENCE = (
 )
 SCOPE = "A refusal is measured to stop the write in Claude Code and Antigravity, and in Codex once, over its patch tool only."
 ACTIONS = [
-    ("hero-try", "dashboard.html#/try", "Watch it stop a bad write — 60 s"),
+    ("hero-try", "dashboard.html#/try", "Try the two-stage rollout — 60 s"),
     ("hero-dashboard", "dashboard.html#/overview", "Open the live dashboard"),
     ("hero-connect", "dashboard.html#/connect", "Connect your repository"),
 ]
@@ -199,7 +199,7 @@ def test_the_three_actions_come_next_each_one_click_in_this_order() -> None:
     found = re.findall(r'<a id="([^"]+)" href="([^"]+)" class="([^"]*)"[^>]*>(.*?)</a>', actions, re.S)
     assert [(ident, href, _text(label)) for ident, href, _, label in found] == ACTIONS
     classes = [set(cls.split()) for _, _, cls, _ in found]
-    assert {"tf-btn", "tf-btn-primary"} <= classes[0], "Watching it work is the primary action"
+    assert {"tf-btn", "tf-btn-primary"} <= classes[0], "Trying the two-stage rollout is the primary action"
     assert "tf-btn" in classes[1] and "tf-btn-primary" not in classes[1], "The dashboard is the secondary one"
     assert "tf-btn" not in classes[2] and "tf-hero-link" in classes[2], "Connecting is a quiet text link"
 
@@ -820,6 +820,155 @@ def test_the_stopped_tile_says_how_many_of_its_refusals_are_in_this_pages_demo_p
         assert stopped_sub(none) == "before they ran", f"{none}: no share that is not a count within the tile's own"
 
 
+# The four sources as the stack reports them, and the project rows they are
+# counted from: 1,284 calls, 37 refused and 57 would-refuse, as the totals say.
+SPLIT_SOURCES = ("sources: { fleet: { calls: 1102, projects: 2 }, live: { calls: 40, projects: 1 }, "
+                 "sandbox: { calls: 80, projects: 1 }, other: { calls: 62, projects: 2 } }")
+SPLIT_ROWS = [
+    {"project": "Acme-Live-billing-credit-limit", "source": "live", "calls": 40, "refused": 2, "would_refuse": 0},
+    {"project": "Acme-Checkout", "source": "fleet", "calls": 700, "refused": 10, "would_refuse": 30},
+    {"project": "Acme-Mobile", "source": "fleet", "calls": 402, "refused": 5, "would_refuse": 20},
+    {"project": "Acme-Sandbox-0a1b2c3d", "source": "sandbox", "calls": 80, "refused": 3, "would_refuse": 7},
+    {"project": "Acme-Probe", "source": "other", "calls": 50, "refused": 14, "would_refuse": 0},
+    {"project": "Acme-Core", "source": "other", "calls": 12, "refused": 3, "would_refuse": 0},
+]
+
+
+def _split_load(tmp_path: Path, rows: list, sources: str = SPLIT_SOURCES, **totals) -> dict:
+    """The page loaded against an overview with these project rows."""
+    body = _overview(sources + ", by_project: " + json.dumps(rows), **totals).replace("by_project: [], ", "", 1)
+    return _load(tmp_path, overview="{ status: 200, body: " + body + " }")
+
+
+def _split_subs(tmp_path: Path, rows: list, sources: str = SPLIT_SOURCES, **totals) -> tuple:
+    """The Stopped and Would-have-been-stopped sub-lines for these project rows, and the strip's markup."""
+    out = _split_load(tmp_path, rows, sources, **totals)
+    subs = [_text(s) for s in re.findall(r'<span class="tf-tile-sub">(.*?)</span>', out["live"], re.S)]
+    return subs[1], subs[2], out["live"]
+
+
+def test_the_stopped_and_would_refuse_tiles_say_where_their_counts_come_from(tmp_path: Path) -> None:
+    """A review read "Stopped 346 before they ran" as governed work; most of it was probes and the synthetic fleet.
+
+    Each of the two tiles now splits its own number by source, from the
+    by_project rows the stack counts it from, real agent runs first, and
+    only when the parts add up to the tile's number. The fleet is called
+    synthetic on the tile itself, not only in the sentence under it.
+    """
+    stopped, observed, markup = _split_subs(tmp_path, SPLIT_ROWS)
+    assert stopped == ("before they ran: 2 in real agent runs (see below), 15 from the synthetic fleet, 3 from visitors’ sandboxes, "
+                       "17 from probes, page demos and other callers")
+    assert observed == "recorded while a project observes: 50 from the synthetic fleet, 7 from visitors’ sandboxes", \
+        "Parts with nothing in them are left out"
+    assert _metrics(markup) == {"calls": "1,284", "refused": "37", "would_refuse": "57"}, "The tiles' numbers are the stack's own counts"
+    assert "in this page’s demo project" not in markup, "Its refusals are within the probes and page demos part"
+    assert 'aria-label="Stopped: 37. before they ran: 2 in real agent runs (see below),' in markup, "The link's label reads the same words"
+
+
+def test_real_runs_are_named_as_such_only_when_the_stack_counts_them_so(tmp_path: Path) -> None:
+    """A live project's row counts every caller in it; `sources.live` counts only Claude Code and Codex.
+
+    When the two disagree on the calls, some of the project's calls were not
+    the real agents', so its refusals are placed in the projects the real
+    agents report to rather than credited to their runs. When real runs were
+    judged and none was refused, the Stopped tile says so, and the
+    Would-refuse tile, whose projects never observe, does not.
+    """
+    other_callers = [dict(row, calls=44) if row["source"] == "live" else row for row in SPLIT_ROWS]
+    stopped, _, _ = _split_subs(tmp_path, other_callers)
+    assert stopped.startswith("before they ran: 2 in the projects real agents report to (see below), 15 from the synthetic fleet")
+    none_refused = [dict(row, refused=0) if row["source"] == "live" else dict(row, refused=16) if row["project"] == "Acme-Probe" else row
+                    for row in SPLIT_ROWS]
+    stopped, observed, _ = _split_subs(tmp_path, none_refused)
+    assert stopped.startswith("before they ran: none from real agent runs, 15 from the synthetic fleet")
+    assert "real agent" not in observed
+    no_live = "sources: { fleet: { calls: 1102 }, live: { calls: 0 }, sandbox: { calls: 80 }, other: { calls: 102 } }"
+    rows = [dict(row, source="other") if row["source"] == "live" else row for row in none_refused]
+    stopped, _, _ = _split_subs(tmp_path, rows, sources=no_live)
+    assert "real agent" not in stopped, "With no real run in the window, none is mentioned"
+
+
+def test_a_refusal_in_real_agent_runs_is_counted_not_offered_as_a_right_one(tmp_path: Path) -> None:
+    """A review: the first real refusal on the public stack was a false alarm, and the tile read it as a stop.
+
+    STATE.md: the one refusal of the first live run was a PowerShell read taken
+    for a write. The overview says nothing of a refused call's review, so the
+    tile counts such refusals and points below, and the sentence under the
+    tiles says a refusal can be wrong and opens each project's refused rows,
+    where the reason and any review are.
+    """
+    out = _split_load(tmp_path, SPLIT_ROWS)
+    assert _read(out["where"]).endswith(
+        "A refusal can be wrong. Real agent runs’ refusals, each with its reason and any review: "
+        "2 refused calls in Acme-Live-billing-credit-limit."
+    )
+    links = re.findall(r'<a class="tf-link" href="([^"]+)">(.*?)</a>', out["where"], re.S)
+    assert links == [("https://example.test/prod/dashboard.html#/calls?days=7&amp;kind=refused&amp;project=Acme-Live-billing-credit-limit",
+                      "2 refused calls in Acme-Live-billing-credit-limit")], "The link opens that project's refused rows, in the tile's window"
+    two = SPLIT_ROWS + [{"project": "Acme-Live-warehouse-carrier-notify", "source": "live", "calls": 8, "refused": 1, "would_refuse": 0}]
+    two = [dict(row, refused=13) if row["project"] == "Acme-Probe" else row for row in two]
+    sources = SPLIT_SOURCES.replace("live: { calls: 40, projects: 1 }", "live: { calls: 48, projects: 2 }").replace("other: { calls: 62", "other: { calls: 54")
+    out = _split_load(tmp_path, two, sources=sources)
+    assert _read(out["where"]).endswith(
+        "each with its reason and any review: 2 refused calls in Acme-Live-billing-credit-limit and "
+        "1 refused call in Acme-Live-warehouse-carrier-notify."
+    ), "One link a project"
+    other_callers = [dict(row, calls=44) if row["source"] == "live" else row for row in SPLIT_ROWS]
+    out = _split_load(tmp_path, other_callers)
+    assert "Refusals in the projects real agents report to, each with its reason and any review: 2 refused calls in" in _read(out["where"])
+    none_refused = [dict(row, refused=0) if row["source"] == "live" else dict(row, refused=16) if row["project"] == "Acme-Probe" else row
+                    for row in SPLIT_ROWS]
+    out = _split_load(tmp_path, none_refused)
+    assert "can be wrong" not in out["where"] and "<a " not in out["where"], "With no refusal in real runs, nothing points to one"
+    more = [dict(row, refused=100) if row["project"] == "Acme-Probe" else row for row in SPLIT_ROWS]
+    out = _split_load(tmp_path, more)
+    assert "can be wrong" not in out["where"], "Where the tile gives no split, the sentence points to nothing"
+
+
+def test_a_real_run_project_name_reaches_the_link_as_text(tmp_path: Path) -> None:
+    hostile = 'Acme-Live-"><img src=x onerror=alert(1)>'
+    rows = [dict(row, project=hostile) if row["source"] == "live" else row for row in SPLIT_ROWS]
+    out = _split_load(tmp_path, rows)
+    assert "<img" not in out["where"] and "onerror=alert(1)>" not in out["where"], "Service data reached the page as markup"
+    assert "&lt;img src=x onerror=alert(1)&gt;" in out["where"], "The name is shown, escaped"
+    assert "project=Acme-Live-%22%3E%3Cimg%20src%3Dx%20onerror%3Dalert(1)%3E" in out["where"], "and carried in the link encoded"
+    for missing in (None, "", 7):
+        rows = [dict(row, project=missing) if row["source"] == "live" else row for row in SPLIT_ROWS]
+        stopped, _, _ = _split_subs(tmp_path, rows)
+        assert stopped == "before they ran; 3 in this page’s demo project", f"project {missing!r}: a refusal it cannot point to gives no split"
+
+
+def test_a_split_that_would_contradict_its_tile_is_not_given(tmp_path: Path) -> None:
+    more = [dict(row, refused=100) if row["project"] == "Acme-Probe" else row for row in SPLIT_ROWS]
+    stopped, observed, _ = _split_subs(tmp_path, more)
+    assert stopped == "before they ran; 3 in this page’s demo project", "Parts that add up to more than 37 give no figure"
+    assert observed.startswith("recorded while a project observes: 50 from the synthetic fleet"), "Each tile is judged on its own parts"
+    for hostile in ("'<img src=x onerror=alert(1)>'", "2.5", "-4", "null"):
+        rows = json.dumps(SPLIT_ROWS).replace('"refused": 14', '"refused": ' + hostile.replace("'", '"'))
+        body = _overview(SPLIT_SOURCES + ", by_project: " + rows).replace("by_project: [], ", "", 1)
+        out = _load(tmp_path, overview="{ status: 200, body: " + body + " }")
+        subs = [_text(s) for s in re.findall(r'<span class="tf-tile-sub">(.*?)</span>', out["live"], re.S)]
+        assert "<img" not in out["live"] and "onerror" not in out["live"], "Service data reached the page as markup"
+        assert subs[1] == "before they ran; 3 in this page’s demo project", f"refused {hostile}: a part that is not a count gives no split"
+    unknown = [dict(row, source="<img src=x>") if row["project"] == "Acme-Probe" else row for row in SPLIT_ROWS]
+    stopped, _, markup = _split_subs(tmp_path, unknown)
+    assert stopped == "before they ran; 3 in this page’s demo project" and "<img" not in markup, "A source the page does not know gives no split"
+
+
+def test_a_day_with_no_call_between_days_with_some_is_named(tmp_path: Path) -> None:
+    """The line reads zero on such a day; the page cannot tell a quiet day from an uncounted one, so it names the day."""
+    def first_sub(series: str) -> str:
+        out = _load(tmp_path, overview="{ status: 200, body: " + _overview("series: [" + series + "]").replace("series: [], ", "", 1) + " }")
+        return [_text(s) for s in re.findall(r'<span class="tf-tile-sub">(.*?)</span>', out["live"], re.S)][0]
+
+    day = lambda d, n: f"{{ day: '2026-09-{d}', approved: {n}, observed: 0, refused: 0 }}"  # noqa: E731
+    assert first_sub(", ".join([day(20, 5), day(21, 0), day(22, 3)])) == "in the last 7 days; none counted on 21 Sep"
+    assert first_sub(", ".join([day(20, 5), day(21, 0), day(22, 0), day(23, 3)])) == "in the last 7 days; none counted on 21 Sep and 22 Sep"
+    assert first_sub(", ".join([day(19, 5), day(20, 0), day(21, 0), day(22, 0), day(23, 3)])) == "in the last 7 days; none counted on 3 of the days"
+    assert first_sub(", ".join([day(20, 0), day(21, 5), day(22, 3), day(23, 0)])) == "in the last 7 days", \
+        "Days before the first count and after the last are the window's edges, not days missing inside it"
+
+
 def test_without_sources_the_sandboxes_are_still_told_apart(tmp_path: Path) -> None:
     split = "sandbox_split: { sandbox: { calls: 24, projects: 2 }, elsewhere: { calls: 1260, projects: 10 } }"
     out = _load(tmp_path, overview="{ status: 200, body: " + _overview(split) + " }")
@@ -842,25 +991,30 @@ def test_without_sources_the_sandboxes_are_still_told_apart(tmp_path: Path) -> N
 
 
 def test_the_daily_live_agent_is_counted_as_real_runs(tmp_path: Path) -> None:
-    """Its calls are real Claude Code or Codex runs, one Acme task a day, in projects that enforce: said so, with its count."""
+    """Its calls are real Claude Code or Codex runs on Acme tasks, in projects that enforce: said so, with its count.
+
+    No cadence is claimed. STATE.md: until the owner creates the daily schedule, a
+    day runs only when the script is started by hand, so "one Acme task a day" was
+    a promise the stack does not yet keep.
+    """
     sources = ("sources: { fleet: { calls: 1102, projects: 6 }, live: { calls: 40, projects: 2 }, "
                "sandbox: { calls: 80, projects: 9 }, other: { calls: 62, projects: 3 } }")
     out = _load(tmp_path, overview="{ status: 200, body: " + _overview(sources) + " }")
     assert _read(out["where"]) == (
         "Where they come from: 1,102 from a synthetic Acme fleet run through the real gates, 40 from real Claude Code "
-        "or Codex runs doing one Acme task a day in projects that enforce, 80 from visitors’ sandboxes, 62 from probes, "
+        "or Codex runs on Acme tasks, in projects that enforce, 80 from visitors’ sandboxes, 62 from probes, "
         "page demos and other API callers."
     ), "The four parts add up to the 1,284 calls, so each is given, the live agent's called real"
     mismatched = sources.replace("calls: 40", "calls: 400")
     out = _load(tmp_path, overview="{ status: 200, body: " + _overview(mismatched) + " }")
     assert _read(out["where"]) == (
-        "Where they come from: a synthetic Acme fleet run through the real gates, real Claude Code or Codex runs doing "
-        "one Acme task a day in projects that enforce, visitors’ sandboxes, probes, page demos and other API callers."
+        "Where they come from: a synthetic Acme fleet run through the real gates, real Claude Code or Codex runs on "
+        "Acme tasks, in projects that enforce, visitors’ sandboxes, probes, page demos and other API callers."
     ), "Parts that do not add up give no figure, and the live agent is still named"
     only_live = "sources: { fleet: { calls: 0 }, live: { calls: 1284 }, sandbox: { calls: 0 }, other: { calls: 0 } }"
     out = _load(tmp_path, overview="{ status: 200, body: " + _overview(only_live) + " }")
     assert _read(out["where"]) == (
-        "Where they come from: 1,284 from real Claude Code or Codex runs doing one Acme task a day in projects that enforce."
+        "Where they come from: 1,284 from real Claude Code or Codex runs on Acme tasks, in projects that enforce."
     )
 
 
@@ -1008,6 +1162,50 @@ def test_the_benchmark_is_pooled_from_the_snapshot_this_stack_serves(tmp_path: P
             f"against {none['done']} of {none['done_n']} with no guidance") in bench, \
         "The price is stated with the result, and read against what the agents finished with no guidance"
     assert 'href="https://example.test/prod/dashboard.html#/proof"' in out["bench"]
+    interval = re.search(r'<p class="tf-bench-note" data-bench="interval">(.*?)</p>', out["bench"], re.S)
+    assert interval and _text(interval.group(1)) == _interval_line(proof), \
+        "The pooled count is quoted with each series' own 95% interval, by family, and the tasks and repetitions behind it"
+    families = {b["family"] for b in proof["benchmarks"] if not b.get("pilot")}
+    if families == {"standard", "pressure"}:
+        assert f"By condition, the {want['series']} series pooled, standard and pressure tasks together." in bench, \
+            "The bars pool the two families, which the reports never do, so they say so"
+
+
+def _pct(value: float) -> str:
+    """A share as T.pct writes it: a whole percent, rounded half up, and <1% for a share under one percent."""
+    share = value * 100
+    return "<1%" if 0 < share < 1 else f"{int(share + 0.5)}%"
+
+
+def _interval_line(proof: dict) -> str:
+    """What the benchmark card must say under its headline, from each series' own interval in the snapshot."""
+    words = {"standard": "standard-task", "pressure": "pressure-task"}
+    intervals: dict = {}
+    tasks: dict = {"standard": [], "pressure": []}
+    reps = set()
+    for b in proof["benchmarks"]:
+        if b.get("pilot"):
+            continue
+        violation = {c["condition"]: c for c in b["conditions"]}["threefold"]["violation"]
+        intervals.setdefault(b["family"], []).append((violation["n"], violation["ci_low"], violation["ci_high"]))
+        tasks[b["family"]] += [t for t in b["tasks"] if t not in tasks[b["family"]]]
+        reps.add(violation["n"] / len(b["tasks"]))
+    (each,) = reps
+    parts = []
+    for family in ("standard", "pressure"):
+        found = intervals.get(family)
+        if not found:
+            continue
+        if len(set(found)) == 1:
+            n, low, high = found[0]
+            parts.append(f"{_pct(low)}–{_pct(high)} for {'the' if len(found) == 1 else 'each'} {words[family]} series of {n} runs")
+        else:
+            parts.append(f"within {_pct(min(x[1] for x in found))}–{_pct(max(x[2] for x in found))} for each of the {len(found)} {words[family]} series")
+    named = [family for family in ("standard", "pressure") if intervals.get(family)]
+    split = ", " + " and ".join(f"{len(tasks[f])} {f}" for f in named) if len(named) > 1 else ""
+    total = sum(len(tasks[f]) for f in named)
+    return (f"95% interval under Threefold, series by series: {'; '.join(parts)}. {total} Acme tasks{split}, "
+            f"each run {int(each)} times per condition in every series.")
 
 
 def test_a_violation_under_threefold_is_said_and_a_pilot_is_not_counted(tmp_path: Path) -> None:
@@ -1031,6 +1229,17 @@ def test_a_violation_under_threefold_is_said_and_a_pilot_is_not_counted(tmp_path
     evil = {"benchmarks": [series("<img src=x onerror=alert(1)>", 0)]}
     out = _load(tmp_path, proof="{ status: 200, body: " + json.dumps(evil) + " }")
     assert "<img" not in out["bench"] and "&lt;img" in out["bench"]
+    assert 'data-bench="interval"' not in out["bench"], "A series without its family, interval or tasks gives no interval line"
+    hostile = series("Codex", 0)
+    hostile.update(family="<img src=x onerror=alert(1)>", tasks=["a", "b", "c"])
+    hostile["conditions"][2]["violation"].update(ci_low=0, ci_high=0.2992)
+    out = _load(tmp_path, proof="{ status: 200, body: " + json.dumps({"benchmarks": [hostile]}) + " }")
+    assert "<img" not in out["bench"] and 'data-bench="interval"' not in out["bench"], "A family this page does not know gives no line"
+    known = dict(hostile, family="pressure")
+    out = _load(tmp_path, proof="{ status: 200, body: " + json.dumps({"benchmarks": [known]}) + " }")
+    assert _text(re.search(r'data-bench="interval">(.*?)</p>', out["bench"], re.S).group(1)) == (
+        "95% interval under Threefold, series by series: 0%–30% for the pressure-task series of 9 runs. "
+        "3 Acme tasks, each run 3 times per condition in every series.")
 
 
 def test_no_benchmark_result_is_shown_without_a_snapshot(tmp_path: Path) -> None:
@@ -1076,6 +1285,103 @@ def test_the_flagship_loop_still_trips_after_the_page_has_loaded(tmp_path: Path)
     assert out["pressed"] == ["true", "false", "false", "false", "false"] and out["title"] == "Runaway tool loop"
     assert out["badge"] == "Live answer"
     assert out["pressedAfterReset"] == ["false"] * 5 and "Circuit breaker: armed" in out["breakerAfterReset"]
+
+
+def test_a_live_answer_shows_the_session_spend_it_carries(tmp_path: Path) -> None:
+    """Every verdict carries current_session_cost_usd, so a live scenario never says "none yet" of a cost it was told.
+
+    A review found "Session spend none yet" under a live loop refusal whose
+    answer carried $0.027: only the certificate set the spend. A measured
+    zero is a measurement too; a value that is not a number leaves the words.
+    """
+    healthy = "'/status': { status: 200, body: { service: 'Threefold', status: 'HEALTHY' } }"
+    out = run(
+        "index.html",
+        r"""
+  answer = api({ """ + healthy + r""",
+    'POST /simulate-loop': { status: 200, body: { status: 'BLOCKED_LOOP_DETECTED', reason: 'Loop detected', session_id: 'sim-1', session_tripped: true, current_session_cost_usd: 0.027, explanation_source: 'deterministic' } },
+    'POST /simulate-secret': { status: 200, body: { status: 'BLOCKED_SECRET_DETECTED', reason: 'Sensitive credential detected', session_id: 'sim-2', current_session_cost_usd: 0, explanation_source: 'deterministic' } },
+    'POST /evaluate-tool-call': { status: 200, body: { status: 'BLOCKED_BOUNDARY_VIOLATION', reason: 'Refused.', current_session_cost_usd: 0.0012 } },
+    'POST /adapter/universal-tool-call': { status: 200, body: { detected_tool_name: 'edit_file', detected_action_type: 'FILE_WRITE', evaluation: { status: 'APPROVED', current_session_cost_usd: 0.0096, proof_hash: 'ab' } } } });
+  await checkApiHealth();
+  const spend = () => [el('kpi-spend').innerText, el('kpi-spend').classList.contains('tf-kpi-none')];
+  await simulateLoop(); await tick(); out.loop = spend();
+  await simulateSecret(); await tick(); out.secret = spend();
+  await simulateBoundary(); await tick(); out.boundary = spend();
+  await simulateUniversalAdapter(); await tick(); out.adapter = spend();
+  for (const cost of ["'0.027'", 'null', '-1', 'Infinity']) {
+    answer = api({ """ + healthy + r""",
+      'POST /simulate-loop': { status: 200, body: { status: 'BLOCKED_LOOP_DETECTED', reason: 'Loop detected', session_id: 'sim-3', session_tripped: true, current_session_cost_usd: eval(cost) } } });
+    await simulateLoop(); await tick();
+    (out.unread = out.unread || []).push(spend());
+  }
+""",
+        tmp_path,
+        before=DEMO_DOM,
+    )
+    assert out["loop"] == ["$0.0270", False], "The live loop shows the cost its answer carried"
+    assert out["secret"] == ["$0.0000", False], "A measured zero is shown as one"
+    assert out["boundary"] == ["$0.0012", False] and out["adapter"] == ["$0.0096", False]
+    assert out["unread"] == [["none yet", True]] * 4, "A cost that is not a finite, non-negative number is not shown"
+
+
+def _explained(tmp_path: Path, text: str, source: str = "bedrock") -> dict:
+    """What "Why, in a sentence" shows for a live loop refusal explained in these words."""
+    body = {"status": "BLOCKED_LOOP_DETECTED", "reason": "Loop detected", "session_id": "sim-1", "session_tripped": True,
+            "bedrock_explanation": text, "explanation_source": source}
+    return run(
+        "index.html",
+        r"""
+  answer = api({ '/status': { status: 200, body: { service: 'Threefold', status: 'HEALTHY' } },
+    'POST /simulate-loop': { status: 200, body: """ + json.dumps(body) + r""" } });
+  await checkApiHealth();
+  await simulateLoop(); await tick();
+  out.box = el('bedrock-box').innerHTML;
+""",
+        tmp_path,
+        before=DEMO_DOM,
+    )["box"]
+
+
+def test_an_explanation_in_markdown_is_shown_as_plain_sentences(tmp_path: Path) -> None:
+    """A review saw "# Threefold Governance Decision: BLOCKED_LOOP_DETECTED **Decision Explanation:** …" under "Why, in a sentence".
+
+    The words are taken out of the Markdown, never rendered as it: the heading
+    and the bold label go, the first sentence or two are shown, and the whole
+    text, in the same plain words, is one click under them.
+    """
+    explanation = (
+        "# Threefold Governance Decision: BLOCKED_LOOP_DETECTED\n\n"
+        "**Decision Explanation:** This block stops a runaway agent from paying for the same edit again. "
+        "The tool `edit_file` was called with identical arguments three times, at $0.0270 so far.\n\n"
+        "## Why it matters\n"
+        "- Each repeat costs tokens and changes nothing in `src/service.py`.\n"
+        "- The session is halted until an operator resumes it, see [the runbook](https://example.test/runbook).\n"
+    )
+    box = _explained(tmp_path, explanation)
+    lead, more = box.split("<details", 1)
+    assert _text(lead) == ("Amazon Bedrock (Claude Haiku 4.5): This block stops a runaway agent from paying for the same edit again. "
+                           "The tool edit_file was called with identical arguments three times, at $0.0270 so far.")
+    assert '<summary>The whole explanation</summary>' in more
+    whole = _text(more)
+    assert "Each repeat costs tokens and changes nothing in src/service.py." in whole and "see the runbook." in whole
+    for mark in ("#", "**", "`", "](", "<h", "<ul", "<code", "<a "):
+        assert mark not in box.replace("<details", "").replace("</details>", ""), f"{mark!r} reached the page"
+    one_line = explanation.replace("\n\n", " ", 1)
+    assert _text(_explained(tmp_path, one_line).split("<details", 1)[0]).startswith(
+        "Amazon Bedrock (Claude Haiku 4.5): This block stops a runaway agent"), "A heading that runs into the text on one line is dropped too"
+
+
+def test_a_plain_explanation_is_shown_whole_and_escaped(tmp_path: Path) -> None:
+    reason = ("Clean Architecture violation: Layering rule 'python-domain-stays-pure' refuses this write: A Python file under "
+              "domain/ may not import infrastructure or a driver. 'src/domain/user.py' imports 'boto3', which matches 'boto3'")
+    box = _explained(tmp_path, reason, "deterministic")
+    assert "<details" not in box and _text(box) == "Deterministic explanation, the model is not asked for this verdict: " + reason, \
+        "A short answer is shown whole, as it came"
+    hostile = "# <img src=x onerror=alert(1)>\n**Why:** `<script>alert(2)</script>` [click](javascript:alert(3)) was refused. " + "x" * 300
+    box = _explained(tmp_path, hostile)
+    assert "<img" not in box and "<script" not in box and "javascript:" not in box and "<a " not in box
+    assert "&lt;script&gt;alert(2)&lt;/script&gt; click was refused." in box, "The words are escaped after the markup is taken out"
 
 
 def test_the_four_scenarios_carry_the_numbers_the_readme_gives_them() -> None:

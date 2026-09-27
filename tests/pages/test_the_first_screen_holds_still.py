@@ -213,3 +213,48 @@ def test_the_hero_actions_never_leave_one_button_alone_on_a_row(tmp_path: Path, 
 def test_the_scenario_names_line_up_whether_or_not_their_card_is_numbered(tmp_path: Path) -> None:
     names = _layout(tmp_path, 1440, 900)["names"]
     assert max(names) - min(names) < 0.5, f"The adapter's name sits apart from the numbered ones: {names}"
+
+
+# A live loop refusal as the stack sends it, with the fix that comes with one.
+LOOP = {
+    "status": "BLOCKED_LOOP_DETECTED",
+    "reason": "Monomorphic loop detected: Tool 'edit_file' invoked with identical arguments 3 consecutive times",
+    "session_id": "sim-loop-1", "session_tripped": True, "current_session_cost_usd": 0.027, "explanation_source": "deterministic",
+    "bedrock_explanation": "Tool 'edit_file' was called with identical arguments once too often, so the session was halted at $0.0270.",
+    "suggested_fix": {
+        "kind": "loop", "validated": False,
+        "summary": "Loop: edit_file on src/service.py was called 3 times with identical arguments. Change the arguments or ask the human.",
+        "steps": ["Read the result of the last call.", "Change the arguments or the approach.", "Poll with a read-only command.",
+                  "An operator resumes the session."],
+    },
+}
+
+TERMINAL = r"""() => {
+  const t = document.getElementById('terminal-log');
+  const verdictSide = document.querySelector('.tf-result-grid').lastElementChild.getBoundingClientRect();
+  return { client: t.clientHeight, scroll: t.scrollHeight, height: t.getBoundingClientRect().height, lines: t.children.length,
+    verdictSide: verdictSide.height, spend: document.getElementById('kpi-spend').textContent,
+    scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth };
+}"""
+
+
+@pytest.mark.parametrize("width,height", [(375, 812), (768, 1024), (1100, 900), (1440, 900)])
+def test_the_terminal_is_as_tall_as_its_lines(tmp_path: Path, width: int, height: int) -> None:
+    """A review found the idle guide cut off on a phone, and four lines in a 600 px black pane on a desk.
+
+    The terminal now shows the whole idle guide at every width, keeps that
+    height when a scenario's first lines replace it, and beside the verdict on
+    a desk no longer stretches to the verdict's side as an empty pane.
+    """
+    press = "document.addEventListener('DOMContentLoaded', () => setTimeout(() => simulateLoop(), 2000));\n"
+    replies = dict(_replies(HEROES["live"]), **{"POST /simulate-loop": {"status": 200, "body": LOOP, "delay": 120}})
+    got = measure("index.html", tmp_path, width=width, height=height, replies=replies, moments={"idle": 1800, "loop": 3400},
+                  probe=TERMINAL, before=press)
+    idle, loop = got["taken"]["idle"], got["taken"]["loop"]
+    assert idle["scroll"] <= idle["client"], f"At {width} px the idle guide is cut off: {idle['scroll']} px of lines in {idle['client']} px"
+    assert loop["lines"] == 4 and loop["spend"] == "$0.0270", "Measured after the live loop answer landed"
+    assert abs(loop["height"] - idle["height"]) < 0.5, "A scenario's first lines neither shrink nor stretch the pane"
+    if width >= 1024:
+        assert loop["verdictSide"] > loop["height"] + 150, \
+            f"Beside a verdict {loop['verdictSide']:.0f} px tall the terminal is {loop['height']:.0f} px: the height of its lines, not of the column"
+    assert loop["scrollWidth"] <= loop["clientWidth"]
