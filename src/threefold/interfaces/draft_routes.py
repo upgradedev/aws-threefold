@@ -29,11 +29,15 @@ is one or two model calls. The brakes, and how far each one reaches:
 - The per-IP token bucket every request passes, sixty in a burst and then two
   a second.
 The last two live in the memory of one container. Lambda runs as many
-containers as there are concurrent requests, the template reserves no
-concurrency, and a caller's next request can land on a container whose bucket
-has never seen them. So they bound one container, not the account: N busy
-containers can make N times 60 calls. An account-wide bound needs reserved
-concurrency or throttling in the template, which this track does not own.
+containers as there are concurrent requests, up to ReservedConcurrency where
+the stack sets one (0 reserves none, leaving only the account's unreserved
+pool), and a caller's next request can land on a container whose bucket has
+never seen them. So they bound one container, not the stack: N busy
+containers can make N times 60 calls. The stack is bounded by the daily
+budget below, one row in the stack's own table, while the table answers: in a
+storage outage each container counts the budget in its own memory, so each
+may spend it. Nothing here bounds the account: a second stack in the same
+account counts in its own table, against a budget of its own.
 """
 from __future__ import annotations
 
@@ -66,10 +70,12 @@ DRAFT_PATH = "/rules/draft"
 # the 200 the verdict explanations share.
 DRAFT_CALLS_PER_CONTAINER = 60
 
-# Drafting model calls the whole account may make in one UTC day, counted in
-# one table row every container adds to. The per-container cap above bounds a
-# container; this bounds the account, which is what a public route needs: N
-# busy containers could otherwise spend N times sixty. A draft claims its two
+# Drafting model calls one stack may make in one UTC day, counted in one row of
+# the stack's own table that every container adds to. The per-container cap
+# above bounds a container; this bounds the stack, which is what a public route
+# needs: N busy containers could otherwise spend N times sixty. It is per stack,
+# not per account: a second stack in the same account counts in its own table,
+# so an account with N stacks may spend N times this. A draft claims its two
 # calls before the model is asked, so a draft past the budget reaches no model.
 DRAFT_MODEL_CALLS_PER_DAY = 400
 MODEL_CALLS_PER_DRAFT = 2
@@ -160,7 +166,7 @@ def handle(path: str, method: str, event: Dict[str, Any]) -> Optional[Dict[str, 
         problem = rfc7807_error(
             429,
             "Drafting Budget Spent",
-            "The drafting calls this account may make today are spent, so no model was asked and "
+            "The drafting calls this stack may make today are spent, so no model was asked and "
             "nothing was drafted or saved. The budget resets at midnight UTC. A rule can still be "
             "written by hand and tried with POST /rules/explain.",
             path,
@@ -250,7 +256,7 @@ def handle(path: str, method: str, event: Dict[str, Any]) -> Optional[Dict[str, 
 
 
 def _claim_budget(router: Any) -> bool:
-    """Claims one draft's model calls from the account's daily budget.
+    """Claims one draft's model calls from this stack's daily budget.
 
     A store that cannot count (an older repository in a test double) lets the
     draft through, bounded by the per-container cap as before; the store's own

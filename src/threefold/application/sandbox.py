@@ -3,7 +3,8 @@
 POST /api/sandbox makes `Acme-Sandbox-<8 hex>` in observe, gone a day later,
 and sends a dozen synthetic hook calls from all three agents through the real
 evaluator, so the dashboard has something true to show: what the shipped rules
-would have refused, and one refusal a reviewer should reject.
+would have refused, and one refusal a reviewer should reject. The answer names
+that call, so a page can ask a visitor to spot it and tell them if they did.
 
 Every call is synthetic, as the clean-room rule requires. No call asks for an
 explanation, so seeding a sandbox never reaches the model.
@@ -20,6 +21,30 @@ from threefold.application.dtos import ToolCallRequestDTO
 from threefold.application.labels import is_labelled
 
 SANDBOX_PREFIX = "Acme-Sandbox-"
+
+# The intended false alarm. `python-domain-stays-pure` covers
+# `**/domain/**/*.py`, and that glob also matches this test module under
+# tests/domain/. A test that drives the order endpoint through FastAPI's
+# TestClient is not domain code at all, so a reasonable reviewer marks this
+# call a false alarm: the rule's path pattern is wider than the layer it
+# means to protect. It is named apart from the rest of the seed so the answer
+# can say which call was planted from the seed itself, never by reading the
+# ledger back and guessing.
+FALSE_ALARM_CALL: Tuple[str, str, str, Dict[str, Any]] = ("codex", "apply_patch", "FILE_WRITE", {
+    "file_path": "tests/domain/test_order_totals.py",
+    "content": (
+        "from fastapi.testclient import TestClient\n\n"
+        "from acme.app import app\n\n\n"
+        "def test_totals_are_rounded():\n"
+        "    assert TestClient(app).get('/orders/1').json()['total'] == 10.5\n"
+    ),
+})
+FALSE_ALARM_RULE = "python-domain-stays-pure"
+# One plain sentence, which a page shows as it is: no Markdown and no glob.
+FALSE_ALARM_WHY = (
+    "The rule's path pattern covers any folder named domain, so it also covers tests/domain/, "
+    "and a test that drives the app through FastAPI's TestClient is not domain code."
+)
 
 # (agent, tool, action type, arguments). Arguments differ call to call, so the
 # loop gate never fires and the mix below is the mix the dashboard shows.
@@ -44,21 +69,8 @@ SEEDED_CALLS: Tuple[Tuple[str, str, str, Dict[str, Any]], ...] = (
     }),
     # Correct: reading the environment file is reaching for credentials.
     ("codex", "shell", "COMMAND_EXEC", {"command": "cat .env"}),
-    # The intended false alarm. `python-domain-stays-pure` covers
-    # `**/domain/**/*.py`, and that glob also matches this test module under
-    # tests/domain/. A test that drives the order endpoint through FastAPI's
-    # TestClient is not domain code at all, so a reasonable reviewer marks this
-    # call a false alarm: the rule's path pattern is wider than the layer it
-    # means to protect.
-    ("codex", "apply_patch", "FILE_WRITE", {
-        "file_path": "tests/domain/test_order_totals.py",
-        "content": (
-            "from fastapi.testclient import TestClient\n\n"
-            "from acme.app import app\n\n\n"
-            "def test_totals_are_rounded():\n"
-            "    assert TestClient(app).get('/orders/1').json()['total'] == 10.5\n"
-        ),
-    }),
+    # The intended false alarm, described above.
+    FALSE_ALARM_CALL,
     ("antigravity", "view_file", "FILE_READ", {"file_path": "docs/ARCHITECTURE.md"}),
     # Correct: an HTTP client imported into the web domain.
     ("antigravity", "write_to_file", "FILE_WRITE", {
@@ -80,6 +92,17 @@ def new_sandbox_name() -> str:
 def _developer(agent: str, project: str) -> str:
     """A 12-hex stand-in for a developer, as a hook computes one: never a name."""
     return hashlib.sha256(f"{project}:{agent}".encode("utf-8")).hexdigest()[:12]
+
+
+def seeded_false_alarm() -> Dict[str, str]:
+    """The seeded call a reviewer should mark a false alarm: {target, rule_key, why}.
+
+    `target` is the path the call writes, which its ledger row records as its
+    target, and `rule_key` the rule it trips. Both are read off the seed, never
+    off the rows the evaluator wrote, so the answer names the call that was
+    planted and not a guess at it.
+    """
+    return {"target": FALSE_ALARM_CALL[3]["file_path"], "rule_key": FALSE_ALARM_RULE, "why": FALSE_ALARM_WHY}
 
 
 def seeded_requests(project: str) -> List[ToolCallRequestDTO]:
@@ -125,4 +148,9 @@ def create_sandbox(evaluator: Any) -> Dict[str, Any]:
     for request in seeded_requests(name):
         evaluator.evaluate_tool_call(request)
         seeded += 1
-    return {"project": name, "calls_seeded": seeded, "url": f"dashboard.html#/projects/{name}"}
+    return {
+        "project": name,
+        "calls_seeded": seeded,
+        "url": f"dashboard.html#/projects/{name}",
+        "seeded_false_alarm": seeded_false_alarm(),
+    }

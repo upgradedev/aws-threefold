@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import datetime
 import hashlib
+import re
 
 import pytest
 
@@ -18,7 +19,14 @@ from threefold.application import ledger
 from threefold.application import projects as stages
 from threefold.application.dtos import InvalidRequestError
 from threefold.application.evaluator import GovernanceEvaluator
-from threefold.application.sandbox import SEEDED_CALLS, create_sandbox, seeded_requests
+from threefold.application.sandbox import (
+    FALSE_ALARM_CALL,
+    SEEDED_CALLS,
+    create_sandbox,
+    seeded_false_alarm,
+    seeded_requests,
+)
+from threefold.domain.layering_rules import DEFAULT_RULES
 from threefold.infrastructure.dynamo_repo import DynamoDBSessionRepository
 
 TODAY = datetime.date(2026, 9, 22)
@@ -211,3 +219,43 @@ def test_a_sandbox_observes_whatever_the_stacks_default(monkeypatch) -> None:
     assert len(rows) == 12 and all(row["status"] == "APPROVED" for row in rows)
     keys = {row["rule_key"] for row in rows} - {"NONE"}
     assert keys == {"python-domain-stays-pure", "java-domain-stays-pure", "web-domain-stays-pure", "PROTECTED_PATH"}
+
+
+def test_the_answer_names_the_one_seeded_call_planted_as_a_false_alarm() -> None:
+    """Read off the seed: the call planted once, the path it writes and the rule it trips."""
+    named = seeded_false_alarm()
+    assert set(named) == {"target", "rule_key", "why"}
+    planted = [call for call in SEEDED_CALLS if call is FALSE_ALARM_CALL]
+    assert len(planted) == 1, "The false alarm is one of the dozen, seeded once"
+    writing = [call for call in SEEDED_CALLS if call[3].get("file_path") == named["target"]]
+    assert writing == planted, "No other seeded call writes the path the answer names"
+    assert named["target"] == "tests/domain/test_order_totals.py"
+    assert named["rule_key"] == "python-domain-stays-pure"
+    assert named["rule_key"] in {rule["id"] for rule in DEFAULT_RULES}, "A rule that ships, which a page can name"
+
+
+def test_the_seeded_false_alarm_is_the_one_row_its_rule_flagged() -> None:
+    """The name is not read back from the ledger, so the ledger is checked to bear it out.
+
+    A page finds the call by its target and its rule_key, so exactly one of the
+    sandbox's rows carries that target, and its rule is the one named.
+    """
+    evaluator = GovernanceEvaluator(session_repo=DynamoDBSessionRepository())
+    created = create_sandbox(evaluator)
+    named = created["seeded_false_alarm"]
+    assert named == seeded_false_alarm()
+    rows = [row for row in evaluator.list_decisions(days=1) if row["project_name"] == created["project"]]
+    same_target = [row for row in rows if named["target"] in (row.get("target"), row.get("observed_target"))]
+    assert len(same_target) == 1
+    row = same_target[0]
+    assert row["rule_key"] == named["rule_key"] and row["observed_rules"] == [named["rule_key"]]
+    assert row["status"] == "APPROVED", "Observed, not refused: it waits for the visitor's label"
+
+
+def test_why_the_seeded_call_is_a_false_alarm_is_one_plain_sentence() -> None:
+    """A page shows it as it is, between two sentences of its own."""
+    why = seeded_false_alarm()["why"]
+    assert why == why.strip() and "\n" not in why
+    assert why[0].isupper() and why.endswith(".")
+    assert not re.search(r"[.!?]\s", why), "One sentence, not two"
+    assert not re.search(r"[`*_#\[\]<>]", why), "Plain words: no Markdown, no glob and no markup"

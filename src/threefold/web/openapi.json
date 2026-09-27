@@ -1059,7 +1059,7 @@
     "/rules/draft": {
       "post": {
         "summary": "Draft one layering rule from a sentence with Amazon Bedrock, try it, and save nothing",
-        "description": "Asks the model for one rule in the format POST /rules accepts, checks it with the validation a save uses, as one more member of the rules in force for project (so an id already in force is caught), sets its mode to observe whatever the model proposed, and tries it on the examples sent and on up to two files built from the rule itself, with the verdicts POST /rules/explain gives. A drafted rule watches, so a file it would refuse reads OBSERVE. Nothing is saved, no verdict is issued and no ledger row is written: putting the draft in force is a separate POST /rules, which needs the operator. When the model cannot be reached the answer is 503 with no draft; Threefold never stands in for the model with a rule of its own. Each draft is at most two model calls, and only the description and the paths, expectations and imports of the examples reach the model, never the rest of an example's file. Drafting model calls are budgeted account-wide per UTC day; past the budget the answer is 429 and no model call is made. Open where PublicReads is true, as POST /rules/explain is; on a stack deployed with PublicReads=false it needs the operator key or a sign-in session.",
+        "description": "Asks the model for one rule in the format POST /rules accepts, checks it with the validation a save uses, as one more member of the rules in force for project (so an id already in force is caught), sets its mode to observe whatever the model proposed, and tries it on the examples sent and on up to two files built from the rule itself, with the verdicts POST /rules/explain gives. A drafted rule watches, so a file it would refuse reads OBSERVE. Nothing is saved, no verdict is issued and no ledger row is written: putting the draft in force is a separate POST /rules, which needs the operator. When the model cannot be reached the answer is 503 with no draft; Threefold never stands in for the model with a rule of its own. Each draft is at most two model calls, and only the description and the paths, expectations and imports of the examples reach the model, never the rest of an example's file. Drafting model calls are budgeted per stack per UTC day, in the stack's own table, so each stack in an account has a budget of its own; past it the answer is 429 and no model call is made. Open where PublicReads is true, as POST /rules/explain is; on a stack deployed with PublicReads=false it needs the operator key or a sign-in session.",
         "security": [
           {},
           {
@@ -1298,7 +1298,7 @@
             }
           },
           "429": {
-            "description": "The day's account-wide drafting budget is spent, so no model call was made and nothing was drafted (urn:threefold:error:draft-budget-spent). The budget resets at midnight UTC.",
+            "description": "This stack's drafting budget for the day is spent, so no model call was made and nothing was drafted (urn:threefold:error:draft-budget-spent). The budget resets at midnight UTC.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3108,7 +3108,7 @@
     "/api/sandbox": {
       "post": {
         "summary": "A throwaway project, seeded, for trying the review and promotion walk",
-        "description": "Creates Acme-Sandbox-<8 hex> in observe with sandbox true and a 24 hour expiry, and sends a dozen synthetic hook calls from claude-code, codex and antigravity through the real evaluator. Several would be refused under more than one rule, and one of them is a false alarm: a test module under tests/domain/ that the domain rule's path pattern also covers.",
+        "description": "Creates Acme-Sandbox-<8 hex> in observe with sandbox true and a 24 hour expiry, and sends a dozen synthetic hook calls from claude-code, codex and antigravity through the real evaluator. Several would be refused under more than one rule, and one of them is a false alarm: a test module under tests/domain/ that the domain rule's path pattern also covers. The answer names that call in seeded_false_alarm, read off the seed rather than off the ledger, so a page can ask a visitor to spot it and tell them whether they did.",
         "requestBody": {
           "required": false,
           "content": {
@@ -3121,7 +3121,7 @@
         },
         "responses": {
           "200": {
-            "description": "project, calls_seeded and the dashboard url",
+            "description": "project, calls_seeded, the dashboard url and seeded_false_alarm",
             "content": {
               "application/json": {
                 "schema": {
@@ -3136,6 +3136,31 @@
                     "url": {
                       "type": "string",
                       "example": "dashboard.html#/projects/Acme-Sandbox-0a1b2c3d"
+                    },
+                    "seeded_false_alarm": {
+                      "type": "object",
+                      "description": "The one seeded call a reviewer should mark a false alarm, named by the seed itself: its row in GET /api/decisions is the one with this target and this rule_key.",
+                      "required": [
+                        "target",
+                        "rule_key",
+                        "why"
+                      ],
+                      "properties": {
+                        "target": {
+                          "type": "string",
+                          "description": "The path the call writes, as its ledger row records it in target.",
+                          "example": "tests/domain/test_order_totals.py"
+                        },
+                        "rule_key": {
+                          "type": "string",
+                          "description": "The rule that flags it, as its ledger row records it in rule_key.",
+                          "example": "python-domain-stays-pure"
+                        },
+                        "why": {
+                          "type": "string",
+                          "description": "One plain sentence, no Markdown, saying why the rule is wrong about this call."
+                        }
+                      }
                     }
                   }
                 }

@@ -197,10 +197,11 @@ is capped at 400 answer tokens and one repair (two model calls at most per
 draft, each one request with a 1 s connect and 5 s read timeout) and 60
 drafting calls per container, each counted when it is made, answered or not
 (`interfaces/draft_routes.py` sets the cap, `rule_drafter.py` counts), where
-the explanations' 200 count only successful calls. Above those, the whole
-account may make 400 drafting model calls a UTC day: a draft claims its two
-in the table before the model is called (`DRAFTBUDGET#<day>`, section 5), and
-once the day is spent it answers 429
+the explanations' 200 count only successful calls. Above those, each stack
+may make 400 drafting model calls a UTC day, counted in its own table, so the
+two stacks in one account may make 400 each: a draft claims its two in the
+stack's table before the model is called (`DRAFTBUDGET#<day>`, section 5), and
+once the stack's day is spent it answers 429
 `urn:threefold:error:draft-budget-spent` without calling it. When the model
 cannot be reached the caller gets no draft rather than a canned one.
 
@@ -448,7 +449,7 @@ recovery on (both checked live, section 1).
 | Project index | `CONFIG#projects` / `<name>` | a copy of every project's configuration, so the list is one Query | as above |
 | Policy | `CONFIG#policy` / `METADATA` | the thresholds `/policy/config` returns | never |
 | Sign-in | `AUTH#<sha256>` / `CODE` or `SESSION` | a sign-in code or a session, by hash only | 120 s for a code, 12 hours for a session |
-| Drafting budget | `DRAFTBUDGET#<YYYY-MM-DD>` / `ACCOUNT` | the drafting model calls the whole account claimed that UTC day, added by a conditional update | 2 days |
+| Drafting budget | `DRAFTBUDGET#<YYYY-MM-DD>` / `ACCOUNT` | the drafting model calls this stack claimed that UTC day, added by a conditional update; despite the sort key's name, each stack's table holds its own | 2 days |
 | Run claim | `RUNCLAIM#<name>` / `CLAIM` | one scheduled run, put only if absent, so a fleet tick delivered twice sends nothing the second time | 24 hours |
 
 A sandbox's expiry covers its stage configuration only. Once that is gone the
@@ -570,9 +571,10 @@ what every route needs: Bedrock, the table (including `Scan` and
 `DeleteItem`), `kms:Sign` on the stack's signing key, and the log and X-Ray
 writes the SAM transform attaches; it holds no right on the evidence bucket.
 And every in-memory limit (the per-address bucket, the explanation cap, the
-per-container drafting cap) is per container, not per account: N busy
-containers allow N times the cap. The drafting budget of 400 model calls a day is the exception,
-kept in the table and so shared by every container.
+per-container drafting cap) is per container, not per stack: N busy
+containers allow N times the cap. The drafting budget of 400 model calls a day
+is the exception, kept in the stack's table and so shared by every container of
+that stack; it is per stack, not per account, since each stack has its own table.
 
 ### 8.2 Why a single table
 
