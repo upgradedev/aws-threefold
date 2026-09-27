@@ -2695,7 +2695,7 @@
             <p class="text-xs text-gray-400">Anyone may label a sandbox's calls on this public demo. The other projects' labels are the operator's; their groups read Operator only.</p>
           </div>
           <div class="flex flex-wrap gap-2">
-            <a class="tf-btn tf-btn-sm${open.length ? '' : ' tf-btn-primary'}" href="#/try">Try it with your own sandbox</a>
+            <a class="tf-btn tf-btn-sm${open.length || fold ? '' : ' tf-btn-primary'}" href="#/try">Try it with your own sandbox</a>
             <a class="tf-btn tf-btn-quiet tf-btn-sm" href="${signinHref()}">${T.icon('signin', 14)}Sign in</a>
           </div>
         </div>`;
