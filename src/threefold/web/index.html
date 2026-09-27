@@ -2643,11 +2643,17 @@
     }
 
     // Whether the stack counts the service's own probes as a source of their
-    // own (`sources.probe`, a count). A stack from before it counts them as
-    // other, and its other callers are said to include them.
+    // own: it reports `sources.probe`, a count, and either some probe calls
+    // or a fleet, since only the stack that runs the fleet tells the probes'
+    // project apart. A stack from before the field counts them as other, and
+    // so does every stack without the fleet, where `sources.probe` is always
+    // 0; there the other callers are said to include them.
     function probesApart(data) {
       const s = data.sources && typeof data.sources === 'object' ? data.sources : null;
-      return !!s && !!s.probe && typeof s.probe === 'object' && wholeNumber(s.probe.calls) !== null;
+      const field = (part, name) => part && typeof part === 'object' ? wholeNumber(part[name]) : null;
+      const probes = s ? field(s.probe, 'calls') : null;
+      const fleet = s ? field(s.fleet, 'projects') : null;
+      return probes !== null && (probes > 0 || (fleet !== null && fleet > 0));
     }
 
     // What "see below" points to: the refusals in real agent runs, a link per

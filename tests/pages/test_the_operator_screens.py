@@ -528,8 +528,8 @@ def test_the_projects_screen_reads_as_a_portfolio(tmp_path: Path) -> None:
     assert 'data-src="fleet"' in page and 'data-src="sandbox"' in page and 'data-src="other"' in page
     assert ">Fleet<" in page and ">Sandbox<" in page and ">Other<" in page
     # Acme-Probe's rules refused 7 calls and flagged none to watch: its rules
-    # did act, so it is not "nothing flagged", and there is nothing to label.
-    assert "7/10 labelled" in page and "4/4 labelled" in page and "nothing to label" in page
+    # did act, so it is not "nothing flagged", and nothing waits for a label.
+    assert "7/10 labelled" in page and "4/4 labelled" in page and "nothing waits for a label" in page
     assert 'aria-label="7 of 10 flagged calls labelled"' in page
     assert 'data-row-href="#/projects/Acme-Payments"' in page, "A row opens its project"
 
@@ -1103,24 +1103,27 @@ def test_an_observe_project_says_why_it_still_shows_refused_calls(tmp_path: Path
     assert "Calls from the demo page always enforce, and a credential is always refused, so a project in Observe can still show refused calls." in projects
 
 
-def test_a_rule_ready_only_on_the_demo_page_s_refusals_has_nothing_from_agents(tmp_path: Path) -> None:
-    """A rule the service reads Ready only because the demo page's calls were refused is not Ready.
+def test_a_rule_whose_only_record_is_refusals_nobody_labelled_reads_quiet_never_ready(tmp_path: Path) -> None:
+    """A rule whose only record is refusals nobody labelled is Quiet on every screen, never Ready.
 
     The service's probe project read "Ready" with "Every call it flagged was
     marked correct" beside 0 correct, 0 flagged and 6 refused, all 6 from the
     demo page, which always enforces; and the hero said "Every rule reads
-    Ready or Quiet: promote" beside 0 calls observed. The chip, the sentence,
-    the tally, the headline and the promote dialog now say the same thing,
-    and nothing reads Ready while the refused calls are still being read.
+    Ready or Quiet: promote" beside 0 calls observed. The service now reads
+    such a rule Quiet, with a sentence that claims no label. The chip, its
+    title, the sentence, the tally, the headline, the promote dialog and the
+    portfolio say the same, whether the refusals came from the demo page or
+    from an agent's hook while the project enforced, and nothing reads Ready
+    while a read is on its way.
     """
     out = ops(
         r"""
   const probe = { rule_key: 'python-domain-stays-pure', kind: 'layering', mode_now: 'observe', would_refuse: 0, correct: 0, false_alarms: 0, unreviewed: 0,
-    refused: 6, last_seen: NOW, state: 'ready', recommendation: 'Every call it flagged was marked correct: ready to enforce.' };
-  const quiet = { rule_key: 'LOOP', kind: 'gate', mode_now: 'observe', would_refuse: 0, correct: 0, false_alarms: 0, unreviewed: 0, refused: 0, last_seen: null, state: 'quiet', recommendation: '' };
+    refused: 6, last_seen: NOW, state: 'quiet', recommendation: 'Nobody labelled the 6 call(s) it refused in this window, so nothing here shows it is ready to enforce.' };
+  const quiet = { rule_key: 'LOOP', kind: 'gate', mode_now: 'observe', would_refuse: 0, correct: 0, false_alarms: 0, unreviewed: 0, refused: 0, last_seen: null, state: 'quiet', recommendation: 'Flagged nothing in this window, so enforcing it would have refused nothing seen here.' };
   const body = detailBody('observe', [probe, quiet]);
   body.config = null;
-  Object.assign(body.readiness.summary, { calls_observed: 0, days_observed: 0, would_have_refused: 0, reviewed: 0, false_alarms: 0, false_alarm_rate: 0, rules_ready: 1, rules_quiet: 1, rules_noisy: 0 });
+  Object.assign(body.readiness.summary, { calls_observed: 0, days_observed: 0, would_have_refused: 0, reviewed: 0, false_alarms: 0, false_alarm_rate: 0, rules_ready: 0, rules_quiet: 2, rules_noisy: 0 });
   const pageRefusals = { status: 200, body: { items: [1, 2, 3, 4, 5, 6].map(i => row(i, { status: 'BLOCKED_BOUNDARY_VIOLATION', origin: 'page', agent: 'page', rule_key: 'python-domain-stays-pure', observed_rules: [], observed_rule: '' })), next_cursor: null } };
   const refusedRead = held();
   answer = contract({
@@ -1139,76 +1142,99 @@ def test_a_rule_ready_only_on_the_demo_page_s_refusals_has_nothing_from_agents(t
   out.checked = {};
   out.dialog.replace(/data-rule="([^"]+)"\s*(checked)?/g, (m, rule, checked) => { out.checked[rule] = !!checked; return m; });
   click('close-dialog');
-  // The same rule, its refusals from an agent's hook (made while the project enforced): the service's Ready stands.
-  const hooked = { status: 200, body: { items: [1, 2, 3, 4, 5, 6].map(i => row(i, { status: 'BLOCKED_BOUNDARY_VIOLATION', origin: 'hook', rule_key: 'python-domain-stays-pure' })), next_cursor: null } };
-  const withAgents = detailBody('observe', [probe, quiet]);
+  // The same rule refused an agent's hook calls while the project enforced, and nobody labelled one: still Quiet.
+  const hooked = { status: 200, body: { items: [1, 2, 3, 4, 5, 6].map(i => row(i, { status: 'BLOCKED_BOUNDARY_VIOLATION', origin: 'hook', rule_key: 'python-domain-stays-pure', observed_rules: [], observed_rule: '' })), next_cursor: null } };
+  const enforcing = detailBody('enforce', [Object.assign({}, probe, { mode_now: 'enforce', recommendation: 'Enforcing, and nobody labelled the 6 call(s) it refused in this window, so nothing here shows it was right.' }), quiet]);
   answer = contract({
     '/api/auth/whoami': PRIVATE,
-    '/api/projects/Acme-Probe': { status: 200, body: withAgents },
-    '/api/decisions': u => u.searchParams.get('kind') === 'refused' ? hooked : { status: 200, body: { items: [row(8)], next_cursor: null } }
+    '/api/projects/Acme-Probe': { status: 200, body: enforcing },
+    '/api/decisions': u => u.searchParams.get('kind') === 'refused' ? hooked : { status: 200, body: { items: [row(8, { project_name: 'Acme-Probe' })], next_cursor: null } }
   });
   await visit('#/projects/Acme-Probe?days=7');
   await tick();
   out.hooked = view();
-  // A read the ledger could carry on into older days, holding every refusal the service counts: decided all the same.
-  const continued = { status: 200, body: { items: pageRefusals.body.items, next_cursor: 'older-days' } };
-  answer = contract({
-    '/api/auth/whoami': PRIVATE,
-    '/api/projects/Acme-Probe': { status: 200, body: withAgents },
-    '/api/decisions': u => u.searchParams.get('kind') === 'refused' ? continued : { status: 200, body: { items: [row(9)], next_cursor: null } }
-  });
+  click('promote-open');
+  out.hookedDialog = el('modal-root').innerHTML;
+  click('close-dialog');
+  // Agents' calls observed, every rule Quiet, one with refusals nobody labelled: the headline does not say none flagged.
+  const quietBody = detailBody('observe', [probe, quiet]);
+  Object.assign(quietBody.readiness.summary, { calls_observed: 5, reviewed: 0, false_alarms: 0, false_alarm_rate: 0, rules_ready: 0, rules_quiet: 2, rules_noisy: 0 });
+  answer = contract({ '/api/auth/whoami': PRIVATE, '/api/projects/Acme-Probe': { status: 200, body: quietBody },
+    '/api/decisions': { status: 200, body: { items: [], next_cursor: null } } });
   await visit('#/projects/Acme-Probe?days=30');
   await tick();
-  out.continued = view();
-  // Fewer than the service counts, with older days unread: nothing is concluded, and the service's Ready stands.
-  const short = { status: 200, body: { items: pageRefusals.body.items.slice(0, 4), next_cursor: 'older-days' } };
-  answer = contract({
-    '/api/auth/whoami': PRIVATE,
-    '/api/projects/Acme-Probe': { status: 200, body: withAgents },
-    '/api/decisions': u => u.searchParams.get('kind') === 'refused' ? short : { status: 200, body: { items: [row(10)], next_cursor: null } }
-  });
-  await visit('#/projects/Acme-Probe?days=14');
-  await tick();
-  out.short = view();
-  // The portfolio: a project whose only agent is the page reads Nothing from agents, not Ready.
-  answer = contract({ '/api/projects': { status: 200, body: { projects: [
-    { project: 'Acme-Probe', stage: 'observe', configured: false, observe_rules: [], created_at: null, promoted_at: null, last_seen: NOW, calls: 6, refused: 6, would_refuse: 0, needs_review: 0, agents: ['page'], hook_modes: ['unknown'] }
-  ] } }, '/api/decisions': { status: 200, body: { items: [], next_cursor: null } } });
+  out.quietHero = view().split('class="tf-ops-hero"')[1].split('</section>')[0];
+  // The portfolio: a row that refused calls and would have refused none is Quiet once the false alarms are read,
+  // unsaid while they are read, Noisy if one of its refusals was marked a false alarm, and never Ready.
+  const list = { projects: [
+    { project: 'Acme-Probe', stage: 'observe', configured: false, observe_rules: [], created_at: null, promoted_at: null, last_seen: NOW, calls: 6, refused: 6, would_refuse: 0, needs_review: 0, agents: ['page'], hook_modes: ['unknown'] },
+    { project: 'Acme-Ledger', stage: 'enforce', configured: true, observe_rules: [], created_at: NOW, promoted_at: NOW, last_seen: NOW, calls: 40, refused: 5, would_refuse: 0, needs_review: 0, agents: ['claude-code'], hook_modes: ['managed'] }
+  ] };
+  const alarmsRead = held();
+  answer = contract({ '/api/projects': { status: 200, body: list },
+    '/api/decisions': u => alarmsRead.promise.then(() => ({ status: 200, body: { items: [], next_cursor: null } })) });
   await visit('#/projects');
+  out.portfolioReading = view();
+  alarmsRead.release();
   await tick();
   out.portfolio = view();
+  answer = contract({ '/api/projects': { status: 200, body: list },
+    '/api/decisions': { status: 200, body: { items: [Object.assign(falseAlarm(1, 'Acme-Ledger', 'PROTECTED_PATH'), { status: 'BLOCKED_PROTECTED_PATH', observed_rules: [], observed_rule: '' })], next_cursor: null } } });
+  await visit('#/overview');
+  await visit('#/projects');
+  await tick();
+  out.portfolioNoisy = view();
 """,
         tmp_path,
     )
     reading = out["reading"]
-    rule = reading.split('data-state=""')[1].split("</li>")[0] if 'data-state=""' in reading else ""
-    assert rule and "tf-ops-chip-wait" in rule and ">Ready<" not in rule, "Nothing reads Ready while the refused calls are read"
+    rule = reading.split('data-state="quiet"')[1].split("</li>")[0]
+    assert ">Quiet<" in rule and ">Ready<" not in rule and "tf-ops-chip-wait" not in rule, "The service's state is drawn at once"
     assert "Every call it flagged was marked correct" not in reading
     read = out["read"]
-    row = read.split('data-state="untested"')[1].split("</li>")[0]
-    assert ">Nothing from agents<" in row and ">Ready<" not in row
+    assert 'data-state="ready"' not in read and ">Ready<" not in read.split('class="tf-ops-rules')[1]
+    row = read.split('data-state="quiet"')[1].split("</li>")[0]
+    assert 'title="Quiet: no label says anything about the calls it refused"' in row, "A Quiet rule that refused calls is not said to have flagged nothing"
     said = text_of(row).replace("&#039;", "'")
-    assert "Nothing from agents to go on: every call it refused came from the demo page, which always enforces, and no agent's call was flagged by it." in said
-    assert "6 refused (all 6 from the demo page)" in re.sub(r"\s+([,.:)])", r"\1", said)
-    assert "Every call it flagged was marked correct" not in read
+    assert "Nobody labelled the 6 calls it refused in this window, so nothing here shows it is ready to enforce." in said
+    assert "6 refused (all 6 from the demo page) in the last 14 days" in re.sub(r"\s+([,.:)])", r"\1", said)
+    assert "Flagged nothing" not in said and "marked correct" not in said, "A rule that refused calls flagged them, and nobody labelled one"
     hero = read.split('class="tf-ops-hero"')[1].split("</section>")[0]
     lead = re.sub(r"<[^>]+>", "", hero.split('<p class="tf-ops-hero-text">', 1)[1].split("</p>", 1)[0])
     assert lead == "No agent's call was observed here in the last 14 days, so no rule has anything to go on yet."
     tally = dict(re.findall(r'data-tally="([a-z_]+)"><b[^>]*>([^<]*)</b>', hero))
-    assert tally == {"ready": "0", "quiet": "1", "needs_review": "0", "noisy": "0", "untested": "1"}, "The tally counts the rules as their rows state them"
-    assert out["checked"] == {"python-domain-stays-pure": False, "LOOP": False}, "A rule with nothing from agents is not checked for the reader"
+    assert tally == {"ready": "0", "quiet": "2", "needs_review": "0", "noisy": "0"}, "The tally counts the rules as their rows state them"
+    assert out["checked"] == {"python-domain-stays-pure": False, "LOOP": False}, "A Quiet rule is not checked for the reader"
     dialog = re.sub(r"\s+([,.:;])", r"\1", text_of(out["dialog"])).replace("&#039;", "'")
     assert "No rule reads Ready, so none is checked for you." in dialog
-    assert "Flagged no agent's call here No agent's call here tested these; check one to enforce it anyway." in dialog
+    untried = out["dialog"].split('data-group="untried"')[1]
+    assert 'data-rule="LOOP"' in untried and 'data-rule="python-domain-stays-pure"' not in untried, "A rule that refused calls did flag them"
+    assert "Flagged nothing here No call here tested this rule; check one to enforce it anyway." in dialog
+    assert "0 flagged · 6 refused · 0 correct" in dialog and "Nobody labelled the 6 calls it refused" in dialog
     hooked = out["hooked"]
-    assert 'data-state="ready"' in hooked and 'data-state="untested"' not in hooked, "Refusals of an agent's calls keep the service's Ready"
-    assert 'data-state="untested"' in out["continued"], "A read holding every refusal the service counts decides, whatever older days remain"
-    short = out["short"]
-    assert 'data-state="ready"' in short and 'data-state="untested"' not in short and "(all" not in short, "A short read concludes nothing"
-    portfolio = out["portfolio"]
-    cell = portfolio.split('class="tf-ops-ready" data-state="untested"')[1].split("</span></span>")[0]
-    assert ">Nothing from agents<" in cell and "demo-page calls only" in cell
-    assert 'data-state="ready"' not in portfolio
+    assert 'data-state="ready"' not in hooked and ">Ready<" not in hooked.split('class="tf-ops-rules')[1], "An agent's refusals, unlabelled, make no rule Ready"
+    hooked_row = text_of(hooked.split('data-state="quiet"')[1].split("</li>")[0])
+    assert "Enforcing, and nobody labelled the 6 calls it refused in this window, so nothing here shows it was right." in hooked_row
+    assert "Flagged nothing here" in text_of(out["hookedDialog"]) and 'data-rule="python-domain-stays-pure"' not in out["hookedDialog"].split('data-group="untried"')[1]
+    quiet_lead = re.sub(r"<[^>]+>", "", out["quietHero"].split('<p class="tf-ops-hero-text">', 1)[1].split("</p>", 1)[0])
+    assert quiet_lead == (
+        "No rule has anything to go on yet: none flagged a call to review in the last 30 days, and nobody labelled a call "
+        "one of them refused."
+    ), "A rule that refused calls is not said to have flagged none"
+
+    def cell(view: str, name: str) -> str:
+        return view.split('data-row-href="#/projects/' + name + '"')[1].split("</tr>")[0]
+
+    for name in ("Acme-Probe", "Acme-Ledger"):
+        waiting = cell(out["portfolioReading"], name)
+        assert 'data-state="unknown"' in waiting and ">Quiet<" not in waiting and ">Ready<" not in waiting, f"{name}: nothing is claimed while the false alarms are read"
+    probe_cell = cell(out["portfolio"], "Acme-Probe")
+    assert 'data-state="quiet"' in probe_cell and ">Quiet<" in probe_cell and "demo-page calls only" in probe_cell
+    assert 'title="Quiet: no label says anything about the calls it refused"' in probe_cell
+    ledger = cell(out["portfolio"], "Acme-Ledger")
+    assert 'data-state="quiet"' in ledger and "nothing waits for a label" in ledger
+    assert 'data-state="ready"' not in out["portfolio"] and ">Ready<" not in out["portfolio"], "Refusals alone make no project Ready"
+    assert 'data-state="noisy"' in cell(out["portfolioNoisy"], "Acme-Ledger"), "A refusal marked a false alarm still makes a project Noisy"
 
 
 def test_the_service_s_probes_are_labelled_synthetic_where_the_stack_names_them(tmp_path: Path) -> None:

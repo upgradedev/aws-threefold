@@ -1099,6 +1099,19 @@ def test_a_probe_part_that_is_not_a_count_gives_no_figures(tmp_path: Path) -> No
                          "other API callers."), "The fleet and the live agent are still named in words"
 
 
+def test_a_stack_that_does_not_run_the_fleet_still_counts_probes_among_the_other_callers(tmp_path: Path) -> None:
+    """Only the fleet's stack tells the probes' project apart; elsewhere sources.probe is 0 and Acme-Probe is other."""
+    private = ("sources: { fleet: { calls: 0, projects: 0 }, live: { calls: 0, projects: 0 }, probe: { calls: 0, projects: 0 }, "
+               "sandbox: { calls: 80, projects: 1 }, other: { calls: 62, projects: 2 } }")
+    rows = [row for row in SPLIT_ROWS if row["source"] in ("sandbox", "other")]
+    out = _split_load(tmp_path, rows, sources=private, calls=142, refused=20, would_refuse=7)
+    assert _read(out["where"]) == (
+        "Where they come from: 80 from visitors’ sandboxes, 62 from probes, page demos and other API callers."
+    ), "A probe count of 0 on a stack without the fleet does not take the probes out of the other callers"
+    stopped, _, _ = _split_subs(tmp_path, rows, sources=private, calls=142, refused=20, would_refuse=7)
+    assert stopped == "before they ran: 3 from visitors’ sandboxes, 17 from probes, page demos and other callers"
+
+
 def test_the_counts_are_read_without_a_key_even_when_one_is_typed(tmp_path: Path) -> None:
     """So they only ever show a stack whose reads are open, which is what their words say it is."""
     out = _load(tmp_path, overview="{ status: 200, body: " + _overview() + " }", before="el('apiKeyInput').value = 'acme-operator-key';\n")
