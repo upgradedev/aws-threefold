@@ -254,6 +254,29 @@ def test_a_live_page_asks_the_table_for_those_fields_and_what_they_are_made_of()
     assert "ProjectionExpression" not in table.queries[-1], "A reader that names nothing gets whole rows, as before"
 
 
+@pytest.mark.parametrize(
+    "fields", [demo_fleet.SWEEP_FIELDS, app_routes.SELF_CORRECTION_READ], ids=["sweep", "self-correction"]
+)
+def test_every_row_cleaned_from_what_the_table_sends_has_the_same_fields(fleet_store, fields) -> None:
+    """Each ledger row, projected as a live table projects it, cleans to the fields it cleans to whole.
+
+    The sweep's tests, and most of the figure's, run on the memory store,
+    which cleans the whole item and then keeps the fields. A live table sends
+    only what the projection names, so a field cleaned from an attribute it
+    does not name would fall to its default there and nowhere else; here it
+    differs.
+    """
+    fetched = set(dynamo_repo.decision_projection(fields)["ExpressionAttributeNames"].values())
+    items = [item for key, item in fleet_store.items() if key.startswith("DECISION#")]
+    assert any(not item.get("rule_key") for item in items), "Rows an older writer left are among them"
+    for item in items:
+        whole = dynamo_repo.clean_decision(item)
+        sent = dynamo_repo.clean_decision({name: value for name, value in item.items() if name in fetched})
+        assert {name: sent[name] for name in fields if name in sent} == {
+            name: whole[name] for name in fields if name in whole
+        }, item["SK"]
+
+
 # ---------------------------------------------------------------- self-correction
 
 
