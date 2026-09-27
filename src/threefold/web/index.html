@@ -465,6 +465,11 @@
     .tf-result-pane { display: flex; flex-direction: column; gap: 14px; padding: 16px 18px 18px; min-width: 0; }
     .tf-result-pane + .tf-result-pane { border-top: 1px solid var(--tf-hairline); }
     @media (min-width: 1024px) { .tf-result-pane + .tf-result-pane { border-top: 0; border-left: 1px solid var(--tf-hairline); } }
+    /* A fix or a certificate runs the panel's full width under the two cells
+       above, each in a row of its own that holds its room only while shown:
+       with neither, the panel ends with the cells. */
+    .tf-result-more { grid-column: 1 / -1; min-width: 0; }
+    .tf-result-row { padding: 16px 18px 18px; border-top: 1px solid var(--tf-hairline); min-width: 0; }
     .tf-terminal-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
     .tf-terminal-bar span:first-child { font: 500 0.75rem/1rem var(--tf-font-mono); color: var(--tf-text-3); }
     /* The terminal is as tall as its lines: never shorter than the idle guide
@@ -472,8 +477,9 @@
        taller than a cap, past which its lines scroll. A glow at an edge says
        there is more beyond it; the lines' own background covers the glow once
        the reader has scrolled to that edge, and the text is drawn over both.
-       Beside the verdict on a desk it no longer stretches to the verdict's
-       height as an empty pane. */
+       Beside the gates on a desk it never stretches to their height as an
+       empty pane, and the cell beside it holds only the gates and the
+       sentence, so the two end near each other. */
     .tf-terminal {
       min-height: 18.5rem; max-height: 24rem; overflow-y: auto; padding: 12px 14px; border-radius: var(--tf-radius-md); border: 1px solid var(--tf-hairline);
       background:
@@ -514,6 +520,15 @@
     .tf-fix ol { padding-left: 20px; color: var(--tf-text-3); }
     .tf-fix-path { font: 400 0.6875rem/1rem var(--tf-font-mono); color: var(--tf-text-3); }
     .tf-fix pre { margin: 0; padding: 8px 10px; border-radius: var(--tf-radius); background: var(--tf-ink-0); border: 1px solid var(--tf-hairline); font: 400 0.6875rem/1.125rem var(--tf-font-mono); color: var(--tf-text); white-space: pre; overflow-x: auto; }
+    /* Each proposed file under its path. Across the panel's width on a desk,
+       the files stand side by side and the words above them keep to a
+       reading width. */
+    .tf-fix-writes { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px 16px; align-items: start; }
+    .tf-fix-write { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+    @media (min-width: 1024px) {
+      .tf-fix-writes { grid-template-columns: repeat(auto-fit, minmax(22rem, 1fr)); }
+      .tf-fix > p, .tf-fix > ol { max-width: 52rem; }
+    }
     .tf-cert { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border-radius: var(--tf-radius-md); background: var(--tf-approved-soft); border: 1px solid var(--tf-approved-line); }
     .tf-cert p { margin: 0; font: 400 0.75rem/1.125rem var(--tf-font-mono); color: var(--tf-text-2); overflow-wrap: anywhere; }
     .tf-cert .tf-cert-note { font-family: var(--tf-font-sans); font-size: 0.6875rem; color: var(--tf-text-3); padding-top: 6px; border-top: 1px solid var(--tf-approved-line); }
@@ -576,7 +591,8 @@
     <!-- THE FIRST TEN SECONDS. What Threefold is in one line, one sentence of how,
          the three things to do next, and beside them the product's core moment:
          an agent's proposed write refused before it is written. No number in
-         this section is written into the page: the demonstration is drawn from
+         this section is written into the page but the walkthrough's own
+         length, on the button that opens it: the demonstration is drawn from
          a live answer of this stack when it answers, labelled live, and from the
          recorded run below when it does not, labelled recorded. The line under
          the demonstration says which agents a refusal has been measured to stop,
@@ -588,7 +604,7 @@
         <h1 id="hero-promise" class="tf-hero-title">Stop bad agent writes <em>before they reach your code.</em></h1>
         <p id="hero-sentence" class="tf-hero-lede">Deterministic gates on AWS judge each write and command from Claude Code, Codex or Antigravity, and your repos observe before they enforce.</p>
         <div id="hero-actions" class="tf-hero-actions">
-          <a id="hero-try" href="dashboard.html#/try" class="tf-btn tf-btn-primary tf-btn-lg"><span data-tf-icon="play"></span>Try the two-stage rollout — 60 s</a>
+          <a id="hero-try" href="dashboard.html#/try" class="tf-btn tf-btn-primary tf-btn-lg"><span data-tf-icon="play"></span>Try the two-stage rollout — 2 min</a>
           <a id="hero-dashboard" href="dashboard.html#/overview" class="tf-btn tf-btn-lg"><span data-tf-icon="grid"></span>Open the live dashboard</a>
           <a id="hero-connect" href="dashboard.html#/connect" class="tf-hero-link">Connect your repository<span data-tf-icon="arrowright"></span></a>
         </div>
@@ -887,13 +903,16 @@
     <!-- WATCH THE GATES. The zero-setup demo of CLAUDE.md rule 6: four scenarios
          and the universal adapter, one picker and one result panel. Each calls
          the live service and shows what came back; when the service cannot be
-         reached, the first four replay a recorded run, labelled as one. -->
+         reached, the first four replay a recorded run, labelled as one. The
+         rule's flagship claim, the circuit breaker's halt and the certificate
+         in under 60 seconds, is said here, where those two are run; the
+         walkthrough the hero opens gives its own figure, about two minutes. -->
     <section id="watch-the-gates" aria-labelledby="gates-title">
       <div class="tf-sec-row">
         <div class="tf-sec-head">
           <p class="tf-eyebrow"><span data-tf-icon="play"></span>Watch the gates</p>
           <h2 id="gates-title" class="tf-h2">Watch the gates refuse, with no account</h2>
-          <p class="tf-sec-lede">Four scenarios and the universal adapter. Each calls the live service and shows what came back.</p>
+          <p id="gates-lede" class="tf-sec-lede">Four scenarios and the universal adapter. Each calls the live service and shows what came back. The circuit breaker halting a loop (Scenario 1) and a governance certificate (Scenario 4) take one click each, both in under 60 seconds.</p>
         </div>
         <div class="tf-actions">
           <span id="apiConnectionStatus" class="tf-chip tf-chip-gray tf-chip-dot" role="status">Checking the service</span>
@@ -940,6 +959,12 @@
             <span id="cb-indicator" class="tf-chip tf-chip-lg tf-chip-dot tf-chip-emerald">Circuit breaker: armed</span>
           </div>
         </div>
+        <!-- On a desk, what was sent and what the gates made of it sit side by
+             side, two cells of about the same height; whatever of any length
+             came back with the verdict, a suggested fix or a certificate, runs
+             the panel's full width under both, so neither column is left with
+             an empty field beside the other. On a phone it is one column in
+             the same order. -->
         <div class="tf-result-grid">
           <div class="tf-result-pane">
             <div class="tf-terminal-bar"><span>agent-telemetry-stream</span><span id="terminal-badge" class="tf-chip tf-chip-gray">Idle</span></div>
@@ -966,27 +991,31 @@
               <p class="tf-pane-label">Why, in a sentence</p>
               <div id="bedrock-box" class="tf-explain">Waiting for a scenario: its verdict is explained here, with the name of whatever wrote the sentence.</div>
             </div>
-            <div id="fix-container" class="hidden">
-              <p class="tf-pane-label">Suggested fix</p>
-              <div id="fix-box" class="tf-fix"></div>
-            </div>
-            <div id="cert-container" class="tf-cert hidden">
-              <div class="tf-cert-head">
-                <span>Governance certificate</span>
-                <button type="button" onclick="downloadCert()" class="tf-btn tf-btn-sm tf-btn-good"><span data-tf-icon="download" data-tf-size="14"></span>Export JSON</button>
-              </div>
-              <p id="cert-id">CERT-TF-...</p>
-              <p id="cert-hash">SHA256: ...</p>
-              <p id="cert-signature">Signature: ...</p>
-              <p id="cert-origin" class="tf-cert-note"></p>
-              <p class="tf-cert-note">
-                An unkeyed SHA-256 catches corruption, not tampering: whoever edits the payload can recompute it. Where the
-                stack holds a signing key, a KMS signature over the same bytes is shown above; no CI step requires one.
-              </p>
-            </div>
             <div class="tf-session-stats" aria-label="The last scenario's session">
               <span>Session spend <b id="kpi-spend" class="tf-kpi-none">none yet</b></span>
               <span id="kpi-tokens"></span>
+            </div>
+          </div>
+          <div class="tf-result-more">
+            <div id="fix-container" class="tf-result-row hidden">
+              <p class="tf-pane-label">Suggested fix</p>
+              <div id="fix-box" class="tf-fix"></div>
+            </div>
+            <div id="cert-container" class="tf-result-row hidden">
+              <div class="tf-cert">
+                <div class="tf-cert-head">
+                  <span>Governance certificate</span>
+                  <button type="button" onclick="downloadCert()" class="tf-btn tf-btn-sm tf-btn-good"><span data-tf-icon="download" data-tf-size="14"></span>Export JSON</button>
+                </div>
+                <p id="cert-id">CERT-TF-...</p>
+                <p id="cert-hash">SHA256: ...</p>
+                <p id="cert-signature">Signature: ...</p>
+                <p id="cert-origin" class="tf-cert-note"></p>
+                <p class="tf-cert-note">
+                  An unkeyed SHA-256 catches corruption, not tampering: whoever edits the payload can recompute it. Where the
+                  stack holds a signing key, a KMS signature over the same bytes is shown above; no CI step requires one.
+                </p>
+              </div>
             </div>
           </div>
         </div>
@@ -1161,16 +1190,51 @@
       return lines.length ? lines : headings.map(words).filter(Boolean);
     }
 
-    // The first sentence, and the second when the first is short. A sentence
-    // ends at a stop followed by a space and a capital, so "$0.0270" and
-    // "user.py" never end one.
+    // The first sentence, and the second when the first is short. Where a
+    // sentence ends is decided by sentenceEnds; with none, the text is shown
+    // whole.
     function leadSentences(text) {
-      const first = /^(.+?[.!?])\s+(?=["'(]?[A-Z])/.exec(text);
-      if (!first) return text;
-      const rest = text.slice(first[0].length);
-      const second = /^(.+?[.!?])(?:\s+(?=["'(]?[A-Z])|$)/.exec(rest);
-      const both = second ? first[1] + ' ' + second[1] : '';
-      return first[1].length < 80 && both && both.length <= EXPLANATION_SHOWN_CHARS ? both : first[1];
+      const ends = sentenceEnds(text);
+      if (!ends.length) return text;
+      const first = text.slice(0, ends[0]);
+      const rest = text.slice(ends[0]).trim();
+      // The second ends where the next sentence starts, or with the text when
+      // the text ends in a stop of its own.
+      const second = ends.length > 1 ? text.slice(ends[0], ends[1]).trim()
+        : SENTENCE_STOP_AT_END.test(rest) ? rest : '';
+      const both = second ? first + ' ' + second : '';
+      return first.length < 80 && both && both.length <= EXPLANATION_SHOWN_CHARS ? both : first;
+    }
+
+    // Where each sentence in the text ends: after a stop, and any closing
+    // quote or bracket after it, that is followed by a space and a capital,
+    // so "$0.0270" and "user.py" never end one. A full stop after an
+    // abbreviation is not an end, though a capital follows it in "e.g. AWS",
+    // "U.S. East" or "N. Virginia", and a model's prose uses those; cut there,
+    // the lead would be a fragment. When it is unclear, the text is not cut:
+    // two sentences shown as one are still whole, and one cut short is not.
+    const SENTENCE_END = /[.!?…]+["'”’)\]]*(?=\s+["'“‘(\[]*\p{Lu})/gu;
+    const SENTENCE_STOP_AT_END = /[.!?…]["'”’)\]]*$/u;
+    // Words a full stop follows without ending the sentence: an initial, an
+    // abbreviation written with dots, and a few written without. "etc." is
+    // not among them, nor "No.", which end a sentence as often as not.
+    const NOT_AN_END = new Set(['approx', 'cf', 'co', 'corp', 'dept', 'dr', 'esp', 'est', 'fig', 'inc', 'incl',
+      'jr', 'ltd', 'mr', 'mrs', 'ms', 'mt', 'prof', 'sr', 'st', 'viz', 'vs']);
+    function sentenceEnds(text) {
+      const ends = [];
+      SENTENCE_END.lastIndex = 0;
+      let stop;
+      while ((stop = SENTENCE_END.exec(text))) {
+        if (stop[0][0] === '.' && stop[0][1] !== '.' && abbreviated(text.slice(0, stop.index))) continue;
+        ends.push(stop.index + stop[0].length);
+      }
+      return ends;
+    }
+    // Whether the word just before a full stop is an abbreviation: "e.g" in
+    // "(e.g.", "U.S" in "U.S.", "N" in "N.".
+    function abbreviated(before) {
+      const word = /[^\s"'“‘(\[]*$/u.exec(before)[0];
+      return /^\p{L}$/u.test(word) || /^(?:\p{L}\.)+\p{L}$/u.test(word) || NOT_AN_END.has(word.toLowerCase());
     }
 
     // One real run of each scenario, recorded against the live API and replayed
@@ -1266,10 +1330,12 @@
         (steps.length
           ? '<ol>' + steps.map(s => `<li>${escapeHtml(s)}</li>`).join('') + '</ol>'
           : '') +
-        writes.map(w =>
-          `<p class="tf-fix-path">${escapeHtml(w.path)}${w.new_file === true ? ' · a new file: if it exists, add to it' : ''}${typeof w.old_string === 'string' ? ' · an Edit: in place of the text replaced' : ''}${w.partial === true ? ' · add with an Edit where the command put it' : ''}</p>` +
-          `<pre><code>${escapeHtml(w.content)}</code></pre>`
-        ).join('') +
+        (writes.length
+          ? '<div class="tf-fix-writes">' + writes.map(w =>
+            `<div class="tf-fix-write"><p class="tf-fix-path">${escapeHtml(w.path)}${w.new_file === true ? ' · a new file: if it exists, add to it' : ''}${typeof w.old_string === 'string' ? ' · an Edit: in place of the text replaced' : ''}${w.partial === true ? ' · add with an Edit where the command put it' : ''}</p>` +
+            `<pre><code>${escapeHtml(w.content)}</code></pre></div>`
+          ).join('') + '</div>'
+          : '') +
         '<p class="tf-fix-path">A starting point, never applied automatically.</p>';
       container.classList.remove('hidden');
     }
@@ -2525,6 +2591,11 @@
     // count makes the parts unusable, as any other part's would. The same
     // holds for `probe`, the service's own probes: synthetic calls, named as
     // such, and once the stack counts them apart, no longer among the others.
+    // The sentence separates its sources with commas, so no source's own
+    // words carry one: "in projects that enforce, 325 from probes" read as
+    // two sources, and "62 from probes, page demos and other API callers" as
+    // a count of the probes alone. Each source is one clause, whichever of
+    // them are there.
     function sourcesSentence(data, calls) {
       const h = T.html;
       const lead = h`<strong>Where they come from:</strong>`;
@@ -2537,7 +2608,7 @@
       const other = s ? part(s.other) : null;
       // No cadence is claimed: a day's run is started by hand until a
       // schedule starts it, so the words say what the runs are, not how often.
-      const liveWords = 'real Claude Code or Codex runs on Acme tasks, in projects that enforce';
+      const liveWords = 'real Claude Code or Codex runs on Acme tasks in projects that enforce';
       const probeWords = 'the service’s own synthetic probes';
       const apart = probesApart(data);
       if (fleet !== null && live !== null && probe !== null && sandbox !== null && other !== null && calls > 0 &&
@@ -2547,7 +2618,7 @@
         if (live) pieces.push(formatCount(live) + ' from ' + liveWords);
         if (sandbox) pieces.push(formatCount(sandbox) + ' from visitors’ sandboxes');
         if (probe) pieces.push(formatCount(probe) + ' from ' + probeWords);
-        if (other) pieces.push(formatCount(other) + (apart ? ' from page demos and other API callers' : ' from probes, page demos and other API callers'));
+        if (other) pieces.push(formatCount(other) + (apart ? ' from page demos and other API callers' : ' from other API callers such as probes and page demos'));
         return h`${lead} ${pieces.join(', ')}.`;
       }
       // A fleet, a live agent or the probes the stack reports are always
@@ -2604,7 +2675,9 @@
     // says "see below", and the rows it points to (liveRefusals) are given
     // project by project with it, which needs every such row's name.
     // A probe row is the service's own synthetic probes, said so, and put
-    // just before the other callers, which then no longer include them.
+    // just before the other callers, which then no longer include them. As in
+    // the sentence under the tiles, each part is one clause with no comma of
+    // its own, since commas separate the parts.
     const SPLIT_SOURCES = ['live', 'fleet', 'sandbox', 'probe', 'other'];
     function sourceSplit(data, key, total, sayNone) {
       const none = { words: '', live: [], real: false };
@@ -2638,7 +2711,7 @@
       if (parts.fleet) words.push(formatCount(parts.fleet) + ' from the synthetic fleet');
       if (parts.sandbox) words.push(formatCount(parts.sandbox) + ' from visitors’ sandboxes');
       if (parts.probe) words.push(formatCount(parts.probe) + ' from the service’s own synthetic probes');
-      if (parts.other) words.push(formatCount(parts.other) + (probesApart(data) ? ' from page demos and other callers' : ' from probes, page demos and other callers'));
+      if (parts.other) words.push(formatCount(parts.other) + (probesApart(data) ? ' from page demos and other callers' : ' from other callers such as probes and page demos'));
       return { words: words.join(', '), live: liveRows, real: real };
     }
 

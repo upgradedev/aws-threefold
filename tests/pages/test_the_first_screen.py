@@ -2,7 +2,7 @@
 
 A judge who opens the public URL meets the hero before anything else: one
 promise line under twelve words, one sentence of how, "Try the two-stage
-rollout — 60 s", "Open the live dashboard" and a quiet "Connect your
+rollout — 2 min", "Open the live dashboard" and a quiet "Connect your
 repository", and beside them the product's core moment. That moment is one
 proposed write, the boundary write RECORDED.boundary was recorded from, asked
 of this stack through the route a hook asks: the answer is the stack's own when
@@ -15,8 +15,10 @@ calls judged, stopped and would have been stopped from GET /api/overview
 (without a key, with one clause saying what the counts are made of), and the
 benchmark pooled from GET /proof.json. Then how it works (three steps, one
 flow diagram, the two-stage rollout, the three agents in the evidence's own
-words), the AWS services as one diagram, the gates the flagship demo trips,
-and a footer holding the links and the hackathon's tags.
+words), the AWS services as one diagram, the gates the flagship demo trips
+(where the flagship's "under 60 seconds" is said, as the walkthrough's "about
+two minutes" is said on the button that opens it), and a footer holding the
+links and the hackathon's tags.
 
 The markup is read as the stack serves it; the script runs under Node with the
 stub browser in _browser.py, and those tests skip where Node is absent.
@@ -24,6 +26,7 @@ stub browser in _browser.py, and those tests skip where Node is absent.
 from __future__ import annotations
 
 import html
+import itertools
 import json
 import re
 from pathlib import Path
@@ -37,7 +40,7 @@ SENTENCE = (
 )
 SCOPE = "A refusal is measured to stop the write in Claude Code and Antigravity, and in Codex once, over its patch tool only."
 ACTIONS = [
-    ("hero-try", "dashboard.html#/try", "Try the two-stage rollout — 60 s"),
+    ("hero-try", "dashboard.html#/try", "Try the two-stage rollout — 2 min"),
     ("hero-dashboard", "dashboard.html#/overview", "Open the live dashboard"),
     ("hero-connect", "dashboard.html#/connect", "Connect your repository"),
 ]
@@ -204,6 +207,25 @@ def test_the_three_actions_come_next_each_one_click_in_this_order() -> None:
     assert "tf-btn" not in classes[2] and "tf-hero-link" in classes[2], "Connecting is a quiet text link"
 
 
+def test_each_length_of_time_is_said_where_it_is_true() -> None:
+    """A judge: the button read "— 60 s", and the walkthrough it opens says "About two minutes".
+
+    The walkthrough's own figure goes on the button that opens it. The flagship
+    claim of CLAUDE.md rule 6, the circuit breaker's halt and the certificate
+    in under 60 seconds, is said beside the two scenarios that make it.
+    """
+    walkthrough = re.search(r'<p class="tf-try-lede">(.*?)</p>', page_source("dashboard.html"), re.S)
+    assert walkthrough and _text(walkthrough.group(1)).startswith("About two minutes on the public demo"), \
+        "The walkthrough gives another figure now: the button that opens it must say the same"
+    label = {ident: words for ident, _, words in ACTIONS}["hero-try"]
+    assert label.endswith("— 2 min") and "60" not in _text(_hero()), "The hero's button says the walkthrough's length"
+    assert "in under 60 seconds with no account" in (ROOT / "CLAUDE.md").read_text(encoding="utf-8")
+    lede = re.search(r'<p id="gates-lede"[^>]*>(.*?)</p>', _section("watch-the-gates"), re.S)
+    assert lede and _text(lede.group(1)).endswith(
+        "The circuit breaker halting a loop (Scenario 1) and a governance certificate (Scenario 4) take one click each, "
+        "both in under 60 seconds."), "The flagship's time is said where its two scenarios are"
+
+
 def test_the_sections_come_in_the_order_a_judge_needs_them() -> None:
     """CLAUDE.md rule 6: the circuit breaker trip and the certificate stay on the first screen's page."""
     body = page_source("index.html")
@@ -238,9 +260,9 @@ def test_the_hero_says_which_agents_a_refusal_is_measured_to_stop() -> None:
 
 
 def test_the_hero_writes_no_number_of_its_own() -> None:
-    """Only the 60 in the walkthrough's label: the demonstration is drawn from an answer."""
+    """Only the 2 in the walkthrough's label, its own length: the demonstration is drawn from an answer."""
     hero = _hero()
-    assert re.findall(r"\d+", _text(hero)) == ["60"]
+    assert re.findall(r"\d+", _text(hero)) == ["2"]
     for ident in ("hero-verdict", "hero-reason", "hero-fix"):
         tag = re.search(rf'<(\w+) id="{ident}"[^>]*>(.*?)</\1>', hero, re.S)
         assert tag and " hidden" in tag.group(0).split(">", 1)[0] and tag.group(2).strip() == "", f"{ident} starts hidden and empty"
@@ -793,7 +815,7 @@ def test_the_counts_are_read_from_the_overview_at_load_and_say_what_they_are_mad
     assert not out["whereHidden"]
     assert _read(out["where"]) == (
         "Where they come from: 1,102 from a synthetic Acme fleet run through the real gates, 120 from visitors’ "
-        "sandboxes, 62 from probes, page demos and other API callers."
+        "sandboxes, 62 from other API callers such as probes and page demos."
     ), "One clause, where a reader first meets the numbers, and the fleet called synthetic"
 
 
@@ -857,7 +879,7 @@ def test_the_stopped_and_would_refuse_tiles_say_where_their_counts_come_from(tmp
     """
     stopped, observed, markup = _split_subs(tmp_path, SPLIT_ROWS)
     assert stopped == ("before they ran: 2 in real agent runs (see below), 15 from the synthetic fleet, 3 from visitors’ sandboxes, "
-                       "17 from probes, page demos and other callers")
+                       "17 from other callers such as probes and page demos")
     assert observed == "recorded while a project observes: 50 from the synthetic fleet, 7 from visitors’ sandboxes", \
         "Parts with nothing in them are left out"
     assert _metrics(markup) == {"calls": "1,284", "refused": "37", "would_refuse": "57"}, "The tiles' numbers are the stack's own counts"
@@ -991,7 +1013,7 @@ def test_without_sources_the_sandboxes_are_still_told_apart(tmp_path: Path) -> N
 
 
 def test_the_daily_live_agent_is_counted_as_real_runs(tmp_path: Path) -> None:
-    """Its calls are real Claude Code or Codex runs on Acme tasks, in projects that enforce: said so, with its count.
+    """Its calls are real Claude Code or Codex runs on Acme tasks in projects that enforce: said so, with its count.
 
     No cadence is claimed. STATE.md: until the owner creates the daily schedule, a
     day runs only when the script is started by hand, so "one Acme task a day" was
@@ -1002,26 +1024,26 @@ def test_the_daily_live_agent_is_counted_as_real_runs(tmp_path: Path) -> None:
     out = _load(tmp_path, overview="{ status: 200, body: " + _overview(sources) + " }")
     assert _read(out["where"]) == (
         "Where they come from: 1,102 from a synthetic Acme fleet run through the real gates, 40 from real Claude Code "
-        "or Codex runs on Acme tasks, in projects that enforce, 80 from visitors’ sandboxes, 62 from probes, "
-        "page demos and other API callers."
+        "or Codex runs on Acme tasks in projects that enforce, 80 from visitors’ sandboxes, 62 from other API callers "
+        "such as probes and page demos."
     ), "The four parts add up to the 1,284 calls, so each is given, the live agent's called real"
     mismatched = sources.replace("calls: 40", "calls: 400")
     out = _load(tmp_path, overview="{ status: 200, body: " + _overview(mismatched) + " }")
     assert _read(out["where"]) == (
         "Where they come from: a synthetic Acme fleet run through the real gates, real Claude Code or Codex runs on "
-        "Acme tasks, in projects that enforce, visitors’ sandboxes, probes, page demos and other API callers."
+        "Acme tasks in projects that enforce, visitors’ sandboxes, probes, page demos and other API callers."
     ), "Parts that do not add up give no figure, and the live agent is still named"
     only_live = "sources: { fleet: { calls: 0 }, live: { calls: 1284 }, sandbox: { calls: 0 }, other: { calls: 0 } }"
     out = _load(tmp_path, overview="{ status: 200, body: " + _overview(only_live) + " }")
     assert _read(out["where"]) == (
-        "Where they come from: 1,284 from real Claude Code or Codex runs on Acme tasks, in projects that enforce."
+        "Where they come from: 1,284 from real Claude Code or Codex runs on Acme tasks in projects that enforce."
     )
 
 
 def test_a_stack_without_live_or_with_none_reads_as_before(tmp_path: Path) -> None:
     """A stack from before live counts those calls as other; a window with no live run names none."""
     before = ("Where they come from: 1,102 from a synthetic Acme fleet run through the real gates, 120 from visitors’ "
-              "sandboxes, 62 from probes, page demos and other API callers.")
+              "sandboxes, 62 from other API callers such as probes and page demos.")
     older = "sources: { fleet: { calls: 1102, projects: 6 }, sandbox: { calls: 120, projects: 9 }, other: { calls: 62, projects: 3 } }"
     out = _load(tmp_path, overview="{ status: 200, body: " + _overview(older) + " }")
     assert _read(out["where"]) == before, "Without a live part the three parts still add up, and are given"
@@ -1059,7 +1081,7 @@ def test_the_service_s_own_probes_are_named_synthetic_never_real(tmp_path: Path)
     out = _split_load(tmp_path, PROBE_ROWS, sources=PROBE_SOURCES)
     assert _read(out["where"]).startswith(
         "Where they come from: 1,102 from a synthetic Acme fleet run through the real gates, 40 from real Claude Code "
-        "or Codex runs on Acme tasks, in projects that enforce, 80 from visitors’ sandboxes, 50 from the service’s own "
+        "or Codex runs on Acme tasks in projects that enforce, 80 from visitors’ sandboxes, 50 from the service’s own "
         "synthetic probes, 12 from page demos and other API callers."
     ), "The five parts add up to the 1,284 calls, and the other callers no longer claim the probes"
     stopped, observed, markup = _split_subs(tmp_path, PROBE_ROWS, sources=PROBE_SOURCES)
@@ -1077,7 +1099,7 @@ def test_probes_the_stack_reports_are_named_even_when_their_parts_give_no_figure
     out = _load(tmp_path, overview="{ status: 200, body: " + _overview(mismatched) + " }")
     assert _read(out["where"]) == (
         "Where they come from: a synthetic Acme fleet run through the real gates, real Claude Code or Codex runs on "
-        "Acme tasks, in projects that enforce, the service’s own synthetic probes, visitors’ sandboxes, page demos and "
+        "Acme tasks in projects that enforce, the service’s own synthetic probes, visitors’ sandboxes, page demos and "
         "other API callers."
     ), "Parts that do not add up give no figure, and the probes are still named as synthetic"
     only_probes = "sources: { fleet: { calls: 0 }, live: { calls: 0 }, probe: { calls: 9 }, sandbox: { calls: 0 }, other: { calls: 1 } }"
@@ -1095,7 +1117,7 @@ def test_a_probe_part_that_is_not_a_count_gives_no_figures(tmp_path: Path) -> No
         assert "<img" not in out["where"] and "onerror" not in out["where"], "Service data reached the page as markup"
         assert "1,102" not in where, f"probe {value}: parts with one that is not a count give no figure"
         assert where == ("Where they come from: a synthetic Acme fleet run through the real gates, real Claude Code or "
-                         "Codex runs on Acme tasks, in projects that enforce, visitors’ sandboxes, probes, page demos and "
+                         "Codex runs on Acme tasks in projects that enforce, visitors’ sandboxes, probes, page demos and "
                          "other API callers."), "The fleet and the live agent are still named in words"
 
 
@@ -1106,10 +1128,91 @@ def test_a_stack_that_does_not_run_the_fleet_still_counts_probes_among_the_other
     rows = [row for row in SPLIT_ROWS if row["source"] in ("sandbox", "other")]
     out = _split_load(tmp_path, rows, sources=private, calls=142, refused=20, would_refuse=7)
     assert _read(out["where"]) == (
-        "Where they come from: 80 from visitors’ sandboxes, 62 from probes, page demos and other API callers."
+        "Where they come from: 80 from visitors’ sandboxes, 62 from other API callers such as probes and page demos."
     ), "A probe count of 0 on a stack without the fleet does not take the probes out of the other callers"
     stopped, _, _ = _split_subs(tmp_path, rows, sources=private, calls=142, refused=20, would_refuse=7)
-    assert stopped == "before they ran: 3 from visitors’ sandboxes, 17 from probes, page demos and other callers"
+    assert stopped == "before they ran: 3 from visitors’ sandboxes, 17 from other callers such as probes and page demos"
+
+
+# Every source the overview can report, with a count a reader can tell apart.
+COMBINATION_PARTS = {"fleet": 1102, "live": 40, "probe": 50, "sandbox": 80, "other": 12}
+
+
+def test_the_sentence_reads_as_one_clause_a_source_whichever_sources_are_there(tmp_path: Path) -> None:
+    """A judge read "in projects that enforce, 325 from probes" as two sources.
+
+    The sentence separates its sources with commas, so no source's own words
+    may carry one. Every combination of the five sources is written, with the
+    fleet's stack telling the probes apart and without, and with figures and
+    without: each source present is said once, in one clause with its count
+    when there is one, and in the order the sentence gives them.
+    """
+    cases = []
+    for size in range(1, len(COMBINATION_PARTS) + 1):
+        for present in itertools.combinations(COMBINATION_PARTS, size):
+            # A fleet in the window tells the probes apart; without one, a
+            # stack that runs the fleet still does, and one that does not, not.
+            for fleet_projects in ((6,) if "fleet" in present else (0, 6)):
+                calls = {name: COMBINATION_PARTS[name] if name in present else 0 for name in COMBINATION_PARTS}
+                sources = {name: {"calls": n, "projects": fleet_projects if name == "fleet" else int(n > 0)} for name, n in calls.items()}
+                total = sum(calls.values())
+                cases.append({"present": list(present), "sources": sources, "calls": total, "figures": True})
+                cases.append({"present": list(present), "sources": sources, "calls": total + 1, "figures": False})
+    said = run(
+        "index.html",
+        "  out.said = " + json.dumps(cases) + ".map(c => String(sourcesSentence({ sources: c.sources }, c.calls)));\n",
+        tmp_path,
+        before=DEMO_DOM,
+    )["said"]
+    in_order = ["fleet", "live", "sandbox", "probe", "other"]
+    named = {"fleet": "a synthetic Acme fleet run through the real gates",
+             "live": "real Claude Code or Codex runs on Acme tasks in projects that enforce",
+             "probe": "the service’s own synthetic probes"}
+    lead = "Where they come from: "
+    for case, markup in zip(cases, said):
+        sentence = _read(markup)
+        assert sentence.startswith(lead) and sentence.endswith(".") and sentence.count(".") == 1, sentence
+        clauses = sentence[len(lead):-1].split(", ")
+        if case["figures"]:
+            sources = [name for name in in_order if name in case["present"]]
+            assert len(clauses) == len(sources), f"{len(sources)} sources read as {len(clauses)}: {sentence!r}"
+            for name, clause in zip(sources, clauses):
+                count = f"{COMBINATION_PARTS[name]:,}"
+                assert clause.startswith(count + " from ") and not re.search(r"\d", clause[len(count):]), \
+                    f"{name} is not a clause of its own, with its count: {clause!r}"
+        else:
+            assert not re.search(r"\d", sentence), f"Parts that do not add up give no figure: {sentence!r}"
+            for name, words in named.items():
+                if name in case["present"]:
+                    assert clauses.count(words) == 1, f"{name} is not one item of the list: {clauses}"
+
+
+def test_a_tile_splits_its_count_one_clause_a_source_whichever_sources_are_there(tmp_path: Path) -> None:
+    """The Stopped tile's parts are separated by commas too, so none of them carries one of its own."""
+    refused = {"live": 2, "fleet": 15, "sandbox": 3, "probe": 14, "other": 4}
+    cases = []
+    for size in range(1, len(refused) + 1):
+        for present in itertools.combinations(refused, size):
+            for fleet_projects in ((6,) if "fleet" in present else (0, 6)):
+                sources = {name: {"calls": COMBINATION_PARTS[name] if name in present else 0,
+                                  "projects": fleet_projects if name == "fleet" else int(name in present)} for name in refused}
+                rows = [{"project": "Acme-" + name.title(), "source": name, "calls": COMBINATION_PARTS[name], "refused": refused[name]}
+                        for name in present]
+                cases.append({"present": list(present), "data": {"sources": sources, "by_project": rows},
+                              "total": sum(refused[name] for name in present)})
+    words = run(
+        "index.html",
+        "  out.words = " + json.dumps(cases) + ".map(c => sourceSplit(c.data, 'refused', c.total, true).words);\n",
+        tmp_path,
+        before=DEMO_DOM,
+    )["words"]
+    for case, said in zip(cases, words):
+        sources = [name for name in ("live", "fleet", "sandbox", "probe", "other") if name in case["present"]]
+        clauses = said.split(", ")
+        assert len(clauses) == len(sources), f"{len(sources)} sources read as {len(clauses)}: {said!r}"
+        for name, clause in zip(sources, clauses):
+            assert re.match(rf"{refused[name]} (?:in|from) ", clause) and not re.search(r"\d", clause[len(str(refused[name])):]), \
+                f"{name} is not a clause of its own, with its count: {clause!r}"
 
 
 def test_the_counts_are_read_without_a_key_even_when_one_is_typed(tmp_path: Path) -> None:
@@ -1448,6 +1551,71 @@ def test_a_plain_explanation_is_shown_whole_and_escaped(tmp_path: Path) -> None:
     box = _explained(tmp_path, hostile)
     assert "<img" not in box and "<script" not in box and "javascript:" not in box and "<a " not in box
     assert "&lt;script&gt;alert(2)&lt;/script&gt; click was refused." in box, "The words are escaped after the markup is taken out"
+
+
+# What leadSentences shows of a long explanation: its first sentence, and the
+# second when the first is short. Each case is the text and the lead expected.
+LEADS = [
+    # An abbreviation before a capital does not end the sentence.
+    ("Domain code may not import a cloud SDK, e.g. AWS clients or queues, because the domain must stay pure and "
+     "testable without a network. Move the import behind a port.",
+     "Domain code may not import a cloud SDK, e.g. AWS clients or queues, because the domain must stay pure and "
+     "testable without a network."),
+    ("The call was judged in the U.S. East region at 12:00 and refused before it ran, as every enforced project's "
+     "calls are. Nothing was written.",
+     "The call was judged in the U.S. East region at 12:00 and refused before it ran, as every enforced project's "
+     "calls are."),
+    ("It was refused, i.e. The write never reached the file, and the agent was told why in the same answer, with the "
+     "rule that decided. Try again with the fix.",
+     "It was refused, i.e. The write never reached the file, and the agent was told why in the same answer, with the "
+     "rule that decided."),
+    ("The edge in N. Virginia forwarded it to the function, which judged it against the layering rules of the "
+     "project and refused it. The file was not written.",
+     "The edge in N. Virginia forwarded it to the function, which judged it against the layering rules of the "
+     "project and refused it."),
+    ("Refused (cf. Scenario 3). The same import in an adapter would pass.",
+     "Refused (cf. Scenario 3). The same import in an adapter would pass."),
+    # A stop followed by a space and a capital does end one, after a closing
+    # quote or bracket too, and after a file name.
+    ('The hook answered "deny." The agent read the reason and wrote the file elsewhere, under infrastructure/, where '
+     'the rule allows it. Then it ran the tests.',
+     'The hook answered "deny." The agent read the reason and wrote the file elsewhere, under infrastructure/, where '
+     'the rule allows it.'),
+    ("It imports boto3 in src/domain/user.py. The domain must not depend on a cloud SDK, so the write was refused "
+     "before it reached the disk and the session carries on.",
+     "It imports boto3 in src/domain/user.py. The domain must not depend on a cloud SDK, so the write was refused "
+     "before it reached the disk and the session carries on."),
+    ("The session was halted (after the third call.) Each repeat had cost tokens and changed nothing in the file, "
+     "so the breaker stopped it there. An operator resumes it.",
+     "The session was halted (after the third call.) Each repeat had cost tokens and changed nothing in the file, "
+     "so the breaker stopped it there."),
+    # A stop inside a number or a version ends nothing.
+    ("The session had spent $0.0270 on three identical calls to edit_file, and v2.1 of the rules refuses the fourth "
+     "before it runs. An operator resumes it.",
+     "The session had spent $0.0270 on three identical calls to edit_file, and v2.1 of the rules refuses the fourth "
+     "before it runs."),
+    # With no end found, the text is shown whole.
+    (("no capital follows any stop here. so the whole text is the lead. " * 3).strip(),
+     ("no capital follows any stop here. so the whole text is the lead. " * 3).strip()),
+]
+
+
+def test_a_long_explanation_is_led_by_whole_sentences_never_a_fragment(tmp_path: Path) -> None:
+    """A judge: a sentence was taken to end at any stop before a capital, so "e.g. The" cut the lead into a fragment.
+
+    A full stop after an initial or an abbreviation ends no sentence, and when
+    it is unclear the text is not cut: two sentences shown as one are whole,
+    one cut short is not.
+    """
+    out = run("index.html", "  out.leads = " + json.dumps([text for text, _ in LEADS]) + ".map(leadSentences);\n",
+              tmp_path, before=DEMO_DOM)
+    for (text, expected), lead in zip(LEADS, out["leads"]):
+        assert lead == expected, f"{text!r} led with {lead!r}"
+    whole = LEADS[0][0] + " " + "Each repeat costs tokens and changes nothing in src/service.py. " * 3
+    box = _explained(tmp_path, whole.strip())
+    lead, more = box.split("<details", 1)
+    assert _text(lead) == "Amazon Bedrock (Claude Haiku 4.5): " + LEADS[0][1], "Through the page, the lead is the same whole sentence"
+    assert "Move the import behind a port." in _text(more)
 
 
 def test_the_four_scenarios_carry_the_numbers_the_readme_gives_them() -> None:
