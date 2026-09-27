@@ -31,6 +31,12 @@
   - FACE, the first screen: `web/index.html` and its page tests
   - TRY, the walkthrough: the `#/try` route of `web/dashboard.html` and its page tests
   - OPS, the operator's screens: every other route of `web/dashboard.html`, and their page tests
+- The finishing wave (2026-09-27), each track in its own worktree:
+  - SPEED, the calls a reader waits for: `application/insights.py`, `application/rollups.py` (everything but the source fields), `application/demo_fleet.py`, `interfaces/app_routes.py` (the overview and projects handlers' reads), `infrastructure/dynamo_repo.py` (reads only), tests for these
+  - ALARM, the function's size and what the slow-call alarm measures: `deploy/template.yml` (MemorySize, the duration alarm, the CloudWatch dashboard), `tests/integration/test_the_template_*.py`, the alarm and sizing lines of `docs/RUNBOOK.md` and `docs/ARCHITECTURE.md`
+  - LIVE, the daily agent's projects as their own source: `source_of`, `SOURCES` and the project lists in `application/rollups.py`, the `source` enum in `web/openapi.json` and `docs/openapi.yaml`, the source sentence, chips and legend in `web/dashboard.html` and `web/index.html`, tests for these
+  - PROBE, the probes read today's overview: `scripts/probe_live.py`, `tests/unit/test_probe_live.py`
+  - ROLE, the GitHub deploy role: `deploy/iam/**`, `.github/workflows/deploy.yml`, section 8 of `docs/RUNBOOK.md`, tests for these
 - Shared, one dispatch line each: `src/threefold/interfaces/api_handlers.py`, `src/threefold/web/openapi.json`, `docs/openapi.yaml`
 - Owner: `STATE.md`, `LOG.md`, `TRAPS.md`, `CLAUDE.md`; merges and deploys
 
