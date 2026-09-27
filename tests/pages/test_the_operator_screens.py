@@ -12,6 +12,7 @@ Every name here is synthetic, as the clean-room rule requires.
 """
 from __future__ import annotations
 
+import html
 import re
 from pathlib import Path
 
@@ -296,6 +297,113 @@ def test_the_public_demo_says_what_its_numbers_are_made_of(tmp_path: Path) -> No
         assert "Everything on this public demo is synthetic" not in page
     assert "30 of them are in visitors' sandboxes, which anyone may label." in split, "The queue says how much of it is sandboxes'"
     assert "tf-ops-source" not in out["private"], "A private stack's numbers are the operator's own"
+
+
+def _source_note(markup: str) -> str:
+    """The overview's source banner alone, as markup."""
+    found = re.search(r'<div class="tf-ops-source".*?(?=\s*<div class="space-y-8">)', markup, re.S)
+    assert found, "The public overview says where its calls come from"
+    return found.group(0)
+
+
+def test_the_public_demo_names_the_daily_live_agent_as_real(tmp_path: Path) -> None:
+    """The live agent's calls are real Claude Code and Codex runs, said in words beside a hue no other source uses."""
+    out = ops(
+        r"""
+  const sources = { fleet: { calls: 3210, projects: 6 }, live: { calls: 12, projects: 2 }, sandbox: { calls: 96, projects: 8 }, other: { calls: 41, projects: 2 } };
+  answer = contract({ '/api/auth/whoami': PUBLIC, '/api/overview': { status: 200, body: Object.assign(overviewBody(), { sources }) } });
+  Threefold.whoami(true);
+  await visit('#/overview?days=7');
+  out.live = view();
+  const zero = Object.assign({}, sources, { live: { calls: 0, projects: 0 } });
+  answer = contract({ '/api/auth/whoami': PUBLIC, '/api/overview': { status: 200, body: Object.assign(overviewBody(), { sources: zero }) } });
+  await visit('#/overview?days=14');
+  out.zero = view();
+  const older = { fleet: sources.fleet, sandbox: sources.sandbox, other: sources.other };
+  answer = contract({ '/api/auth/whoami': PUBLIC, '/api/overview': { status: 200, body: Object.assign(overviewBody(), { sources: older }) } });
+  await visit('#/overview?days=30');
+  out.older = view();
+  const quiet = { fleet: { calls: 0, projects: 0 }, live: { calls: 0, projects: 0 }, sandbox: { calls: 0, projects: 0 }, other: { calls: 0, projects: 0 } };
+  answer = contract({ '/api/auth/whoami': PUBLIC, '/api/overview': { status: 200, body: Object.assign(overviewBody(), { sources: quiet }) } });
+  await visit('#/overview?days=1');
+  out.quiet = view();
+""",
+        tmp_path,
+    )
+    note = _source_note(out["live"])
+    words = html.unescape(re.sub(r"<[^>]+>", "", note))
+    assert ("Where these calls come from, on this public demo: 3,210 from the synthetic Acme fleet, 6 projects whose "
+            "scheduled agents run through the real gates; 12 from the daily live agent: real Claude Code and Codex runs, "
+            "one Acme task a day, in projects that enforce; 96 from visitors' sandboxes; 41 from other callers") in words
+    assert "Daily live agent, real" in words, "The legend names the hue in words"
+    live_hue = "#d55181"
+    assert f'data-tf-tip="Daily live agent, real" data-tf-tip-value="12" data-tf-tip-color="{live_hue}"' in note
+    for other_hue in ("#8b5cf6", "#0891b2", "#4b5470"):
+        assert f'data-tf-tip="Daily live agent, real" data-tf-tip-value="12" data-tf-tip-color="{other_hue}"' not in note
+    assert note.count(live_hue) == 3, "The live hue is on its segment, its tooltip and its legend swatch, and on nothing else"
+    assert 'aria-label="Acme fleet, synthetic 3,210, Daily live agent, real 12, Sandboxes 96, Other callers 41"' in note
+
+    zero = html.unescape(re.sub(r"<[^>]+>", "", _source_note(out["zero"])))
+    assert "Claude Code" not in zero and "; 96 from visitors' sandboxes" in zero, "A live agent with no calls in the window is not claimed"
+    assert 'data-tf-tip="Daily live agent, real"' not in out["zero"], "No segment is drawn for none"
+
+    older = _source_note(out["older"])
+    assert 'data-sources="sources"' in older
+    assert "live agent" not in older and "Claude Code" not in older and "null" not in older, \
+        "A stack from before live counts those calls as other, and the page names no live agent it cannot count"
+    assert "3,210 from the synthetic Acme fleet" in html.unescape(re.sub(r"<[^>]+>", "", older))
+
+    quiet = html.unescape(re.sub(r"<[^>]+>", "", _source_note(out["quiet"])))
+    assert ("On this public demo, calls come from the synthetic Acme fleet where it runs, the daily live agent's real "
+            "Claude Code and Codex runs, visitors' sandboxes") in quiet
+
+
+def test_the_live_agent_s_figures_are_counts_or_are_not_shown(tmp_path: Path) -> None:
+    out = ops(
+        r"""
+  const EVIL = '<img src=x onerror=alert(1)>';
+  const sources = { fleet: { calls: 3210, projects: 6 }, live: { calls: EVIL, projects: EVIL }, sandbox: { calls: 96, projects: 8 }, other: { calls: 41, projects: 2 } };
+  answer = contract({ '/api/auth/whoami': PUBLIC, '/api/overview': { status: 200, body: Object.assign(overviewBody(), { sources }) } });
+  Threefold.whoami(true);
+  await visit('#/overview?days=7');
+  out.hostile = view();
+  const list = [Object.assign({}, PROJECTS.projects[1], { project: 'Acme-Live-orders-s3-archive', source: 'live' }),
+                Object.assign({}, PROJECTS.projects[0], { project: 'Acme-Live-catalog-vat-regen', source: EVIL })];
+  answer = contract({ '/api/projects': { status: 200, body: { projects: list } } });
+  await visit('#/projects');
+  out.projects = view();
+""",
+        tmp_path,
+    )
+    note = _source_note(out["hostile"])
+    assert "<img" not in out["hostile"] and "onerror" not in note
+    assert "live agent" not in note and "Claude Code" not in note, "A live part that is not a count is not named as one"
+    assert "3,210 from the synthetic Acme fleet" in html.unescape(re.sub(r"<[^>]+>", "", note))
+    assert "<img" not in out["projects"] and 'data-src="live"' in out["projects"]
+    assert set(re.findall(r'data-src="([^"]*)"', out["projects"])) == {"live"}, "A source the page does not know gets no chip at all"
+
+
+def test_a_live_project_carries_its_chip_in_the_portfolio(tmp_path: Path) -> None:
+    out = ops(
+        r"""
+  const list = [
+    Object.assign({}, PROJECTS.projects[0], { project: 'Acme-Payments', source: 'fleet' }),
+    Object.assign({}, PROJECTS.projects[1], { project: 'Acme-Live-billing-credit-limit', source: 'live' })
+  ];
+  answer = contract({ '/api/projects': { status: 200, body: { projects: list } } });
+  await visit('#/projects');
+  out.view = view();
+""",
+        tmp_path,
+    )
+    page = out["view"]
+    chip = re.search(r'<span class="tf-chip tf-chip-gray tf-ops-src" data-src="live" title="([^"]*)">Live</span>', page)
+    assert chip, "A live project's row says Live, in a word beside its dot"
+    assert html.unescape(chip.group(1)) == "The daily live agent: a real Claude Code or Codex run on one Acme task a day, in a project that enforces"
+    assert 'data-src="fleet"' in page and ">Fleet<" in page
+    style = (Path(__file__).resolve().parents[2] / "src" / "threefold" / "web" / "dashboard.html").read_text(encoding="utf-8")
+    dots = dict(re.findall(r'\.tf-ops-src\[data-src="(\w+)"\]::before \{ background: var\((--tf-cat-[\w-]+)\); \}', style))
+    assert dots == {"fleet": "--tf-cat-1", "live": "--tf-cat-3", "sandbox": "--tf-cat-2"},         "Each source has a categorical hue of its own, and other keeps the neutral one"
 
 
 def test_a_visitor_is_offered_a_sandbox_rather_than_a_queue_they_cannot_work(tmp_path: Path) -> None:

@@ -132,6 +132,7 @@
     .tf-ops-src { gap: 6px; }
     .tf-ops-src::before { content: ''; width: 7px; height: 7px; border-radius: 99px; background: var(--tf-cat-other); flex-shrink: 0; }
     .tf-ops-src[data-src="fleet"]::before { background: var(--tf-cat-1); }
+    .tf-ops-src[data-src="live"]::before { background: var(--tf-cat-3); }
     .tf-ops-src[data-src="sandbox"]::before { background: var(--tf-cat-2); }
 
     /* The portfolio: one row a project. */
@@ -938,9 +939,11 @@
     };
 
     // Where a project's calls come from, on a stack that says so. A stack from
-    // before the field says only whether a project is a visitor's sandbox.
+    // before the field says only whether a project is a visitor's sandbox, and
+    // one from before `live` calls the daily live agent's projects Other.
     const SOURCES = {
       fleet: { label: 'Fleet', says: 'The synthetic Acme fleet: scheduled agents whose calls run through the real gates' },
+      live: { label: 'Live', says: 'The daily live agent: a real Claude Code or Codex run on one Acme task a day, in a project that enforces' },
       sandbox: { label: 'Sandbox', says: 'A visitor\'s sandbox, seeded with synthetic calls by the walkthrough' },
       other: { label: 'Other', says: 'Neither the fleet nor a sandbox: the service\'s own probes, the demo page, or a connected repository' }
     };
@@ -1170,29 +1173,36 @@
 
     // On the public demo, the one sentence that says what the numbers are made
     // of, from `sources` where the stack reports it and from `sandbox_split`
-    // where it predates that field. Only the fleet is called synthetic: the
-    // page cannot know what else reached a public stack, so the rest is named
-    // by where it came from. Nothing is said on a private stack.
+    // where it predates that field. The fleet is called synthetic and the
+    // daily live agent real, each by its contract: the page cannot know what
+    // else reached a public stack, so the rest is named by where it came from.
+    // A stack from before `live` counts the live agent's calls as other, so
+    // without a count for it nothing here names it, not even in the legend.
+    // Nothing is said on a private stack.
     function sourceNote(data, who) {
       if (!who || who.reads_public !== true) return '';
       const count = part => (part && typeof part.calls === 'number' ? part.calls : null);
       const some = part => (count(part) || 0) > 0;
       let clauses = [];
       let parts = [];
+      let liveReported = false;
       const s = data.sources && typeof data.sources === 'object' ? data.sources : null;
       const split = data.sandbox_split && typeof data.sandbox_split === 'object' ? data.sandbox_split : null;
       if (s) {
         const fleet = s.fleet || {};
+        liveReported = count(s.live) !== null;
         clauses = [
           some(s.fleet) && html`<strong>${num(count(s.fleet))}</strong> from the synthetic Acme fleet, ${typeof fleet.projects === 'number' ? plural(fleet.projects, 'project') : 'projects'} whose scheduled agents run through the real gates`,
+          some(s.live) && html`<strong>${num(count(s.live))}</strong> from the daily live agent: real Claude Code and Codex runs, one Acme task a day, in projects that enforce`,
           some(s.sandbox) && html`<strong>${num(count(s.sandbox))}</strong> from visitors' sandboxes`,
           some(s.other) && html`<strong>${num(count(s.other))}</strong> from other callers: the service's own probes, the demo page, or a repository connected to this stack`
         ];
         parts = [
           { label: 'Acme fleet, synthetic', value: count(s.fleet), color: T.CATEGORICAL[0] },
+          liveReported && { label: 'Daily live agent, real', value: count(s.live), color: T.CATEGORICAL[2] },
           { label: 'Sandboxes', value: count(s.sandbox), color: T.CATEGORICAL[1] },
           { label: 'Other callers', value: count(s.other), color: T.CATEGORICAL_OTHER }
-        ];
+        ].filter(Boolean);
       } else if (split) {
         clauses = [
           some(split.sandbox) && html`<strong>${num(count(split.sandbox))}</strong> from visitors' sandboxes`,
@@ -1206,7 +1216,7 @@
       const said = clauses.filter(Boolean);
       const sentence = said.length
         ? html`Where these calls come from, on this public demo: ${said.map((c, i) => html`${i ? '; ' : ''}${c}`)}.`
-        : html`On this public demo, calls come from the synthetic Acme fleet where it runs, visitors' sandboxes, the service's own probes, the demo page, or a repository connected to this stack.`;
+        : html`On this public demo, calls come from the synthetic Acme fleet where it runs, ${liveReported ? "the daily live agent's real Claude Code and Codex runs, " : ''}visitors' sandboxes, the service's own probes, the demo page, or a repository connected to this stack.`;
       const drawn = parts.filter(p => typeof p.value === 'number' && p.value > 0);
       const bar = drawn.length ? html`<div class="tf-ops-share">
           <div class="tf-ops-share-bar" role="img" aria-label="${parts.map(p => p.label + ' ' + num(p.value)).join(', ')}">${drawn.map(p => html`<span style="flex-grow:${p.value};background:${p.color}" data-tf-tip="${p.label}" data-tf-tip-value="${num(p.value)}" data-tf-tip-color="${p.color}"></span>`)}</div>
