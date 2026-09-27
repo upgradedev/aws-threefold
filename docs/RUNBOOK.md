@@ -364,30 +364,33 @@ project: do not recreate or modify it.
 What the role may do, as `tests/integration/test_the_deploy_role_covers_the_template.py`
 checks it action by action against every resource the template declares:
 CloudFormation change sets on `threefold-prod` only, through the Serverless
-transform; objects under `threefold/` in the packaging bucket; and the Lambda
-functions, DynamoDB tables, S3 buckets, log groups, alarms, dashboard, alarm
-topic, budget, fleet schedule and IAM roles whose names begin
-`threefold-prod-`. It may pass those roles only to Lambda and EventBridge
-Scheduler, and attach to them only the two AWS managed policies the Serverless
-transform attaches.
+transform; objects under `threefold/` in the packaging bucket; the Lambda
+functions, DynamoDB tables, log groups, alarms, alarm topic and fleet schedule
+in eu-west-1 whose names begin `threefold-prod-`; and, because a bucket's,
+a role's, a dashboard's and a budget's ARN carry no Region, only the evidence
+bucket, the two roles, the dashboard and the budget under the names this stack
+gives them. That keeps the edge stack out of reach, although its generated
+bucket names also begin `threefold-prod-`. It may pass the two roles only to
+Lambda and EventBridge Scheduler, and attach to them only the two AWS managed
+policies the Serverless transform attaches.
 
 Where a resource's name cannot be known before it exists, the grant is wider.
 API ids and KMS key ids are generated, so it may call every API Gateway action
 on every API in the account, in any Region, and every key action the template
-needs on every key in the account and Region; `kms:CreateKey` itself names no key and is
-limited to an RSA_2048 signing key, the kind the template declares. Those two
-grants reach the private stack's API and certificate key. It may also make
-the log deliveries an HTTP API's access log needs, list functions, log groups
-and dashboards, and read the account's Lambda settings. It cannot read Secrets
-Manager, create users, groups or managed policies, or change another stack's
-CloudFormation, functions, tables, buckets, log groups, alarms, topics,
-schedules or roles.
+needs on every key in the account and Region; `kms:CreateKey` itself names no
+key and is limited to an RSA_2048 signing key, the kind the template declares.
+Those two grants reach the private stack's API and certificate key. It may
+also make the log deliveries an HTTP API's access log needs, list functions,
+log groups and dashboards, and read the account's Lambda settings. It cannot
+read Secrets Manager, create users, groups or managed policies, or change
+another stack's CloudFormation, functions, tables, buckets, log groups,
+alarms, topics, schedules or roles, provided that stack's own name does not
+begin `threefold-prod-`: the names in eu-west-1 are matched as a prefix.
 
-It can write any inline policy on a role named `threefold-prod-*` and pass
-that role to a function it creates, so its reach is in practice that of an
-account administrator. Anyone who can push to `main` can change what the
-workflow runs with it: treat write access to the repository as administrative
-access to the account.
+It can write any inline policy on either role and pass that role to a function
+it creates, so its reach is in practice that of an account administrator.
+Anyone who can push to `main` can change what the workflow runs with it: treat
+write access to the repository as administrative access to the account.
 
 ## 9. Roll back
 

@@ -53,12 +53,20 @@ trusted:
   and says tags added while creating a key need kms:TagResource "in an IAM
   policy that isn't restricted to particular KMS keys", which key/* in the
   account is. The "*" is narrowed by condition to the key spec and key usage
-  the template declares, read from it here.
+  the template declares, read from it here; the guide's "AWS KMS condition
+  keys" lists CreateKey among the operations kms:KeySpec and kms:KeyUsage
+  apply to.
 - The roles: the AWS::IAM::Role update handler replaces a trust policy with
   UpdateAssumeRolePolicy, and the template writes the schedule role's. A role
   is passed only to the service that runs it, lambda.amazonaws.com for the
   function's and scheduler.amazonaws.com for the schedule's, which the
   iam:PassedToService condition key checks.
+- Names without a Region: an S3 bucket's, an IAM role's, a dashboard's and a
+  budget's ARN carry no Region, so threefold-prod-* would also match the edge
+  stack, threefold-prod-edge in us-east-1, whose generated bucket names begin
+  threefold-prod-edge-. Those grants name what this stack's resources are
+  called instead: a generated name is the stack's name, the logical id and a
+  random suffix, and the other two are the names the template gives them.
 
 The policy is matched as IAM matches it: an action pattern is case-insensitive
 with '*' and '?', a resource pattern is case-sensitive and its '*' crosses ':'
@@ -200,7 +208,15 @@ FUNCTION_ARN = f"arn:aws:lambda:{REGION}:{ACCOUNT}:function:{STACK}-ThreefoldFun
 ROLE_ARN = f"arn:aws:iam::{ACCOUNT}:role/{STACK}-ThreefoldFunctionRole-{SUFFIX}"
 SCHEDULE_ROLE_ARN = f"arn:aws:iam::{ACCOUNT}:role/{STACK}-DemoFleetScheduleRole-{SUFFIX}"
 TABLE_ARN = f"arn:aws:dynamodb:{REGION}:{ACCOUNT}:table/{STACK}-ThreefoldTable-{SUFFIX}"
-BUCKET_ARN = f"arn:aws:s3:::{STACK}-evidencebucket-{SUFFIX.lower()}"
+(_BUCKET,) = [name for name, kind in _resources().items() if kind == "AWS::S3::Bucket"]
+# S3 lowercases a generated bucket name.
+BUCKET_ARN = f"arn:aws:s3:::{STACK}-{_BUCKET.lower()}-{SUFFIX.lower()}"
+# The roles the deploys create: the transform names a function's role after
+# the function, and a plain role has its logical id.
+ROLE_LOGICAL_IDS = sorted(
+    [f"{name}Role" for name, kind in _resources().items() if kind == "AWS::Serverless::Function"]
+    + [name for name, kind in _resources().items() if kind == "AWS::IAM::Role"]
+)
 FUNCTION_LOG_GROUP = f"arn:aws:logs:{REGION}:{ACCOUNT}:log-group:/aws/lambda/{STACK}-ThreefoldFunction-{SUFFIX}"
 API_ARN = f"arn:aws:apigateway:{REGION}::/apis/acme0api01"
 
@@ -549,6 +565,16 @@ def test_every_named_resource_belongs_to_this_stack_or_its_deployment() -> None:
         ("iam:PassRole", f"arn:aws:iam::{ACCOUNT}:role/threefold-dogfood-DemoFleetScheduleRole-X"),
         ("s3:PutObject", f"arn:aws:s3:::{BUCKET}/elsewhere/template.yml"),
         ("lambda:DeleteFunction", f"arn:aws:lambda:us-east-1:{ACCOUNT}:function:{STACK}-ThreefoldFunction-X"),
+        # The edge stack, threefold-prod-edge: its generated bucket names begin
+        # with this stack's name, and bucket, role, dashboard and budget ARNs
+        # carry no Region to tell the two apart.
+        ("s3:PutLifecycleConfiguration", f"arn:aws:s3:::{STACK}-edge-webbucket-x"),
+        ("s3:PutBucketPublicAccessBlock", f"arn:aws:s3:::{STACK}-edge-webbucket-x"),
+        ("s3:DeleteBucket", f"arn:aws:s3:::{STACK}-edge-logbucket-x"),
+        ("iam:PutRolePolicy", f"arn:aws:iam::{ACCOUNT}:role/{STACK}-edge-AcmeRole-X"),
+        ("iam:CreateRole", f"arn:aws:iam::{ACCOUNT}:role/{STACK}-AcmeRole-X"),
+        ("cloudwatch:DeleteDashboards", f"arn:aws:cloudwatch::{ACCOUNT}:dashboard/{STACK}-edge-operations"),
+        ("budgets:ModifyBudget", f"arn:aws:budgets::{ACCOUNT}:budget/{STACK}-edge-account-monthly-cost"),
     ],
 )
 def test_the_role_cannot_touch_the_other_stack_or_anything_else(action: str, resource: str) -> None:
@@ -556,12 +582,14 @@ def test_the_role_cannot_touch_the_other_stack_or_anything_else(action: str, res
 
 
 def test_iam_is_granted_on_this_stacks_roles_and_nothing_else() -> None:
-    """No user, group or managed policy, and no role but the ones this stack's deploys name."""
+    """No user, group or managed policy, and no role but the ones this stack's deploys create."""
+    roles = [f"arn:aws:iam::{ACCOUNT}:role/{STACK}-{logical_id}-*" for logical_id in ROLE_LOGICAL_IDS]
+    assert roles == sorted([ROLE_ARN.rsplit("-", 1)[0] + "-*", SCHEDULE_ROLE_ARN.rsplit("-", 1)[0] + "-*"])
     for statement in STATEMENTS:
         actions = [a for a in _as_list(statement["Action"]) if a.lower().startswith("iam:")]
         if not actions:
             continue
-        assert _as_list(statement["Resource"]) == [f"arn:aws:iam::{ACCOUNT}:role/{STACK}-*"], statement["Sid"]
+        assert sorted(_as_list(statement["Resource"])) == roles, statement["Sid"]
         for action in actions:
             assert "Role" in action and not re.search(r"User|Group|CreatePolicy", action), action
 
