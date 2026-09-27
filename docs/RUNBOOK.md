@@ -167,6 +167,17 @@ emptied, uploads `dashboard.html` again as `app`, and invalidates `/*` once.
 `openapi.json` and `proof.json` are not uploaded: the edge sends every `*.json`
 path to the function, which serves the copies deployed with its code.
 
+The edge serves a page only at an address `deploy/edge.yml` lists. Two
+CloudFront Functions on the pages' behavior (`MissingPageFunction` and
+`MissingPageStatusFunction`) answer any other page address, one with no file
+type or with `.html`, with `404.html` and status 404; a missing file of
+another type keeps the bucket's own 404, and a path an API behavior takes
+keeps the API's own answer. `tests/unit/test_edge_page_not_found.py` holds the
+template's list to the pages this script publishes. So a new page answers 404
+at the edge until the edge stack is deployed with it listed (section 2), and a
+deleted page that is still in the bucket keeps being served until the edge is
+deployed without it.
+
 ## 4. Backfill the daily rollups
 
 Only for a stack that recorded decisions before the rollups existed. Each row
@@ -193,8 +204,13 @@ python scripts/probe_live.py --base https://raa131f9dj.execute-api.eu-west-1.ama
 
 These write: synthetic calls under project `Acme-Probe` and session ids
 `probe-<run id>-*`, the two demo simulations, and one sandbox that expires in
-24 hours; the evidence header lists every kind of write. `--read-only` skips
-every check that records a decision or changes a project. The evidence goes to
+24 hours; the evidence header lists every kind of write. On a stack that runs
+the demo fleet, the overview counts `Acme-Probe` as a source of its own,
+`probe`, and says it is synthetic; the run's sandbox stays among the
+sandboxes, and its call sent under a name outside the pattern and the demo
+simulations stay among other callers (`application/rollups.py`,
+`source_of`). `--read-only` skips every check that records a decision or
+changes a project. The evidence goes to
 `docs/evidence/PROBES_<date>.md`, or to `PROBES_<date>-<run id>.md` when a
 run earlier that day already wrote that file; `--out` names another.
 
@@ -261,18 +277,28 @@ python scripts/build_proof.py \
   --series benchmark/results/20260922T161455Z-pressure.jsonl \
   --series benchmark/results/20260922T162306Z-pressure.jsonl \
   --series benchmark/results/20260923T025154Z-codex.jsonl \
-  --series benchmark/results/20260923T031215Z-pressure-codex.jsonl
+  --series benchmark/results/20260923T031215Z-pressure-codex.jsonl \
+  --evidence-base https://github.com/upgradedev/aws-threefold/blob/main \
+  --private-endpoint https://<private-stack>/prod/ \
+  --key-file /path/outside/the/repo/operator.key
 ```
 
 `report.py` computes the headline from the rows; nothing else states one. Each
 run of the matrix is its own `--series`, so two models, or the standard and the
 pressure tasks, are never pooled into one set of rates.
-`build_proof.py` writes `src/threefold/web/proof.json` from the same rows (and,
+`build_proof.py` writes `src/threefold/web/proof.json` from the same rows, and
 with `--private-endpoint` and `--key-file`, anonymised totals from a private
 stack, refusing to write if any string matches a project name, the key or an
-absolute path). The dashboard's `#/proof` page reads `/proof.json`, which the
-function serves, so a new snapshot reaches the public page with the next
-regional deploy (section 1), not with `publish_web.py`.
+absolute path. Each series cites the report `report.py` made from exactly its
+rows, the one whose Source rows line names them, and a series no report was
+made from cites none. `--evidence-base` is the address the repository's files
+are shown under, so each evidence path on `#/proof` becomes a link into the
+public repository; without it the paths are listed unlinked, and a file not
+yet pushed leads nowhere until it is. Give every source on every run: a
+section is never carried over from an earlier snapshot. The dashboard's
+`#/proof` page reads `/proof.json`, which the function serves, so a new
+snapshot reaches the public page with the next regional deploy (section 1),
+not with `publish_web.py`.
 
 Bounds, from the harness's own caps: each run stops at 20 minutes and, for
 Claude Code, $5 at API list price, so the 54-run matrix cannot take more than

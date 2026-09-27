@@ -31,8 +31,11 @@ flowchart LR
     cf["CloudFront distribution<br/>security headers on every response"]
     s3["S3 bucket, private<br/>origin access control<br/>pages and /assets/*"]
     fn["CloudFront Function<br/>copies Host into X-Threefold-Viewer-Host"]
+    miss["Two CloudFront Functions<br/>a page address with no page:<br/>404.html, status 404"]
     waf --- cf
-    cf -- "default and /assets/*" --> s3
+    cf -- "default: the pages" --> miss
+    miss --> s3
+    cf -- "/assets/*" --> s3
     cf -- "API paths" --> fn
   end
 
@@ -66,6 +69,7 @@ The same picture in words:
 ```
 viewer or hook ──► CloudFront (WAF, security headers)            us-east-1
                      ├─ /, *.html, /app, /assets/* ──► S3 (private, OAC)
+                     │    (a page address with no page: 404.html, status 404)
                      └─ API paths (20 behaviors) ──► viewer-host function
                                                       + X-Threefold-Edge
                                                           │
@@ -144,6 +148,19 @@ the function is reached **[PRIMARY, 2026-09-22, rechecked 2026-09-27]**.
    library and no build step; Tailwind comes from its CDN at a pinned version,
    which the edge's content security policy names exactly.
 
+A mistyped page address is answered by the edge itself, as `deploy/edge.yml`
+builds it. On the default behavior alone, a viewer-request function
+(`MissingPageFunction`) sends a page address, one with no file type or with
+`.html`, that names no published page to `/404.html` and marks the request,
+and a viewer-response function (`MissingPageStatusFunction`) turns that
+answer's 200 into 404. A missing file of another type keeps the bucket's own
+404, and a path an API behavior takes keeps the API's own answer. A
+distribution-wide custom error response would have been simpler and is not
+used, because it would also replace the API's RFC 7807 problem documents,
+which are 403s and 404s too. The list of pages is written into both functions,
+and `tests/unit/test_edge_page_not_found.py` holds it to what
+`scripts/publish_web.py` publishes.
+
 ### 2.2 A coding agent's tool call
 
 1. The agent is about to run `Write`, `Edit`, `MultiEdit`, `NotebookEdit` or
@@ -204,6 +221,26 @@ stack's table before the model is called (`DRAFTBUDGET#<day>`, section 5), and
 once the stack's day is spent it answers 429
 `urn:threefold:error:draft-budget-spent` without calling it. When the model
 cannot be reached the caller gets no draft rather than a canned one.
+
+### 2.5 A visitor walks the rollout on a sandbox
+
+`#/try` in `dashboard.html` walks five steps, and each step's requests go out
+only when the reader presses its button. `POST /api/sandbox` makes an Observe
+project `Acme-Sandbox-<8 hex>` that expires in 24 hours and sends twelve
+synthetic hook calls from the three agents through the real evaluator, none
+asking for an explanation (`application/sandbox.py`). Its answer names, in
+`seeded_false_alarm`, the one seeded call a reasonable reviewer would mark a
+false alarm, read off the seed and never off the ledger: a test module under
+`tests/domain/` that `python-domain-stays-pure` flags because its path pattern
+covers any folder named `domain`. The page lists the flagged calls, asks the
+reader to spot that one while labelling (`POST /api/projects/<name>/reviews`),
+reads readiness (`GET /api/projects/<name>`), promotes with the Ready rules
+checked and nothing else, and then shows the call it will send before sending
+it: `POST /evaluate-tool-call`, as the agent and tool that made a call a
+promoted rule flagged, one the reader marked correct where there is one, in a
+`try-` session and with `explain: true` (section 4.2 says why the session
+matters). On the public stack every one of those writes is open without a
+key because the project is a sandbox (section 4.4).
 
 ---
 
@@ -367,7 +404,26 @@ one thing the walkthrough sets out to show
 **Rule key.** Every ledger row carries `rule_key`: the id of the layering rule
 that decided, or `LOOP`, `PROTECTED_PATH`, `UNREADABLE_WRITE`, `CREDENTIAL`,
 `BUDGET`, `HALTED_SESSION`, or `NONE`. Readiness, the review queue and the
-charts group by it.
+charts group by it. The key is the gate that decided, as the guard states it,
+carried beside the verdict; only a row or verdict that carries none, such as a
+row written before the key existed, is given one from the gate's own words at
+the head of its reason (the rule it names first, or the unreadable-write
+gate's phrase), never from anything the reason quotes, so a command cannot
+name the rule it is counted under (`application/rule_keys.py`,
+`tests/security/test_a_command_cannot_name_the_rule_it_is_counted_under.py`).
+
+**Readiness.** `GET /api/projects/<name>` gives each of the project's rules (its
+layering rules in force, plus the gates `LOOP`, `PROTECTED_PATH`,
+`UNREADABLE_WRITE` and `BUDGET`) a state from the labels on what it flagged in
+the window (`application/rollups.py`, `readiness`): Noisy after any false
+alarm; else Needs review while a call it would have refused is unlabelled;
+else Ready when at least one call it flagged was marked correct; else Quiet.
+Ready rests on labels alone. A refusal nobody labelled is evidence of nothing
+either way: it may be a visitor's button on the demo page, or one of the
+probes' page calls, which always enforce, and a rollup does not say who was
+refused. So a rule whose only record is unlabelled refusals reads Quiet, with
+its `refused` count on the row, and every row's recommendation is a sentence
+true of the counts beside it.
 
 **The fix.** `application/fix_proposer.py` builds a concrete fix for a
 refusal (a rewritten file, an adapter and a port, an environment lookup in

@@ -8,7 +8,7 @@ check it says so; where it rests on `STATE.md` it is tagged [STATE-FILE].
 **Category:** `#workplace-efficiency` · **Lane:** `#community`
 **Tagline:** Threefold refuses a coding agent's edit the moment it is made, not after the commit, so your architecture does not rot while you sleep.
 **Live application:** <https://d1og72wpk4aqig.cloudfront.net/> (CloudFront edge), origin <https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/> (API Gateway). Both answered anonymously with 200 on 2026-09-27 (`docs/evidence/PROBES_2026-09-27-2-edge.md`, `docs/evidence/PROBES_2026-09-27-2.md`) [PRIMARY, 2026-09-27].
-**Try it in a minute, no account:** <https://d1og72wpk4aqig.cloudfront.net/dashboard.html#/try>
+**Try it in about two minutes, no account:** <https://d1og72wpk4aqig.cloudfront.net/dashboard.html#/try>, the two-stage rollout on a sandbox project of your own. The first screen's loop halt, <https://d1og72wpk4aqig.cloudfront.net/>, is one click and well under a minute.
 
 ---
 
@@ -57,7 +57,10 @@ so the rollout had to show what a rule would stop before it stops anything.
    tokens the caller declares, priced per model.
 3. **Rolls out in two stages.** Observe, review, readiness per rule (Ready,
    Quiet, Needs review, Noisy), Promote with the chosen rules, Demote in one
-   click. Page and demo calls always enforce, so the public demo is unaffected.
+   click. Ready rests on labels alone: a rule is Ready when calls it flagged
+   were marked correct and none a false alarm, and a rule whose only record is
+   refusals nobody labelled reads Quiet. Page and demo calls always enforce,
+   so the public demo is unaffected.
    A stack can name projects that start in Enforce instead
    (`EnforceProjectPattern`); the public stack names the `Acme-Live-*`
    projects a real coding agent works in (section 6), since no operator is
@@ -70,11 +73,18 @@ so the rollout had to show what a rule would stop before it stops anything.
 5. **Shows the operation.** `dashboard.html`: overview tiles and inline SVG
    charts that open the calls behind them, projects, a project page with
    readiness per rule, the review queue, call drill-down, a connect wizard,
-   sign-in, the `#/try` sandbox walkthrough and a `#/proof` page. Daily rollups
-   keep the charts exact however busy the ledger is. On the public stack the
-   overview says where its calls came from: the synthetic Acme fleet, the
-   live agent, visitors' sandboxes, or anything else [PRIMARY, 2026-09-27:
-   `GET /api/overview`, its `sources`].
+   sign-in, the `#/try` sandbox walkthrough and a `#/proof` page. The
+   walkthrough takes a visitor through both stages in about two minutes, by
+   its own count: the sandbox it makes names the one seeded call a reviewer
+   should mark a false alarm, the page asks the visitor to spot it and says
+   whether they did, promotion starts with the Ready rules checked, and the
+   last call is shown before it is sent. On `#/proof` each benchmark series
+   cites the report made from its own rows, linked in the public repository.
+   Daily rollups keep the charts exact however busy the ledger is. On the
+   public stack the overview says where its calls came from: the synthetic
+   Acme fleet, the live agent, visitors' sandboxes, or anything else
+   [PRIMARY, 2026-09-27: `GET /api/overview`, its `sources`]. The code on
+   `main` counts the service's own probes apart as well, a fifth source.
 6. **Connects in one command and signs in without a key.** `install.py`, served
    by the stack with its own address written in, installs the hook for the
    agents it finds; `threefold.py open` signs the operator in through a
@@ -90,7 +100,10 @@ so the rollout had to show what a rule would stop before it stops anything.
   origin access control, AWS WAF (IP reputation, a per-address rate limit, two
   managed rule groups), security headers on every response, and a secret origin
   header so the function trusts the viewer's address and host only from the
-  edge. Its own stack in us-east-1.
+  edge. Its own stack in us-east-1. The template answers a page address that
+  has no page with the product's own 404 page and status 404, through two
+  CloudFront Functions on the pages' behavior alone, so a path an API behavior
+  takes keeps the API's own answer.
 - **API and compute:** Amazon API Gateway HTTP API (a throttle on each route,
   access logs) and one AWS Lambda function, Python 3.11 on arm64, X-Ray tracing,
   reserved concurrency.
