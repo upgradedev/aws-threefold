@@ -820,6 +820,100 @@ def test_the_stopped_tile_says_how_many_of_its_refusals_are_in_this_pages_demo_p
         assert stopped_sub(none) == "before they ran", f"{none}: no share that is not a count within the tile's own"
 
 
+# The four sources as the stack reports them, and the project rows they are
+# counted from: 1,284 calls, 37 refused and 57 would-refuse, as the totals say.
+SPLIT_SOURCES = ("sources: { fleet: { calls: 1102, projects: 2 }, live: { calls: 40, projects: 1 }, "
+                 "sandbox: { calls: 80, projects: 1 }, other: { calls: 62, projects: 2 } }")
+SPLIT_ROWS = [
+    {"project": "Acme-Live-billing-credit-limit", "source": "live", "calls": 40, "refused": 2, "would_refuse": 0},
+    {"project": "Acme-Checkout", "source": "fleet", "calls": 700, "refused": 10, "would_refuse": 30},
+    {"project": "Acme-Mobile", "source": "fleet", "calls": 402, "refused": 5, "would_refuse": 20},
+    {"project": "Acme-Sandbox-0a1b2c3d", "source": "sandbox", "calls": 80, "refused": 3, "would_refuse": 7},
+    {"project": "Acme-Probe", "source": "other", "calls": 50, "refused": 14, "would_refuse": 0},
+    {"project": "Acme-Core", "source": "other", "calls": 12, "refused": 3, "would_refuse": 0},
+]
+
+
+def _split_subs(tmp_path: Path, rows: list, sources: str = SPLIT_SOURCES, **totals) -> tuple:
+    """The Stopped and Would-have-been-stopped sub-lines for these project rows, and the strip's markup."""
+    body = _overview(sources + ", by_project: " + json.dumps(rows), **totals).replace("by_project: [], ", "", 1)
+    out = _load(tmp_path, overview="{ status: 200, body: " + body + " }")
+    subs = [_text(s) for s in re.findall(r'<span class="tf-tile-sub">(.*?)</span>', out["live"], re.S)]
+    return subs[1], subs[2], out["live"]
+
+
+def test_the_stopped_and_would_refuse_tiles_say_where_their_counts_come_from(tmp_path: Path) -> None:
+    """A review read "Stopped 346 before they ran" as governed work; most of it was probes and the synthetic fleet.
+
+    Each of the two tiles now splits its own number by source, from the
+    by_project rows the stack counts it from, real agent runs first, and
+    only when the parts add up to the tile's number. The fleet is called
+    synthetic on the tile itself, not only in the sentence under it.
+    """
+    stopped, observed, markup = _split_subs(tmp_path, SPLIT_ROWS)
+    assert stopped == ("before they ran: 2 from real agent runs, 15 from the synthetic fleet, 3 from visitors’ sandboxes, "
+                       "17 from probes, page demos and other callers")
+    assert observed == "recorded while a project observes: 50 from the synthetic fleet, 7 from visitors’ sandboxes", \
+        "Parts with nothing in them are left out"
+    assert _metrics(markup) == {"calls": "1,284", "refused": "37", "would_refuse": "57"}, "The tiles' numbers are the stack's own counts"
+    assert "in this page’s demo project" not in markup, "Its refusals are within the probes and page demos part"
+    assert 'aria-label="Stopped: 37. before they ran: 2 from real agent runs,' in markup, "The link's label reads the same words"
+
+
+def test_real_runs_are_named_as_such_only_when_the_stack_counts_them_so(tmp_path: Path) -> None:
+    """A live project's row counts every caller in it; `sources.live` counts only Claude Code and Codex.
+
+    When the two disagree on the calls, some of the project's calls were not
+    the real agents', so its refusals are placed in the projects the real
+    agents report to rather than credited to their runs. When real runs were
+    judged and none was refused, the Stopped tile says so, and the
+    Would-refuse tile, whose projects never observe, does not.
+    """
+    other_callers = [dict(row, calls=44) if row["source"] == "live" else row for row in SPLIT_ROWS]
+    stopped, _, _ = _split_subs(tmp_path, other_callers)
+    assert stopped.startswith("before they ran: 2 in the projects real agents report to, 15 from the synthetic fleet")
+    none_refused = [dict(row, refused=0) if row["source"] == "live" else dict(row, refused=16) if row["project"] == "Acme-Probe" else row
+                    for row in SPLIT_ROWS]
+    stopped, observed, _ = _split_subs(tmp_path, none_refused)
+    assert stopped.startswith("before they ran: none from real agent runs, 15 from the synthetic fleet")
+    assert "real agent" not in observed
+    no_live = "sources: { fleet: { calls: 1102 }, live: { calls: 0 }, sandbox: { calls: 80 }, other: { calls: 102 } }"
+    rows = [dict(row, source="other") if row["source"] == "live" else row for row in none_refused]
+    stopped, _, _ = _split_subs(tmp_path, rows, sources=no_live)
+    assert "real agent" not in stopped, "With no real run in the window, none is mentioned"
+
+
+def test_a_split_that_would_contradict_its_tile_is_not_given(tmp_path: Path) -> None:
+    more = [dict(row, refused=100) if row["project"] == "Acme-Probe" else row for row in SPLIT_ROWS]
+    stopped, observed, _ = _split_subs(tmp_path, more)
+    assert stopped == "before they ran; 3 in this page’s demo project", "Parts that add up to more than 37 give no figure"
+    assert observed.startswith("recorded while a project observes: 50 from the synthetic fleet"), "Each tile is judged on its own parts"
+    for hostile in ("'<img src=x onerror=alert(1)>'", "2.5", "-4", "null"):
+        rows = json.dumps(SPLIT_ROWS).replace('"refused": 14', '"refused": ' + hostile.replace("'", '"'))
+        body = _overview(SPLIT_SOURCES + ", by_project: " + rows).replace("by_project: [], ", "", 1)
+        out = _load(tmp_path, overview="{ status: 200, body: " + body + " }")
+        subs = [_text(s) for s in re.findall(r'<span class="tf-tile-sub">(.*?)</span>', out["live"], re.S)]
+        assert "<img" not in out["live"] and "onerror" not in out["live"], "Service data reached the page as markup"
+        assert subs[1] == "before they ran; 3 in this page’s demo project", f"refused {hostile}: a part that is not a count gives no split"
+    unknown = [dict(row, source="<img src=x>") if row["project"] == "Acme-Probe" else row for row in SPLIT_ROWS]
+    stopped, _, markup = _split_subs(tmp_path, unknown)
+    assert stopped == "before they ran; 3 in this page’s demo project" and "<img" not in markup, "A source the page does not know gives no split"
+
+
+def test_a_day_with_no_call_between_days_with_some_is_named(tmp_path: Path) -> None:
+    """The line reads zero on such a day; the page cannot tell a quiet day from an uncounted one, so it names the day."""
+    def first_sub(series: str) -> str:
+        out = _load(tmp_path, overview="{ status: 200, body: " + _overview("series: [" + series + "]").replace("series: [], ", "", 1) + " }")
+        return [_text(s) for s in re.findall(r'<span class="tf-tile-sub">(.*?)</span>', out["live"], re.S)][0]
+
+    day = lambda d, n: f"{{ day: '2026-09-{d}', approved: {n}, observed: 0, refused: 0 }}"  # noqa: E731
+    assert first_sub(", ".join([day(20, 5), day(21, 0), day(22, 3)])) == "in the last 7 days; none counted on 21 Sep"
+    assert first_sub(", ".join([day(20, 5), day(21, 0), day(22, 0), day(23, 3)])) == "in the last 7 days; none counted on 21 Sep and 22 Sep"
+    assert first_sub(", ".join([day(19, 5), day(20, 0), day(21, 0), day(22, 0), day(23, 3)])) == "in the last 7 days; none counted on 3 of the days"
+    assert first_sub(", ".join([day(20, 0), day(21, 5), day(22, 3), day(23, 0)])) == "in the last 7 days", \
+        "Days before the first count and after the last are the window's edges, not days missing inside it"
+
+
 def test_without_sources_the_sandboxes_are_still_told_apart(tmp_path: Path) -> None:
     split = "sandbox_split: { sandbox: { calls: 24, projects: 2 }, elsewhere: { calls: 1260, projects: 10 } }"
     out = _load(tmp_path, overview="{ status: 200, body: " + _overview(split) + " }")
@@ -842,25 +936,30 @@ def test_without_sources_the_sandboxes_are_still_told_apart(tmp_path: Path) -> N
 
 
 def test_the_daily_live_agent_is_counted_as_real_runs(tmp_path: Path) -> None:
-    """Its calls are real Claude Code or Codex runs, one Acme task a day, in projects that enforce: said so, with its count."""
+    """Its calls are real Claude Code or Codex runs on Acme tasks, in projects that enforce: said so, with its count.
+
+    No cadence is claimed. STATE.md: until the owner creates the daily schedule, a
+    day runs only when the script is started by hand, so "one Acme task a day" was
+    a promise the stack does not yet keep.
+    """
     sources = ("sources: { fleet: { calls: 1102, projects: 6 }, live: { calls: 40, projects: 2 }, "
                "sandbox: { calls: 80, projects: 9 }, other: { calls: 62, projects: 3 } }")
     out = _load(tmp_path, overview="{ status: 200, body: " + _overview(sources) + " }")
     assert _read(out["where"]) == (
         "Where they come from: 1,102 from a synthetic Acme fleet run through the real gates, 40 from real Claude Code "
-        "or Codex runs doing one Acme task a day in projects that enforce, 80 from visitors’ sandboxes, 62 from probes, "
+        "or Codex runs on Acme tasks, in projects that enforce, 80 from visitors’ sandboxes, 62 from probes, "
         "page demos and other API callers."
     ), "The four parts add up to the 1,284 calls, so each is given, the live agent's called real"
     mismatched = sources.replace("calls: 40", "calls: 400")
     out = _load(tmp_path, overview="{ status: 200, body: " + _overview(mismatched) + " }")
     assert _read(out["where"]) == (
-        "Where they come from: a synthetic Acme fleet run through the real gates, real Claude Code or Codex runs doing "
-        "one Acme task a day in projects that enforce, visitors’ sandboxes, probes, page demos and other API callers."
+        "Where they come from: a synthetic Acme fleet run through the real gates, real Claude Code or Codex runs on "
+        "Acme tasks, in projects that enforce, visitors’ sandboxes, probes, page demos and other API callers."
     ), "Parts that do not add up give no figure, and the live agent is still named"
     only_live = "sources: { fleet: { calls: 0 }, live: { calls: 1284 }, sandbox: { calls: 0 }, other: { calls: 0 } }"
     out = _load(tmp_path, overview="{ status: 200, body: " + _overview(only_live) + " }")
     assert _read(out["where"]) == (
-        "Where they come from: 1,284 from real Claude Code or Codex runs doing one Acme task a day in projects that enforce."
+        "Where they come from: 1,284 from real Claude Code or Codex runs on Acme tasks, in projects that enforce."
     )
 
 

@@ -2397,20 +2397,25 @@
       // two, which count some of those calls, do not say it again. Under the
       // plain words, each of those two carries the term the dashboard and the
       // rows it opens use for the same calls, Refused and Would refuse.
+      // A tile whose count can be split by source says where it comes from
+      // after its plain words (sourceSplit), the day it all fell on first.
       const oneDay = daily('calls').filter(v => v > 0).length === 1;
-      const trend = (key, label, color, total, meaning) => {
+      const trend = (key, label, color, total, meaning, split) => {
         const values = daily(key);
         const active = values.filter(v => v > 0).length;
         if (total === 0) return { spark: null, sub: 'none in ' + span };
-        if (active === 1) return { spark: null, sub: key !== 'calls' && oneDay ? meaning : meaning + ', all on ' + T.shortDay(rows[values.findIndex(v => v > 0)].day) };
+        const from = split ? ': ' + split : '';
+        if (active === 1) return { spark: null, sub: (key !== 'calls' && oneDay ? meaning : meaning + ', all on ' + T.shortDay(rows[values.findIndex(v => v > 0)].day)) + from };
         const spark = active >= 2 ? T.sparkline(values, { label: label, labels: rows.map(r => T.shortDay(r.day)), color: color }) : null;
-        return { spark: spark, sub: meaning };
+        return { spark: spark, sub: meaning + from };
       };
-      const judged = trend('calls', 'Calls judged per day', T.COLORS.accent, calls, 'in ' + span);
-      const ownDemos = demoRefusals(data, refused);
+      const judged = trend('calls', 'Calls judged per day', T.COLORS.accent, calls, 'in ' + span + uncountedDays(rows, daily('calls')));
+      const stoppedFrom = sourceSplit(data, 'refused', refused, true);
+      const ownDemos = stoppedFrom ? 0 : demoRefusals(data, refused);
       const stopped = trend('refused', 'Calls stopped per day', T.COLORS.refused, refused,
-        ownDemos ? 'before they ran; ' + formatCount(ownDemos) + ' in this page’s demo project' : 'before they ran');
-      const observed = trend('observed', 'Calls that would have been stopped, per day', T.COLORS.observed, wouldRefuse, 'recorded while a project observes');
+        ownDemos ? 'before they ran; ' + formatCount(ownDemos) + ' in this page’s demo project' : 'before they ran', stoppedFrom);
+      const observed = trend('observed', 'Calls that would have been stopped, per day', T.COLORS.observed, wouldRefuse, 'recorded while a project observes',
+        sourceSplit(data, 'would_refuse', wouldRefuse, false));
       const href = params => T.pageHref('dashboard.html#/calls' + T.query(Object.assign({ days: days }, params)));
       T.setHtml(strip, h`
         ${T.statTile({ label: 'Calls judged', metric: 'calls', value: calls, icon: 'shield', sub: judged.sub, spark: judged.spark, href: href({}), opens: 'Open the calls' })}
@@ -2439,7 +2444,9 @@
       const live = !s ? null : Object.prototype.hasOwnProperty.call(s, 'live') ? part(s.live) : 0;
       const sandbox = s ? part(s.sandbox) : null;
       const other = s ? part(s.other) : null;
-      const liveWords = 'real Claude Code or Codex runs doing one Acme task a day in projects that enforce';
+      // No cadence is claimed: a day's run is started by hand until a
+      // schedule starts it, so the words say what the runs are, not how often.
+      const liveWords = 'real Claude Code or Codex runs on Acme tasks, in projects that enforce';
       if (fleet !== null && live !== null && sandbox !== null && other !== null && calls > 0 && fleet + live + sandbox + other === calls) {
         const pieces = [];
         if (fleet) pieces.push(formatCount(fleet) + ' from a synthetic Acme fleet run through the real gates');
@@ -2478,6 +2485,63 @@
       const row = rows.find(r => r && typeof r === 'object' && r.project === DEMO_PROJECT);
       const n = row ? wholeNumber(row.refused) : null;
       return n !== null && n > 0 && n <= refused ? n : 0;
+    }
+
+    // Where a tile's count comes from, source by source, as the sentence
+    // under the tiles splits the calls: each by_project row names its source
+    // (fleet, live, sandbox or other) and counts its own refusals and
+    // would-refuse calls. The parts are given only when every row can be read
+    // and they add up to the tile's own number, so a split never contradicts
+    // the figure it splits; otherwise the tile says what it said before. A
+    // live row counts every caller in the daily agent's projects, while the
+    // live part of `sources` counts only Claude Code's and Codex's calls
+    // there, so its part is called real agent runs only when the two agree on
+    // the calls, and is placed in the projects real agents report to
+    // otherwise. Real runs come first. The Stopped tile says when real runs
+    // were judged and none of them was refused; the Would-refuse tile does
+    // not, because those projects enforce and never observe. Plain words
+    // only: the tile repeats its sub-line in its link's label.
+    const SPLIT_SOURCES = ['live', 'fleet', 'sandbox', 'other'];
+    function sourceSplit(data, key, total, sayNone) {
+      const rows = Array.isArray(data.by_project) ? data.by_project : [];
+      if (!rows.length || !(total > 0)) return '';
+      const parts = { live: 0, fleet: 0, sandbox: 0, other: 0 };
+      let liveCalls = 0;
+      for (const row of rows) {
+        const source = row && typeof row === 'object' && typeof row.source === 'string' ? row.source : '';
+        const n = SPLIT_SOURCES.indexOf(source) === -1 ? null : wholeNumber(row[key]);
+        if (n === null) return '';
+        parts[source] += n;
+        if (source === 'live') {
+          const made = wholeNumber(row.calls);
+          if (made === null) return '';
+          liveCalls += made;
+        }
+      }
+      if (SPLIT_SOURCES.reduce((sum, name) => sum + parts[name], 0) !== total) return '';
+      const s = data.sources && typeof data.sources === 'object' ? data.sources : null;
+      const reported = s && s.live && typeof s.live === 'object' ? wholeNumber(s.live.calls) : null;
+      const real = reported !== null && reported > 0 && reported === liveCalls;
+      const words = [];
+      if (parts.live) words.push(formatCount(parts.live) + (real ? ' from real agent runs' : ' in the projects real agents report to'));
+      else if (sayNone && real) words.push('none from real agent runs');
+      if (parts.fleet) words.push(formatCount(parts.fleet) + ' from the synthetic fleet');
+      if (parts.sandbox) words.push(formatCount(parts.sandbox) + ' from visitors’ sandboxes');
+      if (parts.other) words.push(formatCount(parts.other) + ' from probes, page demos and other callers');
+      return words.join(', ');
+    }
+
+    // A day that counted no call, between days that did, is named in words
+    // under the first tile: its trend line reads zero there, and this page
+    // cannot tell a quiet day from one that went uncounted, so it names the
+    // day and claims nothing more about it. More than two are counted instead.
+    function uncountedDays(rows, values) {
+      const first = values.findIndex(v => v > 0);
+      const last = values.length - 1 - values.slice().reverse().findIndex(v => v > 0);
+      if (first === -1) return '';
+      const days = rows.filter((r, i) => i > first && i < last && values[i] === 0).map(r => T.shortDay(r.day));
+      if (!days.length) return '';
+      return '; none counted on ' + (days.length <= 2 ? days.join(' and ') : formatCount(days.length) + ' of the days');
     }
 
     // The benchmark, pooled from the snapshot the dashboard's #/proof shows
