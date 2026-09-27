@@ -46,7 +46,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from benchmark import task_library  # noqa: E402
+from benchmark import codex_agent, task_library  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EVIDENCE_DIR = REPO_ROOT / "docs" / "evidence"
@@ -77,6 +77,11 @@ FAMILY_NOTES = {
 def agent_of(row: Mapping[str, Any]) -> str:
     agent = str(row.get("agent") or "claude-code")
     return "claude-code" if agent == "claude" else agent
+
+
+def _codex_sandbox(row: Mapping[str, Any]) -> str:
+    """The sandbox a Codex row records in harness.codex_sandbox (`none` is no sandbox at all), or "unrecorded"."""
+    return str((row.get("harness") or {}).get("codex_sandbox") or "unrecorded")
 
 
 @functools.lru_cache(maxsize=None)
@@ -394,6 +399,8 @@ def aggregate(rows: Sequence[Mapping[str, Any]], agent: Optional[str] = None, in
         "models": sorted({str(row.get("model")) for row in real}),
         "claude_versions": sorted({str(row.get("claude_code_version")) for row in real if row.get("claude_code_version") and row.get("claude_code_version") != "scripted"}),
         "isolation_modes": sorted({str((row.get("isolation") or {}).get("mode")) for row in real}),
+        # How many Codex runs had each sandbox, as the row records it; the Limits claim a sandbox only from here.
+        "codex_sandboxes": dict(Counter(_codex_sandbox(row) for row in real if agent_of(row) == "codex")),
         "platforms": sorted({str((row.get("harness") or {}).get("platform")) for row in real if row.get("harness")}),
         "run_ids": sorted({str(row.get("run_id")) for row in rows}),
         "dates": sorted({str(row.get("started_at", ""))[:10] for row in dated if row.get("started_at")}),
@@ -450,6 +457,7 @@ def _whole(summary: Mapping[str, Any]) -> Dict[str, Any]:
         "models": sorted({model for part in parts for model in part["models"]}),
         "platforms": sorted({platform for part in parts for platform in part["platforms"]}),
         "isolation_modes": sorted({mode for part in parts for mode in part["isolation_modes"]}),
+        "codex_sandboxes": dict(sum((Counter(part.get("codex_sandboxes") or {}) for part in parts), Counter())),
         "memory_above": [row for part in parts for row in part.get("memory_above") or []],
         "tasks": sorted({task for part in parts for task in part["tasks"]}),
         "conditions": _ordered_conditions(name for part in parts for name in part["conditions"]),
@@ -631,6 +639,7 @@ def caveats(summary: Mapping[str, Any]) -> List[str]:
             "memory from the owner's configuration folder were loaded, and `~` in the agent's shell named the run's folder. They "
             "logged in with a token from a token file, given to the agent process alone; no row records it."
         )
+    codex_shell, codex_reach = _codex_confinement(whole["codex_sandboxes"], whole["platforms"])
     if "codex" in agents:
         items.append(
             "Codex runs (`codex exec --json`) were set up from codex-cli 0.155.0's help text and the event names in its binary, "
@@ -638,7 +647,7 @@ def caveats(summary: Mapping[str, Any]) -> List[str]:
             "`--ignore-user-config`, `--ignore-rules` and `--ephemeral`, and the runner refused to start while CODEX_HOME held an "
             "AGENTS.md, AGENTS.override.md or hooks.json. The hook was registered in the repository's `.codex/hooks.json` as the "
             "installer writes it and ran under `--dangerously-bypass-hook-trust`, because a repository made for one run has no hook "
-            "trust record. Shell commands ran in Codex's own sandbox with approvals off, not under Claude Code's prefix rules. "
+            f"trust record. {codex_shell} "
             "Codex reports no turn count, so its turns are its tool calls and messages; a Threefold run counts only when the "
             "hook's own log and the local ledger show the hook judged the agent's shell and patch calls."
         )
@@ -646,13 +655,49 @@ def caveats(summary: Mapping[str, Any]) -> List[str]:
         items += _claude_reach(whole, several or "codex" in agents)
     if "codex" in agents:
         items.append(
-            "What Codex could reach. Codex's sandbox confined the writes of its shell commands to the repository and its own "
-            "temporary folders, and the environment gave installs no package index and AWS credentials that do not exist. "
+            f"What Codex could reach. {codex_reach} "
             "The owner's private folders (~/.threefold, ~/.claude, ~/.aws, ~/.ssh and the rest) were not denied by name as they "
             "are for Claude Code, and the test runners execute code the agent wrote with the owner's rights, so this is not a "
             "sealed environment either."
         )
     return items
+
+
+def _codex_confinement(sandboxes: Mapping[str, int], platforms: Sequence[str]) -> Tuple[str, str]:
+    """How Codex's shell commands were confined, and what Codex could reach, as the rows record it.
+
+    A sandbox is claimed only for runs whose row names one in harness.codex_sandbox. The Codex matrices of
+    2026-09-23 ran on Windows with none at all (`none`, --dangerously-bypass-approvals-and-sandbox), and a
+    report that spoke of Codex's sandbox there contradicted every row it summarised.
+    """
+    bypass = "`--dangerously-bypass-approvals-and-sandbox`"
+    if set(sandboxes) == {codex_agent.UNSANDBOXED}:
+        why = (", which the runner passes on Windows because Codex has no sandbox there: a run under `--sandbox` was "
+               "told the workspace is read-only and had its commands rejected") if list(platforms) == ["Windows"] else ""
+        return (
+            f"Shell commands ran with no sandbox and no approval prompt ({bypass}{why}), not under Claude Code's "
+            "prefix rules.",
+            "Nothing sandboxed Codex: it started in the task repository inside the run's work root, and its shell "
+            "commands and file edits could read and write anything the owner's account can; only the task repository "
+            "was measured. The environment gave installs no package index and AWS credentials that do not exist.",
+        )
+    if set(sandboxes) == {codex_agent.DEFAULT_SANDBOX}:
+        return (
+            f"Shell commands ran in Codex's own sandbox (`--sandbox {codex_agent.DEFAULT_SANDBOX}`) with approvals off, "
+            "not under Claude Code's prefix rules.",
+            "Codex's sandbox confined the writes of its shell commands to the repository and its own temporary folders, "
+            "and the environment gave installs no package index and AWS credentials that do not exist.",
+        )
+    runs = ", ".join(
+        f"{count} run(s) " + ("with no sandbox recorded" if mode == "unrecorded" else f"under `{mode}`")
+        for mode, count in sorted(sandboxes.items()))
+    return (
+        "Shell commands ran with approvals off, not under Claude Code's prefix rules, in the sandbox each row records "
+        f"(`harness.codex_sandbox`, where `none` is {bypass}): {runs or 'no run recorded one'}.",
+        f"Only a run recorded under `{codex_agent.DEFAULT_SANDBOX}` had the writes of its shell commands confined by "
+        "Codex's sandbox, to the repository and its own temporary folders; any other run could read and write anything "
+        "the owner's account can. The environment gave installs no package index and AWS credentials that do not exist.",
+    )
 
 
 def _claude_reach(summary: Mapping[str, Any], named: bool) -> List[str]:

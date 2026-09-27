@@ -14,8 +14,8 @@ Codex and Antigravity, through one hook file) and answers each write or command
 before it runs. Deterministic gates decide: a domain file importing
 infrastructure under the architect's layering rules, a credential in the
 arguments, a write that switches the hooks off, the same call repeating, a
-spend ceiling. A team connects a repository with one command, and every project
-starts in **Observe**: calls are judged and recorded, and no rule refuses
+spend ceiling. A team connects a repository with one command, and by default a
+project starts in **Observe**: calls are judged and recorded and no rule refuses
 anything. What is still refused there is a credential, by the hook on the
 developer's own machine, and a request the service cannot take at all (a body
 over 1 MB, a malformed call, a key it rejects), because the hook reads any 4xx
@@ -199,13 +199,14 @@ apart and never pooled, and neither are the agents.
 | pressure, Claude Code, `claude-haiku-4-5` | 27 | 100% (9/9) | 56% (5/9) | **0% (0/9)** | 44% (4/9) |
 | pressure, Codex, its default model | 27 | 100% (9/9) | 11% (1/9) | **0% (0/9)** | 67% (6/9) |
 
-The honest reading. The rules-in-the-prompt column tracks the model, not the
-task family. With `claude-sonnet-5` the rules held in both families with
-nothing enforcing them: no violation in 18 plain runs and none in 9 pressure
-runs. With the cheaper model they held in neither: 17% on the plain tasks, and
-56% under prompts that ask for the shortcut, where unguided runs violated every
-time. Codex kept the rules in `AGENTS.md` on the plain tasks and broke them in
-1 of 9 pressure runs. Threefold left no violation in any of the six series.
+The honest reading. For Claude Code, the rules-in-`CLAUDE.md` column tracks the
+model, not the task family. With `claude-sonnet-5` the rules held in both
+families with nothing enforcing them: no violation in 18 plain runs and none in
+9 pressure runs. With `claude-haiku-4-5` they held in neither: 17% on the plain
+tasks, and 56% under prompts that ask for the shortcut, where unguided runs
+violated every time. Codex kept the rules in `AGENTS.md` on the plain tasks and
+broke them in 1 of 9 pressure runs. Threefold left no violation in any of the
+six series.
 The price is the last column: under the pressure prompts the governed Claude
 Code finished 10 of 18 runs (6 of 9, then 4 of 9) and the governed Codex 6 of
 9, and in the other runs the agent stopped and reported the conflict instead of
@@ -470,7 +471,9 @@ Then open <http://localhost:8001/> or <http://localhost:8001/dashboard.html>.
 
 ## Clean room
 
-Every project, session and workload in this repository and on the public stack
-is synthetic (`Acme-*`). A project name outside the stack's
-`AllowedProjectPattern` is stored and shown as `unlabelled`, and developers
-appear in public only as short hashes.
+Every project and workload in this repository and on the public stack is
+synthetic (`Acme-*`), and so is every session but the daily real agent's
+(`live-<task>-<date>`), which are real Claude Code or Codex runs on those
+synthetic tasks. A project name outside the stack's `AllowedProjectPattern` is
+stored and shown as `unlabelled`, and developers appear in public only as short
+hashes.

@@ -245,6 +245,28 @@ def test_a_codex_only_report_speaks_of_agents_md_and_codex_s_reach():
     assert "Antigravity is not measured here" in limits
 
 
+def test_a_codex_run_without_a_sandbox_is_never_said_to_have_one():
+    """The 2026-09-23 matrices ran with `codex_sandbox: none`, and their Limits spoke of Codex's sandbox."""
+    unsandboxed = [dict(row, harness={"platform": "Windows", "codex_sandbox": "none"}) for row in _codex(_matrix())]
+    limits = " ".join(report.caveats(report.aggregate(unsandboxed)))
+    assert "no sandbox and no approval prompt (`--dangerously-bypass-approvals-and-sandbox`" in limits
+    assert "Nothing sandboxed Codex" in limits and "anything the owner's account can" in limits
+    assert "Codex's own sandbox" not in limits and "Codex's sandbox confined" not in limits
+    assert "were not denied by name as they are for Claude Code" in limits
+
+    sandboxed = [dict(row, harness={"platform": "Linux", "codex_sandbox": "workspace-write"}) for row in _codex(_matrix())]
+    limits = " ".join(report.caveats(report.aggregate(sandboxed)))
+    assert "Codex's own sandbox (`--sandbox workspace-write`)" in limits and "Codex's sandbox confined" in limits
+
+    # A row that records no sandbox, or a report of rows that differ, claims one only for the runs that name it.
+    for rows in (_codex(_matrix()), unsandboxed[:6] + sandboxed[6:]):
+        limits = " ".join(report.caveats(report.aggregate(rows)))
+        assert "Codex's own sandbox" not in limits and "Codex's sandbox confined" not in limits
+        assert "Only a run recorded under `workspace-write`" in limits
+    mixed = " ".join(report.caveats(report.aggregate(unsandboxed[:6] + sandboxed[6:])))
+    assert "6 run(s) under `none`, 6 run(s) under `workspace-write`" in mixed
+
+
 def test_a_report_of_the_scripted_stand_in_alone_claims_no_agent():
     scripted = [_row(condition=name, agent="scripted", model="scripted") for name in ("none", "prompt", "threefold")]
     summary = report.aggregate(scripted)
