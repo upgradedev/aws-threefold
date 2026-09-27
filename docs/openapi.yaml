@@ -1647,7 +1647,7 @@ paths:
         calls nobody has labelled; false_alarms the calls labelled false alarm. The totals are split in sandbox_split
         between visitors' sandboxes and every other project, so a page can say what a number is made of; each by_agent
         entry says what kind of caller it is, and coding_agents lists the coding agents alone. sources says the
-        same of where the calls come from: the synthetic Acme fleet, the daily live agent's real Claude Code and
+        same of where the calls come from: the synthetic Acme fleet, the daily live agent's real Claude Code or
         Codex runs, visitors' sandboxes, or anything else, and every by_project row names its source. A sandbox
         whose configuration has expired, a day after it was made, is left out of every figure here, as it always
         has been. self_correction is the one figure not read from the rollups: it is read from the ledger, a bounded
@@ -1732,7 +1732,7 @@ paths:
                       otherwise, as a page's is. Computed over the same projects as the totals, so the four calls
                       add up to totals.calls and the four projects to totals.projects. A page on the public stack
                       says in words that the fleet is synthetic and runs through the real gates, and that the live
-                      agent's calls are real Claude Code and Codex runs, one Acme task a day, in projects that enforce.
+                      agent's calls are real Claude Code or Codex runs, one Acme task a day, in projects that enforce.
                       A stack from before live was added reports fleet, sandbox and other only, and counts the live
                       agent's calls as other.
                     properties:

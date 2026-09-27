@@ -307,7 +307,7 @@ def _source_note(markup: str) -> str:
 
 
 def test_the_public_demo_names_the_daily_live_agent_as_real(tmp_path: Path) -> None:
-    """The live agent's calls are real Claude Code and Codex runs, said in words beside a hue no other source uses."""
+    """The live agent's calls are real Claude Code or Codex runs, said in words beside a hue no other source uses."""
     out = ops(
         r"""
   const sources = { fleet: { calls: 3210, projects: 6 }, live: { calls: 12, projects: 2 }, sandbox: { calls: 96, projects: 8 }, other: { calls: 41, projects: 2 } };
@@ -333,7 +333,7 @@ def test_the_public_demo_names_the_daily_live_agent_as_real(tmp_path: Path) -> N
     note = _source_note(out["live"])
     words = html.unescape(re.sub(r"<[^>]+>", "", note))
     assert ("Where these calls come from, on this public demo: 3,210 from the synthetic Acme fleet, 6 projects whose "
-            "scheduled agents run through the real gates; 12 from the daily live agent: real Claude Code and Codex runs, "
+            "scheduled agents run through the real gates; 12 from the daily live agent: real Claude Code or Codex runs, "
             "one Acme task a day, in projects that enforce; 96 from visitors' sandboxes; 41 from other callers") in words
     assert "Daily live agent, real" in words, "The legend names the hue in words"
     live_hue = "#d55181"
@@ -358,7 +358,7 @@ def test_the_public_demo_names_the_daily_live_agent_as_real(tmp_path: Path) -> N
 
     quiet = html.unescape(re.sub(r"<[^>]+>", "", _source_note(out["quiet"])))
     assert ("On this public demo, calls come from the synthetic Acme fleet where it runs, the daily live agent's real "
-            "Claude Code and Codex runs where it reports, visitors' sandboxes") in quiet
+            "Claude Code or Codex runs where it reports, visitors' sandboxes") in quiet
 
 
 def test_the_live_agent_s_figures_are_counts_or_are_not_shown(tmp_path: Path) -> None:
@@ -424,7 +424,8 @@ def test_a_live_project_carries_its_chip_in_the_portfolio(tmp_path: Path) -> Non
         r"""
   const list = [
     Object.assign({}, PROJECTS.projects[0], { project: 'Acme-Payments', source: 'fleet' }),
-    Object.assign({}, PROJECTS.projects[1], { project: 'Acme-Live-billing-credit-limit', source: 'live' })
+    Object.assign({}, PROJECTS.projects[1], { project: 'Acme-Live-billing-credit-limit', source: 'live' }),
+    Object.assign({}, PROJECTS.projects[1], { project: 'Acme-Probe', source: 'other' })
   ];
   answer = contract({ '/api/projects': { status: 200, body: { projects: list } } });
   await visit('#/projects');
@@ -437,6 +438,10 @@ def test_a_live_project_carries_its_chip_in_the_portfolio(tmp_path: Path) -> Non
     assert chip, "A live project's row says Live, in a word beside its dot"
     assert html.unescape(chip.group(1)) == "The daily live agent: a real Claude Code or Codex run on one Acme task a day, in a project that enforces"
     assert 'data-src="fleet"' in page and ">Fleet<" in page
+    other = re.search(r'<span class="tf-chip tf-chip-gray tf-ops-src" data-src="other" title="([^"]*)">Other</span>', page)
+    assert other and html.unescape(other.group(1)) == (
+        "Not the fleet, the daily live agent or a sandbox: the service's own probes, the demo page, or a connected repository"
+    ), "Other is what is left once all three named sources, the live agent's included, are set apart"
     style = (Path(__file__).resolve().parents[2] / "src" / "threefold" / "web" / "dashboard.html").read_text(encoding="utf-8")
     dots = dict(re.findall(r'\.tf-ops-src\[data-src="(\w+)"\]::before \{ background: var\((--tf-cat-[\w-]+)\); \}', style))
     assert dots == {"fleet": "--tf-cat-1", "live": "--tf-cat-3", "sandbox": "--tf-cat-2"},         "Each source has a categorical hue of its own, and other keeps the neutral one"

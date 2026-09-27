@@ -842,25 +842,25 @@ def test_without_sources_the_sandboxes_are_still_told_apart(tmp_path: Path) -> N
 
 
 def test_the_daily_live_agent_is_counted_as_real_runs(tmp_path: Path) -> None:
-    """Its calls are real Claude Code and Codex runs, one Acme task a day, in projects that enforce: said so, with its count."""
+    """Its calls are real Claude Code or Codex runs, one Acme task a day, in projects that enforce: said so, with its count."""
     sources = ("sources: { fleet: { calls: 1102, projects: 6 }, live: { calls: 40, projects: 2 }, "
                "sandbox: { calls: 80, projects: 9 }, other: { calls: 62, projects: 3 } }")
     out = _load(tmp_path, overview="{ status: 200, body: " + _overview(sources) + " }")
     assert _read(out["where"]) == (
         "Where they come from: 1,102 from a synthetic Acme fleet run through the real gates, 40 from real Claude Code "
-        "and Codex runs doing one Acme task a day in projects that enforce, 80 from visitors’ sandboxes, 62 from probes, "
+        "or Codex runs doing one Acme task a day in projects that enforce, 80 from visitors’ sandboxes, 62 from probes, "
         "page demos and other API callers."
     ), "The four parts add up to the 1,284 calls, so each is given, the live agent's called real"
     mismatched = sources.replace("calls: 40", "calls: 400")
     out = _load(tmp_path, overview="{ status: 200, body: " + _overview(mismatched) + " }")
     assert _read(out["where"]) == (
-        "Where they come from: a synthetic Acme fleet run through the real gates, real Claude Code and Codex runs doing "
+        "Where they come from: a synthetic Acme fleet run through the real gates, real Claude Code or Codex runs doing "
         "one Acme task a day in projects that enforce, visitors’ sandboxes, probes, page demos and other API callers."
     ), "Parts that do not add up give no figure, and the live agent is still named"
     only_live = "sources: { fleet: { calls: 0 }, live: { calls: 1284 }, sandbox: { calls: 0 }, other: { calls: 0 } }"
     out = _load(tmp_path, overview="{ status: 200, body: " + _overview(only_live) + " }")
     assert _read(out["where"]) == (
-        "Where they come from: 1,284 from real Claude Code and Codex runs doing one Acme task a day in projects that enforce."
+        "Where they come from: 1,284 from real Claude Code or Codex runs doing one Acme task a day in projects that enforce."
     )
 
 

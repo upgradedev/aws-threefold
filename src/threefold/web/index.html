@@ -2439,7 +2439,7 @@
       const live = !s ? null : Object.prototype.hasOwnProperty.call(s, 'live') ? part(s.live) : 0;
       const sandbox = s ? part(s.sandbox) : null;
       const other = s ? part(s.other) : null;
-      const liveWords = 'real Claude Code and Codex runs doing one Acme task a day in projects that enforce';
+      const liveWords = 'real Claude Code or Codex runs doing one Acme task a day in projects that enforce';
       if (fleet !== null && live !== null && sandbox !== null && other !== null && calls > 0 && fleet + live + sandbox + other === calls) {
         const pieces = [];
         if (fleet) pieces.push(formatCount(fleet) + ' from a synthetic Acme fleet run through the real gates');
