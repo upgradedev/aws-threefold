@@ -401,9 +401,9 @@ def test_the_function_s_memory_comes_from_a_bounded_parameter_and_it_stays_on_ar
     assert declared["Type"] == "Number", "MinValue and MaxValue bind only a Number"
     low, high, default = int(declared["MinValue"]), int(declared["MaxValue"]), int(declared["Default"])
     assert default == 1024
-    assert 512 <= low <= default <= high <= 3008, (
-        f"{low} to {high}: below 512 the function is back on a small fraction of a core, and above 1,769 "
-        "the extra is a second core the handler's one thread cannot use"
+    assert 512 <= low <= default <= high <= 1769, (
+        f"{low} to {high}: below 512 the function has less than about 0.3 of a core, back toward the "
+        "seventh it had at 256, and above 1,769 the extra is a second core the handler's one thread cannot use"
     )
 
 
@@ -695,6 +695,20 @@ def _timeout_seconds() -> int:
     return int(timeout.group(1))
 
 
+class _UnansweredDraftingClient:
+    """Shaped like the governance client the drafter borrows, with a runtime that never answers."""
+
+    def __init__(self) -> None:
+        self._client = self
+        self.model_id = "synthetic-model"
+        self.max_calls_per_container = 60
+        self.calls_made = 0
+        self.last_error = None
+
+    def converse(self, **_: object) -> dict:
+        raise TimeoutError("read timed out")
+
+
 def test_a_tick_running_toward_the_timeout_is_still_seen() -> None:
     """With the tick out of the slow-call alarm, something must see one run away.
 
@@ -726,13 +740,33 @@ def test_a_tick_running_toward_the_timeout_is_still_seen() -> None:
     assert "HTTP requests" in description and "Demo fleet tick:" in description, (
         "The alarm should say it covers requests and ticks alike, and where a tick says how long it took"
     )
-    # A rule draft may wait on two model calls, each to its connect and read
-    # timeouts. Where that alone reaches the threshold, a draft crosses it by
-    # design whenever Bedrock stops answering, and the alarm has to say so
-    # rather than send the reader looking for a stalled table call.
-    per_call = rule_drafter.DRAFT_CLIENT_TIMEOUTS["connect_timeout"] + rule_drafter.DRAFT_CLIENT_TIMEOUTS["read_timeout"]
-    if rule_drafter.MAX_ATTEMPTS * per_call * 1000 >= float(alarm["Threshold"]):
-        assert "rule draft" in description and "Bedrock is not answering" in description
+    # A draft Bedrock does not answer is one drafter call: the drafter asks
+    # again only after an answer it could not use. Under that call, botocore
+    # sends up to total_max_attempts requests, each waiting out its connect
+    # and read timeouts; a client Config's max_attempts counts retries, and
+    # botocore adds one for the first request. Where that alone reaches the
+    # threshold, the alarm has to say a draft can cross it with nothing
+    # stalled, rather than send the reader looking for a stalled table call.
+    unanswered = _UnansweredDraftingClient()
+    with pytest.raises(rule_drafter.ModelUnavailableError) as unavailable:
+        rule_drafter.draft_rule(
+            "Billing domain classes may not reach persistence.", client=unanswered, existing_rules=[]
+        )
+    assert unavailable.value.calls == 1 and unanswered.calls_made == 1, "A call that got no answer ends the draft"
+    timeouts = rule_drafter.DRAFT_CLIENT_TIMEOUTS
+    retries = timeouts["retries"]
+    sends = retries["total_max_attempts"] if "total_max_attempts" in retries else retries["max_attempts"] + 1
+    unanswered_draft_ms = sends * (timeouts["connect_timeout"] + timeouts["read_timeout"]) * 1000
+    assert "two model calls both wait out" not in description, "The drafter makes no second call after a timeout"
+    if unanswered_draft_ms >= float(alarm["Threshold"]):
+        assert "rule draft Bedrock does not answer can reach it" in description
+        assert "botocore retries the timed-out call once" in description, "Say why one call waits twice"
+        assert sends == 2, "The description says once; say how many times it is now"
+    else:
+        assert "rule draft Bedrock does not answer can reach it" not in description, (
+            f"An unanswered draft stops at about {unanswered_draft_ms / 1000:g} s, below the threshold"
+        )
+
 
 
 @pytest.mark.parametrize("status, floor, share", [("5xx", 10, 5), ("4xx", 20, 25)])

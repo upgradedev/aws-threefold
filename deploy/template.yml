@@ -31,16 +31,17 @@ Parameters:
     Type: Number
     Default: 1024
     MinValue: 512
-    MaxValue: 3008
+    MaxValue: 1769
     Description: >-
       The function's memory in megabytes. Lambda gives a function CPU in
       proportion to its memory, one full core at 1,769. At the 256 the stacks
       first ran with, about a seventh of a core, GET /api/overview took 2.5
       to 3.5 seconds on the public stack. Lambda bills memory times duration,
       and at this traffic four times the memory costs next to nothing while
-      every reader waits less. The floor keeps the function off a small
-      fraction of a core; above 1,769 the extra is a second core, which the
-      handler's single thread cannot use.
+      every reader waits less. The floor gives the function about 0.3 of a
+      core, twice what the stacks first had. The ceiling is one full core:
+      above it the extra is a second core, which the handler's single thread
+      cannot use.
 
   # Operations. Every one of these defaults to a value both stacks run with,
   # so an update that overrides none of them deploys unattended, and neither
@@ -99,11 +100,11 @@ Parameters:
       of the latency API Gateway measures for every HTTP request, and the
       average LatencyMs the service reports for the calls it evaluates. The
       fleet's scheduled tick is in neither: it is not a request, and its calls
-      reach the evaluator without passing through the handler. A hook's call
-      makes no model call and only a page's call waits on Bedrock, so either
-      passing five seconds for most of fifteen minutes means a dependency is
-      struggling. The function times out at 15 seconds, so this warns well
-      before calls start failing.
+      reach the evaluator directly, not through the HTTP route that reports
+      LatencyMs. A hook's call makes no model call and only a page's call
+      waits on Bedrock, so either passing five seconds for most of fifteen
+      minutes means a dependency is struggling. The function times out at 15
+      seconds, so this warns well before calls start failing.
 
   AlarmEmail:
     Type: String
@@ -647,7 +648,14 @@ Resources:
   # still be seen is a tick, or a request, running past where it should stop.
   # Unit is Milliseconds, the unit Lambda publishes Duration in: the p95
   # alarm this replaces read the metric in it and went to ALARM, so the unit
-  # does not leave this one without data.
+  # does not leave this one without data. Six periods rather than three:
+  # ticks come every fifteen minutes, so half an hour holds two of them.
+  # A rule draft can reach it with nothing stalled. The drafter asks the
+  # model again only after an answer it could not use, never after a call
+  # that got none, but the botocore client under it retries a timed-out call
+  # once: a client Config's max_attempts counts retries, and botocore adds
+  # one for the first request, so DRAFT_CLIENT_TIMEOUTS' max_attempts of 1
+  # is two requests. Each waits up to 1 s to connect and 5 to read.
   ThreefoldFunctionNearTimeoutAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
@@ -658,14 +666,16 @@ Resources:
         covers every invocation, HTTP requests and the demo fleet's tick
         alike. The tick stops itself about 10 seconds in and checks the time
         only between steps, so one still running at 12 was held by a single
-        step, most likely a table call that stalled; ticks come every fifteen
-        minutes, so half an hour holds two of them. A rule draft whose two
-        model calls both wait out their timeouts takes about 12 seconds by
-        design, so a draft here means Bedrock is not answering. An invocation
-        that reaches the timeout is also counted by the function errors
-        alarm. The function's log has each tick's "Demo fleet tick:" line with
-        seconds, send_seconds, operate_seconds and cut_short; the access log
-        has each request's latency and route.
+        step, most likely a table call that stalled. A rule draft Bedrock
+        does not answer can reach it too: the drafter does not ask again,
+        but botocore retries the timed-out call once, so the draft waits out
+        two reads of 5 seconds and runs up to about 13 seconds; one whose
+        repair goes unanswered can reach the timeout. A timeout is also
+        counted by the function errors alarm. The function's log has each
+        tick's "Demo fleet tick:" line with seconds, send_seconds,
+        operate_seconds and cut_short, and "Bedrock did not answer a rule
+        draft" for such a draft; RuleDraftLatencyMs in Threefold/Drafting
+        times each draft; the access log has each request's path and latency.
       Namespace: AWS/Lambda
       MetricName: Duration
       Dimensions:
@@ -702,7 +712,7 @@ Resources:
         them. Scheduled work is not in it: the demo fleet's tick invokes the
         function directly, not through the API, and the near-timeout alarm
         watches it. The usual cause is Bedrock or DynamoDB answering slowly;
-        the access log's routeKey, latency and integrationLatency say which
+        the access log's path, latency and integrationLatency say which
         requests.
       Namespace: AWS/ApiGateway
       MetricName: Latency

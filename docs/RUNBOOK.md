@@ -54,7 +54,7 @@ current value, secrets included, so an ordinary code deploy names none.
 | `EdgeOriginSecret` | empty, `NoEcho` | the edge secret; empty trusts no edge header |
 | `DefaultHookStage` | `observe` | the stage for a project with none of its own |
 | `DemoFleet` | `false` | `true` on the public stack only: a schedule runs the synthetic Acme fleet every fifteen minutes |
-| `FunctionMemoryMb` | `1024` | the function's memory in megabytes, from 512 to 3008. Lambda gives CPU in proportion to it; the stacks first ran with 256, so the first deploy that does not name it raises them to the default |
+| `FunctionMemoryMb` | `1024` | the function's memory in megabytes, from 512 to 1769, one full core. Lambda gives CPU in proportion to it; the stacks first ran with 256, so the first deploy that does not name it raises them to the default |
 | `ReservedConcurrency` | `25` | Lambda refuses a reservation that leaves fewer than 100 unreserved: check `aws lambda get-account-settings` shows at least 150 for two stacks at 25, or deploy with `0` |
 | `ApiThrottleRateLimit` / `ApiThrottleBurstLimit` | `100` / `200` | per route, answered 429 by API Gateway |
 | `SlowCallAlarmMs` | `5000` | threshold of the two latency alarms: the p95 of every HTTP request's latency at API Gateway, and the average evaluation latency. The fleet's scheduled tick is in neither; the near-timeout alarm (an invocation over 12 seconds) watches it |
