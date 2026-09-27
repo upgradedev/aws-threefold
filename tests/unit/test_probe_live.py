@@ -20,6 +20,7 @@ synthetic, as the clean-room rule requires.
 from __future__ import annotations
 
 import base64
+import datetime
 import hashlib
 import importlib.util
 import io
@@ -30,6 +31,7 @@ import socket
 import sys
 import threading
 import zipfile
+from collections import Counter
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -93,6 +95,31 @@ APP_OPENAPI = {
 }
 PAGES = ("/", "/index.html", "/console.html", "/rules.html", "/connect.html", "/sessions.html", "/settings.html", "/swagger.html")
 
+# Calls the fake's overview counts beside the ones the run records: the
+# synthetic fleet's and a visitor's sandbox's, so every source, a coding agent
+# with calls in a sandbox and both sides of the sandbox split are there to be
+# checked, rather than passing over empty lists.
+FLEET = ("Acme-Payments", "Acme-Checkout", "Acme-Treasury", "Acme-Search", "Acme-Mobile", "Acme-Platform")
+BACKGROUND_SANDBOX = "Acme-Sandbox-0a1b2c3d"
+BACKGROUND = (
+    [{"project_name": "Acme-Payments", "status": "APPROVED", "observed_rules": [], "agent": "codex"}] * 3
+    + [{"project_name": "Acme-Treasury", "status": "BLOCKED_BOUNDARY_VIOLATION", "observed_rules": [], "agent": "claude-code"}]
+    + [{"project_name": BACKGROUND_SANDBOX, "status": "APPROVED", "observed_rules": ["PROTECTED_PATH"], "agent": "antigravity"}] * 2
+    + [{"project_name": BACKGROUND_SANDBOX, "status": "APPROVED", "observed_rules": [], "agent": "claude-code"}]
+)
+AGENT_KINDS = {
+    "claude-code": "coding_agent", "codex": "coding_agent", "antigravity": "coding_agent",
+    "page": "page", "ci": "ci", "pre-commit": "ci",
+}
+# A figure as insights.self_correction makes one: 6 of the 9 refusals with a
+# later call corrected, so the rate is 0.6667 to four places.
+SELF_CORRECTION = {
+    "refusals_considered": 16, "refusals_with_later_call": 9, "refusals_without_later_call": 7,
+    "self_corrected": 6, "rate": 0.6667, "median_calls_to_correct": 1.5, "rows_read": 2000, "complete": False,
+}
+# The overview's fields a stack deployed before they were added answers without.
+ADDED_SINCE = ("sources", "coding_agents", "sandbox_split", "self_correction")
+
 
 class FakeStack:
     """A Threefold stack in miniature, answering the probe as the contract says a stack does.
@@ -113,9 +140,14 @@ class FakeStack:
         new_pages: bool = True,
         hook_stage: str = "enforce",
         readiness: str = "ready",
+        overview_since: bool = True,
         defects: Tuple[str, ...] = (),
     ) -> None:
         self.readiness = readiness
+        # False answers the overview as a stack deployed before the fields
+        # added since the contract does: without any of ADDED_SINCE, and
+        # without the per-row fields that came with them.
+        self.overview_since = overview_since
         self.private = private
         self.key = key
         self.app = app
@@ -397,6 +429,7 @@ class FakeStack:
                 "session_id": sid,
                 "project_name": project,
                 "developer_id": "0a1b2c3d",
+                "agent": body.get("agent") or "unknown",
                 "status": status,
                 "rule_key": rule_key,
                 "observed_rules": observed,
@@ -453,21 +486,87 @@ class FakeStack:
             rules.append(rule)
         return rules
 
+    def _overview(self, query: Dict[str, str]) -> Dict[str, Any]:
+        """GET /api/overview over the run's calls and the background ones, each figure added up as rollups.overview does."""
+        rows = self.ledger + [dict(row) for row in BACKGROUND]
+
+        def source(name: str) -> str:
+            if probe_live.SANDBOX_PATTERN.fullmatch(name):
+                return "sandbox"
+            return "fleet" if name in FLEET else "other"
+
+        def figures(own: List[Dict[str, Any]]) -> Dict[str, int]:
+            approved = sum(1 for r in own if r["status"] == "APPROVED" and not r["observed_rules"])
+            observed = sum(1 for r in own if r["observed_rules"])
+            refused = sum(1 for r in own if r["status"].startswith("BLOCKED"))
+            return {
+                "calls": approved + observed + refused, "approved": approved, "refused": refused,
+                "would_refuse": observed, "needs_review": observed, "false_alarms": 0,
+            }
+
+        by_project = []
+        for name in sorted({r["project_name"] for r in rows}):
+            own = figures([r for r in rows if r["project_name"] == name])
+            by_project.append({
+                "project": name, "stage": self.hook_stage, "configured": name in self.projects,
+                "sandbox": source(name) == "sandbox", "source": source(name), "calls": own["calls"],
+                "refused": own["refused"], "would_refuse": own["would_refuse"],
+                "needs_review": own["needs_review"], "last_seen": "",
+            })
+        calls = Counter(r["agent"] for r in rows)
+        in_sandboxes = Counter(r["agent"] for r in rows if source(r["project_name"]) == "sandbox")
+        by_agent = [
+            {"agent": agent, "calls": count, "calls_in_sandboxes": in_sandboxes[agent], "kind": AGENT_KINDS.get(agent, "unknown")}
+            for agent, count in sorted(calls.items(), key=lambda kv: (-kv[1], kv[0]))
+        ]
+        coding_agents = [dict(entry) for entry in by_agent if entry["kind"] == "coding_agent"]
+        totals = dict(figures(rows), projects=len(by_project), agents=len(by_agent), coding_agents=len(coding_agents))
+        series = [{"day": "2026-09-22", "approved": totals["approved"], "observed": totals["would_refuse"], "refused": totals["refused"]}]
+        sandbox_split = {}
+        for side, sandbox in (("sandbox", True), ("elsewhere", False)):
+            own = figures([r for r in rows if (source(r["project_name"]) == "sandbox") == sandbox])
+            sandbox_split[side] = dict(own, projects=sum(1 for row in by_project if row["sandbox"] == sandbox))
+        sources = {
+            name: {
+                "calls": sum(row["calls"] for row in by_project if row["source"] == name),
+                "projects": sum(1 for row in by_project if row["source"] == name),
+            }
+            for name in probe_live.SOURCES
+        }
+        figure = dict(SELF_CORRECTION)
+        if "overview_mismatch" in self.defects:
+            totals["approved"] += 1
+        if "sources_short" in self.defects:
+            sources["fleet"]["calls"] += 1
+        if "unnamed_source" in self.defects:
+            by_project[0]["source"] = "live"
+        if "coding_agents_count" in self.defects:
+            totals["coding_agents"] += 1
+        if "unknown_kind" in self.defects:
+            by_agent[-1]["kind"] = "robot"
+        if "split_mismatch" in self.defects:
+            sandbox_split["elsewhere"]["calls"] += 1
+        if "rate_over_considered" in self.defects:
+            figure["rate"] = round(figure["self_corrected"] / figure["refusals_considered"], 4)
+        payload = {
+            "window_days": int(query.get("days", 7)), "generated_at": "2026-09-22T10:00:00+00:00", "source": "rollups",
+            "totals": totals, "series": series, "by_agent": by_agent, "coding_agents": coding_agents,
+            "by_origin": [], "by_rule": [], "by_project": by_project, "stages": {"observe": 0, "enforce": 0},
+            "sources": sources, "sandbox_split": sandbox_split, "self_correction": figure,
+        }
+        if not self.overview_since:
+            for key in ADDED_SINCE:
+                del payload[key]
+            del totals["coding_agents"]
+            for row in by_project:
+                del row["source"], row["sandbox"]
+            for entry in by_agent:
+                del entry["kind"], entry["calls_in_sandboxes"]
+        return payload
+
     def _application(self, verb, path, query, headers, body) -> Optional[Response]:
         if verb == "GET" and path == "/api/overview":
-            approved = sum(1 for r in self.ledger if r["status"] == "APPROVED" and not r["observed_rules"])
-            observed = sum(1 for r in self.ledger if r["observed_rules"])
-            refused = sum(1 for r in self.ledger if r["status"].startswith("BLOCKED"))
-            totals = {
-                "calls": approved + observed + refused, "approved": approved + ("overview_mismatch" in self.defects),
-                "refused": refused, "would_refuse": observed, "needs_review": observed, "false_alarms": 0,
-                "projects": len({r["project_name"] for r in self.ledger}), "agents": 2,
-            }
-            return self._json(200, {
-                "window_days": int(query.get("days", 7)), "generated_at": "2026-09-22T10:00:00+00:00", "source": "rollups",
-                "totals": totals, "series": [{"day": "2026-09-22", "approved": approved, "observed": observed, "refused": refused}],
-                "by_agent": [], "by_origin": [], "by_rule": [], "by_project": [], "stages": {"observe": 0, "enforce": 0},
-            })
+            return self._json(200, self._overview(query))
         if verb == "GET" and path == "/api/decisions":
             rows = self._rows(query)
             limit = min(int(query.get("limit", 50)), 200)
@@ -722,6 +821,8 @@ def test_contract_endpoints_not_deployed_yet_are_skipped_not_failed(monkeypatch)
         "availability/page /dashboard.html",
         "availability/page /app",
         "application/overview shape",
+        "application/overview sources add up to its totals",
+        "application/overview self-correction adds up",
         "application/decisions pagination",
         "application/sandbox created",
         "distribution/install.py names this stack",
@@ -748,6 +849,45 @@ def test_strict_reports_what_is_not_deployed_yet_as_a_failure(monkeypatch):
     assert checks["availability/page /index.html"].status == probe_live.PASS
 
 
+OVERVIEW_SINCE_CHECKS = (
+    "application/overview sources add up to its totals",
+    "application/overview agents carry their kind",
+    "application/overview sandbox split adds up to its totals",
+    "application/overview self-correction adds up",
+)
+
+
+def test_the_overview_s_fields_added_since_the_contract_are_checked_where_they_are_answered(monkeypatch):
+    probe, _ = _run(monkeypatch, FakeStack(), groups=["governance", "application"], expect="public")
+    checks = _by_name(probe)
+    for name in OVERVIEW_SINCE_CHECKS:
+        assert checks[name].status == probe_live.PASS, checks[name]
+    # Each read the figures, not an empty list: the fleet, a sandbox and the run's own calls are all there.
+    assert re.search(r"fleet 4 \+ other \d+ \+ sandbox 3 = totals\.calls \d+", checks[OVERVIEW_SINCE_CHECKS[0]].evidence)
+    assert "3 coding agent(s) = totals.coding_agents" in checks[OVERVIEW_SINCE_CHECKS[1]].evidence
+    assert "6 of 9 refusals with a later call corrected, rate 0.6667" in checks[OVERVIEW_SINCE_CHECKS[3]].evidence
+    # The one answer is read for all of them: no second request, no second bounded ledger read on the stack.
+    assert sum(1 for c in probe.results if c.name.startswith("overview")) == 6
+
+
+def test_a_stack_that_predates_the_overview_s_newer_fields_is_skipped_on_them_not_failed(monkeypatch):
+    probe, _ = _run(monkeypatch, FakeStack(overview_since=False), groups=["governance", "application"], expect="public")
+    assert _failures(probe) == []
+    checks = _by_name(probe)
+    for name in OVERVIEW_SINCE_CHECKS:
+        assert checks[name].status == probe_live.SKIP, checks[name]
+        assert checks[name].evidence.startswith("not deployed yet: GET /api/overview has no "), checks[name]
+    assert "(added 2026-09-26)" in checks[OVERVIEW_SINCE_CHECKS[0]].evidence
+    # What the stack did answer is still checked for real.
+    assert checks["application/overview shape"].status == probe_live.PASS
+    assert checks["application/overview totals equal its series"].status == probe_live.PASS
+    strict, _ = _run(
+        monkeypatch, FakeStack(overview_since=False), groups=["governance", "application"], expect="public", strict=True
+    )
+    for name in OVERVIEW_SINCE_CHECKS:
+        assert _by_name(strict)[name].status == probe_live.FAIL, name
+
+
 # ---------------------------------------------------------------------------
 # One planted defect fails the check that covers it.
 # ---------------------------------------------------------------------------
@@ -766,6 +906,12 @@ def test_strict_reports_what_is_not_deployed_yet_as_a_failure(monkeypatch):
         ("loop_never_trips", "governance/page loop halts on the third call", "third identical call"),
         ("approval_reaches_model", "governance/approval never reaches the model", "explanation_source='bedrock'"),
         ("overview_mismatch", "application/overview totals equal its series", "series sums to"),
+        ("sources_short", "application/overview sources add up to its totals", "but totals.calls is"),
+        ("unnamed_source", "application/overview sources add up to its totals", "names no source that sources lists"),
+        ("coding_agents_count", "application/overview agents carry their kind", "totals.coding_agents is 4, but coding_agents lists 3"),
+        ("unknown_kind", "application/overview agents carry their kind", 'has kind "robot", not one of'),
+        ("split_mismatch", "application/overview sandbox split adds up to its totals", "but totals.calls is"),
+        ("rate_over_considered", "application/overview self-correction adds up", "rate is 0.375, not 0.6667 (6 of 9"),
         ("duplicate_page", "application/decisions pagination", "more than one page"),
         ("loose_filter", "application/decisions kind=refused filter", "not refusals"),
         ("bad_state", "application/project readiness", "counts make it"),
@@ -1185,6 +1331,324 @@ def test_the_synthetic_credential_has_the_shape_the_gate_matches():
 
 
 # ---------------------------------------------------------------------------
+# The overview's fields added since the contract, each against what the code
+# that writes it guarantees.
+# ---------------------------------------------------------------------------
+
+OVERVIEW_CHECKS = {
+    "sources": probe_live.sources_problems,
+    "coding_agents": probe_live.agents_problems,
+    "sandbox_split": probe_live.sandbox_split_problems,
+    "self_correction": probe_live.self_correction_problems,
+}
+
+
+def _public_overview() -> Dict[str, Any]:
+    """The public overview of 2026-09-27, cut to what these checks read.
+
+    What the abridged copy of it left out is filled in as the stack computes
+    it, so it adds up as the stack's does: 28 projects by source, five agents
+    of which two are not coding agents, and the sandbox side of the split.
+    """
+    coding = [
+        {"agent": "claude-code", "calls": 971, "calls_in_sandboxes": 48, "kind": "coding_agent"},
+        {"agent": "antigravity", "calls": 555, "calls_in_sandboxes": 16, "kind": "coding_agent"},
+        {"agent": "codex", "calls": 495, "calls_in_sandboxes": 16, "kind": "coding_agent"},
+    ]
+    rows = (
+        [("Acme-Probe", "other")]
+        + [(name, "fleet") for name in FLEET]
+        + [(f"Acme-Team-{index:02d}", "other") for index in range(17)]
+        + [(f"Acme-Sandbox-{index:08x}", "sandbox") for index in range(4)]
+    )
+    return {
+        "sources": {
+            "fleet": {"calls": 1479, "projects": 6},
+            "other": {"calls": 856, "projects": 18},
+            "sandbox": {"calls": 80, "projects": 4},
+        },
+        "totals": {
+            "agents": 5, "approved": 1970, "calls": 2415, "coding_agents": 3, "false_alarms": 3,
+            "needs_review": 74, "projects": 28, "refused": 278, "would_refuse": 167,
+        },
+        "coding_agents": [dict(entry) for entry in coding],
+        "by_agent": [dict(entry) for entry in coding] + [
+            {"agent": "page", "calls": 300, "calls_in_sandboxes": 0, "kind": "page"},
+            {"agent": "unknown", "calls": 94, "calls_in_sandboxes": 0, "kind": "unknown"},
+        ],
+        "sandbox_split": {
+            "elsewhere": {"approved": 1930, "calls": 2335, "false_alarms": 3, "needs_review": 54, "projects": 24,
+                          "refused": 270, "would_refuse": 135},
+            "sandbox": {"approved": 40, "calls": 80, "false_alarms": 0, "needs_review": 20, "projects": 4,
+                        "refused": 8, "would_refuse": 32},
+        },
+        "self_correction": {
+            "complete": False, "median_calls_to_correct": 1.0, "rate": 0.75, "refusals_considered": 16,
+            "refusals_with_later_call": 8, "refusals_without_later_call": 8, "rows_read": 2000, "self_corrected": 6,
+        },
+        "by_project": [
+            {"project": name, "source": source, "sandbox": source == "sandbox", "configured": False, "stage": "observe"}
+            for name, source in rows
+        ],
+    }
+
+
+def _checked(overview: Dict[str, Any]) -> Dict[str, Optional[List[str]]]:
+    return {field: check(overview) for field, check in OVERVIEW_CHECKS.items()}
+
+
+def test_today_s_public_overview_passes_every_check_of_the_fields_added_since():
+    assert _checked(_public_overview()) == dict.fromkeys(OVERVIEW_CHECKS, [])
+
+
+def test_a_legitimately_empty_overview_passes_every_check_of_them():
+    from threefold.application import ledger
+
+    zeros = dict.fromkeys(probe_live.SPLIT_KEYS, 0)
+    overview = {
+        "sources": {name: {"calls": 0, "projects": 0} for name in probe_live.SOURCES},
+        "totals": dict.fromkeys(probe_live.OVERVIEW_TOTALS + ("coding_agents",), 0),
+        "coding_agents": [], "by_agent": [], "by_project": [],
+        "sandbox_split": {"sandbox": dict(zeros), "elsewhere": dict(zeros)},
+        # What the stack answers when the ledger could not be read: nothing considered, a null rate.
+        "self_correction": ledger.self_correction_unread(),
+    }
+    assert _checked(overview) == dict.fromkeys(OVERVIEW_CHECKS, [])
+
+
+@pytest.mark.parametrize("field", ADDED_SINCE)
+def test_a_stack_that_predates_a_field_is_not_checked_for_it(field):
+    overview = _public_overview()
+    del overview[field]
+    checked = _checked(overview)
+    assert checked.pop(field) is None
+    # The others are still checked, and still pass.
+    assert checked == dict.fromkeys(checked, [])
+
+
+def test_a_stack_that_predates_the_fields_drops_them_from_its_rows_too():
+    overview = _public_overview()
+    for key in ADDED_SINCE:
+        del overview[key]
+    del overview["totals"]["coding_agents"]
+    for row in overview["by_project"]:
+        del row["source"], row["sandbox"]
+    for entry in overview["by_agent"]:
+        del entry["kind"], entry["calls_in_sandboxes"]
+    assert _checked(overview) == dict.fromkeys(OVERVIEW_CHECKS)
+
+
+def test_self_correction_from_before_its_two_counts_is_skipped_and_half_of_them_fails():
+    overview = _public_overview()
+    figure = overview["self_correction"]
+    # 2026-09-22 to 2026-09-25: the rate was over every refusal considered, and neither count was sent.
+    del figure["refusals_with_later_call"], figure["refusals_without_later_call"]
+    figure["rate"] = 0.375
+    assert probe_live.self_correction_problems(overview) is None
+    figure["refusals_with_later_call"] = 8
+    assert probe_live.self_correction_problems(overview) == [
+        "self_correction carries refusals_with_later_call without the other of "
+        "refusals_with_later_call and refusals_without_later_call"
+    ]
+
+
+def _later_call_none(figure: Dict[str, Any]) -> None:
+    figure.update(refusals_with_later_call=0, refusals_without_later_call=16, self_corrected=0,
+                  median_calls_to_correct=None)
+
+
+@pytest.mark.parametrize(
+    "field, change, words",
+    [
+        # (a) sources: fleet, sandbox and other at least, each two counts, adding up to the totals.
+        ("sources", lambda o: o.update(sources=[1479, 856, 80]), "sources is a list, not an object"),
+        ("sources", lambda o: o["sources"].pop("sandbox"), "sources lacks sandbox"),
+        ("sources", lambda o: o["sources"]["other"].update(calls=-1), "sources.other is not calls and projects as counts"),
+        ("sources", lambda o: o["sources"]["other"].update(projects=True), "sources.other is not calls and projects"),
+        ("sources", lambda o: o["sources"].update(live={"calls": 0}), "sources.live is not calls and projects"),
+        ("sources", lambda o: o["sources"]["fleet"].update(calls=1480), "the sources' calls add up to 2416, but totals.calls is 2415"),
+        ("sources", lambda o: o["totals"].update(projects=29), "the sources' projects add up to 28, but totals.projects is 29"),
+        ("sources", lambda o: o["totals"].pop("calls"), "totals.calls is not a count for the sources to add up to"),
+        # (b) every by_project row names a source that sources lists, and each source's projects are its rows.
+        ("sources", lambda o: o["by_project"][3].pop("source"), "by_project[3] names no source that sources lists"),
+        ("sources", lambda o: o["by_project"][3].update(source="live"), "by_project[3] names no source"),
+        ("sources", lambda o: o["by_project"][3].update(source=["fleet"]), "by_project[3] names no source"),
+        ("sources", lambda o: o["by_project"][1].update(source="other"), "sources.fleet.projects is 6, but 5 by_project rows"),
+        ("sources", lambda o: o["by_project"][27].update(sandbox=False), "by_project[27] is a sandbox by one field and not"),
+        ("sources", lambda o: o.update(by_project={}), "by_project is not a list"),
+        # (c) coding_agents: by_agent's coding agents in its order, as many as totals.coding_agents says.
+        ("coding_agents", lambda o: o.update(coding_agents={"claude-code": 971}), "coding_agents is a dict, not a list"),
+        ("coding_agents", lambda o: o["totals"].update(coding_agents=4), "totals.coding_agents is 4, but coding_agents lists 3"),
+        ("coding_agents", lambda o: o["totals"].pop("coding_agents"), "totals.coding_agents is not a count"),
+        ("coding_agents", lambda o: o["coding_agents"].pop(), "coding_agents is not by_agent's 3 coding agent(s)"),
+        ("coding_agents", lambda o: o["coding_agents"].reverse(), "in by_agent's order"),
+        ("coding_agents", lambda o: o["coding_agents"].append(dict(o["by_agent"][3])), "coding_agents[3] is not of kind coding_agent"),
+        ("coding_agents", lambda o: o["coding_agents"][0].pop("calls_in_sandboxes"), "coding_agents[0] lacks calls_in_sandboxes"),
+        # (d) every by_agent entry has a kind the code defines, and no more calls in sandboxes than calls.
+        ("coding_agents", lambda o: o["by_agent"][4].update(kind="robot"), 'by_agent[4] has kind "robot", not one of'),
+        ("coding_agents", lambda o: o["by_agent"][3].pop("kind"), "by_agent[3] lacks kind"),
+        ("coding_agents", lambda o: o["by_agent"][3].update(calls_in_sandboxes=301), "by_agent[3] has 301 calls in sandboxes of 300"),
+        ("coding_agents", lambda o: o["by_agent"][3].update(calls="300"), "by_agent[3] has calls or calls_in_sandboxes that is not"),
+        ("coding_agents", lambda o: o["by_agent"].append(None), "by_agent[5] is not an object"),
+        # (e) self_correction: the two counts add up, the rate and the median are what the counts make them.
+        ("self_correction", lambda o: o.update(self_correction=[16, 8]), "self_correction is a list, not an object"),
+        ("self_correction", lambda o: o["self_correction"].update(refusals_considered=17),
+         "later call 8 and without one 8 do not add up to the 17 considered"),
+        ("self_correction", lambda o: o["self_correction"].update(self_corrected=9, rate=1.125),
+         "self_corrected 9 exceeds the 8 refusals with a later call"),
+        ("self_correction", lambda o: o["self_correction"].update(rate=0.375), "rate is 0.375, not 0.75 (6 of 8, to 4 places)"),
+        ("self_correction", lambda o: o["self_correction"].update(rate="0.75"), 'rate is "0.75", not 0.75'),
+        ("self_correction", lambda o: o["self_correction"].update(rate=None), "rate is null, not 0.75"),
+        ("self_correction", lambda o: o["self_correction"].update(refusals_with_later_call=9, refusals_without_later_call=7, rate=0.67),
+         "rate is 0.67, not 0.6667 (6 of 9"),
+        ("self_correction", lambda o: _later_call_none(o["self_correction"]),
+         "rate is 0.75 with no refusal followed by a later call, not null"),
+        ("self_correction", lambda o: o["self_correction"].update(self_corrected=0, rate=0.0),
+         "median_calls_to_correct is 1.0 with nothing corrected, not null"),
+        ("self_correction", lambda o: o["self_correction"].update(median_calls_to_correct=None),
+         "median_calls_to_correct is null with 6 corrected, not 1 or more calls"),
+        ("self_correction", lambda o: o["self_correction"].update(median_calls_to_correct=0),
+         "median_calls_to_correct is 0 with 6 corrected"),
+        ("self_correction", lambda o: o["self_correction"].update(complete="false"),
+         'self_correction.complete is "false", not true or false'),
+        ("self_correction", lambda o: o["self_correction"].update(rows_read=-1), "self_correction lacks rows_read as counts"),
+        ("self_correction", lambda o: o["self_correction"].pop("rate"), "self_correction lacks rate"),
+        # (f) sandbox_split: each side's figures add up to the totals, and the sandbox side is the sandbox source.
+        ("sandbox_split", lambda o: o.update(sandbox_split=[]), "sandbox_split is a list, not an object"),
+        ("sandbox_split", lambda o: o["sandbox_split"].pop("elsewhere"), "sandbox_split.elsewhere is not an object"),
+        ("sandbox_split", lambda o: o["sandbox_split"]["sandbox"].pop("false_alarms"), "sandbox_split.sandbox lacks false_alarms"),
+        ("sandbox_split", lambda o: o["sandbox_split"]["elsewhere"].update(calls=2336),
+         "sandbox_split calls 80 + 2336 is 2416, but totals.calls is 2415"),
+        ("sandbox_split", lambda o: o["sandbox_split"]["elsewhere"].update(approved=1931), "but totals.approved is 1970"),
+        ("sandbox_split", lambda o: o["sandbox_split"]["elsewhere"].update(projects=23), "but totals.projects is 28"),
+        ("sandbox_split", lambda o: o["sandbox_split"]["elsewhere"].update(false_alarms=2), "but totals.false_alarms is 3"),
+        ("sandbox_split", lambda o: (o["sandbox_split"]["sandbox"].update(calls=79), o["sandbox_split"]["elsewhere"].update(calls=2336)),
+         "sandbox_split.sandbox.calls is 79, but sources.sandbox.calls is 80"),
+    ],
+)
+def test_a_malformed_field_fails_its_own_check(field, change, words):
+    overview = _public_overview()
+    change(overview)
+    problems = OVERVIEW_CHECKS[field](overview)
+    assert problems, f"{field} passed with: {words}"
+    assert any(words in problem for problem in problems), problems
+
+
+def test_a_source_a_newer_stack_adds_counts_with_the_rest():
+    overview = _public_overview()
+    overview["sources"]["live"] = {"calls": 15, "projects": 1}
+    overview["by_project"].append({"project": "Acme-Live", "source": "live", "sandbox": False})
+    for figures in (overview["totals"], overview["sandbox_split"]["elsewhere"]):
+        figures["calls"] += 15
+        figures["projects"] += 1
+    assert _checked(overview) == dict.fromkeys(OVERVIEW_CHECKS, [])
+    # Left out of the sum, it would not have added up.
+    overview["sources"]["live"]["calls"] = 14
+    assert "the sources' calls add up to 2429, but totals.calls is 2430" in probe_live.sources_problems(overview)
+
+
+def test_the_split_s_review_backlog_is_left_out_because_its_two_sides_need_not_add_up(monkeypatch):
+    from threefold.application import projects as stages
+    from threefold.application import rollups
+
+    today = datetime.date(2026, 9, 27)
+    sandbox = "Acme-Sandbox-0a1b2c3d"
+    items = [
+        # A sandbox with more labels than observed calls in the window: its side stops at zero.
+        {"day": str(today), "project": sandbox, "calls": 2, "approved": 2, "observed": 1, "reviewed:observed": 3},
+        {"day": str(today), "project": "Acme-Probe", "calls": 5, "approved": 5, "observed": 5},
+    ]
+    configs = {sandbox: stages.new_config("2026-09-27T06:00:00+00:00", sandbox=True)}
+    overview = json.loads(json.dumps(rollups.overview(items, configs, days=7, today=today)))
+    split = overview["sandbox_split"]
+    assert (split["sandbox"]["needs_review"], split["elsewhere"]["needs_review"], overview["totals"]["needs_review"]) == (0, 5, 3)
+    assert probe_live.sandbox_split_problems(overview) == []
+
+
+def test_the_checks_hold_for_what_the_code_itself_writes(monkeypatch):
+    from threefold.application import ledger
+    from threefold.application import projects as stages
+    from threefold.application import rollups
+
+    # A stack that runs the fleet, so all three sources have calls.
+    monkeypatch.setenv(rollups.DEMO_FLEET_ENV, "true")
+    today = datetime.date(2026, 9, 27)
+    created = "2026-09-27T06:00:00+00:00"
+    sandbox = "Acme-Sandbox-0a1b2c3d"
+
+    def rollup(project: str, **counters: int) -> Dict[str, Any]:
+        return dict(counters, day=str(today), project=project)
+
+    items = [
+        rollup("Acme-Payments", calls=30, approved=27, observed=2, refused=3, **{"agent:codex": 20, "agent:claude-code": 10}),
+        rollup("Acme-Treasury", calls=12, approved=12, **{"agent:antigravity": 12, "review:false_alarm": 1}),
+        rollup(sandbox, calls=8, approved=8, observed=4, **{"reviewed:observed": 1, "agent:claude-code": 4, "agent:codex": 4}),
+        rollup("Acme-Probe", calls=5, approved=3, refused=2, **{"agent:page": 3, "agent:claude-code": 2}),
+        rollup("Acme-Tools", calls=2, approved=2, **{"agent:pre-commit": 1, "agent:acme-bot": 1}),
+    ]
+    configs = {
+        "Acme-Payments": stages.new_config(created, stage="enforce"),
+        sandbox: stages.new_config(created, sandbox=True),
+    }
+
+    def call(session: str, index: int, status: str, target: str) -> Dict[str, Any]:
+        return {
+            "verdict_id": f"{session}-{index}", "timestamp": f"2026-09-27T07:00:{index:02d}+00:00",
+            "session_id": session, "origin": "hook", "project_name": "Acme-Payments", "status": status, "target": target,
+        }
+
+    refused = "BLOCKED_BOUNDARY_VIOLATION"
+    rows = [
+        call("acme-a", 0, refused, "src/acme/domain/order.py"),
+        call("acme-a", 1, "APPROVED", "src/acme/domain/order.py"),
+        call("acme-b", 0, refused, "src/acme/domain/ledger.py"),
+        call("acme-b", 1, "APPROVED", "README.md"),
+        call("acme-b", 2, "APPROVED", "README.md"),
+        call("acme-b", 3, "APPROVED", "src/acme/domain/ledger.py"),
+        call("acme-c", 0, refused, "src/acme/domain/user.py"),
+        call("acme-d", 0, refused, "src/acme/domain/cart.py"),
+        call("acme-d", 1, "APPROVED", "README.md"),
+    ]
+    payload = rollups.overview(items, configs, days=7, today=today)
+    payload["self_correction"] = ledger.self_correction(
+        lambda day, after, limit: (rows if day == str(today) else [], None), 7, today=today
+    )
+    overview = json.loads(json.dumps(payload))
+    # Real figures, not zeros: every source, a coding agent in a sandbox, and a rate to round.
+    assert {name: value["calls"] for name, value in overview["sources"].items()} == {"fleet": 42, "sandbox": 8, "other": 7}
+    assert [entry["kind"] for entry in overview["by_agent"]] == [
+        "coding_agent", "coding_agent", "coding_agent", "page", "unknown", "ci"
+    ]
+    figure = overview["self_correction"]
+    assert (figure["refusals_considered"], figure["refusals_with_later_call"], figure["self_corrected"]) == (4, 3, 2)
+    assert (figure["rate"], figure["median_calls_to_correct"]) == (0.6667, 2.0)
+    assert _checked(overview) == dict.fromkeys(OVERVIEW_CHECKS, [])
+
+
+ODD_VALUES = (None, True, -1, 1.5, float("nan"), 10**400, "", "x", [], [None], {}, {"calls": "1"})
+
+
+def test_no_answer_however_malformed_crashes_a_check():
+    """A malformed answer is a finding the check reports; a crash would be the probe failing, not the stack."""
+    template = _public_overview()
+    # Every field, every key of every object among them, and every key of a row of each list.
+    places = [(field,) for field in template]
+    places += [(field, key) for field in ("sources", "totals", "sandbox_split", "self_correction") for key in template[field]]
+    places += [(field, 0, key) for field in ("by_agent", "coding_agents", "by_project") for key in template[field][0]]
+    places += [("sources", name, key) for name in probe_live.SOURCES for key in probe_live.SOURCE_KEYS]
+    places += [("sandbox_split", side, key) for side in probe_live.SPLIT_SIDES for key in probe_live.SPLIT_KEYS]
+    for place in places:
+        for value in ODD_VALUES:
+            overview = _public_overview()
+            container = overview
+            for step in place[:-1]:
+                container = container[step]
+            container[place[-1]] = value
+            for field, problems in _checked(overview).items():
+                assert problems is None or all(isinstance(problem, str) for problem in problems), (place, value, field)
+
+
+# ---------------------------------------------------------------------------
 # The one function that touches the network, against a server on loopback.
 # ---------------------------------------------------------------------------
 
@@ -1352,6 +1816,17 @@ def test_the_read_only_groups_agree_with_the_real_handler(monkeypatch):
     assert checks["contract/GET /sessions/{session_id}"].status == probe_live.PASS
     assert checks["access/POST /rules needs the key"].status == probe_live.PASS
     assert checks["headers/CORS preflight for a keyed POST"].status == probe_live.PASS
+
+
+def test_the_real_handler_s_overview_passes_the_checks_of_its_newer_fields_rather_than_skipping_them(monkeypatch):
+    # An empty window, since the suite runs offline: the case a check must never fail.
+    monkeypatch.setattr(probe_live, "http_request", _through_the_handler)
+    probe = probe_live.Probe(LOCAL, pace=0, sleep=lambda seconds: None, emit=lambda line: None, runid="5eed0a1b")
+    got = probe.request("GET", "api/overview", auth=True, query={"days": 7})
+    assert got.status == 200
+    for check in (probe._overview_sources, probe._overview_agents, probe._overview_split, probe._overview_self_correction):
+        status, evidence = check(got)
+        assert status == probe_live.PASS, evidence
 
 
 def test_a_private_handler_is_closed_to_the_anonymous_and_the_key_never_shows(monkeypatch):
