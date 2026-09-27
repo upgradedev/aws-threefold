@@ -14,7 +14,10 @@ such as a row written before the key existed, and then only by the gate's own
 words at its head.
 Every sentence that names a rule opens with the rule, and everything the caller
 sent (a path, an import, the command itself) comes after it, so nothing the
-caller wrote can decide which key a row is counted under.
+caller wrote can decide which key a row is counted under. The exception is the
+unreadable-write gate's "this command ..." sentences, one of which names its
+rule only at the end: they are recognised by that opening alone and never read
+for a rule.
 """
 from __future__ import annotations
 
@@ -56,10 +59,13 @@ HALTED_SESSION_REASONS = (FROZEN_SESSION_REASON, "Session already tripped")
 # How the gates open every sentence that names a layering rule: a refusal leads
 # with the violation, an observation with the rule, and the rule's id comes
 # straight after, before anything the caller sent. The id and what decided are
-# read there and nowhere else. A sentence that quotes the caller (a destructive
-# command, a credential store, a protected or governance path, hook tampering)
-# opens with "Command" or "Target path" instead, so nothing inside its quotes
-# is ever read: a comment naming a rule is part of the command, not the head.
+# read there and nowhere else. The exception is the unreadable-write gate's
+# "this command ..." sentences, one of which names its rule only at the end:
+# they are recognised by that opening alone (_UNREADABLE_HEAD below) and never
+# read for a rule. A sentence that quotes the caller (a destructive command, a
+# credential store, a protected or governance path, hook tampering) opens with
+# "Command" or "Target path" instead, so nothing inside its quotes is ever
+# read: a comment naming a rule is part of the command, not the head.
 _VIOLATION_LEAD = "Clean Architecture violation: "
 _RULE_LEADS = ("Layering rule '", "layering rule '")
 _RULE_VERBS = ("refuses", "would refuse", "covers")
