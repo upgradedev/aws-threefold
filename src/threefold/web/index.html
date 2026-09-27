@@ -2522,7 +2522,9 @@
     // figures are not used; a fleet or a live agent among them is still named
     // in words. A stack from before `live` has no such part and counts the
     // live agent's calls as other, so there it is 0; a live part that is not a
-    // count makes the parts unusable, as any other part's would.
+    // count makes the parts unusable, as any other part's would. The same
+    // holds for `probe`, the service's own probes: synthetic calls, named as
+    // such, and once the stack counts them apart, no longer among the others.
     function sourcesSentence(data, calls) {
       const h = T.html;
       const lead = h`<strong>Where they come from:</strong>`;
@@ -2530,27 +2532,34 @@
       const part = (v) => v && typeof v === 'object' ? wholeNumber(v.calls) : null;
       const fleet = s ? part(s.fleet) : null;
       const live = !s ? null : Object.prototype.hasOwnProperty.call(s, 'live') ? part(s.live) : 0;
+      const probe = !s ? null : Object.prototype.hasOwnProperty.call(s, 'probe') ? part(s.probe) : 0;
       const sandbox = s ? part(s.sandbox) : null;
       const other = s ? part(s.other) : null;
       // No cadence is claimed: a day's run is started by hand until a
       // schedule starts it, so the words say what the runs are, not how often.
       const liveWords = 'real Claude Code or Codex runs on Acme tasks, in projects that enforce';
-      if (fleet !== null && live !== null && sandbox !== null && other !== null && calls > 0 && fleet + live + sandbox + other === calls) {
+      const probeWords = 'the service’s own synthetic probes';
+      const apart = probesApart(data);
+      if (fleet !== null && live !== null && probe !== null && sandbox !== null && other !== null && calls > 0 &&
+          fleet + live + probe + sandbox + other === calls) {
         const pieces = [];
         if (fleet) pieces.push(formatCount(fleet) + ' from a synthetic Acme fleet run through the real gates');
         if (live) pieces.push(formatCount(live) + ' from ' + liveWords);
         if (sandbox) pieces.push(formatCount(sandbox) + ' from visitors’ sandboxes');
-        if (other) pieces.push(formatCount(other) + ' from probes, page demos and other API callers');
+        if (probe) pieces.push(formatCount(probe) + ' from ' + probeWords);
+        if (other) pieces.push(formatCount(other) + (apart ? ' from page demos and other API callers' : ' from probes, page demos and other API callers'));
         return h`${lead} ${pieces.join(', ')}.`;
       }
-      // A fleet or a live agent the stack reports is always named, even when
-      // its parts cannot be given as figures: neither synthetic calls nor real
-      // agents' are left unlabelled.
+      // A fleet, a live agent or the probes the stack reports are always
+      // named, even when their parts cannot be given as figures: neither
+      // synthetic calls nor real agents' are left unlabelled.
       const named = [];
       if (fleet !== null && fleet > 0) named.push('a synthetic Acme fleet run through the real gates');
       if (live !== null && live > 0) named.push(liveWords);
-      if (named.length) {
-        return h`${lead} ${named.join(', ')}, visitors’ sandboxes, probes, page demos and other API callers.`;
+      if (named.length || (probe !== null && probe > 0)) {
+        return probe !== null && probe > 0
+          ? h`${lead} ${named.concat([probeWords]).join(', ')}, visitors’ sandboxes, page demos and other API callers.`
+          : h`${lead} ${named.join(', ')}, visitors’ sandboxes, probes, page demos and other API callers.`;
       }
       const split = data.sandbox_split && typeof data.sandbox_split === 'object' ? data.sandbox_split : null;
       const inSandboxes = split ? part(split.sandbox) : null;
@@ -2594,12 +2603,14 @@
     // the first real one on the public stack was a false alarm. So the tile
     // says "see below", and the rows it points to (liveRefusals) are given
     // project by project with it, which needs every such row's name.
-    const SPLIT_SOURCES = ['live', 'fleet', 'sandbox', 'other'];
+    // A probe row is the service's own synthetic probes, said so, and put
+    // just before the other callers, which then no longer include them.
+    const SPLIT_SOURCES = ['live', 'fleet', 'sandbox', 'probe', 'other'];
     function sourceSplit(data, key, total, sayNone) {
       const none = { words: '', live: [], real: false };
       const rows = Array.isArray(data.by_project) ? data.by_project : [];
       if (!rows.length || !(total > 0)) return none;
-      const parts = { live: 0, fleet: 0, sandbox: 0, other: 0 };
+      const parts = { live: 0, fleet: 0, sandbox: 0, probe: 0, other: 0 };
       const liveRows = [];
       let liveCalls = 0;
       for (const row of rows) {
@@ -2626,8 +2637,17 @@
       else if (sayNone && real) words.push('none from real agent runs');
       if (parts.fleet) words.push(formatCount(parts.fleet) + ' from the synthetic fleet');
       if (parts.sandbox) words.push(formatCount(parts.sandbox) + ' from visitors’ sandboxes');
-      if (parts.other) words.push(formatCount(parts.other) + ' from probes, page demos and other callers');
+      if (parts.probe) words.push(formatCount(parts.probe) + ' from the service’s own synthetic probes');
+      if (parts.other) words.push(formatCount(parts.other) + (probesApart(data) ? ' from page demos and other callers' : ' from probes, page demos and other callers'));
       return { words: words.join(', '), live: liveRows, real: real };
+    }
+
+    // Whether the stack counts the service's own probes as a source of their
+    // own (`sources.probe`, a count). A stack from before it counts them as
+    // other, and its other callers are said to include them.
+    function probesApart(data) {
+      const s = data.sources && typeof data.sources === 'object' ? data.sources : null;
+      return !!s && !!s.probe && typeof s.probe === 'object' && wholeNumber(s.probe.calls) !== null;
     }
 
     // What "see below" points to: the refusals in real agent runs, a link per

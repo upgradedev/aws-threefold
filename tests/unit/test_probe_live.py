@@ -1321,8 +1321,20 @@ def test_a_rules_state_follows_from_its_counts():
     state = probe_live.expected_rule_state
     assert state({"false_alarms": 1, "unreviewed": 3, "would_refuse": 4}) == "noisy"
     assert state({"false_alarms": 0, "unreviewed": 1, "would_refuse": 4}) == "needs_review"
-    assert state({"false_alarms": 0, "unreviewed": 0, "would_refuse": 4}) == "ready"
+    assert state({"false_alarms": 0, "unreviewed": 0, "would_refuse": 4, "correct": 4}) == "ready"
     assert state({"false_alarms": 0, "unreviewed": 0, "would_refuse": 0}) == "quiet"
+
+
+def test_a_rule_ready_on_refusals_nobody_labelled_fails_the_contract():
+    """A judge found a rule reading Ready beside 0 correct: its only record was the page's and the probes' refusals."""
+    state = probe_live.expected_rule_state
+    assert state({"false_alarms": 0, "unreviewed": 0, "would_refuse": 0, "refused": 6, "correct": 0}) == "quiet"
+    assert state({"false_alarms": 0, "unreviewed": 0, "would_refuse": 0, "refused": 6, "correct": 1}) == "ready"
+    rule = {"rule_key": "python-domain-stays-pure", "kind": "layering", "mode_now": "observe", "would_refuse": 0,
+            "refused": 6, "correct": 0, "false_alarms": 0, "unreviewed": 0, "last_seen": "", "recommendation": "",
+            "state": "ready"}
+    payload = {"project": "Acme-Probe", "config": None, "readiness": {"summary": {}, "rules": [rule]}}
+    assert "python-domain-stays-pure state='ready' but its counts make it 'quiet'" in probe_live.readiness_problems(payload)
 
 
 def test_a_digest_header_is_read_in_any_of_its_usual_forms():
@@ -1559,6 +1571,18 @@ def test_a_source_a_newer_stack_adds_counts_with_the_rest():
     assert "the sources' calls add up to 2429, but totals.calls is 2430" in probe_live.sources_problems(overview)
 
 
+def test_the_probes_own_source_counts_with_the_rest():
+    """The overview as a stack answers once the probes' project is a source of its own: nothing here fails it."""
+    overview = _public_overview()
+    overview["sources"]["probe"] = {"calls": 120, "projects": 1}
+    overview["sources"]["other"] = {"calls": 856 - 120, "projects": 17}
+    row = next(row for row in overview["by_project"] if row["project"] == "Acme-Probe")
+    row["source"] = "probe"
+    assert _checked(overview) == dict.fromkeys(OVERVIEW_CHECKS, [])
+    overview["sources"]["other"]["projects"] = 18
+    assert "sources.other.projects is 18, but 17 by_project rows name it" in probe_live.sources_problems(overview)
+
+
 def test_the_split_s_review_backlog_is_left_out_because_its_two_sides_need_not_add_up(monkeypatch):
     from threefold.application import projects as stages
     from threefold.application import rollups
@@ -1628,7 +1652,8 @@ def test_the_checks_hold_for_what_the_code_itself_writes(monkeypatch):
     )
     overview = json.loads(json.dumps(payload))
     # Real figures, not zeros: every source, a coding agent in a sandbox, and a rate to round.
-    assert {name: value["calls"] for name, value in overview["sources"].items()} == {"fleet": 42, "live": 4, "sandbox": 8, "other": 7}
+    assert {name: value["calls"] for name, value in overview["sources"].items()} == {
+        "fleet": 42, "live": 4, "probe": 5, "sandbox": 8, "other": 2}
     assert [entry["kind"] for entry in overview["by_agent"]] == [
         "coding_agent", "coding_agent", "coding_agent", "page", "unknown", "ci"
     ]

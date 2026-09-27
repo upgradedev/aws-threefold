@@ -9,6 +9,7 @@ Names are synthetic, as the clean-room rule requires.
 from __future__ import annotations
 
 import datetime
+import itertools
 import time
 
 import pytest
@@ -290,3 +291,110 @@ def test_mode_now_follows_the_stage_and_the_observed_rules() -> None:
     demoted = stages.demoted(config, "2026-09-22T09:00:00+00:00", "anonymous", stages.project_rule_keys(RULES))
     rows, _ = _states([], demoted)
     assert {row["mode_now"] for row in rows.values()} == {"observe"}
+
+
+# Ready rests on labels. A judge reviewing the public demo found a rule reading
+# Ready, "Every call it flagged was marked correct", beside 0 correct and 0
+# would-refuse: its only record was refusals of the demo page's calls and the
+# probes', which always enforce, and nobody had labelled one.
+
+KEY = "python-domain-stays-pure"
+OBSERVING = stages.new_config("2026-09-22T08:00:00+00:00")
+ENFORCING = stages.new_config("2026-09-22T08:00:00+00:00", stage=stages.ENFORCE)
+
+
+def _labelled(observed_correct=0, observed_false=0, observed_waiting=0, refused_correct=0, refused_false=0,
+              refused_unlabelled=0, **extra) -> dict:
+    """One day's item for KEY, from what happened to each call it flagged, counted as the store counts it."""
+    observed = observed_correct + observed_false + observed_waiting
+    refused = refused_correct + refused_false + refused_unlabelled
+    return _rollup(TODAY, PROJECT, calls=observed + refused, observed=observed, refused=refused, **dict({
+        f"observed:{KEY}": observed, f"refused:{KEY}": refused,
+        f"correct:{KEY}": observed_correct + refused_correct,
+        f"false_alarm:{KEY}": observed_false + refused_false,
+        f"reviewed:{KEY}": observed_correct + observed_false,
+    }, **extra))
+
+
+def test_a_rule_whose_only_record_is_page_or_probe_refusals_is_not_ready() -> None:
+    """The demo page's calls and the probes' always enforce; a refusal of one, unlabelled, proves nothing."""
+    item = _labelled(refused_unlabelled=6, **{"origin:page": 6, "agent:page": 6, "stage:enforce": 6})
+    rows, summary = _states([item], OBSERVING)
+    row = rows[KEY]
+    assert (row["would_refuse"], row["refused"], row["correct"], row["false_alarms"]) == (0, 6, 0, 0)
+    assert row["state"] == "quiet" and summary["rules_ready"] == 0
+    assert row["recommendation"] == (
+        "Flagged nothing in this window, and nobody labelled the 6 call(s) it refused: "
+        "nothing here shows it is ready to enforce."
+    )
+    assert "marked correct" not in row["recommendation"], "No label is claimed where none was given"
+
+    rows, _ = _states([item], ENFORCING)
+    assert rows[KEY]["state"] == "quiet"
+    assert rows[KEY]["recommendation"] == (
+        "Enforcing, and nobody labelled the 6 call(s) it refused in this window, so nothing here shows it was right."
+    )
+
+
+def test_a_rule_whose_refusals_nobody_labelled_is_not_ready_even_from_an_agent() -> None:
+    """A promoted rule's own refusals are an agent's calls, but unlabelled they are still no one's judgement."""
+    rows, _ = _states([_labelled(refused_unlabelled=3, **{"origin:hook": 3})], ENFORCING)
+    assert rows[KEY]["state"] == "quiet" and "marked correct" not in rows[KEY]["recommendation"]
+
+
+def test_a_rule_with_its_flags_marked_correct_and_no_false_alarm_is_ready() -> None:
+    rows, summary = _states([_labelled(observed_correct=4)], OBSERVING)
+    assert rows[KEY]["state"] == "ready" and summary["rules_ready"] == 1
+    assert rows[KEY]["recommendation"] == "Every call it flagged was marked correct: ready to enforce."
+    rows, _ = _states([_labelled(observed_correct=4)], ENFORCING)
+    assert rows[KEY]["recommendation"] == "Enforcing, and every call it flagged was marked correct."
+    rows, _ = _states([_labelled(refused_correct=2)], ENFORCING)
+    assert rows[KEY]["state"] == "ready", "A refusal marked correct is a label like any other"
+
+
+def test_a_ready_rule_with_refusals_nobody_labelled_does_not_claim_them() -> None:
+    rows, _ = _states([_labelled(observed_correct=4, refused_unlabelled=5)], OBSERVING)
+    assert rows[KEY]["state"] == "ready"
+    assert rows[KEY]["recommendation"] == (
+        "4 call(s) it flagged marked correct and none a false alarm: ready to enforce; 5 refused call(s) not labelled."
+    )
+    rows, _ = _states([_labelled(observed_correct=4, refused_correct=1, refused_unlabelled=2)], ENFORCING)
+    assert rows[KEY]["recommendation"] == (
+        "Enforcing, with 5 call(s) it flagged marked correct and none a false alarm; 2 refused call(s) not labelled."
+    )
+
+
+def test_labels_do_not_make_a_rule_ready_while_a_flag_waits_or_one_was_wrong() -> None:
+    rows, _ = _states([_labelled(observed_correct=4, observed_waiting=1)], OBSERVING)
+    assert rows[KEY]["state"] == "needs_review"
+    rows, _ = _states([_labelled(observed_correct=4, refused_false=1)], OBSERVING)
+    assert rows[KEY]["state"] == "noisy"
+
+
+@pytest.mark.parametrize("mode", ["observe", "enforce"])
+def test_every_readiness_sentence_is_true_of_the_counts_beside_it(mode) -> None:
+    """Every mix of up to two calls of each fate: the state follows the labels, and the sentence claims nothing more."""
+    config = ENFORCING if mode == stages.ENFORCE else OBSERVING
+    fates = ("observed_correct", "observed_false", "observed_waiting", "refused_correct", "refused_false",
+             "refused_unlabelled")
+    for counts in itertools.product(range(3), repeat=len(fates)):
+        mix = dict(zip(fates, counts))
+        row = _states([_labelled(**mix)], config)[0][KEY]
+        said = row["recommendation"]
+        correct = mix["observed_correct"] + mix["refused_correct"]
+        wrong = mix["observed_false"] + mix["refused_false"]
+        flagged = sum(counts)
+        want = ("noisy" if wrong else "needs_review" if mix["observed_waiting"] else "ready" if correct else "quiet")
+        assert row["state"] == want, mix
+        if "every call it flagged was marked correct" in said.lower():
+            assert correct == flagged > 0, mix
+        elif "marked correct" in said:
+            assert correct > 0 and f"{correct} call(s) it flagged marked correct" in said, mix
+        if "Flagged nothing" in said or "flagged nothing" in said:
+            assert row["would_refuse"] == 0, mix
+        if "nobody labelled" in said:
+            assert correct == wrong == 0 and f"the {row['refused']} call(s) it refused" in said, mix
+        if "not labelled" in said and "nobody" not in said:
+            assert f"{mix['refused_unlabelled']} refused call(s) not labelled" in said, mix
+        if row["state"] != "needs_review":
+            assert said.startswith("Enforcing") == (mode == stages.ENFORCE), mix

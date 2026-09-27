@@ -1648,10 +1648,10 @@ paths:
         between visitors' sandboxes and every other project, so a page can say what a number is made of; each by_agent
         entry says what kind of caller it is, and coding_agents lists the coding agents alone. sources says the
         same of where the calls come from: the synthetic Acme fleet, the daily live agent's real Claude Code or
-        Codex runs, visitors' sandboxes, or anything else, and every by_project row names its source. A sandbox
-        whose configuration has expired, a day after it was made, is left out of every figure here, as it always
-        has been. self_correction is the one figure not read from the rollups: it is read from the ledger, a bounded
-        number of rows, and says whether it covered the whole window.
+        Codex runs, the service's own synthetic probes, visitors' sandboxes, or anything else, and every by_project
+        row names its source. A sandbox whose configuration has expired, a day after it was made, is left out of
+        every figure here, as it always has been. self_correction is the one figure not read from the rollups: it
+        is read from the ledger, a bounded number of rows, and says whether it covered the whole window.
       parameters:
       - name: days
         in: query
@@ -1727,18 +1727,22 @@ paths:
                     type: object
                     description: >-
                       The window's calls and projects by where they come from: the synthetic fleet, the daily live
-                      agent, visitors' sandboxes, and everything else, each as by_project's source names it, except
-                      that a call in a live project is live only when its agent is claude-code or codex, and other
-                      otherwise, as a page's is. Computed over the same projects as the totals, so the four calls
-                      add up to totals.calls and the four projects to totals.projects. A page on the public stack
-                      says in words that the fleet is synthetic and runs through the real gates, and that the live
-                      agent's calls are real Claude Code or Codex runs, one Acme task a day, in projects that enforce.
-                      A stack from before live was added reports fleet, sandbox and other only, and counts the live
-                      agent's calls as other.
+                      agent, the service's own probes, visitors' sandboxes, and everything else, each as by_project's
+                      source names it, except that a call in a live project is live only when its agent is claude-code
+                      or codex, and other otherwise, as a page's is. Computed over the same projects as the totals,
+                      so the five calls add up to totals.calls and the five projects to totals.projects. A page
+                      on the public stack says in words that the fleet is synthetic and runs through the real gates,
+                      that the live agent's calls are real Claude Code or Codex runs, one Acme task a day, in projects
+                      that enforce, and that the probes' calls are the service's own synthetic checks of the stack,
+                      never real work. A stack from before live was added reports fleet, sandbox and other only,
+                      and counts the live agent's calls as other; one from before probe was added counts the probes'
+                      calls as other.
                     properties:
                       fleet:
                         $ref: '#/components/schemas/OverviewSource'
                       live:
+                        $ref: '#/components/schemas/OverviewSource'
+                      probe:
                         $ref: '#/components/schemas/OverviewSource'
                       sandbox:
                         $ref: '#/components/schemas/OverviewSource'
@@ -1810,6 +1814,7 @@ paths:
                           enum:
                           - fleet
                           - live
+                          - probe
                           - sandbox
                           - other
                           description: >-
@@ -1824,9 +1829,13 @@ paths:
                             Acme-Live-payments-staging-key, Acme-Live-warehouse-carrier-notify, exactly), on the
                             stack it reports to, the same public one whose DemoFleet parameter is true, which starts
                             them in Enforce; on any other stack those six names are other, since the benchmark names
-                            its projects that way on whatever stack it is pointed at; sandbox for a visitor's sandbox
-                            (^Acme-Sandbox-[0-9a-f]{8}$); other for everything else, the service's own probes and
-                            page calls included.
+                            its projects that way on whatever stack it is pointed at; probe for Acme-Probe, exactly,
+                            the project the service's own live probes (scripts/probe_live.py) send their synthetic
+                            calls as, on the same public stack whose DemoFleet parameter is true; on any other stack
+                            that name is other, since there it is only what a caller chose to send; sandbox for
+                            a visitor's sandbox (^Acme-Sandbox-[0-9a-f]{8}$), the ones the probes create included;
+                            other for everything else, the page calls, the scenarios' simulations and a call sent
+                            outside the name pattern, recorded as unlabelled, included.
                         calls:
                           type: integer
                         refused:
@@ -2030,6 +2039,7 @@ paths:
                           enum:
                           - fleet
                           - live
+                          - probe
                           - sandbox
                           - other
                           description: >-
@@ -2044,9 +2054,13 @@ paths:
                             Acme-Live-payments-staging-key, Acme-Live-warehouse-carrier-notify, exactly), on the
                             stack it reports to, the same public one whose DemoFleet parameter is true, which starts
                             them in Enforce; on any other stack those six names are other, since the benchmark names
-                            its projects that way on whatever stack it is pointed at; sandbox for a visitor's sandbox
-                            (^Acme-Sandbox-[0-9a-f]{8}$); other for everything else, the service's own probes and
-                            page calls included.
+                            its projects that way on whatever stack it is pointed at; probe for Acme-Probe, exactly,
+                            the project the service's own live probes (scripts/probe_live.py) send their synthetic
+                            calls as, on the same public stack whose DemoFleet parameter is true; on any other stack
+                            that name is other, since there it is only what a caller chose to send; sandbox for
+                            a visitor's sandbox (^Acme-Sandbox-[0-9a-f]{8}$), the ones the probes create included;
+                            other for everything else, the page calls, the scenarios' simulations and a call sent
+                            outside the name pattern, recorded as unlabelled, included.
                         observe_rules:
                           type: array
                           items:

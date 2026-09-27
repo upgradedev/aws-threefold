@@ -114,19 +114,86 @@ def test_readiness_says_which_rules_enforce_after_a_promotion() -> None:
     assert rules["LOOP"]["mode_now"] == "observe"
 
 
-def test_a_rule_that_refused_while_enforcing_is_ready_and_shows_its_refusals() -> None:
-    """The live probe found a promoted rule reading Ready over a row of zeros.
+def _rules(project: str) -> dict:
+    return {row["rule_key"]: row for row in get(f"/api/projects/{project}")["readiness"]["rules"]}
 
-    Its refusals count towards whether it flagged anything, so the row carries
-    them too, and the state can be checked against the numbers beside it.
+
+def _label(project: str, verdict: dict, label: str) -> None:
+    item = {"timestamp": verdict["timestamp"], "verdict_id": verdict["verdict_id"], "label": label}
+    assert post(f"/api/projects/{project}/reviews", {"items": [item]}) == {"updated": 1, "skipped": []}
+
+
+def test_a_rule_that_refused_while_enforcing_shows_its_refusals_and_is_ready_only_once_one_is_labelled() -> None:
+    """The live probe found a promoted rule reading Ready over a row of zeros, and a judge found it again.
+
+    The row carries its refusals, so the state can be checked against the
+    numbers beside it; and a refusal nobody labelled is no one's judgement, so
+    until one is marked correct the rule is Quiet and says so in words.
     """
     project = fresh_project()
     post(f"/api/projects/{project}/promote", {"enforce": ["python-domain-stays-pure"]})
-    assert hook_call(project, f"{project}-s", DOMAIN_WRITE)["status"] == "BLOCKED_BOUNDARY_VIOLATION"
-    rules = {row["rule_key"]: row for row in get(f"/api/projects/{project}")["readiness"]["rules"]}
+    verdict = hook_call(project, f"{project}-s", DOMAIN_WRITE)
+    assert verdict["status"] == "BLOCKED_BOUNDARY_VIOLATION"
+    rules = _rules(project)
     row = rules["python-domain-stays-pure"]
-    assert (row["would_refuse"], row["refused"], row["unreviewed"], row["state"]) == (0, 1, 0, "ready")
+    assert (row["would_refuse"], row["refused"], row["correct"], row["unreviewed"], row["state"]) == (0, 1, 0, 0, "quiet")
+    assert row["recommendation"] == (
+        "Enforcing, and nobody labelled the 1 call(s) it refused in this window, so nothing here shows it was right."
+    )
     assert rules["LOOP"]["refused"] == 0 and rules["LOOP"]["state"] == "quiet"
+
+    _label(project, verdict, "correct")
+    row = _rules(project)["python-domain-stays-pure"]
+    assert (row["correct"], row["state"]) == (1, "ready")
+    assert row["recommendation"] == "Enforcing, and every call it flagged was marked correct."
+
+
+def test_a_rule_whose_only_record_is_the_demo_page_s_refusals_is_not_ready(observe_default) -> None:
+    """A judge reviewing the public demo: Ready, "Every call it flagged was marked correct", beside 0 correct.
+
+    The project observes, so its agents' calls are never refused; the page's
+    are, because a page call always enforces, as the probes' do. Nobody
+    labelled one, so nothing here is evidence the rule is right.
+    """
+    project = fresh_project()
+    for n in range(3):
+        answer = hook_call(project, f"{project}-page-{n}", DOMAIN_WRITE, origin="page", agent="page")
+        assert answer["status"] == "BLOCKED_BOUNDARY_VIOLATION"
+    page = get(f"/api/projects/{project}")
+    row = {r["rule_key"]: r for r in page["readiness"]["rules"]}["python-domain-stays-pure"]
+    assert (row["mode_now"], row["would_refuse"], row["refused"], row["correct"]) == ("observe", 0, 3, 0)
+    assert row["state"] == "quiet" and page["readiness"]["summary"]["rules_ready"] == 0
+    assert "marked correct" not in row["recommendation"]
+    assert row["recommendation"] == (
+        "Flagged nothing in this window, and nobody labelled the 3 call(s) it refused: nothing here shows it is ready to enforce."
+    )
+
+
+def test_a_rule_whose_would_refuse_calls_were_marked_correct_is_ready(observe_default) -> None:
+    project = fresh_project()
+    verdicts = [hook_call(project, f"{project}-s{n}", DOMAIN_WRITE) for n in range(2)]
+    assert {verdict["status"] for verdict in verdicts} == {"APPROVED"}, "Observed, not refused"
+    assert _rules(project)["python-domain-stays-pure"]["state"] == "needs_review"
+    for verdict in verdicts:
+        _label(project, verdict, "correct")
+    row = _rules(project)["python-domain-stays-pure"]
+    assert (row["would_refuse"], row["correct"], row["false_alarms"], row["unreviewed"]) == (2, 2, 0, 0)
+    assert row["state"] == "ready"
+    assert row["recommendation"] == "Every call it flagged was marked correct: ready to enforce."
+
+
+def test_the_probes_project_is_named_as_theirs_on_the_stack_that_runs_the_fleet(monkeypatch) -> None:
+    """The overview and the projects listing, as a page reads them: the probes' calls are not other callers'."""
+    monkeypatch.setenv("DEMO_FLEET", "true")
+    hook_call("Acme-Probe", "probe-0a1b2c3d-read", README, tool="Read", action="FILE_READ", origin="page", agent="page")
+    sources = get("/api/overview", project="Acme-Probe")["sources"]
+    assert set(sources) == {"fleet", "live", "probe", "sandbox", "other"}
+    assert sources["probe"]["projects"] == 1 and sources["probe"]["calls"] >= 1
+    assert sources["other"] == {"calls": 0, "projects": 0}
+    listed = {row["project"]: row for row in get("/api/projects")["projects"]}
+    assert listed["Acme-Probe"]["source"] == "probe"
+    monkeypatch.setenv("DEMO_FLEET", "false")
+    assert get("/api/overview", project="Acme-Probe")["sources"]["probe"] == {"calls": 0, "projects": 0}
 
 
 def test_observe_rules_can_be_set_directly() -> None:
