@@ -5,7 +5,10 @@ answer can take seconds. Whatever the width, the proof strip under it must be
 where it was when the verdict lands, when a recorded run stands in, and while
 the moment plays again; on a phone the page must not scroll sideways, the
 demonstration's bar must keep to one line whatever its label says, and the
-connection controls' summary must leave its chevron room.
+connection controls' summary must leave its chevron room. Under the scenarios,
+the terminal is as tall as its lines, on a desk no taller than the gates beside
+it, and there the result's two columns end near each other whatever came back,
+a live answer or a recorded replay.
 
 These open the page as the stack serves it in headless Chrome, Chromium or
 Edge through _headless.py, with no network, and skip where none is installed.
@@ -229,32 +232,130 @@ LOOP = {
     },
 }
 
+# What the terminal's lines need, measured by setting its height aside for a
+# moment: the lines and the padding, then its border, held between its own
+# minimum and cap, both taken as outer heights like the lines, since its box
+# is content-box. A terminal stretched to its cell is taller than that. The
+# room is the well it sits in, which on a desk is what the gates' cell leaves
+# beside it. A column ends where its last box does: the sent one at the
+# terminal's border, the other at the session's spend.
 TERMINAL = r"""() => {
+  const box = e => e.getBoundingClientRect();
   const t = document.getElementById('terminal-log');
-  const verdictSide = document.querySelector('.tf-result-grid').lastElementChild.getBoundingClientRect();
-  return { client: t.clientHeight, scroll: t.scrollHeight, height: t.getBoundingClientRect().height, lines: t.children.length,
-    verdictSide: verdictSide.height, spend: document.getElementById('kpi-spend').textContent,
+  const style = getComputedStyle(t);
+  const px = name => parseFloat(style[name]);
+  const kept = [t.style.minHeight, t.style.height];
+  t.style.minHeight = '0px'; t.style.height = '0px';
+  const lines = t.scrollHeight + px('borderTopWidth') + px('borderBottomWidth');
+  t.style.minHeight = kept[0]; t.style.height = kept[1];
+  const frame = px('paddingTop') + px('paddingBottom') + px('borderTopWidth') + px('borderBottomWidth');
+  const least = px('minHeight') + frame;
+  const need = Math.min(Math.max(lines, least), px('maxHeight') + frame);
+  const grid = document.querySelector('.tf-result-grid');
+  const cells = Array.from(grid.children);
+  const end = cell => { const shown = Array.from(cell.children).filter(e => e.getClientRects().length); return shown.length ? box(shown[shown.length - 1]).bottom - box(grid).top : 0; };
+  const fix = document.getElementById('fix-container'), cert = document.getElementById('cert-container');
+  return { client: t.clientHeight, scroll: t.scrollHeight, height: box(t).height, need: need, least: least, room: box(t.parentElement).height,
+    newestInView: t.scrollTop + t.clientHeight >= t.scrollHeight - 1, lines: t.children.length,
+    sentEnd: box(t).bottom - box(grid).top, judgedEnd: end(cells[1]), sideBySide: Math.abs(box(cells[0]).top - box(cells[1]).top) < 1,
+    fixShown: !fix.classList.contains('hidden'), fixWidth: box(fix).width, certShown: !cert.classList.contains('hidden'),
+    certWidth: box(cert).width, gridWidth: box(grid).width, badge: document.getElementById('terminal-badge').textContent,
+    spend: document.getElementById('kpi-spend').textContent, verdict: document.getElementById('verdict-tag').textContent,
     scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth };
 }"""
 
+# The loop, then the boundary write with its checked fix of two files, then the
+# compliant run and its certificate, each pressed once the one before has landed.
+SCENARIOS = r"""
+document.addEventListener('DOMContentLoaded', () => {
+  setTimeout(() => simulateLoop(), 2000);
+  setTimeout(() => simulateBoundary(), 3600);
+  setTimeout(() => simulateCompliant(), 5200);
+});
+"""
+SCENARIO_MOMENTS = {"idle": 1800, "loop": 3400, "boundary": 5000, "certificate": 6600}
 
-@pytest.mark.parametrize("width,height", [(375, 812), (768, 1024), (1100, 900), (1440, 900)])
-def test_the_terminal_is_as_tall_as_its_lines(tmp_path: Path, width: int, height: int) -> None:
+
+def _scenario_replies(answer: str) -> dict:
+    """The stack's answers to the hero and the scenarios, measured only at the moments above.
+
+    Recorded, the stack answers /status and then no scenario's call, so each
+    replays its recorded run: the loop's eight lines, a boundary with no fix,
+    and the recorded certificate.
+    """
+    hero = {key: value for key, value in HEROES[answer].items() if key != "measure"}
+    loop = {"status": 200, "body": LOOP, "delay": 120} if answer == "live" else {"network": True, "delay": 120}
+    return dict(_replies(hero), **{"POST /simulate-loop": loop})
+
+
+# What each answer's loop leaves in the terminal and the gates, so a test knows
+# it measured the answer it meant to: the live one's four lines, or the
+# recorded run's eight.
+LOOP_LANDED = {
+    "live": {"lines": 4, "badge": "Live answer", "spend": "$0.0270"},
+    "recorded": {"lines": 8, "badge": "Recorded replay", "spend": "$0.0270"},
+}
+
+
+@pytest.mark.parametrize("answer", sorted(LOOP_LANDED))
+@pytest.mark.parametrize("width,height", [(375, 812), (768, 1024), (1024, 768), (1100, 900), (1440, 900)])
+def test_the_terminal_is_as_tall_as_its_lines(tmp_path: Path, width: int, height: int, answer: str) -> None:
     """A review found the idle guide cut off on a phone, and four lines in a 600 px black pane on a desk.
 
     The terminal now shows the whole idle guide at every width, keeps that
-    height when a scenario's first lines replace it, and beside the verdict on
-    a desk no longer stretches to the verdict's side as an empty pane.
+    height when a scenario's first lines replace it, and is never stretched
+    past what its lines need, whatever sits beside it. On a desk it is also
+    never taller than the room the gates' cell leaves it (a later review found
+    the recorded loop's lines leaving that cell an empty field), and never
+    shorter than its own minimum; past that room its lines scroll, the newest
+    in view.
     """
-    press = "document.addEventListener('DOMContentLoaded', () => setTimeout(() => simulateLoop(), 2000));\n"
-    replies = dict(_replies(HEROES["live"]), **{"POST /simulate-loop": {"status": 200, "body": LOOP, "delay": 120}})
-    got = measure("index.html", tmp_path, width=width, height=height, replies=replies, moments={"idle": 1800, "loop": 3400},
-                  probe=TERMINAL, before=press)
-    idle, loop = got["taken"]["idle"], got["taken"]["loop"]
+    got = measure("index.html", tmp_path, width=width, height=height, replies=_scenario_replies(answer),
+                  moments=SCENARIO_MOMENTS, probe=TERMINAL, before=SCENARIOS)
+    taken = got["taken"]
+    idle, loop = taken["idle"], taken["loop"]
     assert idle["scroll"] <= idle["client"], f"At {width} px the idle guide is cut off: {idle['scroll']} px of lines in {idle['client']} px"
-    assert loop["lines"] == 4 and loop["spend"] == "$0.0270", "Measured after the live loop answer landed"
-    assert abs(loop["height"] - idle["height"]) < 0.5, "A scenario's first lines neither shrink nor stretch the pane"
-    if width >= 1024:
-        assert loop["verdictSide"] > loop["height"] + 150, \
-            f"Beside a verdict {loop['verdictSide']:.0f} px tall the terminal is {loop['height']:.0f} px: the height of its lines, not of the column"
+    landed = LOOP_LANDED[answer]
+    assert (loop["lines"], loop["badge"], loop["spend"]) == (landed["lines"], landed["badge"], landed["spend"]), \
+        f"Measured after the {answer} loop landed"
+    if answer == "live":
+        assert abs(loop["height"] - idle["height"]) < 0.5, "A scenario's first lines neither shrink nor stretch the pane"
+    for moment, at in taken.items():
+        if width < 1024:
+            assert abs(at["height"] - at["need"]) < 1, \
+                f"At {width} px ({moment}) the terminal is {at['height']:.0f} px where its lines need {at['need']:.0f}: stretched to its cell"
+        else:
+            assert at["room"] >= at["least"] - 1, f"At {width} px ({moment}) the terminal has less room than its minimum"
+            assert abs(at["height"] - min(at["need"], at["room"])) < 1, \
+                f"At {width} px ({moment}) the terminal is {at['height']:.0f} px where its lines need {at['need']:.0f} " \
+                f"and the gates leave it {at['room']:.0f}"
+        assert at["newestInView"], f"At {width} px ({moment}) the newest line is scrolled out of view"
     assert loop["scrollWidth"] <= loop["clientWidth"]
+
+
+@pytest.mark.parametrize("answer", sorted(LOOP_LANDED))
+@pytest.mark.parametrize("width,height", [(1024, 768), (1100, 900), (1440, 900)])
+def test_on_a_desk_neither_column_of_the_result_is_left_empty(tmp_path: Path, width: int, height: int, answer: str) -> None:
+    """A judge: after a scenario with a long fix, the terminal's column was mostly empty page beside it.
+
+    The terminal and the gates with their sentence sit side by side and end
+    near each other, whatever the scenario and whether the answer is live or
+    a recorded replay (whose loop left the gates' column 138 px short at
+    1024 px); a fix or a certificate, of any length, runs the panel's full
+    width under both.
+    """
+    got = measure("index.html", tmp_path, width=width, height=height, replies=_scenario_replies(answer),
+                  moments=SCENARIO_MOMENTS, probe=TERMINAL, before=SCENARIOS)
+    taken = got["taken"]
+    assert taken["loop"]["badge"] == LOOP_LANDED[answer]["badge"], f"Measured the {answer} answers"
+    assert taken["boundary"]["verdict"] == "BLOCKED_BOUNDARY_VIOLATION"
+    assert taken["boundary"]["fixShown"] == (answer == "live"), "A live refusal brings its fix of two files; a replay shows none"
+    assert taken["certificate"]["certShown"], "The certificate is shown"
+    for moment, at in taken.items():
+        assert at["sideBySide"], f"At {width} px ({moment}) the terminal and the gates are not side by side"
+        gap = abs(at["sentEnd"] - at["judgedEnd"])
+        assert gap < 96, f"At {width} px ({moment}) one column ends {gap:.0f} px before the other ({at['sentEnd']:.0f} and {at['judgedEnd']:.0f})"
+    for moment, shown, wide in (("boundary", "fixShown", "fixWidth"), ("certificate", "certShown", "certWidth")):
+        if taken[moment][shown]:
+            assert abs(taken[moment][wide] - taken[moment]["gridWidth"]) < 1, f"The {moment}'s row does not run the panel's width"
+    assert taken["boundary"]["scrollWidth"] <= taken["boundary"]["clientWidth"]

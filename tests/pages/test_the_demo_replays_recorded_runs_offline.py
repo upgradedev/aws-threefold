@@ -12,6 +12,7 @@ these tests skip where Node is absent.
 """
 from __future__ import annotations
 
+import html
 from pathlib import Path
 
 from _browser import run
@@ -46,6 +47,7 @@ def test_the_loop_replay_shows_the_recorded_refusal(tmp_path: Path) -> None:
     assert "Recorded 2026-09-25, replayed offline" in out["explained"]
     assert "Monomorphic loop detected" in out["explained"]
     assert "$0.0270" in out["explained"]
+    assert "3 consecutive times. Recorded session cost $0.0270." in out["explained"],         "A review read the recorded reason and the cost as one sentence: the reason ends in a stop of its own"
     assert out["spend"] == "$0.0270", "The recorded session's cost is its spend, as the certificate's replay shows its own"
 
 
@@ -60,7 +62,7 @@ def test_the_secret_replay_shows_the_recorded_reason(tmp_path: Path) -> None:
     )
     assert out["verdict"] == "BLOCKED_SECRET_DETECTED"
     assert "Recorded 2026-09-25, replayed offline" in out["explained"]
-    assert "Sensitive credential detected: AWS_ACCESS_KEY" in out["explained"]
+    assert "Sensitive credential detected: AWS_ACCESS_KEY. The recorded run quarantined it before transmission." in out["explained"]
 
 
 def test_the_boundary_replay_shows_the_recorded_rule(tmp_path: Path) -> None:
@@ -75,6 +77,17 @@ def test_the_boundary_replay_shows_the_recorded_rule(tmp_path: Path) -> None:
     assert out["verdict"] == "BLOCKED_BOUNDARY_VIOLATION"
     assert "Recorded 2026-09-25, replayed offline" in out["explained"]
     assert "python-domain-stays-pure" in out["explained"]
+    assert html.unescape(out["explained"]).endswith("which matches 'boto3'."), "The recorded reason ends in a stop"
+
+
+def test_a_recorded_reason_is_given_a_stop_only_where_it_has_none(tmp_path: Path) -> None:
+    out = _page(
+        r"""
+  out.said = ['Refused.', 'Why?', "which matches 'boto3'", '  AWS_ACCESS_KEY  ', 'It said "stop."', 'Halted (3 calls).'].map(asSentence);
+""",
+        tmp_path,
+    )
+    assert out["said"] == ["Refused.", "Why?", "which matches 'boto3'.", "AWS_ACCESS_KEY.", 'It said "stop."', "Halted (3 calls)."]
 
 
 def test_the_compliant_replay_shows_the_recorded_certificate(tmp_path: Path) -> None:
