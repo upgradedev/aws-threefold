@@ -4,11 +4,13 @@ What is deployed, how a tool call and a page request travel through it, where
 state lives, and the trade-offs behind each choice, including the ones that
 cost something.
 
-How to read the tags. **[PRIMARY, 2026-09-22]** marks a claim checked that day
+How to read the tags. **[PRIMARY, date]** marks a claim checked on that date
 against a live stack with a read-only request or a `describe`/`get` call, and
-the check is named beside it. **[STATE-FILE]** marks a claim taken from
-`STATE.md` and not re-measured here. Everything else describes the code on
-`main` and names the file it comes from.
+the check is named beside it; "rechecked" with a later date means the same
+check was run again that day and answered the same, unless the line says what
+changed. **[STATE-FILE]** marks a claim taken from `STATE.md` and not
+re-measured here. Everything else describes the code on `main` and names the
+file it comes from.
 
 ---
 
@@ -40,9 +42,13 @@ flowchart LR
     ddb[("DynamoDB, one table<br/>TTL · point-in-time recovery")]
     cw["CloudWatch<br/>logs · metric filters · 11 alarms<br/>dashboard · SNS topic"]
     ev[("S3 evidence bucket<br/>nothing writes to it")]
+    kms["KMS key<br/>signs certificates"]
+    sched["EventBridge Scheduler<br/>every 15 minutes, only where DemoFleet=true<br/>the synthetic Acme fleet"]
     api --> lambda
     lambda --> ddb
     lambda -. "logs and EMF" .-> cw
+    lambda -. "kms:Sign" .-> kms
+    sched -- "one tick, invoked directly" --> lambda
   end
 
   bedrock["Amazon Bedrock<br/>Claude Haiku 4.5<br/>eu. inference profile"]
@@ -72,16 +78,21 @@ viewer or hook ──► CloudFront (WAF, security headers)            us-east-1
                      X-Ray active, reserved concurrency 25)
                      ├─► DynamoDB single table (TTL, PITR)
                      ├─► Bedrock Converse, Haiku 4.5 (pages and drafts only)
+                     ├─► KMS Sign (certificates)
                      └─► CloudWatch Logs: EMF records, metric filters, alarms
+
+                   EventBridge Scheduler, every 15 minutes, only where
+                     DemoFleet=true ──► the same Lambda, invoked directly
+                     with one tick of the synthetic fleet (section 7)
 ```
 
 What was checked on the live public stacks **[PRIMARY, 2026-09-22]**:
 
 | Piece | Check | Answer |
 |---|---|---|
-| Edge site | `GET https://d1og72wpk4aqig.cloudfront.net/` | 200 `text/html`, `server: AmazonS3`, `via: ... (CloudFront)` |
-| Edge security headers | response headers of that GET | `strict-transport-security: max-age=63072000; includeSubDomains`, `content-security-policy: default-src 'none'; ...`, `x-frame-options: DENY`, `x-content-type-options: nosniff`, `referrer-policy: no-referrer` |
-| Edge routes API paths to the function | `GET .../status`, `.../api/overview?days=7`, `.../install.py`, `.../dist/manifest.json`, `.../openapi.json`, `.../prod/status` | all 200, JSON or text from the function |
+| Edge site | `GET https://d1og72wpk4aqig.cloudfront.net/` | 200 `text/html`, `server: AmazonS3`, `via: ... (CloudFront)` (rechecked 2026-09-27) |
+| Edge security headers | response headers of that GET | `strict-transport-security: max-age=63072000; includeSubDomains`, `content-security-policy: default-src 'none'; ...`, `x-frame-options: DENY`, `x-content-type-options: nosniff`, `referrer-policy: no-referrer` (rechecked 2026-09-27) |
+| Edge routes API paths to the function | `GET .../status`, `.../api/overview?days=7`, `.../install.py`, `.../dist/manifest.json`, `.../openapi.json`, `.../prod/status` | all 200, JSON or text from the function (rechecked 2026-09-27) |
 | Distribution | `aws cloudfront get-distribution` | `Deployed`, 3 origins, 21 cache behaviors, the web ACL attached |
 | Web ACL | `aws wafv2 get-web-acl` | rules `AmazonIpReputationList`, `RateLimitPerIp`, `CommonRuleSet`, `KnownBadInputsRuleSet` |
 | Edge stack | `aws cloudformation describe-stacks --stack-name threefold-prod-edge --region us-east-1` | `RateLimitPerFiveMinutes=1000`, `PriceClass_100`, `AccessLogs=true` |
@@ -92,16 +103,22 @@ What was checked on the live public stacks **[PRIMARY, 2026-09-22]**:
 | Dashboard | `aws cloudwatch list-dashboards` | `threefold-prod-operations` |
 | API stack parameters | `aws cloudformation describe-stacks --stack-name threefold-prod` | `PublicReads=true`, `DefaultHookStage=observe`, `BedrockModelId=eu.anthropic.claude-haiku-4-5-20251001-v1:0`, `ReservedConcurrency=25`, `MonthlyBudgetUsd=0` |
 
+Two parameters added since that check are set on the public stack as well:
+`DemoFleet=true`, which creates the fleet's schedule (live since 2026-09-26),
+and `EnforceProjectPattern=^Acme-Live-.+$`, under which the projects of the
+real agent `scripts/daily_live_agent.py` runs start in Enforce **[STATE-FILE]**.
+
 The API's own URL, `https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/`,
 stays public and serves the same pages from the function. It answers without
 any of the edge's security headers: a `GET /prod/dashboard.html` returned only
-`content-type`, `content-length`, `cache-control: no-cache` and API Gateway's
-request id **[PRIMARY, 2026-09-22]**. The pages at `/prod/` and
-`/prod/dashboard.html` carry none of the edge's headers; the function's own
-files carry one of them, `x-content-type-options: nosniff`, on `/install.py`,
-`/hooks/threefold_hook.py` and `/assets/threefold.js`, and nothing else of the
-edge's set **[PRIMARY, 2026-09-22]**. The bare `/prod` without the trailing
-slash is API Gateway's own 404, before the function is reached **[PRIMARY, 2026-09-22]**.
+`date`, `content-type`, `content-length`, `cache-control: no-cache` and API
+Gateway's request id **[PRIMARY, 2026-09-22, rechecked 2026-09-27]**. The pages at
+`/prod/` and `/prod/dashboard.html` carry none of the edge's headers; the
+function's own files carry one of them, `x-content-type-options: nosniff`, on
+`/install.py`, `/hooks/threefold_hook.py` and `/assets/threefold.js`, and
+nothing else of the edge's set **[PRIMARY, 2026-09-22, rechecked 2026-09-27]**.
+The bare `/prod` without the trailing slash is API Gateway's own 404, before
+the function is reached **[PRIMARY, 2026-09-22, rechecked 2026-09-27]**.
 
 ---
 
@@ -154,11 +171,12 @@ pins.
 
 ### 2.3 A page asks for an explanation
 
-The demo page (`index.html`), the connect page and the last step of the
-dashboard's `#/try` walkthrough send `explain: true` (the walkthrough's call
-imitates a hook, `origin: "hook"`, on a sandbox project, but asks for the
-sentence because a visitor reads it). A body that leaves `explain` out is read
-as true. When the verdict is a refusal and the caller asked,
+The demo page's scenarios (`index.html`), the connect page and the last step
+of the dashboard's `#/try` walkthrough send `explain: true` (the walkthrough's
+call imitates a hook, `origin: "hook"`, on a sandbox project, but asks for the
+sentence because a visitor reads it). The refusal on the demo page's first
+screen sends `explain: false`, so it waits on no model. A body that leaves
+`explain` out is read as true. When the verdict is a refusal and the caller asked,
 `bedrock_client.py` asks Claude Haiku 4.5 through the
 `eu.` cross-region inference profile for one sentence, with a 1 s connect and
 2.5 s read timeout, at most 200 successful calls per container, and arguments
@@ -176,10 +194,15 @@ answer as untrusted: it is parsed as JSON, checked by the same
 functions `POST /rules/explain` uses. Nothing is stored. A draft becomes a rule
 only through `POST /rules`, which needs the operator on every stack. The route
 is capped at 400 answer tokens and one repair (two model calls at most per
-draft) and 60 drafting calls per container, each counted when it is made,
-answered or not (`rule_drafter.py`), where the explanations' 200 count only
-successful calls. When the model cannot be reached
-the caller gets no draft rather than a canned one.
+draft, each one request with a 1 s connect and 5 s read timeout) and 60
+drafting calls per container, each counted when it is made, answered or not
+(`interfaces/draft_routes.py` sets the cap, `rule_drafter.py` counts), where
+the explanations' 200 count only successful calls. Above those, the whole
+account may make 400 drafting model calls a UTC day: a draft claims its two
+in the table before the model is called (`DRAFTBUDGET#<day>`, section 5), and
+once the day is spent it answers 429
+`urn:threefold:error:draft-budget-spent` without calling it. When the model
+cannot be reached the caller gets no draft rather than a canned one.
 
 ---
 
@@ -255,8 +278,14 @@ POST that lands on the bucket answers 403) refuses every call. The local checks
 above do not depend on the network and still apply.
 
 **At commit.** The installer also adds a pre-commit hook running
-`threefold_cli.py check`, which judges the staged content with the same engine
-and the rules committed at `HEAD`, offline.
+`threefold_cli.py check`, which judges the staged content on the machine with
+the same engine. Its rules are the project's own, fetched from the service
+(`GET /rules?project=`); when they cannot be fetched it falls back to
+`.threefold/rules.json` as committed at `HEAD`, then to the rules Threefold
+ships. In `managed` mode it reads the project's stage from
+`GET /api/projects/<name>` and refuses only what the stage enforces; a stage
+it cannot read refuses nothing, as the hook fails open
+(`src/threefold/tools/threefold_cli.py`).
 
 ---
 
@@ -270,8 +299,8 @@ outside the standard library.
 | Layer | Directory | What lives there |
 |---|---|---|
 | Domain | `src/threefold/domain/` | the session aggregate and tool invocation (`models.py`), the cost breaker and token pricing (`circuit_breaker.py`), the loop detector, the boundary guard and credential scan (`boundary_guard.py`), layering rules, import readers for Python, Java, C# and TypeScript, segment-by-segment path matching, and the shell-write reader (`shell_writes.py`) |
-| Application | `src/threefold/application/` | the evaluator and its stages, rule keys, the validated fix proposer, the ledger, rollups, insights and self-correction, projects and readiness, the sandbox, the rule drafter, the Bedrock reviewer and the certificate issuer |
-| Infrastructure | `src/threefold/infrastructure/` | the DynamoDB repository, the sign-in store, the Bedrock client, the security middleware and rate limiter, EMF metrics, retries and the idempotency cache |
+| Application | `src/threefold/application/` | the evaluator and its stages, rule keys, the validated fix proposer, the ledger, rollups, insights and self-correction, projects and readiness, the sandbox, the demo fleet, the rule drafter, the Bedrock reviewer and the certificate issuer |
+| Infrastructure | `src/threefold/infrastructure/` | the DynamoDB repository, the sign-in store, the Bedrock client, the KMS signer, the security middleware and rate limiter, EMF metrics, retries and the idempotency cache |
 | Interfaces | `src/threefold/interfaces/`, `src/threefold/web/`, `src/threefold/hooks/`, `src/threefold/tools/` | the Lambda handler and its routes, the local development server, the pages and assets, the hook, the installer and the pre-commit CLI |
 
 ### 4.2 The gates, in the order they run
@@ -300,7 +329,7 @@ outside the standard library.
    `sim-*` and page sessions the session is halted, which is the flagship demo.
 4. **The cost breaker** refuses a call whose projected cost exceeds the
    single-call cap, which comes from the policy (`max_single_call_usd`, $1.00 on
-   the public stack **[PRIMARY, 2026-09-22]**, `GET /policy/config`), or that would
+   the public stack **[PRIMARY, 2026-09-22, rechecked 2026-09-27]**, `GET /policy/config`), or that would
    take the session past 105% of the `budget_usd` the call declares ($10.00 when
    the caller sends none, `application/dtos.py`; the 5% is
    `CostCircuitBreaker`'s `hard_limit_buffer` in `domain/circuit_breaker.py`,
@@ -312,10 +341,13 @@ outside the standard library.
    call costs nothing here.
 
 **Stage.** For calls with `origin` `hook` or `ci` that are not dry runs, the
-project's configured stage applies (`CONFIG#project#<name>`), or the stack's
-`DefaultHookStage` when the project has none (`observe` on the public stack
-**[PRIMARY, 2026-09-22]**). Observe evaluates the call as a dry run: recorded,
-never refused, never halting. Enforce runs the gates and turns a refusal whose
+project's configured stage applies (`CONFIG#project#<name>`). A project with
+none starts in Enforce when its name matches the stack's
+`EnforceProjectPattern` (empty by default; `^Acme-Live-.+$` on the public
+stack **[STATE-FILE]**), and otherwise in the stack's `DefaultHookStage`,
+`observe` on the public stack **[PRIMARY, 2026-09-22]**
+(`application/projects.py`, `stage_of`). Observe evaluates the call as a dry
+run: recorded, never refused, never halting. Enforce runs the gates and turns a refusal whose
 rule key the project still observes into an observation. Page calls and every
 call in a `sim-` session always enforce, whatever their origin, so the demo
 behaves the same under any setting (`application/projects.py`, `stage_applies`).
@@ -351,7 +383,10 @@ goes out without one, so the fix never costs more time than the gate.
 redacted before it is kept, and adds the decision to its day's rollup with
 DynamoDB `ADD`. The rollup is best effort: a failed increment never fails a
 verdict. Tiles and charts read the rollups, so they stay exact however busy
-the ledger is; lists read the ledger. Review labels (`correct`, `false_alarm`)
+the ledger is; lists read the ledger. The one figure that reads the ledger is
+self-correction on the overview and each project page: up to 2,000 rows, and
+only nine fields of each (`application/ledger.py`,
+`interfaces/app_routes.py`). Review labels (`correct`, `false_alarm`)
 are stored on the ledger row itself.
 
 `scripts/backfill_rollups.py` adds ledger rows written before rollups existed,
@@ -372,7 +407,9 @@ counted.
   `Authorization: Bearer`) or a live sign-in session. The public stack is
   deployed with no key, so its policy and rules writes are refused outright and
   sign-in is closed there (`POST /api/auth/links` answered 403 "Sign-In Is
-  Closed Here" in `docs/evidence/PROBES_2026-09-22.md`).
+  Closed Here" in `docs/evidence/PROBES_2026-09-22.md`, and again on the edge
+  and the API in `docs/evidence/PROBES_2026-09-27-2-edge.md` and
+  `docs/evidence/PROBES_2026-09-27-2.md`).
 - **Sign-in without pasting a key.** `threefold.py open` sends the key from a
   local file in a header to `POST /api/auth/links`, gets a single-use code that
   expires in 120 seconds, and opens `dashboard.html#/signin?code=...`. The page
@@ -411,6 +448,8 @@ recovery on (both checked live, section 1).
 | Project index | `CONFIG#projects` / `<name>` | a copy of every project's configuration, so the list is one Query | as above |
 | Policy | `CONFIG#policy` / `METADATA` | the thresholds `/policy/config` returns | never |
 | Sign-in | `AUTH#<sha256>` / `CODE` or `SESSION` | a sign-in code or a session, by hash only | 120 s for a code, 12 hours for a session |
+| Drafting budget | `DRAFTBUDGET#<YYYY-MM-DD>` / `ACCOUNT` | the drafting model calls the whole account claimed that UTC day, added by a conditional update | 2 days |
+| Run claim | `RUNCLAIM#<name>` / `CLAIM` | one scheduled run, put only if absent, so a fleet tick delivered twice sends nothing the second time | 24 hours |
 
 A sandbox's expiry covers its stage configuration only. Once that is gone the
 overview and the project list leave the project out (`application/rollups.py`,
@@ -427,9 +466,12 @@ metadata, in pages of at least 100 items and at most 50 pages per request.
 - **Logs.** The function's log group keeps 30 days; the API access log keeps 14
   days, because every line holds a client address.
 - **Metrics.** The function writes one CloudWatch Embedded Metric Format record
-  per evaluated call to `Threefold/Governance` (dimensions `Project` and
-  `Environment`). Both stacks write that namespace, so five metric filters read
-  the same records from each stack's own log group into `Threefold/<stack name>`:
+  per call evaluated through the HTTP routes to `Threefold/Governance`
+  (dimensions `Project` and `Environment`); the fleet's tick calls the
+  evaluator directly and writes no such record, so the call-volume alarm
+  counts callers of the API only. Both stacks write that namespace, so five
+  metric filters read the same records from each stack's own log group into
+  `Threefold/<stack name>`:
   `ToolCallsEvaluated`, `VerdictApproved`, `CircuitBreakerTripped`, `LatencyMs`,
   `CurrentSessionCostUSD`.
 - **Alarms (11).** Function errors, throttles and an invocation over 12 seconds,
@@ -450,9 +492,12 @@ metadata, in pages of at least 100 items and at most 50 pages per request.
 - **Budget.** `MonthlyBudgetUsd` creates an account-wide cost budget on the
   topic; 0, the value on the public stack, creates none.
 - **Live probe.** `scripts/probe_live.py` checks a deployed stack against the
-  project's claims. The committed run against the public API URL ended
-  113 PASS, 0 FAIL, 3 SKIP (`docs/evidence/PROBES_2026-09-22.md`). No probe of
-  the edge URL is committed yet.
+  project's claims and writes a dated evidence file. The latest committed
+  runs, on 2026-09-27, ended 117 PASS, 0 FAIL, 3 SKIP
+  through the edge (`docs/evidence/PROBES_2026-09-27-2-edge.md`) and the same
+  against the API URL (`docs/evidence/PROBES_2026-09-27-2.md`). The first
+  committed run, against the API URL on 2026-09-22, ended 113 PASS, 0 FAIL,
+  3 SKIP (`docs/evidence/PROBES_2026-09-22.md`).
 
 ---
 
@@ -463,13 +508,38 @@ metadata, in pages of at least 100 items and at most 50 pages per request.
 | Stack | `threefold-prod`, eu-west-1, with `threefold-prod-edge` in us-east-1 in front | a second stack from the same `deploy/template.yml` |
 | `PublicReads` | `true` | `false`: the ledger, sessions, rules and policy need the operator |
 | Operator key | none, so policy, rules and stage writes are refused and sign-in is closed | set, so the owner signs in with `threefold.py open` |
-| Traffic | the demo, the sandbox walkthrough, probes, visitors | the owner's own work at nine locations under `Acme-Proj-*` aliases, all projects in Observe **[STATE-FILE]** |
+| `DemoFleet` | `true`, so the fleet's schedule exists **[STATE-FILE]** | `false`, the default, so there is none **[STATE-FILE]** |
+| Traffic | the demo, the sandbox walkthrough, probes, visitors, the synthetic fleet, and a real coding agent's runs | the owner's own work at nine locations under `Acme-Proj-*` aliases **[STATE-FILE]**, every project in Observe in the snapshot of 2026-09-27 (`src/threefold/web/proof.json`) |
 | In this repository | its URLs, its evidence | its stack name only; its address and key live on the owner's machine and are never committed |
+
+**The synthetic fleet.** Every 15 minutes the schedule invokes the function
+with one tick (`application/demo_fleet.py`): 20 to 40 synthetic hook calls
+from Claude Code, Codex and Antigravity across six `Acme-*` projects, through
+the real evaluator with `explain: false`, so no tick calls Bedrock. Now and
+then it also acts as an operator would: it labels would-refuse calls, promotes
+a project whose rules are ready and, rarely, demotes one. Those actions are
+made in process, not through the API, which is how fleet projects reach
+Enforce on a stack whose API refuses every stage write. The function accepts the tick only
+from an event with no HTTP request context, so no caller of the API can
+trigger one; Lambda does not retry it, and a tick delivered twice finds its
+quarter hour claimed (`RUNCLAIM#`, section 5) and sends nothing. Nothing is
+backdated: the fleet's history is as long as the schedule has run, since
+2026-09-26 **[STATE-FILE]**.
+
+**A real agent.** `scripts/daily_live_agent.py`, run from the owner's machine,
+gives Claude Code or Codex one of the benchmark's Acme tasks through the edge,
+in an `Acme-Live-<task>` project that starts in Enforce. On 2026-09-27
+`benchmark/results/live/` holds two runs, Codex on 2026-09-26 and Claude Code
+on 2026-09-27; its schedule on that machine is the owner's to create
+**[STATE-FILE]**. The overview keeps four sources apart, `fleet`,
+`live`, `sandbox` and `other` (`application/rollups.py`, `source_of`), and a
+page on the public stack says in words that the fleet is synthetic.
 
 Only aggregate numbers from the private stack may ever reach a public page,
 through `scripts/build_proof.py`, which refuses to write if any string in its
 output matches a project name, the key or an absolute path. The committed
-`proof.json` has no private section yet.
+`proof.json` carries such a private section, totals only, last rebuilt on
+2026-09-27.
 
 ---
 
@@ -490,11 +560,15 @@ burst of 200 for each of the API's seven routes on its own
 (`DefaultRouteSettings`), so page reads (`ANY /{proxy+}`) and hook verdicts
 (`POST /evaluate-tool-call`) each get that allowance; together with the edge's
 per-address limit it bounds a flood, and does not keep one kind of request
-from crowding out the other. One role carries the union of what every route
-needs:
-Bedrock, the table (including `Scan` and `DeleteItem`) and the unused evidence
-bucket. And every in-memory limit (the per-address bucket, the Bedrock call
-caps) is per container, not per account: N busy containers allow N times the cap.
+from crowding out the other. The fleet's tick is one more invocation from the
+same pool every 15 minutes on the public stack. One role carries the union of
+what every route needs: Bedrock, the table (including `Scan` and
+`DeleteItem`), `kms:Sign` on the stack's signing key, and the X-Ray writes the
+transform attaches; it holds no right on the evidence bucket. And every
+in-memory limit (the per-address bucket, the explanation cap, the per-container
+drafting cap) is per container, not per account: N busy containers allow N
+times the cap. The drafting budget of 400 model calls a day is the exception,
+kept in the table and so shared by every container.
 
 ### 8.2 Why a single table
 
@@ -521,8 +595,12 @@ What it costs. While the service is unreachable, nothing is judged by the
 service: no layering rule, no loop detection, no ledger row. What still holds
 is decided on the machine: a credential is refused, and in enforce (or managed
 at an enforcing stage) a file-tool write to the hooks' own files is refused. A
-team that prefers the other failure sets `THREEFOLD_FAIL_CLOSED=1`. The pre-commit check
-runs offline and catches what reached a commit.
+team that prefers the other failure sets `THREEFOLD_FAIL_CLOSED=1`. The
+pre-commit check does not replace the service in an outage: it judges on the
+machine, but with the rules committed at `HEAD` or the shipped ones, and in
+`managed` mode, which `connect` writes, a stage it cannot read refuses nothing
+(section 3). Only a repository set to `enforce` on the machine still has its
+commits refused while the service is down.
 
 ### 8.4 Why Bedrock is off the enforcement path
 
@@ -553,9 +631,11 @@ What it costs. There are two copies of every page. The function serves the
 copy deployed with its code; the edge serves whatever `publish_web.py` last
 uploaded, so a deploy that changes a page is not visible at the edge until the
 pages are published again. On 2026-09-22 the two `dashboard.html` copies were
-the same size, 159,267 bytes **[PRIMARY, 2026-09-22]**. The API URL has no web
-ACL and serves its pages with none of the edge's headers (section 1), and
-anyone can reach every route there, past the edge.
+the same size, 159,267 bytes **[PRIMARY, 2026-09-22]**; on 2026-09-27 they
+were byte for byte the same, 432,457 bytes with one SHA-256
+**[PRIMARY, 2026-09-27]**, `GET /dashboard.html` on both URLs. The API URL has
+no web ACL and serves its pages with none of the edge's headers (section 1),
+and anyone can reach every route there, past the edge.
 
 ### 8.6 What the edge secret protects, and what it does not
 
@@ -569,8 +649,9 @@ Both API origins therefore send `X-Threefold-Edge` with a secret equal to the
 API stack's `EdgeOriginSecret`, and CloudFront overwrites a viewer's own header
 of that name. Only on a request carrying it does the function believe
 `CloudFront-Viewer-Address` and the `X-Threefold-Viewer-Host` the viewer-host
-function sets. Checked live **[PRIMARY, 2026-09-22]**: `/install.py` fetched
-from the edge carries `BAKED_ENDPOINT = "https://d1og72wpk4aqig.cloudfront.net/"`;
+function sets. Checked live **[PRIMARY, 2026-09-22, rechecked 2026-09-27]**:
+`/install.py` fetched from the edge carries
+`BAKED_ENDPOINT = "https://d1og72wpk4aqig.cloudfront.net/"`;
 fetched from the API URL it carries the API URL; and fetched from the API URL
 with a forged `X-Threefold-Viewer-Host`, with and without a wrong
 `X-Threefold-Edge`, it still carries the API URL.
@@ -583,7 +664,9 @@ What it does not do:
 - It is readable inside the account: the distribution's configuration holds it
   (anyone allowed `cloudfront:GetDistributionConfig`) and so does the
   function's environment (`lambda:GetFunctionConfiguration`, which the CI
-  deploy role has). `NoEcho` keeps it out of `describe-stacks` only.
+  deploy role's policy in `deploy/iam/` would grant; that role is written and,
+  by the owner's decision, not created **[STATE-FILE]**). `NoEcho` keeps it
+  out of `describe-stacks` only.
 - It does not rotate itself. Changing it means deploying both stacks with the
   new value; until both agree, the function treats edge requests as untrusted.
 
