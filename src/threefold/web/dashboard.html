@@ -336,18 +336,16 @@
       .tf-ops-connect .tf-pre, .tf-ops-signin .tf-pre { padding: 44px 14px 14px; }
     }
 
-    /* Sign-in: the brand, and what is and is not kept. */
-    .tf-ops-signin { max-width: 44rem; margin: var(--tf-space-2) auto 0; }
+    /* Sign-in: under the page head, one card: the command, and what is and is not kept. */
+    .tf-ops-signin { max-width: 44rem; }
     .tf-ops-signin-card { padding: var(--tf-space-4) var(--tf-space-3); border-radius: var(--tf-radius-xl); border: 1px solid var(--tf-hairline-strong); background: radial-gradient(520px 220px at 50% -40px, rgba(139, 92, 246, 0.22), transparent 70%), var(--tf-surface-1); box-shadow: var(--tf-shadow-3); }
     @media (min-width: 768px) { .tf-ops-signin-card { padding: var(--tf-space-5) var(--tf-space-5); } }
-    .tf-ops-mark { display: inline-flex; align-items: center; justify-content: center; width: 52px; height: 52px; border-radius: 15px; color: #fff; background: radial-gradient(120% 120% at 20% 0%, #a78bfa 0%, #7c3aed 45%, #5b21b6 100%); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 14px 34px -10px rgba(124, 58, 237, 0.8); }
-    .tf-ops-mark .tf-icon { width: 26px; height: 26px; }
     .tf-ops-promise { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: 1fr; gap: 8px; }
     @media (min-width: 640px) { .tf-ops-promise { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
     .tf-ops-promise li { display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: var(--tf-radius-md); background: rgba(8, 11, 21, 0.6); border: 1px solid var(--tf-hairline); font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-2); }
     .tf-ops-promise li .tf-icon { width: 16px; height: 16px; color: var(--tf-approved-text); }
     .tf-ops-promise li b { font-weight: 600; color: var(--tf-text); }
-    .tf-ops-signin-why { margin: 0; text-align: center; font-size: var(--tf-fs-small); line-height: var(--tf-lh-small); color: var(--tf-text-2); }
+    .tf-ops-signin-why { margin: 0; font-size: var(--tf-fs-small); line-height: var(--tf-lh-small); color: var(--tf-text-2); }
 
     /* Proof: every series on one scale, in one figure. A row a series, a
        lane a condition; the gridlines, the ticks and the tip labels share
@@ -4083,17 +4081,13 @@
       ['clock', 'A link works once', 'Whoever opens it first is signed in, so treat it like the key. Once used, or after a short while, it opens nothing.']
     ];
 
+    // Sign-in wears the page head every screen wears, so from the header's
+    // Sign in the title stands where it stood; what to do is in the card.
     function signinFrame(title, sub, body) {
-      return html`<div class="tf-ops-signin">
-        <div class="tf-ops-signin-card space-y-6">
-          <div class="text-center space-y-3">
-            <span class="tf-ops-mark" aria-hidden="true">${T.icon('shield', 26)}</span>
-            <h1 id="view-title" tabindex="-1" class="text-2xl md:text-3xl font-semibold tracking-tight text-white outline-none">${title}</h1>
-            ${sub ? html`<p class="text-sm text-gray-300 max-w-xl mx-auto">${sub}</p>` : ''}
-          </div>
-          ${body}
-        </div>
-      </div>`;
+      return html`${pageTitle(title, sub, null, html`<p class="tf-eyebrow">${T.icon('signin', 16)}Operator sign-in</p>`)}
+        <div class="tf-ops-signin">
+          <div class="tf-ops-signin-card space-y-6">${body}</div>
+        </div>`;
     }
 
     function viewSignin(ctx) {
@@ -4115,12 +4109,12 @@
             <p class="text-xs text-gray-400">It asks the stack for a one-time link and opens it in this browser.</p>
           </div>
           <ul class="tf-ops-promise">${SIGNIN_PROMISES.map(([icon, head, words]) => html`<li>${T.icon(icon, 16)}<b>${head}</b><span>${words}</span></li>`)}</ul>
-          <p class="text-xs text-gray-500 text-center">No <span class="font-mono">threefold.py</span> yet? <a class="tf-link" href="#/connect">Connect a repository</a> first. On the public demo, reading needs no sign-in at all.</p>`));
+          <p class="text-xs text-gray-500">No <span class="font-mono">threefold.py</span> yet? <a class="tf-link" href="#/connect">Connect a repository</a> first. On the public demo, reading needs no sign-in at all.</p>`));
         return;
       }
 
       function attempt() {
-        ctx.render(signinFrame('Signing you in…', 'Trading the one-time link for a sign-in session. This takes a moment.', html`<div class="space-y-3" aria-busy="true"><div class="tf-skeleton h-4 w-2/3 mx-auto"></div><div class="tf-skeleton h-4 w-1/2 mx-auto"></div></div>`));
+        ctx.render(signinFrame('Signing you in…', 'Trading the one-time link for a sign-in session. This takes a moment.', html`<div class="space-y-3" aria-busy="true"><div class="tf-skeleton h-4 w-2/3"></div><div class="tf-skeleton h-4 w-1/2"></div></div>`));
         return T.api('/api/auth/sessions', { method: 'POST', body: { code } }).then(body => {
           if (!body || typeof body.token !== 'string' || !body.token) {
             // The stack took the link and gave no session back, so the link
@@ -4152,7 +4146,7 @@
           // The stack did not answer, or answered with an error of its own:
           // the link may not have been spent, so trying it again comes first.
           ctx.render(signinFrame('The sign-in did not complete', html`${trimStop(err && err.message ? err.message : 'The stack did not answer')}. Nothing was kept in this browser.`, freshLink(html`
-            <div class="flex flex-wrap justify-center gap-2"><button type="button" class="tf-btn tf-btn-primary" data-action="signin-retry">${T.icon('refresh', 16)}Try the link again</button></div>
+            <div class="flex flex-wrap gap-2"><button type="button" class="tf-btn tf-btn-primary" data-action="signin-retry">${T.icon('refresh', 16)}Try the link again</button></div>
             <p class="tf-ops-signin-why">If it keeps failing, ask for a fresh link on the machine that holds the operator key:</p>`)));
         });
       }
@@ -4163,7 +4157,7 @@
         return html`<div class="space-y-3" role="alert" data-state="signin-failed">
           ${lead}
           ${T.commandBlock('python threefold.py open', 'Sign-in command')}
-          <p class="text-xs text-gray-500 text-center"><a class="tf-link" href="#/overview">Go to the overview</a>. On the public demo, reading needs no sign-in at all.</p>
+          <p class="text-xs text-gray-500"><a class="tf-link" href="#/overview">Go to the overview</a>. On the public demo, reading needs no sign-in at all.</p>
         </div>`;
       }
       ctx.actions({ 'signin-retry': () => attempt() });
@@ -5811,8 +5805,9 @@
         }
       }
 
-      // A new step starts at the top of the stage: on a desk that is the top of
-      // the page, and on a phone the stage's title just under the sticky rail.
+      // A new step starts at the top of the stage: on a desk the page goes back
+      // to its top, where the page head stands above the stage and both are in
+      // view, and on a phone to the stage's title just under the sticky rail.
       function scrollToStage() {
         if (typeof window.scrollTo !== 'function') return;
         let y = 0;
