@@ -136,6 +136,10 @@ def test_the_six_live_projects_are_the_ones_the_daily_script_reports_as() -> Non
     assert {pick.project for pick in rotation} == set(rollups.LIVE_PROJECTS), \
         "The daily script names its projects differently from application/rollups.py"
     assert all(rollups.source_of(pick.project) == "live" for pick in rotation)
+    assert set(rollups.LIVE_AGENTS) == set(daily.AGENTS), \
+        "The daily script runs other agents than application/rollups.py counts as live"
+    assert {pick.agent for pick in rotation} == set(rollups.LIVE_AGENTS)
+    assert all(rollups.agent_kind(agent) == rollups.CODING_AGENT for agent in rollups.LIVE_AGENTS)
 
 
 # --- what the overview and the listing count ---------------------------------------------------------------
@@ -151,6 +155,37 @@ def test_sources_count_the_live_agent_s_calls_and_projects_and_still_add_up_to_t
     assert list(payload["sources"]) == list(rollups.SOURCES)
     assert sum(part["calls"] for part in payload["sources"].values()) == payload["totals"]["calls"] == 70
     assert sum(part["projects"] for part in payload["sources"].values()) == payload["totals"]["projects"] == 7
+
+
+def test_a_call_in_a_live_project_that_no_coding_agent_made_is_other() -> None:
+    """A live project records without a key, so a page's button or an unnamed caller can reach it; those are not the daily run."""
+    mixed = [
+        _rollup(LIVE, calls=10, approved=10, **{"agent:claude-code": 3, "agent:page": 4, "agent:unknown": 2, "agent:ci": 1}),
+        _rollup(LIVE_TOO, calls=6, approved=6, **{"agent:codex": 2, "agent:antigravity": 4}),
+        _rollup("Acme-Live-orders-s3-archive", calls=5, approved=5, **{"agent:page": 5}),
+        # An item from before the agent counters: nothing in it says a coding agent made it.
+        _rollup("Acme-Live-collections-webhook", calls=7, approved=7),
+        _rollup("Acme-Probe", calls=9, approved=9, **{"agent:claude-code": 9}),
+    ]
+    payload = rollups.overview(mixed, {}, days=7, today=TODAY)
+    assert payload["sources"] == {
+        "fleet": {"calls": 0, "projects": 0},
+        "live": {"calls": 5, "projects": 4},
+        "sandbox": {"calls": 0, "projects": 0},
+        "other": {"calls": 9 + 7 + 4 + 5 + 7, "projects": 1},
+    }
+    assert sum(part["calls"] for part in payload["sources"].values()) == payload["totals"]["calls"] == 37
+    assert sum(part["projects"] for part in payload["sources"].values()) == payload["totals"]["projects"] == 5
+    rows = {row["project"]: row for row in payload["by_project"]}
+    assert rows[LIVE]["source"] == "live" and rows[LIVE]["calls"] == 10, "The project is still the live agent's, with all its calls"
+    assert rows["Acme-Live-orders-s3-archive"]["source"] == "live"
+
+
+def test_a_live_item_s_agent_counters_never_take_more_than_its_calls() -> None:
+    odd = [_rollup(LIVE, calls=3, approved=3, **{"agent:claude-code": 5, "agent:codex": 2})]
+    sources = rollups.overview(odd, {}, days=7, today=TODAY)["sources"]
+    assert sources["live"] == {"calls": 3, "projects": 1}
+    assert sources["other"] == {"calls": 0, "projects": 0}
 
 
 def test_every_by_project_row_names_the_live_source() -> None:

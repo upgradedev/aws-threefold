@@ -89,6 +89,14 @@ LIVE_TASKS = (
     "warehouse-carrier-notify",
 )
 LIVE_PROJECTS = tuple(f"Acme-Live-{task}" for task in LIVE_TASKS)
+# The agents the daily live agent runs, as its hook names them, and so the
+# only calls in a live project that `sources` counts as live. A live project
+# records without a key like every project on the public stack, so a page's
+# button, a pipeline or a caller naming no agent can reach it too, and those
+# calls are not the daily run's. The agent is what the caller declares, as it
+# is everywhere in these counts: this keeps out what does not claim to be the
+# daily run, and cannot prove what does.
+LIVE_AGENTS = ("claude-code", "codex")
 
 
 # Set by the template from its DemoFleet parameter: "true" where the schedule
@@ -255,11 +263,23 @@ def _sources(rows: List[Mapping[str, Any]], rollups: List[Mapping[str, Any]]) ->
 
     Computed over the same projects as the totals, so each figure adds up to
     its total: the four `calls` to `totals.calls`, the four `projects` to
-    `totals.projects`.
+    `totals.projects`. A project counts under its row's source; its calls do
+    too, except that a live project's calls are live only when Claude Code or
+    Codex made them (LIVE_AGENTS), and other otherwise.
     """
     calls: Counter = Counter()
     for item in rollups:
-        calls[source_of(item.get("project"))] += int(item.get("calls", 0) or 0)
+        made = int(item.get("calls", 0) or 0)
+        source = source_of(item.get("project"))
+        if source == LIVE:
+            # Each call adds one to exactly one `agent:` counter, so the live
+            # part never exceeds the item's calls; the bounds keep both parts
+            # within them on an item written otherwise.
+            live = max(0, min(made, sum(int(item.get(f"agent:{agent}", 0) or 0) for agent in LIVE_AGENTS)))
+            calls[LIVE] += live
+            calls[OTHER] += made - live
+        else:
+            calls[source] += made
     projects = Counter(row["source"] for row in rows)
     return {name: {"calls": calls.get(name, 0), "projects": projects.get(name, 0)} for name in SOURCES}
 

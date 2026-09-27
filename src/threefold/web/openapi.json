@@ -2192,7 +2192,7 @@
                     },
                     "sources": {
                       "type": "object",
-                      "description": "The window's calls and projects by where they come from: the synthetic fleet, the daily live agent, visitors' sandboxes, and everything else, each as by_project's source names it. Computed over the same projects as the totals, so the four calls add up to totals.calls and the four projects to totals.projects. A page on the public stack says in words that the fleet is synthetic and runs through the real gates, and that the live agent's calls are real Claude Code and Codex runs, one Acme task a day, in projects that enforce. A stack from before live was added reports fleet, sandbox and other only, and counts the live agent's calls as other.",
+                      "description": "The window's calls and projects by where they come from: the synthetic fleet, the daily live agent, visitors' sandboxes, and everything else, each as by_project's source names it, except that a call in a live project is live only when its agent is claude-code or codex, and other otherwise, as a page's is. Computed over the same projects as the totals, so the four calls add up to totals.calls and the four projects to totals.projects. A page on the public stack says in words that the fleet is synthetic and runs through the real gates, and that the live agent's calls are real Claude Code and Codex runs, one Acme task a day, in projects that enforce. A stack from before live was added reports fleet, sandbox and other only, and counts the live agent's calls as other.",
                       "properties": {
                         "fleet": {
                           "$ref": "#/components/schemas/OverviewSource"
