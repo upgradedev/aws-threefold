@@ -159,6 +159,25 @@ SERIES = [
         "20260923T031215Z-pressure-codex.jsonl",
     )
 ]
+# Each committed run of the matrix, and the report made from its rows alone.
+# Two of them ran on one day with the same task family, so the report named by
+# the date is one run's and not the other's.
+OWN_REPORT = {
+    "20260922T143932Z.jsonl": "docs/evidence/BENCHMARK_2026-09-22.md",
+    "20260922T145644Z.jsonl": "docs/evidence/BENCHMARK_2026-09-22-HAIKU.md",
+    "20260923T025154Z-codex.jsonl": "docs/evidence/BENCHMARK_2026-09-23-CODEX.md",
+    "20260922T161455Z-pressure.jsonl": "docs/evidence/BENCHMARK_2026-09-22-PRESSURE-SONNET.md",
+    "20260922T162306Z-pressure.jsonl": "docs/evidence/BENCHMARK_2026-09-22-PRESSURE-HAIKU.md",
+    "20260923T031215Z-pressure-codex.jsonl": "docs/evidence/BENCHMARK_2026-09-23-CODEX-PRESSURE.md",
+}
+# Where the public repository shows its files: the address each evidence path
+# is appended to.
+PUBLIC_FILES = "https://github.com/upgradedev/aws-threefold/blob/main"
+SCRIPTED = ROOT / "benchmark" / "results" / "20260922T095002Z-scripted.jsonl"
+
+
+def _paths(section) -> list:
+    return [item["path"] for item in section["evidence"]]
 
 
 def test_the_committed_snapshot_is_what_the_script_builds_from_the_committed_series() -> None:
@@ -168,10 +187,12 @@ def test_the_committed_snapshot_is_what_the_script_builds_from_the_committed_ser
     and only its totals were kept, so it is checked for shape, not rebuilt.
     """
     committed = json.loads(COMMITTED.read_text(encoding="utf-8"))
-    rebuilt = build_proof.build([], series=SERIES)
+    rebuilt = build_proof.build([], series=SERIES, evidence_url=PUBLIC_FILES)
     assert committed["benchmarks"] == rebuilt["benchmarks"], (
-        "src/threefold/web/proof.json is stale: rebuild it with one --series per committed run")
+        "src/threefold/web/proof.json is stale: rebuild it with one --series per committed run, in this order, and "
+        f"--evidence-base {PUBLIC_FILES}")
     assert committed["benchmark"] == rebuilt["benchmarks"][0]
+    assert committed["method"] == rebuilt["method"]
     private = committed.get("private")
     if private is not None:
         assert set(private) <= {
@@ -208,6 +229,75 @@ def test_the_command_line_takes_several_series(tmp_path: Path, capsys) -> None:
     assert build_proof.main(["--series", str(first), "--series", str(second), "--out", str(out)]) == 0
     assert len(json.loads(out.read_text(encoding="utf-8"))["benchmarks"]) == 2
     assert "2 series shown apart" in capsys.readouterr().out
+
+
+def test_each_committed_series_cites_the_report_made_from_its_own_rows() -> None:
+    sections = build_proof.build([], series=SERIES)["benchmarks"]
+    assert [path.name for path in SERIES] == list(OWN_REPORT)
+    for path, section in zip(SERIES, sections):
+        rows = "benchmark/results/" + path.name
+        assert _paths(section) == [OWN_REPORT[path.name], rows], section["label"]
+        # The report says so itself, on the line benchmark/report.py ends it with.
+        assert f"\nSource rows: `{rows}`. Run ids: " in (ROOT / OWN_REPORT[path.name]).read_text(encoding="utf-8")
+    cited = [section["evidence"][0]["path"] for section in sections]
+    assert len(set(cited)) == len(cited), "Two series cite one report"
+
+
+def test_rows_no_report_was_made_from_cite_none_not_the_report_their_date_names(tmp_path: Path) -> None:
+    # The Haiku matrix's rows under another name. They ran on 2026-09-22, so
+    # the report named by their date is the Sonnet matrix's, which this
+    # snapshot used to cite for them.
+    copy = tmp_path / "acme-haiku-again.jsonl"
+    copy.write_bytes(SERIES[1].read_bytes())
+    summary, _ = build_proof.read_benchmark([copy])
+    assert report.default_output(summary).is_file(), "the date must name a report that exists, or this proves nothing"
+    section = build_proof.build([], series=[copy])["benchmarks"][0]
+    assert _paths(section) == ["acme-haiku-again.jsonl"]
+
+
+def test_a_report_made_from_more_rows_or_fewer_is_not_these_rows_report() -> None:
+    # The pilot's report was made from the pilot's rows and the scripted ones
+    # together: it is cited for the two, in either order, and for neither alone.
+    report_path = "docs/evidence/BENCHMARK_2026-09-22-PILOT.md"
+    assert _paths(build_proof.build([PILOT, SCRIPTED])["benchmark"])[0] == report_path
+    assert _paths(build_proof.build([SCRIPTED, PILOT])["benchmark"])[0] == report_path
+    assert _paths(build_proof.build([PILOT])["benchmark"]) == ["benchmark/results/20260922T095056Z-pilot.jsonl"]
+    assert _paths(build_proof.build([SCRIPTED])["benchmark"]) == ["benchmark/results/20260922T095002Z-scripted.jsonl"]
+
+
+def test_a_report_is_matched_by_the_last_source_rows_line_whatever_its_line_endings(tmp_path, monkeypatch) -> None:
+    evidence = tmp_path / "evidence"
+    evidence.mkdir()
+    ending = "Source rows: `acme-rows.jsonl`, `benchmark/results/acme.jsonl`. Run ids: 20260930T090000Z.\r\n"
+    (evidence / "BENCHMARK_2026-09-30.md").write_bytes(("# Acme\r\n\r\n" + ending).encode("utf-8"))
+    # Quotes the line of another report, and ends with its own.
+    (evidence / "BENCHMARK_2026-09-30-B.md").write_text(ending + "\nSource rows: `other.jsonl`. Run ids: x.\n", encoding="utf-8")
+    # Names the rows, but is not a benchmark report.
+    (evidence / "PROBES_2026-09-30.md").write_text(ending, encoding="utf-8")
+    (evidence / "BENCHMARK_2026-09-30-C.md").write_bytes(b"\xff\xfe not text")
+    monkeypatch.setattr(build_proof, "EVIDENCE_DIR", evidence)
+    found = [evidence / "BENCHMARK_2026-09-30.md"]
+    assert build_proof.reports_made_from(["benchmark/results/acme.jsonl", "acme-rows.jsonl"]) == found
+    assert build_proof.reports_made_from(["acme-rows.jsonl"]) == []
+    assert build_proof.reports_made_from(["other.jsonl"]) == [evidence / "BENCHMARK_2026-09-30-B.md"]
+
+
+@pytest.mark.parametrize("base", [PUBLIC_FILES, PUBLIC_FILES + "/"])
+def test_under_the_public_repository_every_evidence_file_is_an_absolute_link(base: str) -> None:
+    document = build_proof.build([], series=SERIES, evidence_url=base)
+    items = [item for section in document["benchmarks"] for item in section["evidence"]] + document["method"]
+    assert len(items) == 2 * len(SERIES) + len(build_proof.METHOD)
+    for item in items:
+        assert (ROOT / item["path"]).is_file(), f"{item['path']} is linked and is not in the repository"
+        assert item["href"] == "https://github.com/upgradedev/aws-threefold/blob/main/" + item["path"]
+    assert document["benchmark"]["evidence"] == document["benchmarks"][0]["evidence"]
+
+
+def test_rows_from_outside_the_repository_are_listed_and_never_linked(tmp_path: Path) -> None:
+    rows = _rows_file(tmp_path, MEASURED)
+    section = build_proof.build([], series=[rows], evidence_url=PUBLIC_FILES)["benchmarks"][0]
+    assert section["evidence"] == [{"label": "The result rows it was computed from", "path": "rows.jsonl"}], (
+        "The repository holds no such file, so a link to it would lead nowhere")
 
 
 def test_evidence_becomes_links_only_under_an_https_address_the_owner_gives(tmp_path: Path) -> None:
