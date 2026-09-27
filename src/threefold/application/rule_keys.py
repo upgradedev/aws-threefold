@@ -7,15 +7,19 @@ rules, not invariants, so every row also carries `rule_key`: the id of the
 layering rule that decided when one did, otherwise one of the fixed gate keys
 below, or NONE when nothing flagged the call.
 
-The guard returns a sentence rather than a structure, and it is shared with the
-hook's bundle, so the key is read off the verdict here rather than by changing
-what the domain returns. The sentences it reads are the guard's own and are
-pinned by its tests; the matching follows `insights.CATEGORY_BY_REASON`.
+A verdict's key is the gate that decided it, as the guard states it
+(`finding_key`): the evaluator carries it beside the verdict and the ledger
+stores it. A sentence is read only for a row or a verdict that carries no key,
+such as a row written before the key existed, and then only by the gate's own
+words at its head.
+Every sentence that names a rule opens with the rule, and everything the caller
+sent (a path, an import, the command itself) comes after it, so nothing the
+caller wrote can decide which key a row is counted under.
 """
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, Iterable, Mapping, Optional
+from typing import Any, Dict, Iterable, Mapping, Optional, Tuple
 
 from threefold.domain.boundary_guard import (
     COMMAND_PATH_FOUND,
@@ -26,7 +30,6 @@ from threefold.domain.boundary_guard import (
     PROTECTED_PATH_FOUND,
     TAMPERING_FOUND,
     UNREADABLE_FOUND,
-    UNREADABLE_WRITE as UNREADABLE_WRITE_ADVICE,
 )
 
 LOOP = "LOOP"
@@ -50,20 +53,38 @@ FIXED_KEYS = (LOOP, PROTECTED_PATH, UNREADABLE_WRITE, CREDENTIAL, BUDGET, HALTED
 FROZEN_SESSION_REASON = "Session execution frozen"
 HALTED_SESSION_REASONS = (FROZEN_SESSION_REASON, "Session already tripped")
 
-# A layering rule names itself in every sentence it writes: "Layering rule 'x'
-# refuses this write", "would refuse", or "layering rule 'x' covers ...". The id
-# is at most 80 characters, which bounds the search on a hostile reason.
-_LAYERING_RULE = re.compile(r"[Ll]ayering rule '(.{1,80}?)' (?:refuses|would refuse|covers)")
+# How the gates open every sentence that names a layering rule: a refusal leads
+# with the violation, an observation with the rule, and the rule's id comes
+# straight after, before anything the caller sent. The id and what decided are
+# read there and nowhere else. A sentence that quotes the caller (a destructive
+# command, a credential store, a protected or governance path, hook tampering)
+# opens with "Command" or "Target path" instead, so nothing inside its quotes
+# is ever read: a comment naming a rule is part of the command, not the head.
+_VIOLATION_LEAD = "Clean Architecture violation: "
+_RULE_LEADS = ("Layering rule '", "layering rule '")
+_RULE_VERBS = ("refuses", "would refuse", "covers")
+
+# An id the rules in force do not know, read where the lead ends. At most 80
+# characters, which bounds the search on a hostile reason.
+_ID_AFTER_LEAD = re.compile(r"(.{1,80}?)' (?=refuses|would refuse|covers)", re.DOTALL)
 
 # A write the rules could not read. Checked before the rule's name, because a
 # refusal for an unreadable write to a covered path names the rule as well:
 # it is the unreadable-write policy that decided, not the rule's import list,
-# and an operator stages the two apart. The last two markers sit early in their
-# sentences, so a stored reason cut at 240 characters is still recognised.
-_UNREADABLE_MARKERS = (
-    UNREADABLE_WRITE_ADVICE,
-    "too long to be read to the end",
-    "to files it does not name",
+# and an operator stages the two apart. Each is the gate's own phrase in full,
+# at the head or right after the rule's id, so a stored reason cut at 240
+# characters is still recognised. An import refusal puts the rule's
+# description after "this write: ", and that is the operator's to word, which
+# is why a bare "the command" would not be enough to tell the two apart.
+_UNREADABLE_HEAD = _VIOLATION_LEAD + "this command "
+_UNREADABLE_AFTER_ID = "covers '"
+_THIS_WRITE = ("refuses this write: ", "would refuse this write: ")
+_UNREADABLE_AFTER_VERB = (
+    "the command changes part of a line in '",
+    "the command brings a directory tree into '",
+    "the command names '",
+    "the command writes '",
+    "the command writes files it cannot name",
 )
 
 # A dry run and an observe-stage call record the invariant that failed as their
@@ -115,47 +136,63 @@ def finding_key(finding: Any) -> str:
     A project that observes that rule then approved the call. The gate is a
     fact the guard states; `refusal_key` below stays for a stored row, which is
     all that is left of a verdict nobody carried the finding from.
+
+    A layering finding is keyed by the rule the guard says it broke and by
+    nothing else. Its sentence carries the target path and the import, both
+    the caller's, and a path can spell another rule's sentence as readily as a
+    comment can. A layering finding that named no rule would be filed with the
+    guard's other gates, never under a rule its words suggest; the guard names
+    one on every layering finding it makes.
     """
     if finding.kind == LAYERING_FOUND:
-        return finding.rule_id or layering_rule_named(finding.reason) or PROTECTED_PATH
+        return finding.rule_id or PROTECTED_PATH
     return _KEY_BY_FINDING.get(finding.kind, PROTECTED_PATH)
 
 
-def is_unreadable_write(reason: str) -> bool:
-    return any(marker in (reason or "") for marker in _UNREADABLE_MARKERS)
-
-
-def layering_rule_named(reason: str, known_ids: Iterable[str] = ()) -> Optional[str]:
-    """The layering rule a sentence names, or None.
+def _named_rule(reason: str, known_ids: Iterable[str] = ()) -> Optional[Tuple[str, str]]:
+    """The rule a gate's sentence opens with, and the gate's words after it, or None.
 
     The rules in force are tried first, longest id first, so an id that
     contains a quote or a space is still read whole. A stored row whose rules
-    are gone falls back to the pattern.
+    are gone falls back to the pattern. Both read at the head only: the rule's
+    id is the first thing after the lead, and a rule named anywhere later was
+    named by whatever the caller sent.
     """
     text = reason or ""
+    if text.startswith(_VIOLATION_LEAD):
+        text = text[len(_VIOLATION_LEAD):]
+    lead = next((lead for lead in _RULE_LEADS if text.startswith(lead)), None)
+    if lead is None:
+        return None
+    head = text[len(lead):]
     for rule_id in sorted((i for i in known_ids if i), key=len, reverse=True):
-        if f"ayering rule '{rule_id}'" in text:
-            return rule_id
-    found = _LAYERING_RULE.search(text)
-    return found.group(1) if found else None
+        if head.startswith(f"{rule_id}' "):
+            rest = head[len(rule_id) + 2:]
+            if rest.startswith(_RULE_VERBS):
+                return rule_id, rest
+    found = _ID_AFTER_LEAD.match(head)
+    return (found.group(1), head[found.end():]) if found else None
 
 
-# The two sentences that quote the caller's own command line, and so are the
-# two a caller could write the rest of this module's vocabulary into. Both come
-# from the same gate and are filed under the same key, so they are recognised by
-# their own frame before anything inside the quotes is read. A layering refusal
-# opens with "Clean Architecture violation" or "Layering rule", a governance one
-# with "Target path", and command tampering with "Command turns", so none of
-# them can be taken for one of these.
-_QUOTES_THE_COMMAND = (
-    "' reaches a protected path or credential store",
-    "' contains a destructive operation",
-)
-
-
-def quotes_the_command(reason: str) -> bool:
+def is_unreadable_write(reason: str, known_ids: Iterable[str] = ()) -> bool:
+    """Whether the gate's sentence says the rules could not read the write."""
     text = reason or ""
-    return text.startswith("Command '") and any(marker in text for marker in _QUOTES_THE_COMMAND)
+    if text.startswith(_UNREADABLE_HEAD):
+        return True
+    named = _named_rule(text, known_ids)
+    if named is None:
+        return False
+    rest = named[1]
+    if rest.startswith(_UNREADABLE_AFTER_ID):
+        return True
+    verb = next((verb for verb in _THIS_WRITE if rest.startswith(verb)), None)
+    return verb is not None and rest[len(verb):].startswith(_UNREADABLE_AFTER_VERB)
+
+
+def layering_rule_named(reason: str, known_ids: Iterable[str] = ()) -> Optional[str]:
+    """The layering rule a gate's sentence opens with, or None."""
+    named = _named_rule(reason, known_ids)
+    return named[0] if named else None
 
 
 def refusal_key(status: str, reason: str, known_ids: Iterable[str] = ()) -> str:
@@ -164,7 +201,9 @@ def refusal_key(status: str, reason: str, known_ids: Iterable[str] = ()) -> str:
     A destructive command (`rm -rf /`, a force push, `drop database`) is filed
     under PROTECTED_PATH. The contract's keys are closed and it names no gate
     for these; they are refused by the same guard, on the same invariant, as
-    a protected path, and are staged with it.
+    a protected path, and are staged with it. Its sentence quotes the command
+    and opens with "Command", so a rule the command names in a comment or a
+    string is never read as the rule that refused it.
     """
     upper = (status or "").upper()
     if not upper.startswith("BLOCKED"):
@@ -176,9 +215,7 @@ def refusal_key(status: str, reason: str, known_ids: Iterable[str] = ()) -> str:
     if "CIRCUIT_BREAKER" in upper:
         return HALTED_SESSION if (reason or "").startswith(HALTED_SESSION_REASONS) else BUDGET
     if "BOUNDARY" in upper:
-        if quotes_the_command(reason):
-            return PROTECTED_PATH
-        if is_unreadable_write(reason):
+        if is_unreadable_write(reason, known_ids):
             return UNREADABLE_WRITE
         return layering_rule_named(reason, known_ids) or PROTECTED_PATH
     return NONE
@@ -220,7 +257,13 @@ def rule_key(row: Mapping[str, Any], known_ids: Iterable[str] = ()) -> str:
     first = observed[0]
     if first in _STATUS_FOR_INVARIANT:
         return refusal_key(_STATUS_FOR_INVARIANT[first], reason, known_ids)
-    if is_unreadable_write(reason):
+    if first in FIXED_KEYS:
+        # A gate's own key, as the gates stated it. The reason beside it can
+        # quote the caller's command, and nothing in it moves the key.
+        return first
+    if is_unreadable_write(reason, known_ids):
+        # A rule watching a write it could not read lists its own id, and it
+        # is the unreadable-write policy that would have refused the call.
         return UNREADABLE_WRITE
     return first
 
