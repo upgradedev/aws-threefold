@@ -101,7 +101,8 @@ so the rollout had to show what a rule would stop before it stops anything.
   metrics read into a namespace per stack, an SNS topic.
 - **Demo data:** on the public stack only (`DemoFleet`), an Amazon EventBridge
   Scheduler schedule sends a synthetic Acme fleet's calls through the real
-  gates every 15 minutes, and every page that shows them calls them synthetic.
+  gates every 15 minutes, and the overview and the first screen count those
+  calls apart and call them synthetic.
 - **Code:** clean architecture with a standard-library domain, no build step,
   no chart library, no npm. The hook and the installer are single
   standard-library files.
@@ -158,7 +159,7 @@ so the rollout had to show what a rule would stop before it stops anything.
   `scripts/daily_live_agent.py` gives Claude Code or Codex, on alternate days,
   one of the benchmark's Acme tasks in an `Acme-Live-*` project that starts in
   Enforce, and the overview counts its calls as a source of their own. Two
-  runs so far: Codex on 2026-09-26, 8 calls, one refused (falsely, challenge
+  runs as of 2026-09-27: Codex on 2026-09-26, 8 calls, one refused (falsely, challenge
   5), and Claude Code on 2026-09-27, 4 calls, none refused; in both no
   violation landed and the acceptance tests passed
   (`benchmark/results/live/`) [PRIMARY, 2026-09-27].

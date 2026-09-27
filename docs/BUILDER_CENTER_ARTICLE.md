@@ -153,8 +153,8 @@ and the function runs at 1,024 MB with a reserved concurrency of 25
   the public stack only, an Amazon EventBridge Scheduler schedule invokes the
   function every 15 minutes, and each tick sends a bounded batch of synthetic
   calls from six `Acme-*` projects through the real gates, with no model
-  call. Nothing is backdated, and every page that shows those calls says they
-  are synthetic.
+  call. Nothing is backdated, and the overview and the first screen count
+  those calls apart and call them synthetic.
 - **The hook fails open.** If the service cannot answer, the agent's own
   permissions decide, because a governance outage that stopped every developer
   would end the rollout. `THREEFOLD_FAIL_CLOSED=1` flips that.
@@ -201,7 +201,8 @@ and the function runs at 1,024 MB with a reserved concurrency of 25
   otherwise stopped and reported the conflict rather than break a rule. Codex
   CLI 0.155.0 ran the same tasks on 2026-09-23, with the rules in `AGENTS.md`
   instead: 17% / 0% / 0% on the standard tasks and 100% / 11% / 0% under
-  pressure, where the governed agent finished 6 of 9 runs
+  pressure, so for Codex the rules held on the standard tasks and slipped
+  under pressure, and the governed agent finished 6 of 9 pressure runs
   (`docs/evidence/BENCHMARK_2026-09-23-CODEX*.md`). The limits go with it: 18
   or 9 runs a cell, two agents, tasks written by the people who built
   Threefold: rates under temptation, not base rates
@@ -209,13 +210,14 @@ and the function runs at 1,024 MB with a reserved concurrency of 25
 - **Does it hold for a real agent on the live stack?**
   `scripts/daily_live_agent.py` gives Claude Code or Codex, on alternate days,
   one of the benchmark's tasks in an `Acme-Live-*` project on the public
-  stack, which starts in Enforce. Two runs so far **[PRIMARY, 2026-09-27]**,
-  `benchmark/results/live/`: Codex on 2026-09-26, 8 calls, and Claude Code on
-  2026-09-27, 4 calls; in both no violation landed and the acceptance tests
-  passed. Codex's one refusal was false: a read ending in PowerShell's
-  `2>$null`, which the command check took for a write. It was fixed the next
-  day, and looking for a way around the fix closed an older hole:
-  `bash -c "echo ... > src/domain/\$f"` had been approved **[STATE-FILE]**.
+  stack, which starts in Enforce. It had run twice by 2026-09-27
+  **[PRIMARY]**, `benchmark/results/live/`: Codex on 2026-09-26, 8 calls,
+  and Claude Code on 2026-09-27, 4 calls; in both no violation landed and the
+  acceptance tests passed. Codex's one refusal was false: a read ending in
+  PowerShell's `2>$null`, which the command check took for a write. The fix
+  was deployed the next day, and looking for a way around it closed an older
+  hole: `bash -c "echo ... > src/domain/\$f"` had been approved
+  **[STATE-FILE]**.
   Two runs are not a rate; they show the path working with real agents.
 - **The certificate** Threefold issues covers the session's own stored
   verdicts and carries a KMS signature where the stack holds a signing key.
