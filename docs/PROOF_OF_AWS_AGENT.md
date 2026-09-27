@@ -21,9 +21,12 @@ did, and that is the useful part of this record. The raw output kept from that
 day, the stack's description, its `/status` answering and the three
 CloudTrail events of step 9, is in
 [`evidence/DEPLOYMENT_2026-09-20.md`](evidence/DEPLOYMENT_2026-09-20.md). The
-other steps are recorded in this table, written by the session that ran them,
-and the two defects also in the message of the commit that fixed them,
-`9350197`; their transcripts were not kept.
+other steps were recorded in this table on 2026-09-20; their transcripts were
+not kept. The table's two defects are also described in the message of the
+commit that fixed them, `9350197`, which records a third: the Bedrock client
+asked for a retired Claude 3.5 Sonnet in us-east-1, so every explanation was
+a canned string, until the function called the eu Haiku 4.5 inference profile
+in its own Region.
 
 | # | The agent ran | AWS answered | What changed |
 |---|---|---|---|
@@ -116,8 +119,8 @@ Threefold governs coding agents, and coding agents built it. Every response from
 phrased the refusal, `deterministic` when it was not asked (an approval, or a
 hook, which sends `explain: false`), and `deterministic_fallback` when it was
 asked and did not answer. A reader can always tell which one they are looking
-at. The same discipline produced this page: the first table lists two defects
-the agent shipped and then caught, because a proof that records only
+at. The same discipline produced this page: its first section records three
+defects the agent shipped and then caught, because a proof that records only
 successes is not evidence of a working connection.
 
 Since 2026-09-26 a coding agent also works against the deployed service

@@ -300,10 +300,11 @@ python scripts/daily_live_agent.py --endpoint https://d1og72wpk4aqig.cloudfront.
 python scripts/daily_live_agent.py --endpoint https://d1og72wpk4aqig.cloudfront.net/             # today's run
 ```
 
-Two rows exist, Codex on 2026-09-26 and Claude Code on 2026-09-27. The
-Windows Task Scheduler entry that would run it daily at 04:30 local time is
-written out in the script's docstring and is the owner's to create; until it
-exists, a day runs only when the script is started by hand [STATE-FILE].
+As of 2026-09-27, two rows exist, Codex on 2026-09-26 and Claude Code on
+2026-09-27. The Windows Task Scheduler entry that would run it daily at 04:30
+local time is written out in the script's docstring and is the owner's to
+create; until it exists, a day runs only when the script is started by hand
+[STATE-FILE].
 
 ## 7. Connect, open, status, disconnect
 
@@ -327,16 +328,17 @@ For a private stack, fetch `install.py` from that stack instead and add
 | `python3 threefold.py status` | every connected folder on this machine and its stage on the stack |
 | `python3 threefold.py disconnect [PATH]` | removes exactly what connect added; a file changed by hand since keeps the change |
 
-The mode is `managed` unless `--mode` says otherwise: the project's stage on
-the stack decides. `observe` sends every call as a dry run, so the stack
-records it and refuses nothing, whatever the stage. `enforce` is `managed`
-plus a refusal, on the machine and whatever the stage, of writes to the
-hooks' own files. In every mode the hook refuses a credential on the machine,
-before anything is sent.
-
 The installer keeps a copy of itself at `~/.threefold/bin/threefold_install.py`,
 so these work after `threefold.py` is deleted. `--dry-run` writes nothing,
 downloads nothing and calls nothing.
+
+Without `--mode`, a first connect uses `managed` and a reconnect keeps the
+mode recorded in `.threefold.json`. In `managed`, the project's stage on the
+stack decides. `observe` sends every call as a dry run, so the stack records
+it and refuses nothing, whatever the stage. `enforce` is `managed` plus a
+refusal, on the machine and whatever the stage, of writes to the hooks' own
+files. In every mode the hook refuses a credential on the machine, before
+anything is sent.
 
 ## 8. Continuous deployment (optional)
 
@@ -366,7 +368,8 @@ request is refused, and so is a job given a GitHub environment, whose token
 names the environment instead of the branch.
 `tests/security/test_the_deploy_role_trusts_one_branch_of_one_repository.py`
 reads the repository from the GitHub URL in `README.md` and fails if the
-policy names another. Create the role from the repository root:
+policy names another. Once the permissions boundary described at the end of
+this section is in place, create the role from the repository root:
 
 ```bash
 aws iam create-role \
@@ -520,7 +523,7 @@ the tracks' own notes and AWS list prices, not from measurement.
 | AWS WAF web ACL with four rules | about 9 USD a month, plus a per-request charge |
 | CloudWatch alarms (11 per stack) and the dashboard | a few USD a month |
 | Lambda, API Gateway, DynamoDB on demand, CloudFront, S3 | per request and per GB; not estimated |
-| Bedrock | per token, only for page explanations and rule drafts, capped per container at 200 successful explanation calls (failed calls are not counted) and 60 drafting calls (every call counted), and for the whole account at 400 drafting calls a UTC day, after which a draft answers 429 without calling the model |
+| Bedrock | per token, only for page explanations and rule drafts, capped per container at 200 successful explanation calls (failed calls are not counted) and 60 drafting calls (every call counted), and for each stack, one counter in its own table, at 400 drafting model calls a UTC day, after which a draft answers 429 without calling the model |
 | The demo fleet, public stack only | 96 scheduled invocations a day, each sending 20 to 40 synthetic calls through the evaluator and none to Bedrock; Lambda and DynamoDB per request, not estimated |
 | The benchmark | see section 6 |
 
