@@ -81,7 +81,9 @@ appear in this file, and are never sent.
 from __future__ import annotations
 
 import datetime
+import functools
 import hashlib
+import inspect
 import json
 import logging
 import random
@@ -120,6 +122,17 @@ LABEL_NOW_SHARE = 0.4
 SWEEP_MIN_AGE = datetime.timedelta(hours=3)
 SWEEP_HORIZON = datetime.timedelta(hours=8)
 SWEEP_ROW_BUDGET = 1200
+# Every field of a ledger row the sweep reads: when the call was, whose it
+# was, whether it has a review, and what `label_for` decides the label from,
+# the stored reason included for a row that predates rule keys. The sweep
+# asks the ledger for these alone. It reads up to SWEEP_ROW_BUDGET rows every
+# tick, and parsing every field of each was most of what a tick spent on its
+# own reads; a field read here and not named here would be missing from
+# those rows, so a test holds the two together.
+SWEEP_FIELDS = (
+    "timestamp", "verdict_id", "project_name", "session_id", "review", "status", "rule_key",
+    "observed_rules", "observed_rule", "reason", "observed_reason", "observed_target", "target",
+)
 # Roughly half the six projects enforce at any time: promote while fewer than
 # three do, demote about once a day, and let a demoted project observe for six
 # hours before it can be promoted again.
@@ -1093,7 +1106,7 @@ def _sweep(
     has already labelled is left alone even when the read, which is
     eventually consistent, returns it without its review.
     """
-    reader = getattr(evaluator.session_repo, "read_decision_day", None)
+    reader = _sweep_reader(getattr(evaluator.session_repo, "read_decision_day", None))
     if reader is None:
         return
     newest, oldest = now - min_age, now - SWEEP_HORIZON
@@ -1119,6 +1132,17 @@ def _sweep(
             if after is None:
                 break
         day -= datetime.timedelta(days=1)
+
+
+def _sweep_reader(reader: Optional[Callable[..., Any]]) -> Optional[Callable[..., Any]]:
+    """The ledger reader, asked for SWEEP_FIELDS alone where the store can send some fields of a row."""
+    if reader is None:
+        return None
+    try:
+        accepts = "fields" in inspect.signature(reader).parameters
+    except (TypeError, ValueError):
+        accepts = False
+    return functools.partial(reader, fields=SWEEP_FIELDS) if accepts else reader
 
 
 def _is_fleet_row(row: Mapping[str, Any], project: Optional[str]) -> bool:
