@@ -1054,6 +1054,7 @@ def test_the_queue_counts_what_the_overview_counts(tmp_path: Path) -> None:
   out.view = view();
   await click('unfold'); await tick();
   out.unfolded = groupOrder();
+  out.after = view();
 """,
         tmp_path,
     )
@@ -1067,7 +1068,79 @@ def test_the_queue_counts_what_the_overview_counts(tmp_path: Path) -> None:
     assert "Your own sandbox comes first: you can label its calls." in words
     assert 'data-fold="sandboxes"' in out["view"] and "Show them" in words
     assert "2 calls waiting in 2 sandboxes, under 1 rule." in words
-    assert out["unfolded"] == ["Acme-Sandbox-aaaaaaa1", "Acme-Checkout", "Acme-Sandbox-aaaaaaa2", "Acme-Sandbox-aaaaaaa3"],         "Shown, the folded sandboxes take the place of their line, and the groups above keep theirs"
+    view = out["view"]
+    assert view.index('data-fold="sandboxes"') < view.index(">Acme-Checkout<"), \
+        "For a visitor, the line the other sandboxes fold into stands before the groups only the operator may label"
+    assert out["unfolded"] == ["Acme-Sandbox-aaaaaaa1", "Acme-Sandbox-aaaaaaa2", "Acme-Sandbox-aaaaaaa3", "Acme-Checkout"], \
+        "Shown, the folded sandboxes take the place of their line, and the groups above keep theirs"
+
+
+def test_a_visitor_s_keyboard_reaches_the_sandboxes_they_may_label(tmp_path: Path) -> None:
+    """Folded, the sandboxes are a place J and K stop at; shown, they come first, as the note says.
+
+    A review found the note saying the sandboxes came first while Show them
+    drew them last, and J and K walking only the rows a visitor may not label.
+    """
+    out = ops(
+        KEYS
+        + QUEUE
+        + r"""
+  const sent = [];
+  const record = (u, i, body) => { sent.push(u.pathname.replace(/^\/prod\/api\/projects\//, '')); return { status: 200, body: { updated: body.items.length, skipped: [] } }; };
+  const boxes = ['Acme-Sandbox-aaaaaaa2', 'Acme-Sandbox-aaaaaaa3'];
+  const items = [flagged(1, 'Acme-Checkout'), flagged(2, 'Acme-Checkout'), flagged(3, boxes[0]), flagged(4, boxes[1])];
+  answer = contract({
+    '/api/auth/whoami': PUBLIC,
+    '/api/projects': { status: 200, body: { projects: PROJECTS.projects.concat(['Acme-Checkout'].concat(boxes).map(project => Object.assign({}, PROJECTS.projects[1], { project }))) } },
+    '/api/decisions': { status: 200, body: { items, next_cursor: null } },
+    'POST /api/projects/Acme-Sandbox-aaaaaaa2/reviews': record
+  });
+  Threefold.whoami(true);
+  await visit('#/review');
+  const note = () => text(view().split('class="tf-ops-visitor')[1].split('font-medium">')[1].split('</p>')[0]);
+  const onFold = () => /data-fold="sandboxes" data-current="true"/.test(view());
+  out.first = { view: view(), note: note(), onFold: onFold() };
+  press('c'); await tick();
+  out.c = { focus: document.activeElement && document.activeElement.id, sent: sent.length, said: el('live-status').textContent };
+  press('j');
+  out.j = { row: currentRow(), onFold: onFold() };
+  press('k');
+  out.k = { focus: document.activeElement && document.activeElement.id, onFold: onFold() };
+  await click('unfold'); await tick();
+  out.shown = { order: groupOrder(), row: currentRow(), note: note(), folded: view().indexOf('data-fold=') !== -1 };
+  press('c'); await tick();
+  out.sent = sent;
+  answer = contract({
+    '/api/auth/whoami': PRIVATE,
+    '/api/projects': { status: 200, body: { projects: PROJECTS.projects.concat(['Acme-Checkout'].concat(boxes).map(project => Object.assign({}, PROJECTS.projects[1], { project }))) } },
+    '/api/decisions': { status: 200, body: { items: [flagged(1, 'Acme-Checkout'), flagged(3, boxes[0]), flagged(4, boxes[1])], next_cursor: null } }
+  });
+  Threefold.whoami(true);
+  await visit('#/review?days=7');
+  out.operator = { view: view(), start: currentRow() };
+  press('j');
+  out.operator.j = { focus: document.activeElement && document.activeElement.id, onFold: onFold() };
+""",
+        tmp_path,
+    )
+    first = out["first"]
+    assert first["view"].index('data-fold="sandboxes"') < first["view"].index(">Acme-Checkout<"), "The folded line stands first"
+    assert first["onFold"], "The keyboard starts on the one place a visitor can act from"
+    assert first["note"] == "You can label the calls in visitors' sandboxes, folded into one line at the top of the queue: Show them, then label."
+    assert out["c"]["sent"] == 0 and out["c"]["focus"] == "fold-show", "C on the folded line labels nothing and goes to Show them"
+    assert "Press Enter to show them" in out["c"]["said"]
+    assert out["j"] == {"row": "VERDICT-1", "onFold": False}, "J moves on to the next row"
+    assert out["k"] == {"focus": "fold-show", "onFold": True}, "K comes back to the folded line"
+    shown = out["shown"]
+    assert shown["order"] == ["Acme-Sandbox-aaaaaaa2", "Acme-Sandbox-aaaaaaa3", "Acme-Checkout"] and not shown["folded"]
+    assert shown["note"] == "You can label the 2 groups from visitors' sandboxes, which come first.", "The note is true of the order"
+    assert shown["row"] == "VERDICT-3", "Shown, the keyboard is on the first call it can label"
+    assert out["sent"] == ["Acme-Sandbox-aaaaaaa2/reviews"]
+    operator = out["operator"]
+    assert operator["view"].index(">Acme-Checkout<") < operator["view"].index('data-fold="sandboxes"'), \
+        "For the operator, the visitors' sandboxes follow the projects that are theirs"
+    assert operator["start"] == "VERDICT-1" and operator["j"] == {"focus": "fold-show", "onFold": True}, \
+        "The operator's J reaches the folded line after the last row"
 
 
 def test_a_name_with_no_call_and_no_configuration_is_not_a_project_to_promote(tmp_path: Path) -> None:

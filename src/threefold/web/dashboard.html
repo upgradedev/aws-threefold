@@ -114,6 +114,8 @@
     .tf-ops-fold { display: grid; grid-template-columns: 32px minmax(0, 1fr); align-items: start; gap: 12px 14px; padding: 16px 20px; }
     .tf-ops-fold > .flex { grid-column: 1 / -1; }
     @media (min-width: 768px) { .tf-ops-fold { grid-template-columns: 32px minmax(0, 1fr) auto; align-items: center; } .tf-ops-fold > .flex { grid-column: auto; } }
+    /* The keyboard is on the folded line, as it would be on a row. */
+    .tf-ops-fold[data-current="true"] { background: var(--tf-accent-soft); border-color: var(--tf-accent-line); }
 
     /* A small meter: how much of what a project's rules flagged has a label. */
     .tf-ops-meter { display: flex; align-items: center; gap: 8px; min-width: 7rem; }
@@ -2548,19 +2550,33 @@
         return !state.unfold && count >= 2 ? { rows: theirs, names, sandboxes: count, rules: Object.keys(rules).length } : null;
       }
 
-      // The groups on screen, in this visit's order. Each keeps its calls
-      // newest first, and its place in the order names its note and heading.
-      function groups() {
+      // Every group, folded or not, in this visit's order. The order is taken
+      // over the folded groups too, so the line they are folded into stands
+      // where they would, and showing them puts them there: a visitor's
+      // sandboxes first, the operator's after their own projects.
+      function allGroups() {
         const map = {};
         const keys = [];
-        const fold = folded();
-        state.items.filter(row => !(fold && fold.names[row.project_name])).forEach(row => {
+        state.items.forEach(row => {
           const key = groupKey(row);
           if (!map[key]) { map[key] = { key, project: row.project_name || '', rule: ruleKeyOf(row), items: [] }; keys.push(key); }
           map[key].items.push(row);
         });
         settleOrder(keys.map(k => map[k]));
         return state.order.filter(k => map[k]).map(k => Object.assign(map[k], { slot: state.order.indexOf(k), open: mayLabel(state.who, map[k].project) }));
+      }
+
+      // The groups on screen, in this visit's order. Each keeps its calls
+      // newest first, and its place in the order names its note and heading.
+      function groups() {
+        const fold = folded();
+        return allGroups().filter(g => !(fold && fold.names[g.project]));
+      }
+
+      // Where the folded line stands: the place of the first group in it.
+      function foldSlot(fold) {
+        const first = fold ? allGroups().find(g => fold.names[g.project]) : null;
+        return first ? first.slot : -1;
       }
 
       // Every row, in the order the groups draw them, with its group.
@@ -2570,11 +2586,30 @@
         return rows;
       }
 
-      // Where the keyboard is: the row held in `at`, or the first row when
-      // that one has left the queue some other way.
+      // The places J and K move through: every row, and the folded line
+      // where it stands, whose Show them the keyboard lands on. A visitor
+      // whose only labels are in folded sandboxes reaches them this way.
+      const FOLD_STOP = 'fold';
+      function stops() {
+        const rows = ordered();
+        const fold = folded();
+        const keys = rows.map(x => rowKey(x.row));
+        if (!fold) return keys;
+        const at = foldSlot(fold);
+        const before = rows.findIndex(x => x.g.slot > at);
+        keys.splice(before < 0 ? keys.length : before, 0, FOLD_STOP);
+        return keys;
+      }
+      function onFold() { return state.at === FOLD_STOP && !!folded(); }
+
+      // Where the keyboard is: the row held in `at`, or the folded line; else
+      // the first place, when that one has left the queue some other way.
       function currentIndex(rows) {
+        if (onFold()) return -1;
         const at = rows.findIndex(x => rowKey(x.row) === state.at);
         if (at >= 0) return at;
+        const first = stops()[0];
+        if (first === FOLD_STOP) { state.at = FOLD_STOP; return -1; }
         state.at = rows.length ? rowKey(rows[0].row) : null;
         return rows.length ? 0 : -1;
       }
@@ -2634,7 +2669,7 @@
               : open.length
                 ? html`You can label the ${plural(open.length, 'group')} from visitors' sandboxes, which come first.`
                 : fold
-                  ? 'You can label the calls in visitors\' sandboxes, folded at the end of the queue.'
+                  ? 'You can label the calls in visitors\' sandboxes, folded into one line at the top of the queue: Show them, then label.'
                   : 'You are not signed in, and none of these groups is a sandbox\'s.'}</p>
             <p class="text-xs text-gray-400">Anyone may label a sandbox's calls on this public demo. The other projects' labels are the operator's; their groups read Operator only.</p>
           </div>
@@ -2795,27 +2830,32 @@
         }
         let index = -1;
         const fold = folded();
-        const foldCard = fold ? html`<section class="tf-card tf-ops-fold" data-fold="sandboxes" aria-labelledby="fold-title">
+        // The folded line stands where its groups would, and is a place the
+        // keyboard stops at: on it, Show them has the focus.
+        const foldHere = onFold();
+        const foldCard = fold ? html`<section class="tf-card tf-ops-fold" data-fold="sandboxes" data-current="${foldHere ? 'true' : 'false'}" aria-labelledby="fold-title">
             <span class="tf-ops-att-icon" aria-hidden="true">${T.icon('flask', 16)}</span>
             <div class="min-w-0">
               <h2 id="fold-title" class="tf-ops-group-title">Visitors' sandboxes <span class="tf-ops-count">${num(fold.rows.length)}</span></h2>
               <p class="text-xs text-gray-400 mt-1">${plural(fold.rows.length, 'call')} waiting in ${num(fold.sandboxes)} sandboxes, under ${plural(fold.rules, 'rule')}. Each is a visitor's walkthrough, seeded with the same synthetic calls, and anyone may label them.</p>
             </div>
             <div class="flex flex-wrap gap-2">
-              <button type="button" class="tf-btn tf-btn-sm" data-action="unfold">Show them</button>
+              <button type="button" id="fold-show" class="tf-btn tf-btn-sm${isVisitor(state.who) ? ' tf-btn-primary' : ''}" data-action="unfold" aria-describedby="fold-title">Show them${foldHere ? html`<kbd class="tf-kbd tf-ops-kbd-hint" aria-hidden="true">Enter</kbd>` : ''}</button>
               ${mine ? '' : html`<a class="tf-btn tf-btn-quiet tf-btn-sm" href="#/try">Make your own</a>`}
             </div>
           </section>` : '';
+        const sectionList = sections(list);
+        const foldAt = fold ? sectionList.findIndex(sec => sec.groups[0].slot > foldSlot(fold)) : -1;
         ctx.render(html`${head}
           ${progress(list, fold)}
           ${visitorNote(list, fold)}
           ${keysLegend()}
           <p id="review-error" class="text-xs text-rose-300 mb-3" role="alert"></p>
-          <div class="space-y-4">${sections(list).map((sec, si) => {
+          <div class="space-y-4">${sectionList.map((sec, si) => {
             const w = ruleWords(sec.rule, sec.groups.reduce((all, g) => all.concat(g.items), []));
             const sandboxes = sec.groups.every(g => SANDBOX_NAME.test(g.project));
             const calls = sec.groups.reduce((n, g) => n + g.items.length, 0);
-            return html`<section class="tf-card tf-ops-rsec" aria-labelledby="rule-${si}" data-open="${sec.open ? 'true' : 'false'}">
+            return html`${si === foldAt ? foldCard : ''}<section class="tf-card tf-ops-rsec" aria-labelledby="rule-${si}" data-open="${sec.open ? 'true' : 'false'}">
             <div class="tf-ops-rsec-head">
               <h2 id="rule-${si}" class="tf-ops-group-title">
                 <span class="tf-chip tf-chip-amber font-mono">${T.icon('eye', 13)}${sec.rule}</span>
@@ -2845,7 +2885,7 @@
               })}</ul>
             </div>`)}
           </section>`;
-          })}${foldCard}</div>
+          })}${foldAt < 0 ? foldCard : ''}</div>
           ${state.cursor ? html`<div class="mt-4"><button type="button" class="tf-btn" data-action="more" ${state.loadingMore ? raw('disabled') : ''}>${state.loadingMore ? 'Loading…' : state.full ? 'Load more' : 'Look further back'}</button></div>` : ''}`);
         // A redraw replaces every row, and with them the focus. A reader typing
         // a note keeps the field; one working the queue gets the row back.
@@ -3004,6 +3044,14 @@
       function focusCurrent(say, scroll) {
         const rows = ordered();
         const here = currentIndex(rows);
+        if (onFold()) {
+          const fold = folded();
+          const button = document.getElementById('fold-show');
+          refocus(button);
+          if (scroll !== false && button && typeof button.scrollIntoView === 'function') { try { button.scrollIntoView({ block: 'nearest' }); } catch (err) { /* courtesy */ } }
+          if (say) announce('Visitors\' sandboxes: ' + plural(fold.rows.length, 'call') + ' folded into one line. Press Enter to show them.');
+          return;
+        }
         if (here < 0) return;
         const el = document.getElementById('qrow-' + here);
         refocus(el);
@@ -3013,9 +3061,11 @@
 
       function move(step) {
         const rows = ordered();
-        if (!rows.length) return;
-        const here = currentIndex(rows);
-        state.at = rowKey(rows[Math.max(0, Math.min(rows.length - 1, here + step))].row);
+        const places = stops();
+        if (!places.length) return;
+        currentIndex(rows);
+        const here = Math.max(0, places.indexOf(state.at));
+        state.at = places[Math.max(0, Math.min(places.length - 1, here + step))];
         draw();
         focusCurrent(true);
       }
@@ -3023,6 +3073,9 @@
       function labelCurrent(value) {
         const rows = ordered();
         const here = currentIndex(rows);
+        // The folded line holds calls, but none is on screen to label: the
+        // key takes the reader to Show them instead.
+        if (onFold()) { focusCurrent(true); return; }
         if (here < 0) return;
         const done = label([rows[here].row], value, noteFor(rows[here].g));
         focusCurrent(false);
@@ -3098,10 +3151,17 @@
           const key = el.getAttribute('data-group');
           if (key) state.notes[key] = typeof el.value === 'string' ? el.value.slice(0, 200) : '';
         },
+        // Shown, the folded groups stand where their line stood, and the
+        // keyboard goes to the first of their calls.
         unfold: () => {
+          const fold = folded();
           state.unfold = true;
+          const first = fold ? ordered().find(x => fold.names[x.row.project_name]) : null;
+          if (!first) { draw(); focusTitle(); return; }
+          state.at = rowKey(first.row);
+          state.engaged = true;
           draw();
-          focusTitle();
+          focusCurrent(true);
         },
         'queue-pick': el => {
           const key = el.getAttribute('data-row');
