@@ -834,10 +834,15 @@ SPLIT_ROWS = [
 ]
 
 
+def _split_load(tmp_path: Path, rows: list, sources: str = SPLIT_SOURCES, **totals) -> dict:
+    """The page loaded against an overview with these project rows."""
+    body = _overview(sources + ", by_project: " + json.dumps(rows), **totals).replace("by_project: [], ", "", 1)
+    return _load(tmp_path, overview="{ status: 200, body: " + body + " }")
+
+
 def _split_subs(tmp_path: Path, rows: list, sources: str = SPLIT_SOURCES, **totals) -> tuple:
     """The Stopped and Would-have-been-stopped sub-lines for these project rows, and the strip's markup."""
-    body = _overview(sources + ", by_project: " + json.dumps(rows), **totals).replace("by_project: [], ", "", 1)
-    out = _load(tmp_path, overview="{ status: 200, body: " + body + " }")
+    out = _split_load(tmp_path, rows, sources, **totals)
     subs = [_text(s) for s in re.findall(r'<span class="tf-tile-sub">(.*?)</span>', out["live"], re.S)]
     return subs[1], subs[2], out["live"]
 
@@ -851,13 +856,13 @@ def test_the_stopped_and_would_refuse_tiles_say_where_their_counts_come_from(tmp
     synthetic on the tile itself, not only in the sentence under it.
     """
     stopped, observed, markup = _split_subs(tmp_path, SPLIT_ROWS)
-    assert stopped == ("before they ran: 2 from real agent runs, 15 from the synthetic fleet, 3 from visitors’ sandboxes, "
+    assert stopped == ("before they ran: 2 in real agent runs (see below), 15 from the synthetic fleet, 3 from visitors’ sandboxes, "
                        "17 from probes, page demos and other callers")
     assert observed == "recorded while a project observes: 50 from the synthetic fleet, 7 from visitors’ sandboxes", \
         "Parts with nothing in them are left out"
     assert _metrics(markup) == {"calls": "1,284", "refused": "37", "would_refuse": "57"}, "The tiles' numbers are the stack's own counts"
     assert "in this page’s demo project" not in markup, "Its refusals are within the probes and page demos part"
-    assert 'aria-label="Stopped: 37. before they ran: 2 from real agent runs,' in markup, "The link's label reads the same words"
+    assert 'aria-label="Stopped: 37. before they ran: 2 in real agent runs (see below),' in markup, "The link's label reads the same words"
 
 
 def test_real_runs_are_named_as_such_only_when_the_stack_counts_them_so(tmp_path: Path) -> None:
@@ -871,7 +876,7 @@ def test_real_runs_are_named_as_such_only_when_the_stack_counts_them_so(tmp_path
     """
     other_callers = [dict(row, calls=44) if row["source"] == "live" else row for row in SPLIT_ROWS]
     stopped, _, _ = _split_subs(tmp_path, other_callers)
-    assert stopped.startswith("before they ran: 2 in the projects real agents report to, 15 from the synthetic fleet")
+    assert stopped.startswith("before they ran: 2 in the projects real agents report to (see below), 15 from the synthetic fleet")
     none_refused = [dict(row, refused=0) if row["source"] == "live" else dict(row, refused=16) if row["project"] == "Acme-Probe" else row
                     for row in SPLIT_ROWS]
     stopped, observed, _ = _split_subs(tmp_path, none_refused)
@@ -881,6 +886,56 @@ def test_real_runs_are_named_as_such_only_when_the_stack_counts_them_so(tmp_path
     rows = [dict(row, source="other") if row["source"] == "live" else row for row in none_refused]
     stopped, _, _ = _split_subs(tmp_path, rows, sources=no_live)
     assert "real agent" not in stopped, "With no real run in the window, none is mentioned"
+
+
+def test_a_refusal_in_real_agent_runs_is_counted_not_offered_as_a_right_one(tmp_path: Path) -> None:
+    """A review: the first real refusal on the public stack was a false alarm, and the tile read it as a stop.
+
+    STATE.md: the one refusal of the first live run was a PowerShell read taken
+    for a write. The overview says nothing of a refused call's review, so the
+    tile counts such refusals and points below, and the sentence under the
+    tiles says a refusal can be wrong and opens each project's refused rows,
+    where the reason and any review are.
+    """
+    out = _split_load(tmp_path, SPLIT_ROWS)
+    assert _read(out["where"]).endswith(
+        "A refusal can be wrong. Real agent runs’ refusals, each with its reason and any review: "
+        "2 refused calls in Acme-Live-billing-credit-limit."
+    )
+    links = re.findall(r'<a class="tf-link" href="([^"]+)">(.*?)</a>', out["where"], re.S)
+    assert links == [("https://example.test/prod/dashboard.html#/calls?days=7&amp;kind=refused&amp;project=Acme-Live-billing-credit-limit",
+                      "2 refused calls in Acme-Live-billing-credit-limit")], "The link opens that project's refused rows, in the tile's window"
+    two = SPLIT_ROWS + [{"project": "Acme-Live-warehouse-carrier-notify", "source": "live", "calls": 8, "refused": 1, "would_refuse": 0}]
+    two = [dict(row, refused=13) if row["project"] == "Acme-Probe" else row for row in two]
+    sources = SPLIT_SOURCES.replace("live: { calls: 40, projects: 1 }", "live: { calls: 48, projects: 2 }").replace("other: { calls: 62", "other: { calls: 54")
+    out = _split_load(tmp_path, two, sources=sources)
+    assert _read(out["where"]).endswith(
+        "each with its reason and any review: 2 refused calls in Acme-Live-billing-credit-limit and "
+        "1 refused call in Acme-Live-warehouse-carrier-notify."
+    ), "One link a project"
+    other_callers = [dict(row, calls=44) if row["source"] == "live" else row for row in SPLIT_ROWS]
+    out = _split_load(tmp_path, other_callers)
+    assert "Refusals in the projects real agents report to, each with its reason and any review: 2 refused calls in" in _read(out["where"])
+    none_refused = [dict(row, refused=0) if row["source"] == "live" else dict(row, refused=16) if row["project"] == "Acme-Probe" else row
+                    for row in SPLIT_ROWS]
+    out = _split_load(tmp_path, none_refused)
+    assert "can be wrong" not in out["where"] and "<a " not in out["where"], "With no refusal in real runs, nothing points to one"
+    more = [dict(row, refused=100) if row["project"] == "Acme-Probe" else row for row in SPLIT_ROWS]
+    out = _split_load(tmp_path, more)
+    assert "can be wrong" not in out["where"], "Where the tile gives no split, the sentence points to nothing"
+
+
+def test_a_real_run_project_name_reaches_the_link_as_text(tmp_path: Path) -> None:
+    hostile = 'Acme-Live-"><img src=x onerror=alert(1)>'
+    rows = [dict(row, project=hostile) if row["source"] == "live" else row for row in SPLIT_ROWS]
+    out = _split_load(tmp_path, rows)
+    assert "<img" not in out["where"] and "onerror=alert(1)>" not in out["where"], "Service data reached the page as markup"
+    assert "&lt;img src=x onerror=alert(1)&gt;" in out["where"], "The name is shown, escaped"
+    assert "project=Acme-Live-%22%3E%3Cimg%20src%3Dx%20onerror%3Dalert(1)%3E" in out["where"], "and carried in the link encoded"
+    for missing in (None, "", 7):
+        rows = [dict(row, project=missing) if row["source"] == "live" else row for row in SPLIT_ROWS]
+        stopped, _, _ = _split_subs(tmp_path, rows)
+        assert stopped == "before they ran; 3 in this page’s demo project", f"project {missing!r}: a refusal it cannot point to gives no split"
 
 
 def test_a_split_that_would_contradict_its_tile_is_not_given(tmp_path: Path) -> None:

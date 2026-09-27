@@ -271,6 +271,7 @@
     .tf-proof-where { display: flex; gap: 10px; margin: 0 0 var(--tf-space-1); max-width: 64rem; font-size: 0.8125rem; line-height: 1.3125rem; color: var(--tf-text-3); text-wrap: pretty; }
     .tf-proof-where .tf-icon { width: 16px; height: 16px; margin-top: 2px; flex-shrink: 0; color: var(--tf-info-text); }
     .tf-proof-where strong { color: var(--tf-text-2); font-weight: 600; }
+    .tf-proof-where > span { min-width: 0; overflow-wrap: break-word; }
     .tf-proof-links { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 0; font-size: 0.75rem; color: var(--tf-text-3); }
     #proof .tf-sec-row { margin-bottom: 20px; }
     #proof .tf-sec-head { gap: var(--tf-space-1); }
@@ -2498,18 +2499,18 @@
       };
       const judged = trend('calls', 'Calls judged per day', T.COLORS.accent, calls, 'in ' + span + uncountedDays(rows, daily('calls')));
       const stoppedFrom = sourceSplit(data, 'refused', refused, true);
-      const ownDemos = stoppedFrom ? 0 : demoRefusals(data, refused);
+      const ownDemos = stoppedFrom.words ? 0 : demoRefusals(data, refused);
       const stopped = trend('refused', 'Calls stopped per day', T.COLORS.refused, refused,
-        ownDemos ? 'before they ran; ' + formatCount(ownDemos) + ' in this page’s demo project' : 'before they ran', stoppedFrom);
+        ownDemos ? 'before they ran; ' + formatCount(ownDemos) + ' in this page’s demo project' : 'before they ran', stoppedFrom.words);
       const observed = trend('observed', 'Calls that would have been stopped, per day', T.COLORS.observed, wouldRefuse, 'recorded while a project observes',
-        sourceSplit(data, 'would_refuse', wouldRefuse, false));
+        sourceSplit(data, 'would_refuse', wouldRefuse, false).words);
       const href = params => T.pageHref('dashboard.html#/calls' + T.query(Object.assign({ days: days }, params)));
       T.setHtml(strip, h`
         ${T.statTile({ label: 'Calls judged', metric: 'calls', value: calls, icon: 'shield', sub: judged.sub, spark: judged.spark, href: href({}), opens: 'Open the calls' })}
         ${T.statTile({ label: 'Stopped', term: 'Refused', metric: 'refused', value: refused, icon: 'stop', sub: stopped.sub, spark: stopped.spark, href: href({ kind: 'refused' }), opens: 'Open the refused calls' })}
         ${T.statTile({ label: 'Would have been stopped', term: 'Would refuse', metric: 'would_refuse', value: wouldRefuse, icon: 'eye', sub: observed.sub, spark: observed.spark, href: href({ kind: 'observed' }), opens: 'Open the would-refuse calls' })}`);
       T.animateNumbers(strip);
-      T.setHtml(where, h`${T.icon('info', 16)}<span>${sourcesSentence(data, calls)}</span>`);
+      T.setHtml(where, h`${T.icon('info', 16)}<span>${sourcesSentence(data, calls)}${liveRefusals(stoppedFrom, href)}</span>`);
       where.hidden = false;
     }
 
@@ -2588,34 +2589,59 @@
     // were judged and none of them was refused; the Would-refuse tile does
     // not, because those projects enforce and never observe. Plain words
     // only: the tile repeats its sub-line in its link's label.
+    // A refusal in those projects is counted, never offered as a stop that
+    // was right: the overview says nothing of a refused call's review, and
+    // the first real one on the public stack was a false alarm. So the tile
+    // says "see below", and the rows it points to (liveRefusals) are given
+    // project by project with it, which needs every such row's name.
     const SPLIT_SOURCES = ['live', 'fleet', 'sandbox', 'other'];
     function sourceSplit(data, key, total, sayNone) {
+      const none = { words: '', live: [], real: false };
       const rows = Array.isArray(data.by_project) ? data.by_project : [];
-      if (!rows.length || !(total > 0)) return '';
+      if (!rows.length || !(total > 0)) return none;
       const parts = { live: 0, fleet: 0, sandbox: 0, other: 0 };
+      const liveRows = [];
       let liveCalls = 0;
       for (const row of rows) {
         const source = row && typeof row === 'object' && typeof row.source === 'string' ? row.source : '';
         const n = SPLIT_SOURCES.indexOf(source) === -1 ? null : wholeNumber(row[key]);
-        if (n === null) return '';
+        if (n === null) return none;
         parts[source] += n;
         if (source === 'live') {
           const made = wholeNumber(row.calls);
-          if (made === null) return '';
+          if (made === null) return none;
           liveCalls += made;
+          if (n > 0) {
+            if (typeof row.project !== 'string' || !row.project) return none;
+            liveRows.push({ project: row.project, count: n });
+          }
         }
       }
-      if (SPLIT_SOURCES.reduce((sum, name) => sum + parts[name], 0) !== total) return '';
+      if (SPLIT_SOURCES.reduce((sum, name) => sum + parts[name], 0) !== total) return none;
       const s = data.sources && typeof data.sources === 'object' ? data.sources : null;
       const reported = s && s.live && typeof s.live === 'object' ? wholeNumber(s.live.calls) : null;
       const real = reported !== null && reported > 0 && reported === liveCalls;
       const words = [];
-      if (parts.live) words.push(formatCount(parts.live) + (real ? ' from real agent runs' : ' in the projects real agents report to'));
+      if (parts.live) words.push(formatCount(parts.live) + (real ? ' in real agent runs' : ' in the projects real agents report to') + ' (see below)');
       else if (sayNone && real) words.push('none from real agent runs');
       if (parts.fleet) words.push(formatCount(parts.fleet) + ' from the synthetic fleet');
       if (parts.sandbox) words.push(formatCount(parts.sandbox) + ' from visitors’ sandboxes');
       if (parts.other) words.push(formatCount(parts.other) + ' from probes, page demos and other callers');
-      return words.join(', ');
+      return { words: words.join(', '), live: liveRows, real: real };
+    }
+
+    // What "see below" points to: the refusals in real agent runs, a link per
+    // project to its refused rows, where each has its reason and any review.
+    // A refusal can be wrong, and this page cannot tell which: the overview
+    // counts no review per project, and a row's review is read only by
+    // listing the ledger, too slow for this page. Nothing is said when the
+    // tile gave no such part.
+    function liveRefusals(split, href) {
+      const h = T.html;
+      if (!split.live.length) return '';
+      const links = split.live.map((p, i) => h`${i ? (i === split.live.length - 1 ? ' and ' : ', ') : ''}<a class="tf-link" href="${href({ kind: 'refused', project: p.project })}">${plural(p.count, 'refused call', 'refused calls')} in ${p.project}</a>`);
+      const whose = split.real ? 'Real agent runs’ refusals' : 'Refusals in the projects real agents report to';
+      return h` A refusal can be wrong. ${whose}, each with its reason and any review: ${links}.`;
     }
 
     // A day that counted no call, between days that did, is named in words
