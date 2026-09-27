@@ -368,29 +368,64 @@ transform; objects under `threefold/` in the packaging bucket; the Lambda
 functions, DynamoDB tables, log groups, alarms, alarm topic and fleet schedule
 in eu-west-1 whose names begin `threefold-prod-`; and, because a bucket's,
 a role's, a dashboard's and a budget's ARN carry no Region, only the evidence
-bucket, the two roles, the dashboard and the budget under the names this stack
-gives them. That keeps the edge stack out of reach, although its generated
-bucket names also begin `threefold-prod-`. It may pass the two roles only to
-Lambda and EventBridge Scheduler, and attach to them only the two AWS managed
-policies the Serverless transform attaches.
+bucket, the dashboard and the budget under the names this stack gives them,
+and roles whose names begin `threefold-prod-ThreefoldFunctionRole-` or
+`threefold-prod-DemoFleetScheduleRole-`, the prefixes of the two roles this
+stack generates. That keeps the edge stack out of reach, although its generated
+bucket names also begin `threefold-prod-`. It may pass the function's role
+only to Lambda and the schedule's role only to EventBridge Scheduler, and
+attach to them only the two AWS managed policies the Serverless transform
+attaches.
 
 Where a resource's name cannot be known before it exists, the grant is wider.
 API ids and KMS key ids are generated, so it may call every API Gateway action
-on every API in the account, in any Region, and every key action the template
-needs on every key in the account and Region; `kms:CreateKey` itself names no
-key and is limited to an RSA_2048 signing key, the kind the template declares.
-Those two grants reach the private stack's API and certificate key. It may
+on every API Gateway resource in the account, in any Region: REST, HTTP and
+WebSocket APIs, API keys and their values, custom domain names and their
+mappings, usage plans, VPC links and the account's API Gateway settings. It
+may also call every key action the template needs on every key in the account
+and Region; `kms:CreateKey` itself names no key and is limited to an RSA_2048
+signing key, the kind the template declares. Those two grants reach the
+private stack's API and certificate key. Limiting the API Gateway grant to
+this Region's HTTP APIs and their tags (`arn:aws:apigateway:eu-west-1::/apis`,
+`/apis/*` and `/tags/*`) is the likely next narrowing, but whether that covers
+every call CloudFormation makes for an HTTP API has not been checked, and a
+grant that falls short is found only by a live deploy that rolls back. It may
 also make the log deliveries an HTTP API's access log needs, list functions,
-log groups and dashboards, and read the account's Lambda settings. It cannot
-read Secrets Manager, create users, groups or managed policies, or change
-another stack's CloudFormation, functions, tables, buckets, log groups,
-alarms, topics, schedules or roles, provided that stack's own name does not
-begin `threefold-prod-`: the names in eu-west-1 are matched as a prefix.
+log groups and dashboards, and read the account's Lambda settings. Its own
+grants do not let it read Secrets Manager, create users, groups or managed
+policies, or change another stack's CloudFormation, functions, tables,
+buckets, log groups, alarms, topics, schedules or roles, provided that
+stack's own name does not begin `threefold-prod-`: the names in eu-west-1
+are matched as a prefix. Through the roles it may create, though, it can do
+all of those things, as the next paragraph explains.
 
-It can write any inline policy on either role and pass that role to a function
-it creates, so its reach is in practice that of an account administrator.
-Anyone who can push to `main` can change what the workflow runs with it: treat
-write access to the repository as administrative access to the account.
+Its IAM grants name the roles by prefix, because CloudFormation appends a
+random suffix to each generated role name. So the deploy role can create any
+number of roles whose names begin `threefold-prod-ThreefoldFunctionRole-` or
+`threefold-prod-DemoFleetScheduleRole-`. It can give each any trust policy,
+rewrite the trust policy of an existing one, the live function's role
+included, with `iam:UpdateAssumeRolePolicy`, and put any inline policy on it.
+A role that trusts a principal outside the account and carries a policy
+allowing every action is access that outlives the one-hour session and
+survives the deletion of `threefold-github-deploy`. Assuming a role needs no
+`iam:PassRole`, so the PassRole limits above do not stop this. Its reach is
+therefore that of an account administrator, and it can make that reach
+last. Anyone who can push to `main` can change what the workflow runs with
+it: treat write access to the repository as administrative access to the
+account.
+
+Nothing caps this today. The remedy is a permissions boundary, in three
+parts: a managed policy the owner creates, allowing at most what the function
+and the schedule need; `PermissionsBoundary` set to that policy on the
+function and on `DemoFleetScheduleRole` in `deploy/template.yml`; and an
+`iam:PermissionsBoundary` condition requiring it on the deploy role's
+`iam:CreateRole`, `iam:PutRolePolicy` and `iam:AttachRolePolicy`. The deploy
+role holds no grant to put or delete a role's boundary and must not be given
+one. The condition key does not apply to `iam:UpdateAssumeRolePolicy`, so the
+role could still make a bounded role assumable from outside the account: the
+boundary caps what that hands out at what the boundary allows, rather than
+closing the path. The boundary changes the template and the live roles, so it
+is a change of its own and not part of this policy.
 
 ## 9. Roll back
 
