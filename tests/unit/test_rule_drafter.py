@@ -7,6 +7,7 @@ synthetic, as the clean-room rule requires.
 """
 from __future__ import annotations
 
+import copy
 import json
 import re
 from pathlib import Path
@@ -462,7 +463,22 @@ def test_the_route_builds_its_client_with_its_own_cap_and_drafting_timeouts(monk
     config = built[0]["config"]
     assert config.read_timeout == DRAFT_CLIENT_TIMEOUTS["read_timeout"]
     assert config.connect_timeout == DRAFT_CLIENT_TIMEOUTS["connect_timeout"]
-    assert config.retries["max_attempts"] == 1, "A retry would double a bill and blow the deadline"
+    # One request per call, as botocore counts it. A Config's max_attempts
+    # counts retries and botocore adds one for the first request, so a
+    # max_attempts of 1 sent an unanswered call twice; the attempts are read
+    # from a client botocore built, offline, from the route's own Config.
+    botocore_session = pytest.importorskip("botocore.session")
+    monkeypatch.delenv("AWS_PROFILE", raising=False)
+    runtime = botocore_session.get_session().create_client(
+        "bedrock-runtime",
+        region_name="eu-west-1",
+        aws_access_key_id="synthetic",
+        aws_secret_access_key="synthetic",
+        config=copy.deepcopy(config),
+    )
+    assert runtime.meta.config.retries["total_max_attempts"] == 1, (
+        "A retry would double a bill and blow the deadline"
+    )
 
 
 def test_offline_the_route_builds_no_runtime_even_with_its_own_session(monkeypatch) -> None:

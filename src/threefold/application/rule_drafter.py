@@ -65,17 +65,20 @@ DRAFT_MAX_TOKENS = 400
 # drafting client therefore gets its own read timeout of five seconds, still
 # with no retry. No live latency has been measured here; every draft reports
 # its own in the RuleDraftLatencyMs metric, so the first live ones measure it.
+# The retry setting is total_max_attempts, the requests including the first.
+# A Config's max_attempts counts retries, and botocore adds one for the first
+# request, so a max_attempts of 1 sent a call that got no answer twice.
 DRAFT_CLIENT_TIMEOUTS = {
     "connect_timeout": 1,
     "read_timeout": 5,
-    "retries": {"max_attempts": 1, "mode": "standard"},
+    "retries": {"total_max_attempts": 1, "mode": "standard"},
 }
 
-# One repair and no more. The function has fifteen seconds, and one call waits
-# at most one second to connect and five to read, so two calls take at most
-# twelve seconds and leave three for the rest of the request; a third would
-# not fit. A model that cannot produce a valid rule twice from a clear error is
-# not going to on the third attempt either.
+# One repair and no more. The function has fifteen seconds, and one call, sent
+# once, waits at most one second to connect and five to read, so two calls
+# take at most twelve seconds and leave three for the rest of the request; a
+# third would not fit. A model that cannot produce a valid rule twice from a
+# clear error is not going to on the third attempt either.
 MAX_ATTEMPTS = 2
 
 # How deeply a usable answer can nest. A rule is an object holding lists of

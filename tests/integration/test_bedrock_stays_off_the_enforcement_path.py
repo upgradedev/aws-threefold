@@ -12,6 +12,7 @@ published example key.
 """
 from __future__ import annotations
 
+import copy
 import json
 
 import pytest
@@ -200,9 +201,9 @@ def test_prompt_safe_leaves_short_clean_text_alone() -> None:
     assert prompt_safe("cat README.md") == "cat README.md"
 
 
-def test_the_client_waits_seconds_rather_than_minutes() -> None:
+def test_the_client_waits_seconds_rather_than_minutes(monkeypatch) -> None:
     """botocore's defaults are a 60 second read and three retries, on every call."""
-    pytest.importorskip("botocore")
+    botocore_session = pytest.importorskip("botocore.session")
     captured = {}
 
     class _Session:
@@ -216,4 +217,15 @@ def test_the_client_waits_seconds_rather_than_minutes() -> None:
     assert config is not None, "The client was built on botocore's defaults"
     assert config.connect_timeout == CLIENT_TIMEOUTS["connect_timeout"] == 1
     assert config.read_timeout == CLIENT_TIMEOUTS["read_timeout"] == 2.5
-    assert config.retries == {"max_attempts": 1, "mode": "standard"}
+    # One request and no retry, as botocore counts it: a Config's max_attempts
+    # counts retries and botocore adds one for the first request, so the
+    # attempts are read from a client botocore built, offline, from this Config.
+    monkeypatch.delenv("AWS_PROFILE", raising=False)
+    client = botocore_session.get_session().create_client(
+        "bedrock-runtime",
+        region_name="eu-west-1",
+        aws_access_key_id="synthetic",
+        aws_secret_access_key="synthetic",
+        config=copy.deepcopy(config),
+    )
+    assert client.meta.config.retries["total_max_attempts"] == 1, "A retry doubles the wait for a fallback"
