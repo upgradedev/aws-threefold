@@ -180,8 +180,11 @@ def _self_correction(days: int, project: Optional[str]) -> Dict[str, Any]:
 
 
 # What the figure reads of a ledger row: the fields the count itself reads,
-# and the project, which the window is filtered by.
-SELF_CORRECTION_READ = insights.SELF_CORRECTION_FIELDS + ("project_name",)
+# the project, which the window is filtered by, and the developer. The count
+# never reads the developer. It is kept so each row the figure reads is still
+# a row as a page shows it, its developer reduced to a hash, which is what a
+# test of the figure holds every such row to.
+SELF_CORRECTION_READ = insights.SELF_CORRECTION_FIELDS + ("project_name", "developer_id")
 
 
 def _self_correction_reader(reader: Callable[..., Any]) -> Callable[..., Any]:
@@ -193,7 +196,7 @@ def _self_correction_reader(reader: Callable[..., Any]) -> Callable[..., Any]:
     failure gives the unread figure, which says it is not complete.
 
     The figure reads up to ledger.SELF_CORRECTION_ROWS rows on every overview
-    and every project page, and eight fields of each. Asked for those alone,
+    and every project page, and nine fields of each. Asked for those alone,
     the store sends and parses about a third of the attributes it did; the
     rows it reads, and so `rows_read` and `complete`, are the same.
     """
