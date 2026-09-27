@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="tf-repository" content="https://github.com/upgradedev/aws-threefold" />
   <title>Threefold — Operations</title>
   <meta name="description" content="Threefold operations dashboard: what every coding agent's tool call was judged, by project, rule and agent, with the two-stage rollout from Observe to Enforce." />
   <!-- Tailwind CSS via CDN, pinned to an exact version: an unpinned major is a
@@ -6393,7 +6394,9 @@
     }
 
     // The public repository every evidence path is a file of.
-    const REPOSITORY = 'https://github.com/upgradedev/aws-threefold';
+    // The repository the evidence links open, read from the page's markup: a
+    // link to it is somewhere to go, never something the page loads.
+    const REPOSITORY = (document.querySelector('meta[name="tf-repository"]') || {}).content || '';
     const isReport = path => /\.md$/i.test(path);
     const isRows = path => /\.jsonl$/i.test(path);
 

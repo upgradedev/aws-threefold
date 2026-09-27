@@ -11,6 +11,7 @@ Those skip where Node is absent; the rest of the suite needs nothing but Python.
 """
 from __future__ import annotations
 
+import html
 import json
 import re
 import shutil
@@ -57,6 +58,9 @@ function makeEl(id) {
   return node;
 }
 function el(id) { return elements[id] || (elements[id] = makeEl(id)); }
+// The page's own <meta name> tags, as its markup has them: a page may read a
+// value from its head rather than carry it in script.
+let PAGE_META = {};
 const docListeners = {};
 globalThis.window = globalThis;
 globalThis.document = {
@@ -64,6 +68,10 @@ globalThis.document = {
   addEventListener: (t, fn) => { (docListeners[t] = docListeners[t] || []).push(fn); },
   removeEventListener: (t, fn) => { docListeners[t] = (docListeners[t] || []).filter(f => f !== fn); },
   querySelectorAll: () => [],
+  querySelector: sel => {
+    const m = /^meta\[name="([^"]+)"\]$/.exec(String(sel));
+    return m && Object.prototype.hasOwnProperty.call(PAGE_META, m[1]) ? { content: PAGE_META[m[1]] } : null;
+  },
   visibilityState: 'visible',
   activeElement: null,
   title: ''
@@ -165,6 +173,11 @@ def page_source(filename: str) -> str:
     return served
 
 
+def page_meta(markup: str) -> dict[str, str]:
+    """The page's <meta name=... content=...> pairs, decoded as a browser decodes them."""
+    return {name: html.unescape(content) for name, content in re.findall(r'<meta\s+name="([^"]+)"\s+content="([^"]*)"', markup)}
+
+
 def inline_scripts(markup: str) -> list[str]:
     return re.findall(r"<script>(.*?)</script>", markup, re.S)
 
@@ -182,7 +195,7 @@ def run(page: str, scenario: str, tmp_path: Path, before: str = "", shared: bool
     scripts = inline_scripts(markup)
     assert scripts, f"{page} carries no inline script"
     layer = page_source("assets/threefold.js") if shared else ""
-    where = f"location.pathname = {json.dumps(pathname or '/prod/' + page)};\n"
+    where = f"location.pathname = {json.dumps(pathname or '/prod/' + page)};\nPAGE_META = {json.dumps(page_meta(markup))};\n"
     program = tmp_path / "page.js"
     program.write_text(
         STUB
