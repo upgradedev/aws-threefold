@@ -7,8 +7,10 @@ on show. `404.html` is that page. It is answered at any depth (`/nope.html`,
 beside the address asked for. The edge serves it with status 404 on the pages'
 behavior alone, and only for a page address (no file type, or .html): the two
 functions in `deploy/edge.yml`, held by `tests/unit/test_edge_page_not_found.py`.
-A missing script keeps the bucket's 404 and an API path its problem document,
-so the page claims no more than that.
+A missing script keeps the bucket's 404 and a path an API behavior takes the
+API's own answer, so the page claims no more than that. The page is also
+published at /404.html and answered there with 200, so its footer says where
+the 404 is answered rather than that this answer is one.
 """
 from __future__ import annotations
 
@@ -38,8 +40,9 @@ def test_the_shared_layer_is_linked_from_the_root_so_any_depth_finds_it() -> Non
 
 def test_the_page_claims_only_the_addresses_the_edge_answers_it_for() -> None:
     page = _page()
-    assert "<span>Served with status 404 for a page address that has no page</span>" in page
-    assert "any address" not in page, "a missing script or an API path is not answered with this page"
+    assert "<span>Answered with status 404 wherever a page address has no page</span>" in page
+    assert "any address" not in page, "a missing script or a path an API behavior takes is not answered with this page"
+    assert "an API path" not in page, "a bare API prefix such as /api falls through to the pages and gets this page"
     assert "/docs/x.md" not in page, "a file of another type keeps the bucket's own 404"
 
 
