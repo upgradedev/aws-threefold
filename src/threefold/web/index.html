@@ -478,8 +478,7 @@
        there is more beyond it; the lines' own background covers the glow once
        the reader has scrolled to that edge, and the text is drawn over both.
        Beside the gates on a desk it never stretches to their height as an
-       empty pane, and the cell beside it holds only the gates and the
-       sentence, so the two end near each other. */
+       empty pane, nor grows past them: see .tf-terminal-well. */
     .tf-terminal {
       min-height: 18.5rem; max-height: 24rem; overflow-y: auto; padding: 12px 14px; border-radius: var(--tf-radius-md); border: 1px solid var(--tf-hairline);
       background:
@@ -490,8 +489,21 @@
         var(--tf-ink-0);
       font: 400 0.75rem/1.25rem var(--tf-font-mono); color: var(--tf-text-2);
     }
+    /* Its lines scroll past the cap, so the keyboard can reach it and scroll
+       them, and the ring keeps the terminal's own corners. */
+    .tf-terminal:focus-visible { border-radius: var(--tf-radius-md); }
     @media (min-width: 640px) { .tf-terminal { min-height: 11rem; } }
     @media (min-width: 1024px) { .tf-terminal { min-height: 13.5rem; } }
+    /* On a desk the gates' cell sets the row's height, and the terminal takes
+       what that leaves under its bar: as tall as its lines up to there, never
+       past it, and past it its lines scroll with the newest in view. The well
+       asks the row for no more than the terminal's minimum (13.5rem and its
+       padding and border, 26px), so a long run of lines, a recorded replay's
+       above all, no longer leaves the gates' column an empty field. */
+    @media (min-width: 1024px) {
+      .tf-terminal-well { display: flex; flex-direction: column; flex: 1 1 0px; min-height: calc(13.5rem + 26px); }
+      .tf-terminal-well > .tf-terminal { flex: 0 1 auto; }
+    }
     /* Before any scenario, the terminal says what each one will send. */
     .tf-log-key { color: var(--tf-text); }
     @media (min-width: 640px) { .tf-log-key { display: inline-block; min-width: 9.5rem; } }
@@ -520,13 +532,16 @@
     .tf-fix ol { padding-left: 20px; color: var(--tf-text-3); }
     .tf-fix-path { font: 400 0.6875rem/1rem var(--tf-font-mono); color: var(--tf-text-3); }
     .tf-fix pre { margin: 0; padding: 8px 10px; border-radius: var(--tf-radius); background: var(--tf-ink-0); border: 1px solid var(--tf-hairline); font: 400 0.6875rem/1.125rem var(--tf-font-mono); color: var(--tf-text); white-space: pre; overflow-x: auto; }
-    /* Each proposed file under its path. Across the panel's width on a desk,
-       the files stand side by side and the words above them keep to a
+    /* Each proposed file under its path, whole: two files stand side by side
+       only where each column holds a line of about 88 characters (38rem at
+       the files' size), and below that, which is every width this page has
+       today, one goes under the other at the panel's full width rather than
+       cut its lines at the edge. On a desk the words above them keep to a
        reading width. */
     .tf-fix-writes { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px 16px; align-items: start; }
     .tf-fix-write { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
     @media (min-width: 1024px) {
-      .tf-fix-writes { grid-template-columns: repeat(auto-fit, minmax(22rem, 1fr)); }
+      .tf-fix-writes { grid-template-columns: repeat(auto-fit, minmax(min(100%, 38rem), 1fr)); }
       .tf-fix > p, .tf-fix > ol { max-width: 52rem; }
     }
     .tf-cert { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border-radius: var(--tf-radius-md); background: var(--tf-approved-soft); border: 1px solid var(--tf-approved-line); }
@@ -968,13 +983,15 @@
         <div class="tf-result-grid">
           <div class="tf-result-pane">
             <div class="tf-terminal-bar"><span>agent-telemetry-stream</span><span id="terminal-badge" class="tf-chip tf-chip-gray">Idle</span></div>
-            <div id="terminal-log" class="tf-terminal" role="log" aria-label="What the agent sent and what came back">
-              <p class="tf-log tf-log-muted">// Ready. Each scenario sends real calls to this stack and prints what comes back; with no answer, the first four replay a recorded run.</p>
-              <p class="tf-log"><span class="tf-log-key">1 · Loop</span> <span class="tf-log-route"><span class="tf-nobr">POST /simulate-loop</span></span></p>
-              <p class="tf-log"><span class="tf-log-key">2 · Credential</span> <span class="tf-log-route"><span class="tf-nobr">POST /simulate-secret</span></span></p>
-              <p class="tf-log"><span class="tf-log-key">3 · Architecture</span> <span class="tf-log-route"><span class="tf-nobr">POST /evaluate-tool-call</span></span></p>
-              <p class="tf-log"><span class="tf-log-key">4 · Certificate</span> <span class="tf-log-route"><span class="tf-nobr">POST /evaluate-tool-call ×4,</span> <span class="tf-nobr">POST /issue-certificate</span></span></p>
-              <p class="tf-log"><span class="tf-log-key">Adapter</span> <span class="tf-log-route"><span class="tf-nobr">POST /adapter/universal-tool-call</span></span></p>
+            <div class="tf-terminal-well">
+              <div id="terminal-log" class="tf-terminal" role="log" tabindex="0" aria-label="What the agent sent and what came back">
+                <p class="tf-log tf-log-muted">// Ready. Each scenario sends real calls to this stack and prints what comes back; with no answer, the first four replay a recorded run.</p>
+                <p class="tf-log"><span class="tf-log-key">1 · Loop</span> <span class="tf-log-route"><span class="tf-nobr">POST /simulate-loop</span></span></p>
+                <p class="tf-log"><span class="tf-log-key">2 · Credential</span> <span class="tf-log-route"><span class="tf-nobr">POST /simulate-secret</span></span></p>
+                <p class="tf-log"><span class="tf-log-key">3 · Architecture</span> <span class="tf-log-route"><span class="tf-nobr">POST /evaluate-tool-call</span></span></p>
+                <p class="tf-log"><span class="tf-log-key">4 · Certificate</span> <span class="tf-log-route"><span class="tf-nobr">POST /evaluate-tool-call ×4,</span> <span class="tf-nobr">POST /issue-certificate</span></span></p>
+                <p class="tf-log"><span class="tf-log-key">Adapter</span> <span class="tf-log-route"><span class="tf-nobr">POST /adapter/universal-tool-call</span></span></p>
+              </div>
             </div>
           </div>
           <div class="tf-result-pane">
@@ -1295,6 +1312,14 @@
     };
     const DEMO_PROJECT = "Acme-Core";
 
+    // A recorded reason is a clause with no stop of its own. Followed by
+    // another sentence, as the loop's cost and the credential's quarantine
+    // follow theirs, it is given one, or the two read as one sentence.
+    function asSentence(text) {
+      const words = String(text).trim();
+      return SENTENCE_STOP_AT_END.test(words) ? words : words + '.';
+    }
+
     function renderRecordedExplanation(text) {
       document.getElementById('bedrock-box').innerHTML =
         `<strong>Recorded ${RECORDED.recorded_at}, replayed offline, no model was reached now:</strong> ${escapeHtml(text)}`;
@@ -1551,6 +1576,19 @@
       log.scrollTop = log.scrollHeight;
     }
 
+    // On a desk the terminal's height follows the cell beside it, so it can
+    // change after the last line is written, as when the window is resized.
+    // A browser keeps the end in view as a scrolled box grows, not as it
+    // shrinks; this keeps the newest line in view both ways, unless the
+    // reader has scrolled up to an earlier one.
+    (function followTheNewestLine() {
+      const log = document.getElementById('terminal-log');
+      if (!log || typeof ResizeObserver !== 'function') return;
+      let atEnd = true;
+      log.addEventListener('scroll', () => { atEnd = log.scrollTop + log.clientHeight >= log.scrollHeight - 2; });
+      new ResizeObserver(() => { if (atEnd) log.scrollTop = log.scrollHeight; }).observe(log);
+    })();
+
     async function simulateLoop() {
       resetDemo(true);
       markScenario('loop');
@@ -1604,7 +1642,7 @@
       setInvariants('loop');
       setSpendFrom(loop);
 
-      renderRecordedExplanation(`${loop.reason} Recorded session cost $${loop.current_session_cost_usd.toFixed(4)}.`);
+      renderRecordedExplanation(`${asSentence(loop.reason)} Recorded session cost $${loop.current_session_cost_usd.toFixed(4)}.`);
     }
 
     async function simulateSecret() {
@@ -1650,7 +1688,7 @@
       setVerdictTag(leak.status, 'refused');
       setInvariants('secret');
 
-      renderRecordedExplanation(`${leak.reason} The recorded run quarantined it before transmission.`);
+      renderRecordedExplanation(`${asSentence(leak.reason)} The recorded run quarantined it before transmission.`);
     }
 
     async function simulateBoundary() {
@@ -1700,7 +1738,7 @@
       setVerdictTag(wall.status, 'refused');
       setInvariants('boundary');
 
-      renderRecordedExplanation(wall.reason);
+      renderRecordedExplanation(asSentence(wall.reason));
     }
 
     async function simulateCompliant() {

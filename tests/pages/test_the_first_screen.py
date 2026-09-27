@@ -220,7 +220,9 @@ def test_each_length_of_time_is_said_where_it_is_true() -> None:
         "The walkthrough gives another figure now: the button that opens it must say the same"
     label = {ident: words for ident, _, words in ACTIONS}["hero-try"]
     assert label.endswith("— 2 min") and "60" not in _text(_hero()), "The hero's button says the walkthrough's length"
-    assert "in under 60 seconds with no account" in (ROOT / "CLAUDE.md").read_text(encoding="utf-8")
+    # The page's own words are pinned below; of the owner's rule only its figure
+    # is checked, so rewording rule 6 does not fail a page that has not changed.
+    assert "60 seconds" in (ROOT / "CLAUDE.md").read_text(encoding="utf-8"), "CLAUDE.md rule 6 gives another figure now"
     lede = re.search(r'<p id="gates-lede"[^>]*>(.*?)</p>', _section("watch-the-gates"), re.S)
     assert lede and _text(lede.group(1)).endswith(
         "The circuit breaker halting a loop (Scenario 1) and a governance certificate (Scenario 4) take one click each, "
