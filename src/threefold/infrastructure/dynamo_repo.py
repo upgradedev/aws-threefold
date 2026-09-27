@@ -746,8 +746,8 @@ class DynamoDBSessionRepository:
         than quietly defaulted. On a busy day this is most of what a page
         costs, because every attribute of every row is parsed on the way in
         and a row carries some thirty. The page is the same rows either way:
-        `limit` counts rows, and a page of them is far below the megabyte at
-        which the table would cut one short.
+        `limit` counts rows, and the megabyte at which the table cuts a page
+        short is measured on the rows as stored, before any projection.
         """
         partition = f"{DECISION_PARTITION}#{day}"
         if self._table is not None:

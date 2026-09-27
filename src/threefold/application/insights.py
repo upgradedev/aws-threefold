@@ -244,10 +244,11 @@ SELF_CORRECTION_WINDOW = 10
 SELF_CORRECTION_ORIGINS = ("hook", "ci")
 
 # Every field of a ledger row `self_correction` reads, and nothing else it
-# reads. The overview asks the ledger for these alone: it reads up to two
-# thousand rows for this one figure, and parsing the other twenty-odd fields
-# of each was most of what the page cost. A field read here and not named
-# here would be missing from those rows, so a test holds the two together.
+# reads. The overview asks the ledger for these and the two its read filters
+# and reduces a row by, and no more: it reads up to two thousand rows for
+# this one figure, and parsing the other twenty-odd fields of each was most
+# of what the page cost. A field read here and not named here would be
+# missing from those rows, so a test holds the two together.
 SELF_CORRECTION_FIELDS = ("session_id", "timestamp", "verdict_id", "origin", "status", "target", "action_type")
 
 
