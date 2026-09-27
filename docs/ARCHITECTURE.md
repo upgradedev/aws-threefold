@@ -535,9 +535,12 @@ gives Claude Code or Codex one of the benchmark's Acme tasks through the edge,
 in an `Acme-Live-<task>` project that starts in Enforce. On 2026-09-27
 `benchmark/results/live/` holds two runs, Codex on 2026-09-26 and Claude Code
 on 2026-09-27; its schedule on that machine is the owner's to create
-**[STATE-FILE]**. The overview keeps four sources apart, `fleet`,
-`live`, `sandbox` and `other` (`application/rollups.py`, `source_of`), and a
-page on the public stack says in words that the fleet is synthetic.
+**[STATE-FILE]**. The overview keeps five sources apart, `fleet`,
+`live`, `probe`, `sandbox` and `other` (`application/rollups.py`,
+`source_of`): `probe` is `Acme-Probe`, the project the service's own live
+probes (`scripts/probe_live.py`) send their calls as, and like `fleet` and
+`live` it is told apart only on the stack that runs the fleet. A page on the
+public stack says in words that the fleet and the probes are synthetic.
 
 Only aggregate numbers from the private stack may ever reach a public page,
 through `scripts/build_proof.py`, which refuses to write if any string in its
