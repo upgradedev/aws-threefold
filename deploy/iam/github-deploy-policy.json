@@ -185,15 +185,27 @@
       "Resource": "arn:aws:cloudwatch::308857099262:dashboard/threefold-prod-*"
     },
     {
+      "Sid": "CreatingAKeyNamesNoKeySoOnlyItsKindIsScoped",
+      "Effect": "Allow",
+      "Action": "kms:CreateKey",
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "kms:KeySpec": "RSA_2048",
+          "kms:KeyUsage": "SIGN_VERIFY"
+        }
+      }
+    },
+    {
       "Sid": "KeysHaveRandomIdsSoOnlyTheAccountIsScoped",
       "Effect": "Allow",
       "Action": [
-        "kms:CreateKey",
         "kms:DescribeKey",
         "kms:GetKeyPolicy",
         "kms:PutKeyPolicy",
         "kms:EnableKeyRotation",
         "kms:GetKeyRotationStatus",
+        "kms:UpdateKeyDescription",
         "kms:TagResource",
         "kms:UntagResource",
         "kms:ListResourceTags",
@@ -252,7 +264,7 @@
         "iam:CreateRole",
         "iam:DeleteRole",
         "iam:GetRole",
-        "iam:PassRole",
+        "iam:UpdateAssumeRolePolicy",
         "iam:PutRolePolicy",
         "iam:DeleteRolePolicy",
         "iam:GetRolePolicy",
@@ -262,6 +274,20 @@
         "iam:UntagRole"
       ],
       "Resource": "arn:aws:iam::308857099262:role/threefold-prod-*"
+    },
+    {
+      "Sid": "PassTheRolesOnlyToTheServicesThatRunThem",
+      "Effect": "Allow",
+      "Action": "iam:PassRole",
+      "Resource": "arn:aws:iam::308857099262:role/threefold-prod-*",
+      "Condition": {
+        "StringEquals": {
+          "iam:PassedToService": [
+            "lambda.amazonaws.com",
+            "scheduler.amazonaws.com"
+          ]
+        }
+      }
     },
     {
       "Sid": "OnlyTheManagedPoliciesTheTransformAttaches",
