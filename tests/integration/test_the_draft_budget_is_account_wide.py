@@ -14,9 +14,33 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List
 
-from threefold.infrastructure.dynamo_repo import DynamoDBSessionRepository
+import pytest
+
+from threefold.infrastructure.dynamo_repo import DRAFT_BUDGET_PREFIX, DynamoDBSessionRepository
 from threefold.interfaces import api_handlers as router
 from threefold.interfaces import draft_routes
+
+
+def _spend_nothing_yet() -> None:
+    store = getattr(router._evaluator.session_repo, "_memory_store", None) or {}
+    for key in [k for k in store if k.startswith(DRAFT_BUDGET_PREFIX)]:
+        del store[key]
+
+
+@pytest.fixture(autouse=True)
+def _the_day_starts_unspent():
+    """Each test here starts with the account's drafting budget unclaimed.
+
+    The route claims from the handler's module-level store, which lives as long
+    as the process, like the rate limiter the suite already resets. Any earlier
+    test that drafts through the handler, such as the security test that checks
+    an anonymous draft stays open, claims today's calls there, and the tests
+    below that count to a cap of two would then start with the day spent.
+    Cleared again afterwards so the claims made here reach no later test.
+    """
+    _spend_nothing_yet()
+    yield
+    _spend_nothing_yet()
 
 
 class _FakeTable:
