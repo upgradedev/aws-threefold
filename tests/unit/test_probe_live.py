@@ -821,8 +821,7 @@ def test_contract_endpoints_not_deployed_yet_are_skipped_not_failed(monkeypatch)
         "availability/page /dashboard.html",
         "availability/page /app",
         "application/overview shape",
-        "application/overview sources add up to its totals",
-        "application/overview self-correction adds up",
+        *OVERVIEW_SINCE_CHECKS,
         "application/decisions pagination",
         "application/sandbox created",
         "distribution/install.py names this stack",
@@ -867,7 +866,9 @@ def test_the_overview_s_fields_added_since_the_contract_are_checked_where_they_a
     assert re.search(r"fleet 4 \+ other \d+ \+ sandbox 3 = totals\.calls \d+", checks[OVERVIEW_SINCE_CHECKS[0]].evidence)
     assert "3 coding agent(s) = totals.coding_agents" in checks[OVERVIEW_SINCE_CHECKS[1]].evidence
     assert "6 of 9 refusals with a later call corrected, rate 0.6667" in checks[OVERVIEW_SINCE_CHECKS[3]].evidence
-    # The one answer is read for all of them: no second request, so no second bounded ledger read on the stack.
+    # The application group reads one answer for all of them: the four checks add no request of their own, so no
+    # second bounded ledger read on the stack. A full run reads the overview in the access and contract groups
+    # too, as it did before these checks, which is why only these two groups are run here.
     assert sum(1 for _, url, _, _ in stack.log if urlparse(url).path.endswith("/api/overview")) == 1
 
 
@@ -1636,7 +1637,21 @@ def test_the_checks_hold_for_what_the_code_itself_writes(monkeypatch):
     assert _checked(overview) == dict.fromkeys(OVERVIEW_CHECKS, [])
 
 
-ODD_VALUES = (None, True, -1, 1.5, float("nan"), 10**400, "", "x", [], [None], {}, {"calls": "1"})
+def test_the_probe_s_kinds_and_sources_are_the_ones_the_code_defines():
+    """The probe keeps its own copies, so a kind or a source changed in rollups fails here, not against a stack."""
+    from threefold.application import rollups
+
+    # Every kind agent_kind can give, and no other: a kind added to the table
+    # without the probe learning it would fail a stack that is right.
+    assert set(probe_live.AGENT_KINDS) == set(rollups.AGENT_KINDS.values()) | {rollups.UNKNOWN_KIND}
+    assert probe_live.CODING_AGENT == rollups.CODING_AGENT
+    # A subset, not equality: the probe requires only sources every stack
+    # names and accepts any other of the same shape. Requiring a source the
+    # code adds later would fail every stack deployed before it.
+    assert set(probe_live.SOURCES) <= set(rollups.SOURCES)
+
+
+ODD_VALUES =(None, True, -1, 1.5, float("nan"), 10**400, "", "x", [], [None], {}, {"calls": "1"})
 
 
 def test_no_answer_however_malformed_crashes_a_check():
