@@ -398,7 +398,7 @@
   <a href="#view" class="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[80] tf-btn">Skip to content</a>
 
   <header class="sticky top-0 z-40 border-b border-gray-800 bg-gray-950/85 backdrop-blur">
-    <div class="max-w-7xl mx-auto px-4 h-14 flex items-center gap-3">
+    <div class="tf-container h-14 flex items-center gap-3">
       <a href="#/overview" class="flex items-center gap-2.5 shrink-0" aria-label="Threefold overview">
         <span class="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 via-purple-600 to-pink-600 flex items-center justify-center shadow-lg shadow-purple-500/20" aria-hidden="true">
           <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="#fff" stroke-width="1.8"><path d="M10 2.5 16 5v4.5c0 4-2.6 6.8-6 8-3.4-1.2-6-4-6-8V5l6-2.5z"/><path d="m7.5 10 1.8 1.8L13 8"/></svg>
@@ -420,7 +420,7 @@
     </div>
   </header>
 
-  <main class="flex-1 w-full max-w-7xl mx-auto px-4 py-6">
+  <main class="flex-1 tf-container py-6">
     <div id="view" tabindex="-1" class="outline-none">
       <noscript>
         <div class="tf-card p-6 space-y-2">
@@ -3996,7 +3996,7 @@
 .tf-try .tf-try-restart { display: none; }
 @media (min-width: 640px) { .tf-try-lede { display: block; } .tf-try-lede-short { display: none; } }
 
-.tf-try-rail { position: sticky; top: var(--tf-header-h); z-index: 30; margin: 0 -16px; padding: 10px 16px;
+.tf-try-rail { position: sticky; top: var(--tf-header-h); z-index: 30; margin: 0 calc(-1 * var(--tf-gutter)); padding: 10px var(--tf-gutter);
   background: color-mix(in srgb, var(--tf-bg) 90%, transparent); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
   border-top: 1px solid var(--tf-hairline); border-bottom: 1px solid var(--tf-hairline); }
 .tf-try-steps { list-style: none; margin: 0; padding: 0; display: flex; align-items: center; gap: 8px; }
@@ -6085,8 +6085,6 @@
     // section the snapshot does not carry reads "not measured yet", never a
     // zero. Nothing here computes a figure of its own.
     const PROOF_SUB = 'What Threefold has been measured to do, and how. Every figure names where it came from and when it was taken.';
-    // The public repository the evidence files are in.
-    const REPOSITORY = 'https://github.com/upgradedev/aws-threefold';
     // Below this many labels, a false-alarm rate says more than it knows.
     const FEW_LABELS = 30;
 
@@ -6385,7 +6383,7 @@
         <div class="mt-4 pt-3 border-t border-gray-800">
           <p class="tf-label">Evidence</p>
           ${items.length ? html`<ul class="space-y-1.5" data-proof="evidence">${items.map(evidenceItem)}</ul>` : notMeasured('The snapshot names no evidence file.')}
-          ${items.length && !linked ? html`<p class="text-xs text-gray-500 mt-2">Each is a file in the Threefold repository, <a class="tf-link" href="${REPOSITORY}" rel="noopener">${REPOSITORY.replace(/^https:\/\//, '')}</a>, at the path shown. Each series' card above names its own.</p>` : ''}
+          ${items.length && !linked ? html`<p class="text-xs text-gray-500 mt-2">Each is a file in the Threefold repository, <a class="tf-link" href="https://github.com/upgradedev/aws-threefold" rel="noopener">github.com/upgradedev/aws-threefold</a>, at the path shown. Each series' card above names its own.</p>` : ''}
           <p class="text-xs text-gray-500 mt-2">The live figures on this stack are read from <a class="tf-link" href="${T.specHref('GET', '/api/overview')}">GET /api/overview</a>, and this snapshot from <a class="tf-link" href="${T.specHref('GET', '/proof.json')}">GET /proof.json</a>.</p>
         </div>`, 'min-w-0');
     }

@@ -541,6 +541,11 @@ a.tf-chip:hover { filter: brightness(1.15); }
 }
 .tf-pre code { font: inherit; }
 .tf-pre-plain { padding-right: 16px; }
+/* A block that keeps its lines whole and scrolls sideways (pre.code) would
+   run its first line under the copy button at the start of the scroll, where
+   the right padding does not reach. The button gets a strip of its own above
+   the code instead. */
+.tf-command > pre.code { padding-top: 44px; padding-right: 16px; }
 .tf-prompt { color: var(--tf-text-decor); user-select: none; }
 .tf-copy, button.tf-copy {
   position: absolute; top: 8px; right: 8px; display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px;

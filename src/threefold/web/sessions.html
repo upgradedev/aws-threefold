@@ -34,6 +34,19 @@
        extends with the product's ink. -->
   <link rel="stylesheet" href="assets/threefold.css" />
   <script src="assets/threefold.js"></script>
+  <style>
+    /* A session id keeps a readable width and ends in an ellipsis rather than
+       wrapping every few characters; the whole id is in its title and in the
+       detail. A breaker's reason keeps to its column. */
+    .tf-session-cell { min-width: 22ch; }
+    .tf-session-id { display: block; max-width: 30ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .tf-session-why { max-width: 16rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    @media (max-width: 639px) {
+      .tf-session-cell { min-width: 0; }
+      .tf-session-id { max-width: none; white-space: normal; overflow-wrap: anywhere; }
+      .tf-session-why { max-width: none; white-space: normal; }
+    }
+  </style>
 </head>
 <body class="min-h-screen flex flex-col">
   <a class="tf-skip" href="#main">Skip to content</a>
@@ -95,10 +108,10 @@
       </div>
     </div>
 
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+    <div class="grid grid-cols-1 lg:grid-cols-4 gap-6 items-start">
 
       <!-- SESSION TABLE -->
-      <section class="lg:col-span-2 tf-card tf-panel" aria-labelledby="sessions-title">
+      <section class="lg:col-span-3 tf-card tf-panel min-w-0" aria-labelledby="sessions-title">
         <div class="tf-panel-head">
           <div>
             <h2 id="sessions-title" class="tf-panel-title">Sessions</h2>
@@ -160,7 +173,9 @@
           The listing scans the session table and keeps the newest rows, which is honest at this scale and would not be at any
           other: a deployment with real traffic wants a secondary index on a recency key instead. The
           <span class="font-mono">Calls</span> column counts the retained history, which the store caps at the last 50 per
-          session; cost and tokens are cumulative and are not capped.
+          session; cost and tokens are cumulative and are not capped. The rows are the table's. The
+          <span class="font-mono">Last write</span> chip says only where the answering container's most recent session write
+          landed, and reads memory on a container that has written nothing yet.
         </p>
       </section>
 
@@ -351,8 +366,8 @@
     function setPersistence(mode) {
       const badge = document.getElementById('persistenceBadge');
       const durable = mode === 'dynamodb';
-      badge.className = 'tf-chip ' + (durable ? 'tf-chip-emerald' : 'tf-chip-amber');
-      badge.innerHTML = glyph(durable ? 'check' : 'info') + 'Last write: ' + escapeHtml(durable ? 'DynamoDB' : String(mode || 'unknown'));
+      badge.className = 'tf-chip tf-chip-gray';
+      badge.innerHTML = glyph('info') + 'Last write: ' + escapeHtml(durable ? 'DynamoDB' : String(mode || 'unknown'));
       badge.title = durable
         ? 'The most recent session write reached DynamoDB, so what it wrote outlives the container that evaluated it.'
         : 'The most recent session write stayed inside one container, or this container has written nothing yet. It says nothing about where the rows below came from.';
@@ -431,14 +446,14 @@
           const tokens = (Number(s.total_input_tokens) || 0) + (Number(s.total_output_tokens) || 0);
           const selected = s.session_id === selectedId ? ' data-selected="true" aria-selected="true"' : '';
           return '<tr data-index="' + index + '" class="tf-row-link" tabindex="0"' + selected + '>' +
-            '<td data-label="Session"><span class="font-mono text-violet-300 break-all">' + escapeHtml(s.session_id) + '</span>' +
+            '<td data-label="Session" class="tf-session-cell"><span class="tf-session-id font-mono text-violet-300" title="' + escapeHtml(s.session_id) + '">' + escapeHtml(s.session_id) + '</span>' +
               '<div class="tf-micro mt-0.5">' + escapeHtml(s.developer_id || 'unknown developer') + '</div></td>' +
             '<td data-label="Project" class="text-gray-200">' + projectShown(s.project_name) + '</td>' +
             '<td data-label="Calls" class="num">' + (Number(s.calls) || 0) + '</td>' +
             '<td data-label="Cost" class="num">$' + (Number(s.total_cost_usd) || 0).toFixed(4) + '</td>' +
             '<td data-label="Tokens" class="num">' + tokens.toLocaleString() + '</td>' +
             '<td data-label="State"><div>' + stateBadge(s) +
-              (s.trip_reason ? '<div class="tf-micro mt-1 max-w-xs truncate" title="' + escapeHtml(s.trip_reason) + '">' + escapeHtml(s.trip_reason) + '</div>' : '') +
+              (s.trip_reason ? '<div class="tf-micro mt-1 tf-session-why" title="' + escapeHtml(s.trip_reason) + '">' + escapeHtml(s.trip_reason) + '</div>' : '') +
             '</div></td>' +
             '<td data-label="Started" class="font-mono text-gray-400 whitespace-nowrap">' + escapeHtml(formatTimestamp(s.created_at)) + '</td>' +
           '</tr>';

@@ -1237,7 +1237,9 @@
     });
     var primary = links.filter(function (l) { return l.item.primary; });
     var more = links.filter(function (l) { return !l.item.primary; });
-    var moreCurrent = more.some(function (l) { return l.current; });
+    // The front page is not a page kept under More, so on it (and on the
+    // walkthrough, filed beside it) no item of the bar reads as current.
+    var moreCurrent = more.some(function (l) { return l.current && l.item.id !== 'demo'; });
     var menuId = 'tf-more-' + entry.index;
     var mod = isMac() ? '⌘' : 'Ctrl';
     setHtml(entry.el, html`<div class="tf-shell">

@@ -212,25 +212,29 @@
       </ol>
     </div>
 
-    <!-- GOVERN YOUR OWN REPOSITORIES. The installer writes, per repository, what the
-         three steps below do by hand. What it writes is the per-repository
-         configuration contract in STATE.md, and the enforcement claims are only
-         the ones docs/evidence/ENFORCEMENT_2026-09-21.md measured. -->
+    <!-- GOVERN YOUR OWN REPOSITORIES. The file the one command above downloads,
+         threefold.py (this stack's /install.py), written out: what it writes per
+         repository, how a project moves from Observe to Enforce, and how it comes
+         out again. What it writes is the per-repository configuration contract in
+         STATE.md, and the enforcement claims are only the ones
+         docs/evidence/ENFORCEMENT_2026-09-21.md measured. The older --repo form of
+         the same installer, for a checkout of the repository, is a note at the end. -->
     <section id="govern-your-repositories" class="tf-card tf-panel" aria-labelledby="govern-title">
       <div class="tf-panel-head">
         <div>
           <h2 id="govern-title" class="tf-panel-title"><span data-tf-icon="git" data-tf-size="18"></span>Govern your own repositories</h2>
-          <p class="tf-panel-sub">One command per repository, for all three agents and the commit, starting in observe mode.</p>
+          <p class="tf-panel-sub">The file the command above downloads, run once per repository, for all three agents and the commit. A new project starts in Observe; promoting it on the dashboard is what enforces.</p>
         </div>
-        <span class="tf-chip tf-chip-amber"><span data-tf-icon="eye" data-tf-size="13"></span>observe, then enforce</span>
+        <span class="tf-chip tf-chip-amber"><span data-tf-icon="eye" data-tf-size="13"></span>Observe, then promote</span>
       </div>
 
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div class="space-y-5">
           <div>
-            <p class="text-sm font-semibold text-gray-100">The installer · <span class="font-mono tf-accent-text">scripts/threefold_install.py</span></p>
+            <p class="text-sm font-semibold text-gray-100">The installer · <span class="font-mono tf-accent-text">threefold.py</span></p>
             <p class="tf-small mt-1">
-              It is a file in the Threefold repository, standard library only, run once for each repository you want governed.
+              The file this stack serves as <span class="font-mono">install.py</span>, saved as <span class="font-mono">threefold.py</span>
+              by the command above: standard library only, run at the root of each repository you want governed.
               <span class="font-mono">--api-key-file</span> is needed only where the stack enforces a key, and it names a file
               holding the key, so the key itself never appears in a command line or in the repository.
             </p>
@@ -259,26 +263,27 @@
 
         <div class="space-y-4">
           <div class="tf-card-quiet p-4 space-y-2 tf-small">
-            <p class="font-semibold tf-warn-text">From observe to enforce</p>
+            <p class="font-semibold tf-warn-text">From Observe to Enforce</p>
             <p>
-              In <span class="font-mono">observe</span> every call the hook sends goes as <span class="font-mono">dry_run</span>:
-              the service judges and records it, never refuses it and never halts the session, so the enforcement console shows
-              what would have been stopped while nobody is. Two things are decided on your machine before anything is sent, so
-              they hold in either mode: a call carrying a credential is still refused on your machine and never sent, and a call
-              the hook holds back (outside the project, a data file, a term on your never-send list) is neither sent nor
-              recorded. When that record reads right, enforcement takes <span class="text-gray-100">two steps</span>, because
-              the stage is the project's on the service and not your machine's.
+              The stage is the project's, on the service, not your machine's. <span class="font-mono">connect</span> installs in
+              <span class="font-mono">managed</span> mode, so the project's stage decides every call, and a new project starts in
+              Observe: every call the hook sends is judged and recorded, and the agent is not stopped. Two things are decided on
+              your machine before anything is sent, so they hold whatever the stage: a call carrying a credential is still refused
+              on your machine and never sent, and a call the hook holds back (outside the project, a data file, a term on your
+              never-send list) is neither sent nor recorded.
             </p>
-            <ol class="list-decimal pl-4 space-y-1">
-              <li>Run the installer again with <span class="font-mono text-gray-200">--mode managed</span>, or set
-                <span class="font-mono text-gray-200">"mode": "managed"</span> in <span class="font-mono">.threefold.json</span>,
-                so the calls stop going as dry runs and the project's stage decides.
-                <span class="font-mono text-gray-200">--mode enforce</span> sends them exactly the same way; what it adds is on
-                the machine, where a file-tool write to the hooks' own files is refused whatever stage was last seen.</li>
-              <li>Promote the project on
-                <a class="tf-link" id="projects-link" href="dashboard.html#/projects">the dashboard</a>,
-                choosing the rules that enforce. That is the step that moves it from Observe to Enforce.</li>
-            </ol>
+            <p>
+              When that record reads right, enforcement is <span class="text-gray-100">one step</span>: promote the project on
+              <a class="tf-link" id="projects-link" href="dashboard.html#/projects">the dashboard</a>, choosing the rules that
+              enforce. Nothing needs to be installed again.
+            </p>
+            <p>
+              Two other modes change only this machine. <span class="font-mono text-gray-200">--mode observe</span> caps it to
+              Observe: every call goes as a dry run, never refused, whatever the stage.
+              <span class="font-mono text-gray-200">--mode enforce</span> sends calls exactly the same way as
+              <span class="font-mono">managed</span>; what it adds is on the machine, where a file-tool write to the hooks' own
+              files is refused whatever stage was last seen.
+            </p>
             <p>
               Until it is promoted the project stays in Observe whatever mode your machine is in, so a forbidden write is still
               recorded and the agent is told nothing. A stack deployed with
@@ -289,15 +294,27 @@
           </div>
 
           <div class="tf-card-quiet p-4 space-y-2 tf-small">
-            <p class="font-semibold text-gray-100">Uninstall</p>
+            <p class="font-semibold text-gray-100">Disconnect</p>
             <p>
-              Run the installer with <span class="font-mono text-gray-200">--uninstall</span> for the same repository. By hand it
+              Run <span class="font-mono text-gray-200">threefold.py disconnect</span> at the root of the same repository;
+              <span class="font-mono text-gray-200">threefold.py status</span> lists every folder this machine governs. By hand it
               is the same list in reverse: delete <span class="font-mono">.threefold.json</span>, take the Threefold block out of
               each of the three hook settings files, remove the pre-commit hook, and delete the lines it added to
               <span class="font-mono">.git/info/exclude</span>.
             </p>
             <pre class="tf-pre tf-pre-plain code mt-2" id="uninstall-snippet"></pre>
           </div>
+
+          <details class="tf-card-quiet p-4 tf-small" id="older-form">
+            <summary class="cursor-pointer font-semibold text-gray-100">The older form, from a checkout of the repository</summary>
+            <p class="mt-2">
+              The same installer is also in the Threefold repository as <span class="font-mono">scripts/threefold_install.py</span>,
+              and still takes the form it had before <span class="font-mono">connect</span>: a <span class="font-mono">--repo</span>
+              path, <span class="font-mono">--mode</span> (default <span class="font-mono">observe</span> there, which caps the machine
+              to dry runs) and <span class="font-mono">--uninstall</span>.
+            </p>
+            <pre class="tf-pre tf-pre-plain code mt-2" id="older-snippet"></pre>
+          </details>
 
           <div class="tf-callout tf-callout-info">
             <span data-tf-icon="info" data-tf-size="18"></span>
@@ -974,33 +991,40 @@
       });
 
       // The installer's flags are the per-repository contract: an Acme-style alias,
-      // observe first, this endpoint, and a key file rather than a key.
+      // this endpoint, and a key file rather than a key. The project starts in
+      // Observe on the service; the machine follows its stage (managed).
       document.getElementById('install-snippet').textContent =
-        '# Watch first: every call it sends is judged and recorded, never refused;\n' +
-        '# a call carrying a credential is still refused on this machine and never sent\n' +
+        '# At the root of the repository. The project starts in Observe: every call it\n' +
+        '# sends is judged and recorded, and the agent is not stopped;\n' +
+        '# a call carrying a credential is still refused on this machine and never sent.\n' +
         '# --api-key-file only where the stack enforces a key; it names a file, never the key\n' +
-        'python scripts/threefold_install.py \\\n' +
-        '  --repo /path/to/acme-billing \\\n' +
+        'python3 threefold.py connect \\\n' +
         '  --project Acme-Billing \\\n' +
-        '  --mode observe \\\n' +
         '  --endpoint ' + endpoint + ' \\\n' +
         '  --api-key-file /path/to/key-file';
 
       document.getElementById('threefold-json-snippet').textContent = JSON.stringify({
         project: 'Acme-Billing',
         endpoint: endpoint,
-        mode: 'observe',
+        mode: 'managed',
         api_key_file: '/path/to/key-file'
       }, null, 2);
 
       document.getElementById('enforce-snippet').textContent =
-        '# Step 1, on the machine: stop sending dry runs and let the stage decide\n' +
-        'python scripts/threefold_install.py --repo /path/to/acme-billing --project Acme-Billing \\\n' +
-        '  --mode managed --endpoint ' + endpoint + ' --api-key-file /path/to/key-file\n\n' +
-        '# Step 2, on the service: promote the project, which is what enforces it\n' +
-        '# ' + PAGE_BASE + 'dashboard.html#/projects/Acme-Billing';
+        '# The one step, on the service: promote the project, which is what enforces it\n' +
+        '# ' + PAGE_BASE + 'dashboard.html#/projects/Acme-Billing\n\n' +
+        '# Optional, on this machine only: cap it to Observe, dry runs whatever the stage\n' +
+        'python3 threefold.py connect --project Acme-Billing --mode observe';
 
       document.getElementById('uninstall-snippet').textContent =
+        '# At the root of the same repository\n' +
+        'python3 threefold.py disconnect\n\n' +
+        '# Every folder this machine governs, and its stage\n' +
+        'python3 threefold.py status';
+
+      document.getElementById('older-snippet').textContent =
+        'python scripts/threefold_install.py --repo /path/to/acme-billing --project Acme-Billing \\\n' +
+        '  --mode managed --endpoint ' + endpoint + ' --api-key-file /path/to/key-file\n\n' +
         'python scripts/threefold_install.py --repo /path/to/acme-billing --uninstall';
 
       document.getElementById('env-snippet').textContent =
