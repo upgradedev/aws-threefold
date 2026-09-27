@@ -52,8 +52,10 @@ MAX_INDEX_PAGES = 20
 STATS_PARTITION = "STATS"
 ROLLUP_TTL_SECONDS = 35 * 24 * 3600
 
-# The drafting model calls spent in one UTC day, the whole account in one row
-# (PK=DRAFTBUDGET#<day>, SK=ACCOUNT). Two days of life: yesterday's row is
+# The drafting model calls this stack spent in one UTC day, in one row of the
+# stack's own table (PK=DRAFTBUDGET#<day>, SK=ACCOUNT). The sort key names the
+# row, not its reach: a second stack in the same account counts in its own
+# table, so the budget is per stack. Two days of life: yesterday's row is
 # already garbage, and a row that outlived its day by a day is kept only so a
 # reader straddling midnight still finds it.
 DRAFT_BUDGET_PREFIX = "DRAFTBUDGET#"
@@ -567,7 +569,7 @@ class DynamoDBSessionRepository:
         stored.update(stamps)
 
     def claim_draft_calls(self, calls: int, cap: int, day: Optional[str] = None) -> bool:
-        """Claims `calls` drafting model calls out of the day's account budget.
+        """Claims `calls` drafting model calls out of this stack's budget for the day.
 
         One conditional UpdateItem, so concurrent containers add rather than
         overwrite and a claim past the cap counts nothing: True when the calls

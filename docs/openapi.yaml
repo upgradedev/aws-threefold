@@ -893,9 +893,10 @@ paths:
         in force is a separate POST /rules, which needs the operator. When the model cannot be reached the answer
         is 503 with no draft; Threefold never stands in for the model with a rule of its own. Each draft is at most
         two model calls, and only the description and the paths, expectations and imports of the examples reach
-        the model, never the rest of an example's file. Drafting model calls are budgeted account-wide per UTC day;
-        past the budget the answer is 429 and no model call is made. Open where PublicReads is true, as POST /rules/explain
-        is; on a stack deployed with PublicReads=false it needs the operator key or a sign-in session.
+        the model, never the rest of an example's file. Drafting model calls are budgeted per stack per UTC day,
+        in the stack's own table, so each stack in an account has a budget of its own; past it the answer is 429
+        and no model call is made. Open where PublicReads is true, as POST /rules/explain is; on a stack deployed
+        with PublicReads=false it needs the operator key or a sign-in session.
       security:
       - {}
       - OperatorApiKey: []
@@ -1079,8 +1080,8 @@ paths:
                     type: string
         '429':
           description: >-
-            The day's account-wide drafting budget is spent, so no model call was made and nothing was drafted (urn:threefold:error:draft-budget-spent).
-            The budget resets at midnight UTC.
+            This stack's drafting budget for the day is spent, so no model call was made and nothing was drafted
+            (urn:threefold:error:draft-budget-spent). The budget resets at midnight UTC.
           content:
             application/problem+json:
               schema:

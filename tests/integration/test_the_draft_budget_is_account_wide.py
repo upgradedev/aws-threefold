@@ -1,17 +1,22 @@
-"""Drafting model calls are budgeted account-wide per UTC day, not per container.
+"""Drafting model calls are budgeted per stack per UTC day, not per container.
 
 A flood of drafts across N containers used to spend N times the 60 calls
 each container allows, because the only bound lived in container memory.
 Each draft now claims its two calls, the most one draft makes, out of one
-daily account budget held in DynamoDB, claimed with a conditional write so
-concurrent containers add rather than overwrite. Past the budget the route
-answers 429 and no model call is made.
+daily budget held in a row of the stack's own DynamoDB table, claimed with a
+conditional write so concurrent containers add rather than overwrite. Past
+the budget the route answers 429 and no model call is made. The budget is
+not the account's: a second stack in the same account counts in its own
+table. The file keeps the name it was given when this was called
+account-wide.
 
 Names are synthetic, as the clean-room rule requires.
 """
 from __future__ import annotations
 
 import json
+import re
+from pathlib import Path
 from typing import Any, Dict, List
 
 import pytest
@@ -29,7 +34,7 @@ def _spend_nothing_yet() -> None:
 
 @pytest.fixture(autouse=True)
 def _the_day_starts_unspent():
-    """Each test here starts with the account's drafting budget unclaimed.
+    """Each test here starts with the stack's drafting budget unclaimed.
 
     The route claims from the handler's module-level store, which lives as long
     as the process, like the rate limiter the suite already resets. Any earlier
@@ -56,7 +61,9 @@ class _FakeTable:
         if self.fail_with is not None:
             raise self.fail_with
         key = f"{kwargs['Key']['PK']}#{kwargs['Key']['SK']}"
-        stored = self.items.setdefault(dict(kwargs["Key"]), {})
+        # By the key's string: a dict cannot key a dict, and the TypeError
+        # that raised sent every claim to the repository's memory instead.
+        stored = self.items.setdefault(key, {})
         have = int(stored.get("claimed", 0) or 0)
         calls = int(kwargs["ExpressionAttributeValues"][":calls"])
         remaining = int(kwargs["ExpressionAttributeValues"][":remaining"])
@@ -135,6 +142,15 @@ def test_a_storage_outage_falls_back_to_memory_and_still_bounds() -> None:
     assert repo.claim_draft_calls(2, 2, day="budget-day-008") is False
 
 
+def test_each_stack_counts_its_budget_in_its_own_table() -> None:
+    """Two containers of one stack share its row; a second stack's drafts spend none of it."""
+    public, private = _FakeTable(), _FakeTable()
+    assert _repo(public).claim_draft_calls(2, 2, day="budget-day-010") is True
+    assert _repo(public).claim_draft_calls(2, 2, day="budget-day-010") is False
+    assert _repo(private).claim_draft_calls(2, 2, day="budget-day-010") is True
+    assert public.items == private.items == {"DRAFTBUDGET#budget-day-010#ACCOUNT": {"claimed": 2}}
+
+
 def test_budget_rows_expire_two_days_out() -> None:
     repo = _repo()
     repo.claim_draft_calls(2, 600, day="budget-day-009")
@@ -207,6 +223,7 @@ def test_a_draft_past_the_budget_is_answered_429_with_no_model_call(monkeypatch)
     assert status == 429
     assert problem["type"] == "urn:threefold:error:draft-budget-spent"
     assert problem["saved"] is False
+    assert problem["detail"].startswith("The drafting calls this stack may make today are spent,")
 
 
 def test_each_draft_claims_two_calls_and_the_third_is_refused(monkeypatch) -> None:
@@ -219,3 +236,41 @@ def test_each_draft_claims_two_calls_and_the_third_is_refused(monkeypatch) -> No
     status, problem = _draft({"description": DESCRIPTION})
     assert status == 429
     assert problem["type"] == "urn:threefold:error:draft-budget-spent"
+
+
+# ------------------------------------------------------------------ what is said of it
+
+ROOT = Path(__file__).resolve().parents[2]
+
+# Where the budget's reach is stated. The dated records under docs/evidence/
+# say what was true when they were written and are left as they are, and
+# STATE.md and LOG.md are the owner's.
+STATEMENTS = (
+    ROOT / "README.md",
+    ROOT / "benchmark" / "README.md",
+    *sorted((ROOT / "docs").glob("*.md")),
+    ROOT / "docs" / "openapi.yaml",
+    ROOT / "src" / "threefold" / "web" / "openapi.json",
+    ROOT / "src" / "threefold" / "interfaces" / "draft_routes.py",
+    ROOT / "src" / "threefold" / "infrastructure" / "dynamo_repo.py",
+)
+ACCOUNT_WIDE = re.compile(r"account-wide|whole account|account budget|account's daily|this account may", re.I)
+
+
+def test_the_published_document_says_the_budget_is_each_stack_s_own() -> None:
+    draft = json.loads((ROOT / "src" / "threefold" / "web" / "openapi.json").read_text(encoding="utf-8"))[
+        "paths"]["/rules/draft"]["post"]
+    assert "Drafting model calls are budgeted per stack per UTC day, in the stack's own table" in draft["description"]
+    assert draft["responses"]["429"]["description"].startswith("This stack's drafting budget for the day is spent,")
+
+
+def test_no_statement_gives_the_budget_the_account_s_reach() -> None:
+    """Each stack counts in its own table, so no sentence about drafting calls its budget the account's."""
+    wrong = []
+    for path in STATEMENTS:
+        text = path.read_text(encoding="utf-8")
+        for sentence in re.split(r"(?<=[.;:])\s+|\n\s*\n|\n(?=\|)", text):
+            flat = " ".join(sentence.split())
+            if "draft" in flat.lower() and ACCOUNT_WIDE.search(flat):
+                wrong.append(f"{path.relative_to(ROOT).as_posix()}: {flat[:160]}")
+    assert not wrong, wrong
