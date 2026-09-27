@@ -60,7 +60,9 @@ trusted:
   UpdateAssumeRolePolicy, and the template writes the schedule role's. A role
   is passed only to the service that runs it, lambda.amazonaws.com for the
   function's and scheduler.amazonaws.com for the schedule's, which the
-  iam:PassedToService condition key checks.
+  iam:PassedToService condition key checks. Each role has a PassRole
+  statement of its own: one statement listing both roles and both services
+  would let either role be passed to either service.
 - Names without a Region: an S3 bucket's, an IAM role's, a dashboard's and a
   budget's ARN carry no Region, so threefold-prod-* would also match the edge
   stack, threefold-prod-edge in us-east-1, whose generated bucket names begin
@@ -452,6 +454,15 @@ def test_a_role_is_passed_only_to_the_services_that_run_this_stack(service) -> N
 
 
 @pytest.mark.parametrize(
+    "role, context",
+    [(ROLE_ARN, PASSED_TO_SCHEDULER), (SCHEDULE_ROLE_ARN, PASSED_TO_LAMBDA)],
+)
+def test_neither_role_is_passed_to_the_service_that_runs_the_other(role: str, context: Dict[str, str]) -> None:
+    """The function's role on a schedule, or the schedule's role on a function, is a pairing the template never makes."""
+    assert not allows("iam:PassRole", role, context)
+
+
+@pytest.mark.parametrize(
     "request_context",
     [
         {"kms:KeySpec": "SYMMETRIC_DEFAULT", "kms:KeyUsage": "ENCRYPT_DECRYPT"},
@@ -585,13 +596,19 @@ def test_iam_is_granted_on_this_stacks_roles_and_nothing_else() -> None:
     """No user, group or managed policy, and no role but the ones this stack's deploys create."""
     roles = [f"arn:aws:iam::{ACCOUNT}:role/{STACK}-{logical_id}-*" for logical_id in ROLE_LOGICAL_IDS]
     assert roles == sorted([ROLE_ARN.rsplit("-", 1)[0] + "-*", SCHEDULE_ROLE_ARN.rsplit("-", 1)[0] + "-*"])
+    named = set()
     for statement in STATEMENTS:
         actions = [a for a in _as_list(statement["Action"]) if a.lower().startswith("iam:")]
         if not actions:
             continue
-        assert sorted(_as_list(statement["Resource"])) == roles, statement["Sid"]
+        # A statement may name one of the roles (PassRole names each on its
+        # own, with its own service) but never anything else.
+        resources = _as_list(statement["Resource"])
+        assert resources and set(resources) <= set(roles), statement["Sid"]
+        named.update(resources)
         for action in actions:
             assert "Role" in action and not re.search(r"User|Group|CreatePolicy", action), action
+    assert sorted(named) == roles, "a role this stack creates is granted nothing"
 
 
 def test_the_policy_fits_the_inline_quota_of_one_role() -> None:
