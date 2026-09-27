@@ -86,9 +86,9 @@ What was checked on the live public stacks **[PRIMARY, 2026-09-22]**:
 | Web ACL | `aws wafv2 get-web-acl` | rules `AmazonIpReputationList`, `RateLimitPerIp`, `CommonRuleSet`, `KnownBadInputsRuleSet` |
 | Edge stack | `aws cloudformation describe-stacks --stack-name threefold-prod-edge --region us-east-1` | `RateLimitPerFiveMinutes=1000`, `PriceClass_100`, `AccessLogs=true` |
 | API stage | `aws apigatewayv2 get-stage --api-id raa131f9dj --stage-name prod`, `get-routes` | `DefaultRouteSettings` `ThrottlingRateLimit 100`, `ThrottlingBurstLimit 200`, which API Gateway applies to each of the 7 routes separately; access logs to `/aws/vendedlogs/apigateway/threefold-prod/access` |
-| Function | `aws lambda get-function-configuration`, `get-function-concurrency` | `python3.11`, `arm64`, 256 MB, 15 s, tracing `Active`, reserved concurrency 25 |
+| Function | `aws lambda get-function-configuration`, `get-function-concurrency` | `python3.11`, `arm64`, 1024 MB, 15 s, tracing `Active`, reserved concurrency 25 (rechecked 2026-09-27, after `FunctionMemoryMb` replaced the fixed 256 MB) |
 | Table | `aws dynamodb describe-continuous-backups`, `describe-time-to-live` | point-in-time recovery `ENABLED`, TTL on `ttl` `ENABLED` |
-| Alarms | `aws cloudwatch describe-alarms --alarm-name-prefix threefold-prod-` | 10 alarms, all `OK` |
+| Alarms | `aws cloudwatch describe-alarms --alarm-name-prefix threefold-prod-` | 11 alarms, all `OK` (rechecked 2026-09-27, after the slow-call alarm moved to the API's latency and the near-timeout alarm was added) |
 | Dashboard | `aws cloudwatch list-dashboards` | `threefold-prod-operations` |
 | API stack parameters | `aws cloudformation describe-stacks --stack-name threefold-prod` | `PublicReads=true`, `DefaultHookStage=observe`, `BedrockModelId=eu.anthropic.claude-haiku-4-5-20251001-v1:0`, `ReservedConcurrency=25`, `MonthlyBudgetUsd=0` |
 
