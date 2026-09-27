@@ -164,7 +164,7 @@ FIX_CREDENTIAL_MAX_CHARS = 3_000
 FIX_ADVICE_MAX_CHARS = 24_000
 
 # The rule keys whose fix is advice in words rather than a rewrite. A
-# destructive command is filed under PROTECTED_PATH (see rule_keys.refusal_key),
+# destructive command is filed under PROTECTED_PATH (see rule_keys.finding_key),
 # and its fix is advice as well.
 _ADVICE_KEYS = frozenset((LOOP_KEY, BUDGET_KEY, HALTED_SESSION_KEY, PROTECTED_PATH_KEY))
 
@@ -995,8 +995,10 @@ class GovernanceEvaluator:
     def _rule_key(result: EvaluationResultDTO, rules: List[Dict[str, Any]]) -> str:
         """The rule key of a verdict: the gate that decided it, where one said so.
 
-        A verdict this evaluator produced carries its gate. A row or a verdict
-        from anywhere else falls back to reading the sentence, which is all
+        A verdict this evaluator produced carries its gate, and the key is that
+        and nothing else: the reason quotes the caller's own command and path.
+        A verdict from anywhere else is read the way a stored row without a key
+        is, by the gate's own words at the head of its sentence, which is all
         there is to read.
         """
         decided = getattr(result, "decided_key", None)
