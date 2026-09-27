@@ -659,11 +659,13 @@ Resources:
         alike. The tick stops itself about 10 seconds in and checks the time
         only between steps, so one still running at 12 was held by a single
         step, most likely a table call that stalled; ticks come every fifteen
-        minutes, so half an hour holds two of them. An invocation that
-        reaches the timeout is also counted by the function errors alarm. The
-        function's log has each tick's "Demo fleet tick:" line with seconds,
-        send_seconds, operate_seconds and cut_short; the access log has each
-        request's latency.
+        minutes, so half an hour holds two of them. A rule draft whose two
+        model calls both wait out their timeouts takes about 12 seconds by
+        design, so a draft here means Bedrock is not answering. An invocation
+        that reaches the timeout is also counted by the function errors
+        alarm. The function's log has each tick's "Demo fleet tick:" line with
+        seconds, send_seconds, operate_seconds and cut_short; the access log
+        has each request's latency and route.
       Namespace: AWS/Lambda
       MetricName: Duration
       Dimensions:

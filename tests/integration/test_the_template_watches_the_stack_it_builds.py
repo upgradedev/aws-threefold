@@ -29,7 +29,7 @@ from pathlib import Path
 
 import pytest
 
-from threefold.application import demo_fleet
+from threefold.application import demo_fleet, rule_drafter
 from threefold.infrastructure.metrics_emf import emit_threefold_emf_metrics
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -726,6 +726,13 @@ def test_a_tick_running_toward_the_timeout_is_still_seen() -> None:
     assert "HTTP requests" in description and "Demo fleet tick:" in description, (
         "The alarm should say it covers requests and ticks alike, and where a tick says how long it took"
     )
+    # A rule draft may wait on two model calls, each to its connect and read
+    # timeouts. Where that alone reaches the threshold, a draft crosses it by
+    # design whenever Bedrock stops answering, and the alarm has to say so
+    # rather than send the reader looking for a stalled table call.
+    per_call = rule_drafter.DRAFT_CLIENT_TIMEOUTS["connect_timeout"] + rule_drafter.DRAFT_CLIENT_TIMEOUTS["read_timeout"]
+    if rule_drafter.MAX_ATTEMPTS * per_call * 1000 >= float(alarm["Threshold"]):
+        assert "rule draft" in description and "Bedrock is not answering" in description
 
 
 @pytest.mark.parametrize("status, floor, share", [("5xx", 10, 5), ("4xx", 20, 25)])
