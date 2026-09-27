@@ -563,11 +563,11 @@ per-address limit it bounds a flood, and does not keep one kind of request
 from crowding out the other. The fleet's tick is one more invocation from the
 same pool every 15 minutes on the public stack. One role carries the union of
 what every route needs: Bedrock, the table (including `Scan` and
-`DeleteItem`), `kms:Sign` on the stack's signing key, and the X-Ray writes the
-transform attaches; it holds no right on the evidence bucket. And every
-in-memory limit (the per-address bucket, the explanation cap, the per-container
-drafting cap) is per container, not per account: N busy containers allow N
-times the cap. The drafting budget of 400 model calls a day is the exception,
+`DeleteItem`), `kms:Sign` on the stack's signing key, and the log and X-Ray
+writes the SAM transform attaches; it holds no right on the evidence bucket.
+And every in-memory limit (the per-address bucket, the explanation cap, the
+per-container drafting cap) is per container, not per account: N busy
+containers allow N times the cap. The drafting budget of 400 model calls a day is the exception,
 kept in the table and so shared by every container.
 
 ### 8.2 Why a single table
