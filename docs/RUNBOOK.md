@@ -54,9 +54,10 @@ current value, secrets included, so an ordinary code deploy names none.
 | `EdgeOriginSecret` | empty, `NoEcho` | the edge secret; empty trusts no edge header |
 | `DefaultHookStage` | `observe` | the stage for a project with none of its own |
 | `DemoFleet` | `false` | `true` on the public stack only: a schedule runs the synthetic Acme fleet every fifteen minutes |
+| `FunctionMemoryMb` | `1024` | the function's memory in megabytes, from 512 to 1769, one full core. Lambda gives CPU in proportion to it; the stacks first ran with 256, so the first deploy that does not name it raises them to the default |
 | `ReservedConcurrency` | `25` | Lambda refuses a reservation that leaves fewer than 100 unreserved: check `aws lambda get-account-settings` shows at least 150 for two stacks at 25, or deploy with `0` |
 | `ApiThrottleRateLimit` / `ApiThrottleBurstLimit` | `100` / `200` | per route, answered 429 by API Gateway |
-| `SlowCallAlarmMs` | `5000` | threshold of the two latency alarms |
+| `SlowCallAlarmMs` | `5000` | threshold of the two latency alarms: the p95 of every HTTP request's latency at API Gateway, and the average evaluation latency. The fleet's scheduled tick is in neither; the near-timeout alarm (an invocation over 12 seconds) watches it |
 | `MonthlyBudgetUsd` | `0` | an account-wide budget; set it on one stack only |
 | `AllowedProjectPattern` | `^Acme-[A-Za-z0-9-]{1,40}$` | other names are stored and shown as `unlabelled` |
 
@@ -478,7 +479,7 @@ the tracks' own notes and AWS list prices, not from measurement.
 | Item | ESTIMATE |
 |---|---|
 | AWS WAF web ACL with four rules | about 9 USD a month, plus a per-request charge |
-| CloudWatch alarms (10 per stack) and the dashboard | a few USD a month |
+| CloudWatch alarms (11 per stack) and the dashboard | a few USD a month |
 | Lambda, API Gateway, DynamoDB on demand, CloudFront, S3 | per request and per GB; not estimated |
 | Bedrock | per token, only for page explanations and rule drafts, capped per container at 200 successful explanation calls (failed calls are not counted) and 60 drafting calls (every call counted) |
 | The benchmark | see section 6 |

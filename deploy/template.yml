@@ -24,6 +24,25 @@ Parameters:
       both the inference-profile ARN in this account and the underlying
       foundation-model ARN, which is account-less by design.
 
+  # Not one of the operations parameters below, which default to what both
+  # stacks already ran with: this default is more than the 256 they ran
+  # with, so the next deploy that does not name it raises both stacks to it.
+  FunctionMemoryMb:
+    Type: Number
+    Default: 1024
+    MinValue: 512
+    MaxValue: 1769
+    Description: >-
+      The function's memory in megabytes. Lambda gives a function CPU in
+      proportion to its memory, one full core at 1,769. At the 256 the stacks
+      first ran with, about a seventh of a core, GET /api/overview took 2.5
+      to 3.5 seconds on the public stack. Lambda bills memory times duration,
+      and at this traffic four times the memory costs next to nothing while
+      every reader waits less. The floor gives the function about 0.3 of a
+      core, twice what the stacks first had. The ceiling is one full core:
+      above it the extra is a second core, which the handler's single thread
+      cannot use.
+
   # Operations. Every one of these defaults to a value both stacks run with,
   # so an update that overrides none of them deploys unattended, and neither
   # stack has to be told anything new to pick them up.
@@ -77,12 +96,15 @@ Parameters:
     Default: 5000
     MinValue: 100
     Description: >-
-      Milliseconds above which a call counts as slow for two alarms: the
-      function's p95 Duration, and the average LatencyMs the service reports
-      for the calls it evaluates. A hook's call makes no model call and only a
-      page's call waits on Bedrock, so either passing five seconds for most of
-      fifteen minutes means a dependency is struggling. The function
-      times out at 15 seconds, so this warns well before calls start failing.
+      Milliseconds above which a call counts as slow for two alarms: the p95
+      of the latency API Gateway measures for every HTTP request, and the
+      average LatencyMs the service reports for the calls it evaluates. The
+      fleet's scheduled tick is in neither: it is not a request, and its calls
+      reach the evaluator directly, not through the HTTP route that reports
+      LatencyMs. A hook's call makes no model call and only a page's call
+      waits on Bedrock, so either passing five seconds for most of fifteen
+      minutes means a dependency is struggling. The function times out at 15
+      seconds, so this warns well before calls start failing.
 
   AlarmEmail:
     Type: String
@@ -188,7 +210,10 @@ Parameters:
 Globals:
   Function:
     Timeout: 15
-    MemorySize: 256
+    # A parameter, not a constant: Lambda gives CPU in proportion to memory,
+    # and at this traffic more of it costs next to nothing while every reader
+    # waits less (FunctionMemoryMb says how much).
+    MemorySize: !Ref FunctionMemoryMb
     Runtime: python3.11
     Architectures:
       - arm64
@@ -617,21 +642,86 @@ Resources:
       OKActions:
         - !Ref ThreefoldAlarmTopic
 
-  ThreefoldFunctionDurationAlarm:
+  # The function's slowest invocation, against its timeout. The fleet's tick
+  # is one invocation carrying some thirty calls and takes seconds by design;
+  # it is no caller's wait, so no slow-call alarm counts it, and what must
+  # still be seen is a tick, or a request, running past where it should stop.
+  # Unit is Milliseconds, the unit Lambda publishes Duration in: the p95
+  # alarm this replaces read the metric in it and went to ALARM, so the unit
+  # does not leave this one without data. Six periods rather than three:
+  # ticks come every fifteen minutes, so half an hour holds two of them.
+  # A rule draft can reach it with nothing stalled. The drafter asks the
+  # model again only after an answer it could not use, never after a call
+  # that got none, but the botocore client under it retries a timed-out call
+  # once: a client Config's max_attempts counts retries, and botocore adds
+  # one for the first request, so DRAFT_CLIENT_TIMEOUTS' max_attempts of 1
+  # is two requests. Each waits up to 1 s to connect and 5 to read.
+  ThreefoldFunctionNearTimeoutAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub '${AWS::StackName}-function-duration-p95'
+      AlarmName: !Sub '${AWS::StackName}-function-near-timeout'
       AlarmDescription: >-
-        One call in twenty took longer than SlowCallAlarmMs in two of the last
-        three five-minute periods. The usual cause is Bedrock or DynamoDB
-        answering slowly; the function times out at 15 seconds.
+        An invocation ran longer than 12 seconds, within 3 seconds of the
+        function's timeout, in two of the last six five-minute periods. It
+        covers every invocation, HTTP requests and the demo fleet's tick
+        alike. The tick stops itself about 10 seconds in and checks the time
+        only between steps, so one still running at 12 was held by a single
+        step, most likely a table call that stalled. A rule draft Bedrock
+        does not answer can reach it too: the drafter does not ask again,
+        but botocore retries the timed-out call once, so the draft waits out
+        two reads of 5 seconds and runs up to about 13 seconds; one whose
+        repair goes unanswered can reach the timeout. A timeout is also
+        counted by the function errors alarm. The function's log has each
+        tick's "Demo fleet tick:" line with seconds, send_seconds,
+        operate_seconds and cut_short, and "Bedrock did not answer a rule
+        draft" for such a draft; RuleDraftLatencyMs in Threefold/Drafting
+        times each draft; the access log has each request's path and latency.
       Namespace: AWS/Lambda
       MetricName: Duration
       Dimensions:
         - Name: FunctionName
           Value: !Ref ThreefoldFunction
-      ExtendedStatistic: p95
+      Statistic: Maximum
       Unit: Milliseconds
+      Period: 300
+      EvaluationPeriods: 6
+      DatapointsToAlarm: 2
+      Threshold: 12000
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref ThreefoldAlarmTopic
+      OKActions:
+        - !Ref ThreefoldAlarmTopic
+
+  # What an HTTP caller waits for, measured by API Gateway from receiving the
+  # request to answering it, on the one stage the API declares; the 5xx and
+  # 4xx alarms and the dashboard read the same stage. No Unit: AWS advises
+  # leaving it out, because a unit the metric is not published in leaves the
+  # alarm without data, and so unable to fire, rather than failing the deploy.
+  ThreefoldApiLatencyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-api-latency-p95'
+      AlarmDescription: >-
+        The slowest twentieth of HTTP requests (the p95 of the Latency API
+        Gateway measures from receiving a request to answering it) took
+        longer than SlowCallAlarmMs in two of the last three five-minute
+        periods. It is what a caller waits for, a cold start included; in a
+        period with fewer than twenty requests it is close to the slowest of
+        them. Scheduled work is not in it: the demo fleet's tick invokes the
+        function directly, not through the API, and the near-timeout alarm
+        watches it. The usual cause is Bedrock or DynamoDB answering slowly;
+        the access log's path, latency and integrationLatency say which
+        requests.
+      Namespace: AWS/ApiGateway
+      MetricName: Latency
+      Dimensions:
+        - Name: ApiId
+          Value: !Ref ThreefoldHttpApi
+        - Name: Stage
+          Value: prod
+      ExtendedStatistic: p95
       Period: 300
       EvaluationPeriods: 3
       DatapointsToAlarm: 2
@@ -832,9 +922,10 @@ Resources:
         passed SlowCallAlarmMs in two of the last three five-minute periods.
         The handler measures it on /evaluate-tool-call alone, from routing the
         request to the verdict, so it points at that route's gates, table
-        reads and Bedrock call, where the function's Duration covers every
-        route. Neither counts a cold start, which Lambda reports separately as
-        Init Duration. The universal adapter reports no latency.
+        reads and Bedrock call, where the API latency alarm covers every route
+        and counts a cold start in what the caller waited. This one never
+        counts a cold start, which Lambda reports separately as Init Duration.
+        The universal adapter reports no latency.
       Namespace: !Sub 'Threefold/${AWS::StackName}'
       MetricName: LatencyMs
       Statistic: Average
@@ -894,7 +985,8 @@ Resources:
                 "alarms": [
                   "${ThreefoldFunctionErrorsAlarm.Arn}",
                   "${ThreefoldFunctionThrottlesAlarm.Arn}",
-                  "${ThreefoldFunctionDurationAlarm.Arn}",
+                  "${ThreefoldFunctionNearTimeoutAlarm.Arn}",
+                  "${ThreefoldApiLatencyAlarm.Arn}",
                   "${ThreefoldApi5xxRateAlarm.Arn}",
                   "${ThreefoldApi4xxRateAlarm.Arn}",
                   "${ThreefoldTableThrottlesAlarm.Arn}",
@@ -980,7 +1072,8 @@ Resources:
                   ["AWS/ApiGateway", "Latency", "ApiId", "${ThreefoldHttpApi}", "Stage", "prod", {"stat": "p50", "label": "Latency p50"}],
                   ["AWS/ApiGateway", "Latency", "ApiId", "${ThreefoldHttpApi}", "Stage", "prod", {"stat": "p95", "label": "Latency p95"}],
                   ["AWS/ApiGateway", "IntegrationLatency", "ApiId", "${ThreefoldHttpApi}", "Stage", "prod", {"stat": "p95", "label": "Integration latency p95"}]
-                ]
+                ],
+                "annotations": {"horizontal": [{"label": "Slow-call alarm, on the p95", "value": ${SlowCallAlarmMs}}]}
               }
             },
             {
@@ -1005,7 +1098,7 @@ Resources:
                   ["AWS/Lambda", "Duration", "FunctionName", "${ThreefoldFunction}", {"stat": "p95", "label": "p95"}],
                   ["AWS/Lambda", "Duration", "FunctionName", "${ThreefoldFunction}", {"stat": "Maximum", "label": "Maximum"}]
                 ],
-                "annotations": {"horizontal": [{"label": "Slow-call alarm", "value": ${SlowCallAlarmMs}}]}
+                "annotations": {"horizontal": [{"label": "Near-timeout alarm, on the maximum", "value": 12000}]}
               }
             },
             {
