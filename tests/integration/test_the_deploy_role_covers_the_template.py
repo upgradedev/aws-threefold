@@ -45,6 +45,30 @@ trusted:
   rest. The Service Authorization Reference for AWS Lambda authorizes each of
   them against the function and against a qualified function ARN,
   function:<name>:<qualifier>, which with Qualifier $LATEST is the one used.
+- The certificate key: the handler permissions in the AWS::KMS::Key resource
+  provider schema (aws-cloudformation-resource-providers-kms), whose update
+  handler changes the Description the template sets with UpdateKeyDescription.
+  CreateKey is authorized against no key, since none exists yet: the KMS
+  developer guide, "Controlling access to tags", grants it on Resource "*",
+  and says tags added while creating a key need kms:TagResource "in an IAM
+  policy that isn't restricted to particular KMS keys", which key/* in the
+  account is. The "*" is narrowed by condition to the key spec and key usage
+  the template declares, read from it here; the guide's "AWS KMS condition
+  keys" lists CreateKey among the operations kms:KeySpec and kms:KeyUsage
+  apply to.
+- The roles: the AWS::IAM::Role update handler replaces a trust policy with
+  UpdateAssumeRolePolicy, and the template writes the schedule role's. A role
+  is passed only to the service that runs it, lambda.amazonaws.com for the
+  function's and scheduler.amazonaws.com for the schedule's, which the
+  iam:PassedToService condition key checks. Each role has a PassRole
+  statement of its own: one statement listing both roles and both services
+  would let either role be passed to either service.
+- Names without a Region: an S3 bucket's, an IAM role's, a dashboard's and a
+  budget's ARN carry no Region, so threefold-prod-* would also match the edge
+  stack, threefold-prod-edge in us-east-1, whose generated bucket names begin
+  threefold-prod-edge-. Those grants name what this stack's resources are
+  called instead: a generated name is the stack's name, the logical id and a
+  random suffix, and the other two are the names the template gives them.
 
 The policy is matched as IAM matches it: an action pattern is case-insensitive
 with '*' and '?', a resource pattern is case-sensitive and its '*' crosses ':'
@@ -186,7 +210,15 @@ FUNCTION_ARN = f"arn:aws:lambda:{REGION}:{ACCOUNT}:function:{STACK}-ThreefoldFun
 ROLE_ARN = f"arn:aws:iam::{ACCOUNT}:role/{STACK}-ThreefoldFunctionRole-{SUFFIX}"
 SCHEDULE_ROLE_ARN = f"arn:aws:iam::{ACCOUNT}:role/{STACK}-DemoFleetScheduleRole-{SUFFIX}"
 TABLE_ARN = f"arn:aws:dynamodb:{REGION}:{ACCOUNT}:table/{STACK}-ThreefoldTable-{SUFFIX}"
-BUCKET_ARN = f"arn:aws:s3:::{STACK}-evidencebucket-{SUFFIX.lower()}"
+(_BUCKET,) = [name for name, kind in _resources().items() if kind == "AWS::S3::Bucket"]
+# S3 lowercases a generated bucket name.
+BUCKET_ARN = f"arn:aws:s3:::{STACK}-{_BUCKET.lower()}-{SUFFIX.lower()}"
+# The roles the deploys create: the transform names a function's role after
+# the function, and a plain role has its logical id.
+ROLE_LOGICAL_IDS = sorted(
+    [f"{name}Role" for name, kind in _resources().items() if kind == "AWS::Serverless::Function"]
+    + [name for name, kind in _resources().items() if kind == "AWS::IAM::Role"]
+)
 FUNCTION_LOG_GROUP = f"arn:aws:logs:{REGION}:{ACCOUNT}:log-group:/aws/lambda/{STACK}-ThreefoldFunction-{SUFFIX}"
 API_ARN = f"arn:aws:apigateway:{REGION}::/apis/acme0api01"
 
@@ -213,16 +245,32 @@ def _schedule_arn() -> str:
     return f"arn:aws:scheduler:{REGION}:{ACCOUNT}:schedule/default/{name.group(1).replace('${AWS::StackName}', STACK)}"
 
 
+def _key_request() -> Dict[str, str]:
+    """The CreateKey condition keys the certificate key's properties set, as KMS reads them from the request."""
+    block = re.search(r"^  CertificateKey:\n(.*?)(?=^  \w|^\S)", TEMPLATE, re.S | re.M)
+    assert block, "the template has no CertificateKey"
+    context = {}
+    for prop, key in (("KeySpec", "kms:KeySpec"), ("KeyUsage", "kms:KeyUsage")):
+        value = re.search(rf"^      {prop}: (\S+)$", block.group(1), re.M)
+        assert value, f"the key's {prop} is left to KMS's default, which the create grant does not name"
+        context[key] = value.group(1)
+    return context
+
+
+PASSED_TO_LAMBDA = {"iam:PassedToService": "lambda.amazonaws.com"}
+PASSED_TO_SCHEDULER = {"iam:PassedToService": "scheduler.amazonaws.com"}
+
+
 def _required() -> Dict[str, List[tuple]]:
-    """Per deployed type, (action, resource ARN) pairs CloudFormation needs granted."""
+    """Per deployed type, (action, resource ARN, request context) triples CloudFormation needs granted."""
     topic = _topic_arn()
     (dashboard,) = _names("DashboardName")
     (budget,) = _names("BudgetName")
     alarms = [f"arn:aws:cloudwatch:{REGION}:{ACCOUNT}:alarm:{name}" for name in _names("AlarmName")]
     log_groups = _log_group_arns()
 
-    def each(actions: List[str], resources: List[str]) -> List[tuple]:
-        return [(a, r) for a in actions for r in resources]
+    def each(actions: List[str], resources: List[str], context: Optional[Dict[str, str]] = None) -> List[tuple]:
+        return [(a, r, context or {}) for a in actions for r in resources]
 
     tags = ["TagResource", "UntagResource", "ListTagsForResource"]
     return {
@@ -234,7 +282,9 @@ def _required() -> Dict[str, List[tuple]]:
                 "lambda:DeleteFunction",
             ],
             [FUNCTION_ARN],
-        ),
+        )
+        # CreateFunction and an UpdateFunctionConfiguration that names the role pass it to Lambda.
+        + each(["iam:PassRole"], [ROLE_ARN], PASSED_TO_LAMBDA),
         "AWS::Lambda::Permission": each(["lambda:AddPermission", "lambda:RemovePermission", "lambda:GetPolicy"], [FUNCTION_ARN]),
         "AWS::Lambda::EventInvokeConfig": each(
             [
@@ -245,8 +295,8 @@ def _required() -> Dict[str, List[tuple]]:
         ),
         "AWS::IAM::Role": each(
             [
-                "iam:CreateRole", "iam:GetRole", "iam:PassRole", "iam:PutRolePolicy", "iam:GetRolePolicy",
-                "iam:DeleteRolePolicy", "iam:ListRolePolicies", "iam:ListAttachedRolePolicies", "iam:TagRole",
+                "iam:CreateRole", "iam:GetRole", "iam:PutRolePolicy", "iam:GetRolePolicy", "iam:DeleteRolePolicy",
+                "iam:ListRolePolicies", "iam:ListAttachedRolePolicies", "iam:UpdateAssumeRolePolicy", "iam:TagRole",
                 "iam:UntagRole", "iam:DeleteRole",
             ],
             [ROLE_ARN, SCHEDULE_ROLE_ARN],
@@ -255,7 +305,7 @@ def _required() -> Dict[str, List[tuple]]:
             ["scheduler:CreateSchedule", "scheduler:GetSchedule", "scheduler:UpdateSchedule", "scheduler:DeleteSchedule"],
             [_schedule_arn()],
         )
-        + each(["iam:PassRole"], [SCHEDULE_ROLE_ARN]),
+        + each(["iam:PassRole"], [SCHEDULE_ROLE_ARN], PASSED_TO_SCHEDULER),
         "AWS::ApiGatewayV2::Api": each(
             ["apigateway:POST", "apigateway:GET", "apigateway:PATCH", "apigateway:PUT", "apigateway:DELETE"], [API_ARN]
         ),
@@ -298,11 +348,12 @@ def _required() -> Dict[str, List[tuple]]:
         "AWS::Logs::MetricFilter": each(
             ["logs:PutMetricFilter", "logs:DescribeMetricFilters", "logs:DeleteMetricFilter"], [FUNCTION_LOG_GROUP]
         ),
-        "AWS::KMS::Key": each(
+        "AWS::KMS::Key": each(["kms:CreateKey"], ["*"], _key_request())
+        + each(
             [
-                "kms:CreateKey", "kms:DescribeKey", "kms:GetKeyPolicy", "kms:PutKeyPolicy",
-                "kms:EnableKeyRotation", "kms:GetKeyRotationStatus", "kms:TagResource",
-                "kms:UntagResource", "kms:ListResourceTags", "kms:ScheduleKeyDeletion",
+                "kms:DescribeKey", "kms:GetKeyPolicy", "kms:PutKeyPolicy", "kms:EnableKeyRotation",
+                "kms:GetKeyRotationStatus", "kms:UpdateKeyDescription", "kms:TagResource", "kms:UntagResource",
+                "kms:ListResourceTags", "kms:ScheduleKeyDeletion",
             ],
             [f"arn:aws:kms:{REGION}:{ACCOUNT}:key/{SUFFIX}-key-id"],
         ),
@@ -355,7 +406,11 @@ def test_no_type_is_checked_that_the_template_no_longer_deploys() -> None:
 
 @pytest.mark.parametrize("resource_type", sorted(REQUIRED))
 def test_the_role_may_do_everything_cloudformation_does_to_each_type(resource_type: str) -> None:
-    missing = [(action, resource) for action, resource in REQUIRED[resource_type] if not allows(action, resource)]
+    missing = [
+        (action, resource, context)
+        for action, resource, context in REQUIRED[resource_type]
+        if not allows(action, resource, context)
+    ]
     assert not missing, f"{resource_type}: the deploy role is refused {missing}"
 
 
@@ -388,6 +443,39 @@ def test_the_role_may_attach_no_other_managed_policy(policy_arn) -> None:
     assert not allows("iam:AttachRolePolicy", ROLE_ARN, context)
 
 
+@pytest.mark.parametrize(
+    "service", ["ec2.amazonaws.com", "cloudformation.amazonaws.com", "codebuild.amazonaws.com", None]
+)
+def test_a_role_is_passed_only_to_the_services_that_run_this_stack(service) -> None:
+    """Passed to anything else, a role that may invoke the function or sign with the key is that power elsewhere."""
+    context = {"iam:PassedToService": service} if service else {}
+    for role in (ROLE_ARN, SCHEDULE_ROLE_ARN):
+        assert not allows("iam:PassRole", role, context), (role, service)
+
+
+@pytest.mark.parametrize(
+    "role, context",
+    [(ROLE_ARN, PASSED_TO_SCHEDULER), (SCHEDULE_ROLE_ARN, PASSED_TO_LAMBDA)],
+)
+def test_neither_role_is_passed_to_the_service_that_runs_the_other(role: str, context: Dict[str, str]) -> None:
+    """The function's role on a schedule, or the schedule's role on a function, is a pairing the template never makes."""
+    assert not allows("iam:PassRole", role, context)
+
+
+@pytest.mark.parametrize(
+    "request_context",
+    [
+        {"kms:KeySpec": "SYMMETRIC_DEFAULT", "kms:KeyUsage": "ENCRYPT_DECRYPT"},
+        {"kms:KeySpec": "RSA_2048", "kms:KeyUsage": "ENCRYPT_DECRYPT"},
+        {"kms:KeySpec": "ECC_NIST_P256", "kms:KeyUsage": "SIGN_VERIFY"},
+        {},
+    ],
+)
+def test_the_only_key_the_role_may_create_is_the_kind_the_template_declares(request_context) -> None:
+    assert allows("kms:CreateKey", "*", _key_request())
+    assert not allows("kms:CreateKey", "*", request_context)
+
+
 # ------------------------------------------------------------------- and only that
 
 
@@ -411,6 +499,7 @@ RESOURCELESS = {
     "logs:ListLogDeliveries": "as above",
     "logs:PutResourcePolicy": "account-level: the log resource policy that lets API Gateway write",
     "logs:DescribeResourcePolicies": "as above",
+    "kms:CreateKey": "creates a key, so there is none to name yet; conditioned on the template's key spec and usage",
 }
 
 
@@ -439,9 +528,9 @@ def test_every_named_resource_belongs_to_this_stack_or_its_deployment() -> None:
         # DescribeLogGroups is a listing: IAM checks it against every group in
         # the region, and API Gateway's logging guide grants it so.
         f"arn:aws:logs:{REGION}:{ACCOUNT}:log-group:*",
-        # KMS key ids are random, so no pattern can name this stack's key. The
-        # grant is still account- and region-scoped, and only this stack's
-        # deploys run under the role that carries it.
+        # KMS key ids are random, so no pattern can name this stack's key, and
+        # this grant reaches every key in the account and region: the private
+        # stack's certificate key too. docs/RUNBOOK.md section 8 says so.
         f"arn:aws:kms:{REGION}:{ACCOUNT}:key/*",
     }
     for statement in STATEMENTS:
@@ -471,6 +560,15 @@ def test_every_named_resource_belongs_to_this_stack_or_its_deployment() -> None:
         ("cloudwatch:DeleteDashboards", f"arn:aws:cloudwatch::{ACCOUNT}:dashboard/threefold-dogfood-operations"),
         ("budgets:ModifyBudget", f"arn:aws:budgets::{ACCOUNT}:budget/acme-team-budget"),
         ("iam:PutRolePolicy", f"arn:aws:iam::{ACCOUNT}:role/threefold-github-deploy"),
+        ("iam:UpdateAssumeRolePolicy", f"arn:aws:iam::{ACCOUNT}:role/threefold-github-deploy"),
+        ("iam:UpdateAssumeRolePolicy", f"arn:aws:iam::{ACCOUNT}:role/threefold-dogfood-DemoFleetScheduleRole-X"),
+        # No users and no managed policies, even under this stack's name.
+        ("iam:CreateUser", f"arn:aws:iam::{ACCOUNT}:user/{STACK}-user"),
+        ("iam:PutUserPolicy", f"arn:aws:iam::{ACCOUNT}:user/{STACK}-user"),
+        ("iam:AttachUserPolicy", f"arn:aws:iam::{ACCOUNT}:user/{STACK}-user"),
+        ("iam:AttachGroupPolicy", f"arn:aws:iam::{ACCOUNT}:group/{STACK}-group"),
+        ("iam:CreatePolicy", f"arn:aws:iam::{ACCOUNT}:policy/{STACK}-policy"),
+        ("iam:CreatePolicyVersion", f"arn:aws:iam::{ACCOUNT}:policy/{STACK}-policy"),
         # The other stack's fleet schedule, and a schedule in another group.
         ("scheduler:DeleteSchedule", f"arn:aws:scheduler:{REGION}:{ACCOUNT}:schedule/default/threefold-dogfood-demo-fleet"),
         ("scheduler:UpdateSchedule", f"arn:aws:scheduler:{REGION}:{ACCOUNT}:schedule/acme-jobs/{STACK}-demo-fleet"),
@@ -478,10 +576,39 @@ def test_every_named_resource_belongs_to_this_stack_or_its_deployment() -> None:
         ("iam:PassRole", f"arn:aws:iam::{ACCOUNT}:role/threefold-dogfood-DemoFleetScheduleRole-X"),
         ("s3:PutObject", f"arn:aws:s3:::{BUCKET}/elsewhere/template.yml"),
         ("lambda:DeleteFunction", f"arn:aws:lambda:us-east-1:{ACCOUNT}:function:{STACK}-ThreefoldFunction-X"),
+        # The edge stack, threefold-prod-edge: its generated bucket names begin
+        # with this stack's name, and bucket, role, dashboard and budget ARNs
+        # carry no Region to tell the two apart.
+        ("s3:PutLifecycleConfiguration", f"arn:aws:s3:::{STACK}-edge-webbucket-x"),
+        ("s3:PutBucketPublicAccessBlock", f"arn:aws:s3:::{STACK}-edge-webbucket-x"),
+        ("s3:DeleteBucket", f"arn:aws:s3:::{STACK}-edge-logbucket-x"),
+        ("iam:PutRolePolicy", f"arn:aws:iam::{ACCOUNT}:role/{STACK}-edge-AcmeRole-X"),
+        ("iam:CreateRole", f"arn:aws:iam::{ACCOUNT}:role/{STACK}-AcmeRole-X"),
+        ("cloudwatch:DeleteDashboards", f"arn:aws:cloudwatch::{ACCOUNT}:dashboard/{STACK}-edge-operations"),
+        ("budgets:ModifyBudget", f"arn:aws:budgets::{ACCOUNT}:budget/{STACK}-edge-account-monthly-cost"),
     ],
 )
 def test_the_role_cannot_touch_the_other_stack_or_anything_else(action: str, resource: str) -> None:
     assert not allows(action, resource)
+
+
+def test_iam_is_granted_on_this_stacks_roles_and_nothing_else() -> None:
+    """No user, group or managed policy, and no role but the ones this stack's deploys create."""
+    roles = [f"arn:aws:iam::{ACCOUNT}:role/{STACK}-{logical_id}-*" for logical_id in ROLE_LOGICAL_IDS]
+    assert roles == sorted([ROLE_ARN.rsplit("-", 1)[0] + "-*", SCHEDULE_ROLE_ARN.rsplit("-", 1)[0] + "-*"])
+    named = set()
+    for statement in STATEMENTS:
+        actions = [a for a in _as_list(statement["Action"]) if a.lower().startswith("iam:")]
+        if not actions:
+            continue
+        # A statement may name one of the roles (PassRole names each on its
+        # own, with its own service) but never anything else.
+        resources = _as_list(statement["Resource"])
+        assert resources and set(resources) <= set(roles), statement["Sid"]
+        named.update(resources)
+        for action in actions:
+            assert "Role" in action and not re.search(r"User|Group|CreatePolicy", action), action
+    assert sorted(named) == roles, "a role this stack creates is granted nothing"
 
 
 def test_the_policy_fits_the_inline_quota_of_one_role() -> None:
@@ -514,6 +641,28 @@ def test_the_deploy_never_sends_the_edge_secret() -> None:
     assert "EdgeOriginSecret" not in deploy
     assert "--parameter-overrides" not in deploy
     assert "secrets." not in WORKFLOW, "no repository secret carries it either"
+
+
+def test_a_deploy_that_names_no_parameter_falls_back_to_defaults_the_comment_states() -> None:
+    """Where there is no previous value, a new stack or a parameter it has not seen, the template's default applies.
+
+    The deploy step's comment names the defaults a new stack would get; they
+    are read back from the template here so the comment cannot outlive them.
+    """
+    section = re.search(r"^Parameters:\n(.*?)^\S", TEMPLATE, re.S | re.M)
+    assert section, "the template has no Parameters section"
+    blocks = dict(re.findall(r"^  (\w+):\n((?:    .*\n|\n)*)", section.group(1), re.M))
+    assert len(blocks) >= 14, "the scan has gone blind"
+    defaults = {}
+    for name, block in blocks.items():
+        default = re.search(r"^    Default: (.*)$", block, re.M)
+        assert default, f"{name} has no default, so a stack created by the workflow would be refused"
+        defaults[name] = default.group(1)
+    assert (defaults["DemoFleet"], defaults["EnforceProjectPattern"], defaults["EdgeOriginSecret"]) == ("'false'", "''", "''")
+    comment = re.search(r"# No parameter is named here\.(.*?)- name: Deploy", WORKFLOW, re.S)
+    assert comment, "the deploy step no longer says what happens to the parameters it does not name"
+    said = " ".join(line.strip().lstrip("#").strip() for line in comment.group(1).splitlines())
+    assert "DemoFleet 'false' and an empty EnforceProjectPattern and EdgeOriginSecret" in said
 
 
 def test_the_workflow_deploys_the_stack_and_region_the_policy_names() -> None:

@@ -127,7 +127,7 @@
         "s3:GetBucketAcl",
         "s3:ListBucket"
       ],
-      "Resource": "arn:aws:s3:::threefold-prod-*"
+      "Resource": "arn:aws:s3:::threefold-prod-evidencebucket-*"
     },
     {
       "Sid": "LogGroupsThisStackOwns",
@@ -182,18 +182,30 @@
         "cloudwatch:UntagResource",
         "cloudwatch:ListTagsForResource"
       ],
-      "Resource": "arn:aws:cloudwatch::308857099262:dashboard/threefold-prod-*"
+      "Resource": "arn:aws:cloudwatch::308857099262:dashboard/threefold-prod-operations"
+    },
+    {
+      "Sid": "CreatingAKeyNamesNoKeySoOnlyItsKindIsScoped",
+      "Effect": "Allow",
+      "Action": "kms:CreateKey",
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "kms:KeySpec": "RSA_2048",
+          "kms:KeyUsage": "SIGN_VERIFY"
+        }
+      }
     },
     {
       "Sid": "KeysHaveRandomIdsSoOnlyTheAccountIsScoped",
       "Effect": "Allow",
       "Action": [
-        "kms:CreateKey",
         "kms:DescribeKey",
         "kms:GetKeyPolicy",
         "kms:PutKeyPolicy",
         "kms:EnableKeyRotation",
         "kms:GetKeyRotationStatus",
+        "kms:UpdateKeyDescription",
         "kms:TagResource",
         "kms:UntagResource",
         "kms:ListResourceTags",
@@ -232,7 +244,7 @@
         "budgets:UntagResource",
         "budgets:ListTagsForResource"
       ],
-      "Resource": "arn:aws:budgets::308857099262:budget/threefold-prod-*"
+      "Resource": "arn:aws:budgets::308857099262:budget/threefold-prod-account-monthly-cost"
     },
     {
       "Sid": "TheFleetScheduleThisStackMayCreate",
@@ -252,7 +264,7 @@
         "iam:CreateRole",
         "iam:DeleteRole",
         "iam:GetRole",
-        "iam:PassRole",
+        "iam:UpdateAssumeRolePolicy",
         "iam:PutRolePolicy",
         "iam:DeleteRolePolicy",
         "iam:GetRolePolicy",
@@ -261,7 +273,32 @@
         "iam:TagRole",
         "iam:UntagRole"
       ],
-      "Resource": "arn:aws:iam::308857099262:role/threefold-prod-*"
+      "Resource": [
+        "arn:aws:iam::308857099262:role/threefold-prod-ThreefoldFunctionRole-*",
+        "arn:aws:iam::308857099262:role/threefold-prod-DemoFleetScheduleRole-*"
+      ]
+    },
+    {
+      "Sid": "PassTheFunctionRoleOnlyToLambda",
+      "Effect": "Allow",
+      "Action": "iam:PassRole",
+      "Resource": "arn:aws:iam::308857099262:role/threefold-prod-ThreefoldFunctionRole-*",
+      "Condition": {
+        "StringEquals": {
+          "iam:PassedToService": "lambda.amazonaws.com"
+        }
+      }
+    },
+    {
+      "Sid": "PassTheScheduleRoleOnlyToScheduler",
+      "Effect": "Allow",
+      "Action": "iam:PassRole",
+      "Resource": "arn:aws:iam::308857099262:role/threefold-prod-DemoFleetScheduleRole-*",
+      "Condition": {
+        "StringEquals": {
+          "iam:PassedToService": "scheduler.amazonaws.com"
+        }
+      }
     },
     {
       "Sid": "OnlyTheManagedPoliciesTheTransformAttaches",
@@ -270,7 +307,10 @@
         "iam:AttachRolePolicy",
         "iam:DetachRolePolicy"
       ],
-      "Resource": "arn:aws:iam::308857099262:role/threefold-prod-*",
+      "Resource": [
+        "arn:aws:iam::308857099262:role/threefold-prod-ThreefoldFunctionRole-*",
+        "arn:aws:iam::308857099262:role/threefold-prod-DemoFleetScheduleRole-*"
+      ],
       "Condition": {
         "ArnEquals": {
           "iam:PolicyARN": [

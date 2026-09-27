@@ -306,16 +306,27 @@ downloads nothing and calls nothing.
 `.github/workflows/deploy.yml` packages and deploys `threefold-prod` and then
 checks the live URL; `ci.yml` runs the gate, the tests and template
 validation; `keepalive.yml` checks the public URL every six hours. The deploy
-workflow assumes the role `threefold-github-deploy` through GitHub's OIDC
-provider, and that role does not exist yet [STATE-FILE], so every deploy so far
-was run by hand with section 1. Neither workflow deploys the edge or publishes
-the pages.
+workflow runs only when someone dispatches it on `main` (Actions, Deploy, Run
+workflow), never on a push: a deploy stays a person's decision. It assumes the
+role `threefold-github-deploy` through GitHub's OIDC provider, and that role
+does not exist yet [STATE-FILE], so every deploy so far was run by hand with
+section 1. Neither workflow deploys the edge or publishes the pages.
 
-First check the trust policy's `sub` condition in
-`deploy/iam/github-trust.json`: it must read
-`repo:<owner>/<repository>:ref:refs/heads/main` for the one repository whose
-`main` branch is allowed to deploy, with no wildcard. Then create the role,
-from the repository root:
+The workflow names no parameters, so `threefold-prod` keeps the `DemoFleet`,
+`EnforceProjectPattern` and `EdgeOriginSecret` it has, as section 1 describes.
+A parameter the stack does not have yet takes the template's default on the
+first deploy that carries it; the comment above the deploy step in
+`deploy.yml` gives the AWS CLI's wording and the exceptions.
+
+The trust policy, `deploy/iam/github-trust.json`, accepts one token subject:
+`repo:upgradedev/aws-threefold:ref:refs/heads/main`, this repository's `main`
+branch, matched with `StringEquals` and no wildcard, for the audience
+`sts.amazonaws.com`. A run on another branch, from a fork or for a pull
+request is refused, and so is a job given a GitHub environment, whose token
+names the environment instead of the branch.
+`tests/security/test_the_deploy_role_trusts_one_branch_of_one_repository.py`
+reads the repository from the GitHub URL in `README.md` and fails if the
+policy names another. Create the role from the repository root:
 
 ```bash
 aws iam create-role \
@@ -333,18 +344,88 @@ aws iam get-role --role-name threefold-github-deploy \
   --query 'Role.AssumeRolePolicyDocument.Statement[0].Condition'
 ```
 
-The last command must show exactly the `sub` written in
-`deploy/iam/github-trust.json`, one repository's `refs/heads/main`, and no
-wildcard. The account's GitHub OIDC provider already exists and is shared with
-another project: do not recreate or modify it.
+The last command must show exactly the `sub` above and no wildcard. If the role
+was created earlier from a trust policy with another `sub`, it has never been
+assumable; replace its trust policy rather than recreating the role:
 
-What the role may do: CloudFormation on `threefold-prod` only, the packaging
-bucket, and Lambda functions, DynamoDB tables, S3 buckets, log groups, alarms,
-the dashboard, the alarm topic, a budget and IAM roles whose names begin
-`threefold-prod-`. What it may do more widely, because those actions take no
-useful resource constraint: `apigateway:*` and a few CloudWatch and Lambda
-listing actions within the account. It cannot read Secrets Manager, touch any
-other stack, or create users or policies.
+```bash
+aws iam update-assume-role-policy \
+  --role-name threefold-github-deploy \
+  --policy-document file://deploy/iam/github-trust.json
+```
+
+Run the `put-role-policy` command again whenever
+`deploy/iam/github-deploy-policy.json` changes: it replaces the inline policy
+of that name.
+
+The account's GitHub OIDC provider already exists and is shared with another
+project: do not recreate or modify it.
+
+What the role may do, as `tests/integration/test_the_deploy_role_covers_the_template.py`
+checks it action by action against every resource the template declares:
+CloudFormation change sets on `threefold-prod` only, through the Serverless
+transform; objects under `threefold/` in the packaging bucket; the Lambda
+functions, DynamoDB tables, log groups, alarms, alarm topic and fleet schedule
+in eu-west-1 whose names begin `threefold-prod-`; and, because a bucket's,
+a role's, a dashboard's and a budget's ARN carry no Region, only the evidence
+bucket, the dashboard and the budget under the names this stack gives them,
+and roles whose names begin `threefold-prod-ThreefoldFunctionRole-` or
+`threefold-prod-DemoFleetScheduleRole-`, the prefixes of the two roles this
+stack generates. That keeps the edge stack out of reach, although its generated
+bucket names also begin `threefold-prod-`. It may pass the function's role
+only to Lambda and the schedule's role only to EventBridge Scheduler, and
+attach to them only the two AWS managed policies the Serverless transform
+attaches.
+
+Where a resource's name cannot be known before it exists, the grant is wider.
+API ids and KMS key ids are generated, so it may call every API Gateway action
+on every API Gateway resource in the account, in any Region: REST, HTTP and
+WebSocket APIs, API keys and their values, custom domain names and their
+mappings, usage plans, VPC links and the account's API Gateway settings. It
+may also call every key action the template needs on every key in the account
+and Region; `kms:CreateKey` itself names no key and is limited to an RSA_2048
+signing key, the kind the template declares. Those two grants reach the
+private stack's API and certificate key. Limiting the API Gateway grant to
+this Region's HTTP APIs and their tags (`arn:aws:apigateway:eu-west-1::/apis`,
+`/apis/*` and `/tags/*`) is the likely next narrowing, but whether that covers
+every call CloudFormation makes for an HTTP API has not been checked, and a
+grant that falls short is found only by a live deploy that rolls back. It may
+also make the log deliveries an HTTP API's access log needs, list functions,
+log groups and dashboards, and read the account's Lambda settings. Its own
+grants do not let it read Secrets Manager, create users, groups or managed
+policies, or change another stack's CloudFormation, functions, tables,
+buckets, log groups, alarms, topics, schedules or roles, provided that
+stack's own name does not begin `threefold-prod-`: the names in eu-west-1
+are matched as a prefix. Through the roles it may create, though, it can do
+all of those things, as the next paragraph explains.
+
+Its IAM grants name the roles by prefix, because CloudFormation appends a
+random suffix to each generated role name. So the deploy role can create any
+number of roles whose names begin `threefold-prod-ThreefoldFunctionRole-` or
+`threefold-prod-DemoFleetScheduleRole-`. It can give each any trust policy,
+rewrite the trust policy of an existing one, the live function's role
+included, with `iam:UpdateAssumeRolePolicy`, and put any inline policy on it.
+A role that trusts a principal outside the account and carries a policy
+allowing every action is access that outlives the one-hour session and
+survives the deletion of `threefold-github-deploy`. Assuming a role needs no
+`iam:PassRole`, so the PassRole limits above do not stop this. Its reach is
+therefore that of an account administrator, and it can make that reach
+last. Anyone who can push to `main` can change what the workflow runs with
+it: treat write access to the repository as administrative access to the
+account.
+
+Nothing caps this today. The remedy is a permissions boundary, in three
+parts: a managed policy the owner creates, allowing at most what the function
+and the schedule need; `PermissionsBoundary` set to that policy on the
+function and on `DemoFleetScheduleRole` in `deploy/template.yml`; and an
+`iam:PermissionsBoundary` condition requiring it on the deploy role's
+`iam:CreateRole`, `iam:PutRolePolicy` and `iam:AttachRolePolicy`. The deploy
+role holds no grant to put or delete a role's boundary and must not be given
+one. The condition key does not apply to `iam:UpdateAssumeRolePolicy`, so the
+role could still make a bounded role assumable from outside the account: the
+boundary caps what that hands out at what the boundary allows, rather than
+closing the path. The boundary changes the template and the live roles, so it
+is a change of its own and not part of this policy.
 
 ## 9. Roll back
 
