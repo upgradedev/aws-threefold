@@ -4783,7 +4783,8 @@
       }
       // The rules checked for the visitor: the Ready ones, whose every flag
       // the visitor's own labels called correct. A Quiet rule flagged nothing
-      // here, so there is no evidence either way; it is left to the visitor.
+      // here, or refused only calls nobody labelled, so there is no evidence
+      // either way; it is left to the visitor.
       function readyKeys() { return readinessRules().filter(r => r.state === 'ready').map(r => r.rule_key); }
       function selected() {
         if (!(state.selected instanceof Set)) state.selected = new Set(readyKeys());

@@ -1249,8 +1249,18 @@ def test_the_service_s_probes_are_labelled_synthetic_where_the_stack_names_them(
   await visit('#/overview?days=7');
   await tick();
   out.view = view();
+  // A public stack that does not run the fleet: it reports probe as 0, and Acme-Probe's calls are other.
+  const noFleet = Object.assign(overviewBody(), { sources: { fleet: { calls: 0, projects: 0 }, sandbox: { calls: 96, projects: 8 }, probe: { calls: 0, projects: 0 }, other: { calls: 81, projects: 3 } } });
+  answer = contract({ '/api/auth/whoami': PUBLIC, '/api/overview': { status: 200, body: noFleet } });
+  await visit('#/overview?days=14');
+  await tick();
+  out.noFleet = view();
 """,
         tmp_path,
+    )
+    no_fleet = html.unescape(re.sub(r"<[^>]+>", "", out["noFleet"]))
+    assert "81 from other callers: the service's own probes, the demo page, or a repository connected to this stack" in no_fleet, (
+        "Where the fleet does not run, the probes are among the other callers"
     )
     page = out["view"]
     words = html.unescape(re.sub(r"<[^>]+>", "", page))
