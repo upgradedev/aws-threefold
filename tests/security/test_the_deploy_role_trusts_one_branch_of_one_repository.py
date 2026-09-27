@@ -16,6 +16,8 @@ import json
 import re
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 TRUST = json.loads((ROOT / "deploy" / "iam" / "github-trust.json").read_text(encoding="utf-8"))
 README = (ROOT / "README.md").read_text(encoding="utf-8")
@@ -23,13 +25,39 @@ WORKFLOW = (ROOT / ".github" / "workflows" / "deploy.yml").read_text(encoding="u
 PROVIDER = "token.actions.githubusercontent.com"
 
 
-def _repository() -> str:
+def _repository(text: str = README) -> str:
     """The one owner/repository README.md links to on GitHub."""
-    found = {m.rstrip(".") for m in re.findall(r"https://github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)", README)}
+    # A URL that ends a sentence carries its full stop, and a clone URL ends in
+    # .git; neither is part of the repository's name, which the token's sub
+    # carries without them.
+    found = {
+        re.sub(r"\.git$", "", m.rstrip("."))
+        for m in re.findall(r"https://github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)", text)
+    }
     # A second repository in the README would leave the test choosing between
     # them; it fails instead, so a person decides which one deploys.
     assert len(found) == 1, f"README.md links to {sorted(found)}; the trust policy can name only one"
     return found.pop()
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "[CI](https://github.com/acme-devco/acme-widgets/actions/workflows/ci.yml)",
+        "git clone https://github.com/acme-devco/acme-widgets.git",
+        "The source is at https://github.com/acme-devco/acme-widgets.",
+        "Clone https://github.com/acme-devco/acme-widgets.git.",
+    ],
+)
+def test_a_link_clone_url_or_sentence_end_names_the_same_repository(line: str) -> None:
+    text = f"See https://github.com/acme-devco/acme-widgets for the source.\n{line}\n"
+    assert _repository(text) == "acme-devco/acme-widgets"
+
+
+def test_a_second_repository_in_the_readme_fails_rather_than_being_chosen_between() -> None:
+    text = "https://github.com/acme-devco/acme-widgets\nhttps://github.com/acme-devco/acme-widgets-fork\n"
+    with pytest.raises(AssertionError):
+        _repository(text)
 
 
 def _account() -> str:
