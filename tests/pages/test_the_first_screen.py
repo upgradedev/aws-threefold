@@ -214,8 +214,9 @@ def test_each_length_of_time_is_said_where_it_is_true() -> None:
     claim of CLAUDE.md rule 6, the circuit breaker's halt and the certificate
     in under 60 seconds, is said beside the two scenarios that make it.
     """
-    walkthrough = re.search(r'<p class="tf-try-lede">(.*?)</p>', page_source("dashboard.html"), re.S)
-    assert walkthrough and _text(walkthrough.group(1)).startswith("About two minutes on the public demo"), \
+    walkthrough = re.search(r'<p\b[^>]*\bclass="[^"]*\btf-try-lede\b[^"]*"[^>]*>(.*?)</p>', page_source("dashboard.html"), re.S)
+    assert walkthrough, "The walkthrough's lede, which gives its length, is not found where it was"
+    assert _text(walkthrough.group(1)).startswith("About two minutes on the public demo"), \
         "The walkthrough gives another figure now: the button that opens it must say the same"
     label = {ident: words for ident, _, words in ACTIONS}["hero-try"]
     assert label.endswith("— 2 min") and "60" not in _text(_hero()), "The hero's button says the walkthrough's length"
