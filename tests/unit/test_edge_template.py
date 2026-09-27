@@ -194,11 +194,14 @@ def test_only_this_distribution_can_read_the_pages_and_only_read_them() -> None:
     assert allows["s3:ListBucket"]["Resource"] == {"Fn::GetAtt": ["WebBucket", "Arn"]}, "ListBucket applies to the bucket"
 
 
-def test_a_page_that_does_not_exist_is_not_found_rather_than_forbidden() -> None:
+def test_a_file_that_does_not_exist_is_not_found_rather_than_forbidden() -> None:
     """S3 tells a reader that may list the bucket NoSuchKey (404), and one that may not AccessDenied (403).
 
-    The listing permission is how a mistyped page answers 404 without a custom
-    error response, which would also replace the API's problem documents.
+    A page address with no page is sent to /404.html before the bucket is asked
+    (test_edge_page_not_found.py). Everything else that names a missing key, an
+    asset, a file of another type, and /404.html itself until it is published,
+    answers 404 through the listing permission, without a custom error
+    response, which would also replace the API's problem documents.
     """
     allows = _web_bucket_allows()
     assert "s3:ListBucket" in allows, "without it a missing page answers 403 AccessDenied"
@@ -664,9 +667,24 @@ def test_every_api_behavior_runs_the_function_on_the_viewer_request() -> None:
 
 
 def test_the_bucket_behaviors_do_not_run_the_function() -> None:
-    """S3 reads no header of ours, and every run is billed."""
-    for behavior in [DISTRIBUTION["DefaultCacheBehavior"], *[b for b in BEHAVIORS if b["TargetOriginId"] == "web"]]:
-        assert "FunctionAssociations" not in behavior
+    """S3 reads no header of ours, and every run is billed.
+
+    The default behavior runs the two missing-page functions and nothing else
+    (test_edge_page_not_found.py holds what they do); the assets run none.
+    """
+    default = DISTRIBUTION["DefaultCacheBehavior"]
+    for behavior in [default, *[b for b in BEHAVIORS if b["TargetOriginId"] == "web"]]:
+        arns = [association["FunctionARN"] for association in behavior.get("FunctionAssociations", [])]
+        assert FUNCTION_ARN not in arns, behavior.get("PathPattern", "default")
+    for behavior in [b for b in BEHAVIORS if b["TargetOriginId"] == "web"]:
+        assert "FunctionAssociations" not in behavior, behavior["PathPattern"]
+    assert default["FunctionAssociations"] == [
+        {"EventType": "viewer-request", "FunctionARN": {"Fn::GetAtt": ["MissingPageFunction", "FunctionMetadata.FunctionARN"]}},
+        {
+            "EventType": "viewer-response",
+            "FunctionARN": {"Fn::GetAtt": ["MissingPageStatusFunction", "FunctionMetadata.FunctionARN"]},
+        },
+    ]
 
 
 def test_the_viewer_address_and_host_reach_the_origin() -> None:

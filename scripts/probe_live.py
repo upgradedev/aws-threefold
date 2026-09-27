@@ -2613,8 +2613,8 @@ class Probe:
     def _problem_types(self) -> Tuple[str, str]:
         problems = []
         # Asked under /api/, so the function answers it. A bare path is a page
-        # behind the edge, where the pages bucket answers a missing key with its
-        # own 404 in XML, which says nothing about the service's problems.
+        # address behind the edge, answered with the pages' own 404.html, which
+        # says nothing about the service's problems.
         # With the key, because a stack that keeps its reads private refuses an
         # undeclared route before routing it, and this check is about the shape
         # of the service's own problems, not about the door.

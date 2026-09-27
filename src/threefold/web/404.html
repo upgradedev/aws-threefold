@@ -6,11 +6,15 @@
   <title>Not found — Threefold</title>
   <meta name="description" content="No page of Threefold lives at this address. The front page, the overview and the connect page are one click away." />
   <meta name="robots" content="noindex" />
-  <!-- This page is answered for any address that has no page, at any depth
-       (/nope.html, /app/nothing, /docs/x.md), so the shared layer is linked from
-       the site's root rather than beside the address asked for. The publish
-       replaces __THREEFOLD_BASE_PATH__ with the edge's own base, which is empty,
-       and every link below is made absolute by the shared layer. -->
+  <!-- The edge serves this page, with status 404, for a page address that has
+       no page: one that names no file type, or .html, at any depth (/nope.html,
+       /app/nothing, /docs/guide). A missing file of another type keeps the
+       bucket's own 404, and a path an API behavior takes keeps the API's own
+       answer (MissingPageFunction in deploy/edge.yml). Because the address can
+       be anywhere, the shared layer is linked from the site's root rather than
+       beside the address asked for. The publish replaces
+       __THREEFOLD_BASE_PATH__ with the edge's own base, which is empty, and
+       every link below is made absolute by the shared layer. -->
   <link rel="stylesheet" href="__THREEFOLD_BASE_PATH__/assets/threefold.css" />
   <script src="__THREEFOLD_BASE_PATH__/assets/threefold.js"></script>
   <style>
@@ -63,7 +67,7 @@
   <footer class="tf-footer">
     <div class="tf-container">
       <span>Threefold · AWS Zero to Shipped Hackathon 2026</span>
-      <span>This page is answered for any address that has no page</span>
+      <span>Answered with status 404 wherever a page address has no page</span>
     </div>
   </footer>
 
