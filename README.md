@@ -378,7 +378,7 @@ browser ─► CloudFront + WAF ─┬─► S3, private, origin access control 
                                          │     daily rollups, rules, stages, sign-in)
                                          ├─► Bedrock, Claude Haiku 4.5 (page
                                          │     explanations and rule drafts only)
-                                         └─► CloudWatch (EMF metrics, 10 alarms,
+                                         └─► CloudWatch (EMF metrics, 11 alarms,
                                                a dashboard, X-Ray)
 ```
 

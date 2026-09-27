@@ -78,7 +78,8 @@ to 5 ms; files just under 24 KB take about 100 ms for Python or TypeScript and
 however many of their imports move. What the advice costs against a whole
 verdict, and so where the evaluator stops asking for it, is measured and
 recorded beside FIX_LAYERING_ADVICE_MAX_CHARS in application/evaluator.py.
-Not measured on the Lambda, whose 256 MB share of a core will make both slower.
+Not measured on the Lambda, whose share of a core (FunctionMemoryMb, 1024 MB
+by default) will make both slower.
 A refused call pays this once, on top of the gate; an approved call never does.
 
 Wiring (for the owner, after B1 merges; this track changes none of these files):
@@ -121,7 +122,7 @@ Wiring (for the owner, after B1 merges; this track changes none of these files):
    writes; `deny()` then carries it as permissionDecisionReason (Claude Code,
    Codex) or reason (Antigravity). A stack without the field changes nothing.
 5. Budget: the hook gives up after DEFAULT_TIMEOUT_SECONDS = 4.0 and fails open,
-   and the Lambda has Timeout 15 at 256 MB. The cost above is what keeps a large
+   and the Lambda has Timeout 15 at FunctionMemoryMb (1024 MB by default). The cost above is what keeps a large
    refused write inside that; raising MAX_CONTENT_CHARS spends it.
 """
 from __future__ import annotations
@@ -214,7 +215,7 @@ KEPT_TAIL_STEPS = 3
 # The default for propose_fix's max_content_chars: writes that come to more
 # than this, taken together, are not rewritten, only described. A rewrite costs
 # five to seven times the gate's own read of the file, and at 64 KB that was
-# 350 to 470 ms on the development machine [PRIMARY], before a 256 MB Lambda's
+# 350 to 470 ms on the development machine [PRIMARY], before the Lambda's
 # fraction of a core multiplies it, against a hook that gives up after 4 s and
 # then lets the call through. Three times the 8 KB a verdict carries is past
 # anything the answer can include; a larger file gets the same advice in words

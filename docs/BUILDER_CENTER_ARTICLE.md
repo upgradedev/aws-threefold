@@ -113,7 +113,7 @@ browser ─────────────────────►├─
                               │           └─► one Lambda, Python 3.11 on arm64
                               │                 ├─► DynamoDB, one table
                               │                 ├─► Bedrock, Claude Haiku 4.5
-                              │                 └─► CloudWatch: EMF, 10 alarms, X-Ray
+                              │                 └─► CloudWatch: EMF, 11 alarms, X-Ray
 ```
 
 Checked on the live stacks **[PRIMARY, 2026-09-22]**: the web ACL is attached
