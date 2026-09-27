@@ -17,8 +17,12 @@ reading.
 
 The first deploy went out with the code exactly as it stood, before any
 polish, so that packaging and IAM would fail early if they were going to. They
-did, and that is the useful part of this record. Raw output:
-[`evidence/DEPLOYMENT_2026-09-20.md`](evidence/DEPLOYMENT_2026-09-20.md).
+did, and that is the useful part of this record. The raw output kept from that
+day, the stack's description, its `/status` answering and the three
+CloudTrail events of step 9, is in
+[`evidence/DEPLOYMENT_2026-09-20.md`](evidence/DEPLOYMENT_2026-09-20.md). The
+other steps are recorded only in this table, written by the session that ran
+them; their transcripts were not kept.
 
 | # | The agent ran | AWS answered | What changed |
 |---|---|---|---|
@@ -38,7 +42,7 @@ deployed application can reach the model. Only the execution role appearing
 as the CloudTrail principal shows that, and it is why that command is in the
 list.
 
-## 2026-09-22: the stacks as they stand, read back by the agent
+## 2026-09-22: the stacks as they stood, read back by the agent
 
 Every command below is read-only, and each answer is what AWS returned on
 2026-09-22 [PRIMARY, 2026-09-22].
@@ -53,6 +57,16 @@ Every command below is read-only, and each answer is what AWS returned on
 | `aws cloudwatch describe-alarms --alarm-name-prefix threefold-prod-` | 10 alarms, all `OK` |
 | `aws wafv2 get-web-acl` on the edge's web ACL | `AmazonIpReputationList`, `RateLimitPerIp`, `CommonRuleSet`, `KnownBadInputsRuleSet` |
 | `aws cloudfront get-distribution` | `Deployed`, 3 origins, 21 cache behaviors, the web ACL attached |
+
+What has changed since. Rechecked with the same commands on 2026-09-27, the
+function runs at 1024 MB, set by the `FunctionMemoryMb` parameter, and there
+are 11 alarms, all `OK`, after the slow-call alarm moved to the HTTP API's p95
+latency and a near-timeout alarm was added
+([`ARCHITECTURE.md`](ARCHITECTURE.md)) [PRIMARY, 2026-09-27]. The public stack
+also carries two parameters added on 2026-09-26: `DemoFleet=true`, which runs
+a synthetic Acme fleet through the real gates every 15 minutes, labelled
+synthetic wherever it appears, and `EnforceProjectPattern=^Acme-Live-.+$`, so
+the daily live agent's projects start in Enforce [STATE-FILE].
 
 ## Checking it yourself
 
@@ -85,9 +99,14 @@ curl -s https://d1og72wpk4aqig.cloudfront.net/install.py | grep '^BAKED_ENDPOINT
 curl -s https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/install.py | grep '^BAKED_ENDPOINT'
 ```
 
-The whole public stack, checked claim by claim by `scripts/probe_live.py`:
-[`evidence/PROBES_2026-09-22.md`](evidence/PROBES_2026-09-22.md), 113 PASS,
-0 FAIL, 3 SKIP against the origin URL.
+The whole public stack, checked claim by claim by `scripts/probe_live.py`: first
+on 2026-09-22, 113 PASS, 0 FAIL, 3 SKIP against the origin URL
+([`evidence/PROBES_2026-09-22.md`](evidence/PROBES_2026-09-22.md)); most
+recently on 2026-09-27, after that day's second deploy, 117 PASS, 0 FAIL,
+3 SKIP both through the edge and at the origin
+([`evidence/PROBES_2026-09-27-2-edge.md`](evidence/PROBES_2026-09-27-2-edge.md),
+[`evidence/PROBES_2026-09-27-2.md`](evidence/PROBES_2026-09-27-2.md)). Among
+those checks, the installer served through the edge names the edge.
 
 ## The connection is also the product
 
@@ -100,12 +119,29 @@ at. The same discipline produced this page: the first table lists two defects
 the agent shipped and then caught, because a proof that records only
 successes is not evidence of a working connection.
 
+Since 2026-09-26 a coding agent also works against the deployed service
+through the hook: `scripts/daily_live_agent.py` gives Codex or Claude Code,
+alternating by day, one of the benchmark's Acme tasks in a project that
+starts in Enforce on the public stack. Its first run, Codex CLI 0.155.0 on
+2026-09-26, was refused once, falsely: a PowerShell read ending in `2>$null`
+was taken for a write. That was fixed and deployed on 2026-09-27, and looking
+for a way around the fix closed an older hole, where
+`bash -c "... > src/domain/\$f"` had been approved [STATE-FILE]. The second
+run, Claude Code 2.1.220 on 2026-09-27, made 4 calls, all approved, left no
+violation and passed its acceptance tests
+([`benchmark/results/live/`](../benchmark/results/live/)) [PRIMARY,
+2026-09-27]. Until the owner schedules the script, a day runs only when it
+is started by hand [STATE-FILE].
+
 ## What this does not claim
 
 The agent ran under a human operator's credentials, and every deploy was
 reviewed before it was run. No autonomous production access was granted, and
-none is claimed. The GitHub Actions workflows in `.github/workflows/` are
-written to deploy with a short-lived OIDC role instead of stored keys, and that
-role has not been created yet, so no deployment has run from them
-[STATE-FILE]; every deploy so far was run by hand, with the commands in
-[`RUNBOOK.md`](RUNBOOK.md).
+none is claimed. The deploy workflow, `.github/workflows/deploy.yml`, is
+written to deploy with a short-lived OIDC role instead of stored keys. That
+role has deliberately not been created: on 2026-09-27 the owner decided
+against it, because a role that may create roles and write their policies is
+in practice an account administrator until a permissions boundary caps it
+([`RUNBOOK.md`](RUNBOOK.md), section 8). No deployment has run from the
+workflow [STATE-FILE]; every deploy so far was run by hand, with the commands
+in [`RUNBOOK.md`](RUNBOOK.md).

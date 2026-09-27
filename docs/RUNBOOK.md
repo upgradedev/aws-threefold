@@ -53,8 +53,9 @@ current value, secrets included, so an ordinary code deploy names none.
 | `AlarmEmail` | empty, `NoEcho` | subscribes an address to the alarm topic; AWS sends a confirmation first |
 | `EdgeOriginSecret` | empty, `NoEcho` | the edge secret; empty trusts no edge header |
 | `DefaultHookStage` | `observe` | the stage for a project with none of its own |
+| `EnforceProjectPattern` | empty | a regular expression: projects whose name matches start in Enforce until someone configures them. The public stack sets `^Acme-Live-.+$`, for the daily live agent (section 6) |
 | `DemoFleet` | `false` | `true` on the public stack only: a schedule runs the synthetic Acme fleet every fifteen minutes |
-| `FunctionMemoryMb` | `1024` | the function's memory in megabytes, from 512 to 1769, one full core. Lambda gives CPU in proportion to it; the stacks first ran with 256, so the first deploy that does not name it raises them to the default |
+| `FunctionMemoryMb` | `1024` | the function's memory in megabytes, from 512 to 1769, one full core. Lambda gives CPU in proportion to it; the stacks first ran with 256 and were raised to the default by the deploys of 2026-09-27 [STATE-FILE] |
 | `ReservedConcurrency` | `25` | Lambda refuses a reservation that leaves fewer than 100 unreserved: check `aws lambda get-account-settings` shows at least 150 for two stacks at 25, or deploy with `0` |
 | `ApiThrottleRateLimit` / `ApiThrottleBurstLimit` | `100` / `200` | per route, answered 429 by API Gateway |
 | `SlowCallAlarmMs` | `5000` | threshold of the two latency alarms: the p95 of every HTTP request's latency at API Gateway, and the average evaluation latency. The fleet's scheduled tick is in neither; the near-timeout alarm (an invocation over 12 seconds) watches it |
@@ -194,7 +195,8 @@ These write: synthetic calls under project `Acme-Probe` and session ids
 `probe-<run id>-*`, the two demo simulations, and one sandbox that expires in
 24 hours; the evidence header lists every kind of write. `--read-only` skips
 every check that records a decision or changes a project. The evidence goes to
-`docs/evidence/PROBES_<date>.md`.
+`docs/evidence/PROBES_<date>.md`, or to `PROBES_<date>-<run id>.md` when a
+run earlier that day already wrote that file; `--out` names another.
 
 A private stack:
 
@@ -213,9 +215,10 @@ The harness in `benchmark/` runs a coding agent headless on six synthetic Acme
 tasks, and on three pressure variants whose prompt asks for the forbidden
 shortcut, under three conditions, and grades what it left behind.
 
-Measured on 2026-09-22, four matrices, 162 Claude Code runs. A governed
-violation landed with no guidance / with the rules in `CLAUDE.md` / with
-Threefold enforcing:
+Measured on 2026-09-22, four matrices, 162 Claude Code runs, and on
+2026-09-23 two more, 81 runs of Codex CLI 0.155.0. A governed violation
+landed with no guidance / with the rules in `CLAUDE.md` (for Codex, in
+`AGENTS.md`) / with Threefold enforcing:
 
 | Report | Rows | Violation landed | Tests passed, Threefold |
 |---|---|---|---|
@@ -223,13 +226,16 @@ Threefold enforcing:
 | `BENCHMARK_2026-09-22-HAIKU.md` (standard, `claude-haiku-4-5`) | `20260922T145644Z.jsonl` | 39% / 17% / 0% | 18/18 |
 | `BENCHMARK_2026-09-22-PRESSURE-SONNET.md` | `20260922T161455Z-pressure.jsonl` | 67% / 0% / 0% | 6/9 |
 | `BENCHMARK_2026-09-22-PRESSURE-HAIKU.md` | `20260922T162306Z-pressure.jsonl` | 100% / 56% / 0% | 4/9 |
+| `BENCHMARK_2026-09-23-CODEX.md` (standard, Codex) | `20260923T025154Z-codex.jsonl` | 17% / 0% / 0% | 18/18 |
+| `BENCHMARK_2026-09-23-CODEX-PRESSURE.md` | `20260923T031215Z-pressure-codex.jsonl` | 100% / 11% / 0% | 6/9 |
 
-The two families are never pooled. Nothing under Threefold violated in any
-series. The `CLAUDE.md` column follows the model rather than the family: with
-`claude-sonnet-5` the rules held in both families with nothing enforcing them
-(0/18 and 0/9), with `claude-haiku-4-5` in neither (17% and 56%). The cost of
-enforcing shows in the pressure rows, where the governed agent finished 10 of
-18 runs and otherwise stopped and reported the conflict.
+The two families are never pooled, and neither are the two agents. Nothing
+under Threefold violated in any series. For Claude Code the `CLAUDE.md`
+column follows the model rather than the family: with `claude-sonnet-5` the
+rules held in both families with nothing enforcing them (0/18 and 0/9), with
+`claude-haiku-4-5` in neither (17% and 56%). The cost of enforcing shows in
+the pressure rows, where the governed Claude Code agent finished 10 of 18
+runs, and Codex 6 of 9, and otherwise stopped and reported the conflict.
 
 The pilot before them (`BENCHMARK_2026-09-22-PILOT.md`) measured nothing: its
 real-agent runs never reached the model on an expired login, which the token
@@ -253,7 +259,9 @@ python scripts/build_proof.py \
   --series benchmark/results/20260922T143932Z.jsonl \
   --series benchmark/results/20260922T145644Z.jsonl \
   --series benchmark/results/20260922T161455Z-pressure.jsonl \
-  --series benchmark/results/20260922T162306Z-pressure.jsonl
+  --series benchmark/results/20260922T162306Z-pressure.jsonl \
+  --series benchmark/results/20260923T025154Z-codex.jsonl \
+  --series benchmark/results/20260923T031215Z-pressure-codex.jsonl
 ```
 
 `report.py` computes the headline from the rows; nothing else states one. Each
@@ -274,7 +282,28 @@ the four matrices of 2026-09-22 actually took, from their own rows: the
 standard matrix about 0.3 hours and $10 with `claude-sonnet-5` and about
 0.3 hours and $4 with `claude-haiku-4-5`; the pressure matrix about 0.1 hours
 and $6, then about 0.1 hours and $1. Codex runs use `--agent codex` and its own
-login (`codex login`) and are not measured.
+login (`codex login`). Codex reports no cost, so its rows carry none; its two
+matrices of 2026-09-23 took about 0.3 and 0.2 hours by the same reading.
+
+**The daily live agent.** `scripts/daily_live_agent.py` runs one run of the
+`threefold` condition against a live stack instead of a local server. The
+UTC date picks the agent, Claude Code and Codex on alternate days, and the
+task, one of the six standard ones, moving on every second day. The hook
+reports as project `Acme-Live-<task>` in session `live-<task>-<date>`, which
+the public stack starts in Enforce (`EnforceProjectPattern`, section 1), and
+the row goes to `benchmark/results/live/<date>-<agent>.jsonl`. It uses the
+same logins as the matrices; `--codex-home` names a folder holding only a
+Codex login.
+
+```bash
+python scripts/daily_live_agent.py --endpoint https://d1og72wpk4aqig.cloudfront.net/ --dry-run   # the day's pick, nothing run
+python scripts/daily_live_agent.py --endpoint https://d1og72wpk4aqig.cloudfront.net/             # today's run
+```
+
+Two rows exist, Codex on 2026-09-26 and Claude Code on 2026-09-27. The
+Windows Task Scheduler entry that would run it daily at 04:30 local time is
+written out in the script's docstring and is the owner's to create; until it
+exists, a day runs only when the script is started by hand [STATE-FILE].
 
 ## 7. Connect, open, status, disconnect
 
@@ -298,6 +327,13 @@ For a private stack, fetch `install.py` from that stack instead and add
 | `python3 threefold.py status` | every connected folder on this machine and its stage on the stack |
 | `python3 threefold.py disconnect [PATH]` | removes exactly what connect added; a file changed by hand since keeps the change |
 
+The mode is `managed` unless `--mode` says otherwise: the project's stage on
+the stack decides. `observe` sends every call as a dry run, so the stack
+records it and refuses nothing, whatever the stage. `enforce` is `managed`
+plus a refusal, on the machine and whatever the stage, of writes to the
+hooks' own files. In every mode the hook refuses a credential on the machine,
+before anything is sent.
+
 The installer keeps a copy of itself at `~/.threefold/bin/threefold_install.py`,
 so these work after `threefold.py` is deleted. `--dry-run` writes nothing,
 downloads nothing and calls nothing.
@@ -310,8 +346,11 @@ validation; `keepalive.yml` checks the public URL every six hours. The deploy
 workflow runs only when someone dispatches it on `main` (Actions, Deploy, Run
 workflow), never on a push: a deploy stays a person's decision. It assumes the
 role `threefold-github-deploy` through GitHub's OIDC provider, and that role
-does not exist yet [STATE-FILE], so every deploy so far was run by hand with
-section 1. Neither workflow deploys the edge or publishes the pages.
+has deliberately not been created: on 2026-09-27 the owner decided to leave
+it uncreated, because without the permissions boundary described at the end
+of this section it is in practice an account administrator [STATE-FILE].
+Every deploy so far was run by hand with section 1. No workflow deploys the
+edge or publishes the pages.
 
 The workflow names no parameters, so `threefold-prod` keeps the `DemoFleet`,
 `EnforceProjectPattern` and `EdgeOriginSecret` it has, as section 1 describes.
@@ -481,7 +520,8 @@ the tracks' own notes and AWS list prices, not from measurement.
 | AWS WAF web ACL with four rules | about 9 USD a month, plus a per-request charge |
 | CloudWatch alarms (11 per stack) and the dashboard | a few USD a month |
 | Lambda, API Gateway, DynamoDB on demand, CloudFront, S3 | per request and per GB; not estimated |
-| Bedrock | per token, only for page explanations and rule drafts, capped per container at 200 successful explanation calls (failed calls are not counted) and 60 drafting calls (every call counted) |
+| Bedrock | per token, only for page explanations and rule drafts, capped per container at 200 successful explanation calls (failed calls are not counted) and 60 drafting calls (every call counted), and for the whole account at 400 drafting calls a UTC day, after which a draft answers 429 without calling the model |
+| The demo fleet, public stack only | 96 scheduled invocations a day, each sending 20 to 40 synthetic calls through the evaluator and none to Bedrock; Lambda and DynamoDB per request, not estimated |
 | The benchmark | see section 6 |
 
 `MonthlyBudgetUsd` puts an account-wide budget on the alarm topic when a
