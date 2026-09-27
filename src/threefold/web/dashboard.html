@@ -190,6 +190,7 @@
     .tf-ops-tally > div { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: var(--tf-radius); background: var(--tf-surface-1); border: 1px solid var(--tf-hairline); }
     .tf-ops-tally b { font: 650 1.125rem/1.5rem var(--tf-font-sans); color: var(--tf-text); }
     .tf-ops-tally small { font-size: 0.75rem; line-height: 1rem; color: var(--tf-text-3); }
+    .tf-ops-tally > div[data-tally="untested"] { grid-column: 1 / -1; }
 
     /* Readiness, rule by rule. */
     .tf-ops-rules { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
@@ -488,7 +489,11 @@
       ready: { label: 'Ready', chip: 'tf-chip-emerald', says: 'everything it flagged was marked correct' },
       quiet: { label: 'Quiet', chip: 'tf-chip-gray', says: 'it flagged nothing' },
       needs_review: { label: 'Needs review', chip: 'tf-chip-sky', says: 'some of what it flagged has no label yet' },
-      noisy: { label: 'Noisy', chip: 'tf-chip-rose', says: 'at least one flag was a false alarm' }
+      noisy: { label: 'Noisy', chip: 'tf-chip-rose', says: 'at least one flag was a false alarm' },
+      // Not a state the service sends: the page's reading of a rule the
+      // service calls Ready only because it refused calls from the demo page
+      // (ruleState, on the project's screen).
+      untested: { label: 'Nothing from agents', chip: 'tf-chip-gray', says: 'every call it refused came from the demo page, and no agent\'s call has tested it' }
     };
     const REVIEWS = {
       correct: { label: 'Correct', chip: 'tf-chip-emerald' },
@@ -1044,13 +1049,17 @@
       const seen = (fa && fa.byProject[p.project]) || { any: 0, observed: 0 };
       const known = !!fa && (fa.complete || seen.any > 0);
       const flagged = would + (typeof p.refused === 'number' ? p.refused : 0);
-      const state = seen.any > 0 ? 'noisy' : flagged <= 0 ? 'quiet' : reading ? '' : waiting > 0 ? 'needs_review' : known ? 'ready' : '';
+      // Every call from the demo page alone (it is the only agent the list
+      // names) and nothing flagged in Observe: the page's refusals are not an
+      // agent's calls, so there is nothing from agents to go on.
+      const pageOnly = would <= 0 && flagged > 0 && Array.isArray(p.agents) && p.agents.length > 0 && p.agents.every(a => a === 'page');
+      const state = seen.any > 0 ? 'noisy' : flagged <= 0 ? 'quiet' : pageOnly ? 'untested' : reading ? '' : waiting > 0 ? 'needs_review' : known ? 'ready' : '';
       const chip = state ? stateChip(state) : reading
         ? html`<span class="tf-skeleton tf-ops-chip-wait" aria-hidden="true"></span><span class="sr-only">Reading the false alarms</span>`
         : '';
       const unread = !state && !reading ? html` · <span title="The false alarms of this window could not all be read, so neither Ready nor Noisy is claimed">false alarms not all read</span>` : '';
       if (would <= 0) {
-        return html`<span class="tf-ops-ready" data-state="${state || 'unknown'}">${chip}<span class="tf-ops-ready-bar" aria-hidden="true"></span><span class="tf-ops-meter-words">${flagged > 0 ? 'nothing to label' : 'nothing flagged'}${unread}</span></span>`;
+        return html`<span class="tf-ops-ready" data-state="${state || 'unknown'}">${chip}<span class="tf-ops-ready-bar" aria-hidden="true"></span><span class="tf-ops-meter-words">${pageOnly ? 'demo-page calls only' : flagged > 0 ? 'nothing to label' : 'nothing flagged'}${unread}</span></span>`;
       }
       const done = Math.max(0, Math.min(would, would - waiting));
       const wrong = Math.min(done, seen.observed);
@@ -1807,6 +1816,47 @@
       return html`${lead}: ${arrivedWords(split.by, split.total, ARRIVED)}. <a class="tf-link" href="${callsHref({ project: name, kind: 'refused', days })}">See them</a>`;
     }
 
+    // A rule's state as this screen states it. The service reads a rule
+    // Ready once it flagged anything and nothing it flagged waits for a label
+    // or was marked wrong, and a refusal counts as flagged. A call from the
+    // demo page always enforces and is not an agent's, so a rule whose every
+    // refusal came from the page, with nothing flagged in Observe and no
+    // label, has nothing from agents to go on ('untested', drawn "Nothing
+    // from agents"). That is read from
+    // the project's refused calls (refusedSplit). While they are on their
+    // way such a rule's state is left unsaid (''), so Ready is never drawn
+    // and taken back; a read that failed or stopped short leaves the
+    // service's state as it is.
+    function readyOnRefusalsAlone(r) {
+      return r.state === 'ready' && !(r.correct > 0) && !(r.would_refuse > 0) && typeof r.refused === 'number' && r.refused > 0;
+    }
+    function ruleState(r, split) {
+      if (!readyOnRefusalsAlone(r)) return r.state;
+      if (split === undefined) return '';
+      const mine = split && !split.partial ? split.byRule[r.rule_key] : null;
+      return mine && mine.total === r.refused && mine.by.page === r.refused ? 'untested' : r.state;
+    }
+    const UNTESTED_SAYS = 'Nothing from agents to go on: every call it refused came from the demo page, which always enforces, and no agent\'s call was flagged by it.';
+    // What a rule's row says next, in the state the screen gives it.
+    function ruleSays(r, state) {
+      if (state === 'untested') return UNTESTED_SAYS;
+      if (state === '') return 'Reading how its refused calls arrived…';
+      return inflect(r.recommendation) || (STATES[r.state] && STATES[r.state].says) || '';
+    }
+    // The state chip, or its place while the refused calls are read.
+    function ruleChip(state) {
+      return state === ''
+        ? html`<span class="tf-skeleton tf-ops-chip-wait" aria-hidden="true"></span><span class="sr-only">Reading how its refused calls arrived</span>`
+        : stateChip(state);
+    }
+    // The one sentence for the rules that flagged nothing, the same in the
+    // promote dialog as on the walkthrough's step 4: nothing checks them for
+    // the reader. `agents` names the calls that count when some of the rules
+    // refused calls from the demo page.
+    function untriedNote(count, agents) {
+      return 'No ' + (agents ? 'agent\'s ' : '') + 'call here tested ' + (count === 1 ? 'this rule' : 'these') + '; check one to enforce it anyway.';
+    }
+
     function stageHero(name, stage, config, readiness, days, opts) {
       const o = opts || {};
       const canWrite = o.canWrite !== false;
@@ -1815,15 +1865,26 @@
       const observing = rules.filter(r => r.mode_now === 'observe').map(r => r.rule_key);
       const enforcing = rules.filter(r => r.mode_now === 'enforce').length;
       const waiting = sum(rules, 'unreviewed');
-      const noisy = rules.filter(r => r.state === 'noisy').length;
-      const canEnforce = rules.filter(r => r.state === 'ready' || r.state === 'quiet').length;
+      // Each rule in the state its row states, so the headline, the tally
+      // and the promote dialog count the same rules.
+      const states = rules.map(r => ruleState(r, o.refused));
+      const counted = key => states.filter(s => s === key).length;
+      const noisy = counted('noisy');
+      const ready = counted('ready');
+      // A rule with nothing to go on: it flagged nothing, or only calls from
+      // the demo page. The promote dialog leaves these unchecked.
+      const untried = counted('quiet') + counted('untested');
+      const observed = typeof summary.calls_observed === 'number' ? summary.calls_observed : null;
       const enforce = stage === 'enforce';
       const track = html`<div class="tf-ops-track" aria-hidden="true">
           <span class="tf-ops-step" id="stage-step-observe" data-on="${enforce ? '' : 'observe'}">${T.icon('eye', 14)}Observe</span>
           <span class="tf-ops-track-line"></span>
           <span class="tf-ops-step" id="stage-step-enforce" data-on="${enforce ? 'enforce' : ''}">${T.icon('shield', 14)}Enforce</span>
         </div>`;
-      const could = html`<strong class="text-white">${num(canEnforce)} of ${plural(rules.length, 'rule')}</strong> could enforce today`;
+      // Ready (every flag labelled correct) and nothing to go on, said apart.
+      const could = ready
+        ? html`<strong class="text-white">${num(ready)} of ${plural(rules.length, 'rule')}</strong> ${ready === 1 ? 'reads' : 'read'} Ready${untried ? html`, and ${num(untried)} ${untried === 1 ? 'has' : 'have'} nothing to go on yet` : ''}`
+        : html`<strong class="text-white">No rule</strong> reads Ready yet${untried ? html`, and ${num(untried)} of ${plural(rules.length, 'rule')} ${untried === 1 ? 'has' : 'have'} nothing to go on` : ''}`;
       const more = (what, body) => html`<details class="tf-ops-hero-more"><summary>${what}${T.icon('chevrondown', 14)}</summary>${body}</details>`;
       const off = canWrite ? '' : raw(' disabled aria-describedby="stage-locked"');
       const locked = canWrite ? '' : html`<p id="stage-locked" class="tf-ops-locked"><span class="tf-chip tf-chip-gray">${T.icon('lock', 13)}Operator only</span><span>Only the operator changes this project's stage. <a class="tf-link" href="${'#/signin' + query({ next: '/projects/' + name })}">Sign in to ${enforceWord(stage)}</a>, or <a class="tf-link" href="#/try">promote a sandbox of your own</a>.</span></p>`;
@@ -1843,13 +1904,17 @@
         : html`<h2 id="stage-title" tabindex="-1" class="tf-ops-hero-title">In Observe: agents' calls are recorded, never refused</h2>
             <p class="tf-ops-hero-text">${!rules.length
               ? 'Readiness appears once this project sends calls in the window.'
-              : canEnforce === rules.length
-                ? html`Every rule reads Ready or Quiet: promote, and ${rules.length === 1 ? 'it refuses' : 'they refuse'} from the next call.`
-                : waiting
-                  ? html`${could}; ${plural(waiting, 'call')} ${waiting === 1 ? 'waits' : 'wait'} for a label.`
-                  : noisy
-                    ? html`${could}; ${plural(noisy, 'noisy rule')} should keep observing.`
-                    : html`${could}.`}</p>
+              : observed === 0
+                ? html`No agent's call was observed here in ${windowWords(days)}, so no rule has anything to go on yet.`
+                : ready === rules.length
+                  ? html`Every rule reads Ready: promote, and ${rules.length === 1 ? 'it refuses' : 'they refuse'} from the next call.`
+                  : untried === rules.length
+                    ? html`No rule has anything to go on yet: none flagged an agent's call in ${windowWords(days)}.`
+                    : waiting
+                      ? html`${could}; ${plural(waiting, 'call')} ${waiting === 1 ? 'waits' : 'wait'} for a label.`
+                      : noisy
+                        ? html`${could}; ${plural(noisy, 'noisy rule')} should keep observing.`
+                        : html`${could}.`}</p>
             <p class="tf-ops-refused-line" id="stage-refused">${refusedLine(name, o.refused, days)}</p>
             <div class="tf-ops-hero-actions">
               <button type="button" class="tf-btn tf-btn-primary tf-btn-lg" data-action="promote-open" ${rules.length && canWrite ? '' : raw('disabled')}${canWrite ? '' : raw(' aria-describedby="stage-locked"')}>${T.icon('shield', 16)}Promote to Enforce…</button>
@@ -1859,16 +1924,20 @@
             ${more('How Observe works', html`<p class="tf-ops-hero-fine">Your agents work exactly as before. What a rule <em>would</em> have refused is listed below: mark each one correct or false alarm. A rule whose flags were all correct is Ready; one that flagged nothing is Quiet. Promote, and the rules you choose start refusing; the others keep observing.</p>
               <p class="tf-ops-hero-fine">The stage governs calls from agents' hooks and CI. A call from the demo page here always enforces, whatever the stage.</p>
               <p class="tf-ops-hero-fine">One thing is refused even here: a call carrying a credential, which the hook refuses on the machine and never sends. A call the hook holds back, such as one outside the project, is neither sent nor recorded.${config ? '' : ' This project has no configuration yet, so it follows the stack default.'}</p>`)}`;
+      // Counted off the rules as their rows state them; a rule whose
+      // refusals all came from the demo page is its own line, only when
+      // there is one.
+      const untested = counted('untested');
       const tally = [
-        ['ready', summary.rules_ready, 'Ready', 'tf-good'], ['quiet', summary.rules_quiet, 'Quiet', ''],
-        ['needs_review', summary.rules_needing_review, 'To review', 'text-sky-300'], ['noisy', summary.rules_noisy, 'Noisy', 'tf-bad']
-      ];
+        ['ready', ready, 'Ready', 'tf-good'], ['quiet', counted('quiet'), 'Quiet', ''],
+        ['needs_review', counted('needs_review'), 'To review', 'text-sky-300'], ['noisy', noisy, 'Noisy', 'tf-bad']
+      ].concat(untested ? [['untested', untested, 'Nothing from agents', '']] : []);
       // A rate over nothing is not a rate: with no label yet, it says so.
       const reviewed = typeof summary.reviewed === 'number' ? summary.reviewed : 0;
       const side = html`<aside class="tf-ops-hero-side" aria-label="Readiness">
           <span class="tf-ops-att-kicker">Readiness, ${windowWords(days)}</span>
           ${rules.length
-            ? html`<div class="tf-ops-tally">${tally.map(([key, value, label, tone]) => html`<div><b class="${value ? tone : 'text-gray-500'}">${num(value)}</b><small>${label}</small></div>`)}</div>`
+            ? html`<div class="tf-ops-tally">${tally.map(([key, value, label, tone]) => html`<div data-tally="${key}"><b class="${value ? tone : 'text-gray-500'}">${num(value)}</b><small>${label}</small></div>`)}</div>`
             : html`<p class="text-xs text-gray-400">No rule has judged a call from this project in the window.</p>`}
           <p class="text-xs text-gray-500" data-note="false-alarm-rate">${reviewed > 0 && typeof summary.false_alarm_rate === 'number'
             ? html`False-alarm rate ${pct(summary.false_alarm_rate)} over ${plural(reviewed, 'labelled call')}.`
@@ -1898,21 +1967,22 @@
         { key: 'unreviewed', value: r.unreviewed || 0, label: 'not labelled', color: UNLABELLED, href: reviewHref({ project: name, rule: r.rule_key }) }
       ];
       const drawn = parts.filter(p => p.value > 0);
+      const shownState = ruleState(r, split);
       const bar = would > 0 && drawn.length
         ? html`<div class="tf-ops-stack" role="img" aria-label="${r.rule_key}: ${parts.map(p => num(p.value) + ' ' + p.label).join(', ')} of ${num(would)} flagged">${drawn.map(p => html`<a href="${p.href}" style="flex-grow:${p.value};background:${p.color}" aria-label="${num(p.value)} ${p.label}, open these calls" data-tf-tip="${r.rule_key} · ${p.label}" data-tf-tip-value="${num(p.value)}" data-tf-tip-color="${p.color}"></a>`)}</div>`
         : html`<div class="tf-ops-stack" aria-hidden="true"></div>`;
       const words = would > 0
         ? html`<p class="tf-ops-stack-words"><span><a class="tf-num-link" href="${callsHref({ project: name, rule: r.rule_key, kind: 'observed', days })}">${num(would)}</a> flagged</span>${parts.filter(p => p.value > 0).map(p => html`<span><i style="background:${p.color}"></i>${num(p.value)} ${p.label}</span>`)}${r.refused ? html`<span class="text-rose-300"><a class="tf-num-link" href="${callsHref({ project: name, rule: r.rule_key, kind: 'refused', days })}">${num(r.refused)}</a> refused${arrived}</span>` : ''}</p>`
         : html`<p class="tf-ops-stack-words">Flagged nothing in ${windowWords(days)}${r.refused ? html` · <span class="text-rose-300"><a class="tf-num-link" href="${callsHref({ project: name, rule: r.rule_key, kind: 'refused', days })}">${num(r.refused)}</a> refused${arrived}</span>` : ''}</p>`;
-      return html`<li class="tf-ops-rule" data-state="${r.state || ''}">
+      return html`<li class="tf-ops-rule" data-state="${shownState || ''}">
         <div class="tf-ops-rule-name">
-          <span class="tf-ops-chips">${stateChip(r.state)}${r.mode_now === 'enforce' ? html`<span class="tf-chip tf-chip-purple">${T.icon('shield', 13)}enforce</span>` : html`<span class="tf-chip tf-chip-amber">${T.icon('eye', 13)}observe</span>`}</span>
+          <span class="tf-ops-chips">${ruleChip(shownState)}${r.mode_now === 'enforce' ? html`<span class="tf-chip tf-chip-purple">${T.icon('shield', 13)}enforce</span>` : html`<span class="tf-chip tf-chip-amber">${T.icon('eye', 13)}observe</span>`}</span>
           <a href="${callsHref({ project: name, rule: r.rule_key, days })}" class="tf-link-quiet tf-ops-rule-key">${r.rule_key}</a>
           <span class="tf-ops-rule-what">${r.kind === 'gate' ? (GATE_KEYS[r.rule_key] || 'a gate of the service') : 'a layering rule'}${r.last_seen ? ' · last flagged ' + timeAgo(r.last_seen) : ''}</span>
         </div>
         <div class="min-w-0">${bar}${words}</div>
         <div class="min-w-0">
-          <p class="tf-ops-rule-say">${inflect(r.recommendation) || STATES[r.state] && STATES[r.state].says || ''}</p>
+          <p class="tf-ops-rule-say">${ruleSays(r, shownState)}</p>
           ${r.unreviewed ? html`<p class="tf-ops-rule-links"><a class="tf-link" href="${reviewHref({ project: name, rule: r.rule_key })}">Label ${plural(r.unreviewed, 'call')}</a></p>` : ''}
         </div>
       </li>`;
@@ -1931,6 +2001,8 @@
 
     function readinessList(name, rules, days, split) {
       if (!rules.length) return emptyNote('No rule readiness yet.', 'Readiness appears once this project has sent calls in the window.');
+      // Sorted by the state the service sent, so a row does not move when
+      // the refused calls land and a Ready rule reads Nothing from agents.
       const sorted = rules.slice().sort((a, b) => (STATE_ORDER[a.state] === undefined ? 9 : STATE_ORDER[a.state]) - (STATE_ORDER[b.state] === undefined ? 9 : STATE_ORDER[b.state]));
       // A Quiet rule that refused nothing has nothing to show but an empty
       // bar and the same two sentences, and a project has several; one row
@@ -1967,7 +2039,7 @@
     function viewProject(ctx) {
       const name = ctx.args[0] || '';
       const days = pickDays(ctx.params.days, 14, true);
-      const state = { detail: null, recent: undefined, recentError: null, refused: undefined, who: null, selected: null, busy: false };
+      const state = { detail: null, recent: undefined, recentError: null, refused: undefined, who: null, selected: null, promoteFrom: 'observe', busy: false };
       // The alias is what this screen is addressed by and what every request
       // below sends; T.projectName adds the reader's own name for display only.
       const shown = T.projectName(name);
@@ -2128,20 +2200,44 @@
         </li>`)}</ol>`;
       }
 
+      // The rules as the walkthrough's step 4 lays them out: the ones with
+      // something to go on first, then the ones that flagged nothing (or only
+      // calls from the demo page) under the same sentence. Only Ready rules
+      // are checked for the reader, as on the walkthrough; in Enforce, the
+      // rules in force now.
       function promoteBody() {
         const rules = (state.detail.readiness && state.detail.readiness.rules) || [];
         const chosen = state.selected;
         const count = rules.filter(r => chosen.has(r.rule_key)).length;
-        return html`<p class="text-xs text-gray-300">Checked rules start refusing from the next call. Unchecked rules keep observing: they record what they would refuse, and refuse nothing. Ready and Quiet rules are checked for you; the rest need a look first.</p>
-          <ul class="space-y-2">${rules.map((r, i) => html`<li>
+        const shown = rules.map(r => ({ r, s: ruleState(r, state.refused) }));
+        const untried = shown.filter(x => x.s === 'quiet' || x.s === 'untested');
+        const tried = shown.filter(x => untried.indexOf(x) === -1);
+        const agents = untried.some(x => x.s === 'untested');
+        const lead = state.promoteFrom === 'enforce'
+          ? 'The rules in force now are checked.'
+          : tried.some(x => x.s === 'ready')
+            ? 'Ready rules are checked for you: every call they flagged was marked correct.'
+            : 'No rule reads Ready, so none is checked for you.';
+        let k = 0;
+        const item = ({ r, s }) => {
+          const first = k++ === 0;
+          return html`<li>
             <label class="flex items-start gap-3 tf-card-quiet p-3 cursor-pointer">
-              <input type="checkbox" class="mt-0.5 accent-purple-500" ${i === 0 ? raw('id="dialog-first"') : ''} data-change="promote-toggle" data-rule="${r.rule_key}" ${chosen.has(r.rule_key) ? raw('checked') : ''} />
+              <input type="checkbox" class="mt-0.5 accent-purple-500" ${first ? raw('id="dialog-first"') : ''} data-change="promote-toggle" data-rule="${r.rule_key}" ${chosen.has(r.rule_key) ? raw('checked') : ''} />
               <span class="min-w-0 flex-1">
-                <span class="flex flex-wrap items-center gap-2"><span class="font-mono text-xs text-white tf-break">${r.rule_key}</span>${stateChip(r.state)}</span>
-                <span class="block text-xs text-gray-400 mt-1">${num(r.would_refuse)} flagged · ${num(r.correct)} correct · ${num(r.false_alarms)} false alarm${r.false_alarms === 1 ? '' : 's'} · ${num(r.unreviewed)} unreviewed${r.recommendation ? html` — ${inflect(r.recommendation)}` : ''}</span>
+                <span class="flex flex-wrap items-center gap-2"><span class="font-mono text-xs text-white tf-break">${r.rule_key}</span>${ruleChip(s)}</span>
+                <span class="block text-xs text-gray-400 mt-1">${num(r.would_refuse)} flagged · ${num(r.correct)} correct · ${num(r.false_alarms)} false alarm${r.false_alarms === 1 ? '' : 's'} · ${num(r.unreviewed)} unreviewed${ruleSays(r, s) ? html` — ${ruleSays(r, s)}` : ''}</span>
               </span>
             </label>
-          </li>`)}</ul>
+          </li>`;
+        };
+        return html`<p class="text-xs text-gray-300">Checked rules start refusing from the next call. Unchecked rules keep observing: they record what they would refuse, and refuse nothing. ${lead}</p>
+          ${tried.length ? html`<ul class="space-y-2">${tried.map(item)}</ul>` : ''}
+          ${untried.length ? html`<div class="space-y-2" data-group="untried">
+            <p class="tf-label">${agents ? 'Flagged no agent\'s call here' : 'Flagged nothing here'}</p>
+            <p class="text-xs text-gray-400">${untriedNote(untried.length, agents)}</p>
+            <ul class="space-y-2">${untried.map(item)}</ul>
+          </div>` : ''}
           <p id="promote-summary" class="text-xs ${count ? 'text-gray-300' : 'text-amber-300'}">${count
             ? plural(count, 'rule') + ' will enforce; ' + plural(rules.length - count, 'rule') + ' will keep observing.'
             : 'No rule is checked, so nothing would be refused. Check at least one.'}</p>
@@ -2183,9 +2279,13 @@
           const rules = (state.detail && state.detail.readiness && state.detail.readiness.rules) || [];
           const enforcing = rules.filter(r => r.mode_now === 'enforce').map(r => r.rule_key);
           const stage = ((state.detail && state.detail.readiness && state.detail.readiness.summary) || {}).stage;
-          const preset = stage === 'enforce' && enforcing.length
+          // In Enforce, the rules in force now; else the Ready ones only, as
+          // the walkthrough checks them: a rule with nothing to go on waits
+          // for the reader to check it.
+          state.promoteFrom = stage === 'enforce' && enforcing.length ? 'enforce' : 'observe';
+          const preset = state.promoteFrom === 'enforce'
             ? enforcing
-            : rules.filter(r => r.state === 'ready' || r.state === 'quiet').map(r => r.rule_key);
+            : rules.filter(r => ruleState(r, state.refused) === 'ready').map(r => r.rule_key);
           state.selected = new Set(preset);
           openDialog(html`Promote ${T.projectName(name)} to Enforce`, promoteBody(), promoteFooter(false));
         },
@@ -4835,7 +4935,7 @@
         const items = [
           { n: 2, name: TRY_STEPS[1], text: 'The calls a rule would have stopped: who sent each, what it touched, and why.',
             art: html`<span class="tf-try-peek-flag">${T.statusChip('observed')}<span class="tf-try-ghost-bar" style="width:78%"></span><span class="tf-try-ghost-bar" style="width:52%"></span></span>` },
-          { n: 3, name: TRY_STEPS[2], text: 'You say whether each rule was right, and spot the one false alarm.',
+          { n: 3, name: TRY_STEPS[2], text: 'You say whether each rule was right, call by call: Correct, or False alarm.',
             art: html`<span class="tf-try-peek-pair"><span class="tf-try-peek-btn" data-tone="good">${T.icon('check', 12)}Correct</span><span class="tf-try-peek-btn" data-tone="bad">${T.icon('x', 12)}False alarm</span></span>` },
           { n: 4, name: TRY_STEPS[3], text: 'The rules you trust move to Enforce; a noisy one keeps observing.',
             art: html`<span class="tf-try-peek-switch"><span class="tf-try-peek-knob"></span><span>${T.icon('eye', 12)}Observe</span><span data-on>${T.icon('shield', 12)}Enforce</span></span>` },
@@ -5117,6 +5217,9 @@
         </div>`;
       }
 
+      // A false alarm to spot is promised only when the sandbox's answer
+      // names the one it seeded, since only then can the reader be told
+      // whether they found it (labelOutcome).
       function screenLabel(play) {
         const total = state.observed.length;
         const done = labelledCount() === total;
@@ -5126,7 +5229,9 @@
           title: total && done ? 'Every call has a label' : 'Was the rule right?',
           sentence: total && done
             ? 'You marked ' + plural(labelCounts().correct, 'call') + ' correct and ' + plural(labelCounts().false_alarm, 'call') + ' a false alarm, and each rule reads its state from those labels.'
-            : 'One of them is a false alarm: spot it, and mark each call Correct or False alarm.',
+            : state.seededAlarm
+              ? 'One of them is a false alarm: spot it, and mark each call Correct or False alarm.'
+              : 'Mark each call Correct or False alarm: a rule you mark wrong keeps observing.',
           visual: total ? html`${done ? labelOutcome() : ''}${reviewBoard(play, inBar)}` : T.emptyState({ icon: 'check', text: 'No call in the sandbox was flagged by an observing rule, so there is nothing to label. Promote anyway to see a rule refuse.' }),
           actions: done
             ? primary('try-readiness', 'See what that did', 'Reading readiness…')
@@ -5216,7 +5321,7 @@
             ${stageSwitch(!!play.promote)}
             <div class="${play.flip ? 'tf-try-play' : ''}">
               ${flagged.length ? html`<ul class="tf-try-rules">${flagged.map(row)}</ul>` : ''}
-              ${quiet.length ? html`<p class="tf-try-group">Flagged nothing here</p>${p ? '' : html`<p class="tf-try-rule-rec tf-try-group-note">No call here tested ${quiet.length === 1 ? 'this rule' : 'these'}; check one to enforce it anyway.</p>`}<ul class="tf-try-rules tf-try-rules-quiet">${quiet.map(quietRow)}</ul>` : ''}
+              ${quiet.length ? html`<p class="tf-try-group">Flagged nothing here</p>${p ? '' : html`<p class="tf-try-rule-rec tf-try-group-note">${untriedNote(quiet.length)}</p>`}<ul class="tf-try-rules tf-try-rules-quiet">${quiet.map(quietRow)}</ul>` : ''}
               ${rules.length ? '' : emptyNote('The service returned no rules for this project.')}
             </div>`,
           actions: p
@@ -6281,10 +6386,47 @@
     function benchmarkCards(proof) {
       const list = Array.isArray(proof.benchmarks) ? proof.benchmarks.filter(b => b && typeof b === 'object') : [];
       if (!list.length) return benchmarkCard(proof.benchmark);
-      return html`${violationChart(list)}${seriesComparison(list)}${list.map(b => benchmarkCard(b, b.label))}`;
+      const shared = sharedReports(list);
+      return html`${violationChart(list)}${seriesComparison(list)}${list.map(b => benchmarkCard(b, b.label, shared))}`;
     }
 
-    function benchmarkCard(b, label) {
+    // The public repository every evidence path is a file of.
+    const REPOSITORY = 'https://github.com/upgradedev/aws-threefold';
+    const isReport = path => /\.md$/i.test(path);
+    const isRows = path => /\.jsonl$/i.test(path);
+
+    // A report is a series' own only when no series with other result rows
+    // names the same file. A snapshot can give one report to two series run
+    // on the same day; such a report is named on neither card (it stays in
+    // the Evidence list below, under the lead series), so no card cites a
+    // document about another model.
+    function sharedReports(list) {
+      const sources = {};
+      list.forEach(b => (Array.isArray(b.evidence) ? b.evidence : []).forEach(item => {
+        if (!item || typeof item.path !== 'string' || !isReport(item.path)) return;
+        (sources[item.path] = sources[item.path] || new Set()).add(String(b.source || ''));
+      }));
+      return new Set(Object.keys(sources).filter(path => sources[path].size > 1));
+    }
+
+    // A series' evidence as its card lists it, and where its report is found
+    // when the snapshot names none of its own: the report benchmark/report.py
+    // writes names the rows it read on its "Source rows" line.
+    function seriesEvidence(b, shared) {
+      const all = (Array.isArray(b.evidence) ? b.evidence : []).filter(i => i && typeof i.path === 'string');
+      const own = shared ? all.filter(i => !shared.has(i.path)) : all;
+      const withheld = all.length > own.length;
+      const rows = own.map(i => i.path).filter(isRows);
+      const pointer = !own.some(i => isReport(i.path)) && rows.length
+        ? html`<p class="text-xs text-gray-500 mt-2 tf-break" data-proof="report-pointer">${withheld
+            ? 'This snapshot names one report for this series and for a series with other result rows, so it is not listed here. '
+            : 'This snapshot names no report for this series. '}Its report, if one was written, is the file in <a class="tf-link" href="${REPOSITORY + '/tree/main/docs/evidence'}" rel="noopener">docs/evidence/</a> whose Source rows line names <span class="font-mono">${rows.join(', ')}</span>.</p>`
+        : '';
+      if (!own.length && !pointer) return '';
+      return html`<div class="mt-3">${own.length ? html`<p class="tf-label">This series' evidence</p><ul class="space-y-1.5" data-proof="series-evidence">${own.map(evidenceItem)}</ul>` : ''}${pointer}</div>`;
+    }
+
+    function benchmarkCard(b, label, shared) {
       const title = typeof label === 'string' && label ? label : 'The benchmark';
       if (!b || typeof b !== 'object') {
         return card(title, null, notMeasured('This snapshot carries no benchmark result.',
@@ -6324,8 +6466,7 @@
         <dl class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4">${facts.map(([label, value]) => html`<div class="tf-card-quiet p-3 min-w-0"><dt class="tf-label">${label}</dt><dd class="text-xs text-gray-200 tf-break">${value}</dd></div>`)}</dl>
         ${table}
         ${provenance(b.source, b.snapshot_at)}
-        ${Array.isArray(b.evidence) && b.evidence.some(i => i && typeof i.path === 'string')
-          ? html`<div class="mt-3"><p class="tf-label">This series' evidence</p><ul class="space-y-1.5" data-proof="series-evidence">${b.evidence.map(evidenceItem)}</ul></div>` : ''}`, 'min-w-0');
+        ${seriesEvidence(b, shared)}`, 'min-w-0');
     }
 
     function ownUseCard(p) {
@@ -6358,9 +6499,15 @@
         ${provenance(p.source, p.snapshot_at)}`, 'min-w-0');
     }
 
+    // An evidence file, linked where the snapshot links it, or else to the
+    // same path in the public repository's main branch when the path is a
+    // plain relative one.
+    function repositoryHref(path) {
+      return /^[A-Za-z0-9._\/-]+$/.test(path) && path.indexOf('..') === -1 && path.charAt(0) !== '/' ? REPOSITORY + '/blob/main/' + path : '';
+    }
     function evidenceItem(item) {
       if (!item || typeof item.path !== 'string') return '';
-      const href = typeof item.href === 'string' && /^https:\/\//.test(item.href) ? item.href : '';
+      const href = typeof item.href === 'string' && /^https:\/\//.test(item.href) ? item.href : repositoryHref(item.path);
       return html`<li class="flex flex-wrap gap-x-2">${href
         ? html`<a class="tf-link font-mono text-xs tf-break" href="${href}" rel="noopener">${item.path}</a>`
         : html`<span class="font-mono text-xs text-gray-200 tf-break">${item.path}</span>`}<span class="text-xs text-gray-500">${item.label || ''}</span></li>`;
@@ -6383,7 +6530,7 @@
         <div class="mt-4 pt-3 border-t border-gray-800">
           <p class="tf-label">Evidence</p>
           ${items.length ? html`<ul class="space-y-1.5" data-proof="evidence">${items.map(evidenceItem)}</ul>` : notMeasured('The snapshot names no evidence file.')}
-          ${items.length && !linked ? html`<p class="text-xs text-gray-500 mt-2">Each is a file in the Threefold repository, <a class="tf-link" href="https://github.com/upgradedev/aws-threefold" rel="noopener">github.com/upgradedev/aws-threefold</a>, at the path shown. Each series' card above names its own.</p>` : ''}
+          ${items.length && !linked ? html`<p class="text-xs text-gray-500 mt-2">Each is a file in the Threefold repository, <a class="tf-link" href="${REPOSITORY}" rel="noopener">github.com/upgradedev/aws-threefold</a>, at the path shown, and each path opens it on the main branch. Each series' card above names the files that are its own.</p>` : ''}
           <p class="text-xs text-gray-500 mt-2">The live figures on this stack are read from <a class="tf-link" href="${T.specHref('GET', '/api/overview')}">GET /api/overview</a>, and this snapshot from <a class="tf-link" href="${T.specHref('GET', '/proof.json')}">GET /proof.json</a>.</p>
         </div>`, 'min-w-0');
     }

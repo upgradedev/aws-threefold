@@ -586,7 +586,14 @@ def test_the_project_screen_explains_the_stage_and_each_rules_readiness(tmp_path
     assert "https://example.test/prod/api/projects/Acme-Billing?days=14" in out["calls"]
 
 
-def test_promote_preselects_ready_and_quiet_rules_and_sends_the_choice(tmp_path: Path) -> None:
+def test_promote_preselects_ready_rules_only_and_sends_the_choice(tmp_path: Path) -> None:
+    """The project's dialog checks what the walkthrough's step 4 checks: the Ready rules, never a Quiet one.
+
+    It checked Ready and Quiet rules while the walkthrough checked Ready
+    only, so a reader who ran #/try and then opened the sandbox's own page
+    met the opposite default. A Quiet rule flagged nothing, so nothing
+    tested it; it sits under the walkthrough's own sentence, unchecked.
+    """
     out = dash(
         r"""
   let promoted = null;
@@ -602,7 +609,7 @@ def test_promote_preselects_ready_and_quiet_rules_and_sends_the_choice(tmp_path:
   out.first = promoted;
   click('promote-open');
   click('promote-toggle', { 'data-rule': 'PROTECTED_PATH', checked: true });
-  click('promote-toggle', { 'data-rule': 'LOOP', checked: false });
+  click('promote-toggle', { 'data-rule': 'LOOP', checked: true });
   await click('promote-confirm');
   await tick();
   out.second = promoted;
@@ -610,10 +617,15 @@ def test_promote_preselects_ready_and_quiet_rules_and_sends_the_choice(tmp_path:
 """,
         tmp_path,
     )
-    assert out["checked"] == {"java-domain-stays-pure": True, "LOOP": True, "PROTECTED_PATH": False}
-    assert "Unchecked rules keep observing" in out["dialogText"]
-    assert out["first"] == {"enforce": ["java-domain-stays-pure", "LOOP"]}
-    assert out["second"] == {"enforce": ["java-domain-stays-pure", "PROTECTED_PATH"]}
+    assert out["checked"] == {"java-domain-stays-pure": True, "LOOP": False, "PROTECTED_PATH": False}
+    said = re.sub(r"\s+([,.:;])", r"\1", out["dialogText"])
+    assert "Unchecked rules keep observing" in said
+    assert "Ready rules are checked for you: every call they flagged was marked correct." in said
+    assert "Ready and Quiet" not in said
+    # The Quiet rule under the walkthrough's own heading and sentence.
+    assert "Flagged nothing here No call here tested this rule; check one to enforce it anyway." in said
+    assert out["first"] == {"enforce": ["java-domain-stays-pure"]}
+    assert out["second"] == {"enforce": ["java-domain-stays-pure", "LOOP", "PROTECTED_PATH"]}
     assert "Acme-Billing is in Enforce" in out["toast"]
 
 
@@ -1327,7 +1339,10 @@ def test_the_walkthrough_runs_the_rollout_from_sandbox_to_a_real_refusal(tmp_pat
     for part in ("Claude Code", "src/acme/domain/order.py", "python-domain-stays-pure", "PROTECTED_PATH", "imports javax.persistence into the domain"):
         assert part in cards, f"The step-2 cards do not show {part!r}"
     assert cards.count("imports javax.persistence into the domain") == 2, "A rule's reason is said once per rule, not once per call"
-    assert "One of them is a false alarm" in out["step3"] and "docs/.git-hooks-howto.md" in out["step3"]
+    # Without the sandbox naming the call it seeded, no false alarm is promised: nothing could say whether it was found.
+    assert "Mark each call Correct or False alarm: a rule you mark wrong keeps observing." in out["step3"] and "docs/.git-hooks-howto.md" in out["step3"]
+    assert "One of them is a false alarm" not in out["step3"] and "spot" not in out["step1"]
+    assert "You say whether each rule was right, call by call: Correct, or False alarm." in out["step1"]
     assert [r["label"] for r in out["sent"]["reviews"]] == ["correct", "correct", "false_alarm"]
     assert "3 of 3 labelled" in out["labelled"] and "Every call has a label" in out["labelled"]
     # What the labels decide, read from the labels and the calls alone.
@@ -1396,6 +1411,7 @@ def test_the_walkthrough_says_whether_the_reader_found_the_false_alarm_the_sandb
   await click('try-create'); await tick();
   await click('try-show'); await tick();
   await click('try-review'); await tick();
+  out.step3 = text(view());
   await click('try-label', { 'data-verdict': 'VERDICT-1', 'data-label': 'correct' });
   await click('try-label', { 'data-verdict': 'VERDICT-2', 'data-label': 'correct' });
   await tick();
@@ -1408,6 +1424,8 @@ def test_the_walkthrough_says_whether_the_reader_found_the_false_alarm_the_sandb
         tmp_path,
     )
     said = lambda markup: re.sub(r"\s+([,.:])", r"\1", text_of(markup)).replace("&#039;", "'")
+    # Named by the sandbox, the false alarm is promised: the reader is told below whether they found it.
+    assert "One of them is a false alarm: spot it, and mark each call Correct or False alarm." in out["step3"]
     missed = said(out["missed"])
     assert 'data-seeded="missed"' in out["missed"]
     assert ("The sandbox seeded tests/domain/test_order_totals.py as a false alarm. The rule's **/domain/** path also matches tests/domain/, "

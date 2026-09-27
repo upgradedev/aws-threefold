@@ -587,12 +587,14 @@ def test_the_stage_hero_is_a_headline_a_consequence_and_the_action(tmp_path: Pat
     )
     observe = out["observe"]
     lead, rest = observe.split('<p class="tf-ops-hero-text">', 1)[1].split("</p>", 1)
-    assert re.sub(r"<[^>]+>", "", lead) == "2 of 3 rules could enforce today; 1 call waits for a label."
+    # Ready and nothing to go on are said apart, as the promote dialog checks only the Ready ones.
+    assert re.sub(r"<[^>]+>", "", lead) == "1 of 3 rules reads Ready, and 1 has nothing to go on yet; 1 call waits for a label."
     assert observe.count('class="tf-ops-hero-text"') == 1, "One line of consequence, not paragraphs"
     assert rest.index('data-action="promote-open"') < rest.index("<details"), "The action comes before how the stage works"
     assert "False-alarm rate 14% over 7 labelled calls." in observe
     unlabelled = out["unlabelled"]
-    assert "Every rule reads Ready or Quiet: promote, and it refuses from the next call." in unlabelled
+    assert "No rule has anything to go on yet: none flagged an agent's call in the last 7 days." in unlabelled
+    assert "Every rule reads Ready" not in unlabelled
     assert "No flagged call is labelled yet, so there is no false-alarm rate." in unlabelled
     assert "False-alarm rate" not in unlabelled and "over 0" not in unlabelled, "No rate is shown over nothing"
 
@@ -1099,6 +1101,91 @@ def test_an_observe_project_says_why_it_still_shows_refused_calls(tmp_path: Path
     projects = out["projects"]
     assert "agents' calls recorded, never refused" in projects
     assert "Calls from the demo page always enforce, and a credential is always refused, so a project in Observe can still show refused calls." in projects
+
+
+def test_a_rule_ready_only_on_the_demo_page_s_refusals_has_nothing_from_agents(tmp_path: Path) -> None:
+    """A rule the service reads Ready only because the demo page's calls were refused is not Ready.
+
+    The service's probe project read "Ready" with "Every call it flagged was
+    marked correct" beside 0 correct, 0 flagged and 6 refused, all 6 from the
+    demo page, which always enforces; and the hero said "Every rule reads
+    Ready or Quiet: promote" beside 0 calls observed. The chip, the sentence,
+    the tally, the headline and the promote dialog now say the same thing,
+    and nothing reads Ready while the refused calls are still being read.
+    """
+    out = ops(
+        r"""
+  const probe = { rule_key: 'python-domain-stays-pure', kind: 'layering', mode_now: 'observe', would_refuse: 0, correct: 0, false_alarms: 0, unreviewed: 0,
+    refused: 6, last_seen: NOW, state: 'ready', recommendation: 'Every call it flagged was marked correct: ready to enforce.' };
+  const quiet = { rule_key: 'LOOP', kind: 'gate', mode_now: 'observe', would_refuse: 0, correct: 0, false_alarms: 0, unreviewed: 0, refused: 0, last_seen: null, state: 'quiet', recommendation: '' };
+  const body = detailBody('observe', [probe, quiet]);
+  body.config = null;
+  Object.assign(body.readiness.summary, { calls_observed: 0, days_observed: 0, would_have_refused: 0, reviewed: 0, false_alarms: 0, false_alarm_rate: 0, rules_ready: 1, rules_quiet: 1, rules_noisy: 0 });
+  const pageRefusals = { status: 200, body: { items: [1, 2, 3, 4, 5, 6].map(i => row(i, { status: 'BLOCKED_BOUNDARY_VIOLATION', origin: 'page', agent: 'page', rule_key: 'python-domain-stays-pure', observed_rules: [], observed_rule: '' })), next_cursor: null } };
+  const refusedRead = held();
+  answer = contract({
+    '/api/auth/whoami': PRIVATE,
+    '/api/projects/Acme-Probe': { status: 200, body },
+    '/api/decisions': u => u.searchParams.get('kind') === 'refused' ? refusedRead.promise.then(() => pageRefusals) : { status: 200, body: { items: [row(7, { project_name: 'Acme-Probe', agent: 'page', origin: 'page' })], next_cursor: null } }
+  });
+  Threefold.whoami(true);
+  await visit('#/projects/Acme-Probe');
+  out.reading = view();
+  refusedRead.release();
+  await tick();
+  out.read = view();
+  click('promote-open');
+  out.dialog = el('modal-root').innerHTML;
+  out.checked = {};
+  out.dialog.replace(/data-rule="([^"]+)"\s*(checked)?/g, (m, rule, checked) => { out.checked[rule] = !!checked; return m; });
+  click('close-dialog');
+  // The same rule, its refusals from an agent's hook (made while the project enforced): the service's Ready stands.
+  const hooked = { status: 200, body: { items: [1, 2, 3, 4, 5, 6].map(i => row(i, { status: 'BLOCKED_BOUNDARY_VIOLATION', origin: 'hook', rule_key: 'python-domain-stays-pure' })), next_cursor: null } };
+  const withAgents = detailBody('observe', [probe, quiet]);
+  answer = contract({
+    '/api/auth/whoami': PRIVATE,
+    '/api/projects/Acme-Probe': { status: 200, body: withAgents },
+    '/api/decisions': u => u.searchParams.get('kind') === 'refused' ? hooked : { status: 200, body: { items: [row(8)], next_cursor: null } }
+  });
+  await visit('#/projects/Acme-Probe?days=7');
+  await tick();
+  out.hooked = view();
+  // The portfolio: a project whose only agent is the page reads Nothing from agents, not Ready.
+  answer = contract({ '/api/projects': { status: 200, body: { projects: [
+    { project: 'Acme-Probe', stage: 'observe', configured: false, observe_rules: [], created_at: null, promoted_at: null, last_seen: NOW, calls: 6, refused: 6, would_refuse: 0, needs_review: 0, agents: ['page'], hook_modes: ['unknown'] }
+  ] } }, '/api/decisions': { status: 200, body: { items: [], next_cursor: null } } });
+  await visit('#/projects');
+  await tick();
+  out.portfolio = view();
+""",
+        tmp_path,
+    )
+    reading = out["reading"]
+    rule = reading.split('data-state=""')[1].split("</li>")[0] if 'data-state=""' in reading else ""
+    assert rule and "tf-ops-chip-wait" in rule and ">Ready<" not in rule, "Nothing reads Ready while the refused calls are read"
+    assert "Every call it flagged was marked correct" not in reading
+    read = out["read"]
+    row = read.split('data-state="untested"')[1].split("</li>")[0]
+    assert ">Nothing from agents<" in row and ">Ready<" not in row
+    said = text_of(row).replace("&#039;", "'")
+    assert "Nothing from agents to go on: every call it refused came from the demo page, which always enforces, and no agent's call was flagged by it." in said
+    assert "6 refused (all 6 from the demo page)" in re.sub(r"\s+([,.:)])", r"\1", said)
+    assert "Every call it flagged was marked correct" not in read
+    hero = read.split('class="tf-ops-hero"')[1].split("</section>")[0]
+    lead = re.sub(r"<[^>]+>", "", hero.split('<p class="tf-ops-hero-text">', 1)[1].split("</p>", 1)[0])
+    assert lead == "No agent's call was observed here in the last 14 days, so no rule has anything to go on yet."
+    tally = dict(re.findall(r'data-tally="([a-z_]+)"><b[^>]*>([^<]*)</b>', hero))
+    assert tally == {"ready": "0", "quiet": "1", "needs_review": "0", "noisy": "0", "untested": "1"}, "The tally counts the rules as their rows state them"
+    assert out["checked"] == {"python-domain-stays-pure": False, "LOOP": False}, "A rule with nothing from agents is not checked for the reader"
+    dialog = re.sub(r"\s+([,.:;])", r"\1", text_of(out["dialog"])).replace("&#039;", "'")
+    assert "No rule reads Ready, so none is checked for you." in dialog
+    assert "Flagged no agent's call here No agent's call here tested these; check one to enforce it anyway." in dialog
+    hooked = out["hooked"]
+    assert 'data-state="ready"' in hooked and 'data-state="untested"' not in hooked, "Refusals of an agent's calls keep the service's Ready"
+    portfolio = out["portfolio"]
+    cell = portfolio.split('class="tf-ops-ready" data-state="untested"')[1].split("</span></span>")[0]
+    assert ">Nothing from agents<" in cell and "demo-page calls only" in cell
+    assert 'data-state="ready"' not in portfolio
 
 
 def test_the_service_s_probes_are_labelled_synthetic_where_the_stack_names_them(tmp_path: Path) -> None:

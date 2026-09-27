@@ -399,6 +399,45 @@ def test_each_series_names_its_own_evidence_and_the_repository_is_linked(tmp_pat
     assert 'href="https://github.com/upgradedev/aws-threefold"' in page and "github.com/upgradedev/aws-threefold</a>, at the path shown" in page
 
 
+def test_a_report_two_series_are_given_is_named_on_neither_card_and_each_path_opens(tmp_path: Path) -> None:
+    """No card cites a report about another model, and every evidence path is a link.
+
+    The committed snapshot gives the Sonnet and the Haiku series one report,
+    BENCHMARK_2026-09-22.md, whose Source rows line names the Sonnet rows; the
+    Haiku card cited it. A report two series with different rows are given is
+    left off both cards (it stays in the Evidence list, under the lead series),
+    and a card with no report of its own says where its report is found. Each
+    path the snapshot gives without a link opens in the public repository.
+    """
+    out = proof(
+        r"""
+  answer = proofAnswer(COMMITTED);
+  await visit('#/proof');
+  out.view = view();
+""",
+        tmp_path,
+    )
+    page = out["view"]
+    cards = page.split("How this was measured")[0]
+    shared = "docs/evidence/BENCHMARK_2026-09-22.md"
+    claims = [b for b in COMMITTED["benchmarks"] if any(i.get("path") == shared for i in b.get("evidence", []))]
+    assert len({b["source"] for b in claims}) > 1, "The committed snapshot no longer gives one report to two series; this test guards that case"
+    lists = re.findall(r'data-proof="series-evidence">(.*?)</ul>', cards, re.S)
+    assert lists and not any(shared in markup for markup in lists), "A report two series are given is named on neither card"
+    method = page.split("How this was measured")[1]
+    assert shared in method, "It stays in the Evidence list"
+    said = re.sub(r"\s+([,.])", r"\1", re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", cards)))
+    for b in COMMITTED["benchmarks"]:
+        rows = [i["path"] for i in b.get("evidence", []) if i["path"].endswith(".jsonl")]
+        assert f"is the file in docs/evidence/ whose Source rows line names {', '.join(rows)}." in said, f"{b['label']} does not say where its report is"
+    assert said.count("This snapshot names one report for this series and for a series with other result rows, so it is not listed here.") == len(claims)
+    assert 'href="https://github.com/upgradedev/aws-threefold/tree/main/docs/evidence"' in cards
+    for b in COMMITTED["benchmarks"]:
+        for item in b.get("evidence", []):
+            assert f'href="https://github.com/upgradedev/aws-threefold/blob/main/{item["path"]}"' in page
+    assert "each path opens it on the main branch" in method
+
+
 def test_a_false_alarm_rate_over_a_handful_of_labels_is_said_as_a_count(tmp_path: Path) -> None:
     """0% over 5 labels read as a strong claim; below 30 labels the tile gives the count and says why."""
     out = proof(
