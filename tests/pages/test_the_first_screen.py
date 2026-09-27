@@ -1177,6 +1177,44 @@ def test_the_flagship_loop_still_trips_after_the_page_has_loaded(tmp_path: Path)
     assert out["pressedAfterReset"] == ["false"] * 5 and "Circuit breaker: armed" in out["breakerAfterReset"]
 
 
+def test_a_live_answer_shows_the_session_spend_it_carries(tmp_path: Path) -> None:
+    """Every verdict carries current_session_cost_usd, so a live scenario never says "none yet" of a cost it was told.
+
+    A review found "Session spend none yet" under a live loop refusal whose
+    answer carried $0.027: only the certificate set the spend. A measured
+    zero is a measurement too; a value that is not a number leaves the words.
+    """
+    healthy = "'/status': { status: 200, body: { service: 'Threefold', status: 'HEALTHY' } }"
+    out = run(
+        "index.html",
+        r"""
+  answer = api({ """ + healthy + r""",
+    'POST /simulate-loop': { status: 200, body: { status: 'BLOCKED_LOOP_DETECTED', reason: 'Loop detected', session_id: 'sim-1', session_tripped: true, current_session_cost_usd: 0.027, explanation_source: 'deterministic' } },
+    'POST /simulate-secret': { status: 200, body: { status: 'BLOCKED_SECRET_DETECTED', reason: 'Sensitive credential detected', session_id: 'sim-2', current_session_cost_usd: 0, explanation_source: 'deterministic' } },
+    'POST /evaluate-tool-call': { status: 200, body: { status: 'BLOCKED_BOUNDARY_VIOLATION', reason: 'Refused.', current_session_cost_usd: 0.0012 } },
+    'POST /adapter/universal-tool-call': { status: 200, body: { detected_tool_name: 'edit_file', detected_action_type: 'FILE_WRITE', evaluation: { status: 'APPROVED', current_session_cost_usd: 0.0096, proof_hash: 'ab' } } } });
+  await checkApiHealth();
+  const spend = () => [el('kpi-spend').innerText, el('kpi-spend').classList.contains('tf-kpi-none')];
+  await simulateLoop(); await tick(); out.loop = spend();
+  await simulateSecret(); await tick(); out.secret = spend();
+  await simulateBoundary(); await tick(); out.boundary = spend();
+  await simulateUniversalAdapter(); await tick(); out.adapter = spend();
+  for (const cost of ["'0.027'", 'null', '-1', 'Infinity']) {
+    answer = api({ """ + healthy + r""",
+      'POST /simulate-loop': { status: 200, body: { status: 'BLOCKED_LOOP_DETECTED', reason: 'Loop detected', session_id: 'sim-3', session_tripped: true, current_session_cost_usd: eval(cost) } } });
+    await simulateLoop(); await tick();
+    (out.unread = out.unread || []).push(spend());
+  }
+""",
+        tmp_path,
+        before=DEMO_DOM,
+    )
+    assert out["loop"] == ["$0.0270", False], "The live loop shows the cost its answer carried"
+    assert out["secret"] == ["$0.0000", False], "A measured zero is shown as one"
+    assert out["boundary"] == ["$0.0012", False] and out["adapter"] == ["$0.0096", False]
+    assert out["unread"] == [["none yet", True]] * 4, "A cost that is not a finite, non-negative number is not shown"
+
+
 def test_the_four_scenarios_carry_the_numbers_the_readme_gives_them() -> None:
     gates = _section("watch-the-gates")
     cards = re.findall(r'<button type="button" id="scenario-(\w+)".*?</button>', gates, re.S)

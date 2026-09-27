@@ -37,6 +37,7 @@ def test_the_loop_replay_shows_the_recorded_refusal(tmp_path: Path) -> None:
   out.verdict = el('verdict-tag').innerText;
   out.explained = el('bedrock-box').innerHTML;
   out.loopBadge = el('inv-loop').innerText;
+  out.spend = el('kpi-spend').innerText;
 """,
         tmp_path,
     )
@@ -45,6 +46,7 @@ def test_the_loop_replay_shows_the_recorded_refusal(tmp_path: Path) -> None:
     assert "Recorded 2026-09-25, replayed offline" in out["explained"]
     assert "Monomorphic loop detected" in out["explained"]
     assert "$0.0270" in out["explained"]
+    assert out["spend"] == "$0.0270", "The recorded session's cost is its spend, as the certificate's replay shows its own"
 
 
 def test_the_secret_replay_shows_the_recorded_reason(tmp_path: Path) -> None:

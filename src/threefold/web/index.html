@@ -1337,6 +1337,15 @@
       document.getElementById('kpi-tokens').innerText = tokens || '';
     }
 
+    // The session's spend as a verdict reports it: every verdict carries
+    // current_session_cost_usd, the running cost of the session it was judged
+    // in, so a live answer shows what it measured instead of "none yet". A
+    // value that is not a finite, non-negative number leaves the words alone.
+    function setSpendFrom(verdict) {
+      const cost = verdict && typeof verdict === 'object' ? verdict.current_session_cost_usd : null;
+      if (typeof cost === 'number' && isFinite(cost) && cost >= 0) setSpend('$' + cost.toFixed(4), null);
+    }
+
     // Everything back to where it started. A scenario starts from here too, and
     // then writes its own first line into the empty terminal.
     function resetDemo(forScenario) {
@@ -1428,6 +1437,7 @@
             setBreaker('tripped');
             setVerdictTag(data.status, 'refused');
             setInvariants('loop');
+            setSpendFrom(data);
 
             renderExplanation(data);
             renderFix(data);
@@ -1452,6 +1462,7 @@
       setBreaker('tripped');
       setVerdictTag(loop.status, 'refused');
       setInvariants('loop');
+      setSpendFrom(loop);
 
       renderRecordedExplanation(`${loop.reason} Recorded session cost $${loop.current_session_cost_usd.toFixed(4)}.`);
     }
@@ -1480,6 +1491,7 @@
 
             setVerdictTag(data.status, 'refused');
             setInvariants('secret');
+            setSpendFrom(data);
 
             renderExplanation(data);
             renderFix(data);
@@ -1529,6 +1541,7 @@
 
             setVerdictTag(data.status, 'refused');
             setInvariants('boundary');
+            setSpendFrom(data);
 
             renderExplanation(data);
             renderFix(data);
@@ -1703,6 +1716,7 @@
 
             setVerdictTag('UNIVERSAL_ADAPTER_APPROVED', 'approved');
             setInvariants('none');
+            setSpendFrom(data.evaluation);
 
             renderExplanation(data.evaluation);
             return;
