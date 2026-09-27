@@ -379,8 +379,8 @@
     .tf-ops-vgroup { margin: 16px 0 2px; font: 600 0.8125rem/1.25rem var(--tf-font-sans); color: var(--tf-text-2); }
     .tf-ops-vgroup:first-of-type { margin-top: 4px; }
     .tf-ops-vgroup small { font-weight: 400; color: var(--tf-text-3); }
+    /* Shown by the design system only while the table after it is wider than its box. */
     .tf-ops-scroll-hint { display: flex; align-items: center; gap: 6px; margin: 0 0 8px; font-size: 0.75rem; line-height: 1rem; color: var(--tf-text-3); }
-    @media (min-width: 1024px) { .tf-ops-scroll-hint { display: none; } }
     .tf-ops-verdict { display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px; border-radius: var(--tf-radius-md); background: var(--tf-accent-soft); border: 1px solid var(--tf-accent-line); }
     .tf-ops-verdict .tf-icon { width: 20px; height: 20px; color: var(--tf-accent-text); flex-shrink: 0; margin-top: 2px; }
     .tf-ops-verdict p { margin: 0; font-size: 0.9375rem; line-height: 1.375rem; color: var(--tf-text); }
@@ -6273,8 +6273,8 @@
         return c && c[field] ? share(c[field]) : html`<span class="text-gray-500">not measured</span>`;
       };
       return card('The benchmark, every series', 'Violation landed per condition, and whether the tests still passed with Threefold enforcing. Each row is one run of the matrix.', html`
-        <p class="tf-ops-scroll-hint">${T.icon('arrowright', 14)}The table scrolls sideways: Threefold enforcing and its tests passed are to the right.</p>
-        <div class="tf-scroll-x" tabindex="0" role="region" aria-label="The benchmark, every series (scrolls sideways)"><table class="tf-table" data-proof="series">
+        <p class="tf-ops-scroll-hint" data-tf-scroll-hint hidden>${T.icon('arrowright', 14)}The table scrolls sideways: Threefold enforcing and its tests passed are to the right.</p>
+        <div class="tf-scroll-x" data-tf-scroll="The benchmark, every series"><table class="tf-table" data-proof="series">
           <thead><tr>
             <th scope="col">Series</th><th scope="col">No guidance</th><th scope="col">Rules in CLAUDE.md or AGENTS.md</th>
             <th scope="col">Threefold enforcing</th><th scope="col">Tests passed, Threefold</th>
@@ -6459,7 +6459,7 @@
           <p class="text-sm font-semibold text-amber-200">PILOT: not a result</p>
           <p class="text-xs text-amber-100/80">These runs prove the harness end to end. No figure below should be quoted as a measurement.</p>
         </div>` : '';
-      const table = conditions.length ? html`<p class="tf-ops-scroll-hint mt-4">${T.icon('arrowright', 14)}The table scrolls sideways.</p><div class="tf-scroll-x mt-4" tabindex="0" role="region" aria-label="${title}, by condition (scrolls sideways)"><table class="tf-table">
+      const table = conditions.length ? html`<div class="mt-4"><p class="tf-ops-scroll-hint" data-tf-scroll-hint hidden>${T.icon('arrowright', 14)}The table scrolls sideways.</p><div class="tf-scroll-x" data-tf-scroll="${title}, by condition"><table class="tf-table">
           <thead><tr>
             <th scope="col">Condition</th><th scope="col" class="num">Runs measured</th>
             <th scope="col">Violation landed</th><th scope="col">Tests passed</th>
@@ -6473,7 +6473,7 @@
             <td>${correctedCell(c)}</td>
             <td>${overheadCell(c)}</td>
           </tr>`)}</tbody>
-        </table></div>` : notMeasured('The snapshot names no condition.');
+        </table></div></div>` : notMeasured('The snapshot names no condition.');
       const facts = [
         ['Model', list(b.models)],
         ['Agent', (b.agent || 'not recorded') + (Array.isArray(b.agent_versions) && b.agent_versions.length ? ' ' + b.agent_versions.join(', ') : '')],
@@ -6583,6 +6583,10 @@
             ${ownUseCard(proof.private)}
             ${methodCard(proof)}
           </div>`);
+        // A table's box is a keyboard stop, announced as scrolling, only
+        // while the table is wider than it: measured now it is drawn, and
+        // again by the design system when the width or the fonts change.
+        T.fitScrollBoxes(document.getElementById('view'));
       }, err => {
         if (!ctx.alive()) return;
         if (err && err.kind === 'not_found') {
