@@ -29,13 +29,15 @@ is one or two model calls. The brakes, and how far each one reaches:
 - The per-IP token bucket every request passes, sixty in a burst and then two
   a second.
 The last two live in the memory of one container. Lambda runs as many
-containers as there are concurrent requests, the template reserves no
-concurrency, and a caller's next request can land on a container whose bucket
-has never seen them. So they bound one container, not the stack: N busy
-containers can make N times 60 calls. The stack is bounded by the daily budget
-below, one row in the stack's own table. Nothing here bounds the account: a
-second stack in the same account counts in its own table, against a budget of
-its own.
+containers as there are concurrent requests, up to ReservedConcurrency where
+the stack sets one (0 reserves none, leaving only the account's unreserved
+pool), and a caller's next request can land on a container whose bucket has
+never seen them. So they bound one container, not the stack: N busy
+containers can make N times 60 calls. The stack is bounded by the daily
+budget below, one row in the stack's own table, while the table answers: in a
+storage outage each container counts the budget in its own memory, so each
+may spend it. Nothing here bounds the account: a second stack in the same
+account counts in its own table, against a budget of its own.
 """
 from __future__ import annotations
 
