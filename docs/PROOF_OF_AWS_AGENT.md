@@ -8,8 +8,8 @@ claim without taking our word for it.
 ## The agent
 
 Claude Code, driving the AWS CLI v2 and boto3 under the operator's
-credentials, in a Windows terminal. A session of it wrote the code, created
-the first stack, read the failures back out of AWS and fixed them; another, on
+credentials, in a Windows terminal. A session of it created the first stack,
+read the failures back out of AWS and fixed them in the code; another, on
 2026-09-22, read the live stacks back, read-only, for the documentation you are
 reading.
 
@@ -21,8 +21,9 @@ did, and that is the useful part of this record. The raw output kept from that
 day, the stack's description, its `/status` answering and the three
 CloudTrail events of step 9, is in
 [`evidence/DEPLOYMENT_2026-09-20.md`](evidence/DEPLOYMENT_2026-09-20.md). The
-other steps are recorded only in this table, written by the session that ran
-them; their transcripts were not kept.
+other steps are recorded in this table, written by the session that ran them,
+and the two defects also in the message of the commit that fixed them,
+`9350197`; their transcripts were not kept.
 
 | # | The agent ran | AWS answered | What changed |
 |---|---|---|---|
@@ -110,7 +111,7 @@ those checks, the installer served through the edge names the edge.
 
 ## The connection is also the product
 
-Threefold governs coding agents, and it was built by one. Every response from
+Threefold governs coding agents, and coding agents built it. Every response from
 `/evaluate-tool-call` carries `explanation_source`: `bedrock` when the model
 phrased the refusal, `deterministic` when it was not asked (an approval, or a
 hook, which sends `explain: false`), and `deterministic_fallback` when it was
