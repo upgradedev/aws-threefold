@@ -71,6 +71,16 @@ def _unescaped(markup: str) -> str:
             .replace("&#039;", "'").replace("&amp;", "&"))
 
 
+def _card(page: str, title: str) -> str:
+    """The one card drawn under this title. A series' label is also a row of the comparison table, so the heading decides."""
+    (found,) = [part for part in page.split("<section")[1:] if f'<h2 class="tf-section-title">{title}</h2>' in part]
+    return found
+
+
+def _series_evidence(card: str) -> str:
+    return card.split('data-proof="series-evidence"', 1)[1].split("</ul>", 1)[0]
+
+
 # ------------------------------------------------------------------- the route
 
 
@@ -115,8 +125,19 @@ def test_the_committed_snapshot_is_shown_as_it_was_written(tmp_path: Path) -> No
     assert 'data-proof="pilot"' not in out["view"], "no committed series is a pilot"
     if "private" in COMMITTED:
         assert out["metrics"].get("calls_governed") == f"{COMMITTED['private']['calls_governed']:,}"
+    # Each series' card cites the evidence the snapshot gives that series, and
+    # the method's card only the method.
+    for section in series:
+        own = _series_evidence(_card(page, section["label"]))
+        assert own.count("<li") == len(section["evidence"]), section["label"]
+        for item in section["evidence"]:
+            assert item["path"] in own, f"{section['label']} does not cite {item['path']}"
+            if "href" in item:
+                assert f'href="{item["href"]}"' in own
+    method = _card(page, "How this was measured")
     for item in COMMITTED["method"]:
-        assert item["path"] in page
+        assert item["path"] in method
+    assert "docs/evidence/" not in method and "benchmark/results/" not in method
 
 
 def test_a_pilot_snapshot_says_it_is_not_a_result(tmp_path: Path) -> None:
@@ -166,6 +187,43 @@ def test_a_measured_snapshot_shows_each_figure_with_its_source_and_its_date(tmp_
     # An evidence link is followed only when it is an https address.
     assert 'href="https://example.test/acme/threefold/blob/main/docs/evidence/BENCHMARK_2026-09-30.md"' in out["view"]
     assert "javascript:" not in out["view"]
+
+
+def test_each_series_card_cites_its_own_report_and_never_another_series(tmp_path: Path) -> None:
+    """Two series of one day: each card lists its own report and rows, and the method's card neither."""
+    out = proof(
+        r"""
+  const sonnet = JSON.parse(JSON.stringify(MEASURED.benchmark));
+  sonnet.label = 'Standard tasks · Claude Code · claude-sonnet-5';
+  const haiku = JSON.parse(JSON.stringify(MEASURED.benchmark));
+  Object.assign(haiku, {
+    label: 'Standard tasks · Claude Code · claude-haiku-4-5', models: ['claude-haiku-4-5'], run_ids: ['20260930T100000Z'],
+    source: 'benchmark/report.py over benchmark/results/20260930T100000Z.jsonl',
+    evidence: [
+      { label: 'The report', path: 'docs/evidence/BENCHMARK_2026-09-30-HAIKU.md', href: 'https://example.test/acme/threefold/blob/main/docs/evidence/BENCHMARK_2026-09-30-HAIKU.md' },
+      { label: 'The rows', path: 'benchmark/results/20260930T100000Z.jsonl' }
+    ]
+  });
+  answer = proofAnswer(Object.assign({}, MEASURED, { benchmarks: [sonnet, haiku], benchmark: sonnet }));
+  await visit('#/proof');
+  out.view = view();
+""",
+        tmp_path,
+    )
+    page = _unescaped(out["view"])
+    sonnet = _series_evidence(_card(page, "Standard tasks · Claude Code · claude-sonnet-5"))
+    haiku = _series_evidence(_card(page, "Standard tasks · Claude Code · claude-haiku-4-5"))
+    assert 'href="https://example.test/acme/threefold/blob/main/docs/evidence/BENCHMARK_2026-09-30.md"' in sonnet
+    assert "benchmark/results/20260930T090000Z.jsonl" in sonnet
+    assert "BENCHMARK_2026-09-30-HAIKU.md" not in sonnet and "20260930T100000Z" not in sonnet
+    assert 'href="https://example.test/acme/threefold/blob/main/docs/evidence/BENCHMARK_2026-09-30-HAIKU.md"' in haiku
+    assert "benchmark/results/20260930T100000Z.jsonl" in haiku
+    assert "BENCHMARK_2026-09-30.md" not in haiku and "20260930T090000Z" not in haiku
+    # A path is listed even when its link is not an https address, and that link is dropped.
+    assert "javascript:" not in out["view"]
+    method = _card(page, "How this was measured")
+    assert "scripts/build_proof.py" in method
+    assert "docs/evidence/" not in method and "benchmark/results/" not in method, "The first series' report would read as every series'"
 
 
 def test_a_false_alarm_rate_the_totals_cannot_give_says_why(tmp_path: Path) -> None:

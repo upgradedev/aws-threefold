@@ -565,15 +565,20 @@ def evidence_base(url: Optional[str]) -> Optional[str]:
 
 
 def _linked(items: Iterable[Mapping[str, Any]], base: Optional[str]) -> List[Dict[str, Any]]:
-    """The items, each with its absolute address under the base when it is a file of the repository.
+    """The items, each with its absolute address under the base when its path is a file in the working tree.
 
-    Rows read from outside the repository are named by their file name alone,
-    and the repository holds no such file, so they are listed and not linked.
+    The working tree stands in for the repository the base shows: the owner
+    builds the snapshot in the checkout it is committed from, and a file
+    present here but not yet pushed leads nowhere until it is. A file read
+    from outside the repository is named by its file name alone, which may
+    also be the name of a file at the repository's root, so a path with no
+    folder is listed and never linked; every evidence file of the repository
+    lives in a folder.
     """
     if base is None:
         return [dict(item) for item in items]
-    return [dict(item, href=base + urllib.parse.quote(str(item["path"]))) if (REPO_ROOT / str(item["path"])).is_file()
-            else dict(item) for item in items]
+    return [dict(item, href=base + urllib.parse.quote(str(item["path"])))
+            if "/" in str(item["path"]) and (REPO_ROOT / str(item["path"])).is_file() else dict(item) for item in items]
 
 
 # ---------------------------------------------------------------- the check before writing

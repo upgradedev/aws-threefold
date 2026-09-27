@@ -300,6 +300,15 @@ def test_rows_from_outside_the_repository_are_listed_and_never_linked(tmp_path: 
         "The repository holds no such file, so a link to it would lead nowhere")
 
 
+def test_rows_from_outside_named_like_a_file_at_the_repository_root_are_not_linked_to_it(tmp_path: Path) -> None:
+    # Named by its file name alone, the file outside reads as the root's own.
+    assert (ROOT / "README.md").is_file(), "the name must be a file at the root, or this proves nothing"
+    rows = _rows_file(tmp_path, MEASURED, "README.md")
+    section = build_proof.build([], series=[rows], evidence_url=PUBLIC_FILES)["benchmarks"][0]
+    assert section["evidence"] == [{"label": "The result rows it was computed from", "path": "README.md"}], (
+        "A link would lead to the repository's README, not to these rows")
+
+
 def test_evidence_becomes_links_only_under_an_https_address_the_owner_gives(tmp_path: Path) -> None:
     listed = build_proof.build([PILOT])
     assert all("href" not in item for item in listed["benchmark"]["evidence"] + listed["method"])

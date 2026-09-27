@@ -5944,12 +5944,16 @@
         ['Run on', list(b.dates)],
         ['Real-agent runs measured', num(b.valid_rows) + ' of ' + num(b.real_rows)]
       ];
+      // Each series cites its own report and rows here, beside its figures:
+      // one list for all of them would read as every series' evidence.
+      const evidence = (Array.isArray(b.evidence) ? b.evidence : []).map(evidenceItem).filter(Boolean);
       return card(title, 'The same Acme tasks under each condition, judged by checkers that do not import Threefold.', html`
         ${pilot}
         <blockquote class="border-l-2 border-purple-700 pl-4 text-sm text-gray-200 tf-break" data-proof="headline">${b.headline || 'No headline was computed.'}</blockquote>
         <p class="text-xs text-gray-500 mt-1">The headline sentence exactly as benchmark/report.py computed it from the rows.</p>
         <dl class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4">${facts.map(([label, value]) => html`<div class="tf-card-quiet p-3 min-w-0"><dt class="tf-label">${label}</dt><dd class="text-xs text-gray-200 tf-break">${value}</dd></div>`)}</dl>
         ${table}
+        ${evidence.length ? html`<div class="mt-4"><p class="tf-label">Evidence</p><ul class="space-y-1.5" data-proof="series-evidence">${evidence}</ul></div>` : ''}
         ${provenance(b.source, b.snapshot_at)}`, 'min-w-0');
     }
 
@@ -5987,9 +5991,11 @@
         : html`<span class="font-mono text-xs text-gray-200 tf-break">${item.path}</span>`}<span class="text-xs text-gray-500">${item.label || ''}</span></li>`;
     }
 
+    // The files behind the method, for every series alike. A series' own
+    // report and rows are on its card: listed here too, the first series'
+    // report would read as the evidence for all of them.
     function methodCard(proof) {
-      const b = proof.benchmark && typeof proof.benchmark === 'object' ? proof.benchmark : {};
-      const items = [].concat(Array.isArray(b.evidence) ? b.evidence : [], Array.isArray(proof.method) ? proof.method : []);
+      const items = Array.isArray(proof.method) ? proof.method : [];
       const linked = items.some(i => i && typeof i.href === 'string' && /^https:\/\//.test(i.href));
       const terms = [
         ['Violation landed', 'the benchmark\'s own checkers found a governed violation in the files the agent left behind.'],
@@ -5999,7 +6005,7 @@
         ['Overhead', 'the mean turns, seconds and cost of a run under a condition, over the same means with no guidance.'],
         ['Reviewed and false-alarm rate', 'the would-refuse calls the owner labelled, and the share of them labelled false alarm. The rate is given only for a window in which nothing was refused: the totals count false alarms on refused calls as well, and reviewed calls on would-refuse calls only.']
       ];
-      return card('How this was measured', 'The definitions behind every figure above, and the files that hold the evidence.', html`
+      return card('How this was measured', 'The definitions behind every figure above, and the files that compute them. Each series cites its own report and rows on its card.', html`
         <dl class="space-y-2">${terms.map(([term, text]) => html`<div class="text-xs"><dt class="inline font-semibold text-gray-200">${term}:</dt> <dd class="inline text-gray-400">${text}</dd></div>`)}</dl>
         <div class="mt-4 pt-3 border-t border-gray-800">
           <p class="tf-label">Evidence</p>
