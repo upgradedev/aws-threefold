@@ -193,8 +193,20 @@ def _projects_in(rollups: List[Mapping[str, Any]], configs: Mapping[str, Any], o
     return sorted(name for name in names if not _is_expired_sandbox(name, configs))
 
 
-def _project_totals(name: str, rollups: List[Mapping[str, Any]], configs: Mapping[str, Any]) -> Dict[str, Any]:
-    own = [item for item in rollups if item.get("project") == name]
+def _by_project(rollups: Iterable[Mapping[str, Any]]) -> Dict[Any, List[Mapping[str, Any]]]:
+    """Each project's items, in the order they came.
+
+    Grouped in one pass, so a listing of many projects (a public stack's
+    sandboxes) is not a pass over every item for each of them.
+    """
+    grouped: Dict[Any, List[Mapping[str, Any]]] = {}
+    for item in rollups:
+        grouped.setdefault(item.get("project"), []).append(item)
+    return grouped
+
+
+def _project_totals(name: str, own: List[Mapping[str, Any]], configs: Mapping[str, Any]) -> Dict[str, Any]:
+    """One project's row, from its own items."""
     config = configs.get(name)
     return {
         "project": name,
@@ -272,14 +284,16 @@ def overview(
     days_covered = _window(days, today)
     rollups, configs = _as_shown(rollups, configs)
     names = _projects_in(rollups, configs, project)
-    shown = [item for item in rollups if item.get("project") in set(names)]
+    listed = set(names)
+    shown = [item for item in rollups if item.get("project") in listed]
     by_day: Dict[str, List[Mapping[str, Any]]] = {}
     for item in shown:
         by_day.setdefault(str(item.get("day")), []).append(item)
     agents = _prefixed(shown, "agent:")
     refused_by_rule = _prefixed(shown, "refused:")
     observed_by_rule = _prefixed(shown, "observed:")
-    by_project = [_project_totals(name, shown, configs) for name in names]
+    own = _by_project(shown)
+    by_project = [_project_totals(name, own.get(name, []), configs) for name in names]
     stage_counts = Counter(row["stage"] for row in by_project)
     by_agent = _by_agent(agents, _prefixed([item for item in shown if is_sandbox(item.get("project"))], "agent:"))
     coding_agents = [entry for entry in by_agent if entry["kind"] == CODING_AGENT]
@@ -343,11 +357,12 @@ def overview(
 def projects_listing(rollups: List[Mapping[str, Any]], configs: Mapping[str, Mapping[str, Any]]) -> List[Dict[str, Any]]:
     """GET /api/projects: every configured project, and every project the rollups saw."""
     rollups, configs = _as_shown(rollups, configs)
+    grouped = _by_project(rollups)
     listed = []
     for name in _projects_in(rollups, configs, None):
-        own = [item for item in rollups if item.get("project") == name]
+        own = grouped.get(name, [])
         config = configs.get(name) or {}
-        row = _project_totals(name, rollups, configs)
+        row = _project_totals(name, own, configs)
         row.update(
             observe_rules=list(config.get("observe_rules") or []),
             created_at=config.get("created_at"),
