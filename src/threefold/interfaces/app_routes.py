@@ -299,7 +299,9 @@ def _get_project(event: Dict[str, Any], path: str, name: Optional[str]) -> Dict[
     items = evaluator.list_rollups(days=days, project=name)
     readiness = rollups.readiness(items, config, rules, name)
     readiness["summary"]["self_correction"] = _self_correction(days, name)
-    return _respond(200, {"project": name, "config": config, "readiness": readiness})
+    # Where its calls come from, as its row in the listing says, so the page
+    # opened from that row names the same source.
+    return _respond(200, {"project": name, "source": rollups.source_of(name), "config": config, "readiness": readiness})
 
 
 def _get_proof(event: Dict[str, Any], path: str, _: Optional[str]) -> Dict[str, Any]:

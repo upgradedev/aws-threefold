@@ -2119,7 +2119,7 @@ paths:
           default: 14
       responses:
         '200':
-          description: project, config (null when never configured) and readiness
+          description: project, source, config (null when never configured) and readiness
           content:
             application/json:
               schema:
@@ -2127,6 +2127,17 @@ paths:
                 properties:
                   project:
                     type: string
+                  source:
+                    type: string
+                    enum:
+                    - fleet
+                    - live
+                    - probe
+                    - sandbox
+                    - other
+                    description: >-
+                      Where this project's calls come from: the same value as the source of its row in GET /api/projects
+                      and in the overview's by_project, whose description says what each value means.
                   config:
                     oneOf:
                     - $ref: '#/components/schemas/ProjectConfig'

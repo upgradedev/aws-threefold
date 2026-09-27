@@ -994,7 +994,7 @@
     // one from before `live` calls the daily live agent's projects Other.
     const SOURCES = {
       fleet: { label: 'Fleet', says: 'The synthetic Acme fleet: scheduled agents whose calls run through the real gates' },
-      live: { label: 'Live', says: 'The daily live agent: a real Claude Code or Codex run on one Acme task a day, in a project that enforces' },
+      live: { label: 'Live', says: 'The daily live agent: a real Claude Code or Codex run on an Acme task, scheduled once a day, in a project that enforces' },
       sandbox: { label: 'Sandbox', says: 'A visitor\'s sandbox, seeded with synthetic calls by the walkthrough' },
       probe: { label: 'Probe, synthetic', says: 'The service\'s own probes: synthetic calls that check the live stack\'s gates and pages' },
       other: { label: 'Other', says: 'Not the fleet, the daily live agent or a sandbox: the service\'s own probes, the demo page, or a connected repository' }
@@ -1274,7 +1274,7 @@
         const probesApart = !!s.probe && (some(s.probe) || (typeof fleet.projects === 'number' && fleet.projects > 0));
         clauses = [
           some(s.fleet) && html`<strong>${num(count(s.fleet))}</strong> from the synthetic Acme fleet, ${typeof fleet.projects === 'number' ? plural(fleet.projects, 'project') : 'projects'} whose scheduled agents run through the real gates`,
-          live > 0 && html`<strong>${num(live)}</strong> from the daily live agent: real Claude Code or Codex runs, one Acme task a day, in projects that enforce`,
+          live > 0 && html`<strong>${num(live)}</strong> from the daily live agent: real Claude Code or Codex runs on Acme tasks, scheduled once a day, in projects that enforce`,
           some(s.sandbox) && html`<strong>${num(count(s.sandbox))}</strong> from visitors' sandboxes`,
           some(s.probe) && html`<strong>${num(count(s.probe))}</strong> from the service's own probes, synthetic`,
           some(s.other) && html`<strong>${num(count(s.other))}</strong> from other callers: ${probesApart ? '' : "the service's own probes, "}the demo page, or a repository connected to this stack`
@@ -1672,9 +1672,12 @@
       }
       const sorted = rows.slice().sort((a, b) => (isProbe(a) ? 1 : 0) - (isProbe(b) ? 1 : 0) || (b.needs_review || 0) - (a.needs_review || 0) || (b.calls || 0) - (a.calls || 0));
       const numLink = (value, params, tone) => html`<a href="${callsHref(Object.assign({ days }, params))}" class="tf-num-link ${value ? tone : 'text-gray-500'}">${num(value)}</a>`;
+      // A hook mode is a hook's: a project whose calls came only from a page
+      // or from callers that named no agent is given none.
+      const hooked = p => Array.isArray(p.agents) && p.agents.some(a => a !== 'page' && a !== 'unknown');
       const meta = p => compact
         ? html`last seen ${timeAgo(p.last_seen)}`
-        : html`${Array.isArray(p.agents) && p.agents.length ? p.agents.map(agentLabel).join(', ') : 'no agent yet'} · hooks ${chipWords(p.hook_modes)} · last seen ${timeAgo(p.last_seen)}`;
+        : html`${Array.isArray(p.agents) && p.agents.length ? p.agents.map(agentLabel).join(', ') : 'no agent yet'}${hooked(p) || !Array.isArray(p.agents) || !p.agents.length ? html` · hooks ${chipWords(p.hook_modes)}` : ''} · last seen ${timeAgo(p.last_seen)}`;
       const desktop = html`<div class="hidden md:block tf-scroll-x tf-ops-portfolio">
         <table class="tf-table">
           <thead><tr>
@@ -2117,8 +2120,13 @@
         </div>`;
 
 
+        // Where its calls come from, as its row in the listing says (the
+        // answer's `source`). A sandbox's one chip says when it goes.
+        const from = sandbox
+          ? html`<span class="tf-chip tf-chip-gray tf-ops-src" data-src="sandbox" title="${SOURCES.sandbox.says}; its stage expires on its own">Sandbox · expires within a day</span>`
+          : sourceBadge({ project: name, source: d.source });
         ctx.render(html`${crumb}
-          ${pageTitle(html`<span class="font-mono">${shown}</span>`, null, html`${stageChip(stage, config ? true : false)}${sourceBadge({ project: name, sandbox, source: d.source })}${sandbox ? html`<span class="tf-chip tf-chip-sky" title="A sandbox made by the walkthrough; its stage expires on its own">Sandbox · expires within a day</span>` : ''}`)}
+          ${pageTitle(html`<span class="font-mono">${shown}</span>`, null, html`${stageChip(stage, config ? true : false)}${from}`)}
           <div class="space-y-6">
             ${stageHero(name, stage, config, readiness, days, { canWrite, refused: state.refused })}
             ${statTiles}
@@ -2152,31 +2160,49 @@
       function agentsPart(stage) {
         const recent = state.recent;
         if (recent === undefined) return html`<div class="tf-skeleton h-16 w-full" aria-hidden="true"></div>`;
-        return html`${recent && recent.length ? html`<p class="tf-section-sub mb-3">From the latest ${plural(recent.length, 'call')}.</p>` : ''}${agentsPanel(recent, stage)}`;
+        return html`${recent && recent.length ? html`<p class="tf-section-sub mb-3">From the latest ${plural(recent.length, 'call')}.</p>` : ''}${agentsPanel(recent, stage, state.detail && state.detail.source)}`;
       }
       function drawRecent() { keepFocus(draw); }
       function drawRefused() { keepFocus(draw); }
 
-      function agentsPanel(recent, stage) {
+      // Who sent the latest calls, and how. A hook mode is a hook's: only a
+      // call that came through an agent's hook or CI has one. A call from a
+      // page (the demo page's buttons, or the probes pressing them) and a
+      // call that did not say how it arrived are named for what they are,
+      // with no mode, rather than as a hook too old to report one.
+      function agentsPanel(recent, stage, source) {
         if (!recent || !recent.length) return emptyNote('No agent has sent a call from this project in the window.');
-        const byAgent = {};
+        const callers = {};
+        const order = [];
         recent.forEach(row => {
+          const how = row.origin === 'page' || row.agent === 'page' ? 'page' : row.origin === 'hook' || row.origin === 'ci' ? 'hook' : 'other';
           const agent = row.agent || 'unknown';
-          const mode = row.hook_mode || 'unknown';
-          byAgent[agent] = byAgent[agent] || { modes: {}, last: row.timestamp, calls: 0 };
-          byAgent[agent].modes[mode] = true;
-          byAgent[agent].calls += 1;
+          const key = how === 'page' ? 'page' : how + ':' + agent;
+          if (!callers[key]) { callers[key] = { how, agent, modes: {}, last: row.timestamp, calls: 0 }; order.push(key); }
+          if (how === 'hook') callers[key].modes[row.hook_mode || 'unknown'] = true;
+          callers[key].calls += 1;
         });
-        return html`<ul class="space-y-3">${Object.keys(byAgent).map(agent => {
-          const info = byAgent[agent];
+        const probes = source === 'probe';
+        return html`<ul class="space-y-3">${order.map(key => {
+          const info = callers[key];
           const modes = Object.keys(info.modes);
           const capped = stage === 'enforce' && modes.indexOf('observe') !== -1;
+          const name = info.how === 'page'
+            ? html`${T.icon('play', 16)}${probes ? 'The live probes' : 'The demo page'}`
+            : html`${T.icon('terminal', 16)}${agentLabel(info.agent)}`;
+          const how = info.how === 'page'
+            ? html`<p class="text-xs text-gray-400" data-caller="page">${probes
+              ? 'The service\'s own probes, sending the calls a page sends: not through a hook, so there is no hook mode. A page call always enforces, whatever the stage.'
+              : 'Buttons pressed on a page here: not through a hook, so there is no hook mode. A page call always enforces, whatever the stage.'}</p>`
+            : info.how === 'other'
+              ? html`<p class="text-xs text-gray-400" data-caller="other">Sent without saying how it arrived, so no hook mode is recorded.</p>`
+              : html`<div class="flex flex-wrap items-center gap-x-2 gap-y-1">${modes.map(m => html`<span class="tf-chip ${m === 'observe' ? 'tf-chip-amber' : m === 'managed' ? 'tf-chip-emerald' : 'tf-chip-gray'}" title="${HOOK_MODES[m] || m}">${m}</span><span class="text-xs text-gray-400">${HOOK_MODE_WORDS[m] || HOOK_MODES[m] || m}</span>`)}</div>`;
           return html`<li class="tf-card-quiet p-3 space-y-1.5">
             <div class="flex flex-wrap items-center justify-between gap-2">
-              <span class="text-sm text-white inline-flex items-center gap-2">${T.icon('terminal', 16)}${agentLabel(agent)}</span>
+              <span class="text-sm text-white inline-flex items-center gap-2">${name}</span>
               <span class="text-xs text-gray-500">${plural(info.calls, 'call')} · last ${timeAgo(info.last)}</span>
             </div>
-            <div class="flex flex-wrap items-center gap-x-2 gap-y-1">${modes.map(m => html`<span class="tf-chip ${m === 'observe' ? 'tf-chip-amber' : m === 'managed' ? 'tf-chip-emerald' : 'tf-chip-gray'}" title="${HOOK_MODES[m] || m}">${m}</span><span class="text-xs text-gray-400">${HOOK_MODE_WORDS[m] || HOOK_MODES[m] || m}</span>`)}</div>
+            ${how}
             ${capped ? html`<p class="text-xs text-amber-300" role="note">This project is in Enforce, but this agent's hook is capped to observe on its machine, so its calls are never refused. On that machine, run <span class="font-mono">python threefold.py connect --mode managed</span>.</p>` : ''}
           </li>`;
         })}</ul>`;

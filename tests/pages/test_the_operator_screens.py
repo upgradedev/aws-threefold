@@ -337,8 +337,8 @@ def test_the_public_demo_names_the_daily_live_agent_as_real(tmp_path: Path) -> N
     note = _source_note(out["live"])
     words = html.unescape(re.sub(r"<[^>]+>", "", note))
     assert ("Where these calls come from, on this public demo: 3,210 from the synthetic Acme fleet, 6 projects whose "
-            "scheduled agents run through the real gates; 12 from the daily live agent: real Claude Code or Codex runs, "
-            "one Acme task a day, in projects that enforce; 96 from visitors' sandboxes; 41 from other callers") in words
+            "scheduled agents run through the real gates; 12 from the daily live agent: real Claude Code or Codex runs "
+            "on Acme tasks, scheduled once a day, in projects that enforce; 96 from visitors' sandboxes; 41 from other callers") in words
     assert "Daily live agent, real" in words, "The legend names the hue in words"
     live_hue = "#d55181"
     assert f'data-tf-tip="Daily live agent, real" data-tf-tip-value="12" data-tf-tip-color="{live_hue}"' in note
@@ -440,7 +440,7 @@ def test_a_live_project_carries_its_chip_in_the_portfolio(tmp_path: Path) -> Non
     page = out["view"]
     chip = re.search(r'<span class="tf-chip tf-chip-gray tf-ops-src" data-src="live" title="([^"]*)">Live</span>', page)
     assert chip, "A live project's row says Live, in a word beside its dot"
-    assert html.unescape(chip.group(1)) == "The daily live agent: a real Claude Code or Codex run on one Acme task a day, in a project that enforces"
+    assert html.unescape(chip.group(1)) == "The daily live agent: a real Claude Code or Codex run on an Acme task, scheduled once a day, in a project that enforces"
     assert 'data-src="fleet"' in page and ">Fleet<" in page
     other = re.search(r'<span class="tf-chip tf-chip-gray tf-ops-src" data-src="other" title="([^"]*)">Other</span>', page)
     assert other and html.unescape(other.group(1)) == (
@@ -659,6 +659,68 @@ def test_quiet_rules_that_did_nothing_share_one_row(tmp_path: Path) -> None:
     assert "CREDENTIAL" not in quiet, "A quiet rule that refused keeps its own row"
     assert "2 enforce and 1 observe" in re.sub(r"<[^>]+>", "", quiet)
     assert out["list"].count("Enforcing, and it flagged nothing in this window.") == 1, "The boilerplate is said once, not once a rule"
+
+
+def test_a_project_page_names_where_its_calls_come_from(tmp_path: Path) -> None:
+    """The chip beside the title is drawn from the project answer's own `source`, as its row in the listing is."""
+    out = ops(
+        r"""
+  out.heads = {};
+  const cases = [['Acme-Payments', 'fleet'], ['Acme-Live-billing-credit-limit', 'live'], ['Acme-Probe', 'probe'], ['Acme-Portal', 'other'], ['Acme-Billing', null]];
+  for (const [name, source] of cases) {
+    const body = Object.assign(detailBody('observe'), { project: name }, source ? { source } : {});
+    answer = contract({ ['/api/projects/' + name]: { status: 200, body } });
+    await visit('#/projects/' + name);
+    out.heads[source || 'older'] = view().split('id="view-title"')[1].split('class="tf-ops-hero"')[0];
+  }
+  const box = Object.assign(detailBody('observe'), { project: 'Acme-Sandbox-0a1b2c3d', source: 'sandbox' });
+  box.config = Object.assign({}, box.config, { sandbox: true });
+  answer = contract({ '/api/projects/Acme-Sandbox-0a1b2c3d': { status: 200, body: box } });
+  await visit('#/projects/Acme-Sandbox-0a1b2c3d');
+  out.heads.sandbox = view().split('id="view-title"')[1].split('class="tf-ops-hero"')[0];
+""",
+        tmp_path,
+    )
+    heads = out["heads"]
+    for source, word in (("fleet", ">Fleet<"), ("live", ">Live<"), ("probe", ">Probe, synthetic<"), ("other", ">Other<")):
+        assert f'data-src="{source}"' in heads[source] and word in heads[source], f"A {source} project's page says so beside its title"
+    assert "tf-ops-src" not in heads["older"], "A stack whose answer carries no source is not given one by the page"
+    sandbox = heads["sandbox"]
+    assert sandbox.count("tf-ops-src") == 1 and 'data-src="sandbox"' in sandbox and "Sandbox · expires within a day" in sandbox, \
+        "A sandbox wears one chip, which says when it goes"
+
+
+def test_the_agents_card_gives_a_hook_mode_only_to_calls_that_came_through_a_hook(tmp_path: Path) -> None:
+    """The demo page's calls, and calls that did not say how they came, are not an older hook."""
+    out = ops(
+        r"""
+  const items = [
+    row(1, { origin: 'page', agent: 'page', hook_mode: 'unknown' }), row(2, { origin: 'page', agent: 'page', hook_mode: 'unknown' }),
+    row(3, { origin: 'unknown', agent: 'unknown', hook_mode: 'unknown' }),
+    row(4, { hook_mode: 'unknown' }), row(5)
+  ];
+  answer = contract({ '/api/decisions': { status: 200, body: { items, next_cursor: null } } });
+  await visit('#/projects/Acme-Billing');
+  out.agents = view().split('id="agents-body"')[1].split('</section>')[0];
+  const probe = Object.assign(detailBody('observe'), { project: 'Acme-Probe', source: 'probe' });
+  answer = contract({ '/api/projects/Acme-Probe': { status: 200, body: probe }, '/api/decisions': { status: 200, body: { items: items.slice(0, 2).map(r => Object.assign({}, r, { project_name: 'Acme-Probe' })), next_cursor: null } } });
+  await visit('#/projects/Acme-Probe');
+  out.probe = view().split('id="agents-body"')[1].split('</section>')[0];
+""",
+        tmp_path,
+    )
+    cards = out["agents"].split("<li ")[1:]
+    words = [text_of(card) for card in cards]
+    page = next(w for w in words if "The demo page" in w)
+    assert "2 calls" in page and "no hook mode" in page and "always enforces" in page
+    assert "older hook" not in page and "unknown" not in page, "A page call is not a hook too old to say its mode"
+    other = next(w for w in words if "Unknown" in w)
+    assert "Sent without saying how it arrived, so no hook mode is recorded." in other and "older hook" not in other
+    claude = next(w for w in words if "Claude Code" in w)
+    assert "managed" in claude and "an older hook" in claude, "A hook that did not report its mode is still said to be one"
+    assert sum("older hook" in w for w in words) == 1
+    assert "The live probes" in text_of(out["probe"]) and "The demo page" not in text_of(out["probe"]), \
+        "On the probes' own project, their page calls are named as theirs"
 
 
 # ---------------------------------------------------------------- review keys
