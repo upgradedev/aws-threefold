@@ -36,7 +36,10 @@ Three properties matter more than any single check:
   failure, unless `--strict` asks for it to fail. Everything that was deployed
   before that contract fails on a 404 as it always should. A 501, which only
   the local development server answers (it defines no DELETE), is excused on
-  a loopback base and fails anywhere else.
+  a loopback base and fails anywhere else. A field the overview gained after
+  that contract is treated the same way: a stack deployed before the field
+  was added answers without its key, which is "not deployed yet" too, while
+  a field that is there must hold what the code that writes it guarantees.
 
 Standard library only, as the repository's rules require.
 """
@@ -173,6 +176,34 @@ BY_PROJECT_KEYS = (
     "project", "stage", "configured", "calls", "refused", "would_refuse",
     "needs_review", "last_seen",
 )
+
+# Fields the overview gained after the 2026-09-22 contract. None of them is in
+# the keys above, so a stack deployed before one was added still passes the
+# shape check; each has a check of its own, which skips when the key is absent.
+
+# The sources every stack names. A newer one may add another of the same shape.
+SOURCES = ("fleet", "sandbox", "other")
+SOURCE_KEYS = ("calls", "projects")
+# The kinds rollups.agent_kind gives. Which agent has which kind is the stack's
+# table, which grows as agents are added, so only the kind itself is checked.
+CODING_AGENT = "coding_agent"
+AGENT_KINDS = (CODING_AGENT, "page", "ci", "unknown")
+AGENT_KEYS = ("agent", "calls", "calls_in_sandboxes", "kind")
+SPLIT_SIDES = ("sandbox", "elsewhere")
+SPLIT_KEYS = ("projects", "calls", "approved", "refused", "would_refuse", "needs_review", "false_alarms")
+# The split's figures whose two sides add up to the total. needs_review does
+# not: each side is max(0, observed - reviewed) over its own rollups, so a side
+# with more labels than observed calls stops at zero where the total does not.
+SPLIT_ADDS_UP = ("projects", "calls", "approved", "refused", "would_refuse", "false_alarms")
+SELF_CORRECTION_COUNTS = (
+    "refusals_considered", "refusals_with_later_call", "refusals_without_later_call", "self_corrected", "rows_read",
+)
+# Added on 2026-09-25, when the rate became one of the refusals whose session
+# made a later call. Before that, self_correction had neither.
+SELF_CORRECTION_CHANCES = ("refusals_with_later_call", "refusals_without_later_call")
+# insights.self_correction rounds the rate to four places.
+RATE_PLACES = 4
+
 ROW_CONTRACT_FIELDS = ("rule_key", "stage", "hook_mode", "review")
 PROJECT_KEYS = (
     "project", "stage", "configured", "observe_rules", "created_at", "promoted_at",
@@ -508,6 +539,279 @@ def overview_problems(payload: Dict[str, Any]) -> List[str]:
     stages = payload.get("stages") if isinstance(payload.get("stages"), dict) else {}
     if not {"observe", "enforce"} <= set(stages):
         problems.append("stages lacks observe/enforce")
+    return problems
+
+
+# Each of the four below reads one field the overview gained after the
+# contract, and returns None when the stack predates it, so the probe can say
+# "not deployed yet" rather than fail a stack for being older. Otherwise it
+# returns what is wrong, an empty list when nothing is, and never raises: a
+# malformed answer is a finding, not a crash of the probe. Rows are named by
+# their index, never by their project, so no name reaches the evidence.
+
+
+def _is_int(value: Any) -> bool:
+    """A JSON integer. Python counts true and false as integers; JSON does not."""
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _is_count(value: Any) -> bool:
+    return _is_int(value) and value >= 0
+
+
+def _is_number(value: Any) -> bool:
+    """A finite JSON number. JSON's integers can be longer than a float holds, so they are not converted."""
+    if _is_int(value):
+        return True
+    return isinstance(value, float) and math.isfinite(value)
+
+
+def _totals(payload: Dict[str, Any]) -> Dict[str, Any]:
+    return payload.get("totals") if isinstance(payload.get("totals"), dict) else {}
+
+
+def _as_json(value: Any) -> str:
+    """A value the stack sent, written as JSON writes it and shortened, so "0.75" is not read as 0.75."""
+    try:
+        text = json.dumps(value)
+    except (TypeError, ValueError):
+        text = repr(value)
+    return one_line(text, 40)
+
+
+def _first_and_more(indexes: List[int], what: str) -> str:
+    more = f" (and {len(indexes) - 1} more)" if len(indexes) > 1 else ""
+    return f"{what}[{indexes[0]}]{more}"
+
+
+def sources_problems(payload: Dict[str, Any]) -> Optional[List[str]]:
+    """What is wrong with the overview's `sources`, or None from a stack that predates them (2026-09-26).
+
+    rollups._sources counts each source over the same rollups and projects as
+    the totals, so the calls of every source add up to totals.calls and their
+    projects to totals.projects, and a source's projects are the by_project
+    rows that name it. Every by_project row names one, and a row is a sandbox
+    exactly when its source is `sandbox`, since source_of asks is_sandbox
+    first. A source a newer stack adds counts with the rest when it has the
+    same shape.
+    """
+    if "sources" not in payload:
+        return None
+    sources = payload.get("sources")
+    if not isinstance(sources, dict):
+        return [f"sources is a {type(sources).__name__}, not an object"]
+    problems: List[str] = []
+    absent = [name for name in SOURCES if name not in sources]
+    if absent:
+        problems.append("sources lacks " + ",".join(absent))
+    for name, value in sources.items():
+        if not (isinstance(value, dict) and all(_is_count(value.get(key)) for key in SOURCE_KEYS)):
+            problems.append(f"sources.{one_line(name, 40)} is not calls and projects as counts")
+    if problems:
+        return problems
+    totals = _totals(payload)
+    for key in SOURCE_KEYS:
+        added = sum(value[key] for value in sources.values())
+        if not _is_count(totals.get(key)):
+            problems.append(f"totals.{key} is not a count for the sources to add up to")
+        elif added != totals[key]:
+            problems.append(f"the sources' {key} add up to {added}, but totals.{key} is {totals[key]}")
+    rows = payload.get("by_project")
+    if not isinstance(rows, list):
+        return problems + ["by_project is not a list"]
+    unnamed: List[int] = []
+    mismatched: List[int] = []
+    named: Dict[str, int] = dict.fromkeys(sources, 0)
+    for index, row in enumerate(rows):
+        source = row.get("source") if isinstance(row, dict) else None
+        if not (isinstance(source, str) and source in sources):
+            unnamed.append(index)
+            continue
+        named[source] += 1
+        if isinstance(row.get("sandbox"), bool) and row["sandbox"] != (source == "sandbox"):
+            mismatched.append(index)
+    if unnamed:
+        problems.append(_first_and_more(unnamed, "by_project") + " names no source that sources lists")
+    else:
+        for name, value in sources.items():
+            if value["projects"] != named[name]:
+                problems.append(
+                    f"sources.{one_line(name, 40)}.projects is {value['projects']}, "
+                    f"but {named[name]} by_project rows name it"
+                )
+    if mismatched:
+        problems.append(_first_and_more(mismatched, "by_project") + " is a sandbox by one field and not by the other")
+    return problems
+
+
+def _agent_fault(entry: Any) -> str:
+    """What is wrong with one by_agent or coding_agents entry, or "" when nothing is."""
+    if not isinstance(entry, dict):
+        return "is not an object"
+    lacking = [key for key in AGENT_KEYS if key not in entry]
+    if lacking:
+        return "lacks " + ",".join(lacking)
+    if not isinstance(entry["agent"], str):
+        return "has an agent that is not a string"
+    if not (_is_count(entry["calls"]) and _is_count(entry["calls_in_sandboxes"])):
+        return "has calls or calls_in_sandboxes that is not a count"
+    if entry["kind"] not in AGENT_KINDS:
+        return f"has kind {_as_json(entry['kind'])}, not one of {', '.join(AGENT_KINDS)}"
+    if entry["calls_in_sandboxes"] > entry["calls"]:
+        return f"has {entry['calls_in_sandboxes']} calls in sandboxes of {entry['calls']} calls"
+    return ""
+
+
+def agents_problems(payload: Dict[str, Any]) -> Optional[List[str]]:
+    """What is wrong with `coding_agents` and the agents' kinds, or None from a stack that predates them (2026-09-25).
+
+    Both arrived together, with totals.coding_agents. rollups.overview makes
+    every by_agent entry carry its kind and its calls in sandboxes, which are
+    some of its calls; coding_agents is the entries of kind coding_agent in
+    by_agent's order, and totals.coding_agents is how many there are.
+    """
+    if "coding_agents" not in payload:
+        return None
+    coding = payload.get("coding_agents")
+    if not isinstance(coding, list):
+        return [f"coding_agents is a {type(coding).__name__}, not a list"]
+    by_agent = payload.get("by_agent")
+    if not isinstance(by_agent, list):
+        return ["by_agent is not a list"]
+    problems: List[str] = []
+    for where, entries in (("by_agent", by_agent), ("coding_agents", coding)):
+        for index, entry in enumerate(entries):
+            fault = _agent_fault(entry)
+            if fault:
+                problems.append(f"{where}[{index}] {fault}")
+                break
+    others = [
+        index for index, entry in enumerate(coding) if isinstance(entry, dict) and entry.get("kind") != CODING_AGENT
+    ]
+    if others:
+        problems.append(_first_and_more(others, "coding_agents") + " is not of kind coding_agent")
+    expected = [entry for entry in by_agent if isinstance(entry, dict) and entry.get("kind") == CODING_AGENT]
+    if not others and coding != expected:
+        problems.append(f"coding_agents is not by_agent's {len(expected)} coding agent(s) in by_agent's order")
+    count = _totals(payload).get("coding_agents")
+    if not _is_count(count):
+        problems.append("totals.coding_agents is not a count")
+    elif count != len(coding):
+        problems.append(f"totals.coding_agents is {count}, but coding_agents lists {len(coding)}")
+    return problems
+
+
+def sandbox_split_problems(payload: Dict[str, Any]) -> Optional[List[str]]:
+    """What is wrong with `sandbox_split`, or None from a stack that predates it (2026-09-25).
+
+    rollups._part_totals computes each side over its own rollups as the
+    totals are computed over all of them, so each figure in SPLIT_ADDS_UP adds
+    up to its total. The sandbox side is the sandbox source by another name,
+    so where the overview has sources too, the two agree.
+    """
+    if "sandbox_split" not in payload:
+        return None
+    split = payload.get("sandbox_split")
+    if not isinstance(split, dict):
+        return [f"sandbox_split is a {type(split).__name__}, not an object"]
+    problems: List[str] = []
+    for side in SPLIT_SIDES:
+        part = split.get(side)
+        if not isinstance(part, dict):
+            problems.append(f"sandbox_split.{side} is not an object")
+            continue
+        lacking = [key for key in SPLIT_KEYS if not _is_int(part.get(key))]
+        if lacking:
+            problems.append(f"sandbox_split.{side} lacks " + ",".join(lacking) + " as integers")
+    if problems:
+        return problems
+    sandbox, elsewhere = split["sandbox"], split["elsewhere"]
+    totals = _totals(payload)
+    for key in SPLIT_ADDS_UP:
+        added = sandbox[key] + elsewhere[key]
+        if not _is_int(totals.get(key)):
+            problems.append(f"totals.{key} is not an integer for the split to add up to")
+        elif added != totals[key]:
+            problems.append(
+                f"sandbox_split {key} {sandbox[key]} + {elsewhere[key]} is {added}, but totals.{key} is {totals[key]}"
+            )
+    sources = payload.get("sources")
+    source = sources.get("sandbox") if isinstance(sources, dict) else None
+    if isinstance(source, dict):
+        for key in SOURCE_KEYS:
+            if source.get(key) != sandbox[key]:
+                problems.append(
+                    f"sandbox_split.sandbox.{key} is {sandbox[key]}, but sources.sandbox.{key} is {source.get(key)!r}"
+                )
+    return problems
+
+
+def self_correction_problems(payload: Dict[str, Any]) -> Optional[List[str]]:
+    """What is wrong with `self_correction`, or None from a stack that predates its two counts (2026-09-25).
+
+    insights.self_correction splits the refusals it considers into those whose
+    session made a later call and those whose did not, and corrects only the
+    first; the rate is corrected over them, rounded to RATE_PLACES, and null
+    when there were none; the median of the distances is null exactly when
+    none was corrected, and a distance is 1 at the least, the very next call.
+    ledger.self_correction_unread, the figure when the ledger could not be
+    read, is all zeros and nulls and holds all of this.
+
+    Held to none of the totals: the figure is read from the ledger and the
+    totals from the rollups, a rollup is written best effort, and a read that
+    stops at its row budget (`complete` false) covers only its newest rows.
+    """
+    if "self_correction" not in payload:
+        return None
+    figure = payload.get("self_correction")
+    if not isinstance(figure, dict):
+        return [f"self_correction is a {type(figure).__name__}, not an object"]
+    given = [name for name in SELF_CORRECTION_CHANCES if name in figure]
+    if not given:
+        return None
+    if len(given) == 1:
+        return [f"self_correction carries {given[0]} without the other of " + " and ".join(SELF_CORRECTION_CHANCES)]
+    problems: List[str] = []
+    lacking = [key for key in SELF_CORRECTION_COUNTS if not _is_count(figure.get(key))]
+    if lacking:
+        problems.append("self_correction lacks " + ",".join(lacking) + " as counts")
+    unset = [key for key in ("rate", "median_calls_to_correct", "complete") if key not in figure]
+    if unset:
+        problems.append("self_correction lacks " + ",".join(unset))
+    elif not isinstance(figure["complete"], bool):
+        problems.append(f"self_correction.complete is {_as_json(figure['complete'])}, not true or false")
+    if problems:
+        return problems
+    considered = figure["refusals_considered"]
+    later, no_later = figure["refusals_with_later_call"], figure["refusals_without_later_call"]
+    corrected = figure["self_corrected"]
+    if later + no_later != considered:
+        problems.append(
+            f"refusals with a later call {later} and without one {no_later} "
+            f"do not add up to the {considered} considered"
+        )
+    if corrected > later:
+        problems.append(f"self_corrected {corrected} exceeds the {later} refusals with a later call")
+    rate = figure["rate"]
+    if later == 0:
+        if rate is not None:
+            problems.append(f"rate is {_as_json(rate)} with no refusal followed by a later call, not null")
+    elif corrected <= later:
+        # More corrected than could be is reported above, and its division
+        # could overflow a float. The rate is bounded before it is subtracted:
+        # it is never above 1, and an integer longer than a float holds cannot
+        # be subtracted from one.
+        want = round(corrected / later, RATE_PLACES)
+        if not (_is_number(rate) and 0 <= rate <= 1 and abs(rate - want) < 1e-9):
+            problems.append(f"rate is {_as_json(rate)}, not {want} ({corrected} of {later}, to {RATE_PLACES} places)")
+    median = figure["median_calls_to_correct"]
+    if corrected == 0:
+        if median is not None:
+            problems.append(f"median_calls_to_correct is {_as_json(median)} with nothing corrected, not null")
+    elif not _is_number(median) or median < 1:
+        problems.append(
+            f"median_calls_to_correct is {_as_json(median)} with {corrected} corrected, not 1 or more calls"
+        )
     return problems
 
 
@@ -1420,6 +1724,12 @@ class Probe:
         overview = self.request("GET", "api/overview", auth=True, query={"days": 7})
         self.run_check(group, "overview shape", self._overview_shape, overview)
         self.run_check(group, "overview totals equal its series", self._overview_totals, overview)
+        # The same answer, read for the fields added since: one more request
+        # would be one more bounded ledger read on the stack for nothing.
+        self.run_check(group, "overview sources add up to its totals", self._overview_sources, overview)
+        self.run_check(group, "overview agents carry their kind", self._overview_agents, overview)
+        self.run_check(group, "overview sandbox split adds up to its totals", self._overview_split, overview)
+        self.run_check(group, "overview self-correction adds up", self._overview_self_correction, overview)
         pages = self._decision_pages()
         self.run_check(group, "decisions pagination", self._pagination, pages)
         self.run_check(group, "decision rows carry the contract fields", self._row_fields, pages)
@@ -1480,6 +1790,79 @@ class Probe:
         return PASS, (
             f"{identity}: {calls:g} = {approved:g} + {observed:g} + {refused:g}; "
             f"would_refuse {totals.get('would_refuse')} against {observed:g} observed in the series"
+        )
+
+    def _overview_field(
+        self, got: Response, lacks: str, problems_of: Callable[[Dict[str, Any]], Optional[List[str]]]
+    ) -> Optional[Tuple[str, str]]:
+        """The verdict on a field the overview gained after the contract, or None when it is there and sound.
+
+        A stack deployed before the field was added answers without it, which
+        is "not deployed yet" as a missing endpoint is, and fails only under
+        --strict. `lacks` names what such a stack's answer has not got.
+        """
+        absent = self.not_there(got)
+        if absent:
+            return absent
+        if got.status != 200:
+            return FAIL, f"GET /api/overview {self.describe(got)}"
+        # Read as an object, a body that is not one has no key at all, and
+        # would pass for a stack that predates every field.
+        if not isinstance(got.json(), dict):
+            return FAIL, f"GET /api/overview answers 200 with a body that is not a JSON object: {self.snippet(got, 60)}"
+        problems = problems_of(got.obj())
+        if problems is None:
+            return (FAIL if self.strict else SKIP), f"not deployed yet: GET /api/overview has no {lacks}"
+        if problems:
+            return FAIL, "; ".join(problems[:4])
+        return None
+
+    def _overview_sources(self, got: Response) -> Tuple[str, str]:
+        verdict = self._overview_field(got, "sources (added 2026-09-26)", sources_problems)
+        if verdict:
+            return verdict
+        data = got.obj()
+        sources = data["sources"]
+        calls = " + ".join(f"{one_line(name, 40)} {value['calls']}" for name, value in sorted(sources.items()))
+        totals = _totals(data)
+        return PASS, (
+            f"calls {calls} = totals.calls {totals.get('calls')}, and their projects = totals.projects "
+            f"{totals.get('projects')}, each by_project row naming its source"
+        )
+
+    def _overview_agents(self, got: Response) -> Tuple[str, str]:
+        verdict = self._overview_field(got, "coding_agents (added 2026-09-25)", agents_problems)
+        if verdict:
+            return verdict
+        data = got.obj()
+        return PASS, (
+            f"{len(data['coding_agents'])} coding agent(s) = totals.coding_agents, as by_agent lists them; "
+            f"each of {len(data['by_agent'])} by_agent entries has a known kind"
+        )
+
+    def _overview_split(self, got: Response) -> Tuple[str, str]:
+        verdict = self._overview_field(got, "sandbox_split (added 2026-09-25)", sandbox_split_problems)
+        if verdict:
+            return verdict
+        split = got.obj()["sandbox_split"]
+        sandbox, elsewhere = split["sandbox"]["calls"], split["elsewhere"]["calls"]
+        return PASS, (
+            f"calls {sandbox} in sandboxes + {elsewhere} elsewhere = {sandbox + elsewhere}; "
+            f"{', '.join(key for key in SPLIT_ADDS_UP if key != 'calls')} add up too (needs_review need not)"
+        )
+
+    def _overview_self_correction(self, got: Response) -> Tuple[str, str]:
+        verdict = self._overview_field(
+            got, "self_correction with refusals_with_later_call (added 2026-09-25)", self_correction_problems
+        )
+        if verdict:
+            return verdict
+        figure = got.obj()["self_correction"]
+        read = "the whole window" if figure["complete"] else "not the whole window (complete false)"
+        return PASS, (
+            f"{figure['self_corrected']} of {figure['refusals_with_later_call']} refusals with a later call "
+            f"corrected, rate {_as_json(figure['rate'])}; {figure['refusals_without_later_call']} without one, "
+            f"{figure['refusals_considered']} considered; {figure['rows_read']} rows read, {read}"
         )
 
     def _decision_query(self, **extra: Any) -> Dict[str, Any]:
