@@ -2426,26 +2426,36 @@
     // counted beside them, by sandbox when it says only that (sandbox_split),
     // and in words alone when it says neither. Parts read over another window,
     // or parts that add up to nothing, would contradict the tiles, so their
-    // figures are not used; a fleet among them is still named in words.
+    // figures are not used; a fleet or a live agent among them is still named
+    // in words. A stack from before `live` has no such part and counts the
+    // live agent's calls as other, so there it is 0; a live part that is not a
+    // count makes the parts unusable, as any other part's would.
     function sourcesSentence(data, calls) {
       const h = T.html;
       const lead = h`<strong>Where they come from:</strong>`;
       const s = data.sources && typeof data.sources === 'object' ? data.sources : null;
       const part = (v) => v && typeof v === 'object' ? wholeNumber(v.calls) : null;
       const fleet = s ? part(s.fleet) : null;
+      const live = !s ? null : Object.prototype.hasOwnProperty.call(s, 'live') ? part(s.live) : 0;
       const sandbox = s ? part(s.sandbox) : null;
       const other = s ? part(s.other) : null;
-      if (fleet !== null && sandbox !== null && other !== null && calls > 0 && fleet + sandbox + other === calls) {
+      const liveWords = 'real Claude Code or Codex runs doing one Acme task a day in projects that enforce';
+      if (fleet !== null && live !== null && sandbox !== null && other !== null && calls > 0 && fleet + live + sandbox + other === calls) {
         const pieces = [];
         if (fleet) pieces.push(formatCount(fleet) + ' from a synthetic Acme fleet run through the real gates');
+        if (live) pieces.push(formatCount(live) + ' from ' + liveWords);
         if (sandbox) pieces.push(formatCount(sandbox) + ' from visitors’ sandboxes');
         if (other) pieces.push(formatCount(other) + ' from probes, page demos and other API callers');
         return h`${lead} ${pieces.join(', ')}.`;
       }
-      // A fleet the stack reports is always named, even when its parts cannot
-      // be given as figures: synthetic calls are never left unlabelled.
-      if (fleet !== null && fleet > 0) {
-        return h`${lead} a synthetic Acme fleet run through the real gates, visitors’ sandboxes, probes, page demos and other API callers.`;
+      // A fleet or a live agent the stack reports is always named, even when
+      // its parts cannot be given as figures: neither synthetic calls nor real
+      // agents' are left unlabelled.
+      const named = [];
+      if (fleet !== null && fleet > 0) named.push('a synthetic Acme fleet run through the real gates');
+      if (live !== null && live > 0) named.push(liveWords);
+      if (named.length) {
+        return h`${lead} ${named.join(', ')}, visitors’ sandboxes, probes, page demos and other API callers.`;
       }
       const split = data.sandbox_split && typeof data.sandbox_split === 'object' ? data.sandbox_split : null;
       const inSandboxes = split ? part(split.sandbox) : null;

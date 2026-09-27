@@ -841,6 +841,57 @@ def test_without_sources_the_sandboxes_are_still_told_apart(tmp_path: Path) -> N
         "Parts that add up to nothing are not used, and no fleet is claimed"
 
 
+def test_the_daily_live_agent_is_counted_as_real_runs(tmp_path: Path) -> None:
+    """Its calls are real Claude Code or Codex runs, one Acme task a day, in projects that enforce: said so, with its count."""
+    sources = ("sources: { fleet: { calls: 1102, projects: 6 }, live: { calls: 40, projects: 2 }, "
+               "sandbox: { calls: 80, projects: 9 }, other: { calls: 62, projects: 3 } }")
+    out = _load(tmp_path, overview="{ status: 200, body: " + _overview(sources) + " }")
+    assert _read(out["where"]) == (
+        "Where they come from: 1,102 from a synthetic Acme fleet run through the real gates, 40 from real Claude Code "
+        "or Codex runs doing one Acme task a day in projects that enforce, 80 from visitors’ sandboxes, 62 from probes, "
+        "page demos and other API callers."
+    ), "The four parts add up to the 1,284 calls, so each is given, the live agent's called real"
+    mismatched = sources.replace("calls: 40", "calls: 400")
+    out = _load(tmp_path, overview="{ status: 200, body: " + _overview(mismatched) + " }")
+    assert _read(out["where"]) == (
+        "Where they come from: a synthetic Acme fleet run through the real gates, real Claude Code or Codex runs doing "
+        "one Acme task a day in projects that enforce, visitors’ sandboxes, probes, page demos and other API callers."
+    ), "Parts that do not add up give no figure, and the live agent is still named"
+    only_live = "sources: { fleet: { calls: 0 }, live: { calls: 1284 }, sandbox: { calls: 0 }, other: { calls: 0 } }"
+    out = _load(tmp_path, overview="{ status: 200, body: " + _overview(only_live) + " }")
+    assert _read(out["where"]) == (
+        "Where they come from: 1,284 from real Claude Code or Codex runs doing one Acme task a day in projects that enforce."
+    )
+
+
+def test_a_stack_without_live_or_with_none_reads_as_before(tmp_path: Path) -> None:
+    """A stack from before live counts those calls as other; a window with no live run names none."""
+    before = ("Where they come from: 1,102 from a synthetic Acme fleet run through the real gates, 120 from visitors’ "
+              "sandboxes, 62 from probes, page demos and other API callers.")
+    older = "sources: { fleet: { calls: 1102, projects: 6 }, sandbox: { calls: 120, projects: 9 }, other: { calls: 62, projects: 3 } }"
+    out = _load(tmp_path, overview="{ status: 200, body: " + _overview(older) + " }")
+    assert _read(out["where"]) == before, "Without a live part the three parts still add up, and are given"
+    zero = older.replace("sandbox:", "live: { calls: 0, projects: 0 }, sandbox:")
+    out = _load(tmp_path, overview="{ status: 200, body: " + _overview(zero) + " }")
+    assert _read(out["where"]) == before, "A live agent with no calls in the window is not mentioned"
+    assert "Claude Code" not in out["where"]
+
+
+def test_a_live_part_that_is_not_a_count_gives_no_figures(tmp_path: Path) -> None:
+    for value in ("'<img src=x onerror=alert(1)>'", "2.5", "-4", "null", "'40'"):
+        hostile = ("sources: { fleet: { calls: 1102 }, live: { calls: " + value + " }, "
+                   "sandbox: { calls: 120 }, other: { calls: 62 } }")
+        out = _load(tmp_path, overview="{ status: 200, body: " + _overview(hostile) + " }")
+        where = _read(out["where"])
+        assert "<img" not in out["where"] and "onerror" not in out["where"], "Service data reached the page as markup"
+        assert "1,102" not in where and "Claude Code" not in where, f"live {value}: parts with one that is not a count give no figure"
+        assert where == ("Where they come from: a synthetic Acme fleet run through the real gates, visitors’ sandboxes, "
+                         "probes, page demos and other API callers."), "The fleet is still named in words"
+    escaped = "sources: { fleet: { calls: 0 }, live: '<img src=x onerror=alert(1)>', sandbox: { calls: 0 }, other: { calls: 1284 } }"
+    out = _load(tmp_path, overview="{ status: 200, body: " + _overview(escaped) + " }")
+    assert "<img" not in out["where"] and "Claude Code" not in out["where"]
+
+
 def test_the_counts_are_read_without_a_key_even_when_one_is_typed(tmp_path: Path) -> None:
     """So they only ever show a stack whose reads are open, which is what their words say it is."""
     out = _load(tmp_path, overview="{ status: 200, body: " + _overview() + " }", before="el('apiKeyInput').value = 'acme-operator-key';\n")
