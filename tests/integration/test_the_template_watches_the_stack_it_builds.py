@@ -29,6 +29,7 @@ from pathlib import Path
 
 import pytest
 
+from threefold.application import demo_fleet
 from threefold.infrastructure.metrics_emf import emit_threefold_emf_metrics
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -385,6 +386,27 @@ def test_the_function_log_group_keeps_its_name_and_explicit_retention() -> None:
     assert re.search(r"^      RetentionInDays: 30$", group, re.M)
 
 
+def test_the_function_s_memory_comes_from_a_bounded_parameter_and_it_stays_on_arm64() -> None:
+    """Lambda gives CPU in proportion to memory; at 256 MB a page's read took seconds.
+
+    One MemorySize in the whole template, the parameter's: a literal on the
+    function itself would override Globals without a word.
+    """
+    assert re.findall(r"^\s+MemorySize:\s*(.+)$", TEMPLATE, re.M) == ["!Ref FunctionMemoryMb"]
+    function = _tree(_section("Globals"))["Function"]
+    assert function["MemorySize"] == "!Ref FunctionMemoryMb"
+    assert function["Architectures"] == ["arm64"]
+    assert not {"MemorySize", "Architectures"} & set(_properties("ThreefoldFunction"))
+    declared = _tree(PARAMETERS["FunctionMemoryMb"])
+    assert declared["Type"] == "Number", "MinValue and MaxValue bind only a Number"
+    low, high, default = int(declared["MinValue"]), int(declared["MaxValue"]), int(declared["Default"])
+    assert default == 1024
+    assert 512 <= low <= default <= high <= 3008, (
+        f"{low} to {high}: below 512 the function is back on a small fraction of a core, and above 1,769 "
+        "the extra is a second core the handler's one thread cannot use"
+    )
+
+
 # ------------------------------------------------------------------ alarms, in general
 
 
@@ -464,10 +486,17 @@ EXPECTED_ALARMS: dict[str, dict] = {
         "Statistic": "Sum", "Period": "300", "EvaluationPeriods": "1",
         "Threshold": "1", "ComparisonOperator": "GreaterThanOrEqualToThreshold", **_NOTIFY,
     },
-    "ThreefoldFunctionDurationAlarm": {
-        "AlarmName": "!Sub '${AWS::StackName}-function-duration-p95'",
+    "ThreefoldFunctionNearTimeoutAlarm": {
+        "AlarmName": "!Sub '${AWS::StackName}-function-near-timeout'",
         "Namespace": "AWS/Lambda", "MetricName": "Duration", "Dimensions": _FUNCTION,
-        "ExtendedStatistic": "p95", "Unit": "Milliseconds", "Period": "300",
+        "Statistic": "Maximum", "Unit": "Milliseconds", "Period": "300",
+        "EvaluationPeriods": "6", "DatapointsToAlarm": "2",
+        "Threshold": "12000", "ComparisonOperator": "GreaterThanThreshold", **_NOTIFY,
+    },
+    "ThreefoldApiLatencyAlarm": {
+        "AlarmName": "!Sub '${AWS::StackName}-api-latency-p95'",
+        "Namespace": "AWS/ApiGateway", "MetricName": "Latency", "Dimensions": _STAGE,
+        "ExtendedStatistic": "p95", "Period": "300",
         "EvaluationPeriods": "3", "DatapointsToAlarm": "2",
         "Threshold": "!Ref SlowCallAlarmMs", "ComparisonOperator": "GreaterThanThreshold", **_NOTIFY,
     },
@@ -526,6 +555,7 @@ def test_each_alarm_is_exactly_the_alarm_it_is_meant_to_be(logical_id: str) -> N
     properties = _properties(logical_id)
     description = properties.pop("AlarmDescription", "")
     assert len(description) > 80, f"{logical_id} does not say what it means or what to do about it"
+    assert len(description) <= 1024, f"{logical_id}: CloudFormation refuses a longer description, at deploy time"
     assert properties == EXPECTED_ALARMS[logical_id]
 
 
@@ -621,12 +651,81 @@ def test_the_function_alarms_on_errors_and_throttles(metric: str) -> None:
     assert re.search(r"^      ComparisonOperator: GreaterThanOrEqualToThreshold$", block, re.M)
 
 
-def test_the_function_alarms_on_p95_duration_over_the_slow_call_threshold() -> None:
-    _, block = _alarm_on("Duration", "AWS/Lambda")
+def test_the_slow_call_alarm_reads_what_an_http_caller_waits_for() -> None:
+    """API Gateway's Latency for this stack's own API, not the function's Duration.
+
+    The function's Duration also counts the demo fleet's scheduled tick: one
+    invocation carrying some thirty calls, which is nobody's wait. At night it
+    was the only invocation, so it was the p95, and the alarm fired on a batch
+    while promising one call in twenty. API Gateway measures each request from
+    arrival to answer, a cold start included, and the tick never passes
+    through it: the schedule invokes the function itself.
+    """
+    name, block = _alarm_on("Latency", "AWS/ApiGateway")
+    properties = _properties(name)
+    assert properties["Dimensions"] == [
+        {"Name": "ApiId", "Value": "!Ref ThreefoldHttpApi"},
+        {"Name": "Stage", "Value": _stage_name()},
+    ], "This stack's API on the one stage it declares, the series the other API alarms and the dashboard read"
     assert re.search(r"^      ExtendedStatistic: p95$", block, re.M), "A percentile needs ExtendedStatistic"
     assert not re.search(r"^      Statistic:", block, re.M)
     assert re.search(r"^      Threshold: !Ref SlowCallAlarmMs$", block, re.M)
+    assert "Unit" not in properties, "A unit the metric is not published in leaves the alarm without data"
     assert int(_default("SlowCallAlarmMs")) < 15000, "The function times out at 15 seconds; warn before that"
+    schedule = _properties("DemoFleetSchedule")
+    assert schedule["Target"]["Arn"] == "!GetAtt ThreefoldFunction.Arn", "Through the API, the tick would be in it"
+    description = properties["AlarmDescription"]
+    assert "HTTP requests" in description and "tick" in description and "not in it" in description, (
+        "The alarm should say what it measures and that the fleet's tick is not in it"
+    )
+
+
+def test_no_alarm_takes_a_percentile_of_the_function_s_duration_for_a_slow_call() -> None:
+    """Every percentile of the function's Duration counts the tick among the invocations it ranks."""
+    for logical_id in _alarms():
+        properties = _properties(logical_id)
+        if properties.get("Namespace") == "AWS/Lambda" and properties.get("MetricName") == "Duration":
+            assert "ExtendedStatistic" not in properties, logical_id
+            assert properties["Threshold"] != "!Ref SlowCallAlarmMs", logical_id
+
+
+def _timeout_seconds() -> int:
+    timeout = re.search(r"^    Timeout: (\d+)$", TEMPLATE, re.M)
+    assert timeout, "The function declares no timeout"
+    return int(timeout.group(1))
+
+
+def test_a_tick_running_toward_the_timeout_is_still_seen() -> None:
+    """With the tick out of the slow-call alarm, something must see one run away.
+
+    A tick stops itself STOP_BEFORE_DEADLINE_SECONDS before the timeout and
+    checks the time only between steps, so one still running well past that
+    point was held by a step that stalled. The errors alarm sees only a tick
+    that reaches the timeout. This alarm reads the function's slowest
+    invocation, above where a tick stops and below the timeout, over a window
+    that holds two ticks: three five-minute periods hold only one, so two
+    breaching datapoints out of them could never come from ticks alone.
+    """
+    timeout = _timeout_seconds()
+    alarm = _properties("ThreefoldFunctionNearTimeoutAlarm")
+    assert (alarm["Namespace"], alarm["MetricName"], alarm["Dimensions"]) == ("AWS/Lambda", "Duration", _FUNCTION)
+    assert alarm["Statistic"] == "Maximum", "One slow tick among many fast requests moves no percentile"
+    tick_stops_ms = (timeout - demo_fleet.STOP_BEFORE_DEADLINE_SECONDS) * 1000
+    assert tick_stops_ms < float(alarm["Threshold"]) < timeout * 1000, (
+        f"{alarm['Threshold']} ms should lie above where a tick stops itself and below the {timeout} s timeout"
+    )
+    window = int(alarm["EvaluationPeriods"]) * int(alarm["Period"])
+    assert int(alarm["DatapointsToAlarm"]) <= window // demo_fleet.TICK_SECONDS, (
+        "The window holds fewer ticks than the breaching datapoints the alarm needs"
+    )
+    errors = _properties("ThreefoldFunctionErrorsAlarm")
+    assert (errors["MetricName"], errors["Threshold"], errors["EvaluationPeriods"]) == ("Errors", "1", "1"), (
+        "A tick that reaches the timeout is an Error, and one of them in one period must be enough"
+    )
+    description = alarm["AlarmDescription"]
+    assert "HTTP requests" in description and "Demo fleet tick:" in description, (
+        "The alarm should say it covers requests and ticks alike, and where a tick says how long it took"
+    )
 
 
 @pytest.mark.parametrize("status, floor, share", [("5xx", 10, 5), ("4xx", 20, 25)])
@@ -1290,11 +1389,12 @@ def test_the_dashboard_lines_follow_the_alarms_and_the_parameters_they_draw() ->
     expected_by_metric = {
         "CircuitBreakerTripped": halted_threshold,
         "LatencyMs": _PARAMETER_STANDINS["SlowCallAlarmMs"],
-        "Duration": _PARAMETER_STANDINS["SlowCallAlarmMs"],
+        "Latency": _PARAMETER_STANDINS["SlowCallAlarmMs"],
+        "Duration": int(_properties("ThreefoldFunctionNearTimeoutAlarm")["Threshold"]),
         "ConcurrentExecutions": _PARAMETER_STANDINS["ReservedConcurrency"],
     }
     assert _properties("ThreefoldEvaluationLatencyAlarm")["Threshold"] == "!Ref SlowCallAlarmMs"
-    assert _properties("ThreefoldFunctionDurationAlarm")["Threshold"] == "!Ref SlowCallAlarmMs"
+    assert _properties("ThreefoldApiLatencyAlarm")["Threshold"] == "!Ref SlowCallAlarmMs"
     annotated = 0
     for widget in _dashboard()["widgets"]:
         lines = widget["properties"].get("annotations", {}).get("horizontal", [])
@@ -1305,8 +1405,44 @@ def test_the_dashboard_lines_follow_the_alarms_and_the_parameters_they_draw() ->
         assert len(drawn) == 1, f"{widget['properties']['title']}: a line nobody checks"
         assert [line["value"] for line in lines] == [expected_by_metric[drawn.pop()]], widget["properties"]["title"]
         annotated += 1
-    assert annotated == 4
+    assert annotated == 5
     assert all(_widgets_reading(metric) for metric in expected_by_metric)
+
+
+def _as_drawn(dimensions: list[dict]) -> dict[str, str]:
+    """An alarm's dimensions as the filled dashboard body names them."""
+    return {d["Name"]: re.sub(r"^!Ref (\w+)$", r"<\1>", d["Value"]) for d in dimensions}
+
+
+@pytest.mark.parametrize("logical_id", ["ThreefoldApiLatencyAlarm", "ThreefoldFunctionNearTimeoutAlarm"])
+def test_an_alarm_s_line_is_drawn_over_the_series_the_alarm_reads(logical_id: str) -> None:
+    """The slow-call line sat on the function's Duration; the alarm now reads the API's Latency.
+
+    The chart carrying an alarm's line must draw the alarm's own series: its
+    namespace, metric, dimensions and statistic. The line on a p50 or on
+    another stage is a line the alarm never crosses.
+    """
+    alarm = _properties(logical_id)
+    statistic = alarm.get("ExtendedStatistic") or alarm["Statistic"]
+    threshold = alarm["Threshold"]
+    value = _PARAMETER_STANDINS["SlowCallAlarmMs"] if threshold == "!Ref SlowCallAlarmMs" else int(threshold)
+
+    def draws_the_alarm(widget: dict) -> bool:
+        properties = widget["properties"]
+        for row in properties.get("metrics", []):
+            if not isinstance(row[0], str) or row[:2] != [alarm["Namespace"], alarm["MetricName"]]:
+                continue
+            options = row[-1] if isinstance(row[-1], dict) else {}
+            if _row_dimensions(row) == _as_drawn(alarm["Dimensions"]) and options.get("stat", properties.get("stat")) == statistic:
+                return True
+        return False
+
+    carrying = [
+        widget for widget in _dashboard()["widgets"]
+        if value in [line["value"] for line in widget["properties"].get("annotations", {}).get("horizontal", [])]
+        and draws_the_alarm(widget)
+    ]
+    assert len(carrying) == 1, f"No chart, or more than one, draws {logical_id}'s series under its line"
 
 
 def test_the_dashboard_shows_the_api_the_function_the_table_and_governance() -> None:
