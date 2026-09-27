@@ -197,8 +197,9 @@ def _self_correction_reader(reader: Callable[..., Any]) -> Callable[..., Any]:
 
     The figure reads up to ledger.SELF_CORRECTION_ROWS rows on every overview
     and every project page, and nine fields of each. Asked for those alone,
-    the store sends and parses about a third of the attributes it did; the
-    rows it reads, and so `rows_read` and `complete`, are the same.
+    the store sends and parses about two fifths of the attributes it did,
+    those nine and the sort key of a row's twenty-six or so; the rows it
+    reads, and so `rows_read` and `complete`, are the same.
     """
     try:
         parameters = inspect.signature(reader).parameters
