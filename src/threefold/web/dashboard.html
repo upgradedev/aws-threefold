@@ -17,9 +17,9 @@
   </script>
   <link rel="stylesheet" href="assets/threefold.css" />
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
-    body { font-family: 'Inter', sans-serif; background-color: #0a0d18; color: #f3f4f6; }
-    .font-mono { font-family: 'JetBrains Mono', monospace; }
+    /* The page's ground, type and colour are the design system's, as on
+       every other page; only Tailwind's font-mono is pointed at its mono. */
+    .font-mono { font-family: var(--tf-font-mono); }
   </style>
   <style>
     /* OPS: the operator's screens (every route but #/try). Components built on
@@ -27,6 +27,11 @@
        colour or a size of its own that a token already names. A background on
        a button is declared for button.x as well, for Tailwind's preflight. */
 
+    /* A screen's head is the design system's page head; what follows it
+       stands a page's gap below, as on the other pages (tf-main's gap). */
+    .tf-view-head { margin-bottom: var(--tf-space-3); }
+    @media (min-width: 768px) { .tf-view-head { margin-bottom: var(--tf-space-4); } }
+    .tf-view-head .tf-actions { flex-wrap: wrap; }
     .tf-ops-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: var(--tf-space-1h) var(--tf-space-2); margin-bottom: var(--tf-space-1h); }
     .tf-ops-head > :first-child { min-width: 0; flex: 1 1 22rem; }
     /* A screen's title takes the focus when the screen opens, so a screen
@@ -398,32 +403,29 @@
   <script src="assets/threefold.js"></script>
 </head>
 <body class="min-h-screen flex flex-col overflow-x-hidden">
-  <a href="#view" class="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[80] tf-btn">Skip to content</a>
+  <a class="tf-skip" href="#view">Skip to content</a>
 
-  <header class="sticky top-0 z-40 border-b border-gray-800 bg-gray-950/85 backdrop-blur">
-    <div class="tf-container h-14 flex items-center gap-3">
-      <a href="#/overview" class="flex items-center gap-2.5 shrink-0" aria-label="Threefold overview">
-        <span class="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 via-purple-600 to-pink-600 flex items-center justify-center shadow-lg shadow-purple-500/20" aria-hidden="true">
-          <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="#fff" stroke-width="1.8"><path d="M10 2.5 16 5v4.5c0 4-2.6 6.8-6 8-3.4-1.2-6-4-6-8V5l6-2.5z"/><path d="m7.5 10 1.8 1.8L13 8"/></svg>
-        </span>
-        <span class="hidden sm:block">
-          <span class="block text-sm font-bold tracking-tight text-white leading-4">Threefold</span>
-          <span class="block text-[11px] text-gray-500 leading-4">Agent governance</span>
-        </span>
+  <!-- The shell every page wears, the same markup as the other pages', so the
+       header, the navigation and the title stand still from page to page. -->
+  <header class="tf-header">
+    <div class="tf-container tf-header-inner">
+      <a class="tf-brand" href="#/overview" aria-label="Threefold, the overview">
+        <span class="tf-brand-mark" aria-hidden="true" data-tf-icon="shield" data-tf-size="18"></span>
+        <span class="tf-brand-text"><span class="tf-brand-name">Threefold</span><span class="tf-brand-sub">Agent governance</span></span>
       </a>
-      <div id="tf-nav" class="flex-1 min-w-0 flex items-center justify-end">
+      <div id="tf-nav" class="tf-nav-mount">
         <!-- Without script, the pages this app links to are still reachable. -->
-        <nav aria-label="Threefold" class="flex items-center gap-3 text-xs text-gray-400">
-          <a href="index.html" class="underline">Demo</a>
-          <a href="rules.html" class="underline">Rules</a>
-          <a href="sessions.html" class="underline">Sessions</a>
-          <a href="connect.html" class="underline">Connect</a>
+        <nav aria-label="Threefold" class="tf-nav-fallback">
+          <a href="index.html">Demo</a>
+          <a href="rules.html">Rules</a>
+          <a href="sessions.html">Sessions</a>
+          <a href="connect.html">Connect</a>
         </nav>
       </div>
     </div>
   </header>
 
-  <main class="flex-1 tf-container py-6">
+  <main class="tf-main">
     <div id="view" tabindex="-1" class="outline-none">
       <noscript>
         <div class="tf-card p-6 space-y-2">
@@ -438,8 +440,11 @@
   <div id="modal-root"></div>
   <div id="toast-root" class="tf-toast-root" aria-live="polite"></div>
 
-  <footer class="border-t border-gray-800 py-4 text-center text-xs text-gray-500 px-4">
-    Threefold · AWS Zero to Shipped Hackathon 2026 · <span id="foot-words">Every number on this page is read from the API as you look at it</span>
+  <footer class="tf-footer">
+    <div class="tf-container">
+      <span>Threefold · AWS Zero to Shipped Hackathon 2026 · Built with Amazon Bedrock &amp; AWS Serverless</span>
+      <span id="foot-words">Every number on this page is read from the API as you look at it</span>
+    </div>
   </footer>
 
   <script>
@@ -647,21 +652,38 @@
 
     function sum(list, key) { return (list || []).reduce((s, r) => s + (typeof r[key] === 'number' ? r[key] : 0), 0); }
 
-    function pageTitle(title, sub, actions) {
-      return html`<div class="flex flex-wrap items-end justify-between gap-4 mb-5">
-        <div class="min-w-0">
-          <h1 id="view-title" tabindex="-1" class="text-xl md:text-2xl font-semibold tracking-tight text-white outline-none tf-break">${title}</h1>
-          ${sub ? html`<p class="text-xs md:text-sm text-gray-400 mt-1 max-w-3xl">${sub}</p>` : ''}
+    // Every screen's head is the design system's page head, the one the
+    // other pages wear: an eyebrow naming the section (or the breadcrumb in
+    // its place), the title and the lede, so moving between a screen here
+    // and a page there, the title stands where it stood. `lead` is a
+    // breadcrumb (crumbs()); `after` sits under the lede.
+    const EYEBROWS = {
+      overview: ['grid', 'Operations'], review: ['inbox', 'Operations'], projects: ['folder', 'Operations'],
+      connect: ['plug', 'Connect'], proof: ['flask', 'Evidence']
+    };
+    function eyebrow() {
+      const e = current.route ? EYEBROWS[current.route.nav] || ['grid', 'Operations'] : ['search', 'Not found'];
+      return html`<p class="tf-eyebrow">${T.icon(e[0], 16)}${e[1]}</p>`;
+    }
+    function pageTitle(title, sub, actions, lead, after) {
+      return html`<div class="tf-page-head tf-view-head">
+        <div>
+          ${lead || eyebrow()}
+          <h1 id="view-title" tabindex="-1" class="tf-h1 tf-break">${title}</h1>
+          ${sub ? html`<p class="tf-lede">${sub}</p>` : ''}
+          ${after || ''}
         </div>
-        ${actions ? html`<div class="flex flex-wrap items-center gap-2">${actions}</div>` : ''}
+        ${actions ? html`<div class="tf-actions">${actions}</div>` : ''}
       </div>`;
     }
 
+    // A screen deeper than a section names the way back in the eyebrow's
+    // place: one line, the last part cut with an ellipsis where it is long.
     function crumbs(items) {
-      return html`<nav aria-label="Breadcrumb" class="text-xs text-gray-500 mb-2 flex flex-wrap items-center gap-1">
-        ${items.map((item, i) => html`${i ? html`<span aria-hidden="true">/</span>` : ''}${item.href
-          ? html`<a href="${item.href}" class="hover:text-gray-300 underline-offset-2 hover:underline">${item.label}</a>`
-          : html`<span class="text-gray-400 tf-break" aria-current="page">${item.label}</span>`}`)}
+      return html`<nav aria-label="Breadcrumb" class="tf-crumbs">
+        ${items.map((item, i) => html`${i ? html`<span class="tf-crumb-sep" aria-hidden="true">/</span>` : ''}${item.href
+          ? html`<a href="${item.href}">${item.label}</a>`
+          : html`<span aria-current="page">${item.label}</span>`}`)}
       </nav>`;
     }
 
@@ -713,8 +735,8 @@
       return html`<div class="tf-card p-5" aria-hidden="true"><div class="tf-skeleton h-48 w-full"></div></div>`;
     }
 
-    function loadingView(title, sub, kinds) {
-      return html`${pageTitle(title, sub)}<div class="space-y-4" aria-busy="true"><p class="sr-only">Loading</p>${(kinds || ['table']).map(skeleton)}</div>`;
+    function loadingView(title, sub, kinds, lead) {
+      return html`${pageTitle(title, sub, null, lead)}<div class="space-y-4" aria-busy="true"><p class="sr-only">Loading</p>${(kinds || ['table']).map(skeleton)}</div>`;
     }
 
     // The state for a failed read: signed out when the stack refused, an error
@@ -2041,7 +2063,7 @@
       // below sends; T.projectName adds the reader's own name for display only.
       const shown = T.projectName(name);
       const crumb = crumbs([{ label: 'Projects', href: '#/projects' }, { label: shown }]);
-      ctx.render(html`${crumb}${loadingView(shown, 'Reading its stage and readiness…', ['hero', 'tiles', 'table'])}`);
+      ctx.render(loadingView(shown, 'Reading its stage and readiness…', ['hero', 'tiles', 'table'], crumb));
 
       // The stage and readiness first: the screen is drawn as soon as they
       // land. The recent calls and the refused calls follow, each drawn into
@@ -2073,10 +2095,10 @@
         }, err => {
           if (!ctx.alive()) return;
           if (err && err.kind === 'not_found') {
-            ctx.render(html`${crumb}${pageTitle(shown, null)}${emptyNote('This stack has no record of a project by this name: no configuration, and no call in the window.', html`If it was just connected, its first call may still be on its way. <a class="tf-link" href="#/connect">Connect it</a>, or go back to <a class="tf-link" href="#/projects">the projects</a>.`)}`);
+            ctx.render(html`${pageTitle(shown, null, null, crumb)}${emptyNote('This stack has no record of a project by this name: no configuration, and no call in the window.', html`If it was just connected, its first call may still be on its way. <a class="tf-link" href="#/connect">Connect it</a>, or go back to <a class="tf-link" href="#/projects">the projects</a>.`)}`);
             return;
           }
-          ctx.render(html`${crumb}${pageTitle(shown, null)}${failure(err, 'this project')}`);
+          ctx.render(html`${pageTitle(shown, null, null, crumb)}${failure(err, 'this project')}`);
         });
       }
 
@@ -2094,7 +2116,7 @@
         // mistyped. A project whose calls came only from a page (which the
         // readiness does not count as observed) still has calls, and is drawn.
         if (looksEmpty(d) && Array.isArray(state.recent) && state.recent.length === 0) {
-          ctx.render(html`${crumb}${pageTitle(html`<span class="font-mono">${shown}</span>`, null)}
+          ctx.render(html`${pageTitle(html`<span class="font-mono">${shown}</span>`, null, null, crumb)}
             <div class="tf-card p-6 md:p-8 space-y-3" data-state="empty">
               <h2 class="text-lg font-semibold text-white">No call from this project in ${windowWords(days)}</h2>
               <p class="text-sm text-gray-400 max-w-2xl">This stack has no configuration for <span class="font-mono text-gray-200">${shown}</span>, and no call from it in ${windowWords(days)}. Connect it, or check the name.</p>
@@ -2127,8 +2149,7 @@
         const from = sandbox
           ? html`<span class="tf-chip tf-chip-gray tf-ops-src" data-src="sandbox" title="${SOURCES.sandbox.says}; its stage expires on its own">Sandbox · expires within a day</span>`
           : sourceBadge({ project: name, source: d.source });
-        ctx.render(html`${crumb}
-          ${pageTitle(html`<span class="font-mono">${shown}</span>`, null, html`${stageChip(stage, config ? true : false)}${from}`)}
+        ctx.render(html`${pageTitle(html`<span class="font-mono">${shown}</span>`, null, html`${stageChip(stage, config ? true : false)}${from}`, crumb)}
           <div class="space-y-6">
             ${stageHero(name, stage, config, readiness, days, { canWrite, refused: state.refused })}
             ${statTiles}
@@ -3237,7 +3258,7 @@
       const f = readCallFilters(ctx.params);
       const state = { items: [], cursor: null, loadingMore: false, scanned: 0 };
       const sub = describeFilters(f) + '.';
-      ctx.render(html`${crumbs([{ label: 'Overview', href: '#/overview' }, { label: 'Calls' }])}${loadingView('Calls', sub, ['table'])}`);
+      ctx.render(loadingView('Calls', sub, ['table'], crumbs([{ label: 'Overview', href: '#/overview' }, { label: 'Calls' }])));
 
       // A day is filtered here, over rows the route returns newest first, so a
       // day-filtered read asks for the largest page the contract allows (200)
@@ -3278,14 +3299,13 @@
           state.cursor = next;
           draw();
         }, err => {
-          if (ctx.alive()) ctx.render(html`${crumbs([{ label: 'Overview', href: '#/overview' }, { label: 'Calls' }])}${pageTitle('Calls', sub)}${filterBar(f)}${failure(err, 'the calls')}`);
+          if (ctx.alive()) ctx.render(html`${pageTitle('Calls', sub, null, crumbs([{ label: 'Overview', href: '#/overview' }, { label: 'Calls' }]))}${filterBar(f)}${failure(err, 'the calls')}`);
         });
       }
 
       function draw() {
         const chips = activeChips(f);
-        ctx.render(html`${crumbs([{ label: 'Overview', href: '#/overview' }, { label: 'Calls' }])}
-          ${pageTitle('Calls', sub)}
+        ctx.render(html`${pageTitle('Calls', sub, null, crumbs([{ label: 'Overview', href: '#/overview' }, { label: 'Calls' }]))}
           ${outcomeTabs(f)}
           ${filterBar(f)}
           ${chips}
@@ -3502,10 +3522,10 @@
       const verdict = ctx.params.verdict_id || '';
       const crumb = crumbs([{ label: 'Overview', href: '#/overview' }, { label: 'Calls', href: '#/calls' }, { label: verdict || 'Call' }]);
       if (!stamp || !verdict) {
-        ctx.render(html`${crumb}${pageTitle('Which call?', 'A call is opened from a list, which names its time and verdict id.')}<a class="tf-btn tf-btn-primary" href="#/calls">Open the calls</a>`);
+        ctx.render(html`${pageTitle('Which call?', 'A call is opened from a list, which names its time and verdict id.', null, crumb)}<a class="tf-btn tf-btn-primary" href="#/calls">Open the calls</a>`);
         return;
       }
-      ctx.render(html`${crumb}${loadingView('Call', 'Reading the decision…', ['hero', 'table'])}`);
+      ctx.render(loadingView('Call', 'Reading the decision…', ['hero', 'table'], crumb));
       const state = { data: null, who: null };
 
       function load() {
@@ -3517,10 +3537,10 @@
         }, err => {
           if (!ctx.alive()) return;
           if (err && err.kind === 'not_found') {
-            ctx.render(html`${crumb}${pageTitle('This call is not in the ledger', null)}${emptyNote('No decision was recorded with this time and verdict id. It may be older than the ledger keeps, or the link was cut short.', html`<a class="tf-link" href="#/calls">Back to the calls</a>`)}`);
+            ctx.render(html`${pageTitle('This call is not in the ledger', null, null, crumb)}${emptyNote('No decision was recorded with this time and verdict id. It may be older than the ledger keeps, or the link was cut short.', html`<a class="tf-link" href="#/calls">Back to the calls</a>`)}`);
             return;
           }
-          ctx.render(html`${crumb}${pageTitle('Call', null)}${failure(err, 'this call')}`);
+          ctx.render(html`${pageTitle('Call', null, null, crumb)}${failure(err, 'this call')}`);
         });
       }
 
@@ -3682,10 +3702,9 @@
             </div>`
           : '';
 
-        ctx.render(html`${crumb}
-          ${pageTitle(html`<span class="font-mono">${row.tool_name || 'Call'}</span> <span class="font-mono text-gray-400 text-base md:text-lg tf-break">${targetOf(row)}</span>`,
+        ctx.render(html`${pageTitle(html`<span class="font-mono">${row.tool_name || 'Call'}</span> <span class="font-mono text-gray-400 text-base md:text-lg tf-break">${targetOf(row)}</span>`,
             null,
-            html`<a class="tf-btn tf-btn-quiet tf-btn-sm" href="${T.specHref('get', '/api/decision')}">GET /api/decision in the API document</a>`)}
+            html`<a class="tf-btn tf-btn-quiet tf-btn-sm" href="${T.specHref('get', '/api/decision')}">GET /api/decision in the API document</a>`, crumb)}
           <div class="space-y-4">
             ${incident}
             <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -4815,13 +4834,22 @@
         selected: null, promoted: null, observing: null, result: null, replay: null, planned: false, error: null, busy: false, who: null, play: {}, focusId: null,
         saves: [], rulesDef: null, lastLabel: null, seededAlarm: null
       };
+      // A sandbox made earlier in this browser can be resumed. Its record
+      // keeps what the stack answered about the call it seeded as a false
+      // alarm, so a resumed walk still asks the reader to find it and says
+      // whether they did; a record from before that is resumed without it.
+      let resumeAlarm = null;
       try {
         const saved = JSON.parse(localStorage.getItem(TRY_STORAGE) || 'null');
-        if (saved && /^Acme-Sandbox-[0-9a-f]{8}$/.test(saved.project || '') && Date.now() - (saved.at || 0) < 20 * 3600 * 1000) state.resume = saved.project;
+        if (saved && /^Acme-Sandbox-[0-9a-f]{8}$/.test(saved.project || '') && Date.now() - (saved.at || 0) < 20 * 3600 * 1000) {
+          state.resume = saved.project;
+          resumeAlarm = seededAlarmOf(saved);
+        }
       } catch (err) { /* nothing to resume */ }
 
       function remember() {
-        try { localStorage.setItem(TRY_STORAGE, JSON.stringify({ project: state.project, at: Date.now() })); } catch (err) { /* resuming is a convenience */ }
+        const record = Object.assign({ project: state.project, at: Date.now() }, state.seededAlarm ? { seeded_false_alarm: state.seededAlarm } : {});
+        try { localStorage.setItem(TRY_STORAGE, JSON.stringify(record)); } catch (err) { /* resuming is a convenience */ }
       }
 
       function labelledCount() { return state.observed.filter(r => state.labels[r.verdict_id]).length; }
@@ -4830,6 +4858,8 @@
         state.observed.forEach(r => { const l = state.labels[r.verdict_id]; if (l === 'correct' || l === 'false_alarm') c[l] += 1; });
         return c;
       }
+      // How many calls a label went to, as a reader says it: "no call", not "0 calls".
+      function marked(n) { return n === 0 ? 'no call' : plural(n, 'call'); }
       function readinessRules() { return (state.readiness && Array.isArray(state.readiness.rules)) ? state.readiness.rules : []; }
 
       // Below 640px the labels move to the sticky bar (see verdicts()), and
@@ -5307,7 +5337,7 @@
           kicker: 'Step 3 of 5',
           title: total && done ? 'Every call has a label' : 'Was the rule right?',
           sentence: total && done
-            ? 'You marked ' + plural(labelCounts().correct, 'call') + ' correct and ' + plural(labelCounts().false_alarm, 'call') + ' a false alarm, and each rule reads its state from those labels.'
+            ? 'You marked ' + marked(labelCounts().correct) + ' correct and ' + marked(labelCounts().false_alarm) + ' a false alarm, and each rule reads its state from those labels.'
             : state.seededAlarm
               ? 'One of them is a false alarm: spot it, and mark each call Correct or False alarm.'
               : 'Mark each call Correct or False alarm: a rule you mark wrong keeps observing.',
@@ -5663,7 +5693,7 @@
         facts.push({
           figure: p ? num(p.enforce.length) : '—',
           label: p && p.enforce.length === 1 ? 'rule moved to Enforce' : 'rules moved to Enforce',
-          text: 'You marked ' + plural(c.correct, 'call') + ' correct and ' + plural(c.false_alarm, 'call') + ' a false alarm' + (noisy.length ? ', so ' + tryList(noisy) + ' stayed in Observe.' : '.'),
+          text: 'You marked ' + marked(c.correct) + ' correct and ' + marked(c.false_alarm) + ' a false alarm' + (noisy.length ? ', so ' + tryList(noisy) + ' stayed in Observe.' : '.'),
           source: 'POST …/reviews · GET …/projects · POST …/promote'
         });
         const r = state.result || {};
@@ -6084,7 +6114,9 @@
           }, err => { if (ctx.alive()) fail(err, 'create'); });
         },
         'try-resume': () => {
-          state.project = state.resume; state.seeded = null; state.stage = null; state.busy = true; state.error = null; draw();
+          state.project = state.resume; state.seeded = null; state.stage = null; state.busy = true; state.error = null;
+          state.seededAlarm = resumeAlarm;
+          draw();
           // Its stage too: it may have been promoted since it was made.
           const detail = T.api('/api/projects/' + encodeURIComponent(state.project) + query({ days: 1 })).then(d => {
             state.readiness = (d && d.readiness) || state.readiness;
@@ -6636,8 +6668,7 @@
         const written = typeof proof.generated_at === 'string' && proof.generated_at
           ? html`Snapshot written ${when(proof.generated_at)}` : 'The snapshot does not record when it was written';
         const by = typeof proof.generated_by === 'string' && proof.generated_by ? html` by <span class="font-mono">${proof.generated_by}</span>` : '';
-        ctx.render(html`${pageTitle('Proof', PROOF_SUB)}
-          <p class="text-xs text-gray-500 -mt-3 mb-4" data-proof="generated">${written}${by}. It changes only when a new one is deployed.</p>
+        ctx.render(html`${pageTitle('Proof', PROOF_SUB, null, null, html`<p class="tf-ops-sub mt-2" data-proof="generated">${written}${by}. It changes only when a new one is deployed.</p>`)}
           <div class="space-y-4">
             ${benchmarkCards(proof)}
             ${ownUseCard(proof.private)}
