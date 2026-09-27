@@ -53,19 +53,21 @@ def is_sandbox(project: Any) -> bool:
 # synthetic and which are real agents'. `fleet` is the synthetic Acme fleet that
 # application/demo_fleet.py runs on the public stack, `live` the daily live
 # agent (scripts/daily_live_agent.py), a real Claude Code or Codex run on one of
-# the benchmark's standard Acme tasks, `sandbox` a visitor's sandbox, and
-# `other` everything else: the service's own probes, the demo's page calls, and
-# on a private stack the governed repositories themselves. The fleet's projects
-# are these six names exactly, and only on a stack that runs the fleet
-# (DEMO_FLEET, the template's DemoFleet parameter): elsewhere a team may call
-# its own repository Acme-Payments, as the installer's examples do, and its
-# calls are not synthetic. `Acme-Treasury-2` or `Acme-Payments-Internal` is
-# other anywhere.
+# the benchmark's standard Acme tasks, `probe` the service's own live probes
+# (scripts/probe_live.py), synthetic calls that check the stack's gates,
+# `sandbox` a visitor's sandbox, and `other` everything else: the demo's page
+# calls, the simulations its scenarios record, and on a private stack the
+# governed repositories themselves. The fleet's projects are these six names
+# exactly, and only on a stack that runs the fleet (DEMO_FLEET, the template's
+# DemoFleet parameter): elsewhere a team may call its own repository
+# Acme-Payments, as the installer's examples do, and its calls are not
+# synthetic. `Acme-Treasury-2` or `Acme-Payments-Internal` is other anywhere.
 FLEET = "fleet"
 LIVE = "live"
+PROBE = "probe"
 SANDBOX = "sandbox"
 OTHER = "other"
-SOURCES = (FLEET, LIVE, SANDBOX, OTHER)
+SOURCES = (FLEET, LIVE, PROBE, SANDBOX, OTHER)
 FLEET_PROJECTS = (
     "Acme-Payments",
     "Acme-Checkout",
@@ -98,6 +100,15 @@ LIVE_PROJECTS = tuple(f"Acme-Live-{task}" for task in LIVE_TASKS)
 # daily run, and cannot prove what does.
 LIVE_AGENTS = ("claude-code", "codex")
 
+# The project the live probes send their governed calls as, exactly. Named
+# here because the function does not ship scripts/; a unit test reads the
+# script's own name and fails when the two drift. The probes' other writes are
+# not under it and keep their own source: the sandbox a run creates is a
+# sandbox, the call it sends outside the name pattern on purpose is recorded
+# as `unlabelled`, and the scenarios it calls record under the simulation
+# project every visitor's scenarios use, which is not the probes' alone.
+PROBE_PROJECTS = ("Acme-Probe",)
+
 
 # Set by the template from its DemoFleet parameter: "true" where the schedule
 # runs the fleet, "false" (or unset, as off AWS) everywhere else. Read per
@@ -111,7 +122,7 @@ def fleet_runs_here() -> bool:
 
 
 def source_of(project: Any) -> str:
-    """fleet, live, sandbox or other: where a project's calls come from, read off its name and the stack."""
+    """fleet, live, probe, sandbox or other: where a project's calls come from, read off its name and the stack."""
     name = str(project or "")
     if is_sandbox(name):
         return SANDBOX
@@ -124,6 +135,11 @@ def source_of(project: Any) -> str:
     # present those calls as the public demo's daily run.
     if name in LIVE_PROJECTS and fleet_runs_here():
         return LIVE
+    # The same reason holds for the probes' name: on another stack it is only
+    # what a caller chose to send, and a team's own work there must not be
+    # called synthetic.
+    if name in PROBE_PROJECTS and fleet_runs_here():
+        return PROBE
     return OTHER
 
 
@@ -274,7 +290,7 @@ def _sources(rows: List[Mapping[str, Any]], rollups: List[Mapping[str, Any]]) ->
     """sources: the calls and the projects of the window by where they come from.
 
     Computed over the same projects as the totals, so each figure adds up to
-    its total: the four `calls` to `totals.calls`, the four `projects` to
+    its total: the five `calls` to `totals.calls`, the five `projects` to
     `totals.projects`. A project counts under its row's source; its calls do
     too, except that a live project's calls are live only when Claude Code or
     Codex made them (LIVE_AGENTS), and other otherwise.
@@ -324,9 +340,9 @@ def overview(
     entry carries its `kind` and its `calls_in_sandboxes`, and `coding_agents`
     lists the coding agents alone, so a page can say what each number is made
     of. `sources` gives the calls and projects of the synthetic fleet, of the
-    daily live agent, of sandboxes and of everything else, and each by_project
-    row names its `source`. A sandbox whose configuration has expired stays out
-    of all of them.
+    daily live agent, of the service's own probes, of sandboxes and of
+    everything else, and each by_project row names its `source`. A sandbox
+    whose configuration has expired stays out of all of them.
     """
     today = today or datetime.datetime.now(datetime.timezone.utc).date()
     days_covered = _window(days, today)
@@ -373,9 +389,10 @@ def overview(
             "elsewhere": _part_totals([row for row in by_project if not row["sandbox"]], shown, False),
         },
         # Where the calls come from: the synthetic fleet, the daily live
-        # agent, visitors' sandboxes, or anything else. A public page says in
-        # words that the fleet is synthetic and the live agent real; these are
-        # the figures it says it with.
+        # agent, the service's own probes, visitors' sandboxes, or anything
+        # else. A public page says in words that the fleet and the probes are
+        # synthetic and the live agent real; these are the figures it says it
+        # with.
         "sources": _sources(by_project, shown),
         "series": [
             {
@@ -423,15 +440,31 @@ def projects_listing(rollups: List[Mapping[str, Any]], configs: Mapping[str, Map
     return sorted(listed, key=lambda row: (row["last_seen"] or "", row["project"]), reverse=True)
 
 
-def _state(false_alarms: int, unreviewed: int, flagged: int) -> str:
+def _state(false_alarms: int, unreviewed: int, correct: int) -> str:
+    """noisy, needs_review, ready or quiet, from the labels on what a rule flagged.
+
+    Ready rests on labels alone: at least one call it flagged marked correct,
+    none marked a false alarm, and none of its would-refuse calls waiting. A
+    refusal nobody labelled is evidence of nothing either way. It may be a
+    visitor pressing a button on the demo page, or a page call of the service's
+    own probes, and those always enforce whatever the project's stage; a
+    rollup does not say which caller a rule refused. So a rule whose only
+    record is unlabelled refusals has flagged nothing anyone judged, and reads
+    quiet, with its refusals beside it on the row.
+    """
     if false_alarms:
         return "noisy"
     if unreviewed:
         return "needs_review"
-    return "ready" if flagged else "quiet"
+    return "ready" if correct else "quiet"
 
 
-def _recommendation(state: str, mode: str, unreviewed: int, false_alarms: int) -> str:
+def _recommendation(state: str, mode: str, would_refuse: int, refused: int, correct: int, unreviewed: int,
+                    false_alarms: int) -> str:
+    """What to do next, in a sentence true of the counts on the rule's row.
+
+    A count is written `N word(s)`, which the pages put in the singular for 1.
+    """
     enforcing = mode == stages.ENFORCE
     if state == "noisy":
         return (
@@ -442,10 +475,30 @@ def _recommendation(state: str, mode: str, unreviewed: int, false_alarms: int) -
     if state == "needs_review":
         return f"{unreviewed} flagged call(s) not reviewed: mark each correct or false alarm before deciding."
     if state == "ready":
+        # Nothing waits and nothing was marked wrong, so every would-refuse
+        # call is among the correct ones; what they do not cover is refusals
+        # nobody labelled, and "every call" must not claim those.
+        unlabelled = max(0, would_refuse + refused - correct)
+        if not unlabelled:
+            return (
+                "Enforcing, and every call it flagged was marked correct."
+                if enforcing
+                else "Every call it flagged was marked correct: ready to enforce."
+            )
         return (
-            "Enforcing, and every call it flagged was marked correct."
+            f"Enforcing, with {correct} call(s) it flagged marked correct and none a false alarm; "
+            f"{unlabelled} refused call(s) not labelled."
             if enforcing
-            else "Every call it flagged was marked correct: ready to enforce."
+            else f"{correct} call(s) it flagged marked correct and none a false alarm: ready to enforce; "
+            f"{unlabelled} refused call(s) not labelled."
+        )
+    if refused:
+        return (
+            f"Enforcing, and nobody labelled the {refused} call(s) it refused in this window, "
+            "so nothing here shows it was right."
+            if enforcing
+            else f"Nobody labelled the {refused} call(s) it refused in this window, "
+            "so nothing here shows it is ready to enforce."
         )
     return (
         "Enforcing, and it flagged nothing in this window."
@@ -463,9 +516,9 @@ def readiness(
     """GET /api/projects/<name>: whether each rule has earned enforcement.
 
     A rule's calls are the ones its key flagged in the window. `would_refuse`
-    counts the observed ones; a refusal it made while already enforcing counts
-    towards whether it flagged anything, and a label on one counts like any
-    label, so a promoted rule that turns out noisy says so.
+    counts the observed ones and `refused` the ones it refused. A label on a
+    refusal counts like any label, so a promoted rule that turns out noisy
+    says so; a refusal nobody labelled makes no rule Ready (see _state).
     """
     stage = stages.stage_of(config, project)
     rule_by_id = {str(rule.get("id")): rule for rule in layering_rules if rule.get("id")}
@@ -477,24 +530,25 @@ def readiness(
         false_alarms = _sum(rollups, f"false_alarm:{key}")
         unreviewed = max(0, observed - _sum(rollups, f"reviewed:{key}"))
         mode = stages.mode_now(key, stage, config, rule_by_id.get(key))
-        state = _state(false_alarms, unreviewed, observed + refused)
+        state = _state(false_alarms, unreviewed, correct)
         rows.append(
             {
                 "rule_key": key,
                 "kind": "gate" if key in GATE_KEYS and key not in rule_by_id else "layering",
                 "mode_now": mode,
                 "would_refuse": observed,
-                # Refusals it made while already enforcing. They count towards
-                # whether it flagged anything, so a promoted rule that refused
-                # calls is Ready; shown beside would_refuse so that state can
-                # be read off the row rather than taken on trust.
+                # The calls it refused: an agent's while the rule enforced, or
+                # the demo page's and the probes' page calls, which always
+                # enforce. Shown beside would_refuse, so a Quiet rule that
+                # refused calls says so and the state can be read off the row
+                # rather than taken on trust.
                 "refused": refused,
                 "correct": correct,
                 "false_alarms": false_alarms,
                 "unreviewed": unreviewed,
                 "last_seen": _latest(rollups, f"last:{key}"),
                 "state": state,
-                "recommendation": _recommendation(state, mode, unreviewed, false_alarms),
+                "recommendation": _recommendation(state, mode, observed, refused, correct, unreviewed, false_alarms),
             }
         )
     reviewed = _sum(rollups, "review:correct") + _sum(rollups, "review:false_alarm")

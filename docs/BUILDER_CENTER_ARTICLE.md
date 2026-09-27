@@ -85,10 +85,12 @@ still refused by the hook on the developer's own machine, and so is a request th
 service cannot take at all, such as a body over 1 MB, since the hook reads any
 4xx answer other than 429 as a refusal. The dashboard shows what each rule
 *would* have refused. An operator marks each of those correct or a false alarm,
-and each rule reads its state from the labels: **Ready** when everything it
-flagged was correct, **Quiet** when it flagged nothing, **Noisy** after a false
-alarm. **Promote** moves the project to Enforce with the rules that earned it,
-and the others keep observing. **Demote** is one click. A stack can also name
+and each rule reads its state from the labels alone: **Ready** when calls it
+flagged were marked correct and none a false alarm, **Quiet** when no label
+says anything about it, **Noisy** after a false alarm. A refusal nobody
+labelled, such as one of the demo page's, makes no rule Ready. **Promote**
+moves the project to Enforce with the rules that earned it, and the others
+keep observing. **Demote** is one click. A stack can also name
 projects that start in Enforce (`EnforceProjectPattern`); the public one does
 for the projects a real agent works in, because no operator is there to
 promote them.

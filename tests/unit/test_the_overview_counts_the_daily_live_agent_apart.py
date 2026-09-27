@@ -149,8 +149,9 @@ def test_sources_count_the_live_agent_s_calls_and_projects_and_still_add_up_to_t
     assert payload["sources"] == {
         "fleet": {"calls": 30, "projects": 1},
         "live": {"calls": 12, "projects": 2},
+        "probe": {"calls": 9, "projects": 1},
         "sandbox": {"calls": 12, "projects": 1},
-        "other": {"calls": 16, "projects": 3},
+        "other": {"calls": 7, "projects": 2},
     }
     assert list(payload["sources"]) == list(rollups.SOURCES)
     assert sum(part["calls"] for part in payload["sources"].values()) == payload["totals"]["calls"] == 70
@@ -171,8 +172,9 @@ def test_a_call_in_a_live_project_that_no_coding_agent_made_is_other() -> None:
     assert payload["sources"] == {
         "fleet": {"calls": 0, "projects": 0},
         "live": {"calls": 5, "projects": 4},
+        "probe": {"calls": 9, "projects": 1},
         "sandbox": {"calls": 0, "projects": 0},
-        "other": {"calls": 9 + 7 + 4 + 5 + 7, "projects": 1},
+        "other": {"calls": 7 + 4 + 5 + 7, "projects": 0},
     }
     assert sum(part["calls"] for part in payload["sources"].values()) == payload["totals"]["calls"] == 37
     assert sum(part["projects"] for part in payload["sources"].values()) == payload["totals"]["projects"] == 5
@@ -195,7 +197,7 @@ def test_every_by_project_row_names_the_live_source() -> None:
         LIVE: "live",
         LIVE_TOO: "live",
         SANDBOX: "sandbox",
-        "Acme-Probe": "other",
+        "Acme-Probe": "probe",
         "Acme-Live-pressure-catalog-shell-regen": "other",
         "Acme-Live-orders-s3-archive-2": "other",
     }

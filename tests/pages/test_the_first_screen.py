@@ -1046,6 +1046,72 @@ def test_a_live_part_that_is_not_a_count_gives_no_figures(tmp_path: Path) -> Non
     assert "<img" not in out["where"] and "Claude Code" not in out["where"]
 
 
+# The same window, as a stack answers it once the service's own probes are a
+# source of their own: Acme-Probe's 50 calls, 14 of them refused, move out of
+# other, which keeps the page's demo project.
+PROBE_SOURCES = SPLIT_SOURCES.replace("other: { calls: 62, projects: 2 }",
+                                      "probe: { calls: 50, projects: 1 }, other: { calls: 12, projects: 1 }")
+PROBE_ROWS = [dict(row, source="probe") if row["project"] == "Acme-Probe" else row for row in SPLIT_ROWS]
+
+
+def test_the_service_s_own_probes_are_named_synthetic_never_real(tmp_path: Path) -> None:
+    """A judge: the probes' calls were counted as other callers', beside real ones. They are named for what they are."""
+    out = _split_load(tmp_path, PROBE_ROWS, sources=PROBE_SOURCES)
+    assert _read(out["where"]).startswith(
+        "Where they come from: 1,102 from a synthetic Acme fleet run through the real gates, 40 from real Claude Code "
+        "or Codex runs on Acme tasks, in projects that enforce, 80 from visitors’ sandboxes, 50 from the service’s own "
+        "synthetic probes, 12 from page demos and other API callers."
+    ), "The five parts add up to the 1,284 calls, and the other callers no longer claim the probes"
+    stopped, observed, markup = _split_subs(tmp_path, PROBE_ROWS, sources=PROBE_SOURCES)
+    assert stopped == ("before they ran: 2 in real agent runs (see below), 15 from the synthetic fleet, 3 from visitors’ "
+                       "sandboxes, 14 from the service’s own synthetic probes, 3 from page demos and other callers")
+    assert observed == "recorded while a project observes: 50 from the synthetic fleet, 7 from visitors’ sandboxes"
+    assert _metrics(markup) == {"calls": "1,284", "refused": "37", "would_refuse": "57"}, "The tiles' numbers are the stack's own counts"
+    for words in (_read(out["where"]), stopped):
+        probes = words.split("synthetic probes")[0].rsplit(",", 1)[-1]
+        assert "real" not in probes, f"The probes are never called real: {probes!r}"
+
+
+def test_probes_the_stack_reports_are_named_even_when_their_parts_give_no_figure(tmp_path: Path) -> None:
+    mismatched = PROBE_SOURCES.replace("probe: { calls: 50", "probe: { calls: 500")
+    out = _load(tmp_path, overview="{ status: 200, body: " + _overview(mismatched) + " }")
+    assert _read(out["where"]) == (
+        "Where they come from: a synthetic Acme fleet run through the real gates, real Claude Code or Codex runs on "
+        "Acme tasks, in projects that enforce, the service’s own synthetic probes, visitors’ sandboxes, page demos and "
+        "other API callers."
+    ), "Parts that do not add up give no figure, and the probes are still named as synthetic"
+    only_probes = "sources: { fleet: { calls: 0 }, live: { calls: 0 }, probe: { calls: 9 }, sandbox: { calls: 0 }, other: { calls: 1 } }"
+    out = _load(tmp_path, overview="{ status: 200, body: " + _overview(only_probes) + " }")
+    assert _read(out["where"]) == (
+        "Where they come from: the service’s own synthetic probes, visitors’ sandboxes, page demos and other API callers."
+    )
+
+
+def test_a_probe_part_that_is_not_a_count_gives_no_figures(tmp_path: Path) -> None:
+    for value in ("'<img src=x onerror=alert(1)>'", "2.5", "-4", "null", "'50'"):
+        hostile = PROBE_SOURCES.replace("probe: { calls: 50", "probe: { calls: " + value)
+        out = _load(tmp_path, overview="{ status: 200, body: " + _overview(hostile) + " }")
+        where = _read(out["where"])
+        assert "<img" not in out["where"] and "onerror" not in out["where"], "Service data reached the page as markup"
+        assert "1,102" not in where, f"probe {value}: parts with one that is not a count give no figure"
+        assert where == ("Where they come from: a synthetic Acme fleet run through the real gates, real Claude Code or "
+                         "Codex runs on Acme tasks, in projects that enforce, visitors’ sandboxes, probes, page demos and "
+                         "other API callers."), "The fleet and the live agent are still named in words"
+
+
+def test_a_stack_that_does_not_run_the_fleet_still_counts_probes_among_the_other_callers(tmp_path: Path) -> None:
+    """Only the fleet's stack tells the probes' project apart; elsewhere sources.probe is 0 and Acme-Probe is other."""
+    private = ("sources: { fleet: { calls: 0, projects: 0 }, live: { calls: 0, projects: 0 }, probe: { calls: 0, projects: 0 }, "
+               "sandbox: { calls: 80, projects: 1 }, other: { calls: 62, projects: 2 } }")
+    rows = [row for row in SPLIT_ROWS if row["source"] in ("sandbox", "other")]
+    out = _split_load(tmp_path, rows, sources=private, calls=142, refused=20, would_refuse=7)
+    assert _read(out["where"]) == (
+        "Where they come from: 80 from visitors’ sandboxes, 62 from probes, page demos and other API callers."
+    ), "A probe count of 0 on a stack without the fleet does not take the probes out of the other callers"
+    stopped, _, _ = _split_subs(tmp_path, rows, sources=private, calls=142, refused=20, would_refuse=7)
+    assert stopped == "before they ran: 3 from visitors’ sandboxes, 17 from probes, page demos and other callers"
+
+
 def test_the_counts_are_read_without_a_key_even_when_one_is_typed(tmp_path: Path) -> None:
     """So they only ever show a stack whose reads are open, which is what their words say it is."""
     out = _load(tmp_path, overview="{ status: 200, body: " + _overview() + " }", before="el('apiKeyInput').value = 'acme-operator-key';\n")

@@ -181,7 +181,8 @@ BY_PROJECT_KEYS = (
 # the keys above, so a stack deployed before one was added still passes the
 # shape check; each has a check of its own, which skips when the key is absent.
 
-# The sources every stack names. A newer one may add another of the same shape.
+# The sources every stack names. A newer one may add another of the same shape,
+# as `live` (2026-09-27) and `probe`, this script's own calls, were added.
 SOURCES = ("fleet", "sandbox", "other")
 SOURCE_KEYS = ("calls", "projects")
 # The kinds rollups.agent_kind gives. Which agent has which kind is the stack's
@@ -453,12 +454,19 @@ def scan_public_names(value: Any, pattern: "re.Pattern[str]", where: str = "$") 
 
 
 def expected_rule_state(rule: Dict[str, Any]) -> str:
-    """The state the contract derives from a rule's counts."""
+    """The state the contract derives from a rule's counts.
+
+    Ready rests on labels: a call it flagged marked correct, with nothing
+    marked a false alarm and nothing waiting. A refusal nobody labelled, such
+    as the demo page's or this probe's own page calls, which always enforce,
+    makes no rule Ready, so a stack that reads a rule Ready with `correct` 0
+    fails here.
+    """
     if _num(rule.get("false_alarms")) > 0:
         return "noisy"
     if _num(rule.get("unreviewed")) > 0:
         return "needs_review"
-    if _num(rule.get("would_refuse")) + _num(rule.get("refused")) > 0:
+    if _num(rule.get("correct")) > 0:
         return "ready"
     return "quiet"
 

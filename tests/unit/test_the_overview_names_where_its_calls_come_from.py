@@ -71,7 +71,7 @@ def a_stack_that_runs_the_fleet(monkeypatch):
         ("Acme-Mobile", "fleet"),
         ("Acme-Platform", "fleet"),
         (SANDBOX, "sandbox"),
-        ("Acme-Probe", "other"),
+        ("Acme-Probe", "probe"),
         ("Acme-Sim", "other"),
         ("unlabelled", "other"),
         ("Acme-Treasury-0a1b2c3d4e", "other"),
@@ -108,9 +108,9 @@ def test_the_stack_s_setting_is_read_as_the_template_writes_it(value, monkeypatc
     assert rollups.fleet_runs_here() and rollups.source_of("Acme-Treasury") == "fleet"
 
 
-def test_the_fleet_is_six_projects_and_the_four_sources_are_closed() -> None:
+def test_the_fleet_is_six_projects_and_the_five_sources_are_closed() -> None:
     assert len(rollups.FLEET_PROJECTS) == len(set(rollups.FLEET_PROJECTS)) == 6
-    assert rollups.SOURCES == ("fleet", "live", "sandbox", "other")
+    assert rollups.SOURCES == ("fleet", "live", "probe", "sandbox", "other")
     assert not any(rollups.is_sandbox(name) for name in rollups.FLEET_PROJECTS)
 
 
@@ -119,8 +119,9 @@ def test_sources_count_the_calls_and_projects_of_each_and_add_up_to_the_totals()
     assert payload["sources"] == {
         "fleet": {"calls": 75, "projects": 2},
         "live": {"calls": 0, "projects": 0},
+        "probe": {"calls": 9, "projects": 1},
         "sandbox": {"calls": 12, "projects": 1},
-        "other": {"calls": 16, "projects": 3},
+        "other": {"calls": 7, "projects": 2},
     }
     assert sum(part["calls"] for part in payload["sources"].values()) == payload["totals"]["calls"] == 103
     assert sum(part["projects"] for part in payload["sources"].values()) == payload["totals"]["projects"] == 6
@@ -132,7 +133,7 @@ def test_every_by_project_row_names_its_source() -> None:
         "Acme-Payments": "fleet",
         "Acme-Treasury": "fleet",
         SANDBOX: "sandbox",
-        "Acme-Probe": "other",
+        "Acme-Probe": "probe",
         "Acme-Treasury-0a1b2c3d4e": "other",
         "Acme-Payments-Internal": "other",
     }
@@ -159,7 +160,7 @@ def test_an_expired_sandbox_counts_nowhere() -> None:
 def test_the_projects_listing_names_each_row_s_source() -> None:
     rows = {row["project"]: row["source"] for row in rollups.projects_listing(ITEMS, CONFIGS)}
     assert rows["Acme-Payments"] == rows["Acme-Treasury"] == "fleet"
-    assert rows[SANDBOX] == "sandbox" and rows["Acme-Probe"] == "other"
+    assert rows[SANDBOX] == "sandbox" and rows["Acme-Probe"] == "probe"
     assert rows["Acme-Payments-Internal"] == "other"
 
 

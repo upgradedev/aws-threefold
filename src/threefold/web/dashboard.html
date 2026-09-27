@@ -191,7 +191,6 @@
     .tf-ops-tally > div { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: var(--tf-radius); background: var(--tf-surface-1); border: 1px solid var(--tf-hairline); }
     .tf-ops-tally b { font: 650 1.125rem/1.5rem var(--tf-font-sans); color: var(--tf-text); }
     .tf-ops-tally small { font-size: 0.75rem; line-height: 1rem; color: var(--tf-text-3); }
-    .tf-ops-tally > div[data-tally="untested"] { grid-column: 1 / -1; }
 
     /* Readiness, rule by rule. */
     .tf-ops-rules { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
@@ -488,13 +487,11 @@
     };
     const STATES = {
       ready: { label: 'Ready', chip: 'tf-chip-emerald', says: 'everything it flagged was marked correct' },
-      quiet: { label: 'Quiet', chip: 'tf-chip-gray', says: 'it flagged nothing' },
+      // A Quiet rule that refused calls did flag them; what makes it Quiet is
+      // that nobody labelled one (stateChip says which).
+      quiet: { label: 'Quiet', chip: 'tf-chip-gray', says: 'it flagged nothing', saysRefused: 'no label says anything about the calls it refused' },
       needs_review: { label: 'Needs review', chip: 'tf-chip-sky', says: 'some of what it flagged has no label yet' },
-      noisy: { label: 'Noisy', chip: 'tf-chip-rose', says: 'at least one flag was a false alarm' },
-      // Not a state the service sends: the page's reading of a rule the
-      // service calls Ready only because it refused calls from the demo page
-      // (ruleState, on the project's screen).
-      untested: { label: 'Nothing from agents', chip: 'tf-chip-gray', says: 'every call it refused came from the demo page, and no agent\'s call has tested it' }
+      noisy: { label: 'Noisy', chip: 'tf-chip-rose', says: 'at least one flag was a false alarm' }
     };
     const REVIEWS = {
       correct: { label: 'Correct', chip: 'tf-chip-emerald' },
@@ -553,10 +550,13 @@
       if (!s) return html`<span class="tf-chip tf-chip-gray">${stage || 'unknown'}</span>`;
       return html`<span class="tf-chip ${s.chip}" title="${configured === false ? 'Not configured: the stack default applies' : s.label}">${stage === 'enforce' ? raw(T.ICONS.shield) : raw(T.ICONS.eye)}${s.label}${configured === false ? ' · default' : ''}</span>`;
     }
-    function stateChip(state) {
+    // `refused`, when given, is the calls the rule refused, so a Quiet rule
+    // that refused some is not said to have flagged nothing.
+    function stateChip(state, refused) {
       const s = STATES[state];
       if (!s) return html`<span class="tf-chip tf-chip-gray">${state || '—'}</span>`;
-      return html`<span class="tf-chip ${s.chip}" title="${s.label}: ${s.says}">${s.label}</span>`;
+      const says = s.saysRefused && refused > 0 ? s.saysRefused : s.says;
+      return html`<span class="tf-chip ${s.chip}" title="${s.label}: ${says}">${s.label}</span>`;
     }
     function reviewChip(review) {
       const r = REVIEWS[review];
@@ -1035,9 +1035,15 @@
     // for the portfolio: the calls its rules flagged, split by their label
     // (correct, false alarm, not labelled), and the state that follows. Any
     // false alarm makes it Noisy; else anything unlabelled needs review; else
-    // it is Ready if it flagged anything and Quiet if not. Approved green is
-    // drawn only where the false alarms were read to the end of the window:
-    // a labelled call that may be a false alarm is drawn neutral, never Ready.
+    // it is Ready if it would have refused anything, since every such call is
+    // then labelled and none of them wrong, so some were marked correct; and
+    // Quiet if not. Refusals alone make nothing Ready: the row does not say
+    // whether anyone labelled one, and the service reads a rule whose only
+    // record is refusals nobody labelled as Quiet. Approved green is drawn
+    // only where the false alarms were read to the end of the window: a
+    // labelled call that may be a false alarm is drawn neutral, never Ready.
+    // A project that refused calls waits for that read before it reads Quiet,
+    // since one of its refusals may have been marked a false alarm.
     // `fa` undefined is a read still on its way: a state that hangs on it is
     // a placeholder until it lands, so nothing is claimed and then taken back.
     // `fa` null is a read that failed: that state is left unsaid, and the
@@ -1049,18 +1055,21 @@
       const reading = fa === undefined;
       const seen = (fa && fa.byProject[p.project]) || { any: 0, observed: 0 };
       const known = !!fa && (fa.complete || seen.any > 0);
-      const flagged = would + (typeof p.refused === 'number' ? p.refused : 0);
+      const refused = typeof p.refused === 'number' ? p.refused : 0;
       // Every call from the demo page alone (it is the only agent the list
-      // names) and nothing flagged in Observe: the page's refusals are not an
-      // agent's calls, so there is nothing from agents to go on.
-      const pageOnly = would <= 0 && flagged > 0 && Array.isArray(p.agents) && p.agents.length > 0 && p.agents.every(a => a === 'page');
-      const state = seen.any > 0 ? 'noisy' : flagged <= 0 ? 'quiet' : pageOnly ? 'untested' : reading ? '' : waiting > 0 ? 'needs_review' : known ? 'ready' : '';
-      const chip = state ? stateChip(state) : reading
+      // names) and nothing flagged in Observe: said beside the Quiet chip.
+      const pageOnly = would <= 0 && refused > 0 && Array.isArray(p.agents) && p.agents.length > 0 && p.agents.every(a => a === 'page');
+      const state = seen.any > 0 ? 'noisy'
+        : would <= 0 && refused <= 0 ? 'quiet'
+          : reading ? ''
+            : would <= 0 ? (known ? 'quiet' : '')
+              : waiting > 0 ? 'needs_review' : known ? 'ready' : '';
+      const chip = state ? stateChip(state, would <= 0 ? refused : 0) : reading
         ? html`<span class="tf-skeleton tf-ops-chip-wait" aria-hidden="true"></span><span class="sr-only">Reading the false alarms</span>`
         : '';
       const unread = !state && !reading ? html` · <span title="The false alarms of this window could not all be read, so neither Ready nor Noisy is claimed">false alarms not all read</span>` : '';
       if (would <= 0) {
-        return html`<span class="tf-ops-ready" data-state="${state || 'unknown'}">${chip}<span class="tf-ops-ready-bar" aria-hidden="true"></span><span class="tf-ops-meter-words">${pageOnly ? 'demo-page calls only' : flagged > 0 ? 'nothing to label' : 'nothing flagged'}${unread}</span></span>`;
+        return html`<span class="tf-ops-ready" data-state="${state || 'unknown'}">${chip}<span class="tf-ops-ready-bar" aria-hidden="true"></span><span class="tf-ops-meter-words">${pageOnly ? 'demo-page calls only' : refused > 0 ? 'nothing waits for a label' : 'nothing flagged'}${unread}</span></span>`;
       }
       const done = Math.max(0, Math.min(would, would - waiting));
       const wrong = Math.min(done, seen.observed);
@@ -1260,12 +1269,15 @@
         const fleet = s.fleet || {};
         const live = s.live && Number.isInteger(s.live.calls) && s.live.calls >= 0 ? s.live.calls : null;
         liveReported = live !== null;
+        // Only the stack that runs the fleet tells the probes' project apart;
+        // elsewhere `probe` is 0 and they are among the other callers.
+        const probesApart = !!s.probe && (some(s.probe) || (typeof fleet.projects === 'number' && fleet.projects > 0));
         clauses = [
           some(s.fleet) && html`<strong>${num(count(s.fleet))}</strong> from the synthetic Acme fleet, ${typeof fleet.projects === 'number' ? plural(fleet.projects, 'project') : 'projects'} whose scheduled agents run through the real gates`,
           live > 0 && html`<strong>${num(live)}</strong> from the daily live agent: real Claude Code or Codex runs, one Acme task a day, in projects that enforce`,
           some(s.sandbox) && html`<strong>${num(count(s.sandbox))}</strong> from visitors' sandboxes`,
           some(s.probe) && html`<strong>${num(count(s.probe))}</strong> from the service's own probes, synthetic`,
-          some(s.other) && html`<strong>${num(count(s.other))}</strong> from other callers: ${s.probe ? '' : "the service's own probes, "}the demo page, or a repository connected to this stack`
+          some(s.other) && html`<strong>${num(count(s.other))}</strong> from other callers: ${probesApart ? '' : "the service's own probes, "}the demo page, or a repository connected to this stack`
         ];
         parts = [
           { label: 'Acme fleet, synthetic', value: count(s.fleet), color: T.CATEGORICAL[0] },
@@ -1817,46 +1829,23 @@
       return html`${lead}: ${arrivedWords(split.by, split.total, ARRIVED)}. <a class="tf-link" href="${callsHref({ project: name, kind: 'refused', days })}">See them</a>`;
     }
 
-    // A rule's state as this screen states it. The service reads a rule
-    // Ready once it flagged anything and nothing it flagged waits for a label
-    // or was marked wrong, and a refusal counts as flagged. A call from the
-    // demo page always enforces and is not an agent's, so a rule whose every
-    // refusal came from the page, with nothing flagged in Observe and no
-    // label, has nothing from agents to go on ('untested', drawn "Nothing
-    // from agents"). That is read from the project's refused calls
-    // (refusedSplit). While they are on their way such a rule's state is
-    // left unsaid (''), so Ready is never drawn and taken back. The read has
-    // every refusal of the rule when it holds as many as the service counts
-    // (`refused`), even where the ledger offers older days to read; with
-    // fewer, or a read that failed, the service's state stands.
-    function readyOnRefusalsAlone(r) {
-      return r.state === 'ready' && !(r.correct > 0) && !(r.would_refuse > 0) && typeof r.refused === 'number' && r.refused > 0;
-    }
-    function ruleState(r, split) {
-      if (!readyOnRefusalsAlone(r)) return r.state;
-      if (split === undefined) return '';
-      const mine = split ? split.byRule[r.rule_key] : null;
-      return mine && mine.total === r.refused && mine.by.page === r.refused ? 'untested' : r.state;
-    }
-    const UNTESTED_SAYS = 'Nothing from agents to go on: every call it refused came from the demo page, which always enforces, and no agent\'s call was flagged by it.';
-    // What a rule's row says next, in the state the screen gives it.
-    function ruleSays(r, state) {
-      if (state === 'untested') return UNTESTED_SAYS;
-      if (state === '') return 'Reading how its refused calls arrived…';
+    // What a rule's row says next, in the service's words. Its state is the
+    // service's too, which rests on labels alone: a rule whose only record is
+    // refusals nobody labelled, the demo page's among them, is Quiet, and its
+    // sentence says nobody labelled them.
+    function ruleSays(r) {
       return inflect(r.recommendation) || (STATES[r.state] && STATES[r.state].says) || '';
     }
-    // The state chip, or its place while the refused calls are read.
-    function ruleChip(state) {
-      return state === ''
-        ? html`<span class="tf-skeleton tf-ops-chip-wait" aria-hidden="true"></span><span class="sr-only">Reading how its refused calls arrived</span>`
-        : stateChip(state);
+    // A Quiet rule that refused calls did something: it is not among the
+    // rules that flagged nothing, wherever those are set apart.
+    function flaggedNothing(r) {
+      return r.state === 'quiet' && !(typeof r.would_refuse === 'number' && r.would_refuse > 0) && !(typeof r.refused === 'number' && r.refused > 0);
     }
     // The one sentence for the rules that flagged nothing, the same in the
     // promote dialog as on the walkthrough's step 4: nothing checks them for
-    // the reader. `agents` names the calls that count when some of the rules
-    // refused calls from the demo page.
-    function untriedNote(count, agents) {
-      return 'No ' + (agents ? 'agent\'s ' : '') + 'call here tested ' + (count === 1 ? 'this rule' : 'these') + '; check one to enforce it anyway.';
+    // the reader.
+    function untriedNote(count) {
+      return 'No call here tested ' + (count === 1 ? 'this rule' : 'these') + '; check one to enforce it anyway.';
     }
 
     function stageHero(name, stage, config, readiness, days, opts) {
@@ -1867,15 +1856,14 @@
       const observing = rules.filter(r => r.mode_now === 'observe').map(r => r.rule_key);
       const enforcing = rules.filter(r => r.mode_now === 'enforce').length;
       const waiting = sum(rules, 'unreviewed');
-      // Each rule in the state its row states, so the headline, the tally
-      // and the promote dialog count the same rules.
-      const states = rules.map(r => ruleState(r, o.refused));
-      const counted = key => states.filter(s => s === key).length;
+      const counted = key => rules.filter(r => r.state === key).length;
       const noisy = counted('noisy');
       const ready = counted('ready');
-      // A rule with nothing to go on: it flagged nothing, or only calls from
-      // the demo page. The promote dialog leaves these unchecked.
-      const untried = counted('quiet') + counted('untested');
+      // A rule with nothing to go on: it flagged nothing, or refused only
+      // calls nobody labelled. The promote dialog leaves these unchecked.
+      const untried = counted('quiet');
+      // Whether one of them refused calls, so "none flagged" is not said of it.
+      const quietRefused = rules.some(r => r.state === 'quiet' && r.refused > 0);
       const observed = typeof summary.calls_observed === 'number' ? summary.calls_observed : null;
       const enforce = stage === 'enforce';
       const track = html`<div class="tf-ops-track" aria-hidden="true">
@@ -1906,12 +1894,14 @@
         : html`<h2 id="stage-title" tabindex="-1" class="tf-ops-hero-title">In Observe: agents' calls are recorded, never refused</h2>
             <p class="tf-ops-hero-text">${!rules.length
               ? 'Readiness appears once this project sends calls in the window.'
-              : observed === 0
+              : observed === 0 && !ready
                 ? html`No agent's call was observed here in ${windowWords(days)}, so no rule has anything to go on yet.`
                 : ready === rules.length
                   ? html`Every rule reads Ready: promote, and ${rules.length === 1 ? 'it refuses' : 'they refuse'} from the next call.`
                   : untried === rules.length
-                    ? html`No rule has anything to go on yet: none flagged an agent's call in ${windowWords(days)}.`
+                    ? (quietRefused
+                      ? html`No rule has anything to go on yet: none flagged a call to review in ${windowWords(days)}, and nobody labelled a call one of them refused.`
+                      : html`No rule has anything to go on yet: none flagged an agent's call in ${windowWords(days)}.`)
                     : waiting
                       ? html`${could}; ${plural(waiting, 'call')} ${waiting === 1 ? 'waits' : 'wait'} for a label.`
                       : noisy
@@ -1923,17 +1913,14 @@
               ${waiting ? html`<a class="tf-btn tf-btn-lg" href="${reviewHref({ project: name })}">${T.icon('inbox', 16)}Label ${plural(waiting, 'waiting call')}</a>` : ''}
             </div>
             ${locked}
-            ${more('How Observe works', html`<p class="tf-ops-hero-fine">Your agents work exactly as before. What a rule <em>would</em> have refused is listed below: mark each one correct or false alarm. A rule whose flags were all correct is Ready; one that flagged nothing is Quiet. Promote, and the rules you choose start refusing; the others keep observing.</p>
+            ${more('How Observe works', html`<p class="tf-ops-hero-fine">Your agents work exactly as before. What a rule <em>would</em> have refused is listed below: mark each one correct or false alarm. A rule whose flags were all correct is Ready; one that flagged nothing is Quiet, and so is one whose only record is refusals nobody labelled. Promote, and the rules you choose start refusing; the others keep observing.</p>
               <p class="tf-ops-hero-fine">The stage governs calls from agents' hooks and CI. A call from the demo page here always enforces, whatever the stage.</p>
               <p class="tf-ops-hero-fine">One thing is refused even here: a call carrying a credential, which the hook refuses on the machine and never sends. A call the hook holds back, such as one outside the project, is neither sent nor recorded.${config ? '' : ' This project has no configuration yet, so it follows the stack default.'}</p>`)}`;
-      // Counted off the rules as their rows state them; a rule whose
-      // refusals all came from the demo page is its own line, only when
-      // there is one.
-      const untested = counted('untested');
+      // Counted off the rules as their rows state them.
       const tally = [
         ['ready', ready, 'Ready', 'tf-good'], ['quiet', counted('quiet'), 'Quiet', ''],
         ['needs_review', counted('needs_review'), 'To review', 'text-sky-300'], ['noisy', noisy, 'Noisy', 'tf-bad']
-      ].concat(untested ? [['untested', untested, 'Nothing from agents', '']] : []);
+      ];
       // A rate over nothing is not a rate: with no label yet, it says so.
       const reviewed = typeof summary.reviewed === 'number' ? summary.reviewed : 0;
       const side = html`<aside class="tf-ops-hero-side" aria-label="Readiness">
@@ -1970,22 +1957,25 @@
         { key: 'unreviewed', value: r.unreviewed || 0, label: 'not labelled', color: UNLABELLED, href: reviewHref({ project: name, rule: r.rule_key }) }
       ];
       const drawn = parts.filter(p => p.value > 0);
-      const shownState = ruleState(r, split);
       const bar = would > 0 && drawn.length
         ? html`<div class="tf-ops-stack" role="img" aria-label="${r.rule_key}: ${parts.map(p => num(p.value) + ' ' + p.label).join(', ')} of ${num(would)} flagged">${drawn.map(p => html`<a href="${p.href}" style="flex-grow:${p.value};background:${p.color}" aria-label="${num(p.value)} ${p.label}, open these calls" data-tf-tip="${r.rule_key} · ${p.label}" data-tf-tip-value="${num(p.value)}" data-tf-tip-color="${p.color}"></a>`)}</div>`
         : html`<div class="tf-ops-stack" aria-hidden="true"></div>`;
       const words = would > 0
         ? html`<p class="tf-ops-stack-words"><span><a class="tf-num-link" href="${callsHref({ project: name, rule: r.rule_key, kind: 'observed', days })}">${num(would)}</a> flagged</span>${parts.filter(p => p.value > 0).map(p => html`<span><i style="background:${p.color}"></i>${num(p.value)} ${p.label}</span>`)}${r.refused ? html`<span class="text-rose-300"><a class="tf-num-link" href="${callsHref({ project: name, rule: r.rule_key, kind: 'refused', days })}">${num(r.refused)}</a> refused${arrived}</span>` : ''}</p>`
-        : html`<p class="tf-ops-stack-words">Flagged nothing in ${windowWords(days)}${r.refused ? html` · <span class="text-rose-300"><a class="tf-num-link" href="${callsHref({ project: name, rule: r.rule_key, kind: 'refused', days })}">${num(r.refused)}</a> refused${arrived}</span>` : ''}</p>`;
-      return html`<li class="tf-ops-rule" data-state="${shownState || ''}">
+        // A rule that refused calls flagged them, so its row says what it
+        // refused rather than that it flagged nothing.
+        : r.refused
+          ? html`<p class="tf-ops-stack-words"><span class="text-rose-300"><a class="tf-num-link" href="${callsHref({ project: name, rule: r.rule_key, kind: 'refused', days })}">${num(r.refused)}</a> refused${arrived}</span> in ${windowWords(days)}</p>`
+          : html`<p class="tf-ops-stack-words">Flagged nothing in ${windowWords(days)}</p>`;
+      return html`<li class="tf-ops-rule" data-state="${r.state || ''}">
         <div class="tf-ops-rule-name">
-          <span class="tf-ops-chips">${ruleChip(shownState)}${r.mode_now === 'enforce' ? html`<span class="tf-chip tf-chip-purple">${T.icon('shield', 13)}enforce</span>` : html`<span class="tf-chip tf-chip-amber">${T.icon('eye', 13)}observe</span>`}</span>
+          <span class="tf-ops-chips">${stateChip(r.state, r.refused)}${r.mode_now === 'enforce' ? html`<span class="tf-chip tf-chip-purple">${T.icon('shield', 13)}enforce</span>` : html`<span class="tf-chip tf-chip-amber">${T.icon('eye', 13)}observe</span>`}</span>
           <a href="${callsHref({ project: name, rule: r.rule_key, days })}" class="tf-link-quiet tf-ops-rule-key">${r.rule_key}</a>
           <span class="tf-ops-rule-what">${r.kind === 'gate' ? (GATE_KEYS[r.rule_key] || 'a gate of the service') : 'a layering rule'}${r.last_seen ? ' · last flagged ' + timeAgo(r.last_seen) : ''}</span>
         </div>
         <div class="min-w-0">${bar}${words}</div>
         <div class="min-w-0">
-          <p class="tf-ops-rule-say">${ruleSays(r, shownState)}</p>
+          <p class="tf-ops-rule-say">${ruleSays(r)}</p>
           ${r.unreviewed ? html`<p class="tf-ops-rule-links"><a class="tf-link" href="${reviewHref({ project: name, rule: r.rule_key })}">Label ${plural(r.unreviewed, 'call')}</a></p>` : ''}
         </div>
       </li>`;
@@ -2004,8 +1994,7 @@
 
     function readinessList(name, rules, days, split) {
       if (!rules.length) return emptyNote('No rule readiness yet.', 'Readiness appears once this project has sent calls in the window.');
-      // Sorted by the state the service sent, so a row does not move when
-      // the refused calls land and a Ready rule reads Nothing from agents.
+      // Sorted by state, what needs a decision first.
       const sorted = rules.slice().sort((a, b) => (STATE_ORDER[a.state] === undefined ? 9 : STATE_ORDER[a.state]) - (STATE_ORDER[b.state] === undefined ? 9 : STATE_ORDER[b.state]));
       // A Quiet rule that refused nothing has nothing to show but an empty
       // bar and the same two sentences, and a project has several; one row
@@ -2203,19 +2192,19 @@
         </li>`)}</ol>`;
       }
 
-      // The rules as the walkthrough's step 4 lays them out: the ones with
-      // something to go on first, then the ones that flagged nothing (or only
-      // calls from the demo page) under the same sentence. Only Ready rules
-      // are checked for the reader, as on the walkthrough; in Enforce, the
-      // rules in force now.
+      // The rules as the walkthrough's step 4 lays them out: the ones that
+      // flagged or refused something first, then the ones that flagged
+      // nothing under the same sentence. A Quiet rule that refused calls is
+      // among the first, its sentence saying nobody labelled them. Only
+      // Ready rules are checked for the reader, as on the walkthrough; in
+      // Enforce, the rules in force now.
       function promoteBody() {
         const rules = (state.detail.readiness && state.detail.readiness.rules) || [];
         const chosen = state.selected;
         const count = rules.filter(r => chosen.has(r.rule_key)).length;
-        const shown = rules.map(r => ({ r, s: ruleState(r, state.refused) }));
-        const untried = shown.filter(x => x.s === 'quiet' || x.s === 'untested');
+        const shown = rules.map(r => ({ r, s: r.state }));
+        const untried = shown.filter(x => flaggedNothing(x.r));
         const tried = shown.filter(x => untried.indexOf(x) === -1);
-        const agents = untried.some(x => x.s === 'untested');
         const lead = state.promoteFrom === 'enforce'
           ? 'The rules in force now are checked.'
           : tried.some(x => x.s === 'ready')
@@ -2228,8 +2217,8 @@
             <label class="flex items-start gap-3 tf-card-quiet p-3 cursor-pointer">
               <input type="checkbox" class="mt-0.5 accent-purple-500" ${first ? raw('id="dialog-first"') : ''} data-change="promote-toggle" data-rule="${r.rule_key}" ${chosen.has(r.rule_key) ? raw('checked') : ''} />
               <span class="min-w-0 flex-1">
-                <span class="flex flex-wrap items-center gap-2"><span class="font-mono text-xs text-white tf-break">${r.rule_key}</span>${ruleChip(s)}</span>
-                <span class="block text-xs text-gray-400 mt-1">${num(r.would_refuse)} flagged · ${num(r.correct)} correct · ${num(r.false_alarms)} false alarm${r.false_alarms === 1 ? '' : 's'} · ${num(r.unreviewed)} unreviewed${ruleSays(r, s) ? html` — ${ruleSays(r, s)}` : ''}</span>
+                <span class="flex flex-wrap items-center gap-2"><span class="font-mono text-xs text-white tf-break">${r.rule_key}</span>${stateChip(s, r.refused)}</span>
+                <span class="block text-xs text-gray-400 mt-1">${num(r.would_refuse)} flagged${r.refused > 0 ? html` · ${num(r.refused)} refused` : ''} · ${num(r.correct)} correct · ${num(r.false_alarms)} false alarm${r.false_alarms === 1 ? '' : 's'} · ${num(r.unreviewed)} unreviewed${ruleSays(r) ? html` — ${ruleSays(r)}` : ''}</span>
               </span>
             </label>
           </li>`;
@@ -2237,8 +2226,8 @@
         return html`<p class="text-xs text-gray-300">Checked rules start refusing from the next call. Unchecked rules keep observing: they record what they would refuse, and refuse nothing. ${lead}</p>
           ${tried.length ? html`<ul class="space-y-2">${tried.map(item)}</ul>` : ''}
           ${untried.length ? html`<div class="space-y-2" data-group="untried">
-            <p class="tf-label">${agents ? 'Flagged no agent\'s call here' : 'Flagged nothing here'}</p>
-            <p class="text-xs text-gray-400">${untriedNote(untried.length, agents)}</p>
+            <p class="tf-label">Flagged nothing here</p>
+            <p class="text-xs text-gray-400">${untriedNote(untried.length)}</p>
             <ul class="space-y-2">${untried.map(item)}</ul>
           </div>` : ''}
           <p id="promote-summary" class="text-xs ${count ? 'text-gray-300' : 'text-amber-300'}">${count
@@ -2288,7 +2277,7 @@
           state.promoteFrom = stage === 'enforce' && enforcing.length ? 'enforce' : 'observe';
           const preset = state.promoteFrom === 'enforce'
             ? enforcing
-            : rules.filter(r => ruleState(r, state.refused) === 'ready').map(r => r.rule_key);
+            : rules.filter(r => r.state === 'ready').map(r => r.rule_key);
           state.selected = new Set(preset);
           openDialog(html`Promote ${T.projectName(name)} to Enforce`, promoteBody(), promoteFooter(false));
         },
@@ -4795,7 +4784,8 @@
       }
       // The rules checked for the visitor: the Ready ones, whose every flag
       // the visitor's own labels called correct. A Quiet rule flagged nothing
-      // here, so there is no evidence either way; it is left to the visitor.
+      // here, or refused only calls nobody labelled, so there is no evidence
+      // either way; it is left to the visitor.
       function readyKeys() { return readinessRules().filter(r => r.state === 'ready').map(r => r.rule_key); }
       function selected() {
         if (!(state.selected instanceof Set)) state.selected = new Set(readyKeys());
@@ -5273,7 +5263,7 @@
             <span class="tf-try-rule-top">
               <span class="tf-try-rule-key">${r.rule_key}</span>
               <span class="tf-try-kind">${r.kind === 'gate' || tryIsGate(r.rule_key) ? 'gate' : 'layering rule'}</span>
-              <span class="tf-try-rule-chips"><span class="tf-try-flip${flip ? ' tf-try-flipping' : ''}">${flip ? html`<span class="tf-try-was" aria-hidden="true">${stateChip(was)}</span>` : ''}<span class="tf-try-now">${stateChip(r.state)}</span></span>${mode ? modeChip(mode) : ''}</span>
+              <span class="tf-try-rule-chips"><span class="tf-try-flip${flip ? ' tf-try-flipping' : ''}">${flip ? html`<span class="tf-try-was" aria-hidden="true">${stateChip(was)}</span>` : ''}<span class="tf-try-now">${stateChip(r.state, r.refused)}</span></span>${mode ? modeChip(mode) : ''}</span>
             </span>
             ${flagged ? html`<span class="tf-try-bar" aria-hidden="true">${segs.map(k => html`<span class="tf-try-bar-seg" data-k="${k}"></span>`)}${more ? html`<span class="tf-try-bar-more">+${num(more)}</span>` : ''}</span>
               <span class="tf-try-rule-counts">${plural(flagged, 'flag')}: ${num(correct)} correct · ${plural(alarms, 'false alarm')}${open ? ' · ' + num(open) + ' without a label' : ''}</span>` : ''}
@@ -5296,8 +5286,8 @@
         const noisy = rules.filter(r => r.state === 'noisy').length;
         const ready = rules.filter(r => r.state === 'ready').length;
         const chosen = rules.filter(r => selected().has(r.rule_key)).length;
-        const flagged = rules.filter(r => (typeof r.would_refuse === 'number' && r.would_refuse > 0) || r.state !== 'quiet');
-        const quiet = rules.filter(r => flagged.indexOf(r) === -1);
+        const quiet = rules.filter(flaggedNothing);
+        const flagged = rules.filter(r => quiet.indexOf(r) === -1);
         let k = 0;
         const row = r => ruleRow(r, k++, play);
         const quietSays = Array.from(new Set(quiet.map(r => tryPlurals(r.recommendation || (STATES[r.state] || {}).says || ''))));

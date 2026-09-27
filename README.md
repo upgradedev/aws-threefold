@@ -295,9 +295,11 @@ Each file takes the same shape:
    project and rule. Each is marked **correct** or **false alarm**, one at a
    time or in bulk; the label is stored on the ledger row.
 3. **Readiness.** `#/projects/<name>` shows each rule's state: **Ready** when
-   everything it flagged was marked correct, **Quiet** when it flagged nothing,
-   **Needs review** while anything it flagged is unlabelled, **Noisy** after any
-   false alarm.
+   at least one call it flagged was marked correct and none a false alarm,
+   with nothing waiting for a label, **Quiet** when no label says anything
+   about it (it flagged nothing, or refused only calls nobody labelled, such
+   as the demo page's), **Needs review** while anything it would have refused
+   is unlabelled, **Noisy** after any false alarm.
 4. **Promote.** Promote moves the project to Enforce with the rules you pick;
    the others keep observing, recording what they would refuse. **Demote** is one
    click back to Observe.
