@@ -306,16 +306,27 @@ downloads nothing and calls nothing.
 `.github/workflows/deploy.yml` packages and deploys `threefold-prod` and then
 checks the live URL; `ci.yml` runs the gate, the tests and template
 validation; `keepalive.yml` checks the public URL every six hours. The deploy
-workflow assumes the role `threefold-github-deploy` through GitHub's OIDC
-provider, and that role does not exist yet [STATE-FILE], so every deploy so far
-was run by hand with section 1. Neither workflow deploys the edge or publishes
-the pages.
+workflow runs only when someone dispatches it on `main` (Actions, Deploy, Run
+workflow), never on a push: a deploy stays a person's decision. It assumes the
+role `threefold-github-deploy` through GitHub's OIDC provider, and that role
+does not exist yet [STATE-FILE], so every deploy so far was run by hand with
+section 1. Neither workflow deploys the edge or publishes the pages.
 
-First check the trust policy's `sub` condition in
-`deploy/iam/github-trust.json`: it must read
-`repo:<owner>/<repository>:ref:refs/heads/main` for the one repository whose
-`main` branch is allowed to deploy, with no wildcard. Then create the role,
-from the repository root:
+The workflow names no parameters, so `threefold-prod` keeps the `DemoFleet`,
+`EnforceProjectPattern` and `EdgeOriginSecret` it has, as section 1 describes.
+A parameter the stack does not have yet takes the template's default on the
+first deploy that carries it; the comment above the deploy step in
+`deploy.yml` gives the AWS CLI's wording and the exceptions.
+
+The trust policy, `deploy/iam/github-trust.json`, accepts one token subject:
+`repo:upgradedev/aws-threefold:ref:refs/heads/main`, this repository's `main`
+branch, matched with `StringEquals` and no wildcard, for the audience
+`sts.amazonaws.com`. A run on another branch, from a fork or for a pull
+request is refused, and so is a job given a GitHub environment, whose token
+names the environment instead of the branch.
+`tests/security/test_the_deploy_role_trusts_one_branch_of_one_repository.py`
+reads the repository from the GitHub URL in `README.md` and fails if the
+policy names another. Create the role from the repository root:
 
 ```bash
 aws iam create-role \
@@ -333,18 +344,50 @@ aws iam get-role --role-name threefold-github-deploy \
   --query 'Role.AssumeRolePolicyDocument.Statement[0].Condition'
 ```
 
-The last command must show exactly the `sub` written in
-`deploy/iam/github-trust.json`, one repository's `refs/heads/main`, and no
-wildcard. The account's GitHub OIDC provider already exists and is shared with
-another project: do not recreate or modify it.
+The last command must show exactly the `sub` above and no wildcard. If the role
+was created earlier from a trust policy with another `sub`, it has never been
+assumable; replace its trust policy rather than recreating the role:
 
-What the role may do: CloudFormation on `threefold-prod` only, the packaging
-bucket, and Lambda functions, DynamoDB tables, S3 buckets, log groups, alarms,
-the dashboard, the alarm topic, a budget and IAM roles whose names begin
-`threefold-prod-`. What it may do more widely, because those actions take no
-useful resource constraint: `apigateway:*` and a few CloudWatch and Lambda
-listing actions within the account. It cannot read Secrets Manager, touch any
-other stack, or create users or policies.
+```bash
+aws iam update-assume-role-policy \
+  --role-name threefold-github-deploy \
+  --policy-document file://deploy/iam/github-trust.json
+```
+
+Run the `put-role-policy` command again whenever
+`deploy/iam/github-deploy-policy.json` changes: it replaces the inline policy
+of that name.
+
+The account's GitHub OIDC provider already exists and is shared with another
+project: do not recreate or modify it.
+
+What the role may do, as `tests/integration/test_the_deploy_role_covers_the_template.py`
+checks it action by action against every resource the template declares:
+CloudFormation change sets on `threefold-prod` only, through the Serverless
+transform; objects under `threefold/` in the packaging bucket; and the Lambda
+functions, DynamoDB tables, S3 buckets, log groups, alarms, dashboard, alarm
+topic, budget, fleet schedule and IAM roles whose names begin
+`threefold-prod-`. It may pass those roles only to Lambda and EventBridge
+Scheduler, and attach to them only the two AWS managed policies the Serverless
+transform attaches.
+
+Where a resource's name cannot be known before it exists, the grant is wider.
+API ids and KMS key ids are generated, so it may call every API Gateway action
+on every API in the account, in any Region, and every key action the template
+needs on every key in the account and Region; `kms:CreateKey` itself names no key and is
+limited to an RSA_2048 signing key, the kind the template declares. Those two
+grants reach the private stack's API and certificate key. It may also make
+the log deliveries an HTTP API's access log needs, list functions, log groups
+and dashboards, and read the account's Lambda settings. It cannot read Secrets
+Manager, create users, groups or managed policies, or change another stack's
+CloudFormation, functions, tables, buckets, log groups, alarms, topics,
+schedules or roles.
+
+It can write any inline policy on a role named `threefold-prod-*` and pass
+that role to a function it creates, so its reach is in practice that of an
+account administrator. Anyone who can push to `main` can change what the
+workflow runs with it: treat write access to the repository as administrative
+access to the account.
 
 ## 9. Roll back
 

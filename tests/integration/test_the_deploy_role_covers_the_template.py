@@ -598,6 +598,28 @@ def test_the_deploy_never_sends_the_edge_secret() -> None:
     assert "secrets." not in WORKFLOW, "no repository secret carries it either"
 
 
+def test_a_deploy_that_names_no_parameter_falls_back_to_defaults_the_comment_states() -> None:
+    """Where there is no previous value, a new stack or a parameter it has not seen, the template's default applies.
+
+    The deploy step's comment names the defaults a new stack would get; they
+    are read back from the template here so the comment cannot outlive them.
+    """
+    section = re.search(r"^Parameters:\n(.*?)^\S", TEMPLATE, re.S | re.M)
+    assert section, "the template has no Parameters section"
+    blocks = dict(re.findall(r"^  (\w+):\n((?:    .*\n|\n)*)", section.group(1), re.M))
+    assert len(blocks) >= 14, "the scan has gone blind"
+    defaults = {}
+    for name, block in blocks.items():
+        default = re.search(r"^    Default: (.*)$", block, re.M)
+        assert default, f"{name} has no default, so a stack created by the workflow would be refused"
+        defaults[name] = default.group(1)
+    assert (defaults["DemoFleet"], defaults["EnforceProjectPattern"], defaults["EdgeOriginSecret"]) == ("'false'", "''", "''")
+    comment = re.search(r"# No parameter is named here\.(.*?)- name: Deploy", WORKFLOW, re.S)
+    assert comment, "the deploy step no longer says what happens to the parameters it does not name"
+    said = " ".join(line.strip().lstrip("#").strip() for line in comment.group(1).splitlines())
+    assert "DemoFleet 'false' and an empty EnforceProjectPattern and EdgeOriginSecret" in said
+
+
 def test_the_workflow_deploys_the_stack_and_region_the_policy_names() -> None:
     deploy = _step("Deploy")
     assert '--stack-name "$STACK_NAME"' in deploy and '--region "$AWS_REGION"' in deploy

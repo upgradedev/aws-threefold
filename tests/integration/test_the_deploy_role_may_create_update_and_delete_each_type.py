@@ -167,11 +167,11 @@ def test_the_role_may_create_update_and_delete_it(resource_type: str) -> None:
 
 
 def test_no_action_is_a_wildcard_but_lambdas_on_this_stacks_functions() -> None:
-    """A row above is satisfied by naming its action, never by a pattern that also grants what nobody listed.
+    """Every grant names its action, so a row above is not met by a pattern that also grants what nobody listed.
 
-    lambda:* predates this check and is kept: it is scoped to functions named
-    threefold-prod-*, and UpdateFunctionCode alone already lets the role run
-    any code as those functions.
+    The one exception is lambda:*, which predates this check and is kept: it
+    covers only functions named threefold-prod-*, and UpdateFunctionCode alone
+    already lets the role run any code as those functions.
     """
     for statement in POLICY["Statement"]:
         for action in _as_list(statement["Action"]):
