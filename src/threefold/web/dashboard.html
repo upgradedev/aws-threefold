@@ -122,6 +122,8 @@
     @media (min-width: 768px) { .tf-ops-fold { grid-template-columns: 32px minmax(0, 1fr) auto; align-items: center; } .tf-ops-fold > .flex { grid-column: auto; } }
     /* The keyboard is on the folded line, as it would be on a row. */
     .tf-ops-fold[data-current="true"] { background: var(--tf-accent-soft); border-color: var(--tf-accent-line); }
+    /* Enter works on Show them only while it holds the focus, so only then is it hinted. */
+    #fold-show:not(:focus) .tf-ops-kbd-hint { display: none; }
 
     /* A small meter: how much of what a project's rules flagged has a label. */
     .tf-ops-meter { display: flex; align-items: center; gap: 8px; min-width: 7rem; }
@@ -3088,6 +3090,11 @@
         const places = stops();
         if (!places.length) return;
         currentIndex(rows);
+        // The folded line is worked from its Show them, which needs the focus.
+        // A reader whose keyboard stands on the line while the focus is
+        // elsewhere, as a visitor's does when the queue first draws, is taken
+        // to Show them by the first J or K rather than past it.
+        if (onFold() && document.activeElement !== document.getElementById('fold-show')) { draw(); focusCurrent(true); return; }
         const here = Math.max(0, places.indexOf(state.at));
         state.at = places[Math.max(0, Math.min(places.length - 1, here + step))];
         draw();

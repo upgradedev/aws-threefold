@@ -1143,6 +1143,47 @@ def test_a_visitor_s_keyboard_reaches_the_sandboxes_they_may_label(tmp_path: Pat
         "The operator's J reaches the folded line after the last row"
 
 
+def test_a_visitor_s_first_j_lands_on_show_them_not_past_it(tmp_path: Path) -> None:
+    """The queue first draws with the folded line current and the focus on the title; the first J goes to Show them.
+
+    A review found the first J stepping past the folded line to a row only the
+    operator may label, while the line showed an Enter hint the focus did not
+    back. The hint is drawn only while Show them holds the focus (the style
+    below), and the first J takes the reader there.
+    """
+    out = ops(
+        KEYS
+        + QUEUE
+        + r"""
+  const boxes = ['Acme-Sandbox-aaaaaaa2', 'Acme-Sandbox-aaaaaaa3'];
+  answer = contract({
+    '/api/auth/whoami': PUBLIC,
+    '/api/projects': { status: 200, body: { projects: PROJECTS.projects.concat(['Acme-Checkout'].concat(boxes).map(project => Object.assign({}, PROJECTS.projects[1], { project }))) } },
+    '/api/decisions': { status: 200, body: { items: [flagged(1, 'Acme-Checkout'), flagged(2, 'Acme-Checkout'), flagged(3, boxes[0]), flagged(4, boxes[1])], next_cursor: null } }
+  });
+  Threefold.whoami(true);
+  await visit('#/review');
+  const onFold = () => /data-fold="sandboxes" data-current="true"/.test(view());
+  const focus = () => document.activeElement && document.activeElement.id;
+  out.load = { focus: focus(), onFold: onFold() };
+  press('j');
+  out.j1 = { focus: focus(), onFold: onFold(), row: currentRow(), said: el('live-status').textContent };
+  press('j');
+  out.j2 = { focus: focus(), onFold: onFold(), row: currentRow() };
+""",
+        tmp_path,
+    )
+    assert out["load"] == {"focus": "view-title", "onFold": True}, "The queue draws with the title focused and the folded line current"
+    assert out["j1"]["focus"] == "fold-show" and out["j1"]["onFold"] and out["j1"]["row"] is None, \
+        "The first J lands on Show them, not past it"
+    assert "Press Enter to show them" in out["j1"]["said"]
+    assert out["j2"] == {"focus": "qrow-0", "onFold": False, "row": "VERDICT-1"}, "The next J moves on to the first row"
+    from _browser import page_source
+    page = page_source("dashboard.html")
+    assert "#fold-show:not(:focus) .tf-ops-kbd-hint { display: none; }" in page, \
+        "The Enter hint shows only while Show them holds the focus"
+
+
 def test_a_name_with_no_call_and_no_configuration_is_not_a_project_to_promote(tmp_path: Path) -> None:
     """A mistyped or old name drew as a project in Observe, every rule Quiet, with Promote on offer."""
     out = ops(
