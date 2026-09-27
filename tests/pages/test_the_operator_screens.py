@@ -343,9 +343,12 @@ def test_the_public_demo_names_the_daily_live_agent_as_real(tmp_path: Path) -> N
     assert note.count(live_hue) == 3, "The live hue is on its segment, its tooltip and its legend swatch, and on nothing else"
     assert 'aria-label="Acme fleet, synthetic 3,210, Daily live agent, real 12, Sandboxes 96, Other callers 41"' in note
 
-    zero = html.unescape(re.sub(r"<[^>]+>", "", _source_note(out["zero"])))
+    zero_note = _source_note(out["zero"])
+    zero = html.unescape(re.sub(r"<[^>]+>", "", zero_note))
     assert "Claude Code" not in zero and "; 96 from visitors' sandboxes" in zero, "A live agent with no calls in the window is not claimed"
     assert 'data-tf-tip="Daily live agent, real"' not in out["zero"], "No segment is drawn for none"
+    assert "Daily live agent" not in zero_note, "Nor is it in the legend or the bar's label"
+    assert 'aria-label="Acme fleet, synthetic 3,210, Sandboxes 96, Other callers 41"' in zero_note
 
     older = _source_note(out["older"])
     assert 'data-sources="sources"' in older
@@ -381,6 +384,39 @@ def test_the_live_agent_s_figures_are_counts_or_are_not_shown(tmp_path: Path) ->
     assert "3,210 from the synthetic Acme fleet" in html.unescape(re.sub(r"<[^>]+>", "", note))
     assert "<img" not in out["projects"] and 'data-src="live"' in out["projects"]
     assert set(re.findall(r'data-src="([^"]*)"', out["projects"])) == {"live"}, "A source the page does not know gets no chip at all"
+
+
+def test_a_live_part_that_is_not_a_whole_count_names_no_live_agent(tmp_path: Path) -> None:
+    """2.5 would read as 3 real runs, and -4 as a legend entry: neither is a count, so the banner reads as a stack without live."""
+    out = ops(
+        r"""
+  const busy = { fleet: { calls: 3210, projects: 6 }, sandbox: { calls: 96, projects: 8 }, other: { calls: 41, projects: 2 } };
+  const quiet = { fleet: { calls: 0, projects: 0 }, sandbox: { calls: 0, projects: 0 }, other: { calls: 0, projects: 0 } };
+  const overview = sources => ({ '/api/auth/whoami': PUBLIC, '/api/overview': { status: 200, body: Object.assign(overviewBody(), { sources }) } });
+  answer = contract(overview(busy));
+  Threefold.whoami(true);
+  let n = 0;
+  for (const [name, calls] of [['half', 2.5], ['negative', -4], ['nan', NaN], ['infinite', Infinity]]) {
+    for (const [kind, rest] of [['busy', busy], ['quiet', quiet]]) {
+      answer = contract(overview(Object.assign({}, rest, { live: { calls, projects: 1 } })));
+      await visit('#/overview?days=' + (n++ % 2 ? 14 : 7));
+      out[name + '-' + kind] = view();
+    }
+  }
+""",
+        tmp_path,
+    )
+    for value in ("half", "negative", "nan", "infinite"):
+        busy = _source_note(out[f"{value}-busy"])
+        words = html.unescape(re.sub(r"<[^>]+>", "", busy))
+        assert "live agent" not in words and "Claude Code" not in words, f"live {value}: no clause names it"
+        assert "Daily live agent" not in busy, f"live {value}: no segment, legend entry or label names it"
+        assert 'aria-label="Acme fleet, synthetic 3,210, Sandboxes 96, Other callers 41"' in busy, value
+        assert ("Where these calls come from, on this public demo: 3,210 from the synthetic Acme fleet, 6 projects whose "
+                "scheduled agents run through the real gates; 96 from visitors' sandboxes; 41 from other callers") in words
+        quiet = html.unescape(re.sub(r"<[^>]+>", "", _source_note(out[f"{value}-quiet"])))
+        assert ("On this public demo, calls come from the synthetic Acme fleet where it runs, visitors' sandboxes") in quiet, \
+            f"live {value}: the list of where calls can come from reads as a stack without live"
 
 
 def test_a_live_project_carries_its_chip_in_the_portfolio(tmp_path: Path) -> None:

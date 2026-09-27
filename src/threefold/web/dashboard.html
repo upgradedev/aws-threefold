@@ -1177,7 +1177,9 @@
     // daily live agent real, each by its contract: the page cannot know what
     // else reached a public stack, so the rest is named by where it came from.
     // A stack from before `live` counts the live agent's calls as other, so
-    // without a count for it nothing here names it, not even in the legend.
+    // without a whole count for it nothing here names it, not even in the
+    // legend: a live part of 2.5, -4 or NaN is read as no live part at all. A
+    // window with none of its calls names it in no clause and no legend.
     // Nothing is said on a private stack.
     function sourceNote(data, who) {
       if (!who || who.reads_public !== true) return '';
@@ -1190,16 +1192,17 @@
       const split = data.sandbox_split && typeof data.sandbox_split === 'object' ? data.sandbox_split : null;
       if (s) {
         const fleet = s.fleet || {};
-        liveReported = count(s.live) !== null;
+        const live = s.live && Number.isInteger(s.live.calls) && s.live.calls >= 0 ? s.live.calls : null;
+        liveReported = live !== null;
         clauses = [
           some(s.fleet) && html`<strong>${num(count(s.fleet))}</strong> from the synthetic Acme fleet, ${typeof fleet.projects === 'number' ? plural(fleet.projects, 'project') : 'projects'} whose scheduled agents run through the real gates`,
-          some(s.live) && html`<strong>${num(count(s.live))}</strong> from the daily live agent: real Claude Code and Codex runs, one Acme task a day, in projects that enforce`,
+          live > 0 && html`<strong>${num(live)}</strong> from the daily live agent: real Claude Code and Codex runs, one Acme task a day, in projects that enforce`,
           some(s.sandbox) && html`<strong>${num(count(s.sandbox))}</strong> from visitors' sandboxes`,
           some(s.other) && html`<strong>${num(count(s.other))}</strong> from other callers: the service's own probes, the demo page, or a repository connected to this stack`
         ];
         parts = [
           { label: 'Acme fleet, synthetic', value: count(s.fleet), color: T.CATEGORICAL[0] },
-          liveReported && { label: 'Daily live agent, real', value: count(s.live), color: T.CATEGORICAL[2] },
+          live > 0 && { label: 'Daily live agent, real', value: live, color: T.CATEGORICAL[2] },
           { label: 'Sandboxes', value: count(s.sandbox), color: T.CATEGORICAL[1] },
           { label: 'Other callers', value: count(s.other), color: T.CATEGORICAL_OTHER }
         ].filter(Boolean);
