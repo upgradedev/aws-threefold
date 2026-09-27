@@ -472,8 +472,8 @@ Then open <http://localhost:8001/> or <http://localhost:8001/dashboard.html>.
 ## Clean room
 
 Every project and workload in this repository and on the public stack is
-synthetic (`Acme-*`), and so is every session but the daily real agent's
-(`live-<task>-<date>`), which are real Claude Code or Codex runs on those
-synthetic tasks. A project name outside the stack's `AllowedProjectPattern` is
-stored and shown as `unlabelled`, and developers appear in public only as short
-hashes.
+synthetic (`Acme-*`). The agents are real where the text says so: the
+benchmark's Claude Code and Codex runs (`benchmark/results/`) and the daily real
+agent's `live-<task>-<date>` sessions are real agent runs on synthetic Acme
+tasks. A project name outside the stack's `AllowedProjectPattern` is stored and
+shown as `unlabelled`, and developers appear in public only as short hashes.

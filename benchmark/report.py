@@ -692,8 +692,8 @@ def _codex_confinement(sandboxes: Mapping[str, int], platforms: Sequence[str]) -
         f"{count} run(s) " + ("with no sandbox recorded" if mode == "unrecorded" else f"under `{mode}`")
         for mode, count in sorted(sandboxes.items()))
     return (
-        "Shell commands ran with approvals off, not under Claude Code's prefix rules, in the sandbox each row records "
-        f"(`harness.codex_sandbox`, where `none` is {bypass}): {runs or 'no run recorded one'}.",
+        "Shell commands ran with approvals off, not under Claude Code's prefix rules. The sandbox each row records "
+        f"(`harness.codex_sandbox`, where `none` is no sandbox at all, {bypass}): {runs or 'none recorded'}.",
         f"Only a run recorded under `{codex_agent.DEFAULT_SANDBOX}` had the writes of its shell commands confined by "
         "Codex's sandbox, to the repository and its own temporary folders; any other run could read and write anything "
         "the owner's account can. The environment gave installs no package index and AWS credentials that do not exist.",
