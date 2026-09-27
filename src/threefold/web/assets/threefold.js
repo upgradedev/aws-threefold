@@ -926,7 +926,7 @@
     var boxes = all(scope || doc, '[data-tf-scroll]');
     boxes.forEach(fitScrollBox);
     if (!scrollWatch) {
-      scrollWatch = { seen: typeof root.WeakSet === 'function' ? new root.WeakSet() : null, observer: null, frame: 0 };
+      scrollWatch = { observer: null, frame: 0 };
       var again = function () {
         if (scrollWatch.frame) return;
         var later = typeof root.requestAnimationFrame === 'function' ? root.requestAnimationFrame.bind(root) : function (fn) { return setTimeout(fn, 16); };
@@ -936,10 +936,11 @@
       if (doc && doc.fonts && doc.fonts.ready && typeof doc.fonts.ready.then === 'function') doc.fonts.ready.then(again, function () {});
       if (typeof root.ResizeObserver === 'function') scrollWatch.observer = new root.ResizeObserver(again);
     }
+    // The boxes on the page now, and only those: a box a redraw removed is
+    // let go rather than watched for the rest of the visit.
     if (scrollWatch.observer) {
-      boxes.forEach(function (box) {
-        if (scrollWatch.seen && scrollWatch.seen.has(box)) return;
-        if (scrollWatch.seen) scrollWatch.seen.add(box);
+      scrollWatch.observer.disconnect();
+      all(doc, '[data-tf-scroll]').forEach(function (box) {
         scrollWatch.observer.observe(box);
         if (box.firstElementChild) scrollWatch.observer.observe(box.firstElementChild);
       });
