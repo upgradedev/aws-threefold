@@ -4,10 +4,12 @@ On the deployed function every Query and GetItem is a round trip, and every
 attribute of every item it returns is parsed at a fraction of a CPU, so what a
 request costs is how many of them it makes and how much each sends back. The
 overview reads the ledger for its self-correction figure; the pins here are
-that each of those reads asks for the figure's fields alone, that the number
-of reads stays within what the constants allow, and that the payload is the
-same, number for number, as when every field of every row was read. The fleet's
-tick is counted through its repository the same way.
+that each of those reads asks for the figure's fields alone, and that the
+payload is the same, number for number, as when every field of every row was
+read. Those are what reading fewer fields changed. The round trips it did not
+change, and their test is a regression guard: every page the window needs is
+read once, and nothing is read twice. The fleet's tick is counted through its
+repository the same way.
 
 Names are synthetic, as the clean-room rule requires.
 """
@@ -174,13 +176,45 @@ def test_the_overview_reads_the_ledger_for_the_figure_s_fields_alone(table) -> N
     assert sum(attributes for _, _, attributes in ledger_reads) <= figure["rows_read"] * len(wanted)
 
 
-def test_the_overview_makes_no_more_round_trips_than_its_constants_allow(table) -> None:
+def _pages_the_figure_needs(table: _LiveTable, today: datetime.date, days: int) -> int:
+    """The ledger pages the figure reads when it reads each one once, from how many rows each day holds.
+
+    Newest day first, a page of PAGE_SIZE rows or of what is left of the
+    budget, and a day is done at its first page that comes back short, which
+    after a full page is an empty one.
+    """
+    budget, pages, read = ledger.SELF_CORRECTION_ROWS, 0, 0
+    for offset in range(days):
+        partition = f"DECISION#{today - datetime.timedelta(days=offset)}"
+        left = sum(1 for pk, _ in table.items if pk == partition)
+        while read < budget:
+            limit = min(ledger.PAGE_SIZE, budget - read)
+            got = min(limit, left)
+            pages, read, left = pages + 1, read + got, left - got
+            if got < limit:
+                break
+    return pages
+
+
+def test_the_overview_reads_each_page_it_needs_once(table) -> None:
+    """A regression guard: reading fewer fields left the round trips as they were, and this holds them there.
+
+    Each day's rollups once, the configurations once, and each ledger page
+    the window needs once, so a second read of the figure, or of any page,
+    fails here rather than passing under a ceiling.
+    """
     get("/api/overview", days=DAYS)
-    rollup_reads = DAYS
-    config_reads = 1
-    ledger_reads = DAYS + ledger.SELF_CORRECTION_ROWS // ledger.PAGE_SIZE + 1
-    assert len(table.calls) <= rollup_reads + config_reads + ledger_reads, [call[0] for call in table.calls]
     assert all(kind == "Query" for kind, _, _ in table.calls), "No read of the overview is one item at a time"
+    asked = [(query["ExpressionAttributeValues"][":pk"], (query.get("ExclusiveStartKey") or {}).get("SK"))
+             for _, query, _ in table.calls]
+    assert len(asked) == len(set(asked)), "No partition is read twice from the same place"
+    ledger_reads = table.ledger_queries()
+    # The route's today, from its first ledger read, so a run that crosses
+    # midnight models the window the route read.
+    today = datetime.date.fromisoformat(ledger_reads[0][1]["ExpressionAttributeValues"][":pk"].split("#")[1])
+    pages = _pages_the_figure_needs(table, today, DAYS)
+    assert len(ledger_reads) == pages
+    assert len(table.calls) <= DAYS + 1 + pages, [call[0] for call in table.calls]
 
 
 def test_the_overview_is_the_same_as_when_every_field_was_read(table, monkeypatch) -> None:
