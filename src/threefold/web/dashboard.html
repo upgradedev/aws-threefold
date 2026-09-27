@@ -1567,7 +1567,7 @@
             <a href="#/connect" class="tf-btn tf-btn-primary tf-btn-sm">Connect ${raw(T.ICONS.arrow)}</a>
           </li>
           <li class="tf-card-quiet p-4 space-y-2">
-            <p class="text-xs font-semibold text-purple-300">Try it in a minute</p>
+            <p class="text-xs font-semibold text-purple-300">Try it in two minutes</p>
             <p class="text-xs text-gray-400">On the public demo: a sandbox project seeded with calls from three agents, reviewed and promoted by you.</p>
             <a href="#/try" class="tf-btn tf-btn-sm">Start the walkthrough</a>
           </li>
@@ -3721,9 +3721,10 @@
 .tf-try-title:focus-visible, .tf-try-h2:focus-visible { outline: none; }
 .tf-try-head .tf-eyebrow { margin-bottom: 6px; }
 .tf-try-lede { display: none; margin: 8px 0 0; font-size: var(--tf-fs-small); line-height: var(--tf-lh-small); color: var(--tf-text-2); }
+.tf-try-lede-short { margin: 4px 0 0; font-size: 0.8125rem; line-height: 1.25rem; color: var(--tf-text-2); }
 .tf-try-tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 0; }
 .tf-try .tf-try-restart { display: none; }
-@media (min-width: 640px) { .tf-try-lede { display: block; } }
+@media (min-width: 640px) { .tf-try-lede { display: block; } .tf-try-lede-short { display: none; } }
 
 .tf-try-rail { position: sticky; top: var(--tf-header-h); z-index: 30; margin: 0 -16px; padding: 10px 16px;
   background: color-mix(in srgb, var(--tf-bg) 90%, transparent); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
@@ -3903,6 +3904,9 @@
 .tf-try-flag-top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .tf-try-flag-agent { font: 600 0.8125rem/1.25rem var(--tf-font-sans); color: var(--tf-text); }
 .tf-try-flag-top .tf-chip { margin-left: auto; }
+.tf-try-flag-why { margin: 0; font-size: 0.875rem; line-height: 1.375rem; color: var(--tf-text-2); overflow-wrap: anywhere; }
+.tf-try-flag .tf-try-dl > div { grid-template-columns: 6.5rem minmax(0, 1fr); }
+.tf-try-flag .tf-try-dl dt { text-transform: none; letter-spacing: 0; font: 500 0.75rem/1.25rem var(--tf-font-sans); color: var(--tf-text-2); }
 .tf-try-dl { margin: 0; display: flex; flex-direction: column; gap: 10px; }
 .tf-try-dl > div { display: grid; grid-template-columns: 4.5rem minmax(0, 1fr); gap: 10px; align-items: baseline; }
 @media (max-width: 479px) { .tf-try-dl > div { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
@@ -3995,6 +3999,15 @@
 .tf-try-tally-marks { display: inline-flex; gap: 3px; flex-shrink: 0; }
 
 .tf-try-states { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; }
+.tf-try-outcome { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.tf-try-outcome .tf-try-group { margin: 4px 0 0; }
+.tf-try-outcome-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.tf-try-outcome-list > li { display: flex; align-items: flex-start; gap: 10px; min-width: 0; padding: 10px 12px; border-radius: var(--tf-radius-md); background: var(--tf-inset);
+  border: 1px solid var(--tf-hairline); font-size: 0.8125rem; line-height: 1.25rem; color: var(--tf-text-2); overflow-wrap: break-word; }
+.tf-try-outcome-list > li > span { min-width: 0; }
+.tf-try-outcome-list > li > .tf-icon { flex-shrink: 0; margin-top: 3px; }
+.tf-try-outcome-list > li[data-tone="enforce"] > .tf-icon { color: var(--tf-accent-text); }
+.tf-try-outcome-list > li[data-tone="observe"] > .tf-icon { color: var(--tf-observed-text); }
 .tf-try-group-note { margin: -2px 0 10px; }
 .tf-try-group { margin: 8px 0 0; font: 600 var(--tf-fs-micro)/1rem var(--tf-font-sans); letter-spacing: var(--tf-track-caps); text-transform: uppercase; color: var(--tf-text-3); }
 .tf-try-rules { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 8px; grid-template-columns: minmax(0, 1fr); }
@@ -4068,7 +4081,7 @@
 .tf-try-delta dd .tf-icon { flex-shrink: 0; }
 .tf-try-delta [data-kind="same"] .tf-icon { color: var(--tf-approved-text); }
 .tf-try-delta [data-kind="changed"] .tf-icon { color: var(--tf-text-3); }
-.tf-try-delta [data-kind="stage"] { border-color: var(--tf-accent-line); background: linear-gradient(90deg, var(--tf-accent-soft), transparent 85%), var(--tf-inset); }
+.tf-try-delta [data-kind="stage"] { grid-column: 1 / -1; border-color: var(--tf-accent-line); background: linear-gradient(90deg, var(--tf-accent-soft), transparent 85%), var(--tf-inset); }
 .tf-try-delta [data-kind="stage"] .tf-icon { color: var(--tf-accent-text); }
 
 .tf-try-climax { display: flex; flex-direction: column; gap: 16px; }
@@ -4094,7 +4107,9 @@
 .tf-try-climax-grid { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); align-items: start; }
 .tf-try-then-none { margin: 0; font-size: 0.8125rem; line-height: 1.25rem; color: var(--tf-text-3); }
 .tf-try-then-file { margin: 0; overflow-wrap: break-word; }
-@media (min-width: 960px) { .tf-try-climax-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 960px) { .tf-try-climax-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .tf-try-climax-grid[data-single] { grid-template-columns: minmax(0, 1fr); } }
+.tf-try-nomodel { margin: 0; display: flex; align-items: flex-start; gap: 8px; max-width: 72ch; }
+.tf-try-nomodel .tf-icon { flex-shrink: 0; margin-top: 2px; }
 .tf-try-quote { margin: 0; display: flex; flex-direction: column; gap: 10px; padding: 18px 20px; border-radius: var(--tf-radius-md); background: var(--tf-accent-soft); border: 1px solid var(--tf-accent-line); }
 .tf-try-quote-src { display: inline-flex; align-items: center; gap: 8px; font: 600 var(--tf-fs-micro)/1rem var(--tf-font-sans); letter-spacing: var(--tf-track-caps); text-transform: uppercase; color: var(--tf-accent-text); }
 .tf-try-quote blockquote { margin: 0; font-size: 1rem; line-height: 1.625rem; color: color-mix(in srgb, var(--tf-accent-text) 30%, var(--tf-text)); overflow-wrap: anywhere; }
@@ -4104,7 +4119,7 @@
 @media (min-width: 640px) { .tf-try-fix { padding: 22px 24px; } }
 .tf-try-fix-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .tf-try-fix-head .tf-label { margin: 0 4px 0 0; }
-.tf-try-fix-head .tf-chip { height: auto; min-height: 22px; white-space: normal; overflow-wrap: anywhere; }
+.tf-try-fix-head .tf-chip { height: auto; min-height: 22px; padding-top: 2px; padding-bottom: 2px; border-radius: 8px; white-space: normal; overflow-wrap: anywhere; }
 .tf-try-fix-summary { margin: 0; font-size: 0.9375rem; line-height: 1.5rem; color: var(--tf-text); overflow-wrap: anywhere; }
 .tf-try-fix-checks { margin: 0; display: inline-flex; align-items: center; gap: 8px; font-size: 0.8125rem; color: var(--tf-approved-text); }
 .tf-try-fix-checks[data-passed="some"] { color: var(--tf-observed-text); }
@@ -4350,7 +4365,7 @@
       const state = {
         step: 1, project: '', stage: null, seeded: null, calls: null, callsError: null, readiness: null, before: null, observed: [], flaggedRead: false, labels: {}, cursor: 0,
         selected: null, promoted: null, observing: null, result: null, replay: null, planned: false, error: null, busy: false, who: null, play: {}, focusId: null,
-        saves: [], rulesDef: null, lastLabel: null
+        saves: [], rulesDef: null, lastLabel: null, seededAlarm: null
       };
       try {
         const saved = JSON.parse(localStorage.getItem(TRY_STORAGE) || 'null');
@@ -4405,8 +4420,12 @@
         state.promoted = { stage: 'enforce', enforce, observe, earlier: true };
         state.observing = observe.slice();
       }
+      // The rules checked for the visitor: the Ready ones, whose every flag
+      // the visitor's own labels called correct. A Quiet rule flagged nothing
+      // here, so there is no evidence either way; it is left to the visitor.
+      function readyKeys() { return readinessRules().filter(r => r.state === 'ready').map(r => r.rule_key); }
       function selected() {
-        if (!(state.selected instanceof Set)) state.selected = new Set(readinessRules().filter(r => r.state === 'ready' || r.state === 'quiet').map(r => r.rule_key));
+        if (!(state.selected instanceof Set)) state.selected = new Set(readyKeys());
         return state.selected;
       }
 
@@ -4464,9 +4483,10 @@
         const closed = !!(state.who && state.who.reads_public === false);
         return html`<div class="tf-try-side">
           <div class="tf-try-head">
-            <p class="tf-eyebrow">${T.icon('play', 16)}The 60-second walkthrough</p>
+            <p class="tf-eyebrow">${T.icon('play', 16)}The two-minute walkthrough</p>
             <h1 id="view-title" tabindex="-1" class="tf-try-title">Try the two-stage rollout</h1>
-            <p class="tf-try-lede">About a minute on the public demo, from a sandbox of your own to a real refusal.</p>
+            <p class="tf-try-lede">About two minutes on the public demo, from a sandbox of your own to a real refusal.</p>
+            <p class="tf-try-lede-short">Watch in Observe, then promote to Enforce.</p>
             ${closed ? '' : html`<p class="tf-try-tags"><span class="tf-chip tf-chip-sky">${T.icon('flask', 13)}Synthetic sandbox</span><span class="tf-chip tf-chip-gray">${T.icon('lock', 13)}No account</span></p>`}
           </div>
           ${closed ? '' : rail()}
@@ -4508,7 +4528,7 @@
 
       function callItem(r, i) {
         const o = outcomeOf(r);
-        const target = targetOf(r);
+        const target = tryTarget(r) === r.tool_name ? '' : tryTarget(r);
         return html`<li class="tf-try-call tf-try-arrive" data-outcome="${o}" style="--tf-try-i:${i}">
           <span class="tf-try-call-dot" aria-hidden="true">${T.icon(tryOutcomeIcon(o), 13)}</span>
           <span class="tf-try-call-body">
@@ -4538,7 +4558,7 @@
         </div>`;
       }
 
-      // What the next minute holds, drawn with the pieces each step will
+      // What the next steps hold, drawn with the pieces each step will
       // show, before there is anything of the visitor's own to show. No
       // figure in it: every number on the walkthrough is read from a response.
       function peeks(play) {
@@ -4553,7 +4573,7 @@
             art: html`<span class="tf-try-peek-refused">${T.icon('stop', 18)}<span class="tf-try-peek-refused-text"><b>Refused</b><span class="tf-try-ghost-bar" style="width:88%"></span></span></span>` }
         ];
         return html`<section class="tf-try-peeks${play.peeks || play.enter ? ' tf-try-play' : ''}" aria-labelledby="try-peeks-title">
-          <h3 id="try-peeks-title" class="tf-try-group">Then, in the next minute</h3>
+          <h3 id="try-peeks-title" class="tf-try-group">Then, in four more steps</h3>
           <ol class="tf-try-peek-list">${items.map((p, i) => html`<li class="tf-try-peek" style="--tf-try-i:${i}">
             <span class="tf-try-peek-art" aria-hidden="true">${p.art}</span>
             <span class="tf-try-peek-words"><span class="tf-try-peek-name"><span class="tf-try-peek-n" aria-hidden="true">${p.n}</span>${p.name}</span><span class="tf-try-peek-text">${p.text}</span></span>
@@ -4606,23 +4626,33 @@
         };
       }
 
-      function flagCard(r, i) {
-        const why = tryWhy(r, state.rulesDef);
-        const key = ruleKeyOf(r);
-        const command = r.action_type === 'COMMAND_EXEC';
+      // Step 2: the flagged calls under the rule that flagged them, the
+      // rule's reason said once, and each call by the agent that sent it and
+      // what it touched. Step 3 then shows each call whole, to label it.
+      function flagGroups(rows) {
+        const groups = [];
+        rows.forEach(r => {
+          const key = ruleKeyOf(r);
+          let g = groups.find(x => x.key === key);
+          if (!g) groups.push(g = { key, rows: [] });
+          g.rows.push(r);
+        });
+        return groups;
+      }
+
+      function flagGroup(g, i) {
+        const why = tryWhy(g.rows[0], state.rulesDef);
         return html`<article class="tf-try-flag tf-try-rise" style="--tf-try-i:${i}">
-          <header class="tf-try-flag-top">${tryAvatar(r.agent)}<span class="tf-try-flag-agent">${agentLabel(r.agent)}</span><span class="tf-mono tf-try-muted">${r.tool_name}</span>${T.statusChip('observed')}</header>
-          <dl class="tf-try-dl">
-            <div><dt>${command ? 'Command' : 'File'}</dt><dd class="tf-try-file">${tryTarget(r) ? tryPath(tryTarget(r)) : '—'}</dd></div>
-            <div><dt>Rule</dt><dd><span class="tf-mono tf-try-strong">${key}</span> <span class="tf-try-kind">${tryIsGate(key) ? 'gate' : 'layering rule'}</span></dd></div>
-            <div><dt>Why</dt><dd>${tryWhyHtml(why)}</dd></div>
-          </dl>
+          <header class="tf-try-flag-top"><span class="tf-mono tf-try-strong tf-break">${g.key}</span><span class="tf-try-kind">${tryIsGate(g.key) ? 'gate' : 'layering rule'}</span>${T.statusChip('observed', plural(g.rows.length, 'call'))}</header>
+          <p class="tf-try-flag-why">${why.sentence}</p>
+          <dl class="tf-try-dl">${g.rows.map(r => html`<div><dt>${agentLabel(r.agent)}</dt><dd class="tf-try-file">${tryTarget(r) ? tryPath(tryTarget(r)) : '—'}</dd></div>`)}</dl>
         </article>`;
       }
 
       function screenFlagged(play) {
         const rows = state.observed;
-        const rules = Array.from(new Set(rows.map(ruleKeyOf)));
+        const groups = flagGroups(rows);
+        const rules = groups.map(g => g.key);
         const total = typeof state.seeded === 'number' ? state.seeded : (Array.isArray(state.calls) ? state.calls.length : null);
         return {
           kicker: 'Step 2 of 5',
@@ -4631,7 +4661,7 @@
             ? 'Each one ran: in Observe, a rule only records a call it would refuse.'
             : 'No observing rule flagged a call here, so there is nothing to label; promote anyway to see a rule refuse.',
           visual: html`${projectBar(html`<span class="tf-try-stat" data-outcome="observed">${T.icon('eye', 14)}<b>${num(rows.length)}</b>${total !== null ? html`of ${num(total)} calls` : 'calls'} · ${plural(rules.length, 'rule')}</span>${Array.isArray(state.calls) ? stat('refused', tryTally(state.calls).refused, 'refused') : ''}`)}
-            ${rows.length ? html`<div class="tf-try-cards${play.cards ? ' tf-try-play' : ''}">${rows.map(flagCard)}</div>` : html`${T.emptyState({
+            ${rows.length ? html`<div class="tf-try-cards${play.cards ? ' tf-try-play' : ''}">${groups.map(flagGroup)}</div>` : html`${T.emptyState({
               icon: 'check',
               text: 'Every call in the list ran, and none broke a rule in Observe. The ledger can lag a moment behind a new sandbox, so a second read may find more.',
               action: { label: 'Read the list again', action: 'try-show' }
@@ -4667,6 +4697,47 @@
           <ul class="tf-try-tally">${Array.from(byRule).map(([key, marks]) => html`<li><span>${key}</span><span class="tf-try-tally-marks">${marks.map(l => html`<span class="tf-try-q-mark" data-label="${l}" title="${l ? REVIEWS[l].label : 'No label yet'}">${l === 'correct' ? T.icon('check', 11) : l === 'false_alarm' ? T.icon('x', 11) : ''}</span>`)}</span></li>`)}</ul>
           <p class="tf-try-muted">A rule with a false alarm will read Noisy and keep observing.</p>
         </div>`;
+      }
+
+      // The call the sandbox's own answer names as the false alarm it seeded,
+      // when it names one: {target, rule_key, why}. Without it nothing is
+      // assumed: the page never decides by itself which call was wrong.
+      function seededAlarmOf(body) {
+        const s = body && body.seeded_false_alarm;
+        if (!s || typeof s !== 'object' || typeof s.target !== 'string' || !s.target || typeof s.rule_key !== 'string' || !s.rule_key) return null;
+        return { target: s.target, rule_key: s.rule_key, why: typeof s.why === 'string' ? s.why : '' };
+      }
+
+      // Once every call has a label: what those labels decide, read from the
+      // labels and the calls alone. A rule whose every flag was marked
+      // correct refuses those calls once it is promoted; a rule with a false
+      // alarm reads Noisy and keeps observing, so its calls keep running.
+      // Where the sandbox's answer named the call it seeded as a false alarm,
+      // the reader is told whether they found it, and a miss is one click
+      // from undone.
+      function labelOutcome() {
+        const items = flagGroups(state.observed).map(g => {
+          const alarm = g.rows.some(r => state.labels[r.verdict_id] === 'false_alarm');
+          const targets = g.rows.map(r => html`<span class="tf-mono">${tryPath(tryTarget(r))}</span>`);
+          return alarm
+            ? html`<li data-tone="observe">${T.icon('eye', 14)}<span><span class="tf-mono tf-try-strong">${g.key}</span> has a false alarm, so it keeps observing: ${tryListHtml(targets)} ${g.rows.length === 1 ? 'keeps' : 'keep'} running.</span></li>`
+            : html`<li data-tone="enforce">${T.icon('shield', 14)}<span><span class="tf-mono tf-try-strong">${g.key}</span>, once promoted, refuses ${tryListHtml(targets)}.</span></li>`;
+        });
+        const seeded = state.seededAlarm;
+        const seededRow = seeded
+          ? state.observed.find(r => (tryTarget(r) === seeded.target || targetOf(r) === seeded.target) && ruleKeyOf(r) === seeded.rule_key) || null
+          : null;
+        const seededLabel = seededRow ? state.labels[seededRow.verdict_id] : '';
+        const why = seeded && seeded.why ? html` ${tryStop(seeded.why)}` : '';
+        const found = !seededRow || !seededLabel ? ''
+          : seededLabel === 'false_alarm'
+            ? html`<div class="tf-callout tf-callout-ok" data-seeded="found">${T.icon('check', 18)}<div class="tf-callout-body"><p>You found it: <span class="tf-mono">${tryPath(seeded.target)}</span> is the call the sandbox seeded as a false alarm.${why} So <span class="tf-mono">${seeded.rule_key}</span> keeps observing.</p></div></div>`
+            : html`<div class="tf-callout tf-callout-warn" data-seeded="missed">${T.icon('alert', 18)}<div class="tf-callout-body"><p>The sandbox seeded <span class="tf-mono">${tryPath(seeded.target)}</span> as a false alarm.${why} Marked Correct, <span class="tf-mono">${seeded.rule_key}</span> would refuse it once promoted.</p><p><button type="button" class="tf-btn tf-btn-sm tf-btn-danger" data-action="try-label" data-verdict="${seededRow.verdict_id}" data-label="false_alarm">${T.icon('x', 14)}Mark it False alarm</button></p></div></div>`;
+        return html`<section class="tf-try-outcome" aria-labelledby="try-outcome-title">
+          ${found}
+          <p id="try-outcome-title" class="tf-try-group">What your labels decide</p>
+          <ul class="tf-try-outcome-list">${items}</ul>
+        </section>`;
       }
 
       // The two labels for the call on top. On a desk they sit on the card;
@@ -4786,7 +4857,7 @@
           sentence: total && done
             ? 'You marked ' + plural(labelCounts().correct, 'call') + ' correct and ' + plural(labelCounts().false_alarm, 'call') + ' a false alarm, and each rule reads its state from those labels.'
             : 'One of them is a false alarm: spot it, and mark each call Correct or False alarm.',
-          visual: total ? reviewBoard(play, inBar) : T.emptyState({ icon: 'check', text: 'No call in the sandbox was flagged by an observing rule, so there is nothing to label. Promote anyway to see a rule refuse.' }),
+          visual: total ? html`${done ? labelOutcome() : ''}${reviewBoard(play, inBar)}` : T.emptyState({ icon: 'check', text: 'No call in the sandbox was flagged by an observing rule, so there is nothing to label. Promote anyway to see a rule refuse.' }),
           actions: done
             ? primary('try-readiness', 'See what that did', 'Reading readiness…')
             : inBar
@@ -4845,6 +4916,7 @@
       function screenPromote(play) {
         const rules = readinessRules();
         const noisy = rules.filter(r => r.state === 'noisy').length;
+        const ready = rules.filter(r => r.state === 'ready').length;
         const chosen = rules.filter(r => selected().has(r.rule_key)).length;
         const flagged = rules.filter(r => (typeof r.would_refuse === 'number' && r.would_refuse > 0) || r.state !== 'quiet');
         const quiet = rules.filter(r => flagged.indexOf(r) === -1);
@@ -4864,14 +4936,17 @@
           title: p ? (p.earlier ? 'Already in Enforce' : 'Now in Enforce') : 'Promote to Enforce',
           sentence: p
             ? (p.earlier ? 'Promoted before you came back: ' + enforcing + keeps : enforcing.replace(/ refuse/, ' now refuse') + keeps)
-            : noisy
-              ? 'Ready and Quiet rules are checked; ' + (noisy === 1 ? 'the Noisy one, with a false alarm, keeps' : 'the Noisy ones, with false alarms, keep') + ' observing.'
-              : 'Ready and Quiet rules are checked, and none is Noisy; an unchecked rule keeps observing.',
+            : (ready
+              ? 'Ready rules are checked: you marked every call they flagged correct. '
+              : 'No rule reads Ready, so none is checked; check one to enforce it anyway. ')
+              + (noisy
+                ? (noisy === 1 ? 'The Noisy one, with a false alarm, keeps' : 'The Noisy ones, with false alarms, keep') + ' observing.'
+                : 'An unchecked rule keeps observing.'),
           visual: html`${projectBar(html`<span class="tf-try-states">${byState.map(([s, n]) => html`<span class="tf-try-stat">${stateChip(s)}<b>${num(n)}</b></span>`)}</span>`, !!play.promote)}
             ${stageSwitch(!!play.promote)}
             <div class="${play.flip ? 'tf-try-play' : ''}">
               ${flagged.length ? html`<ul class="tf-try-rules">${flagged.map(row)}</ul>` : ''}
-              ${quiet.length ? html`<p class="tf-try-group">Flagged nothing here</p>${quietWords ? html`<p class="tf-try-rule-rec tf-try-group-note">${quietWords}</p>` : ''}<ul class="tf-try-rules tf-try-rules-quiet">${quiet.map(quietRow)}</ul>` : ''}
+              ${quiet.length ? html`<p class="tf-try-group">Flagged nothing here</p>${p ? '' : html`<p class="tf-try-rule-rec tf-try-group-note">No call here tested ${quiet.length === 1 ? 'this rule' : 'these'}; check one to enforce it anyway.</p>`}<ul class="tf-try-rules tf-try-rules-quiet">${quiet.map(quietRow)}</ul>` : ''}
               ${rules.length ? '' : emptyNote('The service returned no rules for this project.')}
             </div>`,
           actions: p
@@ -4910,10 +4985,9 @@
       function delta(plan) {
         const row = earlierRow(plan);
         if (!row) return '';
-        const items = [];
+        const items = [{ k: 'Stage', v: 'Observe → Enforce', kind: 'stage' }];
         if (row.agent !== planAgent(plan)) items.push({ k: 'Agent', v: agentLabel(row.agent) + ' → ' + agentLabel(planAgent(plan)), kind: 'changed' });
         sameParts(plan).forEach(part => items.push({ k: part.k, v: part.v || 'the same', kind: 'same' }));
-        items.push({ k: 'Stage', v: 'Observe → Enforce', kind: 'stage' });
         return html`<dl class="tf-try-delta" aria-label="Between the call in Observe and this one">${items.map(i => html`<div data-kind="${i.kind}"><dt>${i.k}</dt><dd>${i.kind === 'changed' ? '' : T.icon(i.kind === 'stage' ? 'shield' : 'check', 14)}<span>${i.v}</span></dd></div>`)}</dl>`;
       }
 
@@ -4982,8 +5056,8 @@
           kicker: 'Step 5 of 5',
           title: same ? 'Send the same call again' : 'Send the same kind of call again',
           sentence: same
-            ? same.charAt(0).toUpperCase() + same.slice(1) + ', and your sandbox is now in Enforce. This time the rule in force refuses it.'
-            : 'A write the rule forbids, to your sandbox, now in Enforce. This time the rule in force refuses it.',
+            ? same.charAt(0).toUpperCase() + same.slice(1) + ', and your sandbox is now in Enforce. Send it and see what the rule in force answers.'
+            : 'A write the rule forbids, to your sandbox, now in Enforce. Send it and see what the rule in force answers.',
           visual: plan
             ? html`${projectBar()}<div class="tf-try-compare tf-try-compare-send">
                 <div class="tf-try-now-col"><p class="tf-try-then-label">Now, in Enforce · as ${agentLabel(planAgent(plan))}'s hook sends it</p>${editor(plan, 'pending')}${plan.action_type === 'FILE_WRITE' ? ruleBox(plan.rule, (plan.arguments || {}).file_path, plan.imports || '', { title: 'Now in force', stage: 'enforce', describe: true }) : ''}</div>
@@ -5042,12 +5116,17 @@
         const r = state.result || {};
         const plan = state.replay;
         const refused = !!(r.status && r.status !== 'APPROVED');
-        // The caption names the source in a few words; why a sentence is not
-        // the model's is said beneath it, in sentence case.
-        const source = r.explanation_source === 'bedrock' ? 'Amazon Bedrock' : 'Deterministic explanation';
-        const sourceNote = r.explanation_source === 'deterministic_fallback'
-          ? 'Amazon Bedrock was asked and did not answer, so this sentence is the service\'s own. The deterministic gate made the verdict either way.'
-          : 'It explains the verdict for the person reading; the deterministic gate made it.';
+        // A sentence from the model is quoted under a caption that names it.
+        // One the model did not write adds nothing to the rule's reason the
+        // banner already gives, so it is not quoted: one quiet line says why
+        // there is no model sentence, and the fix takes the width.
+        const modelSaid = !!(r.bedrock_explanation && r.explanation_source === 'bedrock');
+        const noModel = !modelSaid && (r.bedrock_explanation || r.explanation_source === 'deterministic_fallback')
+          ? (r.explanation_source === 'deterministic_fallback'
+            ? 'No model sentence this time: Amazon Bedrock was asked and did not answer. The rule\'s reason above is the service\'s own, and the deterministic gate made the verdict either way.'
+            : 'No model sentence this time: the rule\'s reason above is the service\'s own, and the deterministic gate made the verdict.')
+          : '';
+        const fixHtml = tryFix(r.suggested_fix);
         // Plain words first: the rule's reason as a reader would say it. The
         // precise terms (the rule, the verdict, the stage) come second.
         const why = r.reason ? tryWhy({ status: r.status || 'APPROVED', reason: r.reason, rule_key: plan && plan.rule }, state.rulesDef) : null;
@@ -5079,14 +5158,15 @@
               <div class="tf-try-now-col"><p class="tf-try-then-label">${refused ? 'Now, in Enforce · refused' : 'Now · approved'}</p>${editor(plan, refused ? 'refused' : 'approved')}</div>
               <div class="tf-try-then-col">${thenCard(plan)}</div>
             </div>` : ''}
-            ${r.bedrock_explanation || tryFix(r.suggested_fix) ? html`<div class="tf-try-climax-grid">
-              ${r.bedrock_explanation ? html`<figure class="tf-try-quote">
-                <figcaption class="tf-try-quote-src">${T.icon('sparkles', 14)}${source}</figcaption>
+            ${modelSaid || fixHtml ? html`<div class="tf-try-climax-grid"${modelSaid ? '' : raw(' data-single')}>
+              ${modelSaid ? html`<figure class="tf-try-quote">
+                <figcaption class="tf-try-quote-src">${T.icon('sparkles', 14)}Amazon Bedrock</figcaption>
                 <blockquote>${r.bedrock_explanation}</blockquote>
-                <p class="tf-try-quote-note">${sourceNote}</p>
+                <p class="tf-try-quote-note">It explains the verdict for the person reading; the deterministic gate made it.</p>
               </figure>` : ''}
-              ${tryFix(r.suggested_fix)}
+              ${fixHtml}
             </div>` : ''}
+            ${noModel ? html`<p class="tf-try-muted tf-try-nomodel">${T.icon('info', 14)}<span>${noModel}</span></p>` : ''}
           </div>`,
           actions: primary('try-finish', 'See what just happened')
         };
@@ -5260,11 +5340,17 @@
       function fail(err, doing, target) {
         state.busy = false;
         const why = String((err && err.message) || 'no answer').replace(/[.\s]+$/, '');
+        // What the service said, without the transport's "HTTP 500: " in
+        // front, and asked to try again only when it did not say so itself.
+        const said = why.replace(/^HTTP \d{3}: /, '');
+        const busy = !!err && err.status === 429;
         state.error = T.isAuthError(err)
           ? (doing === 'create' ? 'This stack does not let visitors make a sandbox (HTTP ' + err.status + '). The walkthrough runs on the public demo.' : 'The stack refused (HTTP ' + err.status + '): a sandbox is open to anyone only on the public demo.')
           : doing === 'label' && target
             ? 'That did not work: the label for ' + target + ' was not saved (' + why + '). Mark it again.'
-            : 'That did not work: ' + why + '. Try again.';
+            : busy
+              ? (doing === 'create' ? 'The demo is busy: wait a minute and press Make my sandbox again.' : 'The demo is busy: wait a minute and press the button again.')
+              : 'That did not work: ' + said + (/\b(try again|wait|press|mark it again)\b/i.test(said) ? '.' : '. Try again.');
         // On step 3 with calls still to label the way on is disabled, so the
         // keyboard goes back to the call it was on.
         state.focusId = state.step === 3 && labelledCount() < state.observed.length ? 'try-correct' : 'try-primary';
@@ -5533,6 +5619,7 @@
             // The contract makes every sandbox in Observe.
             state.stage = 'observe';
             state.seeded = body && typeof body.calls_seeded === 'number' ? body.calls_seeded : null;
+            state.seededAlarm = seededAlarmOf(body);
             remember();
             return loadCalls().then(() => {
               if (!ctx.alive()) return;
@@ -5604,7 +5691,7 @@
               state.busy = false;
               state.readiness = (detail && detail.readiness) || { rules: [] };
               applyConfig(detail);
-              state.selected = new Set(readinessRules().filter(r => r.state === 'ready' || r.state === 'quiet').map(r => r.rule_key));
+              state.selected = new Set(readyKeys());
               enter(4, { flip: true });
               draw();
             }, err => { if (ctx.alive()) fail(err, 'readiness'); });
@@ -5704,7 +5791,7 @@
           try { localStorage.removeItem(TRY_STORAGE); } catch (err) { /* nothing stored */ }
           Object.assign(state, {
             step: 1, project: '', stage: null, seeded: null, calls: null, callsError: null, readiness: null, before: null, observed: [], flaggedRead: false, labels: {}, cursor: 0,
-            selected: null, promoted: null, observing: null, result: null, replay: null, planned: false, error: null, busy: false, resume: null, saves: [], rulesDef: null, lastLabel: null
+            selected: null, promoted: null, observing: null, result: null, replay: null, planned: false, error: null, busy: false, resume: null, saves: [], rulesDef: null, lastLabel: null, seededAlarm: null
           });
           enter(1);
           draw();
@@ -6031,7 +6118,7 @@
             <h2 class="text-lg font-semibold text-white">Not measured yet</h2>
             <p class="text-sm text-gray-400 max-w-2xl">This stack has no proof snapshot deployed, so this page shows nothing rather than something invented.</p>
             <p class="text-xs text-gray-500 max-w-2xl">A snapshot is written by <span class="font-mono">scripts/build_proof.py</span> from the benchmark's result rows and, when the owner adds them, the totals of the owner's own use.</p>
-            <div class="flex flex-wrap gap-2"><a class="tf-btn" href="#/overview">The overview</a><a class="tf-btn" href="#/try">Try it in a minute</a></div>
+            <div class="flex flex-wrap gap-2"><a class="tf-btn" href="#/overview">The overview</a><a class="tf-btn" href="#/try">Try it in two minutes</a></div>
           </div>`);
           return;
         }
