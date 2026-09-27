@@ -268,7 +268,9 @@ def _count(outcome: str, model_calls: int, started: float) -> None:
 
     The latency is the whole draft, model calls and all. It is how the drafting
     read timeout gets measured in the field: a draft that answers 503 after
-    about six seconds ran into it.
+    about six seconds ran into it on its first call, and one that answers 503
+    after about twelve waited out a slow answer it could not use and then a
+    repair that never came.
     """
     emit_threefold_emf_metrics(
         {

@@ -747,6 +747,7 @@ def test_a_tick_running_toward_the_timeout_is_still_seen() -> None:
     # botocore adds one for the first request. Where that alone reaches the
     # threshold, the alarm has to say a draft can cross it with nothing
     # stalled, rather than send the reader looking for a stalled table call.
+    # Where it does not, the alarm says where such a draft stops instead.
     unanswered = _UnansweredDraftingClient()
     with pytest.raises(rule_drafter.ModelUnavailableError) as unavailable:
         rule_drafter.draft_rule(
@@ -766,6 +767,15 @@ def test_a_tick_running_toward_the_timeout_is_still_seen() -> None:
         assert "rule draft Bedrock does not answer can reach it" not in description, (
             f"An unanswered draft stops at about {unanswered_draft_ms / 1000:g} s, below the threshold"
         )
+        assert f"does not answer stops at about {unanswered_draft_ms / 1000:g} seconds" in description, (
+            "Say where an unanswered draft stops"
+        )
+        # What can still reach it is a draft that used its repair: a slow
+        # answer it could not use, then a slow repair.
+        if rule_drafter.MAX_ATTEMPTS * unanswered_draft_ms >= float(alarm["Threshold"]):
+            assert "followed by a slow repair can reach" in description, (
+                "Say which draft can cross the threshold with nothing stalled"
+            )
 
 
 

@@ -650,12 +650,14 @@ Resources:
   # alarm this replaces read the metric in it and went to ALARM, so the unit
   # does not leave this one without data. Six periods rather than three:
   # ticks come every fifteen minutes, so half an hour holds two of them.
-  # A rule draft can reach it with nothing stalled. The drafter asks the
-  # model again only after an answer it could not use, never after a call
-  # that got none, but the botocore client under it retries a timed-out call
-  # once: a client Config's max_attempts counts retries, and botocore adds
-  # one for the first request, so DRAFT_CLIENT_TIMEOUTS' max_attempts of 1
-  # is two requests. Each waits up to 1 s to connect and 5 to read.
+  # A rule draft can reach it with nothing stalled, but only one way. Each
+  # drafting call is one request, waiting up to 1 s to connect and 5 to read
+  # (DRAFT_CLIENT_TIMEOUTS sets total_max_attempts 1: a Config's max_attempts
+  # counts retries, and botocore adds one for the first request). The drafter
+  # asks again only after an answer it could not use, never after a call that
+  # got none, so a draft Bedrock does not answer stops at about 6 seconds;
+  # only a slow answer that could not be used followed by a slow repair can
+  # reach 12, which leaves the request about 3 of its 15 seconds.
   ThreefoldFunctionNearTimeoutAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
@@ -666,16 +668,16 @@ Resources:
         covers every invocation, HTTP requests and the demo fleet's tick
         alike. The tick stops itself about 10 seconds in and checks the time
         only between steps, so one still running at 12 was held by a single
-        step, most likely a table call that stalled. A rule draft Bedrock
-        does not answer can reach it too: the drafter does not ask again,
-        but botocore retries the timed-out call once, so the draft waits out
-        two reads of 5 seconds and runs up to about 13 seconds; one whose
-        repair goes unanswered can reach the timeout. A timeout is also
-        counted by the function errors alarm. The function's log has each
-        tick's "Demo fleet tick:" line with seconds, send_seconds,
-        operate_seconds and cut_short, and "Bedrock did not answer a rule
-        draft" for such a draft; RuleDraftLatencyMs in Threefold/Drafting
-        times each draft; the access log has each request's path and latency.
+        step, most likely a table call that stalled. A rule draft can reach
+        it with nothing stalled: each model call waits up to 6 seconds and
+        the drafter asks again only after an answer it could not use, so a
+        draft Bedrock does not answer stops at about 6 seconds; only a slow
+        unusable answer followed by a slow repair can reach 12. A timeout is
+        also counted by the function errors alarm. The function's log has
+        each tick's "Demo fleet tick:" line with seconds, send_seconds,
+        operate_seconds and cut_short; RuleDraftLatencyMs and
+        RuleDraftModelCalls in Threefold/Drafting time each draft and count
+        its calls; the access log has each request's path and latency.
       Namespace: AWS/Lambda
       MetricName: Duration
       Dimensions:

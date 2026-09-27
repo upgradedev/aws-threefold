@@ -26,10 +26,12 @@ SOURCE_FALLBACK = "deterministic_fallback"
 # waits 60 seconds to read and retries three times, which put a refusal behind
 # minutes of a model that was not answering. The explanation is decoration on a
 # decision already made, so one short attempt and then the labelled fallback.
+# One attempt is total_max_attempts 1: a Config's max_attempts counts retries,
+# and botocore adds one for the first request, so max_attempts 1 is two.
 CLIENT_TIMEOUTS = {
     "connect_timeout": 1,
     "read_timeout": 2.5,
-    "retries": {"max_attempts": 1, "mode": "standard"},
+    "retries": {"total_max_attempts": 1, "mode": "standard"},
 }
 
 # About 2 KB of the call's arguments is enough for a model to phrase a verdict,
