@@ -39,26 +39,46 @@ policy, `x-frame-options: DENY`, `nosniff` and `referrer-policy: no-referrer`
 [PRIMARY, 2026-09-22]. How the two fit together, and why both exist:
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
-## Sixty seconds, no account
+## Two minutes, no account
 
 1. **The two-stage rollout, on a project of your own:**
-   <https://d1og72wpk4aqig.cloudfront.net/dashboard.html#/try>. Five steps: make
-   a sandbox project (`Acme-Sandbox-<8 hex>`, seeded with twelve synthetic hook
-   calls from all three agents through the real evaluator), see what its rules
-   would have refused, label each call, promote, and send the
-   same kind of call again to watch it refused, with the fix it suggests. That
-   last call is sent in a `try-` session, which the project's stage decides like
-   any hook's call: one step earlier the same call was recorded and approved,
-   and it is refused only because the project now enforces. (`sim-` sessions
-   enforce whatever the stage, which is why the walkthrough does not use one.)
-   After 24 hours the
+   <https://d1og72wpk4aqig.cloudfront.net/dashboard.html#/try>. About two
+   minutes for a reader, as the walkthrough itself says. Five steps:
+   - **Make a sandbox.** A project `Acme-Sandbox-<8 hex>` in Observe, seeded
+     with twelve synthetic hook calls from all three agents through the real
+     evaluator. The answer to `POST /api/sandbox` also names, in
+     `seeded_false_alarm`, the one seeded call a reasonable reviewer would call
+     a false alarm: a test module under `tests/domain/`, which
+     `python-domain-stays-pure` flags because its path pattern covers any
+     folder named `domain`.
+   - **See what would be refused.** Every flagged call, grouped by rule; each
+     one ran.
+   - **Label each call.** The page asks you to spot the false alarm and, once
+     every call has a label, says whether you found it and what your labels
+     decide.
+   - **Promote.** The rules that read Ready are checked for you and nothing
+     else is; the rule with the false alarm reads Noisy and keeps observing.
+   - **Send it again.** The page shows the call it is about to send, the same
+     agent, file and import as a call you marked correct in Observe wherever a
+     rule you promoted flagged one, and sends it only when you press Send it.
+     It comes back refused, with the fix it suggests.
+
+   That last call is sent in a `try-` session, which the project's stage decides
+   like any hook's call: one step earlier the same call was recorded and
+   approved, and it is refused only because the project now enforces. (`sim-`
+   sessions enforce whatever the stage, which is why the walkthrough does not
+   use one.) The two minutes are reading time: a script that pressed each
+   button the moment the page enabled it reached the refusal in under two
+   seconds, and the page had finished drawing it within three, against a local
+   server with no network and no model (measured 2026-09-28). After 24 hours the
    sandbox's stage configuration expires and the project drops out of the
    overview and the project list; its calls and labels stay in the public call
    lists until the ledger's own 30-day expiry, and its daily counters stay in
    the table, no longer shown, for 35 days.
-2. **The flagship demo:** <https://d1og72wpk4aqig.cloudfront.net/>. Scenario 1
-   sends one `POST /simulate-loop`; the function evaluates the same call three
-   times and the third is refused with `BLOCKED_LOOP_DETECTED`, halting that demo
+2. **The flagship demo, well under a minute:**
+   <https://d1og72wpk4aqig.cloudfront.net/>. Scenario 1 is one click and one
+   `POST /simulate-loop`; the function evaluates the same call three times and
+   the third is refused with `BLOCKED_LOOP_DETECTED`, halting that demo
    session. Scenario 4 evaluates four ordinary calls and issues a governance
    certificate. Every click gets a fresh session.
 3. **The dashboard itself:**
@@ -66,14 +86,18 @@ policy, `x-frame-options: DENY`, `nosniff` and `referrer-policy: no-referrer`
    and bar opens the calls behind it. Most of what it shows comes from a
    synthetic Acme fleet: every 15 minutes a schedule sends calls from the three
    agents through the real gates across six `Acme-*` projects, and labels,
-   promotes and demotes as an operator would. Nothing is backdated, and the
-   overview counts its sources apart and says in words that the fleet is
-   synthetic. On 2026-09-27 its seven days held 3,086 calls: 2,128 from the
-   fleet, 80 from sandboxes, 12 from the daily real agent (below) and 866 from
-   everything else [PRIMARY, 2026-09-27:
+   promotes and demotes as an operator would. Nothing is backdated. The
+   overview counts five sources apart, the fleet, the daily real agent (below),
+   the service's own probes, visitors' sandboxes and everything else, and says
+   in words that the fleet and the probes are synthetic. On 2026-09-27 its
+   seven days held 3,086 calls: 2,128 from the fleet, 80 from sandboxes, 12
+   from the daily real agent and 866 from everything else, which then still
+   held the probes' own calls, since the probe source came after that count
+   [PRIMARY, 2026-09-27:
    [`docs/evidence/PROBES_2026-09-27-2-edge.md`](docs/evidence/PROBES_2026-09-27-2-edge.md)].
    `#/proof` shows what has been measured, and says "not measured yet" where
-   nothing has.
+   nothing has; each of the six benchmark series there cites the report made
+   from its own rows, linked in this repository.
 
 The public stack has no operator key [STATE-FILE], so anonymous visitors can
 read, try and run the sandbox, and cannot change the policy, the layering rules
@@ -83,9 +107,13 @@ or any real project's stage.
 
 ## Install it in front of your own agent
 
-**One command.** These are the lines the dashboard's connect wizard
+**One command, at the root of the repository.** These are the lines the
+connect page (`connect.html`) leads with and the dashboard's connect wizard
 (`dashboard.html#/connect`) builds, with the stack the page was served from as
-the base; `Acme-Billing` is the project alias you choose.
+the base; `Acme-Billing` is the project alias you choose. It saves the
+installer as `threefold.py` and runs `threefold.py connect`, which installs in
+`managed` mode: the project's stage on the service decides every call, and a
+new project starts in Observe.
 
 Windows PowerShell:
 
@@ -125,30 +153,36 @@ removes exactly what was added, and `py threefold.py open` signs you in (below).
 The installer keeps a copy of itself at `~/.threefold/bin/threefold_install.py`
 for when `threefold.py` is gone.
 
-From a checkout of this repository, [`scripts/threefold_install.py`](scripts/threefold_install.py)
-is the same installer:
+**From Observe to Enforce is one step.** The stage is the project's, on the
+service, not your machine's. When what the project recorded in Observe reads
+right, promote it on the dashboard with the rules you choose; nothing is
+installed again, and until then the project stays in Observe.
 
-```bash
-python scripts/threefold_install.py connect /path/to/acme-billing --project Acme-Billing \
-  --endpoint https://d1og72wpk4aqig.cloudfront.net/
-```
-
-**Modes.** `connect` installs in `managed` mode: each call is sent to be judged
-and the project's stage on the service decides, Observe or Enforce.
-`--mode observe` pins the machine instead: every call goes as a dry run, which
-the service judges and records and no rule refuses, whatever the stage says; the
-older form `--repo PATH --project NAME` defaults to it. `--mode enforce` sends
-calls exactly as `managed` does, so the project's stage still decides on the
-service; what it adds is on the machine, where a file-tool write (`Write`,
-`Edit`, a patch) to the hooks' own files is refused whatever stage was last
-seen. A machine installed with
-`--mode observe` therefore reaches enforcement in two steps: install again with
-`--mode managed` or `--mode enforce` (or set `"mode"` in `.threefold.json`), and
-promote the project on the dashboard, or deploy the stack with
-`DefaultHookStage=enforce` for projects that have no stage of their own.
+**Two other modes change only this machine.** `--mode observe` caps it to
+Observe: every call goes as a dry run, which the service judges and records and
+no rule refuses, whatever the stage says. `--mode enforce` sends calls exactly
+as `managed` does, so the project's stage still decides on the service; what it
+adds is on the machine, where a file-tool write (`Write`, `Edit`, a patch) to
+the hooks' own files is refused whatever stage was last seen. A machine capped
+with `--mode observe` therefore reaches enforcement in two steps: connect again
+with `--mode managed` (or set `"mode"` in `.threefold.json`), and promote the
+project on the dashboard, or deploy the stack with `DefaultHookStage=enforce`
+for projects that have no stage of their own.
 
 In every mode, a call carrying a credential is still refused on your machine
 and never sent, and a call the hook holds back is neither sent nor recorded.
+
+**The older form, from a checkout of this repository.**
+[`scripts/threefold_install.py`](scripts/threefold_install.py) is the same
+installer, and besides `connect` it still takes the form it had before
+`connect`: a `--repo` path, `--mode`, which defaults to `observe` there and so
+caps the machine to dry runs, and `--uninstall`.
+
+```bash
+python scripts/threefold_install.py --repo /path/to/acme-billing --project Acme-Billing \
+  --mode managed --endpoint https://d1og72wpk4aqig.cloudfront.net/
+python scripts/threefold_install.py --repo /path/to/acme-billing --uninstall
+```
 
 **What leaves your machine.** For a call it sends, the hook sends one
 `POST /evaluate-tool-call`: the session id, your project alias, `anonymous` or
@@ -217,9 +251,11 @@ the tasks were written by the people who built Threefold, so these are rates
 under temptation and not base rates of everyday work. Two agents, both on
 Windows (Claude Code 2.1.220 with two models, Codex CLI 0.155.0 on its own
 default); Antigravity is not measured. Method, every result and its limits:
+one report per series,
 [`docs/evidence/BENCHMARK_2026-09-22.md`](docs/evidence/BENCHMARK_2026-09-22.md)
-and the five reports beside it, and the dashboard's `#/proof` page carries the
-same six series.
+and the five beside it (listed under Evidence, below). The dashboard's
+`#/proof` page carries the same six series, and each series' card cites the
+report made from its own rows, linked in this repository.
 
 **A real agent on the public stack.** `scripts/daily_live_agent.py` has a real
 agent, Claude Code and Codex on alternate days, do one of the standard tasks
@@ -299,7 +335,10 @@ Each file takes the same shape:
    with nothing waiting for a label, **Quiet** when no label says anything
    about it (it flagged nothing, or refused only calls nobody labelled, such
    as the demo page's), **Needs review** while anything it would have refused
-   is unlabelled, **Noisy** after any false alarm.
+   is unlabelled, **Noisy** after any false alarm. Ready rests on labels
+   alone: a refusal nobody labelled is evidence of nothing, so a rule whose
+   only record is unlabelled refusals reads Quiet, with those refusals
+   counted on its row (`application/rollups.py`).
 4. **Promote.** Promote moves the project to Enforce with the rules you pick;
    the others keep observing, recording what they would refuse. **Demote** is one
    click back to Observe.
@@ -425,7 +464,10 @@ written in this repository. Only the public stack deploys with
 `DemoFleet=true`, which adds an EventBridge Scheduler schedule invoking the
 same function every 15 minutes for the synthetic fleet; the function takes
 that event only when it is not an HTTP request, so no caller of the API can
-start a tick. Topology, data model and trade-offs:
+start a tick. The edge is built to answer a page address that has no page with
+the product's own `404.html` and status 404, through two CloudFront Functions
+on the pages' behavior alone, so a path an API behavior takes keeps the API's
+own answer (`deploy/edge.yml`). Topology, data model and trade-offs:
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). The six Well-Architected
 pillars against what is deployed: [`docs/WELL_ARCHITECTED.md`](docs/WELL_ARCHITECTED.md).
 Deploying, publishing the pages, probing, rolling back and tearing down:

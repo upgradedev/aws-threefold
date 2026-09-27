@@ -781,9 +781,13 @@ def test_the_spec_marks_nothing_as_not_deployed() -> None:
 def test_the_readme_installs_with_the_installer_and_rolls_out_observe_then_enforce() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     install = readme.split("## Install it in front of your own agent", 1)[1].split("\n## ", 1)[0]
-    for fact in ("scripts/threefold_install.py", "--mode observe", "--mode enforce", ".git/info/exclude"):
+    for fact in ("scripts/threefold_install.py", "--mode observe", "--mode enforce", ".git/info/exclude", "--uninstall"):
         assert fact in install, f"The install section does not mention {fact}"
     assert install.index("--mode observe") < install.index("--mode enforce")
+    # connect.html leads with the one command and gives the older --repo form
+    # as the alternative; the README teaches them in the same order.
+    assert "threefold.py connect" in install and "--repo" in install
+    assert install.index("threefold.py connect") < install.index("--repo"), "The README teaches the older form first"
 
 
 def test_the_readme_prints_no_test_count() -> None:

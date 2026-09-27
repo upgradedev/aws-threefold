@@ -489,7 +489,12 @@ results and matrix estimate, and the summary file one block per family, with
 no headline across them. `scripts/build_proof.py` computes its benchmark
 section from the result rows with `report.aggregate()`, whose top level, given
 rows of both families, is the standard family's own summary (each family's is
-under `by_family`), so it never shows the two pooled either.
+under `by_family`), so it never shows the two pooled either. Each `--series`
+it is given cites the report made from exactly that series' rows, found by
+the report's `Source rows` line and never by its file name, and a series no
+report was made from cites none; with `--evidence-base` every cited path on
+the dashboard's `#/proof` becomes a link into the public repository
+(`docs/RUNBOOK.md`, section 6, has the command).
 
 | Field | Meaning |
 |---|---|

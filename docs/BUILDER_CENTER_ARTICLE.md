@@ -95,6 +95,16 @@ projects that start in Enforce (`EnforceProjectPattern`); the public one does
 for the projects a real agent works in, because no operator is there to
 promote them.
 
+On the public stack a visitor can walk both stages on a sandbox project of
+their own, in about two minutes by the walkthrough's own count. The stack
+seeds the sandbox with a dozen synthetic hook calls from three agents through
+the real evaluator, and its answer names the one a reviewer should reject: a
+test under `tests/domain/`, flagged because the Python rule's path pattern
+covers any folder named `domain`. The page asks the visitor to spot it and
+says whether they did, checks only the Ready rules for promotion, and shows
+the call it will send again before sending it. That call is refused only
+because the project now enforces.
+
 Connecting a repository is one command, copied from the dashboard:
 
 ```bash
@@ -105,9 +115,11 @@ The stack serves `install.py` with its own address written in. It downloads the
 hook and the pre-commit check, keeps a file only when its SHA-256 matches the
 stack's manifest, registers the hook for the agents it finds, lists everything
 it wrote in `.git/info/exclude`, sends one harmless call, and opens the project
-page. An operator of a private stack signs in with `threefold.py open`, which
-trades the key in a local file for a single-use link, so no key is ever pasted
-into a browser.
+page. It installs in `managed` mode, so the project's stage on the service
+decides every call, and moving to Enforce is one step on the dashboard, with
+nothing to install again. An operator of a private stack signs in with
+`threefold.py open`, which trades the key in a local file for a single-use
+link, so no key is ever pasted into a browser.
 
 ## What runs on AWS
 
@@ -150,7 +162,11 @@ and the function runs at 1,024 MB with a reserved concurrency of 25
   installer fetched from the edge pointed its hook past the firewall. Fetched
   from the edge, `install.py` now names the edge; fetched from the API URL, it
   names the API URL **[PRIMARY, 2026-09-22]**. The secret is not
-  authentication; the API's own URL stays public.
+  authentication; the API's own URL stays public. The template also answers a
+  page address that has no page with the product's own 404 page and status
+  404, through two CloudFront Functions on the pages' behavior alone: a
+  distribution-wide error page would have replaced the API's own problem
+  documents as well.
 - **A synthetic fleet gives the public dashboard something true to show.** On
   the public stack only, an Amazon EventBridge Scheduler schedule invokes the
   function every 15 minutes, and each tick sends a bounded batch of synthetic
@@ -241,11 +257,11 @@ and the function runs at 1,024 MB with a reserved concurrency of 25
 
 ## Try it
 
-- The two-stage rollout on a sandbox project of your own, in about a minute:
-  <https://d1og72wpk4aqig.cloudfront.net/dashboard.html#/try>
-- The demo, where the third identical call halts the session:
-  <https://d1og72wpk4aqig.cloudfront.net/>
+- The two-stage rollout on a sandbox project of your own, in about two
+  minutes: <https://d1og72wpk4aqig.cloudfront.net/dashboard.html#/try>
+- The demo, where the third identical call halts the session, one click and
+  well under a minute: <https://d1og72wpk4aqig.cloudfront.net/>
 - The operations dashboard, which names where its calls come from:
   <https://d1og72wpk4aqig.cloudfront.net/dashboard.html#/overview>
-- The benchmark's six series, side by side:
-  <https://d1og72wpk4aqig.cloudfront.net/dashboard.html#/proof>
+- The benchmark's six series, side by side, each citing the report made from
+  its own rows: <https://d1og72wpk4aqig.cloudfront.net/dashboard.html#/proof>
