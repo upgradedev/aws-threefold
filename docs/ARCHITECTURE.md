@@ -31,7 +31,7 @@ flowchart LR
     cf["CloudFront distribution<br/>security headers on every response"]
     s3["S3 bucket, private<br/>origin access control<br/>pages and /assets/*"]
     fn["CloudFront Function<br/>copies Host into X-Threefold-Viewer-Host"]
-    miss["Two CloudFront Functions<br/>a page address with no page:<br/>404.html, status 404"]
+    miss["Two CloudFront Functions, in edge.yml<br/>a page address with no page:<br/>404.html, status 404"]
     waf --- cf
     cf -- "default: the pages" --> miss
     miss --> s3
@@ -69,7 +69,7 @@ The same picture in words:
 ```
 viewer or hook ──► CloudFront (WAF, security headers)            us-east-1
                      ├─ /, *.html, /app, /assets/* ──► S3 (private, OAC)
-                     │    (a page address with no page: 404.html, status 404)
+                     │    (in edge.yml: a missing page gets 404.html, status 404)
                      └─ API paths (20 behaviors) ──► viewer-host function
                                                       + X-Threefold-Edge
                                                           │
@@ -89,6 +89,11 @@ viewer or hook ──► CloudFront (WAF, security headers)            us-east-1
                      DemoFleet=true ──► the same Lambda, invoked directly
                      with one tick of the synthetic fleet (section 7)
 ```
+
+Both pictures draw the stacks as `deploy/template.yml` and `deploy/edge.yml`
+build them. The table below is what was checked on the live stacks, and when.
+No check in it covers the two missing-page functions; section 2.1 describes
+them as `deploy/edge.yml` builds them.
 
 What was checked on the live public stacks **[PRIMARY, 2026-09-22]**:
 
@@ -239,8 +244,9 @@ checked and nothing else, and then shows the call it will send before sending
 it: `POST /evaluate-tool-call`, as the agent and tool that made a call a
 promoted rule flagged, one the reader marked correct where there is one, in a
 `try-` session and with `explain: true` (section 4.2 says why the session
-matters). On the public stack every one of those writes is open without a
-key because the project is a sandbox (section 4.4).
+matters). On the public stack the labels and the promotion need no key
+because the project is a sandbox, and `POST /api/sandbox` is open there only
+(section 4.4).
 
 ---
 

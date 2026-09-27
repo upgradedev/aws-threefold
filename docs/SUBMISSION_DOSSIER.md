@@ -1,8 +1,9 @@
 # Threefold: submission dossier
 
 Field-by-field answers for the AWS Zero to Shipped submission form, written to
-match the code on `main` and the live stacks. Where a sentence rests on a live
-check it says so; where it rests on `STATE.md` it is tagged [STATE-FILE].
+match the code on `main`. Where a sentence rests on a check of a live stack it
+is tagged [PRIMARY] with the date of the check; where it rests on `STATE.md` it
+is tagged [STATE-FILE]. Everything else describes the code on `main`.
 
 **Application name:** Threefold
 **Category:** `#workplace-efficiency` · **Lane:** `#community`
@@ -58,9 +59,9 @@ so the rollout had to show what a rule would stop before it stops anything.
 3. **Rolls out in two stages.** Observe, review, readiness per rule (Ready,
    Quiet, Needs review, Noisy), Promote with the chosen rules, Demote in one
    click. Ready rests on labels alone: a rule is Ready when calls it flagged
-   were marked correct and none a false alarm, and a rule whose only record is
-   refusals nobody labelled reads Quiet. Page and demo calls always enforce,
-   so the public demo is unaffected.
+   were marked correct, none a false alarm and none waiting for a label,
+   and a rule whose only record is refusals nobody labelled reads Quiet.
+   Page and demo calls always enforce, so the public demo is unaffected.
    A stack can name projects that start in Enforce instead
    (`EnforceProjectPattern`); the public stack names the `Acme-Live-*`
    projects a real coding agent works in (section 6), since no operator is

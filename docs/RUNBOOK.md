@@ -167,16 +167,17 @@ emptied, uploads `dashboard.html` again as `app`, and invalidates `/*` once.
 `openapi.json` and `proof.json` are not uploaded: the edge sends every `*.json`
 path to the function, which serves the copies deployed with its code.
 
-The edge serves a page only at an address `deploy/edge.yml` lists. Two
-CloudFront Functions on the pages' behavior (`MissingPageFunction` and
-`MissingPageStatusFunction`) answer any other page address, one with no file
-type or with `.html`, with `404.html` and status 404; a missing file of
-another type keeps the bucket's own 404, and a path an API behavior takes
-keeps the API's own answer. `tests/unit/test_edge_page_not_found.py` holds the
-template's list to the pages this script publishes. So a new page answers 404
-at the edge until the edge stack is deployed with it listed (section 2), and a
-deleted page that is still in the bucket keeps being served until the edge is
-deployed without it.
+As `deploy/edge.yml` builds it, the edge serves a page only at an address
+that template lists. Two CloudFront Functions on the pages' behavior
+(`MissingPageFunction` and `MissingPageStatusFunction`) answer any other page
+address, one with no file type or with `.html`, with `404.html` and status
+404; a missing file of another type keeps the bucket's own 404, and a path an
+API behavior takes keeps the API's own answer.
+`tests/unit/test_edge_page_not_found.py` holds the template's list to the
+pages this script publishes. So, with that template deployed, a new page
+answers 404 at the edge until the edge stack is deployed with it listed
+(section 2), and a deleted page that is still in the bucket keeps being served
+until the edge is deployed without it.
 
 ## 4. Backfill the daily rollups
 
