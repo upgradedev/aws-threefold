@@ -40,15 +40,17 @@ The shape:
   original did: the gates judge imports and credentials, not meaning.
 - checks: [{gate, path, passed}] for every check that was run.
 
-Which fix a refusal gets is decided by the verdict's family (a rule_key when the
-response carries one, else its rule_evaluations and status) and then by asking
-the questions the boundary guard asks, in the guard's order, of the call itself.
-Reason text is read in four places only, all of them for detail rather than for
-the decision, and each says less when the text does not match rather than
-guessing: a loop's repeat count and cycle, a halted session's cause, which of
-the circuit breaker's two cost sentences refused the call, and (until the
-rule_key reaches every verdict) the evaluator's own halted-session prefix, the
-same one the evaluator itself relies on.
+Which fix a refusal gets is decided by the verdict's family (the gate that
+decided it, which the evaluator carries beside every verdict as `decided_key`
+and a stored row carries as `rule_key`; else, for a verdict that carries
+neither, its rule_evaluations and status) and then by asking the questions the
+boundary guard asks, in the guard's order, of the call itself. Reason text is
+read in four places only, all of them for detail rather than for the decision,
+and each says less when the text does not match rather than guessing: a loop's
+repeat count and cycle, a halted session's cause, which of the circuit
+breaker's two cost sentences refused the call, and (only for a verdict that
+names no gate) the evaluator's own halted-session prefix, the same one the
+evaluator itself relies on.
 
 A detected secret is never repeated. Fixes replace it with an environment lookup;
 every string that leaves this module is passed through the redaction the ledger
@@ -177,7 +179,12 @@ from threefold.domain.boundary_guard import (
     write_pairs,
 )
 from threefold.application.rule_keys import (
+    BUDGET as BUDGET_KEY,
     CREDENTIAL as CREDENTIAL_KEY,
+    HALTED_SESSION as HALTED_SESSION_KEY,
+    HALTED_SESSION_REASONS,
+    LOOP as LOOP_KEY,
+    NONE as NONE_KEY,
     PROTECTED_PATH as PROTECTED_PATH_KEY,
     finding_key,
 )
@@ -246,16 +253,17 @@ GATE_SYNTAX = "syntax"
 GATE_ROUTE = "route"
 
 # How the evaluator begins a refusal that comes from a halted session rather
-# than from a gate. Copied rather than imported: the evaluator will import this
-# module to attach fixes, and importing it back would be a cycle.
-HALTED_PREFIXES = ("Session execution frozen", "Session already tripped")
+# than from a gate: the sentences rule_keys reads, and the evaluator writes, for
+# the same purpose. Read here only for a verdict that names no gate.
+HALTED_PREFIXES = HALTED_SESSION_REASONS
 
 # The rule keys the application contract fixes, mapped to a family. A layering
-# rule's own id is any other key.
+# rule's own id is any other key. SESSION_ALREADY_HALTED is the rule a halted
+# session's refusal is recorded under, kept for a caller that passes that.
 _FAMILY_BY_RULE_KEY = {
-    "LOOP": "loop",
-    "BUDGET": "budget",
-    "HALTED_SESSION": "halted",
+    LOOP_KEY: "loop",
+    BUDGET_KEY: "budget",
+    HALTED_SESSION_KEY: "halted",
     "SESSION_ALREADY_HALTED": "halted",
 }
 
@@ -430,17 +438,46 @@ def _effective_reason(result: Any) -> str:
     return str(_field(result, "reason") or "")
 
 
+def _decided_key(result: Any) -> str:
+    """The rule key of the gate that decided the verdict, or "" when it names none.
+
+    The evaluator marks every verdict it makes with `decided_key`
+    (GovernanceEvaluator._decided): the gate that refused the call, or for an
+    approval the first rule that would have, which is the rule its reason and
+    its first observation name. It is carried beside the response rather than
+    in it, and it is the key the ledger stores for the same verdict. A verdict
+    passed as a dict, or a stored row, carries it as `rule_key`. The response's
+    fields hold no key at all, so this module read `rule_key` off a verdict
+    that never had one and chose every family from the fallback below.
+
+    Compared as written: a layering rule's id is the operator's and may be
+    `loop` in lower case, which is not the loop gate.
+    """
+    for name in ("decided_key", "rule_key"):
+        key = _field(result, name)
+        if isinstance(key, str) and key:
+            return key
+    return ""
+
+
 def _family(result: Any) -> Optional[str]:
-    """Which gate spoke: loop, budget, halted, boundary, observed, or None for a plain approval."""
+    """Which gate spoke: loop, budget, halted, boundary, observed, or None for a plain approval.
+
+    The gate the verdict names (_decided_key) decides it. The invariants and
+    the status are read only for a verdict that names none, and they rank the
+    gates rather than follow them: an approval that two gates would have
+    refused was answered for the budget before the loop, and for the loop
+    before a layering rule, whichever of them its reason named.
+    """
+    key = _decided_key(result)
+    if key in _FAMILY_BY_RULE_KEY:
+        return _FAMILY_BY_RULE_KEY[key]
+    if key and key != NONE_KEY:
+        return "boundary"
     status = str(_field(result, "status") or "").upper()
     evaluations = _field(result, "rule_evaluations")
     evaluations = evaluations if isinstance(evaluations, dict) else {}
-    rule_key = str(_field(result, "rule_key") or "").upper()
     reason = _effective_reason(result)
-    if rule_key in _FAMILY_BY_RULE_KEY:
-        return _FAMILY_BY_RULE_KEY[rule_key]
-    if rule_key and rule_key != "NONE":
-        return "boundary"
     if evaluations.get("BUDGET_CIRCUIT_BREAKER_SAFE") is False or status == "BLOCKED_CIRCUIT_BREAKER":
         return "halted" if reason.startswith(HALTED_PREFIXES) else "budget"
     if evaluations.get("LOOP_THRASHING_FREE") is False or status == "BLOCKED_LOOP_DETECTED":

@@ -29,7 +29,7 @@ from typing import Any, Dict, List
 import pytest
 
 import threefold.domain.models as models
-from threefold.application import demo_fleet, dtos, rollups
+from threefold.application import demo_fleet, dtos, insights, ledger, rollups
 from threefold.application import projects as stages
 from threefold.application.bedrock_reviewer import BedrockArchitecturalReviewer
 from threefold.application.evaluator import GovernanceEvaluator
@@ -301,6 +301,44 @@ def test_a_tick_on_real_time_is_reproducible_too() -> None:
     assert shape == [(row[0], row[1], row[2], row[3], row[4]) for row in _ledger_shape(second)]
 
 
+def test_a_tick_counts_each_call_under_the_key_the_ledger_stored(monkeypatch) -> None:
+    """The key a tick counts and labels by is the ledger's, with the gate named and without it.
+
+    A verdict the evaluator made names its gate, and that is the key. One that
+    names none is read the way the ledger reads a stored row that carries no
+    key, so the two readings agree on every call of a working morning, refused
+    and observed alike.
+    """
+    moment = MONDAY + datetime.timedelta(hours=9)
+    clock = SimulatedClock(moment)
+    clock.install(monkeypatch)
+    evaluator = _fresh_evaluator()
+    for name in ("Acme-Payments", "Acme-Checkout", "Acme-Mobile"):
+        evaluator.save_project_config(name, stages.new_config(moment.isoformat(), stage=stages.ENFORCE))
+    verdicts = []
+    judge = evaluator.evaluate_tool_call
+
+    def judged(request):
+        verdict = judge(request)
+        verdicts.append(verdict)
+        return verdict
+
+    monkeypatch.setattr(evaluator, "evaluate_tool_call", judged)
+    _run_ticks(evaluator, clock, moment, 12)
+    stored = {(row["timestamp"], row["verdict_id"]): row for row in _rows(evaluator)}
+    assert len(stored) == len(verdicts)
+
+    keys = collections.Counter()
+    for verdict in verdicts:
+        row = stored[(str(verdict.timestamp), str(verdict.verdict_id))]
+        assert demo_fleet._key_of(verdict) == verdict.decided_key == row["rule_key"]
+        keyless = copy.copy(verdict)
+        keyless.decided_key = None
+        assert demo_fleet._key_of(keyless) == row["rule_key"], (verdict.status, verdict.reason)
+        keys[(verdict.status == "APPROVED", row["rule_key"] if row["rule_key"] in ("NONE", "LOOP") else "gate or rule")] += 1
+    assert keys[(False, "gate or rule")] and keys[(True, "gate or rule")] and keys[(False, "LOOP")], keys
+
+
 # ---------------------------------------------------------------- a day of it
 
 
@@ -309,6 +347,15 @@ def test_every_tick_of_the_day_stayed_inside_its_bounds(a_day: Day) -> None:
         assert demo_fleet.MIN_CALLS <= summary["calls"] <= demo_fleet.MAX_CALLS, summary
         assert summary["calls"] == sum(summary["verdicts"].values())
         assert summary["cut_short"] is False
+
+
+def test_the_console_names_each_refusal_of_the_day_as_the_ledger_does(a_day: Day) -> None:
+    """/api/insights and /api/decisions count the same refusal under the same category."""
+    refused = [row for row in a_day.rows if row["status"] != "APPROVED"]
+    assert refused
+    for row in refused:
+        assert insights.categorise(row) == ledger.shown_row(row)["category"], (row["rule_key"], row["reason"])
+    assert {insights.categorise(row) for row in refused} >= {"LAYERING", "PROTECTED_PATH", "LOOP"}
 
 
 def test_every_call_of_the_day_reached_the_ledger_as_a_managed_hook_call(a_day: Day) -> None:

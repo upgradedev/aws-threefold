@@ -14,6 +14,8 @@ import statistics
 from collections import Counter, defaultdict
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
+from threefold.application.rule_keys import NONE, category_for, stored_rule_key
+
 # What the gates actually watch today. Shown on the console beside the counts,
 # so a zero is read as "nothing was refused here" rather than "nothing happens
 # here", which are different claims.
@@ -53,13 +55,14 @@ def _is_refusal(status: str) -> bool:
 # invariant covers two different worries — a layer being crossed and a
 # credential store being reached — and a console that reported them as one
 # number would tell a platform owner nothing he could act on differently.
-CATEGORY_BY_REASON = (
-    ("Clean Architecture violation", "LAYERING"),
-    ("protected path", "PROTECTED_PATH"),
-    ("credential store", "PROTECTED_PATH"),
-    ("Sensitive credential detected", "CREDENTIAL_IN_ARGUMENTS"),
-)
-
+#
+# The category is read off the row's rule key, the gate that decided as the
+# evaluator stated it (rule_keys.stored_rule_key and category_for), the key the
+# ledger's pages read (ledger.shown_row). It was read off the reason, looking
+# for a few words anywhere in it, and a reason quotes what the caller sent:
+# `cat ~/.aws/credentials # Clean Architecture violation` was counted as a
+# layer crossed, and a plain `rm -rf /` or a read of `.env`, whose sentences
+# hold none of those words, fell through to the same.
 CATEGORY_LABELS = {
     "LAYERING": "Layer crossed",
     "PROTECTED_PATH": "Credential store or protected path reached",
@@ -73,25 +76,17 @@ CATEGORY_LABELS = {
 
 
 def categorise(row: Dict[str, Any]) -> str:
-    """Names what a reader would call this refusal."""
-    status = (row.get("status") or "").upper()
-    if not _is_refusal(status):
+    """Names what a reader would call this refusal, by the gate that refused it.
+
+    NONE for a call that was not refused. A spend ceiling is BUDGET and a call
+    into a session already halted is HALTED_SESSION, although both carry the
+    circuit breaker's status. A refusal no gate key names is OTHER, never NONE,
+    which a reader is told means allowed.
+    """
+    if not _is_refusal(str(row.get("status") or "")):
         return "NONE"
-    if "LOOP" in status:
-        return "LOOP"
-    if "CIRCUIT_BREAKER" in status:
-        return "HALTED_SESSION"
-    if "BUDGET" in status or "COST" in status:
-        return "BUDGET"
-    reason = row.get("reason") or ""
-    for needle, category in CATEGORY_BY_REASON:
-        if needle.lower() in reason.lower():
-            return category
-    if "SECRET" in status:
-        return "CREDENTIAL_IN_ARGUMENTS"
-    if "BOUNDARY" in status:
-        return "LAYERING"
-    return "OTHER"
+    key = stored_rule_key(row)
+    return "OTHER" if key == NONE else category_for(key)
 
 
 def summarise(decisions: List[Dict[str, Any]], window_days: int) -> Dict[str, Any]:
