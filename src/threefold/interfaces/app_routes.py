@@ -23,7 +23,7 @@ import re
 from typing import Any, Callable, Dict, Optional, Tuple
 from urllib.parse import unquote
 
-from threefold.application import ledger, rollups
+from threefold.application import insights, ledger, rollups
 from threefold.application import projects as stages
 from threefold.application.dtos import InvalidRequestError
 from threefold.application.labels import UNLABELLED, is_labelled, public_row
@@ -173,25 +173,40 @@ def _self_correction(days: int, project: Optional[str]) -> Dict[str, Any]:
     if reader is None:
         return ledger.self_correction_unread()
     try:
-        return ledger.self_correction(_reader_that_fails_loudly(reader), days, project)
+        return ledger.self_correction(_self_correction_reader(reader), days, project)
     except Exception as exc:  # a figure never fails the page it is on
         logger.warning("Could not read the ledger for self-correction: %s", exc)
         return ledger.self_correction_unread()
 
 
-def _reader_that_fails_loudly(reader: Callable[..., Any]) -> Callable[..., Any]:
-    """The ledger reader, asked to raise on a failed query where the store can.
+# What the figure reads of a ledger row: the fields the count itself reads,
+# and the project, which the window is filtered by.
+SELF_CORRECTION_READ = insights.SELF_CORRECTION_FIELDS + ("project_name",)
+
+
+def _self_correction_reader(reader: Callable[..., Any]) -> Callable[..., Any]:
+    """The ledger reader, asked to raise on a failed query and to send only what the figure reads, where the store can.
 
     The store answers a failed query with the rows its container holds, so a
     listing still shows something. For this figure that would read a ledger it
     could not reach as a complete window with no refusal in it; raised, the
     failure gives the unread figure, which says it is not complete.
+
+    The figure reads up to ledger.SELF_CORRECTION_ROWS rows on every overview
+    and every project page, and eight fields of each. Asked for those alone,
+    the store sends and parses about a third of the attributes it did; the
+    rows it reads, and so `rows_read` and `complete`, are the same.
     """
     try:
-        accepts = "raise_errors" in inspect.signature(reader).parameters
+        parameters = inspect.signature(reader).parameters
     except (TypeError, ValueError):
-        accepts = False
-    return functools.partial(reader, raise_errors=True) if accepts else reader
+        parameters = {}
+    options: Dict[str, Any] = {}
+    if "raise_errors" in parameters:
+        options["raise_errors"] = True
+    if "fields" in parameters:
+        options["fields"] = SELF_CORRECTION_READ
+    return functools.partial(reader, **options) if options else reader
 
 
 def _get_decisions(event: Dict[str, Any], path: str, _: Optional[str]) -> Dict[str, Any]:
