@@ -1216,7 +1216,7 @@
       const said = clauses.filter(Boolean);
       const sentence = said.length
         ? html`Where these calls come from, on this public demo: ${said.map((c, i) => html`${i ? '; ' : ''}${c}`)}.`
-        : html`On this public demo, calls come from the synthetic Acme fleet where it runs, ${liveReported ? "the daily live agent's real Claude Code and Codex runs, " : ''}visitors' sandboxes, the service's own probes, the demo page, or a repository connected to this stack.`;
+        : html`On this public demo, calls come from the synthetic Acme fleet where it runs, ${liveReported ? "the daily live agent's real Claude Code and Codex runs where it reports, " : ''}visitors' sandboxes, the service's own probes, the demo page, or a repository connected to this stack.`;
       const drawn = parts.filter(p => typeof p.value === 'number' && p.value > 0);
       const bar = drawn.length ? html`<div class="tf-ops-share">
           <div class="tf-ops-share-bar" role="img" aria-label="${parts.map(p => p.label + ' ' + num(p.value)).join(', ')}">${drawn.map(p => html`<span style="flex-grow:${p.value};background:${p.color}" data-tf-tip="${p.label}" data-tf-tip-value="${num(p.value)}" data-tf-tip-color="${p.color}"></span>`)}</div>

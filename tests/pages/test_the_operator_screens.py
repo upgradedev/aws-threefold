@@ -355,7 +355,7 @@ def test_the_public_demo_names_the_daily_live_agent_as_real(tmp_path: Path) -> N
 
     quiet = html.unescape(re.sub(r"<[^>]+>", "", _source_note(out["quiet"])))
     assert ("On this public demo, calls come from the synthetic Acme fleet where it runs, the daily live agent's real "
-            "Claude Code and Codex runs, visitors' sandboxes") in quiet
+            "Claude Code and Codex runs where it reports, visitors' sandboxes") in quiet
 
 
 def test_the_live_agent_s_figures_are_counts_or_are_not_shown(tmp_path: Path) -> None:
