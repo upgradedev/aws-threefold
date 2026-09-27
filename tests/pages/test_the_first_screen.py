@@ -1107,6 +1107,50 @@ def test_the_benchmark_is_pooled_from_the_snapshot_this_stack_serves(tmp_path: P
             f"against {none['done']} of {none['done_n']} with no guidance") in bench, \
         "The price is stated with the result, and read against what the agents finished with no guidance"
     assert 'href="https://example.test/prod/dashboard.html#/proof"' in out["bench"]
+    interval = re.search(r'<p class="tf-bench-note" data-bench="interval">(.*?)</p>', out["bench"], re.S)
+    assert interval and _text(interval.group(1)) == _interval_line(proof), \
+        "The pooled count is quoted with each series' own 95% interval, by family, and the tasks and repetitions behind it"
+    families = {b["family"] for b in proof["benchmarks"] if not b.get("pilot")}
+    if families == {"standard", "pressure"}:
+        assert f"By condition, the {want['series']} series pooled, standard and pressure tasks together." in bench, \
+            "The bars pool the two families, which the reports never do, so they say so"
+
+
+def _pct(value: float) -> str:
+    """A share as T.pct writes it: a whole percent, rounded half up, and <1% for a share under one percent."""
+    share = value * 100
+    return "<1%" if 0 < share < 1 else f"{int(share + 0.5)}%"
+
+
+def _interval_line(proof: dict) -> str:
+    """What the benchmark card must say under its headline, from each series' own interval in the snapshot."""
+    words = {"standard": "standard-task", "pressure": "pressure-task"}
+    intervals: dict = {}
+    tasks: dict = {"standard": [], "pressure": []}
+    reps = set()
+    for b in proof["benchmarks"]:
+        if b.get("pilot"):
+            continue
+        violation = {c["condition"]: c for c in b["conditions"]}["threefold"]["violation"]
+        intervals.setdefault(b["family"], []).append((violation["n"], violation["ci_low"], violation["ci_high"]))
+        tasks[b["family"]] += [t for t in b["tasks"] if t not in tasks[b["family"]]]
+        reps.add(violation["n"] / len(b["tasks"]))
+    (each,) = reps
+    parts = []
+    for family in ("standard", "pressure"):
+        found = intervals.get(family)
+        if not found:
+            continue
+        if len(set(found)) == 1:
+            n, low, high = found[0]
+            parts.append(f"{_pct(low)}–{_pct(high)} for {'the' if len(found) == 1 else 'each'} {words[family]} series of {n} runs")
+        else:
+            parts.append(f"within {_pct(min(x[1] for x in found))}–{_pct(max(x[2] for x in found))} for each of the {len(found)} {words[family]} series")
+    named = [family for family in ("standard", "pressure") if intervals.get(family)]
+    split = ", " + " and ".join(f"{len(tasks[f])} {f}" for f in named) if len(named) > 1 else ""
+    total = sum(len(tasks[f]) for f in named)
+    return (f"95% interval under Threefold, series by series: {'; '.join(parts)}. {total} Acme tasks{split}, "
+            f"each run {int(each)} times per condition in every series.")
 
 
 def test_a_violation_under_threefold_is_said_and_a_pilot_is_not_counted(tmp_path: Path) -> None:
@@ -1130,6 +1174,17 @@ def test_a_violation_under_threefold_is_said_and_a_pilot_is_not_counted(tmp_path
     evil = {"benchmarks": [series("<img src=x onerror=alert(1)>", 0)]}
     out = _load(tmp_path, proof="{ status: 200, body: " + json.dumps(evil) + " }")
     assert "<img" not in out["bench"] and "&lt;img" in out["bench"]
+    assert 'data-bench="interval"' not in out["bench"], "A series without its family, interval or tasks gives no interval line"
+    hostile = series("Codex", 0)
+    hostile.update(family="<img src=x onerror=alert(1)>", tasks=["a", "b", "c"])
+    hostile["conditions"][2]["violation"].update(ci_low=0, ci_high=0.2992)
+    out = _load(tmp_path, proof="{ status: 200, body: " + json.dumps({"benchmarks": [hostile]}) + " }")
+    assert "<img" not in out["bench"] and 'data-bench="interval"' not in out["bench"], "A family this page does not know gives no line"
+    known = dict(hostile, family="pressure")
+    out = _load(tmp_path, proof="{ status: 200, body: " + json.dumps({"benchmarks": [known]}) + " }")
+    assert _text(re.search(r'data-bench="interval">(.*?)</p>', out["bench"], re.S).group(1)) == (
+        "95% interval under Threefold, series by series: 0%–30% for the pressure-task series of 9 runs. "
+        "3 Acme tasks, each run 3 times per condition in every series.")
 
 
 def test_no_benchmark_result_is_shown_without_a_snapshot(tmp_path: Path) -> None:

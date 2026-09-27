@@ -288,7 +288,7 @@
     .tf-bench-big.tf-good { color: var(--tf-approved-text); }
     .tf-bench-of { font-size: 0.8125rem; line-height: 1.25rem; color: var(--tf-text-2); }
     .tf-bench p { margin: 0; font-size: 0.8125rem; line-height: 1.25rem; color: var(--tf-text-2); }
-    .tf-bench .tf-bench-price { font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-3); }
+    .tf-bench .tf-bench-price, .tf-bench .tf-bench-note { font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-3); }
     .tf-bench .tf-hbars { gap: 10px; }
     .tf-bench .tf-hbar-head > :first-child { font-family: var(--tf-font-sans); color: var(--tf-text-2); }
     .tf-bench-more { align-self: flex-start; font-size: 0.8125rem; line-height: 1.25rem; }
@@ -2649,6 +2649,7 @@
       let landed = 0;
       let scripted = false;
       const agents = [];
+      const counted = [];
       list.forEach(b => {
         if (!b || typeof b !== 'object' || b.pilot === true || !Array.isArray(b.conditions)) return;
         const found = {};
@@ -2674,9 +2675,55 @@
         });
         if (counts[2].k > 0) landed += 1;
         if (typeof b.agent === 'string' && b.agent && agents.indexOf(b.agent) === -1) agents.push(b.agent);
+        counted.push(b);
       });
       const runs = CONDITIONS.reduce((s, c) => s + sums[c.key].n, 0);
-      return { series, runs, landed, agents, sums, real: !scripted };
+      return { series, runs, landed, agents, sums, real: !scripted, counted };
+    }
+
+    // What the pooled headline is quoted with: each series' own 95% interval
+    // for Threefold, as the snapshot carries it (benchmark/report.py's
+    // Wilson interval), by task family, and the tasks and repetitions behind
+    // them. No interval is computed here: the families and agents are never
+    // pooled in the reports, so the pooled count is given beside the
+    // intervals the reports give, not with a new one of its own. Said only
+    // when every series counted names a family this page knows and carries
+    // its interval, its tasks and a whole number of repetitions of them.
+    const FAMILY_WORDS = { standard: 'standard-task', pressure: 'pressure-task' };
+    function benchmarkScope(counted) {
+      const families = {};
+      const tasks = { standard: [], pressure: [] };
+      let reps = null;
+      for (const b of counted) {
+        const word = Object.prototype.hasOwnProperty.call(FAMILY_WORDS, b.family) ? b.family : null;
+        const tf = Array.isArray(b.conditions) ? b.conditions.find(c => c && c.condition === 'threefold') : null;
+        const v = tf && tf.violation && typeof tf.violation === 'object' ? tf.violation : null;
+        const own = Array.isArray(b.tasks) ? b.tasks.filter(t => typeof t === 'string' && t) : [];
+        const n = v ? wholeNumber(v.n) : null;
+        const low = v && typeof v.ci_low === 'number' && v.ci_low >= 0 && v.ci_low <= 1 ? v.ci_low : null;
+        const high = v && typeof v.ci_high === 'number' && v.ci_high >= 0 && v.ci_high <= 1 ? v.ci_high : null;
+        const each = n && own.length ? n / own.length : null;
+        if (!word || !n || low === null || high === null || low > high || !Number.isInteger(each) || (reps !== null && each !== reps)) return '';
+        reps = each;
+        (families[word] = families[word] || []).push({ n, low, high });
+        own.forEach(t => { if (tasks[word].indexOf(t) === -1) tasks[word].push(t); });
+      }
+      const order = Object.keys(FAMILY_WORDS).filter(f => families[f]);
+      if (!order.length) return '';
+      const h = T.html;
+      // A range never breaks at its dash.
+      const range = (low, high) => h`<span class="tf-nobr">${T.pct(low)}–${T.pct(high)}</span>`;
+      const intervals = order.map((f, i) => {
+        const all = families[f];
+        const same = all.every(x => x.n === all[0].n && x.low === all[0].low && x.high === all[0].high);
+        const said = same
+          ? h`${range(all[0].low, all[0].high)} for ${all.length === 1 ? 'the' : 'each'} ${FAMILY_WORDS[f]} series of ${plural(all[0].n, 'run', 'runs')}`
+          : h`within ${range(Math.min.apply(null, all.map(x => x.low)), Math.max.apply(null, all.map(x => x.high)))} for each of the ${formatCount(all.length)} ${FAMILY_WORDS[f]} series`;
+        return h`${i ? '; ' : ''}${said}`;
+      });
+      const total = order.reduce((sum, f) => sum + tasks[f].length, 0);
+      const split = order.length > 1 ? ', ' + order.map(f => formatCount(tasks[f].length) + ' ' + f).join(' and ') : '';
+      return h`95% interval under Threefold, series by series: ${intervals}. ${plural(total, 'Acme task', 'Acme tasks')}${split}, each run ${plural(reps, 'time', 'times')} per condition in every series.`;
     }
 
     async function loadBenchmark() {
@@ -2737,19 +2784,24 @@
       // finished with no guidance at all, so the cost reads against a baseline.
       const none = totals.sums.none;
       const baseline = none.doneN ? h`, against ${none.done} of ${none.doneN} with no guidance` : '';
+      const scope = benchmarkScope(totals.counted);
+      // The bars pool the series; where they mix the two task families, the
+      // label says so, since the reports never pool them.
+      const mixed = totals.counted.some(b => b.family === 'standard') && totals.counted.some(b => b.family === 'pressure');
       T.setHtml(card, h`<div class="tf-bench-main">${head}
           <div class="tf-bench-value">
             <span class="tf-bench-big${tf.k === 0 ? ' tf-good' : ''}" data-metric="bench-threefold">${tf.k} of ${tf.n}</span>
             <span class="tf-bench-of">runs under Threefold in which a rule-breaking write landed</span>
           </div>
           <p data-bench="headline">${plural(totals.series, 'series', 'series')}, ${totals.real ? plural(totals.runs, 'real run', 'real runs') : plural(totals.runs, 'run', 'runs')} of ${agents}. ${verdictLine}</p>
+          ${scope ? h`<p class="tf-bench-note" data-bench="interval">${scope}</p>` : ''}
           ${tf.doneN ? h`<p class="tf-bench-price" data-bench="price">The price: the acceptance tests passed in ${tf.done} of those ${tf.doneN} runs under Threefold${baseline}, because a refused agent sometimes stops instead of finishing.</p>` : ''}
           <a class="tf-link tf-bench-more" href="${T.pageHref('dashboard.html#/proof')}">Each series, apart, with its evidence</a>
         </div>
         <div class="tf-bench-chart">
           <div class="tf-bench-label">
             <p class="tf-bench-label-main">Runs in which a rule-breaking write landed</p>
-            <p class="tf-bench-label-sub">${totals.series === 1 ? 'By condition.' : h`By condition, the ${plural(totals.series, 'series', 'series')} pooled.`} The benchmark calls these governed violations.</p>
+            <p class="tf-bench-label-sub">${totals.series === 1 ? 'By condition.' : h`By condition, the ${plural(totals.series, 'series', 'series')} pooled${mixed ? ', standard and pressure tasks together' : ''}.`} The benchmark calls these governed violations.</p>
           </div>
           ${bars}
         </div>`);
