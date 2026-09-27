@@ -32,6 +32,10 @@ function session(id, project, tripped) {
 """
 
 
+def text_of(markup: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", markup))
+
+
 def ops(scenario: str, tmp_path: Path) -> dict:
     return run("dashboard.html", scenario, tmp_path, before=FIXTURES + OPS)
 
@@ -792,7 +796,7 @@ def test_a_rule_says_its_sentence_once_and_each_call_what_differs(tmp_path: Path
     assert "src/acme/domain/order_1.py' imports" not in words, "The file is on the row already"
     assert "Command 'cat .env' reaches a protected path or credential store" in words, "A lone call's reason is shown whole"
     assert out["order"] == ["Acme-Checkout", "Acme-Ledger", "Acme-Ledger"]
-    assert "4 calls waiting, under 2 rules in 2 projects" in out["count"]
+    assert "4 calls waiting in the last 7 days, under 2 rules in 2 projects" in out["count"]
     assert page.count('data-action="label-group"') == 2, "Bulk labels only where a project holds more than one call"
 
 
@@ -921,6 +925,7 @@ def test_a_visitor_is_told_which_groups_they_may_label(tmp_path: Path) -> None:
   const record = (u, i, body) => { sent.push(u.pathname.replace(/^\/prod\/api\/projects\//, '')); return { status: 200, body: { updated: body.items.length, skipped: [] } }; };
   answer = contract({
     '/api/auth/whoami': PUBLIC,
+    '/api/projects': { status: 200, body: { projects: PROJECTS.projects.concat([Object.assign({}, PROJECTS.projects[1], { project: 'Acme-Sandbox-0a1b2c3d', source: 'sandbox' })]) } },
     '/api/decisions': { status: 200, body: { items: [flagged(1, 'Acme-Checkout'), flagged(2, 'Acme-Checkout'), flagged(3, 'Acme-Sandbox-0a1b2c3d')], next_cursor: null } },
     'POST /api/projects/Acme-Checkout/reviews': record,
     'POST /api/projects/Acme-Sandbox-0a1b2c3d/reviews': record
@@ -953,6 +958,194 @@ def test_a_visitor_is_told_which_groups_they_may_label(tmp_path: Path) -> None:
     assert "is the operator's, so nothing was sent" in out["refused"] and out["stillThere"], "C on a project a visitor may not label sends nothing and removes nothing"
     assert out["sent"] == ["Acme-Sandbox-0a1b2c3d/reviews"]
     assert "tf-ops-visitor" not in out["operator"] and "Operator only" not in out["operator"]
+
+
+def test_the_queue_counts_what_the_overview_counts(tmp_path: Path) -> None:
+    """The queue reads the same week the overview does, and leaves out what the overview leaves out.
+
+    A review of the live site found the overview saying 81 calls waited and
+    the queue, over 30 days, 156: most of the difference was sandboxes whose
+    stage had expired, which the overview and the project list no longer
+    count. Other visitors' sandboxes, each with the same seeded calls, now
+    fold into one line, and the reader's own sandbox leads.
+    """
+    out = ops(
+        QUEUE
+        + r"""
+  const live = ['Acme-Sandbox-aaaaaaa1', 'Acme-Sandbox-aaaaaaa2', 'Acme-Sandbox-aaaaaaa3'];
+  store['threefold-try'] = JSON.stringify({ project: 'Acme-Sandbox-aaaaaaa1', at: Date.now() });
+  answer = contract({
+    '/api/auth/whoami': PUBLIC,
+    '/api/projects': { status: 200, body: { projects: PROJECTS.projects.concat(['Acme-Checkout'].concat(live).map(project => Object.assign({}, PROJECTS.projects[1], { project }))) } },
+    '/api/decisions': { status: 200, body: { items: [
+      flagged(1, 'Acme-Checkout'), flagged(2, 'Acme-Checkout'), flagged(3, 'Acme-Sandbox-aaaaaaa1'), flagged(4, 'Acme-Sandbox-aaaaaaa2'),
+      flagged(5, 'Acme-Sandbox-aaaaaaa3'), flagged(6, 'Acme-Sandbox-dead0001'), flagged(7, 'Acme-Sandbox-dead0001')
+    ], next_cursor: null } }
+  });
+  Threefold.whoami(true);
+  await visit('#/review');
+  out.read = calls.filter(c => c.url.indexOf('/api/decisions') !== -1).pop().url;
+  out.order = groupOrder();
+  out.text = text(view());
+  out.view = view();
+  await click('unfold'); await tick();
+  out.unfolded = groupOrder();
+""",
+        tmp_path,
+    )
+    assert "days=7" in out["read"], "The queue reads the same week as every other screen"
+    words = out["text"]
+    assert "5 calls waiting in the last 7 days" in words
+    assert "2 of them in 2 visitors' sandboxes, folded below" in words
+    assert "Left out: 2 calls from visitors' sandboxes that have expired, which the overview no longer counts either." in words
+    assert "Acme-Sandbox-dead0001" not in out["view"], "An expired sandbox's calls are not in the queue"
+    assert out["order"] == ["Acme-Sandbox-aaaaaaa1", "Acme-Checkout"], "The reader's own sandbox leads; the others are folded"
+    assert "Your own sandbox comes first: you can label its calls." in words
+    assert 'data-fold="sandboxes"' in out["view"] and "Show them" in words
+    assert "2 calls waiting in 2 sandboxes, under 1 rule." in words
+    assert out["unfolded"] == ["Acme-Sandbox-aaaaaaa1", "Acme-Checkout", "Acme-Sandbox-aaaaaaa2", "Acme-Sandbox-aaaaaaa3"],         "Shown, the folded sandboxes take the place of their line, and the groups above keep theirs"
+
+
+def test_a_name_with_no_call_and_no_configuration_is_not_a_project_to_promote(tmp_path: Path) -> None:
+    """A mistyped or old name drew as a project in Observe, every rule Quiet, with Promote on offer."""
+    out = ops(
+        r"""
+  const detail = detailBody('observe', RULES.map(r => Object.assign({}, r, { would_refuse: 0, correct: 0, false_alarms: 0, unreviewed: 0, state: 'quiet' })));
+  detail.project = 'Acme-Nope-Missing';
+  detail.config = null;
+  detail.readiness.summary = Object.assign({}, detail.readiness.summary, { calls_observed: 0, days_observed: 0, would_have_refused: 0, reviewed: 0 });
+  answer = contract({ '/api/projects/Acme-Nope-Missing': { status: 200, body: detail }, '/api/decisions': { status: 200, body: { items: [], next_cursor: null } } });
+  await visit('#/projects/Acme-Nope-Missing');
+  await tick();
+  out.view = view();
+  // The same readiness with a call from a page in the window: a project.
+  answer = contract({ '/api/projects/Acme-Nope-Missing': { status: 200, body: detail }, '/api/decisions': { status: 200, body: { items: [row(1, { project_name: 'Acme-Nope-Missing', origin: 'page', agent: 'page' })], next_cursor: null } } });
+  await visit('#/projects/Acme-Nope-Missing?days=7');
+  await tick();
+  out.called = view();
+""",
+        tmp_path,
+    )
+    page = out["view"]
+    assert "No call from this project in the last 14 days" in page
+    assert "Connect it, or check the name." in page
+    assert 'data-action="promote-open"' not in page, "There is nothing to promote"
+    assert 'href="#/connect"' in page and 'href="#/projects"' in page
+    assert "No call from this project" not in out["called"] and 'data-action="promote-open"' in out["called"], "A project with calls is drawn as one"
+
+
+def test_a_visitor_sees_the_stage_and_label_controls_off_where_only_the_operator_may_act(tmp_path: Path) -> None:
+    """Promote and the labels are drawn off, with why, before anything is pressed.
+
+    On a fleet project an anonymous visitor could open the promotion dialog,
+    press Promote, and only then read that it needs the operator; the Review
+    screen already said so up front.
+    """
+    out = ops(
+        r"""
+  answer = contract({ '/api/auth/whoami': PUBLIC });
+  Threefold.whoami(true);
+  await visit('#/projects/Acme-Billing');
+  out.project = view();
+  await click('promote-open'); await tick();
+  out.dialog = el('modal-root').innerHTML;
+  await visit('#/call?timestamp=t&verdict_id=VERDICT-1');
+  out.call = view();
+  answer = contract({ '/api/auth/whoami': PRIVATE });
+  Threefold.whoami(true);
+  await visit('#/projects/Acme-Billing');
+  out.operator = view();
+""",
+        tmp_path,
+    )
+    project = out["project"]
+    assert re.search(r'data-action="promote-open"[^>]*disabled', project), "Promote is off for a visitor"
+    assert "Operator only" in project and "Sign in to promote" in project and 'href="#/try"' in project
+    assert "tf-dialog" not in out["dialog"], "The dialog does not open for a visitor"
+    call = out["call"]
+    assert re.search(r'data-action="call-label" data-label="correct"[^>]*disabled', call)
+    assert "Sign in to label" in call and "Operator only" in call
+    assert not re.search(r'data-action="promote-open"[^>]*disabled', out["operator"]) and "Operator only" not in out["operator"]
+
+
+def test_an_observe_project_says_why_it_still_shows_refused_calls(tmp_path: Path) -> None:
+    """A project in Observe refuses no agent's call; its refused calls say how they arrived.
+
+    The screen said "refuse nothing" beside a rule that had refused 74 calls,
+    every one from the demo page, which always enforces.
+    """
+    out = ops(
+        r"""
+  const rules = [Object.assign({}, RULES[0], { mode_now: 'observe', refused: 3 })].concat(RULES.slice(1));
+  answer = contract({
+    '/api/projects/Acme-Billing': { status: 200, body: detailBody('observe', rules) },
+    '/api/decisions': u => u.searchParams.get('kind') === 'refused'
+      ? { status: 200, body: { items: [1, 2, 3].map(i => row(i, { status: 'BLOCKED_BOUNDARY_VIOLATION', origin: 'page', agent: 'page', observed_rules: [], observed_rule: '' })), next_cursor: null } }
+      : { status: 200, body: { items: [row(4)], next_cursor: null } }
+  });
+  await visit('#/projects/Acme-Billing');
+  await tick();
+  out.text = text(view());
+  answer = contract();
+  await visit('#/projects');
+  out.projects = text(view());
+""",
+        tmp_path,
+    )
+    words = re.sub(r"\s+([,.:)])", r"\1", out["text"])
+    assert "In Observe: agents' calls are recorded, never refused" in words
+    assert "3 calls were refused here in the last 14 days all the same: all 3 from the demo page, which always enforces." in words
+    assert "3 refused (all 3 from the demo page)" in words
+    projects = out["projects"]
+    assert "agents' calls recorded, never refused" in projects
+    assert "Calls from the demo page always enforce, and a credential is always refused, so a project in Observe can still show refused calls." in projects
+
+
+def test_the_service_s_probes_are_labelled_synthetic_where_the_stack_names_them(tmp_path: Path) -> None:
+    """A probe project is a synthetic source of its own: named so, drawn so, and not work for the operator."""
+    out = ops(
+        r"""
+  const sources = { fleet: { calls: 3210, projects: 6 }, sandbox: { calls: 96, projects: 8 }, probe: { calls: 40, projects: 1 }, other: { calls: 41, projects: 2 } };
+  const body = Object.assign(overviewBody(), { sources });
+  body.by_project = body.by_project.concat([{ project: 'Acme-Probe', source: 'probe', stage: 'observe', configured: false, calls: 40, refused: 30, would_refuse: 36, needs_review: 36, last_seen: NOW }]);
+  answer = contract({ '/api/auth/whoami': PUBLIC, '/api/overview': { status: 200, body } });
+  Threefold.whoami(true);
+  await visit('#/overview?days=7');
+  await tick();
+  out.view = view();
+""",
+        tmp_path,
+    )
+    page = out["view"]
+    words = html.unescape(re.sub(r"<[^>]+>", "", page))
+    assert "40 from the service's own probes, synthetic" in words
+    assert "41 from other callers: the demo page, or a repository connected to this stack" in words, "Other no longer claims the probes"
+    assert "Probes, synthetic" in words, "The legend names the probes"
+    reviews = page.split('data-slot="reviews"')[1].split("</article>")[0]
+    assert "Acme-Probe" not in reviews and "Left out: 36 calls in the service's own probes, which are synthetic." in html.unescape(re.sub(r"<[^>]+>", "", reviews))
+    table = page.split("By project")[1]
+    assert 'data-src="probe"' in table and "Probe, synthetic" in table
+    assert table.index("Acme-Probe") > table.index("Acme-Catalog"), "The probe comes after the projects someone works in"
+
+
+def test_a_reason_the_ledger_cut_says_so_and_the_record_names_its_extra_fields(tmp_path: Path) -> None:
+    """A reason cut at 240 characters ends in an ellipsis and a note, not mid-word; repeated fields are not listed twice."""
+    out = ops(
+        r"""
+  const cut = ('The rule found an import ' + 'x'.repeat(300)).slice(0, 240);
+  const decision = Object.assign({}, DECISION, { decision: row(1, { observed_reason: cut, category: 'LAYERING', model: 'default', surprise: 'kept' }) });
+  answer = contract({ '/api/decision': { status: 200, body: decision } });
+  await visit('#/call?timestamp=t&verdict_id=VERDICT-1');
+  out.view = view();
+""",
+        tmp_path,
+    )
+    page = out["view"]
+    assert page.count("cut at 240 characters by the ledger") == 2, "The hero and the record each say the reason was cut"
+    assert "xxxx…" in page
+    assert "Model default" in text_of(page), "A field the list does not name, but the page knows, is named"
+    assert ">category</dt>" not in page.replace("\n", "") and ">observed_rule</dt>" not in page.replace("\n", ""), "A field that repeats a listed one is left out"
+    assert "Other fields the ledger returned (1)" in page and "surprise" in page
 
 
 # ---------------------------------------------------------------------- proof

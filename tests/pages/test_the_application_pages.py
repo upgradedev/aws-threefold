@@ -570,7 +570,7 @@ def test_the_project_screen_explains_the_stage_and_each_rules_readiness(tmp_path
         tmp_path,
     )
     observe = out["observe"]
-    assert "In Observe: the rules record, and refuse nothing" in observe
+    assert "In Observe: agents&#039; calls are recorded, never refused" in observe or "In Observe: agents' calls are recorded, never refused" in observe
     assert "a call carrying a credential, which the hook refuses on the machine" in observe
     for chip in (">Ready<", ">Quiet<", ">Noisy<"):
         assert chip in observe
@@ -688,7 +688,7 @@ def test_the_review_queue_groups_calls_by_project_and_rule(tmp_path: Path) -> No
 """,
         tmp_path,
     )
-    assert out["read"] == "https://example.test/prod/api/decisions?kind=observed&review=unreviewed&days=30&limit=200"
+    assert out["read"] == "https://example.test/prod/api/decisions?kind=observed&review=unreviewed&days=7&limit=200"
     page = out["view"]
     assert page.count("<section") == 2, "Two groups: Acme-Billing under one rule, Acme-Catalog under another"
     assert "All 2 correct" in page, "A group of several calls can be labelled at once"
