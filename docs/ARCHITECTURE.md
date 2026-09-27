@@ -38,7 +38,7 @@ flowchart LR
     api["API Gateway HTTP API<br/>stage prod · throttle · access logs"]
     lambda["One Lambda function<br/>Python 3.11 · arm64 · X-Ray<br/>reserved concurrency"]
     ddb[("DynamoDB, one table<br/>TTL · point-in-time recovery")]
-    cw["CloudWatch<br/>logs · metric filters · 10 alarms<br/>dashboard · SNS topic"]
+    cw["CloudWatch<br/>logs · metric filters · 11 alarms<br/>dashboard · SNS topic"]
     ev[("S3 evidence bucket<br/>nothing writes to it")]
     api --> lambda
     lambda --> ddb
@@ -68,7 +68,7 @@ viewer or hook ──► CloudFront (WAF, security headers)            us-east-1
                      (throttle 100 rps, burst 200, per route; access logs)
                                                           │
                                                           ▼
-                   One Lambda (python3.11, arm64, 256 MB, 15 s,
+                   One Lambda (python3.11, arm64, 1,024 MB, 15 s,
                      X-Ray active, reserved concurrency 25)
                      ├─► DynamoDB single table (TTL, PITR)
                      ├─► Bedrock Converse, Haiku 4.5 (pages and drafts only)
@@ -432,9 +432,13 @@ metadata, in pages of at least 100 items and at most 50 pages per request.
   the same records from each stack's own log group into `Threefold/<stack name>`:
   `ToolCallsEvaluated`, `VerdictApproved`, `CircuitBreakerTripped`, `LatencyMs`,
   `CurrentSessionCostUSD`.
-- **Alarms (10).** Function errors, throttles and p95 duration; API 5xx rate and
-  4xx rate; table throttled requests and system errors; calls into halted
-  sessions; average evaluation latency; call volume. Each notifies the SNS topic
+- **Alarms (11).** Function errors, throttles and an invocation over 12 seconds,
+  near the 15-second timeout; API p95 latency, 5xx rate and 4xx rate; table
+  throttled requests and system errors; calls into halted sessions; average
+  evaluation latency; call volume. The slow-call alarm reads API Gateway's
+  latency, what an HTTP caller waits for, so the demo fleet's scheduled tick,
+  which invokes the function directly, is not in it; the near-timeout alarm
+  sees a tick that runs long. Each notifies the SNS topic
   `<stack>-alarms` when it fires and when it clears, and treats missing data as
   not breaching. `AlarmEmail` subscribes an address (NoEcho); empty, the alarms
   still show their state in the console.
