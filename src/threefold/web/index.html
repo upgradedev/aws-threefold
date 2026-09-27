@@ -573,7 +573,7 @@
         <h1 id="hero-promise" class="tf-hero-title">Stop bad agent writes <em>before they reach your code.</em></h1>
         <p id="hero-sentence" class="tf-hero-lede">Deterministic gates on AWS judge each write and command from Claude Code, Codex or Antigravity, and your repos observe before they enforce.</p>
         <div id="hero-actions" class="tf-hero-actions">
-          <a id="hero-try" href="dashboard.html#/try" class="tf-btn tf-btn-primary tf-btn-lg"><span data-tf-icon="play"></span>Watch it stop a bad write — 60 s</a>
+          <a id="hero-try" href="dashboard.html#/try" class="tf-btn tf-btn-primary tf-btn-lg"><span data-tf-icon="play"></span>Try the two-stage rollout — 60 s</a>
           <a id="hero-dashboard" href="dashboard.html#/overview" class="tf-btn tf-btn-lg"><span data-tf-icon="grid"></span>Open the live dashboard</a>
           <a id="hero-connect" href="dashboard.html#/connect" class="tf-hero-link">Connect your repository<span data-tf-icon="arrowright"></span></a>
         </div>
@@ -2381,7 +2381,7 @@
         // added the first call since, and it is counted from the next visit.
         proofState(strip, 'sparkles', 'Nothing judged here yet',
           'When this page asked, this stack had judged no call in the last ' + plural(days, 'day', 'days') + ', so there was nothing to count.',
-          h`<a class="tf-link" href="${T.pageHref('dashboard.html#/try')}">Watch it stop a bad write, step by step</a>`);
+          h`<a class="tf-link" href="${T.pageHref('dashboard.html#/try')}">Try the two-stage rollout, step by step</a>`);
         return;
       }
       const rows = Array.isArray(data.series) ? data.series.filter(r => r && typeof r === 'object' && typeof r.day === 'string') : [];

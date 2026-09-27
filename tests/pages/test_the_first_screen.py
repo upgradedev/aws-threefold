@@ -1,8 +1,8 @@
 """The first screen says what Threefold is, shows it working, and proves it, in that order.
 
 A judge who opens the public URL meets the hero before anything else: one
-promise line under twelve words, one sentence of how, "Watch it stop a bad
-write — 60 s", "Open the live dashboard" and a quiet "Connect your
+promise line under twelve words, one sentence of how, "Try the two-stage
+rollout — 60 s", "Open the live dashboard" and a quiet "Connect your
 repository", and beside them the product's core moment. That moment is one
 proposed write, the boundary write RECORDED.boundary was recorded from, asked
 of this stack through the route a hook asks: the answer is the stack's own when
@@ -37,7 +37,7 @@ SENTENCE = (
 )
 SCOPE = "A refusal is measured to stop the write in Claude Code and Antigravity, and in Codex once, over its patch tool only."
 ACTIONS = [
-    ("hero-try", "dashboard.html#/try", "Watch it stop a bad write — 60 s"),
+    ("hero-try", "dashboard.html#/try", "Try the two-stage rollout — 60 s"),
     ("hero-dashboard", "dashboard.html#/overview", "Open the live dashboard"),
     ("hero-connect", "dashboard.html#/connect", "Connect your repository"),
 ]
@@ -199,7 +199,7 @@ def test_the_three_actions_come_next_each_one_click_in_this_order() -> None:
     found = re.findall(r'<a id="([^"]+)" href="([^"]+)" class="([^"]*)"[^>]*>(.*?)</a>', actions, re.S)
     assert [(ident, href, _text(label)) for ident, href, _, label in found] == ACTIONS
     classes = [set(cls.split()) for _, _, cls, _ in found]
-    assert {"tf-btn", "tf-btn-primary"} <= classes[0], "Watching it work is the primary action"
+    assert {"tf-btn", "tf-btn-primary"} <= classes[0], "Trying the two-stage rollout is the primary action"
     assert "tf-btn" in classes[1] and "tf-btn-primary" not in classes[1], "The dashboard is the secondary one"
     assert "tf-btn" not in classes[2] and "tf-hero-link" in classes[2], "Connecting is a quiet text link"
 
