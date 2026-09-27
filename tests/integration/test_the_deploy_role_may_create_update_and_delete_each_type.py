@@ -10,7 +10,11 @@ the Serverless transform's types expanded, must have a row below naming what
 creates, updates and deletes it, and the policy must hold an Allow statement
 for each of those actions, on "*" or on that service's own ARNs. A resource
 type added to the template fails here until someone has thought about all
-three. Nothing calls AWS.
+three. It does not ask which of the service's resources a grant names, or
+whether its condition holds, so a grant on another bucket, or one whose
+condition never holds, meets a row here; test_the_deploy_role_covers_the_template.py
+checks each action against the ARN and request this stack's resource will
+have. Nothing calls AWS.
 """
 from __future__ import annotations
 
@@ -137,7 +141,10 @@ def _matches(pattern: str, action: str) -> bool:
 
 
 def _granted(action: str) -> bool:
-    """Some Allow statement lists the action, on '*' or on ARNs of the action's own service."""
+    """Some Allow statement lists the action, on '*' or on ARNs of the action's own service.
+
+    Which ARNs, and the statement's Condition, are the fine-grained test's to check.
+    """
     service = action.split(":")[0]
     for statement in POLICY["Statement"]:
         if statement["Effect"] != "Allow":
