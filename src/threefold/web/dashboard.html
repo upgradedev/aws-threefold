@@ -4199,15 +4199,8 @@
     const TRY_CSS = `
 .tf-try { display: flex; flex-direction: column; gap: 16px; }
 .tf-try-side { display: contents; }
-.tf-try-head { min-width: 0; }
-.tf-try-title { margin: 0; font: 650 1.125rem/1.5rem var(--tf-font-sans); letter-spacing: -0.01em; color: var(--tf-text); outline: none; }
-.tf-try-title:focus-visible, .tf-try-h2:focus-visible { outline: none; }
-.tf-try-head .tf-eyebrow { margin-bottom: 6px; }
-.tf-try-lede { display: none; margin: 8px 0 0; font-size: var(--tf-fs-small); line-height: var(--tf-lh-small); color: var(--tf-text-2); }
-.tf-try-lede-short { margin: 4px 0 0; font-size: 0.8125rem; line-height: 1.25rem; color: var(--tf-text-2); }
-.tf-try-tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 0; }
+.tf-try-h2:focus-visible { outline: none; }
 .tf-try .tf-try-restart { display: none; }
-@media (min-width: 640px) { .tf-try-lede { display: block; } .tf-try-lede-short { display: none; } }
 
 .tf-try-rail { position: sticky; top: var(--tf-header-h); z-index: 30; margin: 0 calc(-1 * var(--tf-gutter)); padding: 10px var(--tf-gutter);
   background: color-mix(in srgb, var(--tf-bg) 90%, transparent); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
@@ -4226,6 +4219,7 @@
 
 @media (min-width: 1024px) {
   .tf-try { display: grid; grid-template-columns: 17rem minmax(0, 1fr); gap: 32px; align-items: start; }
+  .tf-try[data-closed="true"] { grid-template-columns: minmax(0, 1fr); }
   .tf-try-side { display: flex; flex-direction: column; gap: 28px; position: sticky; top: calc(var(--tf-header-h) + 24px); }
   .tf-try-rail { position: static; margin: 0; padding: 0; background: none; -webkit-backdrop-filter: none; backdrop-filter: none; border: 0; }
   .tf-try-steps { flex-direction: column; align-items: stretch; gap: 0; }
@@ -4973,18 +4967,23 @@
         </div>`;
       }
 
+      // On a private stack no step can be taken, so no step is drawn.
+      function closedHere() { return !!(state.who && state.who.reads_public === false); }
+
+      // The design system's page head, as every other screen wears it, so
+      // the title stands where it stands there; the steps and the way back
+      // to a new sandbox are the column beside the stage.
+      function head() {
+        return pageTitle('Try the two-stage rollout',
+          'About two minutes on the public demo, from a sandbox of your own to a real refusal.',
+          closedHere() ? null : html`<span class="tf-chip tf-chip-sky">${T.icon('flask', 13)}Synthetic sandbox</span><span class="tf-chip tf-chip-gray">${T.icon('lock', 13)}No account</span>`,
+          html`<p class="tf-eyebrow">${T.icon('play', 16)}The two-minute walkthrough</p>`);
+      }
+
       function side() {
-        // On a private stack no step can be taken, so no step is drawn as current.
-        const closed = !!(state.who && state.who.reads_public === false);
+        if (closedHere()) return '';
         return html`<div class="tf-try-side">
-          <div class="tf-try-head">
-            <p class="tf-eyebrow">${T.icon('play', 16)}The two-minute walkthrough</p>
-            <h1 id="view-title" tabindex="-1" class="tf-try-title">Try the two-stage rollout</h1>
-            <p class="tf-try-lede">About two minutes on the public demo, from a sandbox of your own to a real refusal.</p>
-            <p class="tf-try-lede-short">Watch in Observe, then promote to Enforce.</p>
-            ${closed ? '' : html`<p class="tf-try-tags"><span class="tf-chip tf-chip-sky">${T.icon('flask', 13)}Synthetic sandbox</span><span class="tf-chip tf-chip-gray">${T.icon('lock', 13)}No account</span></p>`}
-          </div>
-          ${closed ? '' : rail()}
+          ${rail()}
           ${state.project && state.step > 1 ? html`<button type="button" class="tf-link-btn tf-try-restart" data-action="try-restart">${T.icon('refresh', 14)}Start again with a new sandbox</button>` : ''}
         </div>`;
       }
@@ -5785,7 +5784,7 @@
         const play = state.play || {};
         state.play = {};
         const s = screen(play);
-        ctx.render(html`<div class="tf-try${play.enter ? ' tf-try-entering' : ''}" data-step="${state.step}">
+        ctx.render(html`${head()}<div class="tf-try${play.enter ? ' tf-try-entering' : ''}" data-step="${state.step}"${closedHere() ? raw(' data-closed="true"') : ''}>
           ${side()}
           <section id="try-stage" class="tf-card tf-try-stage${play.enter ? ' tf-try-enter' : ''}" data-tone="${s.tone || ''}" aria-labelledby="try-step-title">
             <header class="tf-try-stage-head">

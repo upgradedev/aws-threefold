@@ -5,7 +5,9 @@ dashboard's screens, a 40 px one under an eyebrow on the others, and the
 navigation a few pixels apart, because the dashboard drew a header of its own.
 Every page now wears the design system's shell and page head, so the brand, the
 navigation's mount and the title are measured here in a real browser, at a
-desk's width and a phone's, and must be where they are on every page.
+desk's width and a phone's, and must be where they are on every page. The
+walkthrough (#/try) kept a small title of its own in its column of steps until
+a second review found the title still jumping there; it wears the same head.
 
 These open the pages as the stack serves them in headless Chrome, Chromium or
 Edge through _headless.py, with no network, and skip where none is installed.
@@ -30,6 +32,7 @@ PAGES = [
     ("dashboard.html", "#/review"),
     ("dashboard.html", "#/projects/Acme-Billing"),
     ("dashboard.html", "#/proof"),
+    ("dashboard.html", "#/try"),
     ("rules.html", ""),
     ("sessions.html", ""),
     ("connect.html", ""),
