@@ -398,7 +398,13 @@ behaves the same under any setting (`application/projects.py`, `stage_applies`).
 Each container holds a project's stage for `RULES_REFRESH_SECONDS` (30 s) before
 reading it again, so a promotion or a demotion applies at once on the container
 that handled it and within 30 seconds on every other warm container; a call
-landing elsewhere in that window is judged under the old stage.
+landing elsewhere in that window is judged under the old stage. A visitor's
+sandbox is the exception: no container holds its stage, which is read on every
+call (`_reads_every_time` in `application/evaluator.py`). Every read of a stage
+is strongly consistent (`load_project_config` in
+`infrastructure/dynamo_repo.py`), so a sandbox's call that arrives after a
+promotion or a demotion has been answered is judged under the new stage on any
+container.
 The request's `hook_mode` is recorded on the ledger row and plays no part in
 choosing the stage, so a machine in `enforce` mode is refused only where the
 project enforces. The last step of the `#/try` walkthrough sends its call in a

@@ -13,6 +13,8 @@ Names are synthetic, as the clean-room rule requires.
 """
 from __future__ import annotations
 
+import copy
+
 import pytest
 
 from threefold.application import evaluator as evaluator_module
@@ -20,7 +22,7 @@ from threefold.application import projects as stages
 from threefold.application import sandbox as sandbox_module
 from threefold.application.dtos import ToolCallRequestDTO
 from threefold.application.evaluator import GovernanceEvaluator
-from threefold.infrastructure.dynamo_repo import DynamoDBSessionRepository
+from threefold.infrastructure.dynamo_repo import DECISION_PARTITION, PROJECT_CONFIG_PREFIX, DynamoDBSessionRepository
 
 PROJECT = "Acme-Stage"
 DOMAIN_WRITE = {"file_path": "src/acme/domain/order.py", "content": "import boto3\n"}
@@ -423,6 +425,98 @@ def test_a_sandbox_whose_read_fails_keeps_the_stage_held(observe_default, no_int
     repo.failing = True
     verdict = evaluator.evaluate_tool_call(_walkthrough_call("try-flaky", name))
     assert (verdict.status, verdict.project_stage) == ("BLOCKED_BOUNDARY_VIOLATION", "enforce")
+
+
+# ---------------------------------------------------------------- a replica one write behind
+
+
+class _ReplicaBehind:
+    """A table whose eventually consistent reads of a stage answer from a replica one write behind.
+
+    DynamoDB acknowledges a write before every replica holds it, and a GetItem
+    without ConsistentRead may be answered by one that does not yet: with the
+    copy from before the write, or with nothing for an item just made. Here
+    that replica never catches up. Only a stage's own partition lags, so no
+    other read in the test changes; everything else answers as written.
+    """
+
+    def __init__(self) -> None:
+        self.items: dict = {}
+        self.behind: dict = {}
+        self.stage_reads: list = []
+
+    def put_item(self, Item, **_):  # noqa: N803 - boto3 spells it this way
+        key = (Item["PK"], Item["SK"])
+        self.behind[key] = self.items.get(key)
+        self.items[key] = copy.deepcopy(Item)
+
+    def get_item(self, Key, ConsistentRead=False, **_):  # noqa: N803
+        key = (Key["PK"], Key["SK"])
+        found = self.items.get(key)
+        if key[0].startswith(PROJECT_CONFIG_PREFIX):
+            self.stage_reads.append(ConsistentRead)
+            if not ConsistentRead:
+                found = self.behind.get(key)
+        return {"Item": copy.deepcopy(found)} if found else {}
+
+    def update_item(self, **_):
+        return {}
+
+    def stage_item(self, name: str) -> dict:
+        return self.items[(f"{PROJECT_CONFIG_PREFIX}{name}", "METADATA")]
+
+    def decisions(self, name: str) -> list:
+        return [
+            item for (partition, _), item in self.items.items()
+            if partition.startswith(DECISION_PARTITION) and item.get("project_name") == name
+        ]
+
+
+def _container(table: _ReplicaBehind) -> GovernanceEvaluator:
+    """A Lambda container: a repository and a memory of its own, on the table every container shares."""
+    resource = type("Resource", (), {"Table": lambda self, _name: table})()
+    return GovernanceEvaluator(session_repo=DynamoDBSessionRepository(boto3_resource=resource))
+
+
+def test_a_sandbox_is_judged_on_the_last_write_even_where_a_replica_is_behind(monkeypatch, no_interval_ends) -> None:
+    """The stage just saved, on this container or another, is the stage a sandbox's call is judged under.
+
+    On a stack whose default stage is enforce, a read that missed the item
+    just made would seed the sandbox under Enforce. A read that missed the
+    promotion would approve the walkthrough's call under Observe, on the
+    container that took the promotion as much as on any other, and a
+    promotion or demotion that read an older copy would write it back over
+    the newer one. Every read of a stage is strongly consistent, and that is
+    all that rules these out.
+    """
+    monkeypatch.setenv("DEFAULT_HOOK_STAGE", "enforce")
+    table = _ReplicaBehind()
+    took_it, elsewhere = _container(table), _container(table)
+    name = sandbox_module.create_sandbox(took_it)["project"]
+
+    seeded = table.decisions(name)
+    assert len(seeded) == len(sandbox_module.SEEDED_CALLS)
+    assert {row["stage"] for row in seeded} == {"observe"}, "Seeded in Observe, although the stack's default enforces"
+    before = elsewhere.evaluate_tool_call(_walkthrough_call("try-replica-before", name))
+    assert (before.status, before.project_stage) == ("APPROVED", "observe")
+
+    _promote(took_it, name, ["python-domain-stays-pure"])
+    assert table.stage_item(name)["sandbox"] is True, "The promotion changed the sandbox's copy, not a missing one"
+    here = took_it.evaluate_tool_call(_walkthrough_call("try-replica-here", name))
+    assert (here.status, here.project_stage) == ("BLOCKED_BOUNDARY_VIOLATION", "enforce"), (
+        "The container that took the promotion judges under it"
+    )
+    there = elsewhere.evaluate_tool_call(_walkthrough_call("try-replica-there", name))
+    assert (there.status, there.project_stage) == ("BLOCKED_BOUNDARY_VIOLATION", "enforce")
+
+    _demote(took_it, name)
+    assert [entry["action"] for entry in table.stage_item(name)["history"]] == ["promote", "demote"]
+    again = elsewhere.evaluate_tool_call(_walkthrough_call("try-replica-demoted", name))
+    assert (again.status, again.project_stage) == ("APPROVED", "observe")
+
+    assert table.stage_reads and all(read is True for read in table.stage_reads), "Every read of a stage is consistent"
+    behind = table.get_item(Key={"PK": f"{PROJECT_CONFIG_PREFIX}{name}", "SK": "METADATA"})["Item"]
+    assert behind["stage"] == "enforce", "The replica is a write behind, so a read that did not ask would be wrong"
 
 
 # ---------------------------------------------------------------- the hook's mode
