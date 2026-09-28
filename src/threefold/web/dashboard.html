@@ -1806,7 +1806,7 @@
             <div class="tf-card tf-tile"><span class="tf-tile-label">${T.icon('folder', 16)}Projects</span><span class="tf-tile-value" data-metric="projects">${num(rows.length)}</span><span class="tf-tile-sub">seen in the last 7 days</span></div>
             <div class="tf-card tf-tile"><span class="tf-tile-label">${T.icon('eye', 16)}In Observe</span><span class="tf-tile-value">${num(observe)}</span><span class="tf-tile-sub">agents' calls recorded, never refused</span></div>
             <div class="tf-card tf-tile"><span class="tf-tile-label">${T.icon('shield', 16)}In Enforce</span><span class="tf-tile-value">${num(enforce)}</span><span class="tf-tile-sub">the rules in force refuse</span></div>
-            <a class="tf-card tf-card-link tf-tile" href="${reviewHref()}"><span class="tf-tile-label">${T.icon('inbox', 16)}Waiting for a label</span><span class="tf-tile-value">${num(waiting)}</span><span class="tf-tile-sub">${waiting ? 'across ' + plural(rows.filter(p => (p.needs_review || 0) > 0).length, 'project') : 'nothing to review'}</span></a>
+            <a class="tf-card tf-card-link tf-tile" href="${reviewHref({ days: 7 })}"><span class="tf-tile-label">${T.icon('inbox', 16)}Waiting for a label</span><span class="tf-tile-value">${num(waiting)}</span><span class="tf-tile-sub">${waiting ? 'across ' + plural(rows.filter(p => (p.needs_review || 0) > 0).length, 'project') : 'nothing to review'}</span></a>
           </div>` : '';
         if (!rows.length) {
           ctx.render(html`${pageTitle('Projects', sub)}
