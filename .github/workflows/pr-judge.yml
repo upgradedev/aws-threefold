@@ -1,0 +1,45 @@
+name: Judge the diff
+
+# The merge gate. The hook governs the machine it is installed on; this check
+# governs the merge: every added or changed text file in the pull request is
+# judged through the deployed service, and the check fails when a rule fires
+# on one. A hook nobody installed cannot be bypassed here, because there is no
+# hook: a cloud agent's pull request is judged exactly like a local one's.
+#
+# Wiring it as a required check is what makes it load-bearing: branch
+# protection on main names this check, without requiring pull requests, so
+# direct pushes keep working and every pull request is judged. See
+# docs/RUNBOOK.md section 12.
+#
+# Keyless and model-free: evaluate needs no key on the public stack, and the
+# judge sends explain=false, so no Bedrock call is made. The origin URL, not
+# the edge: shared runners must not depend on the WAF's per-address luck.
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  judge:
+    name: Judge the diff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Judge the diff through Threefold
+        run: >
+          python scripts/judge_pr.py
+          --endpoint https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/
+          --project Acme-Threefold
+          --base origin/${{ github.base_ref }}
+          --session-id judge-pr-${{ github.event.pull_request.number }}-${{ github.run_id }}

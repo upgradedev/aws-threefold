@@ -556,3 +556,40 @@ the tracks' own notes and AWS list prices, not from measurement.
 
 `MonthlyBudgetUsd` puts an account-wide budget on the alarm topic when a
 number is wanted rather than an estimate.
+
+## 12. The merge gate: judge pull requests
+
+The hook governs the machine it is installed on. The merge gate governs the
+merge: `scripts/judge_pr.py` sends every added or changed text file in a pull
+request to `/evaluate-tool-call` as the Write it is, and fails the check when
+the service refuses one or a rule fires on one. A hook nobody installed cannot
+be bypassed here, because there is no hook: a cloud agent's pull request is
+judged exactly like a local one's.
+
+```bash
+python scripts/judge_pr.py --endpoint https://<api>/prod/ --project Acme-Widget
+python scripts/judge_pr.py --endpoint https://<api>/prod/ --project Acme-Widget --all-files --dry-run
+```
+
+A rule firing is red even where the verdict is APPROVED: on a project the
+server holds in Observe the call is recorded, never refused, and the response
+says which rules would have refused it. The gate reads that list, so it holds
+on any stage. Anything unjudged fails the check too: the service unreachable,
+an answer that is not JSON, throttles past the retries. Skips are printed, not
+hidden: excluded paths, empty files, files that are not text, files over the
+byte cap, a diff over the file cap. The byte cap sits under the service's own
+body cap, so the largest page is judged whole. Published AWS example keys are
+scrubbed before sending; they authenticate nothing, and the security suite's
+adversarial fixtures stay excluded by default, visibly in the workflow.
+
+Adopting it on another repository is the workflow plus one setting: copy
+`.github/workflows/pr-judge.yml`, set the endpoint and the project, and name
+the check in the branch protection on main, without requiring pull requests,
+so direct pushes keep working and every pull request is judged. The runs are
+recorded on the stack under the project with one session per run, so
+re-judging a file never trips the loop gate.
+
+Keyless and model-free against the public stack: evaluate needs no key there,
+and the judge sends `explain: false`, so no model is called. Prefer the origin
+URL to the edge in CI: shared runners must not depend on the WAF's per-address
+luck.

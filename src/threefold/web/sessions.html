@@ -114,7 +114,7 @@
         <span class="tf-tile-label"><span data-tf-icon="clock"></span>Calls kept in history</span>
         <span id="kpi-calls" class="tf-tile-value">—</span>
         <span id="kpi-calls-note" class="tf-tile-sub" hidden></span>
-        <span class="tf-tile-sub">The last 50 per session are kept, so a longer session counts 50 here</span>
+        <span class="tf-tile-sub">The last 50 calls per session are kept for detail; the count is cumulative</span>
       </div>
     </div>
 
@@ -182,8 +182,8 @@
         <p class="tf-micro mt-4 pt-4" style="border-top:1px solid var(--tf-hairline)">
           The listing scans the session table and keeps the newest rows, which is honest at this scale and would not be at any
           other: a deployment with real traffic wants a secondary index on a recency key instead. The
-          <span class="font-mono">Calls</span> column counts the retained history, which the store caps at the last 50 per
-          session; cost and tokens are cumulative and are not capped. The rows are the table's. The
+          <span class="font-mono">Calls</span> column is cumulative; the store keeps the last 50 calls per
+          session for detail, and cost and tokens are cumulative too. The rows are the table's. The
           <span class="font-mono">Last write</span> chip says only where the answering container's most recent session write
           landed, and reads memory on a container that has written nothing yet.
         </p>

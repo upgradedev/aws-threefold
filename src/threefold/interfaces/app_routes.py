@@ -263,9 +263,10 @@ def _session_summary(session_id: Any) -> Optional[Dict[str, Any]]:
         return None
     return {
         "session_id": session.session_id,
-        # The store keeps the last fifty calls, so this saturates there, as the
-        # sessions listing says of the same number.
-        "calls": len(session.history),
+        # Cumulative: the store keeps the last fifty calls for the window, but
+        # the count never saturates there. Sessions read back from rows written
+        # before the counter fall back to the retained history's length.
+        "calls": session.total_calls or len(session.history),
         "cost_usd": session.total_cost_usd,
         "is_tripped": session.is_tripped,
     }

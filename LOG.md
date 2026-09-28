@@ -287,3 +287,8 @@
 
 ## 2026-09-28T19:21:00+03:00 — Regionals redeployed so the origin serves the latest pages
 - Verification found the edge on the new words while the API origin still served the pre-fix pages: the regional stacks had deployed before the wording fix. Redeployed `threefold-prod` and `threefold-dogfood` (`PublicReads=false` kept, `/prod/status` HEALTHY); the origin now serves the latest card. Probes after the redeploy: edge and API 117/0/3 (`docs/evidence/PROBES_2026-09-28-5-edge.md`, `docs/evidence/PROBES_2026-09-28-5.md`), private 101/0 read-only.
+
+## 2026-09-28T20:44:00+03:00 — The merge gate, and sessions that count every call
+- `scripts/judge_pr.py` judges every added or changed file in a pull request through `/evaluate-tool-call` (agent `ci`, origin `ci`, no explanation) and fails the check when the service refuses one or a rule fires on one — including observed rules on Observe-stage projects. Fail-closed throughout: the service down, non-JSON, throttles past retries, over either cap, all exit 2. Proven live against the origin before wiring: a `boto3` domain import and a shaped credential each drew the refusal with a GitHub annotation. 12 unit tests, no network.
+- Not done on purpose: excluding AWS published-example keys service-side would break the security suite's convention of using them as bait, so the judge scrubs the inert pair client-side (the pre-commit gate's set) and excludes the adversarial fixtures visibly.
+- `.github/workflows/pr-judge.yml` runs it on pull requests to main; runbook section 12 documents adoption. The sessions listing's `calls` is cumulative now (`total_calls` beside the fifty kept for the window, old rows read back the retained length), with a round-trip test past the cap. Suite 6334 passed, 6 skipped.

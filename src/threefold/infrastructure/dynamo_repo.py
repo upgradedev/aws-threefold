@@ -357,6 +357,9 @@ class DynamoDBSessionRepository:
             except Exception as exc:
                 logger.warning("Could not parse verdicts JSON: %s", exc)
 
+        # Rows written before the cumulative counter carry no field and read
+        # back the retained history's length, the best count they hold.
+        stored_calls = int(item.get("total_calls") or 0)
         session = AgentSession(
             session_id=session_id,
             developer_id=item.get("developer_id", "dev-default"),
@@ -365,6 +368,7 @@ class DynamoDBSessionRepository:
             total_cost_usd=float(item.get("total_cost_usd", 0.0)),
             total_input_tokens=int(item.get("total_input_tokens", 0)),
             total_output_tokens=int(item.get("total_output_tokens", 0)),
+            total_calls=stored_calls if stored_calls else len(history),
             history=history,
             verdicts=verdicts,
             is_tripped=bool(item.get("is_tripped", False)),
@@ -424,7 +428,8 @@ class DynamoDBSessionRepository:
                     "trip_reason": item.get("trip_reason") or "",
                     "is_terminated": bool(item.get("is_terminated", False)),
                     "created_at": item.get("created_at", ""),
-                    "calls": len(json.loads(item.get("history_json") or "[]")),
+                    "calls": int(item.get("total_calls") or 0)
+                    or len(json.loads(item.get("history_json") or "[]")),
                 }
             )
         summaries.sort(key=lambda s: s["created_at"], reverse=True)
@@ -1082,6 +1087,7 @@ class DynamoDBSessionRepository:
             "total_cost_usd": str(session.total_cost_usd),
             "total_input_tokens": session.total_input_tokens,
             "total_output_tokens": session.total_output_tokens,
+            "total_calls": session.total_calls,
             "is_tripped": session.is_tripped,
             "trip_reason": session.trip_reason or "",
             "is_terminated": session.is_terminated,

@@ -319,6 +319,14 @@ Each settings file takes the same shape (Muse takes the plugin commands instead)
 | `THREEFOLD_TIMEOUT` | Seconds to wait for the service, 4 unless set. |
 | `THREEFOLD_HOME` | Where the hook's local files live, `~/.threefold` unless set. |
 
+The hook governs the machine it is installed on. The merge is governed
+separately: [`scripts/judge_pr.py`](scripts/judge_pr.py) judges every added or
+changed file in a pull request through the service, including pull requests
+from agents that never installed anything, and fails the check when a rule
+fires. This repository's own pull requests are judged that way
+([`.github/workflows/pr-judge.yml`](.github/workflows/pr-judge.yml)); the
+runbook's section 12 says how to adopt it.
+
 ---
 
 ## The two-stage rollout
@@ -433,8 +441,8 @@ Also true [STATE-FILE]:
   the caller's word, and carries a KMS signature where the stack holds a
   signing key. It is returned rather than archived, and nothing in CI requires
   one before a merge. The S3 bucket the stack provisions is empty.
-- The sessions listing's call count stops at 50, because a session keeps its
-  last 50 calls.
+- The sessions listing's call count is cumulative; a session keeps its last
+  50 calls for detail.
 - When the demo page cannot reach the service, its four scenario panels
   replay one real run each, recorded against the live API and labelled
   "recorded, replayed offline"; no value in them is invented.

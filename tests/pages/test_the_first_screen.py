@@ -431,6 +431,11 @@ def test_each_agent_is_described_in_the_words_of_the_evidence_it_links() -> None
     assert "shell route is not measured" in _text(agents[2])
     assert "tf-chip-amber" in agents[3] and "Measured over write, edit and shell" in agents[3], "Muse is not rounded up"
     assert "not measured" not in _text(agents[3])
+    # The evidence measured three routes and the chip names all three; the two
+    # that were once falsely "not measured" stay named in their tool spelling,
+    # so a later edit cannot quietly drop one while the quotes keep passing.
+    for route in ("edit_file", "powershell"):
+        assert route in _text(agents[3]), f"The Muse card no longer names {route}"
 
 
 def test_the_page_promises_a_fix_only_where_one_can_be_made() -> None:

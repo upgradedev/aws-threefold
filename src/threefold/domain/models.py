@@ -120,6 +120,7 @@ class AgentSession:
     total_cost_usd: float = 0.0
     total_input_tokens: int = 0
     total_output_tokens: int = 0
+    total_calls: int = 0
     history: List[ToolInvocation] = field(default_factory=list)
     verdicts: List[StoredVerdict] = field(default_factory=list)
     is_tripped: bool = False
@@ -138,8 +139,14 @@ class AgentSession:
         self.total_cost_usd = round(self.total_cost_usd + usage.cost_usd, 4)
 
     def record_tool_call(self, invocation: ToolInvocation) -> None:
-        """Appends tool invocation to session audit history."""
+        """Appends tool invocation to session audit history.
+
+        The counter beside it is cumulative: the store keeps the last fifty
+        calls for the sliding window, but the count a listing shows never
+        saturates there.
+        """
         self.history.append(invocation)
+        self.total_calls += 1
 
     def record_verdict(self, verdict: StoredVerdict) -> None:
         """Appends a rendered verdict to what the certificate covers.

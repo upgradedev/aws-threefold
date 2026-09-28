@@ -184,9 +184,10 @@ hidden in a document that a judge would read as finished work.
    credential key, always enforced and never staged. The POST handler accepts
    and strictly validates the list, and a saved policy is re-read every thirty
    seconds rather than adopted at cold start only.
-2. The `calls` count in the sessions listing saturates at 50, because the store
-   keeps `history[-50:]`. Cost and tokens are cumulative and are not capped. The
-   page says so rather than presenting 50 as a total.
+2. Fixed on 2026-09-28: the `calls` count is cumulative (`total_calls`, kept
+   beside the history it counts). The store still keeps `history[-50:]` for the
+   sliding window; rows written before the counter read back the retained
+   history's length.
 3. Fixed on 2026-09-25: the uploader nothing called (`s3_store.py`) was deleted
    together with the function role's S3 statement, so the role holds no object
    rights at all. `EvidenceStore.create_sealed_bundle` stays: it seals locally
