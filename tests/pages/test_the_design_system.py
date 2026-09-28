@@ -434,6 +434,7 @@ def test_every_mark_has_a_tooltip_on_hover_and_focus_and_a_table_a_reader_can_op
   ], href: (r, k) => '#/calls?kind=' + k }));
   out.plain = String(T.stackedBars(series, { keys: [{ key: 'approved', label: 'Approved', color: '#0ea572' }] }));
   out.bars = String(T.hbars([{ label: 'LOOP', segments: [{ value: 3, label: 'refused', color: '#e11d48' }, { value: 5, label: 'would refuse', color: '#d97706', href: '#/calls?rule=LOOP' }] }]));
+  out.plainBars = String(T.hbars([{ label: 'No guidance', segments: [{ value: 37, label: 'landed', color: '#e11d48' }, { value: 0, label: 'clean', color: '#0ea572' }] }]));
   out.ring = String(T.donut([{ label: 'Refused', value: 2, color: '#e11d48' }, { label: 'Approved', value: 8, color: '#0ea572', href: '#/calls' }]));
   out.spark = String(T.sparkline([1, 4, 2], { label: 'Refused per day', labels: ['23 Sep', '24 Sep', '25 Sep'] }));
 
@@ -473,7 +474,17 @@ def test_every_mark_has_a_tooltip_on_hover_and_focus_and_a_table_a_reader_can_op
     assert len(re.findall(r'class="tf-chart-label"', stack)) <= 4, "Direct labels on a few values, never every one"
     assert '<g tabindex="0"' in out["plain"], "A mark with no rows behind it is still reachable from the keyboard"
     assert 'class="tf-legend"' not in out["plain"], "One series needs no legend"
-    assert "tf-hbar-seg" in out["bars"] and 'tabindex="0"' in out["bars"] and out["bars"].count("data-tf-tip=") == 2
+    assert "tf-hbar-seg" in out["bars"] and out["bars"].count("data-tf-tip=") == 2
+    assert 'aria-label="LOOP: 5 would refuse, open these calls"' in out["bars"], "The link is the row's stop"
+    assert 'tabindex="0"' not in out["bars"], "No span stop beside the link"
+    plain = out["plainBars"]
+    assert plain.count('tabindex="0"') == 1, "One stop for a row with no links"
+    assert re.search(r'<div class="tf-hbar" role="img" aria-label="No guidance: 37 landed, 0 clean" tabindex="0">', plain), \
+        "The row is the stop, named by the label that counts the zero segment no bar is drawn for"
+    spans = re.findall(r"<span[^>]*tf-hbar-seg[^>]*>", plain)
+    assert len(spans) == 1, "The zero segment draws no bar"
+    assert all("tabindex" not in s and "aria-label" not in s and "data-tf-tip=" in s for s in spans), \
+        "A plain segment is not a stop and carries no label; its tooltip stays for the mouse"
     assert out["ring"].count("data-tf-tip=") == 2
     assert out["spark"].count('class="tf-hit"') == 3 and 'data-tf-tip="24 Sep"' in out["spark"]
     assert out["opened"] == ["open", "true"] and out["closed"] == ["closed", "false"]

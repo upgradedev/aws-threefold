@@ -2119,6 +2119,11 @@
   // One row per thing, each a bar of one or more segments on a shared scale.
   // rows: [{label, href, sublabel, value, segments: [{value, label, color, href}]}]
   // The bars are HTML, so the 4px round data end holds at any width.
+  // Keyboard stops: a row whose segments link keeps the links as its stops; a
+  // row with none is one stop itself, named by the label that counts every
+  // segment including the zero ones no bar is drawn for. A plain segment is
+  // never a stop of its own: its tooltip stays for the mouse, and the row's
+  // label carries its numbers to the keyboard and the screen reader.
   function hbars(rows, options) {
     options = options || {};
     var totals = rows.map(function (r) {
@@ -2132,19 +2137,20 @@
           var segs = r.segments.filter(function (seg) { return isNumber(seg.value) && seg.value > 0; });
           var described = r.segments.map(function (seg) { return num(seg.value) + ' ' + seg.label; }).join(', ');
           var width = Math.max(0, Math.min(100, (totals[i] / max) * 100));
+          var linked = segs.some(function (seg) { return !!seg.href; });
           return html`<li>
             <div class="tf-hbar-head">
               ${r.href ? html`<a href="${r.href}" class="tf-link-quiet">${r.label}</a>` : html`<span>${r.label}</span>`}
               <span class="tf-hbar-value">${r.value !== undefined ? r.value : num(totals[i])}</span>
             </div>
-            <div class="tf-hbar" role="img" aria-label="${r.label}: ${described}">
+            <div class="tf-hbar" role="img" aria-label="${r.label}: ${described}"${raw(linked ? '' : ' tabindex="0"')}>
               <div class="tf-hbar-fill" style="width:${round1(width)}%">
                 ${segs.map(function (seg) {
                   var label = r.label + ': ' + num(seg.value) + ' ' + seg.label;
                   var style = 'flex-grow:' + seg.value + ';background:' + seg.color;
                   return seg.href
                     ? html`<a href="${seg.href}" class="tf-hbar-seg" style="${style}" aria-label="${label}, open these calls" data-tf-tip="${r.label + ' · ' + seg.label}" data-tf-tip-value="${num(seg.value)}" data-tf-tip-color="${seg.color}" data-tf-tip-action="Open these calls"></a>`
-                    : html`<span class="tf-hbar-seg" style="${style}" tabindex="0" aria-label="${label}" data-tf-tip="${r.label + ' · ' + seg.label}" data-tf-tip-value="${num(seg.value)}" data-tf-tip-color="${seg.color}"></span>`;
+                    : html`<span class="tf-hbar-seg" style="${style}" data-tf-tip="${r.label + ' · ' + seg.label}" data-tf-tip-value="${num(seg.value)}" data-tf-tip-color="${seg.color}"></span>`;
                 })}
               </div>
             </div>

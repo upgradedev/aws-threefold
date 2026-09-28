@@ -1423,6 +1423,24 @@ def test_the_benchmark_is_pooled_from_the_snapshot_this_stack_serves(tmp_path: P
     assert out["bench"].index('data-bench="price"') < out["bench"].index('data-bench="time"') < out["bench"].index('data-bench="case"')
 
 
+def test_the_benchmark_bars_are_one_named_stop_per_row(tmp_path: Path) -> None:
+    """A judge: the "x of 81" bars gave every nonzero segment its own unnamed keyboard stop.
+
+    Each row is one stop now, named by the label that counts every segment,
+    and a segment is a bar with a hover tooltip, never a stop of its own.
+    """
+    proof = json.loads(PROOF_FILE.read_text(encoding="utf-8"))
+    out = _load(tmp_path, proof="{ status: 200, body: " + json.dumps(proof) + " }")
+    bench = out["bench"]
+    rows = re.findall(r'<div class="tf-hbar" role="img" aria-label="([^"]+)"( tabindex="0")?>', bench)
+    assert len(rows) == 3, "One row per condition"
+    assert all(stop for _, stop in rows), "Every row is a stop, named"
+    assert all(re.search(r": \d", label) for label, _ in rows), "Each label counts its segments"
+    spans = re.findall(r"<span[^>]*tf-hbar-seg[^>]*>", bench)
+    assert spans, "The bars are drawn"
+    assert all("tabindex" not in s and "aria-label" not in s for s in spans), "No segment is a stop"
+
+
 # The case for a team's time that the evidence supports, and no more: where a
 # rule-breaking write is caught, and what the agent gets back. Nothing
 # measured time saved, and the sentence says so.
