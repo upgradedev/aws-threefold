@@ -149,6 +149,7 @@ governs, and the runbook's teardown section says the same.
 | The links cannot drift from the routes | Swagger UI derives its anchors from method and path, so a renamed route would break every link pointing at it silently. A test rebuilds those anchors from the served document, extracts the endpoints the dashboard actually fetches, and fails when one is unlinked. Confirmed by deleting a single entry and watching it fail |
 | A visitor can take the hook | The deployment serves it at `/hooks/claude_code_hook.py`, anonymously, as readable text. Downloaded from the live URL and run: an ordinary read came back `allow`, a `from boto3 import client` write into a domain file came back `deny` with a Bedrock sentence. Before this, `connect.html` told the reader to `git clone <repository>` — a literal placeholder, since the repository is not published — and the install path ended there |
 | A certificate cannot attest to nothing | `POST /issue-certificate` with `{"evaluations": []}` used to answer 200 with `verdict_status: COMPLIANT_APPROVED` and `all_passed: true`, because `all()` over an empty list is true. It now answers 400 `Nothing To Certify`, as does a session this service has no record of governing. Verified against the live stack, and the dashboard's Scenario 4 still issues its certificate |
+| A pull request is judged before merge | `.github/workflows/pr-judge.yml`, a required check on main: every added or changed file judged through `/evaluate-tool-call`, red on a refusal or a fired rule, fail-closed on anything unjudged. Proven on PR #6: a shaped token failed the check in 9 s with the merge BLOCKED, removing it passed in 11 s |
 | The policy cannot be rewritten by a stranger | `POST /policy/config` and its `/policy` alias now require an operator key even where reads need none, because the write lands in DynamoDB and every later container adopts it. With no key configured, which is how the stack deploys, the write is refused outright with 403 `Policy Is Read Only Here`; with one configured, a missing key is 401 and a wrong key is 403. Verified against the live stack, and `GET /policy/config` still answers 200 to an anonymous request |
 | The layering rules can be read, tried and saved from a page | `/rules.html` answers 200 anonymously on the live stack, lists the four shipped rules with ENFORCE badges, and trying `import javax.persistence.Entity` in a Java domain class returns REFUSE naming `java-domain-stays-pure`. Its three deep links open `GET /rules`, `POST /rules/explain` and `POST /rules` in Swagger UI. An anonymous save answers 403 `Policy Is Read Only Here`, because the stack deploys with no operator key. Verified 2026-09-21 |
 | A rule can watch before it bites | A rule with `mode: observe` lets the call run and records which rule would have refused it and on which file. The console counts these apart from refusals, in a Would refuse column and its own section. Measured end to end on a local server running the deployed code: two observed calls and one refusal gave `refused: 1, observed: 2`, and a three-file MultiEdit counted once and named the file the rule watched. The live ledger has no observations yet, because no observing rule has been saved there |
@@ -310,11 +311,12 @@ traffic.
    rules in the prompt, and Threefold enforcing: no governed violation landed
    under Threefold in any series (dossier sections 6 and 8,
    `docs/evidence/BENCHMARK_2026-09-2*.md`).
-3. Fixed on 2026-09-25 except the CI check: the certificate is issued from
-   the session's stored verdicts and signed with a KMS key where the stack
-   holds one. What remains open is making a CI check refuse a pull request
-   whose session has no valid certificate, which is the work that would make
-   the certificate load-bearing rather than decorative.
+3. Fixed on 2026-09-25 except the CI check, and superseded on 2026-09-28 by
+   a stronger one: the certificate is issued from the session's stored verdicts
+   and signed with a KMS key where the stack holds one, and a CI check now
+   refuses a pull request whose diff fires a rule, whatever session produced
+   it — which covers pull requests from agents that never installed anything.
+   The certificate itself is still not required before a merge.
 4. Fixed on 2026-09-25: the evaluate request carries `model_id`, the
    calculator prices Haiku ids on the Haiku row and everything else on the
    default rate, and the ledger row keeps the model so a cost can be audited.
