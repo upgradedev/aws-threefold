@@ -438,16 +438,16 @@ def test_a_live_project_carries_its_chip_in_the_portfolio(tmp_path: Path) -> Non
         tmp_path,
     )
     page = out["view"]
-    chip = re.search(r'<span class="tf-chip tf-chip-gray tf-ops-src" data-src="live" title="([^"]*)">Live</span>', page)
+    chip = re.search(r'<span class="tf-chip tf-chip-gray tf-src" data-src="live" title="([^"]*)">Live</span>', page)
     assert chip, "A live project's row says Live, in a word beside its dot"
     assert html.unescape(chip.group(1)) == "The daily live agent: a real Claude Code or Codex run on an Acme task, in a project that enforces"
     assert 'data-src="fleet"' in page and ">Fleet<" in page
-    other = re.search(r'<span class="tf-chip tf-chip-gray tf-ops-src" data-src="other" title="([^"]*)">Other</span>', page)
+    other = re.search(r'<span class="tf-chip tf-chip-gray tf-src" data-src="other" title="([^"]*)">Other</span>', page)
     assert other and html.unescape(other.group(1)) == (
         "Not the fleet, the daily live agent or a sandbox: the service's own probes, the demo page, or a connected repository"
     ), "Other is what is left once all three named sources, the live agent's included, are set apart"
-    style = (Path(__file__).resolve().parents[2] / "src" / "threefold" / "web" / "dashboard.html").read_text(encoding="utf-8")
-    dots = dict(re.findall(r'\.tf-ops-src\[data-src="(\w+)"\]::before \{ background: var\((--tf-cat-[\w-]+)\); \}', style))
+    style = (Path(__file__).resolve().parents[2] / "src" / "threefold" / "web" / "assets" / "threefold.css").read_text(encoding="utf-8")
+    dots = dict(re.findall(r'\.tf-src\[data-src="(\w+)"\]::before \{ background: var\((--tf-cat-[\w-]+)\); \}', style))
     assert dots == {"fleet": "--tf-cat-1", "live": "--tf-cat-3", "sandbox": "--tf-cat-2"},         "Each source has a categorical hue of its own, and other keeps the neutral one"
 
 
@@ -684,9 +684,9 @@ def test_a_project_page_names_where_its_calls_come_from(tmp_path: Path) -> None:
     heads = out["heads"]
     for source, word in (("fleet", ">Fleet<"), ("live", ">Live<"), ("probe", ">Probe, synthetic<"), ("other", ">Other<")):
         assert f'data-src="{source}"' in heads[source] and word in heads[source], f"A {source} project's page says so beside its title"
-    assert "tf-ops-src" not in heads["older"], "A stack whose answer carries no source is not given one by the page"
+    assert "tf-src" not in heads["older"], "A stack whose answer carries no source is not given one by the page"
     sandbox = heads["sandbox"]
-    assert sandbox.count("tf-ops-src") == 1 and 'data-src="sandbox"' in sandbox and "Sandbox · expires within a day" in sandbox, \
+    assert sandbox.count("tf-src") == 1 and 'data-src="sandbox"' in sandbox and "Sandbox · expires within a day" in sandbox, \
         "A sandbox wears one chip, which says when it goes"
 
 
@@ -1084,6 +1084,203 @@ def test_the_queue_counts_what_the_overview_counts(tmp_path: Path) -> None:
         "Shown, the folded sandboxes take the place of their line, and the groups above keep theirs"
 
 
+PAGED = r"""
+// A busy stack's ledger: each read scans a budget of rows and hands back a
+// cursor, with whatever of the queue it met, often nothing. `pages` holds what
+// each read finds, in order; after the last one the cursor stops, or, with
+// `endless`, the reads go on finding nothing.
+function paged(pages, endless) {
+  return u => {
+    const at = u.searchParams.get('cursor');
+    const n = at ? Number(at.slice(1)) : 0;
+    const items = pages[n] || [];
+    const more = endless || n + 1 < pages.length;
+    return { status: 200, body: { items, next_cursor: more ? 'c' + (n + 1) : null } };
+  };
+}
+function decisionReads() { return calls.filter(c => c.url.indexOf('/api/decisions') !== -1).map(c => new URL(c.url)); }
+function smoke(unreviewed) {
+  const body = Object.assign(detailBody('observe', [
+    { rule_key: 'python-domain-stays-pure', kind: 'layering', mode_now: 'observe', would_refuse: unreviewed, correct: 0, false_alarms: 0, unreviewed, last_seen: NOW, state: 'needs_review', recommendation: '' },
+    { rule_key: 'LOOP', kind: 'gate', mode_now: 'observe', would_refuse: 0, correct: 0, false_alarms: 0, unreviewed: 0, last_seen: null, state: 'quiet', recommendation: '' }
+  ]), { project: 'Acme-Smoke' });
+  return { status: 200, body };
+}
+"""
+
+
+def test_the_queue_reads_on_while_the_ledger_hands_back_a_cursor(tmp_path: Path) -> None:
+    """A judge found the queue taking the first page for the whole week, and an empty first page for an empty queue.
+
+    Acme-Smoke's page said 5 calls waited while the queue said nothing
+    waited: the ledger reads day by day within a budget of its own, and on a
+    busy stack its first answer held none of them, with a cursor. The queue
+    now reads on while a cursor comes back.
+    """
+    out = ops(
+        QUEUE
+        + PAGED
+        + r"""
+  answer = contract({
+    '/api/projects/Acme-Smoke': smoke(4),
+    '/api/decisions': paged([[], [flagged(1, 'Acme-Smoke'), flagged(2, 'Acme-Smoke'), flagged(3, 'Acme-Smoke')], [], [flagged(4, 'Acme-Smoke')]])
+  });
+  await visit('#/review?project=Acme-Smoke&days=14');
+  out.reads = decisionReads().map(u => [u.searchParams.get('days'), u.searchParams.get('cursor')]);
+  out.view = view();
+  out.count = text(view().split('id="review-count"')[1].split('</p>')[0]);
+""",
+        tmp_path,
+    )
+    assert out["reads"] == [["14", None], ["14", "c1"], ["14", "c2"], ["14", "c3"]], \
+        "The queue reads the window the project's page counted, on through every cursor, to the end"
+    assert 'data-state="empty"' not in out["view"] and "Nothing waits" not in out["view"]
+    assert "4 calls waiting in the last 14 days, under 1 rule in 1 project" in out["count"]
+    assert 'data-action="more"' not in out["view"], "Read to the end, there is nothing further to offer"
+
+
+def test_a_read_that_stops_short_says_how_many_wait_and_reads_further(tmp_path: Path) -> None:
+    """While a cursor remains, the count is the project page's and the rows are the newest of it; never the empty state."""
+    out = ops(
+        QUEUE
+        + PAGED
+        + r"""
+  // Acme-Smoke: 5 wait by its page, and the newest days hold none of them.
+  answer = contract({ '/api/projects/Acme-Smoke': smoke(5), '/api/decisions': paged([], true) });
+  await visit('#/review?project=Acme-Smoke&days=14');
+  out.firstReads = decisionReads().length;
+  out.none = view();
+  out.noneText = text(view());
+  await click('more'); await tick();
+  out.secondReads = decisionReads().length;
+  // Acme-Probe: 42 wait by its page, and two pages of six read hold twelve.
+  const twelve = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(i => flagged(i, 'Acme-Probe'));
+  answer = contract({
+    '/api/projects/Acme-Probe': smoke(42),
+    '/api/decisions': paged([twelve.slice(0, 6), twelve.slice(6)].concat([[], [], [], [], []]), true)
+  });
+  await visit('#/review?project=Acme-Probe&days=14');
+  out.some = text(view().split('id="review-count"')[1].split('</p>')[0]);
+  out.someView = view();
+  // Every project: the overview's count. A rule across every project has none.
+  answer = contract({ '/api/overview': { status: 200, body: overviewBody({ needs_review: 81 }) }, '/api/decisions': paged([twelve.slice(0, 3)], true) });
+  await visit('#/review?days=7');
+  out.every = text(view().split('id="review-count"')[1].split('</p>')[0]);
+  await visit('#/review?rule=LOOP&days=7');
+  out.rule = text(view().split('id="review-count"')[1].split('</p>')[0]);
+""",
+        tmp_path,
+    )
+    assert out["firstReads"] == 6, "The read goes on through the cursors, up to six requests"
+    none, words = out["none"], out["noneText"]
+    assert 'data-state="not-reached"' in none and 'data-state="empty"' not in none, "A cursor left is not an empty queue"
+    assert "Nothing waits for a label" not in words and "has a label" not in words
+    assert "though 5 wait in the last 14 days, as the project's page counts them" in words
+    assert "Look further back" in none
+    assert out["secondReads"] == 12, "Reading further back is another bounded read on from where the first stopped"
+    assert "42 calls waiting in the last 14 days, as the project's page counts them; the newest 12 are read below" in out["some"]
+    assert "Look further back" in out["someView"]
+    assert "81 calls waiting in the last 7 days, as the overview counts them; the newest 3 are read below" in out["every"]
+    assert "At least 3 calls waiting in the last 7 days" in out["rule"] and "older days are not read yet" in out["rule"], \
+        "With no count for its scope, the queue claims only what it read"
+    assert "more beyond these" not in out["rule"], "A cursor says older days are unread, not that more calls wait"
+
+
+def test_a_later_page_that_fails_keeps_what_was_read(tmp_path: Path) -> None:
+    """A refused second read (a busy stack's 429) leaves the rows of the first on screen, and the way to read further."""
+    out = ops(
+        QUEUE
+        + r"""
+  answer = contract({ '/api/decisions': u => u.searchParams.get('cursor') === 'c1'
+    ? { status: 429, body: { detail: 'Too many requests.' } }
+    : { status: 200, body: { items: [flagged(1, 'Acme-Checkout'), flagged(2, 'Acme-Checkout')], next_cursor: 'c1' } } });
+  await visit('#/review?rule=LOOP&days=7');
+  out.view = view();
+  out.count = text(view().split('id="review-count"')[1].split('</p>')[0]);
+  out.error = el('review-error').textContent;
+""",
+        tmp_path,
+    )
+    assert "At least 2 calls waiting in the last 7 days" in out["count"], "The rows read before the failure are kept"
+    assert "Look further back" in out["view"] and "could not all be read" in out["error"], "It says so, and offers the read again"
+
+
+def test_the_project_page_opens_the_queue_over_its_own_window(tmp_path: Path) -> None:
+    """The project page counts 14 days; every way from it into the queue carries those 14 days."""
+    out = ops(
+        r"""
+  answer = contract();
+  await visit('#/projects/Acme-Billing');
+  out.links = hrefs(view(), '#/review');
+""",
+        tmp_path,
+    )
+    links = set(out["links"])
+    assert "#/review?project=Acme-Billing&days=14" in links, "The hero's Label link"
+    assert "#/review?project=Acme-Billing&rule=PROTECTED_PATH&days=14" in links, "A rule's Label link and its bar"
+    assert all("days=14" in link for link in links), links
+
+
+def test_the_queue_names_where_each_group_s_calls_come_from(tmp_path: Path) -> None:
+    """A group head carries its project's source chip, and the probes' share is said and listed after the rest."""
+    out = ops(
+        QUEUE
+        + r"""
+  const list = [
+    Object.assign({}, PROJECTS.projects[1], { project: 'Acme-Payments', source: 'fleet' }),
+    Object.assign({}, PROJECTS.projects[1], { project: 'Acme-Probe', source: 'probe' })
+  ];
+  answer = contract({
+    '/api/projects': { status: 200, body: { projects: list } },
+    '/api/decisions': { status: 200, body: { items: [flagged(1, 'Acme-Probe'), flagged(2, 'Acme-Probe'), flagged(3, 'Acme-Payments')], next_cursor: null } }
+  });
+  await visit('#/review');
+  out.order = groupOrder();
+  out.heads = (view().match(/<h3 id="group-\d+"[\s\S]*?<\/h3>/g) || []);
+  out.count = text(view().split('id="review-count"')[1].split('</p>')[0]);
+""",
+        tmp_path,
+    )
+    assert out["order"] == ["Acme-Payments", "Acme-Probe"], "The probes' group follows the projects someone works in"
+    payments, probe = out["heads"]
+    assert 'data-src="fleet"' in payments and ">Fleet<" in payments
+    assert 'data-src="probe"' in probe and ">Probe, synthetic<" in probe
+    assert "3 calls waiting" in out["count"] and "2 of them in the service's own probes, which are synthetic" in html.unescape(out["count"])
+
+
+def test_a_gate_s_rows_lead_with_its_plain_sentence_and_keep_its_words(tmp_path: Path) -> None:
+    """The overview names a gate in a sentence; the queue leads with the same one, and the service's words stay one click away."""
+    out = ops(
+        QUEUE
+        + r"""
+  const raw = "Command 'cat .env' reaches a protected path or credential store";
+  const probe = i => row(i, { project_name: 'Acme-Probe', rule_key: 'PROTECTED_PATH', observed_rules: ['PROTECTED_PATH'], observed_rule: 'PROTECTED_PATH', tool_name: 'Bash', target: 'cat .env', observed_target: 'cat .env', observed_reason: raw });
+  answer = contract({ '/api/decisions': { status: 200, body: { items: [probe(1), probe(2)], next_cursor: null } } });
+  await visit('#/review');
+  out.section = view().split('class="tf-ops-rsec-head"')[1].split('class="tf-ops-proj"')[0];
+  out.rows = view().split('class="tf-ops-queue"')[1];
+""",
+        tmp_path,
+    )
+    section = html.unescape(out["section"])
+    lead = re.search(r'<p class="tf-ops-rsec-rule">([^<]*)</p>', section)
+    assert lead and lead.group(1) == "A write to a protected path, such as hook settings or .git/hooks", "The gate's plain sentence leads"
+    said = re.search(r'<details class="tf-ops-said">[\s\S]*?</details>', section)
+    assert said and "Command 'cat .env' reaches a protected path or credential store" in said.group(0), \
+        "What the service said is kept, one click under the sentence"
+    assert "reaches a protected path" not in re.sub(r'<details[\s\S]*?</details>', "", html.unescape(out["rows"])), \
+        "No row leads with the engine's words"
+
+
+def test_rows_only_the_operator_may_label_are_read_only_without_faded_text() -> None:
+    from _browser import page_source
+
+    ops_style = page_source("dashboard.html").split("/* OPS: the operator's screens", 1)[1].split("</style>", 1)[0]
+    assert not re.search(r'data-open="false"\][^{]*\{[^}]*opacity', ops_style), \
+        "An operator-only group is shown read-only by its lock chip and its missing buttons, never by dimming its text"
+    assert not re.search(r'\.tf-ops-qrow[^{]*\{[^}]*opacity', ops_style)
+
+
 def test_a_visitor_s_keyboard_reaches_the_sandboxes_they_may_label(tmp_path: Path) -> None:
     """Folded, the sandboxes are a place J and K stop at; shown, they come first, as the note says.
 
@@ -1427,7 +1624,7 @@ def test_the_service_s_probes_are_labelled_synthetic_where_the_stack_names_them(
     out = ops(
         r"""
   const sources = { fleet: { calls: 3210, projects: 6 }, sandbox: { calls: 96, projects: 8 }, probe: { calls: 40, projects: 1 }, other: { calls: 41, projects: 2 } };
-  const body = Object.assign(overviewBody(), { sources });
+  const body = Object.assign(overviewBody({ needs_review: 21 + 36 }), { sources });
   body.by_project = body.by_project.concat([{ project: 'Acme-Probe', source: 'probe', stage: 'observe', configured: false, calls: 40, refused: 30, would_refuse: 36, needs_review: 36, last_seen: NOW }]);
   answer = contract({ '/api/auth/whoami': PUBLIC, '/api/overview': { status: 200, body } });
   Threefold.whoami(true);
@@ -1454,6 +1651,11 @@ def test_the_service_s_probes_are_labelled_synthetic_where_the_stack_names_them(
     assert "Probes, synthetic" in words, "The legend names the probes"
     reviews = page.split('data-slot="reviews"')[1].split("</article>")[0]
     assert "Acme-Probe" not in reviews and "Left out: 36 calls in the service's own probes, which are synthetic." in html.unescape(re.sub(r"<[^>]+>", "", reviews))
+    assert "21 calls wait for a label" in html.unescape(re.sub(r"<[^>]+>", "", reviews)), \
+        "The headline counts what the card lists: the probes' calls its own note leaves out are not in it"
+    tile = html.unescape(page.split('data-metric="needs_review"')[1].split("</a>")[0])
+    assert "57" in tile and "36 of them in the service's own probes, which are synthetic" in tile, \
+        "The tile counts every call waiting, as the queue lists them, and says the probes' share"
     table = page.split("By project")[1]
     assert 'data-src="probe"' in table and "Probe, synthetic" in table
     assert table.index("Acme-Probe") > table.index("Acme-Catalog"), "The probe comes after the projects someone works in"
@@ -1535,6 +1737,133 @@ def test_the_proof_page_leads_with_the_violation_rates_on_one_scale(tmp_path: Pa
 
 
 # -------------------------------------------------------------- call, connect
+
+
+def test_the_calls_screen_names_where_each_project_s_calls_come_from(tmp_path: Path) -> None:
+    """Synthetic calls are labelled on the calls screen as on the overview: each row's project wears its source chip."""
+    out = ops(
+        r"""
+  const list = [
+    Object.assign({}, PROJECTS.projects[0], { project: 'Acme-Billing', source: 'fleet' }),
+    Object.assign({}, PROJECTS.projects[1], { project: 'Acme-Probe', source: 'probe' })
+  ];
+  let first = true;
+  answer = contract({
+    '/api/projects': { status: 200, body: { projects: list } },
+    // A busy ledger: the first read meets no match and hands back a cursor.
+    '/api/decisions': u => u.searchParams.get('cursor')
+      ? { status: 200, body: { items: [row(1), row(2, { project_name: 'Acme-Probe' }), row(3, { project_name: 'Acme-Retired' })], next_cursor: null } }
+      : { status: 200, body: { items: [], next_cursor: 'c1' } }
+  });
+  await visit('#/calls?kind=observed&days=7');
+  out.view = view();
+  out.reads = calls.filter(c => c.url.indexOf('/api/decisions') !== -1).length;
+  await visit('#/calls?project=Acme-Probe&days=7');
+  out.one = view().split('aria-label="Outcome"')[0];
+""",
+        tmp_path,
+    )
+    page = out["view"]
+    assert out["reads"] == 2 and 'data-state="not-reached"' not in page, "A first page with no match and a cursor is read past"
+    rows = page.split("<tbody>")[1].split("</tbody>")[0].split("<tr ")[1:]
+    assert 'data-src="fleet"' in rows[0] and ">Fleet<" in rows[0]
+    assert 'data-src="probe"' in rows[1] and ">Probe, synthetic<" in rows[1]
+    assert "data-src=" not in rows[2], "A project the list does not name is given no chip, never a guess"
+    assert 'data-src="probe"' in html.unescape(out["one"]), "Filtered to one project, the chip stands by the title"
+
+
+def test_a_halted_session_leads_with_why_in_plain_words(tmp_path: Path) -> None:
+    out = ops(
+        r"""
+  const halted = Object.assign(session('fleet-ledger-codex-1', 'Acme-Ledger', true), { trip_reason: "Monomorphic loop detected: Tool 'run_command' invoked with identical arguments 3 consecutive times" });
+  const odd = Object.assign(session('fleet-ledger-codex-2', 'Acme-Ledger', true), { trip_reason: 'A reason no page knows' });
+  answer = contract({ '/api/auth/whoami': PRIVATE, '/api/sessions': { status: 200, body: { sessions: [halted, odd] } } });
+  Threefold.whoami(true);
+  await visit('#/overview?days=7');
+  await tick();
+  out.slot = view().split('data-slot="halted"')[1].split('</article>')[0];
+""",
+        tmp_path,
+    )
+    slot = html.unescape(out["slot"])
+    why = re.findall(r'<span class="tf-ops-halt-why" title="([^"]*)">([^<]*)</span>', slot)
+    assert why[0] == ("Monomorphic loop detected: Tool 'run_command' invoked with identical arguments 3 consecutive times",
+                      "The same call kept repeating"), "The plain sentence leads; the breaker's words are its title"
+    assert why[1] == ("A reason no page knows", "A reason no page knows"), "A reason the page has no words for is shown as the service wrote it"
+
+
+SESSIONS = r"""
+const NOW = new Date().toISOString();
+function ses(id, project, extra) {
+  return Object.assign({ session_id: id, project_name: project, developer_id: 'ab12cd34', calls: 4, total_cost_usd: 0, total_input_tokens: 0,
+    total_output_tokens: 0, is_tripped: false, trip_reason: '', is_terminated: false, created_at: '2026-09-28T04:08:10.097110+00:00' }, extra || {});
+}
+answer = api({
+  '/api/sessions': { status: 200, body: { persistence: 'dynamodb', sessions: [
+    ses('fleet-payments-codex-1', 'Acme-Payments', { calls: 30 }), ses('fleet-payments-codex-2', 'Acme-Payments', { calls: 20 }),
+    ses('probe-live-01', 'Acme-Probe', { calls: 1 }),
+    ses('sim-0a1b2c3d', 'Acme-Demo', { calls: 3, is_tripped: true, trip_reason: "Monomorphic loop detected: Tool 'run_command' invoked with identical arguments 3 consecutive times" }),
+    ses('s-old', 'Acme-Retired', { calls: 2, is_tripped: true, trip_reason: 'Projected session cost $5.1000 exceeds allocated budget limit of $5.00' })
+  ] } },
+  '/api/projects': { status: 200, body: { projects: [
+    { project: 'Acme-Payments', source: 'fleet', stage: 'observe', calls: 50 }, { project: 'Acme-Probe', source: 'probe', stage: 'observe', calls: 1 },
+    { project: 'Acme-Demo', source: 'other', stage: 'observe', calls: 3 }
+  ] } },
+  // As GET /sessions/{id} answers: no trip_reason of its own.
+  '/sessions/sim-0a1b2c3d': { status: 200, body: { session_id: 'sim-0a1b2c3d', project_name: 'Acme-Demo', is_tripped: true,
+    tool_call_history_count: 3, cumulative_cost_usd: 0.027, budget_usd: 10, budget_remaining_usd: 9.973, created_at: '2026-09-28T04:08:10.097110+00:00' } }
+});
+"""
+
+
+def test_the_sessions_page_says_where_its_sessions_come_from_and_why_they_stopped(tmp_path: Path) -> None:
+    """A judge found the sessions unlabelled where the overview labels the fleet, and the breaker's raw words leading."""
+    out = run(
+        "sessions.html",
+        r"""
+  await tick();
+  out.table = el('sessions-body').innerHTML;
+  out.count = el('kpi-count-note').innerText;
+  out.calls = [el('kpi-calls-note').innerText, el('kpi-calls-note').hidden];
+  out.tripped = [el('kpi-tripped-note').innerText, el('kpi-tripped-note').hidden];
+  out.reads = calls.map(c => c.url);
+  await selectSession('sim-0a1b2c3d');
+  out.detail = el('detail-body').innerHTML;
+""",
+        tmp_path,
+        before=SESSIONS,
+    )
+    rows = out["table"].split("<tr ")[1:]
+    assert 'data-src="fleet"' in rows[0] and ">Fleet<" in rows[0]
+    assert 'data-src="probe"' in rows[2] and ">Probe, synthetic<" in rows[2]
+    assert 'data-src="other"' in rows[3] and "data-src=" not in rows[4], "A project the list does not name gets no chip"
+    assert out["count"] == "Newest first · 2 in the Acme fleet, synthetic · 1 in the service's probes, synthetic · 1 from other callers · 1 in projects with no call in 7 days"
+    assert out["calls"] == ["50 in the Acme fleet, synthetic · 1 in the service's probes, synthetic · 3 from other callers · 2 in projects with no call in 7 days", False]
+    assert out["tripped"] == ["1 of them the demo page's scenarios or the service's probes, which halt on purpose", False]
+    why = html.unescape(rows[3])
+    assert 'title="Monomorphic loop detected: Tool \'run_command\' invoked with identical arguments 3 consecutive times"' in why
+    assert ">The same call kept repeating<" in why, "The plain sentence leads"
+    assert ">Its spend reached its budget<" in html.unescape(rows[4])
+    started = re.search(r'<time datetime="([^"]+)" title="([^"]+)">([^<]+)</time>', rows[0])
+    assert started and started.groups() == ("2026-09-28T04:08:10.097Z", "2026-09-28 04:08:10Z", "Sep 28, 04:08"), \
+        "The column shows the day and the minute; the whole value is the element's"
+    assert "https://example.test/prod/api/projects" in out["reads"], "The chips come from the same stack as the rows"
+    detail = html.unescape(out["detail"])
+    assert "<dt>Why</dt><dd class=\"\">The same call kept repeating</dd>" in detail, "The detail says why, from the listing the page already read"
+    assert "Monomorphic loop detected: Tool 'run_command' invoked with identical arguments 3 consecutive times" in detail, "and keeps the breaker's own words"
+
+
+def test_calls_observed_says_what_it_counts(tmp_path: Path) -> None:
+    """A judge found a project's calls observed differing from its calls elsewhere, unexplained."""
+    out = ops(
+        r"""
+  answer = contract();
+  await visit('#/projects/Acme-Billing');
+  out.tile = text(view().split('data-metric="calls_observed"')[1].split('</div>')[0]);
+""",
+        tmp_path,
+    )
+    assert "judged in Observe, in the last 14 days; not calls from a page, nor those judged in Enforce" in html.unescape(out["tile"])
 
 
 def test_the_calls_screen_chooses_the_outcome_in_one_place(tmp_path: Path) -> None:

@@ -40,11 +40,19 @@
        detail. A breaker's reason keeps to its column. */
     .tf-session-cell { min-width: 22ch; }
     .tf-session-id { display: block; max-width: 30ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .tf-session-why { max-width: 16rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* Why a breaker stopped it, in a reader's words, wrapping within its
+       column; the service's own words are in its title and the detail. */
+    .tf-session-why { max-width: 13rem; white-space: normal; }
+    /* A project keeps a readable width, and a long alias breaks only at a
+       dash; its chip says where its calls come from. */
+    .tf-session-project { min-width: 8.5rem; }
+    .tf-session-project .tf-src { margin-top: 4px; }
+    .tf-session-started { white-space: nowrap; }
     @media (max-width: 639px) {
       .tf-session-cell { min-width: 0; }
       .tf-session-id { max-width: none; white-space: normal; overflow-wrap: anywhere; }
-      .tf-session-why { max-width: none; white-space: normal; }
+      .tf-session-why { max-width: none; }
+      .tf-session-project { min-width: 0; }
     }
   </style>
 </head>
@@ -94,6 +102,7 @@
       <div class="tf-card tf-tile">
         <span class="tf-tile-label"><span data-tf-icon="stop"></span>Stopped by a breaker</span>
         <span id="kpi-tripped" class="tf-tile-value">—</span>
+        <span id="kpi-tripped-note" class="tf-tile-sub" hidden></span>
         <span class="tf-tile-sub">A demo loop, the budget, or an operator's freeze. A governed agent's loop is refused call by call and never halts its session</span>
       </div>
       <div class="tf-card tf-tile">
@@ -104,6 +113,7 @@
       <div class="tf-card tf-tile">
         <span class="tf-tile-label"><span data-tf-icon="clock"></span>Calls kept in history</span>
         <span id="kpi-calls" class="tf-tile-value">—</span>
+        <span id="kpi-calls-note" class="tf-tile-sub" hidden></span>
         <span class="tf-tile-sub">The last 50 per session are kept, so a longer session counts 50 here</span>
       </div>
     </div>
@@ -160,7 +170,7 @@
                 <th scope="col" class="num">Cost</th>
                 <th scope="col" class="num">Tokens</th>
                 <th scope="col">State</th>
-                <th scope="col">Started</th>
+                <th scope="col">Started, UTC</th>
               </tr>
             </thead>
             <tbody id="sessions-body">
@@ -397,6 +407,82 @@
       return new Date(parsed).toISOString().replace('T', ' ').slice(0, 19) + 'Z';
     }
 
+    // When a session started, short enough for its column: the day and the
+    // minute, in UTC as the column says. The whole value is the element's
+    // datetime and its title.
+    const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    function startedMarkup(value) {
+      if (!value) return '—';
+      const parsed = Date.parse(value);
+      if (Number.isNaN(parsed)) return escapeHtml(value);
+      const at = new Date(parsed);
+      const short = MONTHS[at.getUTCMonth()] + ' ' + at.getUTCDate() + ', ' + at.toISOString().slice(11, 16);
+      return '<time datetime="' + escapeHtml(at.toISOString()) + '" title="' + escapeHtml(formatTimestamp(value)) + '">' + escapeHtml(short) + '</time>';
+    }
+
+    // Where each project's calls come from, from the project list the
+    // service keeps for the last 7 days, read once from the same address as
+    // the sessions and with the same credential. A project it does not list
+    // gets no chip, never a guess.
+    let projectSources = null;
+    let sourcesFrom = '';
+    async function loadProjectSources() {
+      const base = getApiBase();
+      if (!window.Threefold || (projectSources && sourcesFrom === base)) return;
+      try {
+        const res = await fetch(base + '/api/projects', { method: 'GET', headers: authHeaders() });
+        if (!res.ok) return;
+        const data = await res.json();
+        const rows = {};
+        (data && Array.isArray(data.projects) ? data.projects : []).forEach(p => { if (p && typeof p.project === 'string' && p.project) rows[p.project] = p; });
+        projectSources = rows;
+        sourcesFrom = base;
+        renderTable();
+      } catch (err) { /* the chips are left out; the rows are not */ }
+    }
+    function sourceOfSession(s) {
+      if (!window.Threefold) return '';
+      const row = projectSources && Object.prototype.hasOwnProperty.call(projectSources, s.project_name) ? projectSources[s.project_name] : { project: s.project_name };
+      return Threefold.sourceOf(row);
+    }
+    function sourceChipOf(s) {
+      if (!window.Threefold) return '';
+      const row = projectSources && Object.prototype.hasOwnProperty.call(projectSources, s.project_name) ? projectSources[s.project_name] : { project: s.project_name };
+      return String(Threefold.sourceChip(row));
+    }
+
+    // The sessions shown, split by where their project's calls come from, in
+    // the words of the overview's legend. Sessions whose project the list
+    // does not name are counted apart rather than guessed at.
+    const SOURCE_WORDS = {
+      fleet: 'in the Acme fleet, synthetic', live: 'in the daily live agent\'s projects, real', sandbox: 'in visitors\' sandboxes',
+      probe: 'in the service\'s probes, synthetic', other: 'from other callers'
+    };
+    function splitWords(rows, weigh) {
+      if (!projectSources || !rows.length) return '';
+      const by = {};
+      let unlisted = 0;
+      rows.forEach(s => {
+        const src = sourceOfSession(s);
+        const n = weigh ? weigh(s) : 1;
+        if (src) by[src] = (by[src] || 0) + n; else unlisted += n;
+      });
+      const parts = Object.keys(SOURCE_WORDS).filter(k => by[k]).map(k => by[k].toLocaleString() + ' ' + SOURCE_WORDS[k]);
+      if (unlisted) parts.push(unlisted.toLocaleString() + ' in projects with no call in 7 days');
+      return parts.join(' · ');
+    }
+
+    // Sessions that halt on purpose: the demo page's scenarios (sim-) and the
+    // service's own live probes (probe-), as the overview leaves them out.
+    const HALTS_ON_PURPOSE = /^(sim|probe)-/;
+
+    // Why a breaker stopped it: the reader's words where the shared layer
+    // knows the service's, the service's own words otherwise.
+    function whyStopped(reason) {
+      const plain = window.Threefold && typeof Threefold.tripWords === 'function' ? Threefold.tripWords(reason) : '';
+      return plain || String(reason || '');
+    }
+
     // A state is an icon and a word, never colour alone.
     function stateBadge(session) {
       if (session.is_terminated) {
@@ -421,6 +507,14 @@
           .map(v => String(v || '').toLowerCase())
           .some(v => v.indexOf(needle) !== -1);
       });
+    }
+
+    // A tile's second line, shown only when it has something to say.
+    function noteLine(id, words) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.innerText = words || '';
+      el.hidden = !words;
     }
 
     function emptyRow(words, tone) {
@@ -448,14 +542,14 @@
           return '<tr data-index="' + index + '" class="tf-row-link" tabindex="0"' + selected + '>' +
             '<td data-label="Session" class="tf-session-cell"><span class="tf-session-id font-mono text-violet-300" title="' + escapeHtml(s.session_id) + '">' + escapeHtml(s.session_id) + '</span>' +
               '<div class="tf-micro mt-0.5">' + escapeHtml(s.developer_id || 'unknown developer') + '</div></td>' +
-            '<td data-label="Project" class="text-gray-200">' + projectShown(s.project_name) + '</td>' +
+            '<td data-label="Project" class="text-gray-200 tf-session-project"><div>' + projectShown(s.project_name) + '</div>' + (s.project_name ? sourceChipOf(s) : '') + '</td>' +
             '<td data-label="Calls" class="num">' + (Number(s.calls) || 0) + '</td>' +
             '<td data-label="Cost" class="num">$' + (Number(s.total_cost_usd) || 0).toFixed(4) + '</td>' +
             '<td data-label="Tokens" class="num">' + tokens.toLocaleString() + '</td>' +
             '<td data-label="State"><div>' + stateBadge(s) +
-              (s.trip_reason ? '<div class="tf-micro mt-1 tf-session-why" title="' + escapeHtml(s.trip_reason) + '">' + escapeHtml(s.trip_reason) + '</div>' : '') +
+              (s.trip_reason ? '<div class="tf-micro mt-1 tf-session-why" title="' + escapeHtml(s.trip_reason) + '">' + escapeHtml(whyStopped(s.trip_reason)) + '</div>' : '') +
             '</div></td>' +
-            '<td data-label="Started" class="font-mono text-gray-400 whitespace-nowrap">' + escapeHtml(formatTimestamp(s.created_at)) + '</td>' +
+            '<td data-label="Started, UTC" class="font-mono text-gray-400 tf-session-started">' + startedMarkup(s.created_at) + '</td>' +
           '</tr>';
         }).join('');
 
@@ -477,9 +571,22 @@
       const trippedEl = document.getElementById('kpi-tripped');
       const callsEl = document.getElementById('kpi-calls');
       count.innerText = String(rows.length);
-      document.getElementById('kpi-count-note').innerText = rows.length === sessions.length
+      // Where their calls come from, as the project list says it, so a page
+      // of mostly synthetic sessions says so; nothing when the list is unread.
+      const split = splitWords(rows);
+      document.getElementById('kpi-count-note').innerText = (rows.length === sessions.length
         ? 'Newest first'
-        : rows.length + ' of ' + sessions.length + ' shown by the filter';
+        : rows.length + ' of ' + sessions.length + ' shown by the filter') + (split ? ' · ' + split : '');
+      const callsSplit = splitWords(rows, s => Number(s.calls) || 0);
+      noteLine('kpi-calls-note', calls ? callsSplit : '');
+      // The demo page's scenarios and the service's probes halt on purpose,
+      // as the overview's strip says; the rest are said apart.
+      const onPurpose = rows.filter(s => (s.is_tripped || s.is_terminated) && HALTS_ON_PURPOSE.test(String(s.session_id || ''))).length;
+      noteLine('kpi-tripped-note', tripped
+        ? (onPurpose === tripped
+          ? (tripped === 1 ? 'The demo page\'s scenario or a probe, which halts on purpose' : 'All of them the demo page\'s scenarios or the service\'s probes, which halt on purpose')
+          : onPurpose ? onPurpose + ' of them the demo page\'s scenarios or the service\'s probes, which halt on purpose' : '')
+        : '');
       trippedEl.innerText = String(tripped);
       trippedEl.className = tripped ? 'tf-tile-value tf-bad' : 'tf-tile-value';
       document.getElementById('kpi-cost').innerText = '$' + cost.toFixed(4);
@@ -518,6 +625,7 @@
         setPersistence(data.persistence);
         showRaw(data);
         renderTable();
+        loadProjectSources();
       } catch (err) {
         setConnection(false, 'Unreachable');
         showRaw({ error: String(err) });
@@ -579,6 +687,10 @@
       tag.className = 'tf-chip ' + (halted ? 'tf-chip-rose' : 'tf-chip-emerald');
       tag.innerHTML = glyph(halted ? 'stop' : 'check') + (halted ? 'Halted' : 'Running');
 
+      // Why a breaker stopped it: GET /sessions/{id} does not say, and the
+      // listing already read does, so it is taken from there.
+      const listed = sessions.find(s => s && s.session_id === data.session_id) || {};
+      const reason = halted ? (data.trip_reason || listed.trip_reason || '') : '';
       const budget = Number(data.budget_usd) || 0;
       const spent = Number(data.cumulative_cost_usd) || 0;
       const used = budget > 0 ? Math.min(100, (spent / budget) * 100) : 0;
@@ -594,6 +706,8 @@
           detailRow('Budget left', '$' + (Number(data.budget_remaining_usd) || 0).toFixed(4),
             (Number(data.budget_remaining_usd) || 0) > 0 ? 'tf-good' : 'tf-bad') +
           detailRow('Stopped', halted ? 'yes' : 'no', halted ? 'tf-bad' : 'tf-good') +
+          (reason ? detailRow('Why', whyStopped(reason)) : '') +
+          (reason && whyStopped(reason) !== String(reason) ? detailRow('The breaker said', reason, 'text-gray-400') : '') +
           detailRow('Started', formatTimestamp(data.created_at), 'text-gray-400') +
         '</dl>' +
         '<div class="mt-4">' +

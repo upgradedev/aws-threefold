@@ -549,6 +549,15 @@ a.tf-chip:hover { filter: brightness(1.15); }
    its own) still leads with a mark before its word. */
 .tf-chip-dot::before { content: ''; width: 6px; height: 6px; border-radius: 99px; background: currentColor; flex-shrink: 0; }
 .tf-dot { width: 8px; height: 8px; border-radius: 99px; display: inline-block; flex-shrink: 0; background: currentColor; }
+/* Where a project's calls come from (Threefold.sourceChip): identity, so a
+   dot in a categorical hue beside a word. The service's own probes take the
+   neutral of "other" with a hatch, never a series hue of their own. */
+.tf-src { gap: 6px; }
+.tf-src::before { content: ''; width: 7px; height: 7px; border-radius: 99px; background: var(--tf-cat-other); flex-shrink: 0; }
+.tf-src[data-src="fleet"]::before { background: var(--tf-cat-1); }
+.tf-src[data-src="live"]::before { background: var(--tf-cat-3); }
+.tf-src[data-src="sandbox"]::before { background: var(--tf-cat-2); }
+.tf-src[data-src="probe"]::before { background: repeating-linear-gradient(135deg, var(--tf-cat-other) 0 2px, var(--tf-text-3) 2px 3px); }
 
 /* A code block with a copy button that confirms. */
 .tf-command { position: relative; }
@@ -707,7 +716,11 @@ a.tf-chip:hover { filter: brightness(1.15); }
 .tf-tile-more { display: inline-flex; align-items: center; gap: 4px; margin-top: auto; padding-top: 6px; font: 500 0.75rem/1rem var(--tf-font-sans); color: var(--tf-text-3); transition: color var(--tf-dur-1), gap var(--tf-dur-2) var(--tf-ease-out); }
 .tf-tile-more .tf-icon { width: 14px; height: 14px; }
 .tf-card-link:hover .tf-tile-more { color: var(--tf-accent-text); gap: 7px; }
-.tf-tile-spark { flex-shrink: 0; display: inline-flex; }
+/* The value keeps its width; the sparkline gives way to it, scaled down
+   whole rather than running out of a narrow tile. */
+.tf-tile-value { flex-shrink: 0; }
+.tf-tile-spark { flex: 0 1 auto; min-width: 0; display: inline-flex; justify-content: flex-end; }
+.tf-tile-spark > svg { display: block; max-width: 100%; height: auto; }
 .tf-delta { display: inline-flex; align-items: center; gap: 3px; font: 600 0.75rem/1rem var(--tf-font-sans); color: var(--tf-text-3); }
 .tf-delta .tf-icon { width: 13px; height: 13px; }
 .tf-delta-good { color: var(--tf-approved-text); }
@@ -857,6 +870,9 @@ html.tf-lock, html.tf-lock body { overflow: hidden; }
 .tf-palette-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; padding: 10px 16px; border-top: 1px solid var(--tf-hairline); background: var(--tf-inset); font-size: var(--tf-fs-micro); color: var(--tf-text-3); }
 .tf-palette-foot span { display: inline-flex; align-items: center; gap: 6px; }
 @media (max-width: 639px) { .tf-palette-overlay { padding-top: 12px; } .tf-palette { max-height: calc(100dvh - 24px); } .tf-palette-foot { display: none; } }
+/* On a phone a project's hint (its stage, where its calls come from, how
+   many) wraps rather than losing its end to an ellipsis. */
+@media (max-width: 639px) { .tf-palette-hint { white-space: normal; } }
 
 /* The tooltip every chart mark shares: value first, label after. */
 .tf-tip {

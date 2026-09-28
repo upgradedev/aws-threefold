@@ -963,6 +963,54 @@
     return html`<span class="tf-chip ${s.chip}" title="${title || word || s.word}">${icon(s.icon, 13)}${word || s.word}</span>`;
   }
 
+  // Where a project's calls come from, as GET /api/projects and the
+  // overview's rows name it (`source`), so a page can say which of its rows
+  // are synthetic. A stack from before the field says only whether a project
+  // is a visitor's sandbox, which its name does too; a project the reader has
+  // no row for is given no chip rather than a guess, because Other is itself
+  // one of the answers. No cadence is claimed for the daily live agent: until
+  // a schedule starts it, a day's run is started by hand.
+  var SOURCES = {
+    fleet: { label: 'Fleet', says: 'The synthetic Acme fleet: scheduled agents whose calls run through the real gates' },
+    live: { label: 'Live', says: 'The daily live agent: a real Claude Code or Codex run on an Acme task, in a project that enforces' },
+    sandbox: { label: 'Sandbox', says: 'A visitor\'s sandbox, seeded with synthetic calls by the walkthrough' },
+    probe: { label: 'Probe, synthetic', says: 'The service\'s own probes: synthetic calls that check the live stack\'s gates and pages' },
+    other: { label: 'Other', says: 'Not the fleet, the daily live agent or a sandbox: the service\'s own probes, the demo page, or a connected repository' }
+  };
+  var SANDBOX_ALIAS = /^Acme-Sandbox-[0-9a-f]{8}$/;
+
+  function sourceOf(p) {
+    if (p && Object.prototype.hasOwnProperty.call(SOURCES, p.source)) return p.source;
+    if (p && (p.sandbox === true || SANDBOX_ALIAS.test(String(p.project || '')))) return 'sandbox';
+    return '';
+  }
+
+  // The chip: a dot in the source's categorical hue and its word, the whole
+  // sentence on hover. `p` is a project's row ({project, source, sandbox}).
+  function sourceChip(p) {
+    var src = sourceOf(p);
+    if (!src) return '';
+    return html`<span class="tf-chip tf-chip-gray tf-src" data-src="${src}" title="${SOURCES[src].says}">${SOURCES[src].label}</span>`;
+  }
+
+  // Why a breaker stopped a session, in a reader's words, for the halts the
+  // service writes (the loop detector, the circuit breaker's three spend
+  // checks, and an operator's freeze). Anything else is '' and is shown in
+  // the service's own words; those words are kept wherever this leads.
+  var TRIP_WORDS = [
+    [/^Monomorphic loop detected\b/i, 'The same call kept repeating'],
+    [/^(Similar|Ping-pong oscillation|Circular \d+-step|Similar \d+-step|Autonomous thrashing) (loop|cycle) detected\b/i, 'Its calls kept going round in a loop'],
+    [/^Single invocation cost \S+ exceeds/i, 'One call would have cost more than the per-call cap'],
+    [/^Projected session cost \S+ exceeds allocated budget/i, 'Its spend reached its budget'],
+    [/^Projected session cost \S+ exceeds the policy session ceiling/i, 'Its spend reached the policy’s ceiling'],
+    [/^MANUALLY_TERMINATED by /, 'An operator froze it']
+  ];
+  function tripWords(reason) {
+    var text = String(reason || '');
+    for (var i = 0; i < TRIP_WORDS.length; i++) if (TRIP_WORDS[i][0].test(text)) return TRIP_WORDS[i][1];
+    return '';
+  }
+
   // Keyboard hint chips: kbd('Ctrl', 'K').
   function kbd() {
     var keys = Array.prototype.slice.call(arguments);
@@ -1171,13 +1219,19 @@
   }
 
   // Tab and Shift+Tab stay inside whatever is modal: the palette, a dialog of
-  // this layer's, or a page's own [aria-modal="true"].
+  // this layer's, a page's own [aria-modal="true"], or, while the menu sheet
+  // covers the page on a narrow screen, the header that holds the sheet and
+  // the button that closes it.
   function trapFocus(event) {
     var modal = null;
     if (palette.open) modal = doc.getElementById('tf-palette');
     else {
       var open = all(doc, '[aria-modal="true"]');
       modal = open.length ? open[open.length - 1] : null;
+    }
+    if (!modal) {
+      var sheet = menuOpen();
+      modal = sheet && typeof sheet.closest === 'function' ? sheet.closest('header') || sheet : sheet;
     }
     if (!modal) return;
     var nodes = focusables(modal);
@@ -1383,15 +1437,51 @@
     if (!menu || !menu.classList) return;
     var show = open === undefined ? menu.classList.contains('hidden') : open;
     var was = !menu.classList.contains('hidden');
+    // Where the focus was when the sheet closes: inside it, it goes back to
+    // the button that opened it rather than to the page behind.
+    var inside = was && !show && within(doc.activeElement, menu);
     menu.classList.toggle('hidden', !show);
-    // The sheet covers the page, so the page under it holds still.
+    // The sheet covers the page, so the page under it holds still, and is
+    // taken out of reach while it does.
     if (show !== was && !palette.open && !dialogState) lockScroll(show);
+    if (show && !was) holdPage(menu);
+    else if (!show) releasePage();
     var toggle = button || one(doc, '[data-tf-menu]');
     if (toggle && toggle.setAttribute) {
       toggle.setAttribute('aria-expanded', show ? 'true' : 'false');
       toggle.setAttribute('aria-label', show ? 'Close the menu' : 'Open the menu');
     }
     if (show) focusNode(one(menu, 'a'));
+    else if (inside) focusNode(toggle);
+  }
+
+  function menuOpen() {
+    var menu = doc && doc.getElementById ? doc.getElementById('tf-menu') : null;
+    return menu && menu.classList && !menu.classList.contains('hidden') ? menu : null;
+  }
+
+  // While the sheet is open, everything on the page but the header that
+  // holds it is inert: Tab, a pointer and a screen reader's cursor all stay
+  // in the bar and the sheet (trapFocus wraps Tab within the header). Only
+  // what this layer made inert is released, whichever way the sheet closes.
+  var inertByMenu = [];
+  function holdPage(menu) {
+    releasePage();
+    var body = doc && doc.body;
+    var header = menu && typeof menu.closest === 'function' ? menu.closest('header') : null;
+    if (!body || !body.children || !header) return;
+    Array.prototype.forEach.call(body.children, function (child) {
+      if (!child || child === header || typeof child.setAttribute !== 'function') return;
+      if (typeof child.contains === 'function' && child.contains(header)) return;
+      if (/^(SCRIPT|STYLE|TEMPLATE)$/i.test(String(child.tagName || ''))) return;
+      if (typeof child.hasAttribute === 'function' && child.hasAttribute('inert')) return;
+      child.setAttribute('inert', '');
+      inertByMenu.push(child);
+    });
+  }
+  function releasePage() {
+    inertByMenu.forEach(function (child) { if (typeof child.removeAttribute === 'function') child.removeAttribute('inert'); });
+    inertByMenu = [];
   }
 
   function moreMenus() { return all(doc, '[data-tf-more]'); }
@@ -1476,7 +1566,11 @@
     var alias = String(p.project);
     var stage = p.stage === 'enforce' ? 'Enforce' : 'Observe';
     var facts = [stage];
-    if (isNumber(p.calls)) facts.push(num(p.calls) + ' calls in 7 days');
+    // Where its calls come from, as the project list says it: the fleet's
+    // and the probes' are synthetic, and the palette says so too.
+    var src = sourceOf(p);
+    if (src) facts.push(SOURCES[src].label);
+    if (isNumber(p.calls)) facts.push(num(p.calls) + (p.calls === 1 ? ' call' : ' calls') + ' in 7 days');
     if (isNumber(p.needs_review) && p.needs_review > 0) facts.push(num(p.needs_review) + ' to review');
     var target = '#/projects/' + encodeURIComponent(alias);
     var item = { group: 'Projects', id: 'project-' + alias, text: alias, alias: alias, icon: 'folder', hint: facts.join(' · '), href: inDash ? target : PAGE_BASE + 'dashboard.html' + target, keywords: [] };
@@ -1853,6 +1947,9 @@
   }
   if (typeof root.addEventListener === 'function') {
     root.addEventListener('scroll', function () { if (tipFor) hideTip(); }, { passive: true });
+    // Widened past the bar's breakpoint, the stylesheet hides an open sheet;
+    // it is closed here as well, so the page under it is released.
+    root.addEventListener('resize', function () { if (menuOpen() && (root.innerWidth || 0) >= 1024) toggleMenu(null, false); });
     root.addEventListener('hashchange', function () { closePalette(false); hideTip(); });
   }
 
@@ -2187,6 +2284,10 @@
     commandBlock: commandBlock,
     announce: announce,
     statusChip: statusChip,
+    SOURCES: SOURCES,
+    sourceOf: sourceOf,
+    sourceChip: sourceChip,
+    tripWords: tripWords,
     kbd: kbd,
     emptyState: emptyState,
     skeleton: skeleton,
