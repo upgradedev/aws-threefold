@@ -6698,8 +6698,10 @@
           : html`${plural(stages.observe, 'project')} ${stages.observe === 1 ? 'was' : 'were'} in Observe and ${num(stages.enforce)} in Enforce`;
       const span = typeof p.window_days === 'number' ? html`the ${plural(p.window_days, 'day')} these totals cover` : 'the window these totals cover';
       const nothingRefused = p.refused === 0;
-      const refusals = first => nothingRefused ? html`${first ? 'No' : 'no'} call was refused in ${span}${allObserve ? ': every call was judged and recorded, and a rule in Observe refuses nothing' : ''}`
-        : typeof p.refused === 'number' && p.refused > 0 ? html`${plural(p.refused, 'call')} ${p.refused === 1 ? 'was' : 'were'} refused in ${span}` : '';
+      // The service's refusals: a call carrying a credential is refused on the
+      // machine and never sent, so these totals cannot count it.
+      const refusals = first => nothingRefused ? html`${first ? 'The' : 'the'} service refused no call in ${span}${allObserve ? ': every call was judged and recorded, and a rule in Observe refuses nothing' : ''}`
+        : typeof p.refused === 'number' && p.refused > 0 ? html`${first ? 'The' : 'the'} service refused ${plural(p.refused, 'call')} in ${span}` : '';
       const standing = staged
         ? html`At the snapshot, ${staged}${refusals(false) ? html`, and ${refusals(false)}` : ''}.`
         : refusals(true) ? html`${refusals(true)}.` : '';
@@ -6707,7 +6709,7 @@
       // there is nothing to count, and the line says that rather than an
       // empty figure.
       const corrected = nothingRefused
-        ? 'Self-corrected: none to count. It is counted on refused calls, and no call was refused in this window.'
+        ? 'Self-corrected: none to count. It is counted on refused calls, and the service refused no call in this window.'
         : p.self_correction ? html`Self-corrected: ${selfCorrectionWords(p.self_correction)}.` : '';
       return card(title, sub, html`
         <div class="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-7 gap-3">${tiles.map(([label, value, metric, note]) => html`<div class="tf-card-quiet tf-tile">
