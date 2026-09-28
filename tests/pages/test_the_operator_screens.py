@@ -1186,6 +1186,25 @@ def test_a_read_that_stops_short_says_how_many_wait_and_reads_further(tmp_path: 
     assert "more beyond these" not in out["rule"], "A cursor says older days are unread, not that more calls wait"
 
 
+def test_a_later_page_that_fails_keeps_what_was_read(tmp_path: Path) -> None:
+    """A refused second read (a busy stack's 429) leaves the rows of the first on screen, and the way to read further."""
+    out = ops(
+        QUEUE
+        + r"""
+  answer = contract({ '/api/decisions': u => u.searchParams.get('cursor') === 'c1'
+    ? { status: 429, body: { detail: 'Too many requests.' } }
+    : { status: 200, body: { items: [flagged(1, 'Acme-Checkout'), flagged(2, 'Acme-Checkout')], next_cursor: 'c1' } } });
+  await visit('#/review?rule=LOOP&days=7');
+  out.view = view();
+  out.count = text(view().split('id="review-count"')[1].split('</p>')[0]);
+  out.error = el('review-error').textContent;
+""",
+        tmp_path,
+    )
+    assert "At least 2 calls waiting in the last 7 days" in out["count"], "The rows read before the failure are kept"
+    assert "Look further back" in out["view"] and "could not all be read" in out["error"], "It says so, and offers the read again"
+
+
 def test_the_project_page_opens_the_queue_over_its_own_window(tmp_path: Path) -> None:
     """The project page counts 14 days; every way from it into the queue carries those 14 days."""
     out = ops(

@@ -2564,6 +2564,9 @@
         Object.keys(state.labelled).forEach(k => { known[k] = true; });
         const rows = [];
         let sent = 0;
+        // A request after the first that fails (a busy stack's 429, say)
+        // ends the read with what it had and the cursor it failed at, so the
+        // reader keeps the rows and can read further again.
         const step = at => fetchPage(at).then(body => {
           sent += 1;
           const items = body && Array.isArray(body.items) ? body.items : [];
@@ -2576,6 +2579,9 @@
           const full = items.length >= REVIEW_PAGE;
           if (!next || next === at || rows.length >= REVIEW_PAGE || sent >= REVIEW_READS) return { rows, cursor: next, full };
           return step(next);
+        }, err => {
+          if (!sent) throw err;
+          return { rows, cursor: at, full: false, failed: err };
         });
         return step(cursor);
       }
@@ -2619,8 +2625,13 @@
           state.items = current(read.rows);
           state.cursor = read.cursor;
           state.full = read.full;
+          state.readFailed = read.failed || null;
           return state.cursor ? readCount() : null;
-        }).then(() => { if (ctx.alive()) draw(); }, err => {
+        }).then(() => {
+          if (!ctx.alive()) return;
+          draw();
+          if (state.readFailed) sayError('Older days could not all be read: ' + trimStop(state.readFailed.message) + '. What was read is shown; look further back to try again.');
+        }, err => {
           if (ctx.alive()) ctx.render(html`${pageTitle('Review', sub)}${failure(err, 'the review queue')}`);
         });
       }
@@ -2953,6 +2964,10 @@
       function draw() {
         const before = document.activeElement;
         const typing = before && /^note-/.test(String(before.id || '')) ? before.id : '';
+        // A reader who pressed Look further back keeps the focus on it while
+        // it reads and after, as long as there is further to read.
+        const reading = !!before && before.id === 'review-more';
+        const backOnMore = () => { const more = reading && document.getElementById('review-more'); if (more) refocus(more); return !!more; };
         const list = groups();
         const rows = ordered(list);
         const here = currentIndex(rows);
@@ -2971,8 +2986,9 @@
                 <p class="text-sm text-gray-400 max-w-2xl" id="review-count">${done ? plural(done, 'call') + ' labelled on this visit. ' : ''}No call waiting for a label among the newest days read so far${counted ? html`, though <strong class="text-white" data-metric="unreviewed">${num(counted)}</strong> ${counted === 1 ? 'waits' : 'wait'} in ${windowWords(days)}, ${countedBy()}` : ''}. The ledger holds older days of this window: read further back to reach them.</p>
               </div>
               <p id="review-error" class="text-xs text-rose-300" role="alert"></p>
-              <div class="flex flex-wrap gap-2"><button type="button" id="review-more" class="tf-btn tf-btn-primary" data-action="more" ${state.loadingMore ? raw('disabled') : ''}>${state.loadingMore ? 'Loading…' : 'Look further back'}</button><a class="tf-btn" href="${callsHref({ kind: 'observed', days, project })}">See the flagged calls</a></div>
+              <div class="flex flex-wrap gap-2"><button type="button" id="review-more" class="tf-btn tf-btn-primary" data-action="more" ${state.loadingMore ? raw('aria-disabled="true" aria-busy="true"') : ''}>${state.loadingMore ? 'Loading…' : 'Look further back'}</button><a class="tf-btn" href="${callsHref({ kind: 'observed', days, project })}">See the flagged calls</a></div>
             </div>`);
+          if (backOnMore()) return;
           if (state.engaged && focusLost()) focusTitle();
           return;
         }
@@ -3058,10 +3074,11 @@
             </div>`)}
           </section>`;
           })}${foldAt < 0 ? foldCard : ''}</div>
-          ${state.cursor ? html`<div class="mt-4"><button type="button" id="review-more" class="tf-btn" data-action="more" ${state.loadingMore ? raw('disabled') : ''}>${state.loadingMore ? 'Loading…' : state.full ? 'Load more' : 'Look further back'}</button></div>` : ''}`);
+          ${state.cursor ? html`<div class="mt-4"><button type="button" id="review-more" class="tf-btn" data-action="more" ${state.loadingMore ? raw('aria-disabled="true" aria-busy="true"') : ''}>${state.loadingMore ? 'Loading…' : state.full ? 'Load more' : 'Look further back'}</button></div>` : ''}`);
         // A redraw replaces every row, and with them the focus. A reader typing
         // a note keeps the field; one working the queue gets the row back.
         if (typing) { refocus(document.getElementById(typing)); return; }
+        if (backOnMore()) return;
         if (!focusLost()) return;
         // The route focused the title of the loading screen, which this draw
         // replaced. Until the reader works the queue, the new title takes the
@@ -3349,26 +3366,24 @@
           focusCurrent(false);
         },
         // Reads on, as the first read did, from where it stopped. The button
-        // is drawn again with the screen, so the focus goes back to it while
-        // it is still there, and to the title of the screen when it is not.
+        // stays focusable while it reads (draw keeps the focus on it), and a
+        // page that fails part way keeps what was read before it.
         more: () => {
           if (!state.cursor || state.loadingMore) return;
-          const pressed = document.activeElement && document.activeElement.id === 'review-more';
           state.loadingMore = true;
           draw();
-          if (pressed) refocus(document.getElementById('review-more'));
           return readOn(state.cursor).then(read => {
             if (!ctx.alive()) return;
             const more = current(read.rows);
             state.items = state.items.concat(more);
             state.cursor = read.cursor;
             state.full = read.full;
+            if (read.failed) sayError('Older days could not all be read: ' + trimStop(read.failed.message) + '. What was read is shown; look further back to try again.');
             return (state.cursor && !state.counted ? readCount() : Promise.resolve()).then(() => more);
           }).then(more => {
             if (!ctx.alive() || !more) return;
             state.loadingMore = false;
             draw();
-            if (pressed && focusLost()) { const again = document.getElementById('review-more'); if (again) refocus(again); else focusTitle(); }
             announce(more.length
               ? plural(more.length, 'more call') + ' read' + (state.cursor ? '; older days can still be read' : ', to the end of the window') + '.'
               : 'No more calls wait for a label' + (state.cursor ? ' in what was read; older days can still be read' : '') + '.');
