@@ -284,3 +284,6 @@
 
 ## 2026-09-28T18:37:00+03:00 — The Muse card shortened to hold the phone budget
 - The first wording pushed How-it-works to 2.909 phone screens against the 2.9 bound, and CI failed it. The Muse card now says the same measured truth in one quote instead of two (2.857 screens in both faces, measured twice). Full pages layer 433 passed locally, pages published, probes rerun: edge and API 117/0/3 (`docs/evidence/PROBES_2026-09-28-4-edge.md`, `docs/evidence/PROBES_2026-09-28-4.md`).
+
+## 2026-09-28T19:21:00+03:00 — Regionals redeployed so the origin serves the latest pages
+- Verification found the edge on the new words while the API origin still served the pre-fix pages: the regional stacks had deployed before the wording fix. Redeployed `threefold-prod` and `threefold-dogfood` (`PublicReads=false` kept, `/prod/status` HEALTHY); the origin now serves the latest card. Probes after the redeploy: edge and API 117/0/3 (`docs/evidence/PROBES_2026-09-28-5-edge.md`, `docs/evidence/PROBES_2026-09-28-5.md`), private 101/0 read-only.
