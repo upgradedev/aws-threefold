@@ -151,14 +151,6 @@
     .tf-ops-scope { display: flex; align-items: flex-start; gap: 8px; margin: 0; font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-3); }
     .tf-ops-scope .tf-icon { flex-shrink: 0; margin-top: 2px; }
     .tf-ops-cut { font-family: var(--tf-font-sans); font-size: 0.6875rem; color: var(--tf-text-3); white-space: nowrap; }
-    .tf-ops-src { gap: 6px; }
-    .tf-ops-src::before { content: ''; width: 7px; height: 7px; border-radius: 99px; background: var(--tf-cat-other); flex-shrink: 0; }
-    .tf-ops-src[data-src="fleet"]::before { background: var(--tf-cat-1); }
-    .tf-ops-src[data-src="live"]::before { background: var(--tf-cat-3); }
-    .tf-ops-src[data-src="sandbox"]::before { background: var(--tf-cat-2); }
-    /* The service's own probes: synthetic, drawn in the neutral of "other"
-       with a hatch, so they never take a series hue of their own. */
-    .tf-ops-src[data-src="probe"]::before { background: repeating-linear-gradient(135deg, var(--tf-cat-other) 0 2px, var(--tf-text-3) 2px 3px); }
 
     /* The portfolio: one row a project. */
     .tf-ops-portfolio .tf-table td, .tf-ops-portfolio .tf-table tbody th { vertical-align: middle; }
@@ -262,8 +254,18 @@
       .tf-ops-proj-tools > .tf-ops-note-add { order: 9; flex-basis: 100%; }
       .tf-ops-qrow-what { font-size: 0.75rem; line-height: 1.125rem; }
     }
-    section[data-open="false"] .tf-ops-qrow-body { opacity: 0.78; }
+    /* A group only the operator may label reads at full contrast: its lock
+       chip and the missing buttons say it is read-only, never faded text. */
     .tf-ops-qrow-actions .tf-kbd { margin-left: 2px; }
+    /* What the service said, word for word, kept one click under the plain sentence. */
+    .tf-ops-said { margin: 2px 0 0; max-width: 90ch; font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-3); }
+    .tf-ops-said > summary { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; list-style: none; border-radius: var(--tf-radius-sm); color: var(--tf-text-3); }
+    .tf-ops-said > summary::-webkit-details-marker { display: none; }
+    .tf-ops-said > summary:hover { color: var(--tf-text-2); }
+    .tf-ops-said > summary:focus-visible { outline: 2px solid var(--tf-focus); outline-offset: 2px; }
+    .tf-ops-said > summary .tf-icon { width: 12px; height: 12px; transition: transform var(--tf-dur-1); }
+    .tf-ops-said[open] > summary .tf-icon { transform: rotate(180deg); }
+    .tf-ops-said > p { margin: 4px 0 0; color: var(--tf-text-2); overflow-wrap: anywhere; }
     .tf-ops-group-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 10px 16px; }
     .tf-ops-group-title { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font: 600 0.875rem/1.375rem var(--tf-font-sans); color: var(--tf-text); }
     .tf-ops-note-add { display: inline-flex; align-items: center; gap: 6px; padding: 2px 0; border: 0; background: none; cursor: pointer; font-size: 0.75rem; line-height: 1rem; color: var(--tf-text-3); }
@@ -1014,30 +1016,27 @@
       ci: 'ci: a pipeline or a pre-commit check'
     };
 
-    // Where a project's calls come from, on a stack that says so. A stack from
-    // before the field says only whether a project is a visitor's sandbox, and
-    // one from before `live` calls the daily live agent's projects Other.
-    // No cadence is claimed for it, as on the first screen: until a schedule
-    // starts it, a day's run is started by hand.
-    const SOURCES = {
-      fleet: { label: 'Fleet', says: 'The synthetic Acme fleet: scheduled agents whose calls run through the real gates' },
-      live: { label: 'Live', says: 'The daily live agent: a real Claude Code or Codex run on an Acme task, in a project that enforces' },
-      sandbox: { label: 'Sandbox', says: 'A visitor\'s sandbox, seeded with synthetic calls by the walkthrough' },
-      probe: { label: 'Probe, synthetic', says: 'The service\'s own probes: synthetic calls that check the live stack\'s gates and pages' },
-      other: { label: 'Other', says: 'Not the fleet, the daily live agent or a sandbox: the service\'s own probes, the demo page, or a connected repository' }
-    };
-    function sourceOf(p) {
-      if (p && Object.prototype.hasOwnProperty.call(SOURCES, p.source)) return p.source;
-      if (p && (p.sandbox === true || /^Acme-Sandbox-[0-9a-f]{8}$/.test(String(p.project || '')))) return 'sandbox';
-      return '';
-    }
+    // Where a project's calls come from, on a stack that says so: the design
+    // system's words and chip (Threefold.sourceChip), which sessions.html
+    // shares. A stack from before the field says only whether a project is a
+    // visitor's sandbox, and one from before `live` calls the daily live
+    // agent's projects Other.
+    const SOURCES = T.SOURCES;
+    function sourceOf(p) { return T.sourceOf(p); }
     // The service's own probes, on a stack that names them, come after
     // everything else in a list: nobody has to act on them.
     function isProbe(p) { return sourceOf(p) === 'probe'; }
-    function sourceBadge(p) {
-      const src = sourceOf(p);
-      if (!src) return '';
-      return html`<span class="tf-chip tf-chip-gray tf-ops-src" data-src="${src}" title="${SOURCES[src].says}">${SOURCES[src].label}</span>`;
+    function sourceBadge(p) { return T.sourceChip(p); }
+    // A project's row by its alias, from a read of GET /api/projects, so a
+    // screen whose rows name only the alias (a call, a queue's group) can
+    // carry the same chip. An alias with no row gets none.
+    function sourceRowOf(rows, name) {
+      return (rows && Object.prototype.hasOwnProperty.call(rows, name) && rows[name]) || { project: name };
+    }
+    function projectRows(body) {
+      const rows = {};
+      (body && Array.isArray(body.projects) ? body.projects : []).forEach(p => { if (p && typeof p.project === 'string' && p.project) rows[p.project] = p; });
+      return rows;
     }
 
     // The false alarms of a window, by project, from one read of the ledger
@@ -1137,21 +1136,33 @@
     // anyone may label a sandbox's calls, and only the operator the rest. The
     // slot says so, and offers the walkthrough, which makes a sandbox of the
     // reader's own, rather than a keyboard for labels that would be refused.
+    // The calls waiting in the service's own probes, which the strip leaves
+    // out of its count: synthetic, and nobody has to act on them. Never more
+    // than the window's total, whatever the rows say.
+    function probesWaiting(data) {
+      const t = data.totals || {};
+      const all = typeof t.needs_review === 'number' ? t.needs_review : 0;
+      const rows = (Array.isArray(data.by_project) ? data.by_project : []).filter(p => isProbe(p) && (p.needs_review || 0) > 0);
+      return Math.max(0, Math.min(all, sum(rows, 'needs_review')));
+    }
+
     function reviewSlot(data, days, who) {
       const t = data.totals || {};
       const visitor = !!who && who.reads_public === true && who.authenticated !== true;
-      const waiting = typeof t.needs_review === 'number' ? t.needs_review : 0;
+      // The headline counts what its list and its notes speak of: the probes'
+      // calls are left out of it, and the note says how many.
+      const inProbes = probesWaiting(data);
+      const waiting = Math.max(0, (typeof t.needs_review === 'number' ? t.needs_review : 0) - inProbes);
+      const probeNote = inProbes ? html`<p class="tf-ops-att-note">Left out: ${plural(inProbes, 'call')} in the service's own probes, which are synthetic.</p>` : '';
       if (!waiting) {
         return attSlot({ slot: 'reviews', tone: 'ok', icon: 'check', kicker: 'Reviews', title: 'Nothing waits for a label',
-          body: html`<p class="tf-ops-att-note">Every call a rule in Observe flagged in ${windowWords(days)} has a label.</p>` });
+          body: html`<p class="tf-ops-att-note">${inProbes ? "Outside the service's own probes, every" : 'Every'} call a rule in Observe flagged in ${windowWords(days)} has a label.</p>${probeNote}` });
       }
       // A visitor's sandbox expires within a day and is the visitor's to
       // label, so for the operator the projects that are theirs lead, and a
       // sandbox is listed only where room is left.
       const theirs = p => (visitor || sourceOf(p) !== 'sandbox' ? 1 : 0);
       const waitingIn = (Array.isArray(data.by_project) ? data.by_project : []).filter(p => (p.needs_review || 0) > 0);
-      const probes = waitingIn.filter(isProbe);
-      const inProbes = sum(probes, 'needs_review');
       const rows = waitingIn.filter(p => !isProbe(p))
         .sort((a, b) => theirs(b) - theirs(a) || (b.needs_review || 0) - (a.needs_review || 0) || String(a.project).localeCompare(String(b.project)));
       const split = data.sandbox_split && data.sandbox_split.sandbox;
@@ -1162,7 +1173,7 @@
         body: html`<ul class="tf-ops-att-list">${rows.slice(0, 3).map(p => html`<li><a href="${reviewHref({ project: p.project, days })}"><span class="tf-ops-att-what font-mono">${T.projectName(p.project)}</span><span class="tf-ops-att-n">${num(p.needs_review)}</span></a></li>`)}</ul>
           ${rows.length > 3 ? html`<p class="tf-ops-att-note">and ${plural(rows.length - 3, 'more project')}.</p>` : ''}
           ${inSandboxes ? html`<p class="tf-ops-att-note">${num(inSandboxes)} of them ${inSandboxes === 1 ? 'is' : 'are'} in visitors' sandboxes${visitor ? ', which anyone may label' : ', which drop out of these figures within a day'}.</p>` : ''}
-          ${inProbes ? html`<p class="tf-ops-att-note">Left out: ${plural(inProbes, 'call')} in the service's own probes, which are synthetic.</p>` : ''}
+          ${probeNote}
           ${visitor ? html`<p class="tf-ops-att-note">The other projects' labels are the operator's.</p>` : ''}`,
         foot: visitor
           ? html`<a class="tf-btn tf-btn-primary tf-btn-sm" href="#/try">Try it with your own sandbox${T.icon('arrowright', 14)}</a><a class="tf-btn tf-btn-quiet tf-btn-sm" href="${reviewHref({ days })}">See the queue</a>`
@@ -1249,7 +1260,7 @@
         body: html`<ul class="tf-ops-halts">${halted.slice(0, 3).map(s => html`<li>
             <a class="tf-ops-halt" href="${T.pageHref('sessions.html' + query({ session: s.session_id }))}">
               <span class="tf-ops-halt-id"><span class="font-mono text-gray-100">${s.session_id}</span>${s.project_name ? html` <span class="text-gray-500">in</span> <span class="font-mono">${T.projectName(s.project_name)}</span>` : ''}</span>
-              ${s.trip_reason ? html`<span class="tf-ops-halt-why">${s.trip_reason}</span>` : ''}
+              ${s.trip_reason ? html`<span class="tf-ops-halt-why" title="${s.trip_reason}">${T.tripWords(s.trip_reason) || s.trip_reason}</span>` : ''}
               <span class="tf-ops-halt-when">started ${timeAgo(s.created_at)}</span>
             </a>
             ${operator ? html`<button type="button" class="tf-btn tf-btn-sm" data-action="resume-open" data-session="${s.session_id}">${T.icon('refresh', 14)}Resume…</button>` : ''}
@@ -1513,7 +1524,12 @@
             href: callsHref({ kind: 'refused', days }), sub: selfCorrectionWords(data.self_correction),
             opens: SELF_CORRECTION_SCOPE + ' Opens every refused call in this window', more: 'See the refusals' },
           { label: visitor ? 'Waiting for a label' : 'Waiting for your label', metric: 'needs_review', value: t.needs_review, href: callsHref({ kind: 'observed', review: 'unreviewed', days }), icon: 'inbox', term: 'needs review',
-            sub: t.needs_review ? 'label them so their rules can become Ready' : 'every flagged call has a label' },
+            // Every call waiting, the probes' among them, as the queue lists
+            // them; the attention strip above counts without the probes, so
+            // the share is said here too.
+            sub: t.needs_review
+              ? 'label them so their rules can become Ready' + (probesWaiting(data) ? '; ' + num(probesWaiting(data)) + ' of them in the service\'s own probes, which are synthetic' : '')
+              : 'every flagged call has a label' },
           { label: 'Projects', metric: 'projects', value: t.projects, href: '#/projects', icon: 'folder', more: 'See the projects',
             sub: num(stages.observe) + ' in Observe · ' + num(stages.enforce) + ' in Enforce' },
           { label: codingCount !== null ? 'Coding agents' : 'Agents', metric: codingCount !== null ? 'coding_agents' : 'agents',
@@ -1606,7 +1622,9 @@
       function resumeBody(id, halt) {
         let remembered = '';
         try { remembered = localStorage.getItem(NAME_KEY) || ''; } catch (err) { /* a convenience */ }
-        return html`<p class="text-sm text-gray-300">Session <span class="font-mono text-white tf-break">${id}</span> was halted${halt && halt.trip_reason ? html`: <span class="text-gray-200">${halt.trip_reason}</span>` : ''}. Resuming clears the halt and keeps its history and spend, so the gates still apply to its next call.</p>
+        const why = halt && halt.trip_reason ? T.tripWords(halt.trip_reason) : '';
+        return html`<p class="text-sm text-gray-300">Session <span class="font-mono text-white tf-break">${id}</span> was halted${halt && halt.trip_reason ? html`: <span class="text-gray-200">${why ? trimStop(why) : trimStop(halt.trip_reason)}</span>` : ''}. Resuming clears the halt and keeps its history and spend, so the gates still apply to its next call.</p>
+          ${why ? html`<p class="text-xs text-gray-400">The breaker's own words: <span class="tf-break">${halt.trip_reason}</span></p>` : ''}
           <label class="block"><span class="tf-label">Why it is safe to resume</span>
             <input id="dialog-first" type="text" maxlength="240" class="tf-input w-full" placeholder="For example: the loop was a retry I stopped" /></label>
           <label class="block"><span class="tf-label">Your name, for the record</span>
@@ -1722,7 +1740,7 @@
             <td class="num">${numLink(p.calls, { project: p.project }, 'text-gray-200')}</td>
             <td class="num">${numLink(p.refused, { project: p.project, kind: 'refused' }, 'text-rose-300')}</td>
             <td class="num">${numLink(p.would_refuse, { project: p.project, kind: 'observed' }, 'text-amber-300')}</td>
-            <td class="num">${p.needs_review ? html`<a href="${reviewHref({ project: p.project })}" class="tf-num-link text-sky-300">${num(p.needs_review)}</a>` : html`<span class="text-gray-500">${num(p.needs_review)}</span>`}</td>
+            <td class="num">${p.needs_review ? html`<a href="${reviewHref({ project: p.project, days })}" class="tf-num-link text-sky-300">${num(p.needs_review)}</a>` : html`<span class="text-gray-500">${num(p.needs_review)}</span>`}</td>
             <td>${readinessCell(p, fa)}</td>
           </tr>`)}</tbody>
         </table>
@@ -1735,7 +1753,7 @@
         <div class="tf-ops-pnums">
           ${[['Calls', p.calls, {}, 'text-gray-200'], ['Refused', p.refused, { kind: 'refused' }, 'text-rose-300'], ['Would refuse', p.would_refuse, { kind: 'observed' }, 'text-amber-300']].map(([label, value, params, tone]) =>
             html`<a href="${callsHref(Object.assign({ days, project: p.project }, params))}"><b class="${value ? tone : 'text-gray-500'}">${num(value)}</b><small>${label}</small></a>`)}
-          <a href="${reviewHref({ project: p.project })}"><b class="${p.needs_review ? 'text-sky-300' : 'text-gray-500'}">${num(p.needs_review)}</b><small>Waiting</small></a>
+          <a href="${reviewHref({ project: p.project, days })}"><b class="${p.needs_review ? 'text-sky-300' : 'text-gray-500'}">${num(p.needs_review)}</b><small>Waiting</small></a>
         </div>
         ${readinessCell(p, fa)}
         <p class="tf-ops-pmeta">${meta(p)}</p>
@@ -1940,7 +1958,7 @@
             <p class="tf-ops-refused-line" id="stage-refused">${refusedLine(name, o.refused, days)}</p>
             <div class="tf-ops-hero-actions">
               <button type="button" class="tf-btn tf-btn-primary tf-btn-lg" data-action="promote-open" ${rules.length && canWrite ? '' : raw('disabled')}${canWrite ? '' : raw(' aria-describedby="stage-locked"')}>${T.icon('shield', 16)}Promote to Enforce…</button>
-              ${waiting ? html`<a class="tf-btn tf-btn-lg" href="${reviewHref({ project: name })}">${T.icon('inbox', 16)}Label ${plural(waiting, 'waiting call')}</a>` : ''}
+              ${waiting ? html`<a class="tf-btn tf-btn-lg" href="${reviewHref({ project: name, days })}">${T.icon('inbox', 16)}Label ${plural(waiting, 'waiting call')}</a>` : ''}
             </div>
             ${locked}
             ${more('How Observe works', html`<p class="tf-ops-hero-fine">Your agents work exactly as before. What a rule <em>would</em> have refused is listed below: mark each one correct or false alarm. A rule whose flags were all correct is Ready; one that flagged nothing is Quiet, and so is one whose only record is refusals nobody labelled. Promote, and the rules you choose start refusing; the others keep observing.</p>
@@ -1984,7 +2002,7 @@
       const parts = [
         { key: 'correct', value: r.correct || 0, label: 'correct', color: C.approved, href: callsHref({ project: name, rule: r.rule_key, review: 'correct', days }) },
         { key: 'false_alarm', value: r.false_alarms || 0, label: r.false_alarms === 1 ? 'false alarm' : 'false alarms', color: C.refused, href: callsHref({ project: name, rule: r.rule_key, review: 'false_alarm', days }) },
-        { key: 'unreviewed', value: r.unreviewed || 0, label: 'not labelled', color: UNLABELLED, href: reviewHref({ project: name, rule: r.rule_key }) }
+        { key: 'unreviewed', value: r.unreviewed || 0, label: 'not labelled', color: UNLABELLED, href: reviewHref({ project: name, rule: r.rule_key, days }) }
       ];
       const drawn = parts.filter(p => p.value > 0);
       const bar = would > 0 && drawn.length
@@ -2006,7 +2024,7 @@
         <div class="min-w-0">${bar}${words}</div>
         <div class="min-w-0">
           <p class="tf-ops-rule-say">${ruleSays(r)}</p>
-          ${r.unreviewed ? html`<p class="tf-ops-rule-links"><a class="tf-link" href="${reviewHref({ project: name, rule: r.rule_key })}">Label ${plural(r.unreviewed, 'call')}</a></p>` : ''}
+          ${r.unreviewed ? html`<p class="tf-ops-rule-links"><a class="tf-link" href="${reviewHref({ project: name, rule: r.rule_key, days })}">Label ${plural(r.unreviewed, 'call')}</a></p>` : ''}
         </div>
       </li>`;
     }
@@ -2129,9 +2147,13 @@
         }
         const canWrite = mayLabel(state.who, name);
 
+        // Calls observed is the calls judged while the project observed, over
+        // this page's window; the call counts of the overview and the project
+        // list are every call of their own window, a page's and those judged
+        // in Enforce among them, so the tile says which it counts.
         const stats = [
           ['Days observed', summary.days_observed, 'days_observed', 'with a call, in ' + windowWords(days)],
-          ['Calls observed', summary.calls_observed, 'calls_observed', 'judged and recorded'],
+          ['Calls observed', summary.calls_observed, 'calls_observed', 'judged in Observe, in ' + windowWords(days) + '; not calls from a page, nor those judged in Enforce'],
           ['Would refuse', summary.would_have_refused, 'would_have_refused', 'flagged by a rule in Observe'],
           ['Reviewed', summary.reviewed, 'reviewed', 'flagged calls with a label'],
           ['False alarms', summary.false_alarms, 'false_alarms', 'labels that said the rule was wrong']
@@ -2150,7 +2172,7 @@
         // Where its calls come from, as its row in the listing says (the
         // answer's `source`). A sandbox's one chip says when it goes.
         const from = sandbox
-          ? html`<span class="tf-chip tf-chip-gray tf-ops-src" data-src="sandbox" title="${SOURCES.sandbox.says}; its stage expires on its own">Sandbox · expires within a day</span>`
+          ? html`<span class="tf-chip tf-chip-gray tf-src" data-src="sandbox" title="${SOURCES.sandbox.says}; its stage expires on its own">Sandbox · expires within a day</span>`
           : sourceBadge({ project: name, source: d.source });
         ctx.render(html`${pageTitle(html`<span class="font-mono">${shown}</span>`, null, html`${stageChip(stage, config ? true : false)}${from}`, crumb)}
           <div class="space-y-6">
@@ -2413,10 +2435,12 @@
     }
 
     // A list of calls as rows that open their detail. Shared by the project
-    // screen and the calls screen.
+    // screen and the calls screen. `sources` is the project list by alias
+    // (projectRows), for the chip that says where a project's calls come from.
     function callsList(rows, options) {
       options = options || {};
       const showProject = options.project !== false;
+      const chip = row => sourceBadge(sourceRowOf(options.sources, row.project_name));
       // A narrow card folds the rule under the call it judged, so a rule key
       // is never broken inside a word to fit a column of its own.
       const foldRule = options.foldRule === true;
@@ -2430,7 +2454,7 @@
           <tbody>${rows.map(row => html`<tr class="cursor-pointer" data-row-href="${callHref(row)}">
             <td class="whitespace-nowrap"><a href="${callHref(row)}" class="tf-link-quiet" title="${dateTime(row.timestamp)}">${timeAgo(row.timestamp)}</a></td>
             <td>${outcomeChip(row)}</td>
-            ${showProject ? html`<td class="font-mono text-gray-300 tf-break">${T.projectName(row.project_name)}</td>` : ''}
+            ${showProject ? html`<td><span class="flex flex-wrap items-center gap-x-2 gap-y-1"><span class="font-mono text-gray-300 tf-break">${T.projectName(row.project_name)}</span>${chip(row)}</span></td>` : ''}
             <td class="text-gray-300 whitespace-nowrap">${agentLabel(row.agent)}</td>
             <td class="min-w-[12rem]"><span class="font-mono text-gray-200">${row.tool_name}</span> <span class="font-mono text-gray-500 tf-break">${breakable(targetOf(row))}</span>${foldRule && outcomeOf(row) !== 'approved' ? html`<span class="block font-mono text-xs text-gray-400 mt-0.5">${breakable(ruleKeyOf(row))}</span>` : ''}</td>
             ${foldRule ? '' : html`<td class="font-mono text-gray-400 whitespace-nowrap">${outcomeOf(row) === 'approved' ? html`<span class="text-gray-600">—</span>` : ruleKeyOf(row)}</td>`}
@@ -2442,7 +2466,8 @@
         <a href="${callHref(row)}" class="block tf-card-quiet p-3 space-y-1.5">
           <span class="flex flex-wrap items-center justify-between gap-2">${outcomeChip(row)}<span class="text-xs text-gray-500">${timeAgo(row.timestamp)}</span></span>
           <span class="block text-xs"><span class="font-mono text-gray-200">${row.tool_name}</span> <span class="font-mono text-gray-500 tf-break">${targetOf(row)}</span></span>
-          <span class="block text-xs text-gray-500">${showProject ? html`<span class="font-mono">${T.projectName(row.project_name)}</span> · ` : ''}${agentLabel(row.agent)}${outcomeOf(row) !== 'approved' ? html` · <span class="font-mono">${ruleKeyOf(row)}</span>` : ''}</span>
+          <span class="block text-xs text-gray-400">${showProject ? html`<span class="font-mono">${T.projectName(row.project_name)}</span> · ` : ''}${agentLabel(row.agent)}${outcomeOf(row) !== 'approved' ? html` · <span class="font-mono">${ruleKeyOf(row)}</span>` : ''}</span>
+          ${showProject && chip(row) ? html`<span class="flex flex-wrap gap-1">${chip(row)}</span>` : ''}
           ${outcomeOf(row) === 'observed' ? html`<span class="block">${reviewChip(row.review)}</span>` : ''}
         </a>
       </li>`)}</ul>`;
@@ -2457,8 +2482,13 @@
     // refuses them.
     // A page of the review queue: the most GET /api/decisions returns. The
     // ledger may hand back a cursor with a page that is not full, because it
-    // reads day by day; only a full page says more calls are there.
+    // reads day by day within a budget of its own; only a full page says more
+    // calls are there. A cursor says only that older days are still unread.
     const REVIEW_PAGE = 200;
+    // How many requests one read of the queue sends while cursors keep coming
+    // back: enough to cover a busy week on the public stack, few enough to
+    // stay well inside the 60 requests a minute the API allows one address.
+    const REVIEW_READS = 6;
     const REVIEW_KEYS = [['J', 'next'], ['K', 'previous'], ['C', 'correct'], ['F', 'false alarm'], ['U', 'undo the last label']];
 
     // The one kind of project anyone may label on the public demo: a visitor's
@@ -2479,7 +2509,9 @@
     function viewReview(ctx) {
       const project = T.PROJECT_PATTERN.test(ctx.params.project || '') ? ctx.params.project : '';
       const rule = /^[A-Za-z0-9_.:-]{1,80}$/.test(ctx.params.rule || '') ? ctx.params.rule : '';
-      const days = pickDays(ctx.params.days, 7);
+      // Any window a project's page can be read over, so a link from one
+      // opens the queue over the same days it counted.
+      const days = pickDays(ctx.params.days, 7, true);
       const sub = 'Calls a rule in Observe would have refused. Correct if the rule was right; False alarm if the call should run.';
       // `order` is this visit's group order. It is fixed when the queue is
       // first drawn, so a label never moves the group being worked, and a
@@ -2489,9 +2521,11 @@
       // across redraws. `labelled` holds the rows labelled on this visit and
       // still labelled; `saved` the batches Undo can take back. `engaged` is
       // set once the reader works the queue, and from then on a redraw hands
-      // focus back to the row the keyboard is on.
+      // focus back to the row the keyboard is on. `live` is the project list
+      // by alias (null when it could not be read); `counted` the window's
+      // count of calls waiting, read only while older days are unread.
       const state = { items: [], cursor: null, loadingMore: false, who: null, order: [], at: null, notes: {}, noteOpen: {}, labelled: {}, saved: [], engaged: false,
-        live: null, expired: 0, unfold: false };
+        live: null, expired: 0, unfold: false, counted: null };
       // The sandbox this browser made on #/try, if any: the reader's own.
       const mine = (() => {
         try {
@@ -2518,30 +2552,82 @@
         });
       }
 
+      // Reads the queue on from `cursor`. A busy stack answers a short page,
+      // even an empty one, with a cursor, and that is not an empty queue, so
+      // pages are read on while a cursor comes back: until a screenful is in
+      // hand, REVIEW_READS requests have gone out, or a cursor comes back
+      // unchanged. A row already held, or labelled on this visit, is dropped
+      // before anything counts it.
+      function readOn(cursor) {
+        const known = {};
+        state.items.forEach(r => { known[rowKey(r)] = true; });
+        Object.keys(state.labelled).forEach(k => { known[k] = true; });
+        const rows = [];
+        let sent = 0;
+        const step = at => fetchPage(at).then(body => {
+          sent += 1;
+          const items = body && Array.isArray(body.items) ? body.items : [];
+          items.forEach(r => {
+            if (!r || r.review || known[rowKey(r)]) return;
+            known[rowKey(r)] = true;
+            rows.push(r);
+          });
+          const next = body && body.next_cursor ? body.next_cursor : null;
+          const full = items.length >= REVIEW_PAGE;
+          if (!next || next === at || rows.length >= REVIEW_PAGE || sent >= REVIEW_READS) return { rows, cursor: next, full };
+          return step(next);
+        });
+        return step(cursor);
+      }
+
+      // While older days are unread, the rows in hand are not the queue's
+      // size. The count comes from the screen that sent the reader here: a
+      // project's page (its rules' calls not labelled, over the same days),
+      // or, across every project, the overview's. A rule across every
+      // project has no such count, and none is claimed.
+      function readCount() {
+        const read = project
+          ? T.api('/api/projects/' + encodeURIComponent(project) + query({ days })).then(d => {
+              const rules = d && d.readiness && Array.isArray(d.readiness.rules) ? d.readiness.rules.filter(r => !rule || r.rule_key === rule) : [];
+              return rules.length && rules.every(r => typeof r.unreviewed === 'number') ? sum(rules, 'unreviewed') : null;
+            })
+          : rule ? Promise.resolve(null)
+            : T.api('/api/overview' + query({ days })).then(b => (b && b.totals && typeof b.totals.needs_review === 'number' ? b.totals.needs_review : null));
+        return read.then(n => { state.counted = typeof n === 'number' ? { n, done: labelledCount() } : null; }, () => { state.counted = null; });
+      }
+
+      // The count to state while older days are unread: the one read above,
+      // less what was labelled here since, and never fewer than the rows in
+      // hand. Null when the read reached the end of the window, or nothing
+      // counts the queue's scope.
+      function countedNow() {
+        if (!state.cursor || !state.counted) return null;
+        return Math.max(state.items.length, state.counted.n - (labelledCount() - state.counted.done));
+      }
+
       // Who is reading decides which groups can be labelled here, and on the
-      // public demo it puts those first, so it is read with the first page,
-      // and so is the project list, which says which sandboxes still exist.
+      // public demo it puts those first, so it is read with the first pages,
+      // and so is the project list, which says which sandboxes still exist
+      // and where each project's calls come from.
       function load() {
-        const projects = T.api('/api/projects').then(body => {
-          const live = {};
-          (body && Array.isArray(body.projects) ? body.projects : []).forEach(p => { if (p && p.project) live[p.project] = true; });
-          return live;
-        }, () => null);
-        return Promise.all([fetchPage(null), T.whoami(), projects]).then(([body, who, live]) => {
+        const projects = T.api('/api/projects').then(projectRows, () => null);
+        return Promise.all([readOn(null), T.whoami(), projects]).then(([read, who, live]) => {
           if (!ctx.alive()) return;
           state.who = who || null;
           state.live = live;
           state.expired = 0;
-          state.items = current((body && Array.isArray(body.items)) ? body.items.filter(r => !r.review) : []);
-          state.cursor = body && body.next_cursor ? body.next_cursor : null;
-          state.full = !!(body && Array.isArray(body.items) && body.items.length >= REVIEW_PAGE);
-          draw();
-        }, err => {
+          state.items = current(read.rows);
+          state.cursor = read.cursor;
+          state.full = read.full;
+          return state.cursor ? readCount() : null;
+        }).then(() => { if (ctx.alive()) draw(); }, err => {
           if (ctx.alive()) ctx.render(html`${pageTitle('Review', sub)}${failure(err, 'the review queue')}`);
         });
       }
 
       const rowKey = r => r.verdict_id + '|' + r.timestamp;
+      const rowSource = name => sourceRowOf(state.live, name);
+      const probeGroup = g => (isProbe(rowSource(g.project)) ? 1 : 0);
       const groupKey = r => JSON.stringify([r.project_name || '', ruleKeyOf(r)]);
 
       // A group is one rule in one project, because a label is written to that
@@ -2561,7 +2647,9 @@
         // The sandbox this browser made leads everything.
         const own = g => (isVisitor(state.who) || !SANDBOX_NAME.test(g.project) ? 1 : 0);
         const yours = g => (mine && g.project === mine ? 1 : 0);
-        fresh.sort((a, b) => yours(b) - yours(a) || open(b) - open(a) || own(b) - own(a) ||
+        // The service's own probes are synthetic and nobody has to act on
+        // them, so they come last, as they do in the project list.
+        fresh.sort((a, b) => yours(b) - yours(a) || open(b) - open(a) || probeGroup(a) - probeGroup(b) || own(b) - own(a) ||
           (perRule[b.rule] || 0) - (perRule[a.rule] || 0) || a.rule.localeCompare(b.rule) ||
           b.items.length - a.items.length || a.project.localeCompare(b.project));
         state.order = state.order.concat(fresh.map(g => g.key));
@@ -2672,14 +2760,33 @@
 
       function signinHref() { return '#/signin' + query({ next: '/review' + query({ days, project, rule }) }); }
 
+      // Where the queue's count comes from, while older days are unread.
+      function countedBy() { return project ? 'as the project\'s page counts them' : 'as the overview counts them'; }
+
+      // The queue's size, in one sentence. Read to the end of the window, it
+      // is the rows in hand. While older days are unread, it is the count
+      // the project's page or the overview states, with how many of those
+      // calls are read below; with no such count, the rows in hand are what
+      // is known, and said to be the least of it.
       function progress(list, fold) {
         const waiting = state.items.length;
         const done = labelledCount();
-        const total = waiting + done;
+        const counted = countedNow();
+        const total = (counted !== null ? counted : waiting) + done;
         const width = total ? Math.round((done / total) * 1000) / 10 : 0;
         const scope = [project && html`<span class="font-mono">${T.projectName(project)}</span>`, rule && html`rule <span class="font-mono">${rule}</span>`].filter(Boolean);
+        const spread = html`${plural(distinct(list, 'rule'), 'rule')} in ${plural(distinct(list, 'project') + (fold ? fold.sandboxes : 0), 'project')}`;
+        const probes = state.items.filter(r => isProbe(rowSource(r.project_name))).length;
+        const head = !state.cursor
+          ? html`<strong class="text-white" data-metric="unreviewed">${num(waiting)}</strong> call${waiting === 1 ? '' : 's'} waiting in ${windowWords(days)}, under ${spread}`
+          : counted !== null && counted > waiting
+            ? html`<strong class="text-white" data-metric="unreviewed">${num(counted)}</strong> call${counted === 1 ? '' : 's'} waiting in ${windowWords(days)}, ${countedBy()}; the newest <span data-metric="read">${num(waiting)}</span> ${waiting === 1 ? 'is' : 'are'} read below, under ${spread}`
+            : html`At least <strong class="text-white" data-metric="unreviewed">${num(waiting)}</strong> call${waiting === 1 ? '' : 's'} waiting in ${windowWords(days)}, under ${spread}${state.full ? ', and more beyond these' : ': older days are not read yet'}`;
+        const probeWords = !probes ? ''
+          : probes === waiting ? html` · ${waiting === 1 ? 'it is' : 'every one of them is'} in the service's own probes, which are synthetic`
+            : html` · ${num(probes)} of them in the service's own probes, which are synthetic`;
         return html`<div class="tf-ops-progress mb-3">
-          <p class="text-xs text-gray-400" id="review-count"><strong class="text-white" data-metric="unreviewed">${num(waiting)}</strong> call${waiting === 1 ? '' : 's'} waiting in ${windowWords(days)}, under ${plural(distinct(list, 'rule'), 'rule')} in ${plural(distinct(list, 'project') + (fold ? fold.sandboxes : 0), 'project')}${scope.length ? html` · ${scope}` : ''}${state.cursor && state.full ? ', and more beyond these' : ''}${fold ? html` · ${num(fold.rows.length)} of them in ${num(fold.sandboxes)} visitors' sandboxes, folded below` : ''}${done ? html` · <span class="text-emerald-300">${plural(done, 'call')} labelled on this visit</span>` : ''}.</p>
+          <p class="text-xs text-gray-400" id="review-count">${head}${scope.length ? html` · ${scope}` : ''}${probeWords}${fold ? html` · ${num(fold.rows.length)} of them in ${num(fold.sandboxes)} visitors' sandboxes, folded below` : ''}${done ? html` · <span class="text-emerald-300">${plural(done, 'call')} labelled on this visit</span>` : ''}.</p>
           ${state.expired ? html`<p class="text-xs text-gray-500" data-note="expired">Left out: ${plural(state.expired, 'call')} from visitors' sandboxes that have expired, which the overview no longer counts either.</p>` : ''}
           ${done ? html`<span class="tf-ops-meter" data-state="${waiting ? 'part' : 'done'}" role="img" aria-label="${num(done)} of ${num(total)} labelled on this visit"><span class="tf-ops-meter-track"><span class="tf-ops-meter-fill" style="width:${width}%"></span></span><span class="tf-ops-meter-words">${num(done)}/${num(total)}</span></span>` : ''}
         </div>`;
@@ -2809,6 +2916,15 @@
       // A detail longer than a line of meta takes a line of its own.
       function detailIsLong(detail) { return detail.words.length > 72; }
 
+      // A gate's rows lead with its plain sentence, as the overview names the
+      // gate; what the service said, word for word, is kept one click under
+      // it, never dropped. A layering rule's sentence is its own description,
+      // which is already plain.
+      function isGate(ruleKey) { return Object.prototype.hasOwnProperty.call(GATE_KEYS, ruleKey); }
+      function said(markup, cut) {
+        return html`<details class="tf-ops-said"><summary>What the service said${T.icon('chevrondown', 12)}</summary><p>${markup}${cut ? html`…${cutNote()}` : ''}</p></details>`;
+      }
+
       // The groups on screen, gathered by rule: a run of groups under the
       // same rule, that the reader may or may not label alike, is one
       // section. The order of the groups is the visit's own, so a rule whose
@@ -2841,6 +2957,23 @@
         const scope = [project && html`<span class="font-mono">${T.projectName(project)}</span>`, rule && html`rule <span class="font-mono">${rule}</span>`].filter(Boolean);
         const head = pageTitle('Review', sub, filters());
         if (!list.length && folded()) { state.unfold = true; draw(); return; }
+        // Nothing in hand while older days are unread is not an empty queue:
+        // it says what was read, the count where one is known, and reads on.
+        if (!list.length && state.cursor) {
+          const done = labelledCount();
+          const counted = countedNow();
+          ctx.render(html`${head}
+            <div class="tf-card p-6 md:p-8 space-y-4" data-state="not-reached">
+              <div class="space-y-2 min-w-0">
+                <h2 class="text-lg font-semibold text-white">Not reached yet${scope.length ? html` in ${scope}` : ''}</h2>
+                <p class="text-sm text-gray-400 max-w-2xl" id="review-count">${done ? plural(done, 'call') + ' labelled on this visit. ' : ''}No call waiting for a label among the newest days read so far${counted ? html`, though <strong class="text-white" data-metric="unreviewed">${num(counted)}</strong> ${counted === 1 ? 'waits' : 'wait'} in ${windowWords(days)}, ${countedBy()}` : ''}. The ledger holds older days of this window: read further back to reach them.</p>
+              </div>
+              <p id="review-error" class="text-xs text-rose-300" role="alert"></p>
+              <div class="flex flex-wrap gap-2"><button type="button" id="review-more" class="tf-btn tf-btn-primary" data-action="more" ${state.loadingMore ? raw('disabled') : ''}>${state.loadingMore ? 'Loading…' : 'Look further back'}</button><a class="tf-btn" href="${callsHref({ kind: 'observed', days, project })}">See the flagged calls</a></div>
+            </div>`);
+          if (state.engaged && focusLost()) focusTitle();
+          return;
+        }
         if (!list.length) {
           const done = labelledCount();
           ctx.render(html`${head}
@@ -2885,6 +3018,8 @@
             const w = ruleWords(sec.rule, sec.groups.reduce((all, g) => all.concat(g.items), []));
             const sandboxes = sec.groups.every(g => SANDBOX_NAME.test(g.project));
             const calls = sec.groups.reduce((n, g) => n + g.items.length, 0);
+            const gate = isGate(sec.rule);
+            const plain = gate ? GATE_KEYS[sec.rule] : (w.shared || 'A layering rule: what a layer of the code may not import');
             return html`${si === foldAt ? foldCard : ''}<section class="tf-card tf-ops-rsec" aria-labelledby="rule-${si}" data-open="${sec.open ? 'true' : 'false'}">
             <div class="tf-ops-rsec-head">
               <h2 id="rule-${si}" class="tf-ops-group-title">
@@ -2892,11 +3027,12 @@
                 <span class="tf-ops-count">${num(calls)}</span>
                 ${sandboxes ? html`<span class="text-xs font-normal text-gray-500">in ${sec.groups.length === 1 ? "a visitor's sandbox" : num(sec.groups.length) + " visitors' sandboxes"}</span>` : sec.groups.length > 1 ? html`<span class="text-xs font-normal text-gray-500">in ${plural(sec.groups.length, 'project')}</span>` : ''}
               </h2>
-              <p class="tf-ops-rsec-rule">${w.shared || GATE_KEYS[sec.rule] || 'A layering rule: what a layer of the code may not import'}</p>
+              <p class="tf-ops-rsec-rule">${plain}</p>
+              ${gate && w.shared ? said(w.shared) : ''}
             </div>
             ${sec.groups.map(g => html`<div class="tf-ops-proj" data-open="${g.open ? 'true' : 'false'}">
               <div class="tf-ops-proj-head">
-                <h3 id="group-${g.slot}" class="tf-ops-proj-title"><a href="${projectHref(g.project)}" class="tf-link-quiet font-mono tf-break">${T.projectName(g.project)}</a><span class="tf-ops-count">${num(g.items.length)}</span></h3>
+                <h3 id="group-${g.slot}" class="tf-ops-proj-title"><a href="${projectHref(g.project)}" class="tf-link-quiet font-mono tf-break">${T.projectName(g.project)}</a>${sourceBadge(rowSource(g.project))}<span class="tf-ops-count">${num(g.items.length)}</span></h3>
                 ${groupActions(g)}
               </div>
               ${g.open ? noteField(g) : ''}
@@ -2904,11 +3040,15 @@
               index += 1;
               const on = index === here;
               const d = w.detail[rowKey(row)] ? detailOf(row, w.detail[rowKey(row)]) : null;
+              // A gate's own words for this call sit under its row, one click
+              // away; a layering rule's row says what differs, its import.
+              const inline = d && !gate ? d : null;
               return html`<li id="qrow-${index}" class="tf-ops-qrow" tabindex="-1" data-current="${on ? 'true' : 'false'}" data-action="queue-pick" data-row="${rowKey(row)}"${on ? raw(' aria-current="true"') : ''}>
               <div class="tf-ops-qrow-body">
                 <p class="tf-ops-qrow-what"><span class="font-mono text-gray-100">${row.tool_name}</span> <span class="font-mono text-gray-300 tf-break">${breakable(targetOf(row))}</span></p>
-                ${d && detailIsLong(d) ? html`<p class="tf-ops-qrow-line tf-break">${d.markup}${reasonCut(reasonOf(row)) ? html`…${cutNote()}` : ''}</p>` : ''}
-                <p class="tf-ops-qrow-meta">${d && !detailIsLong(d) ? html`<span class="tf-ops-qrow-detail tf-break">${d.markup}${reasonCut(reasonOf(row)) ? html`…${cutNote()}` : ''}</span><span aria-hidden="true">·</span>` : ''}<span>${agentLabel(row.agent)}</span><span aria-hidden="true">·</span><span title="${dateTime(row.timestamp)}">${timeAgo(row.timestamp)}</span><span aria-hidden="true">·</span><a class="tf-link" href="${callHref(row)}">details</a></p>
+                ${inline && detailIsLong(inline) ? html`<p class="tf-ops-qrow-line tf-break">${inline.markup}${reasonCut(reasonOf(row)) ? html`…${cutNote()}` : ''}</p>` : ''}
+                <p class="tf-ops-qrow-meta">${inline && !detailIsLong(inline) ? html`<span class="tf-ops-qrow-detail tf-break">${inline.markup}${reasonCut(reasonOf(row)) ? html`…${cutNote()}` : ''}</span><span aria-hidden="true">·</span>` : ''}<span>${agentLabel(row.agent)}</span><span aria-hidden="true">·</span><span title="${dateTime(row.timestamp)}">${timeAgo(row.timestamp)}</span><span aria-hidden="true">·</span><a class="tf-link" href="${callHref(row)}">details</a></p>
+                ${d && gate && d.words ? said(d.markup, reasonCut(reasonOf(row))) : ''}
               </div>
               ${rowActions(row, g, on)}
             </li>`;
@@ -2916,7 +3056,7 @@
             </div>`)}
           </section>`;
           })}${foldAt < 0 ? foldCard : ''}</div>
-          ${state.cursor ? html`<div class="mt-4"><button type="button" class="tf-btn" data-action="more" ${state.loadingMore ? raw('disabled') : ''}>${state.loadingMore ? 'Loading…' : state.full ? 'Load more' : 'Look further back'}</button></div>` : ''}`);
+          ${state.cursor ? html`<div class="mt-4"><button type="button" id="review-more" class="tf-btn" data-action="more" ${state.loadingMore ? raw('disabled') : ''}>${state.loadingMore ? 'Loading…' : state.full ? 'Load more' : 'Look further back'}</button></div>` : ''}`);
         // A redraw replaces every row, and with them the focus. A reader typing
         // a note keeps the field; one working the queue gets the row back.
         if (typing) { refocus(document.getElementById(typing)); return; }
@@ -3206,21 +3346,30 @@
           draw();
           focusCurrent(false);
         },
+        // Reads on, as the first read did, from where it stopped. The button
+        // is drawn again with the screen, so the focus goes back to it while
+        // it is still there, and to the title of the screen when it is not.
         more: () => {
           if (!state.cursor || state.loadingMore) return;
+          const pressed = document.activeElement && document.activeElement.id === 'review-more';
           state.loadingMore = true;
           draw();
-          return fetchPage(state.cursor).then(body => {
+          if (pressed) refocus(document.getElementById('review-more'));
+          return readOn(state.cursor).then(read => {
             if (!ctx.alive()) return;
-            state.loadingMore = false;
-            const known = {};
-            state.items.forEach(r => { known[rowKey(r)] = true; });
-            const more = current((body && Array.isArray(body.items)) ? body.items.filter(r => !r.review && !known[rowKey(r)] && !state.labelled[rowKey(r)]) : []);
+            const more = current(read.rows);
             state.items = state.items.concat(more);
-            state.cursor = body && body.next_cursor ? body.next_cursor : null;
-            state.full = !!(body && Array.isArray(body.items) && body.items.length >= REVIEW_PAGE);
+            state.cursor = read.cursor;
+            state.full = read.full;
+            return (state.cursor && !state.counted ? readCount() : Promise.resolve()).then(() => more);
+          }).then(more => {
+            if (!ctx.alive() || !more) return;
+            state.loadingMore = false;
             draw();
-            if (!more.length) announce('No more calls wait for a label' + (state.cursor ? ' in what was read; older days can still be read' : '') + '.');
+            if (pressed && focusLost()) { const again = document.getElementById('review-more'); if (again) refocus(again); else focusTitle(); }
+            announce(more.length
+              ? plural(more.length, 'more call') + ' read' + (state.cursor ? '; older days can still be read' : ', to the end of the window') + '.'
+              : 'No more calls wait for a label' + (state.cursor ? ' in what was read; older days can still be read' : '') + '.');
           }, err => {
             if (!ctx.alive()) return;
             state.loadingMore = false;
@@ -3270,7 +3419,7 @@
 
     function viewCalls(ctx) {
       const f = readCallFilters(ctx.params);
-      const state = { items: [], cursor: null, loadingMore: false, scanned: 0 };
+      const state = { items: [], cursor: null, loadingMore: false, scanned: 0, sources: null };
       const sub = describeFilters(f) + '.';
       ctx.render(loadingView('Calls', sub, ['table'], crumbs([{ label: 'Overview', href: '#/overview' }, { label: 'Calls' }])));
 
@@ -3293,24 +3442,32 @@
       function onDay(row) { return !f.day || String(row.timestamp || '').slice(0, 10) === f.day; }
       function pastDay(rows) { return f.day && rows.some(r => String(r.timestamp || '').slice(0, 10) < f.day); }
 
+      // A page with nothing to show and a cursor is read past as well: a busy
+      // stack's ledger answers a filtered read that way when its own page
+      // budget runs out before it reaches a match.
       function read(cursor, pagesLeft) {
         return T.api(apiQuery(cursor)).then(body => {
           const rows = (body && Array.isArray(body.items)) ? body.items : [];
           const next = body && body.next_cursor ? body.next_cursor : null;
           state.scanned += rows.length;
           const kept = rows.filter(onDay);
-          if (f.day && !kept.length && next && !pastDay(rows) && pagesLeft > 0) {
+          if (!kept.length && next && next !== cursor && !pastDay(rows) && pagesLeft > 0) {
             return read(next, pagesLeft - 1);
           }
           return { rows: kept, next: pastDay(rows) ? null : next };
         });
       }
 
+      // Where each project's calls come from, for the chip beside its name:
+      // the project list, read once beside the rows. A read that fails leaves
+      // the chips out, never the rows.
       function load() {
-        return read(null, 4).then(({ rows, next }) => {
+        const projects = T.api('/api/projects').then(projectRows, () => null);
+        return Promise.all([read(null, 4), projects]).then(([{ rows, next }, sources]) => {
           if (!ctx.alive()) return;
           state.items = rows;
           state.cursor = next;
+          state.sources = sources;
           draw();
         }, err => {
           if (ctx.alive()) ctx.render(html`${pageTitle('Calls', sub, null, crumbs([{ label: 'Overview', href: '#/overview' }, { label: 'Calls' }]))}${filterBar(f)}${failure(err, 'the calls')}`);
@@ -3319,13 +3476,13 @@
 
       function draw() {
         const chips = activeChips(f);
-        ctx.render(html`${pageTitle('Calls', sub, null, crumbs([{ label: 'Overview', href: '#/overview' }, { label: 'Calls' }]))}
+        ctx.render(html`${pageTitle('Calls', sub, f.project ? sourceBadge(sourceRowOf(state.sources, f.project)) : null, crumbs([{ label: 'Overview', href: '#/overview' }, { label: 'Calls' }]))}
           ${outcomeTabs(f)}
           ${filterBar(f)}
           ${chips}
           <p id="calls-error" class="text-xs text-rose-300 mb-2" role="alert"></p>
           ${state.items.length
-            ? card(html`<span data-metric="rows">${num(state.items.length)}</span> ${state.items.length === 1 ? 'call' : 'calls'} shown${state.cursor ? ', more beyond' : ''}`, f.day ? 'Filtered to ' + shortDay(f.day) + ' in this page.' : null, callsList(state.items, { project: !f.project }))
+            ? card(html`<span data-metric="rows">${num(state.items.length)}</span> ${state.items.length === 1 ? 'call' : 'calls'} shown${state.cursor ? ', more beyond' : ''}`, f.day ? 'Filtered to ' + shortDay(f.day) + ' in this page.' : null, callsList(state.items, { project: !f.project, sources: state.sources }))
             : state.cursor
               // Nothing matched, and the ledger still holds older rows: the read
               // stopped on its page budget before it got that far. Saying "none

@@ -503,7 +503,7 @@ def test_every_tile_bar_and_row_opens_the_rows_behind_it(tmp_path: Path) -> None
     # By project: the name opens the project, each number its rows, needs review the queue
     assert "#/projects/Acme-Catalog" in out["projects"]
     assert has(days=7, project="Acme-Catalog", kind="observed") and has(days=7, project="Acme-Billing")
-    assert "#/review?project=Acme-Catalog" in out["review"]
+    assert "#/review?project=Acme-Catalog&days=7" in out["review"], "The queue opens over the window the row counted"
 
 
 def test_the_overview_says_what_to_do_when_nothing_was_governed(tmp_path: Path) -> None:
