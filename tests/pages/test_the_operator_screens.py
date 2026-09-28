@@ -1769,7 +1769,7 @@ def test_a_halted_session_leads_with_why_in_plain_words(tmp_path: Path) -> None:
     slot = html.unescape(out["slot"])
     why = re.findall(r'<span class="tf-ops-halt-why" title="([^"]*)">([^<]*)</span>', slot)
     assert why[0] == ("Monomorphic loop detected: Tool 'run_command' invoked with identical arguments 3 consecutive times",
-                      "The same call kept repeating, so the loop breaker halted the session"), "The plain sentence leads; the breaker's words are its title"
+                      "The same call kept repeating"), "The plain sentence leads; the breaker's words are its title"
     assert why[1] == ("A reason no page knows", "A reason no page knows"), "A reason the page has no words for is shown as the service wrote it"
 
 
@@ -1818,8 +1818,8 @@ def test_the_sessions_page_says_where_its_sessions_come_from_and_why_they_stoppe
     assert out["tripped"] == ["1 of them the demo page's scenarios or the service's probes, which halt on purpose", False]
     why = html.unescape(rows[3])
     assert 'title="Monomorphic loop detected: Tool \'run_command\' invoked with identical arguments 3 consecutive times"' in why
-    assert ">The same call kept repeating, so the loop breaker halted the session<" in why, "The plain sentence leads"
-    assert ">The session’s spend reached its budget<" in html.unescape(rows[4])
+    assert ">The same call kept repeating<" in why, "The plain sentence leads"
+    assert ">Its spend reached its budget<" in html.unescape(rows[4])
     started = re.search(r'<time datetime="([^"]+)" title="([^"]+)">([^<]+)</time>', rows[0])
     assert started and started.groups() == ("2026-09-28T04:08:10.097Z", "2026-09-28 04:08:10Z", "Sep 28, 04:08"), \
         "The column shows the day and the minute; the whole value is the element's"

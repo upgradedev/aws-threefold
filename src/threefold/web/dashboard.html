@@ -2781,7 +2781,9 @@
           ? html`<strong class="text-white" data-metric="unreviewed">${num(waiting)}</strong> call${waiting === 1 ? '' : 's'} waiting in ${windowWords(days)}, under ${spread}`
           : counted !== null && counted > waiting
             ? html`<strong class="text-white" data-metric="unreviewed">${num(counted)}</strong> call${counted === 1 ? '' : 's'} waiting in ${windowWords(days)}, ${countedBy()}; the newest <span data-metric="read">${num(waiting)}</span> ${waiting === 1 ? 'is' : 'are'} read below, under ${spread}`
-            : html`At least <strong class="text-white" data-metric="unreviewed">${num(waiting)}</strong> call${waiting === 1 ? '' : 's'} waiting in ${windowWords(days)}, under ${spread}${state.full ? ', and more beyond these' : ': older days are not read yet'}`;
+            : counted !== null && counted === waiting
+              ? html`<strong class="text-white" data-metric="unreviewed">${num(waiting)}</strong> call${waiting === 1 ? '' : 's'} waiting in ${windowWords(days)}, ${countedBy()}, ${waiting === 1 ? 'read below' : 'every one read below'}, under ${spread}`
+              : html`At least <strong class="text-white" data-metric="unreviewed">${num(waiting)}</strong> call${waiting === 1 ? '' : 's'} waiting in ${windowWords(days)}, under ${spread}${state.full ? ', and more beyond these' : ': older days are not read yet'}`;
         const probeWords = !probes ? ''
           : probes === waiting ? html` · ${waiting === 1 ? 'it is' : 'every one of them is'} in the service's own probes, which are synthetic`
             : html` · ${num(probes)} of them in the service's own probes, which are synthetic`;

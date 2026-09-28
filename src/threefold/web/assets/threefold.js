@@ -998,10 +998,11 @@
   // checks, and an operator's freeze). Anything else is '' and is shown in
   // the service's own words; those words are kept wherever this leads.
   var TRIP_WORDS = [
-    [/^(Monomorphic|Similar|Ping-pong oscillation|Circular \d+-step|Similar \d+-step|Autonomous thrashing) (loop|cycle) detected\b/i, 'The same call kept repeating, so the loop breaker halted the session'],
+    [/^Monomorphic loop detected\b/i, 'The same call kept repeating'],
+    [/^(Similar|Ping-pong oscillation|Circular \d+-step|Similar \d+-step|Autonomous thrashing) (loop|cycle) detected\b/i, 'Its calls kept going round in a loop'],
     [/^Single invocation cost \S+ exceeds/i, 'One call would have cost more than the per-call cap'],
-    [/^Projected session cost \S+ exceeds allocated budget/i, 'The session’s spend reached its budget'],
-    [/^Projected session cost \S+ exceeds the policy session ceiling/i, 'The session’s spend reached the policy’s ceiling'],
+    [/^Projected session cost \S+ exceeds allocated budget/i, 'Its spend reached its budget'],
+    [/^Projected session cost \S+ exceeds the policy session ceiling/i, 'Its spend reached the policy’s ceiling'],
     [/^MANUALLY_TERMINATED by /, 'An operator froze it']
   ];
   function tripWords(reason) {
