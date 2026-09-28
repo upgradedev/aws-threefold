@@ -670,17 +670,74 @@ def test_the_api_document_s_faint_parts_are_set_to_what_the_inversion_makes_read
     """Measured on the rendered page, GET and POST badges were 3.15:1 and 3.06:1, and a schema's name 1.31:1.
 
     The filter is affine, so the colour each part is set in is the one that
-    renders readable: re-sampled at 6.74:1, 7.04:1 and 11.66:1.
+    renders readable: re-sampled at 6.74:1, 7.04:1 and 11.66:1. A later
+    review measured three more under AA as rendered: Authorize at 3.25:1, the
+    version and OAS badges at 4.21:1 and 3.18:1, and a schema's Expand all at
+    2.15:1; re-sampled through the same filter at 7.49:1, 6.64:1, 7.08:1 and
+    8.23:1.
     """
     page = page_source("swagger.html")
-    for rule in (
+    rules = (
         ".swagger-ui .opblock.opblock-get .opblock-summary-method { background: #1e63ae; }",
         ".swagger-ui .opblock.opblock-post .opblock-summary-method { background: #0a6e46; }",
         ".swagger-ui .json-schema-2020-12-accordion { background: transparent; }",
         ".swagger-ui .json-schema-2020-12__title { color: #111; }",
-    ):
+        ".swagger-ui .btn.authorize { color: #0a6e46; border-color: #0a6e46; }",
+        ".swagger-ui .info .title small { background: #c3c8d2; }",
+        ".swagger-ui .info .title small.version-stamp { background: #b8e08a; }",
+        ".swagger-ui .info .title small pre.version { color: #111; }",
+        ".swagger-ui .json-schema-2020-12-expand-deep-button { background: #d9d9d9; color: #111; }",
+    )
+    for rule in rules:
         assert rule in page, rule
-    assert page.index(".swagger-ui { filter: invert(90%) hue-rotate(180deg); }") < page.index("opblock-get .opblock-summary-method")
+    after = page.index(".swagger-ui { filter: invert(90%) hue-rotate(180deg); }")
+    assert all(page.index(rule) > after for rule in rules), "Each is set after the filter, so it is what the filter turns"
+
+
+# The filter as the page sets it, in sRGB, where a browser applies it: invert
+# 90%, then hue-rotate 180 degrees.
+_HUE_180 = ((-0.574, 1.43, 0.144), (0.426, 0.43, 0.144), (0.426, 1.43, -0.856))
+
+
+def _rendered(hex_colour: str) -> str:
+    c = [int(hex_colour.lstrip("#")[i:i + 2], 16) for i in (0, 2, 4)]
+    inverted = [0.9 * 255 - 0.8 * v for v in c]
+    out = [round(max(0.0, min(255.0, sum(m * v for m, v in zip(row, inverted))))) for row in _HUE_180]
+    return "#" + "".join(f"{v:02x}" for v in out)
+
+
+def test_the_api_document_s_colours_pass_aa_as_the_filter_renders_them() -> None:
+    """The pairs set above, through the filter, are at least 4.5:1: the arithmetic a contrast checker cannot see."""
+    card = _tokens()["--tf-surface-1"]  # the card the document sits on, outside the filter
+    pairs = {
+        "Authorize on the page": (_rendered("#0a6e46"), card),
+        "the version badge": (_rendered("#111111"), _rendered("#c3c8d2")),
+        "the OAS badge": (_rendered("#111111"), _rendered("#b8e08a")),
+        "Expand all": (_rendered("#111111"), _rendered("#d9d9d9")),
+    }
+    for name, (text, ground) in pairs.items():
+        assert _contrast(text, ground) >= 4.5, f"{name} renders at {_contrast(text, ground):.2f}:1"
+    assert _contrast(_rendered("#49cc90"), card) < 4.5, "Swagger UI's own green is the one that failed"
+
+
+def test_the_api_document_s_title_is_a_second_level_heading_and_its_website_is_the_site() -> None:
+    """Swagger UI's title was a second h1, and its group headings skipped to h3; its Website link opened the raw API origin.
+
+    Swagger UI's script is from a CDN no test here reaches, so the page's
+    wiring is checked: the title is given aria-level 2 when the document is
+    drawn and whenever Swagger UI draws it again. The link is the document's
+    info.contact.url, in both OpenAPI documents.
+    """
+    page = page_source("swagger.html")
+    script = page.split("function titleAtLevelTwo()", 1)[1]
+    assert "document.querySelector('#swagger-ui .info .title')" in script
+    assert "title.setAttribute('aria-level', '2')" in script
+    assert "onComplete: titleAtLevelTwo" in script
+    assert "new MutationObserver(titleAtLevelTwo).observe(document.getElementById('swagger-ui'), { childList: true, subtree: true });" in script
+    spec = json.loads(page_source("openapi.json"))
+    assert spec["info"]["contact"]["url"] == "https://d1og72wpk4aqig.cloudfront.net/", "The Website link opens the site"
+    twin = (Path(__file__).resolve().parents[2] / "docs" / "openapi.yaml").read_text(encoding="utf-8")
+    assert "    url: https://d1og72wpk4aqig.cloudfront.net/\n" in twin, "Run scripts/generate_openapi_yaml.py"
 
 
 def test_a_code_block_that_scrolls_keeps_its_first_line_clear_of_the_copy_button() -> None:

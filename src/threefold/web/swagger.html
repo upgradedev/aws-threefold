@@ -50,6 +50,19 @@
     .swagger-ui .opblock.opblock-post .opblock-summary-method { background: #0a6e46; }
     .swagger-ui .json-schema-2020-12-accordion { background: transparent; }
     .swagger-ui .json-schema-2020-12__title { color: #111; }
+    /* The same arithmetic for three parts measured under AA as rendered.
+       Authorize's green word and ring on the dark page rendered at 3.25:1;
+       set in the POST badge's #0a6e46 they render near rgb(100,180,148),
+       7.49:1. The version and OAS badges kept a white word, which renders
+       dark, on a grey and a green that render mid-tone, 4.21:1 and 3.18:1;
+       a near-black word on light badges renders near white on dark ones,
+       6.64:1 and 7.08:1. A schema's Expand all, grey on grey, rendered
+       2.15:1; set near black on a light grey it renders 8.23:1. */
+    .swagger-ui .btn.authorize { color: #0a6e46; border-color: #0a6e46; }
+    .swagger-ui .info .title small { background: #c3c8d2; }
+    .swagger-ui .info .title small.version-stamp { background: #b8e08a; }
+    .swagger-ui .info .title small pre.version { color: #111; }
+    .swagger-ui .json-schema-2020-12-expand-deep-button { background: #d9d9d9; color: #111; }
     #swagger-ui:empty::before {
       content: 'Reading the document…'; display: block; padding: 32px 16px; text-align: center;
       font-size: var(--tf-fs-small); color: var(--tf-text-3);
@@ -131,6 +144,16 @@
     // The shared navigation, as every page draws it.
     if (window.Threefold) Threefold.mountNav(document.getElementById('page-nav'), { active: 'api' });
 
+    // Swagger UI draws the document's title as a first-level heading, under
+    // this page's own h1, and its groups at level 3, so the outline went from
+    // level 1 to level 1 and then skipped to 3. The title is given level 2,
+    // the level its place on this page gives it, and kept there if Swagger UI
+    // draws it again.
+    function titleAtLevelTwo() {
+      const title = document.querySelector('#swagger-ui .info .title');
+      if (title && title.getAttribute('aria-level') !== '2') title.setAttribute('aria-level', '2');
+    }
+
     window.onload = function() {
       const specUrl = SPEC_URL;
 
@@ -142,8 +165,12 @@
           SwaggerUIBundle.presets.apis,
           SwaggerUIBundle.SwaggerUIStandalonePreset
         ],
-        layout: "BaseLayout"
+        layout: "BaseLayout",
+        onComplete: titleAtLevelTwo
       });
+      if (typeof MutationObserver === 'function') {
+        new MutationObserver(titleAtLevelTwo).observe(document.getElementById('swagger-ui'), { childList: true, subtree: true });
+      }
     };
   </script>
 </body>

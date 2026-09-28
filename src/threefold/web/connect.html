@@ -35,7 +35,15 @@
   <link rel="stylesheet" href="assets/threefold.css" />
   <script src="assets/threefold.js"></script>
   <style>
+    /* A command keeps its lines whole, flags and all, and scrolls sideways
+       where it is wider than its box. */
     pre.code { white-space: pre; overflow-x: auto; overflow-wrap: normal; }
+    /* A block that scrolls is a stop for the keyboard: the design system
+       marks one while it is wider than its box (data-tf-scroll), and a
+       browser makes any block that scrolls focusable. Either way it shows
+       where the keyboard is, as every control does, with its own corners. */
+    pre:focus-visible { outline: var(--tf-focus-width) solid var(--tf-focus); outline-offset: var(--tf-focus-offset); }
+    pre.tf-pre:focus-visible { border-radius: var(--tf-radius-md); }
     .tf-probe { display: block; width: 100%; cursor: pointer; transition: border-color var(--tf-dur-2), background-color var(--tf-dur-2), transform var(--tf-dur-2) var(--tf-ease-out); }
     .tf-probe:hover { border-color: var(--tf-accent-line); background: var(--tf-surface-2); transform: translateY(-1px); }
     .tf-probe .tf-probe-go { color: var(--tf-text-3); }
@@ -124,13 +132,13 @@
       </div>
       <div id="panel-posix" class="tf-tabpanel" role="tabpanel" aria-labelledby="tab-posix" tabindex="0">
         <div class="tf-command">
-          <pre class="tf-pre" id="oneline-posix"></pre>
+          <pre class="tf-pre code" id="oneline-posix" data-tf-scroll="The macOS and Linux command"></pre>
           <button type="button" onclick="copyText('oneline-posix', this)" class="tf-copy" aria-label="Copy the macOS and Linux command"><span data-tf-icon="copy" data-tf-size="14" data-tf-class="tf-icon-idle"></span><span data-tf-icon="check" data-tf-size="14" data-tf-class="tf-icon-done"></span><span data-tf-copy-label>Copy</span></button>
         </div>
       </div>
       <div id="panel-powershell" class="tf-tabpanel" role="tabpanel" aria-labelledby="tab-powershell" tabindex="0" hidden>
         <div class="tf-command">
-          <pre class="tf-pre" id="oneline-powershell"></pre>
+          <pre class="tf-pre code" id="oneline-powershell" data-tf-scroll="The PowerShell command"></pre>
           <button type="button" onclick="copyText('oneline-powershell', this)" class="tf-copy" aria-label="Copy the PowerShell command"><span data-tf-icon="copy" data-tf-size="14" data-tf-class="tf-icon-idle"></span><span data-tf-icon="check" data-tf-size="14" data-tf-class="tf-icon-done"></span><span data-tf-copy-label>Copy</span></button>
         </div>
       </div>
@@ -239,7 +247,7 @@
               holding the key, so the key itself never appears in a command line or in the repository.
             </p>
             <div class="tf-command mt-2">
-              <pre class="tf-pre code" id="install-snippet"></pre>
+              <pre class="tf-pre code" id="install-snippet" data-tf-scroll="The installer command"></pre>
               <button type="button" onclick="copyText('install-snippet', this)" class="tf-copy" aria-label="Copy the installer command"><span data-tf-icon="copy" data-tf-size="14" data-tf-class="tf-icon-idle"></span><span data-tf-icon="check" data-tf-size="14" data-tf-class="tf-icon-done"></span><span data-tf-copy-label>Copy</span></button>
             </div>
           </div>
@@ -252,7 +260,7 @@
               <li>The pre-commit hook, so an edit that got past an agent is still judged when it is committed, and recorded with agent <span class="font-mono">pre-commit</span>.</li>
               <li>Every one of them listed in <span class="font-mono text-gray-200">.git/info/exclude</span>, which is local to your clone. None of it is ever committed, and the governed repository shows no change.</li>
             </ul>
-            <pre class="tf-pre tf-pre-plain code mt-3" id="threefold-json-snippet"></pre>
+            <pre class="tf-pre tf-pre-plain code mt-3" id="threefold-json-snippet" data-tf-scroll="The .threefold.json it writes"></pre>
             <p class="tf-micro mt-2">
               The hook reads each setting from the environment first, then from <span class="font-mono">.threefold.json</span>,
               then from <span class="font-mono">~/.threefold/config.json</span>, so a variable set where the agent starts wins
@@ -290,7 +298,7 @@
               <span class="font-mono text-gray-200">DefaultHookStage=enforce</span> puts projects that have no stage of their
               own straight into Enforce; the public demo deploys with the default, <span class="font-mono">observe</span>.
             </p>
-            <pre class="tf-pre tf-pre-plain code mt-2" id="enforce-snippet"></pre>
+            <pre class="tf-pre tf-pre-plain code mt-2" id="enforce-snippet" data-tf-scroll="From Observe to Enforce, the commands"></pre>
           </div>
 
           <div class="tf-card-quiet p-4 space-y-2 tf-small">
@@ -302,7 +310,7 @@
               each of the three hook settings files, remove the pre-commit hook, and delete the lines it added to
               <span class="font-mono">.git/info/exclude</span>.
             </p>
-            <pre class="tf-pre tf-pre-plain code mt-2" id="uninstall-snippet"></pre>
+            <pre class="tf-pre tf-pre-plain code mt-2" id="uninstall-snippet" data-tf-scroll="The commands that disconnect"></pre>
           </div>
 
           <details class="tf-card-quiet p-4 tf-small" id="older-form">
@@ -313,7 +321,7 @@
               path, <span class="font-mono">--mode</span> (default <span class="font-mono">observe</span> there, which caps the machine
               to dry runs) and <span class="font-mono">--uninstall</span>.
             </p>
-            <pre class="tf-pre tf-pre-plain code mt-2" id="older-snippet"></pre>
+            <pre class="tf-pre tf-pre-plain code mt-2" id="older-snippet" data-tf-scroll="The older form's commands"></pre>
           </details>
 
           <div class="tf-callout tf-callout-info">
@@ -379,7 +387,7 @@
                  class="tf-spec-link">GET /hooks/threefold_hook.py</a>
             </div>
             <div class="tf-command mt-3">
-              <pre class="tf-pre code" id="fetch-snippet"></pre>
+              <pre class="tf-pre code" id="fetch-snippet" data-tf-scroll="The commands that fetch and run the script"></pre>
               <button type="button" onclick="copyText('fetch-snippet', this)" class="tf-copy" aria-label="Copy the commands that fetch and run the script"><span data-tf-icon="copy" data-tf-size="14" data-tf-class="tf-icon-idle"></span><span data-tf-icon="check" data-tf-size="14" data-tf-class="tf-icon-done"></span><span data-tf-copy-label>Copy</span></button>
             </div>
             <p class="tf-micro mt-2">
@@ -400,19 +408,19 @@
 
             <p class="tf-label mt-4">Claude Code · <span class="font-mono normal-case tracking-normal">.claude/settings.local.json</span></p>
             <div class="tf-command">
-              <pre class="tf-pre code" id="settings-claude-code"></pre>
+              <pre class="tf-pre code" id="settings-claude-code" data-tf-scroll="The Claude Code block"></pre>
               <button type="button" onclick="copyText('settings-claude-code', this)" class="tf-copy" aria-label="Copy the Claude Code block"><span data-tf-icon="copy" data-tf-size="14" data-tf-class="tf-icon-idle"></span><span data-tf-icon="check" data-tf-size="14" data-tf-class="tf-icon-done"></span><span data-tf-copy-label>Copy</span></button>
             </div>
 
             <p class="tf-label mt-4">Codex · <span class="font-mono normal-case tracking-normal">.codex/hooks.json</span></p>
             <div class="tf-command">
-              <pre class="tf-pre code" id="settings-codex"></pre>
+              <pre class="tf-pre code" id="settings-codex" data-tf-scroll="The Codex block"></pre>
               <button type="button" onclick="copyText('settings-codex', this)" class="tf-copy" aria-label="Copy the Codex block"><span data-tf-icon="copy" data-tf-size="14" data-tf-class="tf-icon-idle"></span><span data-tf-icon="check" data-tf-size="14" data-tf-class="tf-icon-done"></span><span data-tf-copy-label>Copy</span></button>
             </div>
 
             <p class="tf-label mt-4">Antigravity · <span class="font-mono normal-case tracking-normal">.agents/hooks.json</span></p>
             <div class="tf-command">
-              <pre class="tf-pre code" id="settings-antigravity"></pre>
+              <pre class="tf-pre code" id="settings-antigravity" data-tf-scroll="The Antigravity block"></pre>
               <button type="button" onclick="copyText('settings-antigravity', this)" class="tf-copy" aria-label="Copy the Antigravity block"><span data-tf-icon="copy" data-tf-size="14" data-tf-class="tf-icon-idle"></span><span data-tf-icon="check" data-tf-size="14" data-tf-class="tf-icon-done"></span><span data-tf-copy-label>Copy</span></button>
             </div>
             <p class="tf-micro mt-2">
@@ -429,7 +437,7 @@
               is required. Each one is described in the table below.
             </p>
             <div class="tf-command mt-2">
-              <pre class="tf-pre code" id="env-snippet"></pre>
+              <pre class="tf-pre code" id="env-snippet" data-tf-scroll="The environment"></pre>
               <button type="button" onclick="copyText('env-snippet', this)" class="tf-copy" aria-label="Copy the environment"><span data-tf-icon="copy" data-tf-size="14" data-tf-class="tf-icon-idle"></span><span data-tf-icon="check" data-tf-size="14" data-tf-class="tf-icon-done"></span><span data-tf-copy-label>Copy</span></button>
             </div>
           </div>
@@ -489,7 +497,7 @@
 
         <div class="mt-5">
           <p class="tf-label">What <span id="agent-label">Claude Code</span> receives on stdout</p>
-          <pre class="tf-pre tf-pre-plain code" style="max-height:16rem;overflow:auto" id="hook-output" aria-live="polite">Press a button above.</pre>
+          <pre class="tf-pre tf-pre-plain code" style="max-height:16rem;overflow:auto" id="hook-output" aria-live="polite" data-tf-scroll="What the agent receives">Press a button above.</pre>
         </div>
 
         <div id="probe-fix-container" class="hidden mt-4">
@@ -501,7 +509,7 @@
         <details class="tf-disclosure mt-4">
           <summary><span data-tf-icon="code"></span>The service's own answer</summary>
           <div class="tf-disclosure-body">
-            <pre class="tf-pre tf-pre-plain code" style="max-height:16rem;overflow:auto;font-size:0.72rem" id="raw-response">Nothing sent yet.</pre>
+            <pre class="tf-pre tf-pre-plain code" style="max-height:16rem;overflow:auto;font-size:0.72rem" id="raw-response" data-tf-scroll="The service's own answer">Nothing sent yet.</pre>
           </div>
         </details>
       </div>
@@ -698,7 +706,7 @@
         <div class="space-y-5">
           <div>
             <p class="tf-label">Claude Code writes this on stdin</p>
-            <pre class="tf-pre tf-pre-plain code">{
+            <pre class="tf-pre tf-pre-plain code" data-tf-scroll="What Claude Code writes on stdin">{
   "session_id": "0f3c…",
   "tool_name": "Write",
   "tool_input": {
@@ -712,7 +720,7 @@
           <div>
             <p class="tf-label">The hook writes this on stdout when it refuses</p>
             <p class="tf-micro mb-1">Claude Code and Codex:</p>
-            <pre class="tf-pre tf-pre-plain code">{
+            <pre class="tf-pre tf-pre-plain code" data-tf-scroll="The refusal Claude Code and Codex read">{
   "hookSpecificOutput": {
     "hookEventName": "PreToolUse",
     "permissionDecision": "deny",
@@ -720,7 +728,7 @@
   }
 }</pre>
             <p class="tf-micro mt-3 mb-1">Antigravity:</p>
-            <pre class="tf-pre tf-pre-plain code">{
+            <pre class="tf-pre tf-pre-plain code" data-tf-scroll="The refusal Antigravity reads">{
   "decision": "deny",
   "reason": "Threefold refused this call. …"
 }</pre>
@@ -742,7 +750,7 @@
           <div>
             <p class="tf-label">Verify without an agent</p>
             <div class="tf-command">
-              <pre class="tf-pre code" id="curl-snippet"></pre>
+              <pre class="tf-pre code" id="curl-snippet" data-tf-scroll="The verification commands"></pre>
               <button type="button" onclick="copyText('curl-snippet', this)" class="tf-copy" aria-label="Copy the verification commands"><span data-tf-icon="copy" data-tf-size="14" data-tf-class="tf-icon-idle"></span><span data-tf-icon="check" data-tf-size="14" data-tf-class="tf-icon-done"></span><span data-tf-copy-label>Copy</span></button>
             </div>
             <p class="tf-micro mt-2">
@@ -904,6 +912,15 @@
       return headers;
     }
 
+    // A block of code wider than its box is a keyboard stop, a region named
+    // for what it holds, announced as scrolling; one that fits is none of
+    // these. The design system measures the blocks when the window or a
+    // block changes size; new text in a block does not change its size, so
+    // the page asks again whenever it writes some.
+    function fitCode() {
+      if (window.Threefold && typeof Threefold.fitScrollBoxes === 'function') Threefold.fitScrollBoxes(document.getElementById('main'));
+    }
+
     // An icon from the shared set, as markup this page writes; nothing without it.
     function glyph(name, size) {
       return window.Threefold ? String(Threefold.icon(name, size || 13)) : '';
@@ -1057,6 +1074,7 @@
         "  -H 'Content-Type: application/json' \\\n" +
         '  -d \'' + shellBody(CASES.ordinary_edit) + '\' \\\n' +
         '  | python -c \'import sys,json;print(json.load(sys.stdin)["status"])\'; done';
+      fitCode();
     }
 
     // The v2 request, as this page sends it. It is marked as coming from a page,
@@ -1127,7 +1145,7 @@
           (w.new_file === true ? ' · a new file: if it exists, add to it' : '') +
           (typeof w.old_string === 'string' ? ' · an Edit: in place of the text replaced' : '') +
           (w.partial === true ? ' · add with an Edit where the command put it' : '') + '</p>' +
-          '<pre class="code p-2 rounded bg-gray-900 border border-gray-800 text-[11px] font-mono text-gray-300 overflow-x-auto"><code>' +
+          '<pre class="code p-2 rounded bg-gray-900 border border-gray-800 text-[11px] font-mono text-gray-300 overflow-x-auto" data-tf-scroll="The proposed file"><code>' +
           escapeHtml(w.content) + '</code></pre>'
         ).join('') +
         '<p class="text-[11px] text-gray-500">A starting point, never applied automatically.</p>';
@@ -1161,6 +1179,7 @@
         ? JSON.stringify(decision, null, 2)
         : '(nothing: the hook prints no output on an approval, and exits 0)\n\n' +
           '// ' + AGENTS[agentName].label + ' then runs its own permission flow as if the hook were not there.';
+      fitCode();
     }
 
     async function probe(caseName) {
@@ -1185,6 +1204,7 @@
           document.getElementById('hook-output').textContent =
             'The service answered ' + res.status + '. The hook treats a non-answer as unreachable: it prints nothing and exits 0, ' +
             'unless THREEFOLD_FAIL_CLOSED=1, when it refuses the call.';
+          fitCode();
           return;
         }
         lastVerdict = data;
@@ -1202,6 +1222,7 @@
           '(nothing: the service could not be reached, so the hook prints no output and exits 0)\n\n' +
           '// This is the fail-open path. With THREEFOLD_FAIL_CLOSED=1 the hook refuses the call instead.';
       }
+      fitCode();
     }
 
     renderNav();
@@ -1216,6 +1237,7 @@
       if (!window.Threefold) return;
       const platform = String((navigator && (navigator.platform || navigator.userAgent)) || '');
       if (/Win/.test(platform)) Threefold.selectTab(document.getElementById('tab-powershell'), false);
+      fitCode();
     })();
   </script>
 </body>
