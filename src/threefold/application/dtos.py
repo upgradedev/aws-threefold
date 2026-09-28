@@ -15,7 +15,7 @@ from threefold.application.labels import label_project
 # fill with anything. A value outside the set is kept as "unknown" and the
 # response says so; a caller that sends nothing, as every caller did before
 # these fields existed, is "unknown" without a warning.
-KNOWN_AGENTS = ("claude-code", "codex", "antigravity", "pre-commit", "ci", "page")
+KNOWN_AGENTS = ("claude-code", "codex", "antigravity", "muse", "pre-commit", "ci", "page")
 KNOWN_ORIGINS = ("hook", "page", "ci")
 # How the hook on the developer's machine was told to send: `observe` sends
 # every call as a dry run, `managed` leaves the decision to the project's stage

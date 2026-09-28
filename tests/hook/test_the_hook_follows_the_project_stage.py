@@ -21,8 +21,8 @@ from typing import Any, Dict
 
 import pytest
 
-AGENTS = ("claude-code", "codex", "antigravity")
-GOVERNANCE_FILES = [".claude/settings.local.json", ".codex/hooks.json", ".agents/hooks.json", ".threefold.json"]
+AGENTS = ("claude-code", "codex", "antigravity", "muse")
+GOVERNANCE_FILES = [".claude/settings.local.json", ".codex/hooks.json", ".agents/hooks.json", ".threefold.json", ".threefold-muse/hooks/threefold_hook.py", ".threefold-muse/manifest.json"]
 
 
 def _write_json(path: Path, document: Dict[str, Any]) -> Path:

@@ -32,6 +32,7 @@ AGENT_KINDS = {
     "claude-code": CODING_AGENT,
     "codex": CODING_AGENT,
     "antigravity": CODING_AGENT,
+    "muse": CODING_AGENT,
     "page": "page",
     "ci": "ci",
     "pre-commit": "ci",

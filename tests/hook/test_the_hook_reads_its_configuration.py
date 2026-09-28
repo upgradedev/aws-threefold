@@ -23,7 +23,7 @@ import pytest
 
 from threefold.domain.shell_writes import is_governance_path as service_governance_path
 
-AGENTS = ("claude-code", "codex", "antigravity")
+AGENTS = ("claude-code", "codex", "antigravity", "muse")
 
 
 def _write_json(path: Path, document: Dict[str, Any]) -> Path:
@@ -335,7 +335,7 @@ def test_settings_never_show_the_key_in_their_repr(hook, machine, monkeypatch) -
 # --- the hooks' own files ------------------------------------------------------------
 
 @pytest.mark.parametrize("agent", AGENTS)
-@pytest.mark.parametrize("relative", [".claude/settings.json", ".claude/settings.local.json", ".codex/hooks.json", ".agents/hooks.json", ".threefold.json", ".git/hooks/pre-commit"])
+@pytest.mark.parametrize("relative", [".claude/settings.json", ".claude/settings.local.json", ".codex/hooks.json", ".agents/hooks.json", ".threefold.json", ".git/hooks/pre-commit", ".threefold-muse/hooks/threefold_hook.py", ".threefold-muse/.muse-plugin/plugin.json", ".threefold-muse/manifest.json"])
 def test_in_enforce_mode_a_write_to_the_hooks_own_files_is_refused_without_a_request(agent, relative, payloads, stub, run_hook, verdict) -> None:
     code, out, _ = run_hook(payloads.write(agent, relative, "{}"), ["--agent", agent])
     assert code == 0
@@ -352,7 +352,7 @@ def test_a_patch_that_deletes_the_repository_config_is_refused(payloads, stub, r
 
 
 @pytest.mark.parametrize("agent", AGENTS)
-@pytest.mark.parametrize("relative", [".claude/settings.local.json", ".codex/hooks.json", ".threefold.json"])
+@pytest.mark.parametrize("relative", [".claude/settings.local.json", ".codex/hooks.json", ".threefold.json", ".threefold-muse/hooks/threefold_hook.py", ".threefold-muse/manifest.json"])
 def test_in_observe_mode_the_same_write_is_sent_as_its_path_alone(agent, relative, machine, payloads, stub, run_hook, unconfigured) -> None:
     """Observe mode stops nothing and the rollout sees the attempt, but the
     service judges such a write by where it lands, so what it says stays here."""
@@ -390,8 +390,11 @@ def test_an_ordinary_settings_file_elsewhere_in_the_project_is_not_protected(pay
 GOVERNANCE_SAMPLES = [
     ".claude/settings.json", ".claude/settings.local.json", ".codex/hooks.json", ".codex/config.toml",
     ".agents/hooks.json", ".threefold.json", ".git/hooks/pre-commit", ".git/config", ".threefold/rules.json",
+    ".threefold-muse/hooks/threefold_hook.py", ".threefold-muse/.muse-plugin/plugin.json", ".threefold-muse/manifest.json",
+    ".threefold-muse", "sub/.threefold-muse/hooks/threefold_hook.py", ".THREEFOLD-MUSE/MANIFEST.JSON",
     "sub/.claude/settings.json", ".CLAUDE/SETTINGS.JSON", ".claude", ".git", ".codex", "src/app.py",
     ".claude/agents/x.md", ".gitignore", "docs/hooks.json", ".github/workflows/ci.yml", "", ".",
+    "src/.threefold-muse-notes.txt", ".threefold-museum/x.py",
 ]
 
 

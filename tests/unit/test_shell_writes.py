@@ -264,13 +264,15 @@ def test_running_a_script_file_is_not_read_into() -> None:
         ".claude/settings.json", ".claude/settings.local.json", ".codex/hooks.json", ".codex/config.toml",
         ".agents/hooks.json", ".threefold.json", ".git/hooks/pre-commit", "./.git/hooks/post-merge",
         "nested/checkout/.claude/settings.json", ".threefold/rules.json", ".CLAUDE/Settings.JSON", ".git/config",
+        ".threefold-muse/hooks/threefold_hook.py", ".threefold-muse/.muse-plugin/plugin.json", ".threefold-muse/manifest.json",
+        ".threefold-muse", "nested/checkout/.threefold-muse/manifest.json", ".THREEFOLD-MUSE/HOOKS/threefold_hook.py",
     ],
 )
 def test_the_files_that_decide_whether_hooks_run_are_governance_paths(path: str) -> None:
     assert is_governance_path(path) is True
 
 
-@pytest.mark.parametrize("path", [".claude/agents/reviewer.md", ".gitignore", "src/settings.json", "docs/hooks.json", ".github/workflows/ci.yml"])
+@pytest.mark.parametrize("path", [".claude/agents/reviewer.md", ".gitignore", "src/settings.json", "docs/hooks.json", ".github/workflows/ci.yml", ".threefold-museum/x.py", "src/.threefold-muse-notes.txt"])
 def test_files_beside_them_are_not(path: str) -> None:
     assert is_governance_path(path) is False
 
@@ -392,6 +394,10 @@ def test_whether_a_shape_could_be_a_file_a_glob_covers(pattern: str, glob: str, 
         (".claude/\ue005", True, True),
         (".\ue005", True, True),
         ("\ue004/.git/hooks/pre-commit", False, True),
+        (".threefold-muse/\ue005", False, True),
+        (".threefold-muse/\ue004", False, True),
+        (".threefold-muse", True, True),
+        (".threefold-muse-notes/\ue005", False, False),
         ("build/\ue005", True, False),
         ("\ue005", True, False),
         ("\ue004", True, False),
@@ -652,6 +658,9 @@ def test_reading_the_hooks_setting_is_not_changing_it(command: str) -> None:
 def test_git_clean_x_removes_the_hooks_own_ignored_files() -> None:
     removed = [w.target for w in analyse("git clean -fdx").writes if w.deletes]
     assert ".threefold.json" in removed and ".claude/settings.local.json" in removed
+    assert ".threefold-muse/hooks/threefold_hook.py" in removed
+    assert ".threefold-muse/.muse-plugin/plugin.json" in removed
+    assert ".threefold-muse/manifest.json" in removed
 
 
 @pytest.mark.parametrize("command", ["git clean -fd", "git clean -ndx", "git clean -fdx build/"])
@@ -660,7 +669,7 @@ def test_git_clean_that_spares_ignored_files_or_the_root_removes_none_of_them(co
 
 
 def test_git_clean_x_with_the_files_excluded_keeps_them() -> None:
-    command = "git clean -fdx -e .threefold.json -e .claude -e .codex -e .agents"
+    command = "git clean -fdx -e .threefold.json -e .claude -e .codex -e .agents -e .threefold-muse"
     assert [w for w in analyse(command).writes if w.deletes] == []
 
 

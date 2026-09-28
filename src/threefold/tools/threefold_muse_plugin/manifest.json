@@ -1,0 +1,13 @@
+{
+  "written_by": "threefold_install.py",
+  "files": [
+    {
+      "path": ".muse-plugin/plugin.json",
+      "sha256": "b15581b8dd662521d72aaaa4984f21dabe2226737fd44e2d59fc448fec5af89c"
+    },
+    {
+      "path": "hooks/threefold_hook.py",
+      "sha256": "75171109dbbaaba6421bc4a85a630100ba66bbcd9f9d27216ece7f4f30979646"
+    }
+  ]
+}

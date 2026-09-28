@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Threefold — Connect a Coding Agent</title>
-  <meta name="description" content="Connect Claude Code, Codex or Antigravity to Threefold in one command. Every project starts in Observe; a rule refuses only once you promote it." />
+  <meta name="description" content="Connect Claude Code, Codex, Antigravity or Muse to Threefold in one command. Every project starts in Observe; a rule refuses only once you promote it." />
   <!-- Tailwind CSS via CDN, pinned to an exact version: an unpinned major is a
        script that can change under a page that did not change, and it runs on the
        same origin as the operator key this browser may hold. No integrity hash: the
@@ -79,7 +79,7 @@
       <div>
         <p class="tf-eyebrow"><span data-tf-icon="plug"></span>Connect</p>
         <h1 class="tf-h1">Connect a coding agent</h1>
-        <p class="tf-lede">One script sits in front of Claude Code, Codex or Antigravity and asks this service about each write and command before it runs. Every project starts in Observe: what a rule would stop is recorded for you to review, and nothing is stopped but a call carrying a credential until you promote the project.</p>
+        <p class="tf-lede">One script sits in front of Claude Code, Codex, Antigravity or Muse and asks this service about each write and command before it runs. Every project starts in Observe: what a rule would stop is recorded for you to review, and nothing is stopped but a call carrying a credential until you promote the project.</p>
       </div>
       <div class="tf-actions">
         <a id="hook-badge" href="hooks/threefold_hook.py" target="_blank" rel="noopener" title="Read the script this deployment serves" class="tf-spec-link">threefold_hook.py <span data-tf-icon="external" data-tf-size="12"></span></a>
@@ -116,9 +116,9 @@
         <div>
           <h2 id="one-command-title" class="tf-h2">Connect a repository in one command</h2>
           <p class="tf-lede" style="font-size:0.9375rem">
-            Run it at the root of the repository. It installs the hook for Claude Code, Codex and Antigravity where they are
-            installed, keeps its files out of git, starts the project in Observe, sends one harmless call to prove the path,
-            and opens the project on the dashboard.
+            Run it at the root of the repository. It installs the hook for Claude Code, Codex, Antigravity and Muse where
+            they are installed, keeps its files out of git, starts the project in Observe, sends one harmless call to prove
+            the path, and opens the project on the dashboard.
           </p>
         </div>
         <a id="wizard-link" href="dashboard.html#/connect" class="tf-btn tf-btn-primary">
@@ -214,7 +214,7 @@
           <span class="tf-step-num">3</span>
           <div>
             <p class="tf-stepper-title">A refusal is handed back as a deny</p>
-            <p class="tf-stepper-text">Measured on 2026-09-21: Claude Code and the Antigravity desktop app stopped the refused write. Measured on 2026-09-23, in one run: Codex stopped it over <span class="font-mono">apply_patch</span>. The table further down has the detail, and says which Codex routes are still not measured.</p>
+            <p class="tf-stepper-text">Measured on 2026-09-21: Claude Code and the Antigravity desktop app stopped the refused write. Measured on 2026-09-23, in one run: Codex stopped it over <span class="font-mono">apply_patch</span>. Measured on 2026-09-28: Muse stopped it over <span class="font-mono">write_file</span>. The table further down has the detail, and says which Codex and Muse routes are still not measured.</p>
           </div>
         </li>
       </ol>
@@ -231,7 +231,7 @@
       <div class="tf-panel-head">
         <div>
           <h2 id="govern-title" class="tf-panel-title"><span data-tf-icon="git" data-tf-size="18"></span>Govern your own repositories</h2>
-          <p class="tf-panel-sub">The file the command above downloads, run once per repository, for all three agents and the commit. A new project starts in Observe; promoting it on the dashboard is what enforces.</p>
+          <p class="tf-panel-sub">The file the command above downloads, run once per repository, for all four agents and the commit. A new project starts in Observe; promoting it on the dashboard is what enforces.</p>
         </div>
         <span class="tf-chip tf-chip-amber"><span data-tf-icon="eye" data-tf-size="13"></span>Observe, then promote</span>
       </div>
@@ -257,6 +257,7 @@
             <ul class="tf-small space-y-1.5 list-disc pl-4 mt-1">
               <li><span class="font-mono text-gray-200">.threefold.json</span> at the repository root, holding <span class="font-mono">project</span>, <span class="font-mono">endpoint</span>, <span class="font-mono">mode</span> and, when given, <span class="font-mono">api_key_file</span>: the path to the key, never the key.</li>
               <li>The three agents' hook settings: <span class="font-mono text-gray-200">.claude/settings.local.json</span> for Claude Code, <span class="font-mono text-gray-200">.codex/hooks.json</span> for Codex and <span class="font-mono text-gray-200">.agents/hooks.json</span> for Antigravity, the same blocks as Step 2 below.</li>
+              <li>The Muse plugin bundle, <span class="font-mono text-gray-200">.threefold-muse/</span>, holding the hook and its manifest, registered for the project with <span class="font-mono text-gray-200">muse plugins install</span> and approved with <span class="font-mono text-gray-200">muse plugins approve</span>, the same commands as Step 2 below.</li>
               <li>The pre-commit hook, so an edit that got past an agent is still judged when it is committed, and recorded with agent <span class="font-mono">pre-commit</span>.</li>
               <li>Every one of them listed in <span class="font-mono text-gray-200">.git/info/exclude</span>, which is local to your clone. None of it is ever committed, and the governed repository shows no change.</li>
             </ul>
@@ -307,8 +308,9 @@
               Run <span class="font-mono text-gray-200">threefold.py disconnect</span> at the root of the same repository;
               <span class="font-mono text-gray-200">threefold.py status</span> lists every folder this machine governs. By hand it
               is the same list in reverse: delete <span class="font-mono">.threefold.json</span>, take the Threefold block out of
-              each of the three hook settings files, remove the pre-commit hook, and delete the lines it added to
-              <span class="font-mono">.git/info/exclude</span>.
+              each hook settings file, remove the Muse plugin with <span class="font-mono">muse plugins remove threefold</span>
+              and delete <span class="font-mono">.threefold-muse/</span>, remove the pre-commit hook, and delete the lines it
+              added to <span class="font-mono">.git/info/exclude</span>.
             </p>
             <pre class="tf-pre tf-pre-plain code mt-2" id="uninstall-snippet" data-tf-scroll="The commands that disconnect"></pre>
           </div>
@@ -344,9 +346,12 @@
               desktop app refused <span class="font-mono">write_to_file</span>; in each case the refused file was not created.
               Codex CLI 0.155.0 was measured on 2026-09-23, once: the hook refused an <span class="font-mono">apply_patch</span>
               that added <span class="font-mono">boto3</span> to a governed file, and the file's sha256 was unchanged afterwards.
-              One machine, Windows, those versions: method, results and the Codex routes that are not measured are in
-              <span class="font-mono">docs/evidence/ENFORCEMENT_2026-09-21.md</span> and
-              <span class="font-mono">docs/evidence/ENFORCEMENT_2026-09-23.md</span> in the repository.
+              Muse 1.4.0 was measured on 2026-09-28: the hook refused a <span class="font-mono">write_file</span> and the
+              refused file was not created; its edit and shell routes are not measured.
+              One machine, Windows, those versions: method, results and the routes that are not measured are in
+              <span class="font-mono">docs/evidence/ENFORCEMENT_2026-09-21.md</span>,
+              <span class="font-mono">docs/evidence/ENFORCEMENT_2026-09-23.md</span> and
+              <span class="font-mono">docs/evidence/ENFORCEMENT_2026-09-28-MUSE.md</span> in the repository.
             </p>
           </div>
         </div>
@@ -359,10 +364,10 @@
       <div class="tf-card tf-panel">
         <div class="tf-panel-head">
           <div>
-            <h2 class="tf-panel-title"><span data-tf-icon="download" data-tf-size="18"></span>Install by hand: one file, three agents</h2>
+            <h2 class="tf-panel-title"><span data-tf-icon="download" data-tf-size="18"></span>Install by hand: one file, four agents</h2>
             <p class="tf-panel-sub">
               One agent at a time. For a repository you mean to keep governed, the installer above writes all of this
-              for the three agents at once and keeps it out of the repository's history.
+              for the four agents at once and keeps it out of the repository's history.
             </p>
           </div>
           <span class="tf-chip tf-chip-purple">three steps</span>
@@ -423,10 +428,18 @@
               <pre class="tf-pre code" id="settings-antigravity" data-tf-scroll="The Antigravity block"></pre>
               <button type="button" onclick="copyText('settings-antigravity', this)" class="tf-copy" aria-label="Copy the Antigravity block"><span data-tf-icon="copy" data-tf-size="14" data-tf-class="tf-icon-idle"></span><span data-tf-icon="check" data-tf-size="14" data-tf-class="tf-icon-done"></span><span data-tf-copy-label>Copy</span></button>
             </div>
+
+            <p class="tf-label mt-4">Muse · <span class="font-mono normal-case tracking-normal">a plugin, installed per project</span></p>
+            <div class="tf-command">
+              <pre class="tf-pre code" id="settings-muse" data-tf-scroll="The Muse commands"></pre>
+              <button type="button" onclick="copyText('settings-muse', this)" class="tf-copy" aria-label="Copy the Muse commands"><span data-tf-icon="copy" data-tf-size="14" data-tf-class="tf-icon-idle"></span><span data-tf-icon="check" data-tf-size="14" data-tf-class="tf-icon-done"></span><span data-tf-copy-label>Copy</span></button>
+            </div>
             <p class="tf-micro mt-2">
-              The three blocks share one layout. The file each agent reads, its matcher and the <span class="font-mono">--agent</span>
+              The three settings blocks share one layout. The file each agent reads, its matcher and the <span class="font-mono">--agent</span>
               name are what this project fixed for it; check the layout against your agent's own hook documentation, above all for
-              Antigravity, before you rely on it.
+              Antigravity, before you rely on it. Muse reads no settings file: it runs the hook as a plugin, so instead of a
+              block it takes the install commands above, once <span class="font-mono">.threefold-muse/</span> holds the bundle
+              the installer writes.
             </p>
           </div>
 
@@ -466,6 +479,7 @@
             <option value="claude-code" selected>Claude Code</option>
             <option value="codex">Codex</option>
             <option value="antigravity">Antigravity</option>
+            <option value="muse">Muse</option>
           </select>
         </label>
 
@@ -534,7 +548,7 @@
             <li><span class="font-mono text-gray-200">project_name</span>: your <span class="font-mono">THREEFOLD_PROJECT</span> alias. A name that does not match the stack's pattern (<span class="font-mono">Acme-</span> and up to 40 letters, digits or dashes by default) is stored and counted as <span class="font-mono">unlabelled</span>, and the answer says so in <span class="font-mono">warnings</span>.</li>
             <li><span class="font-mono text-gray-200">developer</span>: <span class="font-mono">anonymous</span>, or a 12-character hex hash computed on your machine. Never a user name. Any developer value is shown in public only as a short hash.</li>
             <li><span class="font-mono text-gray-200">tool_name</span>, <span class="font-mono text-gray-200">action_type</span> and <span class="font-mono text-gray-200">arguments</span>. For a write, the arguments include the text being written: that text is what the gates read.</li>
-            <li><span class="font-mono text-gray-200">agent</span>: <span class="font-mono">claude-code</span>, <span class="font-mono">codex</span> or <span class="font-mono">antigravity</span>; <span class="font-mono text-gray-200">origin</span>: <span class="font-mono">hook</span>; <span class="font-mono text-gray-200">explain</span>: <span class="font-mono">false</span>, so the hook does not ask for the model's sentence.</li>
+            <li><span class="font-mono text-gray-200">agent</span>: <span class="font-mono">claude-code</span>, <span class="font-mono">codex</span>, <span class="font-mono">antigravity</span> or <span class="font-mono">muse</span>; <span class="font-mono text-gray-200">origin</span>: <span class="font-mono">hook</span>; <span class="font-mono text-gray-200">explain</span>: <span class="font-mono">false</span>, so the hook does not ask for the model's sentence.</li>
           </ul>
         </div>
         <div class="tf-card-quiet p-4 space-y-2 tf-small">
@@ -564,7 +578,7 @@
       <div class="tf-panel-head">
         <div>
           <h2 id="per-agent-title" class="tf-panel-title"><span data-tf-icon="terminal" data-tf-size="18"></span>What each agent does with a deny, as far as it has been shown</h2>
-          <p class="tf-panel-sub">The hook's side is fixed. The agent's side was measured on 2026-09-21, and for Codex on 2026-09-23, on one Windows machine, for the versions named, by checking whether the refused file existed afterwards.</p>
+          <p class="tf-panel-sub">The hook's side is fixed. The agent's side was measured on 2026-09-21, and for Codex on 2026-09-23 and Muse on 2026-09-28, on one Windows machine, for the versions named, by checking whether the refused file existed afterwards.</p>
         </div>
       </div>
       <div class="tf-scroll-x">
@@ -613,6 +627,17 @@
                 <div>
                   <span class="tf-chip tf-chip-emerald">stops the write · measured</span>
                   <p class="tf-micro mt-1.5">Desktop app, 2026-09: <span class="font-mono">write_to_file</span> was refused and the file was not created. The other tools were not measured.</p>
+                </div>
+              </td>
+            </tr>
+            <tr data-agent="muse" data-enforcement="stopped">
+              <td data-label="Agent" class="font-semibold text-gray-100">Muse</td>
+              <td data-label="Tool calls" class="font-mono text-[11px]">write_file, edit_file, powershell</td>
+              <td data-label="On a refusal" class="font-mono text-[11px]">hookSpecificOutput.permissionDecision "deny", with a reason</td>
+              <td data-label="Stops the write?">
+                <div>
+                  <span class="tf-chip tf-chip-emerald">stops the write · measured</span>
+                  <p class="tf-micro mt-1.5">1.4.0: a <span class="font-mono">write_file</span> was refused and the file was not created. The <span class="font-mono">edit_file</span> and <span class="font-mono">powershell</span> routes are not measured.</p>
                 </div>
               </td>
             </tr>
@@ -714,13 +739,13 @@
     "content": "from boto3 import client"
   }
 }</pre>
-            <p class="tf-micro mt-2">Codex and Antigravity hand over the same call in their own tool names; <span class="font-mono">--agent</span> tells the hook which shape to read.</p>
+            <p class="tf-micro mt-2">Codex, Antigravity and Muse hand over the same call in their own tool names; <span class="font-mono">--agent</span> tells the hook which shape to read.</p>
           </div>
 
           <div>
             <p class="tf-label">The hook writes this on stdout when it refuses</p>
-            <p class="tf-micro mb-1">Claude Code and Codex:</p>
-            <pre class="tf-pre tf-pre-plain code" data-tf-scroll="The refusal Claude Code and Codex read">{
+            <p class="tf-micro mb-1">Claude Code, Codex and Muse:</p>
+            <pre class="tf-pre tf-pre-plain code" data-tf-scroll="The refusal Claude Code, Codex and Muse read">{
   "hookSpecificOutput": {
     "hookEventName": "PreToolUse",
     "permissionDecision": "deny",
@@ -739,10 +764,10 @@
             <p class="tf-label">Tool calls, in the service's vocabulary</p>
             <div class="grid grid-cols-1 gap-2 text-[11px] font-mono">
               <div class="tf-card-quiet p-2.5 flex items-center justify-between gap-3">
-                <span class="text-gray-300">Write, Edit, MultiEdit, NotebookEdit, apply_patch, write_to_file, replace_file_content, multi_replace_file_content</span><span class="tf-accent-text">FILE_WRITE</span>
+                <span class="text-gray-300">Write, Edit, MultiEdit, NotebookEdit, apply_patch, write_to_file, replace_file_content, multi_replace_file_content, write_file, edit_file</span><span class="tf-accent-text">FILE_WRITE</span>
               </div>
               <div class="tf-card-quiet p-2.5 flex items-center justify-between gap-3">
-                <span class="text-gray-300">Bash, run_command</span><span class="tf-accent-text">COMMAND_EXEC</span>
+                <span class="text-gray-300">Bash, run_command, powershell</span><span class="tf-accent-text">COMMAND_EXEC</span>
               </div>
             </div>
           </div>
@@ -787,7 +812,8 @@
 
     // What this project fixed for each agent: the tools that reach the hook, and
     // the name the hook is told it is serving. The file each block goes in is
-    // beside the block itself.
+    // beside the block itself. Muse reads no settings file: it runs the hook
+    // as a plugin, so its entry carries the install commands instead.
     const AGENTS = {
       'claude-code': {
         label: 'Claude Code',
@@ -800,6 +826,10 @@
       antigravity: {
         label: 'Antigravity',
         matcher: 'write_to_file|replace_file_content|multi_replace_file_content|run_command'
+      },
+      muse: {
+        label: 'Muse',
+        plugin: true
       }
     };
 
@@ -952,7 +982,19 @@
       });
     }
 
-    // One registration block per agent, in the layout the three share.
+    // The project-scope commands that register the Muse plugin, once
+    // .threefold-muse/ holds the bundle the installer writes. Muse loads no
+    // project plugin it was not told to, so the install and the approval are
+    // both needed; the list at the end shows whether they took.
+    function museCommands() {
+      return '# At the root of the repository, once .threefold-muse/ holds the bundle\n'
+        + '# the installer writes (the hook as hooks/threefold_hook.py, beside its manifest)\n'
+        + 'muse plugins install .threefold-muse --scope project\n'
+        + 'muse plugins approve threefold\n'
+        + 'muse plugins list';
+    }
+
+    // One registration block per agent, in the layout the three settings files share.
     function agentSettings(name) {
       const agent = AGENTS[name];
       return JSON.stringify({
@@ -1004,7 +1046,7 @@
         '  | THREEFOLD_PROJECT=Acme-Demo THREEFOLD_ENDPOINT=' + endpoint + ' python threefold_hook.py --agent claude-code';
 
       Object.keys(AGENTS).forEach(name => {
-        document.getElementById('settings-' + name).textContent = agentSettings(name);
+        document.getElementById('settings-' + name).textContent = AGENTS[name].plugin ? museCommands() : agentSettings(name);
       });
 
       // The installer's flags are the per-repository contract: an Acme-style alias,

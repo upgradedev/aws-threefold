@@ -15,7 +15,7 @@ Under the hero, a proof strip whose every figure is read as the page loads:
 calls judged, stopped and would have been stopped from GET /api/overview
 (without a key, with one clause saying what the counts are made of), and the
 benchmark pooled from GET /proof.json. Then how it works (three steps, one
-flow diagram, the two-stage rollout, the three agents in the evidence's own
+flow diagram, the two-stage rollout, the four agents in the evidence's own
 words), the AWS services as one diagram, the gates the flagship demo trips
 (where the flagship's "under 60 seconds" is said, as the walkthrough's "about
 two minutes" is said on the button that opens it), and a footer holding the
@@ -38,10 +38,10 @@ PROMISE = "Stop bad agent writes before they reach your code."
 # A judge read "your repos observe before they enforce" twice before it made
 # sense; the second sentence says the same in the page's own plain words.
 SENTENCE = (
-    "Deterministic gates on AWS judge each write and command from Claude Code, Codex or Antigravity. "
+    "Deterministic gates on AWS judge each write and command from Claude Code, Codex, Antigravity or Muse. "
     "Each repository only watches until you promote its rules."
 )
-SCOPE = "A refusal is measured to stop the write in Claude Code and Antigravity, and in Codex once, over its patch tool only."
+SCOPE = "A refusal is measured to stop the write in Claude Code and Antigravity, in Codex once, over its patch tool only, and in Muse over its file-write tool only."
 ACTIONS = [
     ("hero-try", "dashboard.html#/try", "Try the two-stage rollout — 2 min"),
     ("hero-dashboard", "dashboard.html#/overview", "Open the live dashboard"),
@@ -263,7 +263,7 @@ def test_the_sections_come_in_the_order_a_judge_needs_them() -> None:
 
 
 def test_the_hero_says_which_agents_a_refusal_is_measured_to_stop() -> None:
-    """The sentence names three agents; the evidence measured all three, unevenly.
+    """The sentence names four agents; the evidence measured all four, unevenly.
 
     Claude Code and Antigravity refused a Write and no file was created
     (`docs/evidence/ENFORCEMENT_2026-09-21.md`). Codex was measured on
@@ -400,7 +400,7 @@ def test_the_header_holds_the_shell_and_the_footer_the_links_and_the_tags() -> N
     }
 
 
-def test_how_it_works_shows_three_steps_one_flow_the_rollout_and_the_three_agents() -> None:
+def test_how_it_works_shows_three_steps_one_flow_the_rollout_and_the_four_agents() -> None:
     section = _section("how-it-works")
     steps = re.findall(r'<li class="tf-card tf-step-card">(.*?)</li>', section, re.S)
     assert [_text(re.search(r"<h3>(.*?)</h3>", s).group(1)) for s in steps] == [
@@ -420,7 +420,7 @@ def test_how_it_works_shows_three_steps_one_flow_the_rollout_and_the_three_agent
 def test_each_agent_is_described_in_the_words_of_the_evidence_it_links() -> None:
     section = _section("how-it-works")
     agents = re.findall(r'<li class="tf-card tf-agent">(.*?)</li>', section, re.S)
-    assert [re.search(r'<span class="tf-agent-name">(.*?)</span>', a).group(1) for a in agents] == ["Claude Code", "Antigravity", "Codex"]
+    assert [re.search(r'<span class="tf-agent-name">(.*?)</span>', a).group(1) for a in agents] == ["Claude Code", "Antigravity", "Codex", "Muse"]
     for agent in agents:
         (link,) = re.findall(rf'href="{re.escape(REPOSITORY)}/blob/main/(docs/evidence/[^"]+)"', agent)
         evidence = (ROOT / link).read_text(encoding="utf-8")
@@ -429,6 +429,8 @@ def test_each_agent_is_described_in_the_words_of_the_evidence_it_links() -> None
             assert " ".join(words.split()) in " ".join(evidence.replace("`", "").split()), f"{words!r} is not in {link}"
     assert "tf-chip-amber" in agents[2] and "Measured once, over its patch tool" in agents[2], "Codex is not rounded up"
     assert "shell route is not measured" in _text(agents[2])
+    assert "tf-chip-amber" in agents[3] and "Measured over its file-write tool" in agents[3], "Muse is not rounded up"
+    assert "routes are not measured" in _text(agents[3])
 
 
 def test_the_page_promises_a_fix_only_where_one_can_be_made() -> None:

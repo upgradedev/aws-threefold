@@ -483,7 +483,7 @@
     const REFRESH_MS = 30000;
 
     const AGENT_LABELS = {
-      'claude-code': 'Claude Code', codex: 'Codex', antigravity: 'Antigravity',
+      'claude-code': 'Claude Code', codex: 'Codex', antigravity: 'Antigravity', muse: 'Muse',
       'pre-commit': 'pre-commit', ci: 'CI', page: 'Page', unknown: 'Unknown'
     };
     const OUTCOMES = {
@@ -4041,7 +4041,7 @@
                 <h2 class="text-sm font-semibold text-white">Run one command at the root of the repository</h2>
                 ${ok ? html`<div id="connect-command" class="space-y-3">${commandTabs()}</div>`
                   : html`<p class="text-xs text-rose-300">Fix the name above and the command appears here.</p>`}
-                <p class="text-xs text-gray-400">It downloads one standard-library Python file from this stack, installs the hook for Claude Code, Codex and Antigravity where they are installed, keeps its files out of git, and finishes by sending one harmless call and opening this project here.</p>
+                <p class="text-xs text-gray-400">It downloads one standard-library Python file from this stack, installs the hook for Claude Code, Codex, Antigravity and Muse where they are installed, keeps its files out of git, and finishes by sending one harmless call and opening this project here.</p>
                 <details class="tf-disclosure text-xs text-gray-400">
                   <summary>${T.icon('shield', 16)}For the careful: check the file before you run it</summary>
                   <div class="tf-disclosure-body">

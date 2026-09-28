@@ -16,8 +16,9 @@ is tagged [STATE-FILE]. Everything else describes the code on `main`.
 ## 1. Project description
 
 Threefold governs the tool calls coding agents make. One standard-library hook
-file sits in front of Claude Code, Codex and Antigravity and asks a service on
-AWS about each write or command before it runs. Deterministic gates decide: a
+file sits in front of Claude Code, Codex, Antigravity and Muse and asks a
+service on AWS about each write or command before it runs. Deterministic gates
+decide: a
 domain file importing infrastructure under the architect's layering rules, a
 credential in the arguments, a write that switches the hooks off, the same call
 repeating, a spend ceiling. A team connects a repository with one command.
@@ -139,7 +140,10 @@ so the rollout had to show what a rule would stop before it stops anything.
    CLI 0.155.0 was measured on 2026-09-23, in one run and on one route: the
    hook refused an `apply_patch` adding `boto3` to a governed file, and the
    file's sha256 was unchanged afterwards. Its other routes are not measured
-   (`docs/evidence/ENFORCEMENT_2026-09-23.md`).
+   (`docs/evidence/ENFORCEMENT_2026-09-23.md`). Muse 1.4.0 was measured on
+   2026-09-28: the hook refused a `write_file` and the refused file was not
+   created; its edit and shell routes are not measured
+   (`docs/evidence/ENFORCEMENT_2026-09-28-MUSE.md`).
 2. **Every write route, not only the Write tool.** An agent refused a `Write`
    can reach for `cat > file <<'EOF'`. The service reads a shell command for
    the writes it makes and judges readable content like a `Write`, and refuses

@@ -185,7 +185,7 @@ _GOVERNANCE_PAIRS = frozenset(
 )
 _GOVERNANCE_FILES = frozenset((".threefold.json",))
 # Removing one of these directories removes the files above with it.
-_GOVERNANCE_DIRECTORIES = frozenset((".claude", ".codex", ".agents", ".git", ".threefold"))
+_GOVERNANCE_DIRECTORIES = frozenset((".claude", ".codex", ".agents", ".git", ".threefold", ".threefold-muse"))
 
 
 def _segments_of(path: str) -> List[str]:
@@ -199,8 +199,10 @@ def is_governance_path(path: str, deletes: bool = False) -> bool:
     sent paths relative to wherever the agent happened to start and a nested
     checkout has its own settings. `.threefold/` is included beside the listed
     files: it holds the rules the pre-commit check falls back to, and rewriting
-    them is the same act as rewriting the hook settings. Case is ignored, since
-    two of the three agents run on file systems that ignore it too.
+    them is the same act as rewriting the hook settings, as is rewriting
+    anything under `.threefold-muse/`, the Muse plugin bundle holding the hook
+    beside its manifest. Case is ignored, since three of the four agents run on
+    file systems that ignore it too.
     """
     if not path:
         return False
@@ -215,6 +217,8 @@ def is_governance_path(path: str, deletes: bool = False) -> bool:
         if parts[index] == ".git" and parts[index + 1] == "hooks":
             return True
     if ".threefold" in parts[:-1] or parts[-1] == ".threefold":
+        return True
+    if ".threefold-muse" in parts[:-1] or parts[-1] == ".threefold-muse":
         return True
     return deletes and parts[-1] in _GOVERNANCE_DIRECTORIES
 
@@ -393,16 +397,16 @@ def pattern_matches_glob(pattern: str, glob: str, suffix: str = "") -> bool:
     return _shapes_meet(tuple(shapes))
 
 
-# The governance paths as globs: the named files, the two directories whose
+# The governance paths as globs: the named files, the three directories whose
 # every file counts, and, for a deletion, the directories that hold them.
 _GOVERNANCE_FILES_GLOBS = (
     "**/.claude/settings.json", "**/.claude/settings.local.json", "**/.codex/hooks.json", "**/.codex/config.toml",
     "**/.agents/hooks.json", "**/.git/config", "**/.threefold.json",
 )
-_GOVERNANCE_HOMES_GLOBS = ("**/.git/hooks/**", "**/.threefold/**")
-_GOVERNANCE_DIRECTORY_GLOBS = ("**/.claude", "**/.codex", "**/.agents", "**/.git", "**/.threefold")
+_GOVERNANCE_HOMES_GLOBS = ("**/.git/hooks/**", "**/.threefold/**", "**/.threefold-muse/**")
+_GOVERNANCE_DIRECTORY_GLOBS = ("**/.claude", "**/.codex", "**/.agents", "**/.git", "**/.threefold", "**/.threefold-muse")
 _GOVERNANCE_FINAL_NAMES = ("settings.json", "settings.local.json", "hooks.json", "config.toml", "config", ".threefold.json")
-_GOVERNANCE_DIRECTORY_NAMES = (".claude", ".codex", ".agents", ".git", ".threefold")
+_GOVERNANCE_DIRECTORY_NAMES = (".claude", ".codex", ".agents", ".git", ".threefold", ".threefold-muse")
 
 
 def _segment_could_be(segment: str, name: str) -> bool:
@@ -420,9 +424,9 @@ def pattern_is_governance(pattern: str, deletes: bool = False, tree: bool = Fals
     reading it that freely would make `> "$OUT/report.txt"` a write into
     .git/hooks and refuse it in every mode. So the literal part has to carry
     what makes the path a governance path: the file's own name
-    (`$D/settings.json`, whatever D is), a `.threefold` or `.git/hooks`
-    directory it passes through, or the settings directory an expansion is
-    written into (`.claude/$F`).
+    (`$D/settings.json`, whatever D is), a `.threefold`, `.threefold-muse` or
+    `.git/hooks` directory it passes through, or the settings directory an
+    expansion is written into (`.claude/$F`).
 
     A `tree` is the files beneath a copied directory. The agents read their
     settings at the project root, so a tree is asked about the root's files:
@@ -451,7 +455,7 @@ def pattern_is_governance(pattern: str, deletes: bool = False, tree: bool = Fals
         if EXPANSION in segment:
             continue
         following = segments[index + 1] if index + 1 < len(segments) else ""
-        if _segment_could_be(segment, ".threefold") or (
+        if _segment_could_be(segment, ".threefold") or _segment_could_be(segment, ".threefold-muse") or (
             _segment_could_be(segment, ".git") and following and EXPANSION not in following and _segment_could_be(following, "hooks")
         ):
             if any(pattern_matches_glob(pattern, glob) for glob in _GOVERNANCE_HOMES_GLOBS):
@@ -2353,7 +2357,10 @@ _CONFIG_WRITES = (
 _CONFIG_VALUES = ("-f", "--file", "--blob", "-t", "--type", "--default", "--comment", "--value", "--fixed-value")
 # The files the installer lists in .git/info/exclude, which `git clean -x`
 # removes with the rest of what is ignored.
-_IGNORED_GOVERNANCE = (".threefold.json", ".claude/settings.local.json", ".codex/hooks.json", ".agents/hooks.json")
+_IGNORED_GOVERNANCE = (
+    ".threefold.json", ".claude/settings.local.json", ".codex/hooks.json", ".agents/hooks.json",
+    ".threefold-muse/.muse-plugin/plugin.json", ".threefold-muse/hooks/threefold_hook.py", ".threefold-muse/manifest.json",
+)
 
 
 def _is_hooks_path(key: str) -> bool:

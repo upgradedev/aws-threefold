@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-AGENTS = ("claude-code", "codex", "antigravity")
+AGENTS = ("claude-code", "codex", "antigravity", "muse")
 HOOK_PATH = Path(__file__).resolve().parents[2] / "src" / "threefold" / "hooks" / "threefold_hook.py"
 
 REFUSAL = {
@@ -86,8 +86,8 @@ def test_the_hook_contains_no_allow_decision_at_all() -> None:
     assert "approve" not in literals
 
 
-def test_the_deny_format_for_claude_code_and_codex_is_hook_specific_output(hook) -> None:
-    for agent in ("claude-code", "codex"):
+def test_the_deny_format_for_claude_code_codex_and_muse_is_hook_specific_output(hook) -> None:
+    for agent in ("claude-code", "codex", "muse"):
         assert hook.deny(agent, "because") == {
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",

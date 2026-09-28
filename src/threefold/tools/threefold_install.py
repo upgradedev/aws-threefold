@@ -11,7 +11,7 @@
 and the older form, which keeps working exactly as it did:
 
     threefold_install.py --repo PATH --project Acme-Payments
-        [--agents claude-code,codex,antigravity] [--mode observe|managed|enforce]
+        [--agents claude-code,codex,antigravity,muse] [--mode observe|managed|enforce]
         [--endpoint URL] [--api-key-file PATH] [--include GLOB ...]
         [--uninstall] [--dry-run]
 
@@ -19,8 +19,9 @@ and the older form, which keeps working exactly as it did:
 the current directory, the project is `Acme-<folder name>` made to fit the
 alias pattern, the agents are the ones found on this machine (Claude Code by
 ~/.claude or `claude` on PATH, Codex by ~/.codex or `codex`, Antigravity by
-~/.gemini/antigravity, ~/.antigravity or `antigravity`, all three when none is
-found), and the mode is managed, so the project's stage on the dashboard
+~/.gemini/antigravity, ~/.antigravity or `antigravity`, Muse by
+~/.local/share/muse or `muse` on PATH, all four when none is found), and the
+mode is managed, so the project's stage on the dashboard
 decides and every project starts in Observe. Run again on a connected folder,
 it keeps the project, mode and include list it finds there unless told
 otherwise. It ends by sending one harmless dry-run call, printing whether the
@@ -56,6 +57,10 @@ What an install does, in order:
    `.codex/hooks.json` and `.agents/hooks.json`, with the matchers the hook was
    measured against on day one. Merged, never replaced: every other key and
    every other hook in those files is kept, and a second install adds nothing.
+   For Muse it writes the plugin bundle instead, `.threefold-muse/` holding
+   the hook and its manifest, and registers it for the project with
+   `muse plugins install`, then `muse plugins approve`; `muse plugins list`
+   shows whether the registration took.
 4. Installs a pre-commit hook that runs `threefold_cli.py check`. A pre-commit
    hook already there is kept and run first. If `core.hooksPath` is set, git
    does not read `.git/hooks`, so nothing is installed there and the output
@@ -96,8 +101,9 @@ written for.
 
 A directory git does not recognise as a repository, such as a workspace root
 that holds several repositories, is installed in workspace mode instead of
-being refused. Only `.threefold.json` and the three agents' settings files are
-written there, merged as above; there is no pre-commit hook, so nothing checks
+being refused. Only `.threefold.json`, the three agents' settings files and
+the Muse plugin bundle are written there, merged as above; there is no
+pre-commit hook, so nothing checks
 a commit, and nothing is written under any `.git`, including a `.git` folder
 git itself does not accept. The install record is kept in
 `THREEFOLD_HOME/installs/<16 hex of the directory's path>.json`, so an uninstall
@@ -164,6 +170,7 @@ HERE: Optional[Path] = _own_path().parent if _own_path() is not None else None
 SOURCE: Optional[Path] = HERE.parents[1] if HERE is not None and len(HERE.parents) > 1 else None
 HOOK_SOURCE: Optional[Path] = SOURCE / "threefold" / "hooks" / "threefold_hook.py" if SOURCE is not None else None
 CLI_SOURCE: Optional[Path] = HERE / "threefold_cli.py" if HERE is not None else None
+MUSE_BUNDLE_SOURCE: Optional[Path] = HERE / "threefold_muse_plugin" if HERE is not None else None
 
 # The stack replaces this with its own URL when it serves the file at
 # /install.py. Replaced, the copy is a served one: its endpoint is the stack
@@ -174,7 +181,7 @@ BAKED_ENDPOINT = "__THREEFOLD_ENDPOINT__"
 _UNBAKED = "__THREEFOLD" "_ENDPOINT__"
 
 PROJECT_PATTERN = re.compile(r"^Acme-[A-Za-z0-9-]{1,40}$")
-AGENTS = ("claude-code", "codex", "antigravity")
+AGENTS = ("claude-code", "codex", "antigravity", "muse")
 MODES = ("managed", "observe", "enforce")
 COMMANDS = ("connect", "disconnect", "status", "open")
 
@@ -192,16 +199,55 @@ AGENT_SETTINGS = {
 # but no measurement in this repository records which folder under it the
 # desktop app uses, so the two folders here are the ones this command's
 # contract names, not observed ones; ~/.gemini alone is not taken as
-# Antigravity, since other tools keep settings there. A miss costs little:
-# with no agent found, all three are registered.
+# Antigravity, since other tools keep settings there. For Muse the folder is
+# the one its own server answers as its home, and the command is what the
+# installer registers the plugin through. A miss costs little: with no agent
+# found, all four are registered.
 AGENT_SIGNS = {
     "claude-code": ((".claude",), "claude"),
     "codex": ((".codex",), "codex"),
     "antigravity": ((".gemini/antigravity", ".antigravity"), "antigravity"),
+    "muse": ((".local/share/muse",), "muse"),
 }
 
 CONFIG_FILE = ".threefold.json"
 HOME_CONFIG = "config.json"
+
+# Muse reads no settings file in the repository: it runs the hook as a native
+# plugin, installed per project from a bundle this installer writes. The
+# bundle's source is threefold_muse_plugin/ beside this file, pinned by the
+# sha256 manifest beside it; the installer verifies the pins and copies the
+# bundle to MUSE_PLUGIN_DIR, then registers it with the muse command.
+MUSE_PLUGIN_ID = "threefold"
+MUSE_PLUGIN_DIR = ".threefold-muse"
+MUSE_PLUGIN_FILES = (".muse-plugin/plugin.json", "hooks/threefold_hook.py", "manifest.json")
+MUSE_TIMEOUT_SECONDS = 120.0
+MUSE_REGISTERED = re.compile(r"\bthreefold\b")
+
+# The plugin manifest, exactly as the bundle carries it. A served copy of
+# this installer has no bundle beside it, so it renders the bundle from this
+# text and the hook it downloaded; a test holds the two byte for byte.
+MUSE_PLUGIN_JSON = """{
+  "schemaVersion": 1,
+  "name": "threefold",
+  "version": "1.0.0",
+  "description": "Threefold governs this project's tool calls: each write and command is judged before it runs.",
+  "compat": {
+    "manifestDir": ".muse-plugin"
+  },
+  "capabilities": {
+    "hooks": [
+      {
+        "id": "govern",
+        "event": "PreToolUse",
+        "command": ["python", "hooks/threefold_hook.py", "--agent", "muse"],
+        "timeoutMs": 10000,
+        "statusMessage": "Threefold is judging this call"
+      }
+    ]
+  }
+}
+"""
 EXCLUDE_KEY = "git:info/exclude"
 MANIFEST_NAME = "threefold-install.json"
 INSTALLS_DIR = "installs"
@@ -761,6 +807,9 @@ def _merged_manifest(old: Dict[str, Any]) -> Dict[str, Any]:
         # the old bytes back when the file still holds exactly the install's.
         "originals": originals,
         "installed": dict(old.get("installed") or {}),
+        # The Muse plugin this install registered, so a second install for
+        # fewer agents still lists it and an uninstall still unregisters it.
+        "muse": old.get("muse"),
     }
 
 
@@ -780,12 +829,16 @@ def is_tracked(root: Path, relative: str) -> bool:
 
 # --- the shared copies ------------------------------------------------------------------------
 
-def shared_copies(plan: Plan, home: Path) -> None:
-    """The hook, the check and the engine in THREEFOLD_HOME: from the stack when served, else from the checkout."""
+def shared_copies(plan: Plan, home: Path) -> Optional[bytes]:
+    """The hook, the check and the engine in THREEFOLD_HOME: from the stack when served, else from the checkout.
+
+    Returns the hook bytes the plan stages, for the Muse plugin bundle, which
+    carries its own copy of the hook: from the checkout here, from the stack's
+    bundle when served. None on a served dry run, which fetches nothing.
+    """
     endpoint = served_endpoint()
     if endpoint:
-        served_copies(plan, home, endpoint)
-        return
+        return served_copies(plan, home, endpoint)
     if HOOK_SOURCE is None or CLI_SOURCE is None or SOURCE is None or not HOOK_SOURCE.is_file() or not CLI_SOURCE.is_file():
         raise InstallError(
             "this copy of the installer has neither a stack's address baked in nor a Threefold checkout around it; "
@@ -797,9 +850,10 @@ def shared_copies(plan: Plan, home: Path) -> None:
     targets.extend((module, home / "lib" / "threefold" / "domain" / module.name) for module in sorted((engine / "domain").glob("*.py")))
     changed = [(target, source.read_bytes()) for source, target in targets if not target.is_file() or target.read_bytes() != source.read_bytes()]
     _plan_copies(plan, home, changed, f"copy the hook, the pre-commit check and the engine into {forward(home)}")
+    return HOOK_SOURCE.read_bytes()
 
 
-def served_copies(plan: Plan, home: Path, endpoint: str) -> None:
+def served_copies(plan: Plan, home: Path, endpoint: str) -> Optional[bytes]:
     if plan.dry_run:
         # Nothing is fetched on a dry run either: it asks nothing of the stack.
         plan.add(
@@ -807,7 +861,7 @@ def served_copies(plan: Plan, home: Path, endpoint: str) -> None:
             f"each file against {endpoint}dist/manifest.json, and put them in {forward(home)}",
             lambda: None,
         )
-        return
+        return None
     files, manifest = fetch_bundle(endpoint)
     targets = [(home / path, data) for path, data in files]
     copy = installer_copy(endpoint, manifest)
@@ -821,6 +875,10 @@ def served_copies(plan: Plan, home: Path, endpoint: str) -> None:
     )
     if copy is None:
         plan.add(f"note: no copy of the installer was kept in {forward(home / 'bin')}; take it again from {endpoint}install.py")
+    for path, data in files:
+        if path == "bin/threefold_hook.py":
+            return data
+    return None  # unreachable: fetch_bundle refuses a bundle without the hook
 
 
 def _plan_copies(plan: Plan, home: Path, changed: List[Tuple[Path, bytes]], description: str) -> None:
@@ -833,6 +891,287 @@ def _plan_copies(plan: Plan, home: Path, changed: List[Tuple[Path, bytes]], desc
             _write_bytes(target, data)()
 
     plan.add(f"{description} ({len(changed)} file(s))", action)
+
+
+# --- the Muse plugin bundle -------------------------------------------------------------------
+#
+# Muse runs the hook as a native plugin, not from a settings file: the bundle
+# below is written into the repository, registered for the project with
+# `muse plugins install`, and approved with `muse plugins approve`. Muse loads
+# no project plugin it was not told to, so writing the files without running
+# the commands governs nothing. What was measured of each command is in
+# docs/evidence/ENFORCEMENT_2026-09-28-MUSE.md.
+
+def muse_binary() -> Optional[str]:
+    """The muse command, or None when Muse is not on PATH."""
+    return shutil.which("muse")
+
+
+def run_muse(root: Path, *args: str) -> Tuple[bool, str]:
+    """Runs the muse command for the project at `root`: (ran cleanly, its output).
+
+    False for anything that is not a clean run: no binary, a refusal to start,
+    a timeout, a nonzero exit. Callers say what that means; this only reports
+    it. Stdin is closed so no command can wait on a prompt.
+    """
+    binary = muse_binary()
+    if not binary:
+        return False, ""
+    if os.name == "nt" and binary.lower().endswith((".cmd", ".bat")):
+        # The Windows installer puts a muse.cmd on PATH, which CreateProcess
+        # cannot run directly; cmd runs it. A list, never a shell string.
+        argv: List[str] = [os.environ.get("COMSPEC", "cmd.exe"), "/d", "/c", binary, *args]
+    else:
+        argv = [binary, *args]
+    try:
+        ran = subprocess.run(argv, capture_output=True, timeout=MUSE_TIMEOUT_SECONDS, stdin=subprocess.DEVNULL, cwd=str(root))
+    except (OSError, subprocess.TimeoutExpired):
+        return False, ""
+    out = b"".join(part for part in (ran.stdout, ran.stderr) if part).decode("utf-8", "replace")
+    return ran.returncode == 0, out
+
+
+def _muse_why(output: str) -> str:
+    """The muse command's complaint in one short line, or that it said nothing."""
+    line = " ".join(output.split())
+    return line[:160] if line else "it printed nothing"
+
+
+def muse_plugin_files(home: Path, hook_bytes: Optional[bytes], dry_run: bool = False) -> List[Tuple[str, bytes]]:
+    """The plugin bundle as (path in .threefold-muse/, bytes), verified before anything is written.
+
+    From the checkout's bundle source when there is one, each file checked
+    against the sha256 its manifest gives; from the hook this plan staged and
+    the manifest text above when served, with the pins computed. A bundle that
+    is short, swapped or tampered with stops the install rather than
+    registering half of itself. On a dry run with no bytes to check, empty
+    stand-ins: the digests are recorded and discarded, and only the
+    descriptions are printed.
+    """
+    bundle = MUSE_BUNDLE_SOURCE
+    if bundle is not None and (bundle / "manifest.json").is_file():
+        return _verified_bundle_files(bundle)
+    hook = hook_bytes
+    if hook is None:
+        candidate = home / "bin" / "threefold_hook.py"
+        if candidate.is_file():
+            hook = candidate.read_bytes()
+    if hook is None:
+        if dry_run:
+            return [(name, b"") for name in MUSE_PLUGIN_FILES]
+        raise InstallError(
+            "the Muse plugin needs the hook, and this copy of the installer has neither the plugin bundle beside it "
+            "nor a hook in THREEFOLD_HOME; take the installer from a checkout, or connect again once one is installed"
+        )
+    plugin = MUSE_PLUGIN_JSON.encode("utf-8")
+    manifest = dump_json({
+        "written_by": "threefold_install.py",
+        "files": [
+            {"path": ".muse-plugin/plugin.json", "sha256": _digest(plugin)},
+            {"path": "hooks/threefold_hook.py", "sha256": _digest(hook)},
+        ],
+    }).encode("utf-8")
+    return [(".muse-plugin/plugin.json", plugin), ("hooks/threefold_hook.py", hook), ("manifest.json", manifest)]
+
+
+def _verified_bundle_files(bundle: Path) -> List[Tuple[str, bytes]]:
+    """The bundle's files, each checked against the sha256 its manifest gives, or an InstallError."""
+    try:
+        manifest = json.loads((bundle / "manifest.json").read_bytes().decode("utf-8"))
+    except (OSError, ValueError, UnicodeDecodeError):
+        raise InstallError(
+            f"the plugin bundle in {forward(bundle)} cannot be checked against its manifest, so nothing was written"
+        ) from None
+    entries = manifest.get("files") if isinstance(manifest, dict) else None
+    pins = {
+        entry.get("path"): _sha(entry.get("sha256"))
+        for entry in (entries if isinstance(entries, list) else [])
+        if isinstance(entry, dict)
+    }
+    files: List[Tuple[str, bytes]] = []
+    for path in (".muse-plugin/plugin.json", "hooks/threefold_hook.py"):
+        try:
+            data = bundle.joinpath(*path.split("/")).read_bytes()
+        except OSError:
+            raise InstallError(f"the plugin bundle has no {path}, so nothing was written") from None
+        if _digest(data) != pins.get(path):
+            raise InstallError(f"{path} in the plugin bundle does not match its manifest, so nothing was written")
+        files.append((path, data))
+    files.append(("manifest.json", (bundle / "manifest.json").read_bytes()))
+    return files
+
+
+def _muse_ours(directory: Path) -> bool:
+    """Whether a plugin directory without an install record is marked as Threefold's own."""
+    try:
+        manifest = json.loads((directory / "manifest.json").read_bytes().decode("utf-8"))
+    except (OSError, ValueError, UnicodeDecodeError):
+        return False
+    return isinstance(manifest, dict) and manifest.get("written_by") == "threefold_install.py"
+
+
+def muse_wiring(root: Path) -> str:
+    """What status prints for a Muse install: the files, the registration, or what cannot be told."""
+    if not (root / MUSE_PLUGIN_DIR / "manifest.json").is_file():
+        return f"its {MUSE_PLUGIN_DIR}/ is gone"
+    if not muse_binary():
+        return "plugin files present, muse is not on PATH so registration is unknown"
+    if not root.is_dir():
+        return "plugin files present, the folder is gone so registration is unknown"
+    ok, listing = run_muse(root, "plugins", "list")
+    if not ok:
+        return "plugin files present, `muse plugins list` did not answer so registration is unknown"
+    if MUSE_REGISTERED.search(listing):
+        return "plugin files present, registered"
+    return "plugin files present, but `muse plugins list` does not show threefold"
+
+
+def plan_muse(
+    plan: Plan, root: Path, home: Path, manifest: Dict[str, Any], written: List[str], registered: List[str],
+    tracked: Callable[[str], bool], hook_bytes: Optional[bytes], dry_run: bool, out: Any, prefix: str,
+) -> None:
+    """The Muse plugin bundle in MUSE_PLUGIN_DIR, and its registration for the project.
+
+    The files go through the same bookkeeping as any other: a tracked file is
+    never written, a current file is left alone, and what is written is listed
+    in .git/info/exclude with the rest. Registration runs the muse command at
+    execution time, never at plan time: a dry run prints the commands and runs
+    nothing, and a plan that stops before it runs nothing either. A command
+    that does not run cleanly leaves a note and the files, not a failure: the
+    registration is one the owner can finish by hand from the note.
+    """
+    files = muse_plugin_files(home, hook_bytes, dry_run)
+    relatives = [f"{MUSE_PLUGIN_DIR}/{name}" for name, _ in files]
+    held = next((relative for relative in relatives if tracked(relative)), None)
+    if held is not None:
+        plan.add(
+            f"{held} is tracked by git, so the Muse plugin was not installed from it: a committed file decides the "
+            f"plugin here. To register those files, run `muse plugins install {MUSE_PLUGIN_DIR} --scope project` "
+            f"and `muse plugins approve {MUSE_PLUGIN_ID}` at the repository root"
+        )
+        return
+    for name, data in files:
+        relative = f"{MUSE_PLUGIN_DIR}/{name}"
+        path = root.joinpath(MUSE_PLUGIN_DIR, *name.split("/"))
+        if path.is_file() and path.read_bytes() == data:
+            if relative in manifest["installed"] or manifest.get("muse"):
+                written.append(relative)
+            plan.add(f"{relative} is current")
+            continue
+        written.append(relative)
+        if not path.exists():
+            for directory in _created_dirs(root, relative):
+                if directory not in manifest["created_dirs"]:
+                    manifest["created_dirs"].append(directory)
+            if relative not in manifest["created_files"]:
+                manifest["created_files"].append(relative)
+        plan.add(f"write the Muse plugin file {relative}", _planned_write(manifest, relative, path, data))
+    manifest["muse"] = {"dir": MUSE_PLUGIN_DIR}
+    registered.append("muse")
+
+    def register() -> None:
+        if not muse_binary():
+            print(
+                f"{prefix}note: muse is not on PATH, so the plugin files were written but not registered; from the "
+                f"repository root run `muse plugins install {MUSE_PLUGIN_DIR} --scope project`, then "
+                f"`muse plugins approve {MUSE_PLUGIN_ID}`",
+                file=out,
+            )
+            return
+        ok, install_out = run_muse(root, "plugins", "install", str(root / MUSE_PLUGIN_DIR), "--scope", "project")
+        if not ok:
+            print(
+                f"{prefix}note: `muse plugins install` did not run cleanly ({_muse_why(install_out)}); the plugin "
+                f"files are written, and the registration is left for `muse plugins install {MUSE_PLUGIN_DIR} "
+                "--scope project` by hand",
+                file=out,
+            )
+            return
+        ok, approve_out = run_muse(root, "plugins", "approve", MUSE_PLUGIN_ID)
+        if not ok:
+            print(
+                f"{prefix}note: `muse plugins approve {MUSE_PLUGIN_ID}` did not run cleanly "
+                f"({_muse_why(approve_out)}); the plugin files are written, and the approval is left for that "
+                "command by hand",
+                file=out,
+            )
+            return
+        ok, listing = run_muse(root, "plugins", "list")
+        if not ok or not MUSE_REGISTERED.search(listing):
+            print(
+                f"{prefix}note: `muse plugins list` does not show {MUSE_PLUGIN_ID}; the plugin files are written, "
+                "and the registration is left for the two commands above by hand",
+                file=out,
+            )
+
+    plan.add(
+        f"register the Muse plugin for this project: `muse plugins install {forward(root / MUSE_PLUGIN_DIR)} "
+        f"--scope project`, then `muse plugins approve {MUSE_PLUGIN_ID}`, and check `muse plugins list` shows it",
+        register,
+    )
+
+
+def muse_uninstall(plan: Plan, root: Path, manifest: Dict[str, Any], exact: bool, out: Any, prefix: str) -> None:
+    """Takes the Muse plugin out: unregisters it, then removes what the install wrote.
+
+    Without the install record only a directory marked as Threefold's own
+    goes: manifest.json says who wrote it. A file changed by hand since the
+    install keeps the change.
+    """
+    directory = root / MUSE_PLUGIN_DIR
+    known = [f"{MUSE_PLUGIN_DIR}/{name}" for name in MUSE_PLUGIN_FILES]
+    if exact:
+        if not manifest.get("muse") and not any(
+            key in manifest["installed"] or key in manifest["originals"] or key in manifest["created_files"]
+            for key in known
+        ):
+            return
+    elif not _muse_ours(directory):
+        return
+
+    def unregister() -> None:
+        if not muse_binary():
+            print(
+                f"{prefix}note: muse is not on PATH, so a Muse plugin registration for this project, if any, was "
+                f"left in place; remove it with `muse plugins remove {MUSE_PLUGIN_ID}`",
+                file=out,
+            )
+            return
+        ok, listing = run_muse(root, "plugins", "list")
+        if ok and not MUSE_REGISTERED.search(listing):
+            return
+        ok, failed = run_muse(root, "plugins", "remove", MUSE_PLUGIN_ID)
+        if not ok:
+            print(
+                f"{prefix}note: `muse plugins remove {MUSE_PLUGIN_ID}` did not run cleanly ({_muse_why(failed)}); "
+                "remove the registration by hand if it is still there",
+                file=out,
+            )
+
+    plan.add(f"unregister the Muse plugin for this project (`muse plugins remove {MUSE_PLUGIN_ID}`)", unregister)
+    created = set(manifest["created_files"])
+    for relative in known:
+        path = root.joinpath(*relative.split("/"))
+        if not path.exists() or path.is_dir():
+            continue
+        original = _restorable(manifest, relative, path)
+        if original is not None:
+            plan.add(f"put {relative} back exactly as it was before the install", _write_bytes(path, original))
+        elif relative in created and _unchanged_since_install(manifest, relative, path):
+            plan.add(f"delete {relative}, which the install created", path.unlink)
+        elif not exact:
+            plan.add(f"delete {relative}, marked as Threefold's Muse plugin file", path.unlink)
+        else:
+            plan.add(f"note: {relative} has changed since the install, so it was left as it is")
+    if not exact:
+        for subdirectory in (f"{MUSE_PLUGIN_DIR}/hooks", f"{MUSE_PLUGIN_DIR}/.muse-plugin", MUSE_PLUGIN_DIR):
+            path = root.joinpath(*subdirectory.split("/"))
+
+            def remove_if_empty(path: Path = path) -> None:
+                if path.is_dir() and not any(path.iterdir()):
+                    path.rmdir()
+
+            plan.add(f"remove {subdirectory}/ if the uninstall left it empty", remove_if_empty)
 
 
 # --- the list of installs on this machine --------------------------------------------------------
@@ -932,7 +1271,7 @@ def plan_install(
         # by, and nothing to ask: git is not run against a workspace at all.
         return False if workspace else is_tracked(root, relative)
 
-    shared_copies(plan, home)
+    staged_hook = shared_copies(plan, home)
 
     # The repository's configuration. Never the key: only where to read it.
     config: Dict[str, Any] = {"project": args.project, "mode": args.mode}
@@ -997,6 +1336,8 @@ def plan_install(
     # One entry per agent, merged into whatever the file already holds.
     registered: List[str] = []
     for agent in agents:
+        if agent == "muse":
+            continue  # planned below: a plugin bundle, not a settings entry
         relative, matcher = AGENT_SETTINGS[agent]
         path = root / relative
         if tracked(relative):
@@ -1046,6 +1387,9 @@ def plan_install(
             _planned_write(manifest, relative, path, dump_json(document).encode("utf-8")),
         )
 
+    if "muse" in agents:
+        plan_muse(plan, root, home, manifest, written, registered, tracked, staged_hook, args.dry_run, out, prefix)
+
     if not workspace:
         # A workspace has no .git git would read: a hook written there would
         # never run, and a folder git does not accept is not ours to write in.
@@ -1056,7 +1400,12 @@ def plan_install(
     # Every agent whose hook runs here now, from this install or an earlier
     # one: a second install for fewer agents takes none of the others out.
     recorded_files = {item.get("file") for item in manifest["entries"] if isinstance(item, dict)}
-    running = [agent for agent in AGENTS if agent in registered or AGENT_SETTINGS[agent][0] in recorded_files]
+    running = [
+        agent for agent in AGENTS
+        if agent in registered
+        or (agent == "muse" and manifest.get("muse"))
+        or (agent in AGENT_SETTINGS and AGENT_SETTINGS[agent][0] in recorded_files)
+    ]
     index_step(plan, home, {
         "path": forward(root), "project": args.project, "mode": args.mode, "agents": running, "workspace": workspace,
     })
@@ -1269,6 +1618,8 @@ def uninstall(
             # that change: only the entry the install added comes out.
             plan.add(f"remove the hook entry from {relative}, which has changed since the install", _write_text(path, dump_json(remaining)))
 
+    muse_uninstall(plan, root, manifest, exact, out, prefix)
+
     config_path = root / CONFIG_FILE
     original = _restorable(manifest, CONFIG_FILE, config_path)
     if original is not None:
@@ -1349,7 +1700,9 @@ def git_side_uninstall(
         if exact:
             ours = set(manifest["exclude_lines"])
         elif EXCLUDE_MARKER.encode("utf-8") in lines:
-            ours = {EXCLUDE_MARKER, f"/{CONFIG_FILE}"} | {f"/{relative}" for relative, _ in AGENT_SETTINGS.values()}
+            ours = {EXCLUDE_MARKER, f"/{CONFIG_FILE}"} | {f"/{relative}" for relative, _ in AGENT_SETTINGS.values()} | {
+                f"/{MUSE_PLUGIN_DIR}/{name}" for name in MUSE_PLUGIN_FILES
+            }
         else:
             ours = set()
         removing = {text.encode("utf-8") for text in ours}
@@ -1694,8 +2047,8 @@ def connect(args: argparse.Namespace, out: Any) -> int:
             agent_line = ", ".join(f"{agent} ({why})" for agent, why in detected)
         else:
             agent_line = (
-                "all three, because none was found (looked for ~/.claude or claude, ~/.codex or codex, "
-                "~/.gemini/antigravity, ~/.antigravity or antigravity)"
+                "all four, because none was found (looked for ~/.claude or claude, ~/.codex or codex, "
+                "~/.gemini/antigravity, ~/.antigravity or antigravity, ~/.local/share/muse or muse)"
             )
     else:
         agents = parse_agents(args.agents)
@@ -1928,6 +2281,8 @@ def status(args: argparse.Namespace, out: Any, err: Any = None) -> int:
         print(f"  {forward(path)}{'' if present else '  (its .threefold.json is gone)'}", file=out)
         print(f"    project {project or 'none'}   mode {mode}   stage {stage}", file=out)
         print(f"    agents  {', '.join(agents) or 'none'}{'   (workspace)' if entry.get('workspace') else ''}", file=out)
+        if "muse" in agents:
+            print(f"    muse    {muse_wiring(path)}", file=out)
         if settings is not None:
             print(f"    stack   {settings.endpoint}", file=out)
     return 0
@@ -2036,7 +2391,7 @@ def legacy_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="threefold_install.py", description=__doc__.split("\n\n", 1)[0])
     parser.add_argument("--repo", required=True, help="the repository to govern")
     parser.add_argument("--project", help="its alias, Acme-<name>; required to install")
-    parser.add_argument("--agents", default=",".join(AGENTS), help="comma-separated, default all three")
+    parser.add_argument("--agents", default=",".join(AGENTS), help="comma-separated, default all four")
     parser.add_argument("--mode", choices=("observe", "managed", "enforce"), default="observe")
     parser.add_argument("--endpoint", help="the service, default the public stack")
     parser.add_argument("--api-key-file", help="a file holding the key; its path is written, never its content")

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Threefold — Stop bad agent writes before they reach your code</title>
-  <meta name="description" content="Threefold governs Claude Code, Codex and Antigravity: a hook asks before every write or command, deterministic gates on AWS decide, and every project observes before it enforces." />
+  <meta name="description" content="Threefold governs Claude Code, Codex, Antigravity and Muse: a hook asks before every write or command, deterministic gates on AWS decide, and every project observes before it enforces." />
   <script>
       // The server rewrites __THREEFOLD_BASE_PATH__ to the API Gateway stage prefix
       // when it serves this page, so the base is exact rather than guessed from the
@@ -423,7 +423,7 @@
       }
     }
 
-    /* The three agents and what has been measured of each. */
+    /* The four agents and what has been measured of each. */
     .tf-agents { list-style: none; margin: var(--tf-space-3) 0 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--tf-space-2); }
     @media (min-width: 900px) { .tf-agents { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
     .tf-agent { display: flex; flex-direction: column; gap: 10px; padding: 18px; min-width: 0; }
@@ -631,7 +631,7 @@
       <div class="tf-hero-copy">
         <p class="tf-eyebrow"><span data-tf-icon="shield"></span>Threefold · governance for coding agents</p>
         <h1 id="hero-promise" class="tf-hero-title">Stop bad agent writes <em>before they reach your code.</em></h1>
-        <p id="hero-sentence" class="tf-hero-lede">Deterministic gates on AWS judge each write and command from Claude Code, Codex or Antigravity. Each repository only watches until you promote its rules.</p>
+        <p id="hero-sentence" class="tf-hero-lede">Deterministic gates on AWS judge each write and command from Claude Code, Codex, Antigravity or Muse. Each repository only watches until you promote its rules.</p>
         <div id="hero-actions" class="tf-hero-actions">
           <a id="hero-try" href="dashboard.html#/try" class="tf-btn tf-btn-primary tf-btn-lg"><span data-tf-icon="play"></span>Try the two-stage rollout — 2 min</a>
           <a id="hero-dashboard" href="dashboard.html#/overview" class="tf-btn tf-btn-lg"><span data-tf-icon="grid"></span>Open the live dashboard</a>
@@ -669,7 +669,7 @@
         </figcaption>
       </figure>
 
-      <p class="tf-hero-scope"><span data-tf-icon="info"></span><span id="hero-scope">A refusal is measured to stop the write in Claude Code and Antigravity, and in Codex once, over its patch tool only.</span></p>
+      <p class="tf-hero-scope"><span data-tf-icon="info"></span><span id="hero-scope">A refusal is measured to stop the write in Claude Code and Antigravity, in Codex once, over its patch tool only, and in Muse over its file-write tool only.</span></p>
     </section>
 
     <!-- THE PROOF STRIP. Every figure is read as the page loads: the counts from
@@ -706,7 +706,7 @@
     </section>
 
     <!-- HOW IT WORKS. The three steps, the flow they make, the two-stage rollout,
-         and the three agents with what has been measured of each, in the words of
+         and the four agents with what has been measured of each, in the words of
          the evidence that measured it. -->
     <section id="how-it-works" aria-labelledby="how-title">
       <div class="tf-sec-head">
@@ -826,7 +826,7 @@
         <p class="tf-demote"><span class="tf-demote-line" aria-hidden="true"></span><span data-tf-icon="refresh"></span><span><strong>Demote</strong> is one click back to Observe, whenever a rule misbehaves.</span></p>
       </div>
 
-      <ul class="tf-agents" id="agents" aria-label="The three agents and what has been measured of each">
+      <ul class="tf-agents" id="agents" aria-label="The four agents and what has been measured of each">
         <li class="tf-card tf-agent">
           <div class="tf-agent-head"><span class="tf-agent-name">Claude Code</span><span class="tf-chip tf-chip-emerald"><span data-tf-icon="check" data-tf-size="13"></span>Measured: the write is stopped</span></div>
           <blockquote>A deny from the hook “stops the write in Claude Code 2.1.220 on this platform, over both the file tool and the shell.”</blockquote>
@@ -841,6 +841,11 @@
           <div class="tf-agent-head"><span class="tf-agent-name">Codex</span><span class="tf-chip tf-chip-amber"><span data-tf-icon="alert" data-tf-size="13"></span>Measured once, over its patch tool</span></div>
           <blockquote>In one run “the real hook refused it”, and the governed file “had the same sha256 afterwards as before.” Codex CLI 0.155.0; its shell route is not measured.</blockquote>
           <p class="tf-agent-src"><span>Measured on disk, <span class="tf-nobr">2026-09-23</span></span><a class="tf-link" href="https://github.com/upgradedev/aws-threefold/blob/main/docs/evidence/ENFORCEMENT_2026-09-23.md">Read the evidence</a></p>
+        </li>
+        <li class="tf-card tf-agent">
+          <div class="tf-agent-head"><span class="tf-agent-name">Muse</span><span class="tf-chip tf-chip-amber"><span data-tf-icon="alert" data-tf-size="13"></span>Measured over its file-write tool</span></div>
+          <blockquote>A deny from the hook “stops the write in Muse Code 1.4.0 over <code>write_file</code>”: the refused file was not created, and its edit and shell routes are not measured.</blockquote>
+          <p class="tf-agent-src"><span>Measured on disk, <span class="tf-nobr">2026-09-28</span></span><a class="tf-link" href="https://github.com/upgradedev/aws-threefold/blob/main/docs/evidence/ENFORCEMENT_2026-09-28-MUSE.md">Read the evidence</a></p>
         </li>
       </ul>
       <p class="tf-agents-note">Measured on one Windows machine by what was on disk afterwards, not by what the agent said: two open bug reports say a deny can be ignored.</p>

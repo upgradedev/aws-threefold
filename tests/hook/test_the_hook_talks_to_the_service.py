@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-AGENTS = ("claude-code", "codex", "antigravity")
+AGENTS = ("claude-code", "codex", "antigravity", "muse")
 HOOK_PATH = Path(__file__).resolve().parents[2] / "src" / "threefold" / "hooks" / "threefold_hook.py"
 
 
@@ -221,6 +221,7 @@ def _unreadable_shell(project, tool, keys):
     [
         ("codex", "shell", {"argv": ["bash", "-lc", "rm -rf src"]}),
         ("claude-code", "Bash", {"cmd": "rm -rf src"}),
+        ("muse", "powershell", {"description": "remove it all"}),
     ],
 )
 def test_fail_closed_refuses_a_call_whose_shape_the_hook_cannot_read(

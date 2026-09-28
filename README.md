@@ -10,8 +10,8 @@ Built for the AWS Zero to Shipped hackathon. **Category:** `#workplace-efficienc
 [![Still up](https://github.com/upgradedev/aws-threefold/actions/workflows/keepalive.yml/badge.svg)](https://github.com/upgradedev/aws-threefold/actions/workflows/keepalive.yml)
 
 Threefold sits in front of the tool calls a coding agent makes (Claude Code,
-Codex and Antigravity, through one hook file) and answers each write or command
-before it runs. Deterministic gates decide: a domain file importing
+Codex, Antigravity and Muse, through one hook file) and answers each write or
+command before it runs. Deterministic gates decide: a domain file importing
 infrastructure under the architect's layering rules, a credential in the
 arguments, a write that switches the hooks off, the same call repeating, a
 spend ceiling. A team connects a repository with one command, and by default a
@@ -208,10 +208,13 @@ refused file was not created. Codex CLI 0.155.0 was measured on 2026-09-23, in
 one run: the hook refused an `apply_patch` that added `boto3` to a governed
 file, and the file's sha256 was unchanged afterwards. For Codex that is one
 route, one run; the shell route and a refusal from a hook that makes no network
-call are not measured. Method and results:
-[`docs/evidence/ENFORCEMENT_2026-09-21.md`](docs/evidence/ENFORCEMENT_2026-09-21.md)
+call are not measured. Muse 1.4.0 was measured on 2026-09-28: the hook refused
+a `write_file` and the refused file was not created; its edit and shell routes
+are not measured. Method and results:
+[`docs/evidence/ENFORCEMENT_2026-09-21.md`](docs/evidence/ENFORCEMENT_2026-09-21.md),
+[`docs/evidence/ENFORCEMENT_2026-09-23.md`](docs/evidence/ENFORCEMENT_2026-09-23.md)
 and
-[`docs/evidence/ENFORCEMENT_2026-09-23.md`](docs/evidence/ENFORCEMENT_2026-09-23.md).
+[`docs/evidence/ENFORCEMENT_2026-09-28-MUSE.md`](docs/evidence/ENFORCEMENT_2026-09-28-MUSE.md).
 
 **Does Threefold change what an agent does?** Measured with Claude Code on
 2026-09-22 and with Codex on 2026-09-23. Each ran headless on six synthetic
@@ -271,7 +274,7 @@ are single runs, reported apart from the matrix and never pooled with it.
 
 ### By hand, one agent at a time
 
-The hook is one standard-library file for three agents, served by the stack:
+The hook is one standard-library file for four agents, served by the stack:
 
 ```bash
 curl -O https://d1og72wpk4aqig.cloudfront.net/hooks/threefold_hook.py
@@ -285,8 +288,9 @@ tells the one file which agent is calling it.
 | Claude Code | `.claude/settings.local.json` | `Write\|Edit\|MultiEdit\|NotebookEdit\|Bash` | `python /absolute/path/to/threefold_hook.py --agent claude-code` |
 | Codex | `.codex/hooks.json` | `apply_patch\|Edit\|Write\|Bash` | `python /absolute/path/to/threefold_hook.py --agent codex` |
 | Antigravity | `.agents/hooks.json` | `write_to_file\|replace_file_content\|multi_replace_file_content\|run_command` | `python /absolute/path/to/threefold_hook.py --agent antigravity` |
+| Muse | plugin bundle in `.threefold-muse/` | PreToolUse | `muse plugins install .threefold-muse --scope project`, then `muse plugins approve threefold` |
 
-Each file takes the same shape:
+Each settings file takes the same shape (Muse takes the plugin commands instead):
 
 ```json
 {
@@ -503,6 +507,7 @@ Then open <http://localhost:8001/> or <http://localhost:8001/dashboard.html>.
 | [`docs/evidence/PROBES_2026-09-27-2-edge.md`](docs/evidence/PROBES_2026-09-27-2-edge.md), [`docs/evidence/PROBES_2026-09-27-2.md`](docs/evidence/PROBES_2026-09-27-2.md) | `scripts/probe_live.py` against the site and against the origin URL on 2026-09-27: 117 PASS, 0 FAIL, 3 SKIP each, with every check's evidence line. The earlier runs sit beside them, the first on 2026-09-22 against the origin: 113 PASS, 0 FAIL, 3 SKIP |
 | [`docs/evidence/ENFORCEMENT_2026-09-21.md`](docs/evidence/ENFORCEMENT_2026-09-21.md) | Whether a deny stops the write, per agent, checked on the file system |
 | [`docs/evidence/ENFORCEMENT_2026-09-23.md`](docs/evidence/ENFORCEMENT_2026-09-23.md) | The same question for Codex CLI 0.155.0, over its patch tool, in one run |
+| [`docs/evidence/ENFORCEMENT_2026-09-28-MUSE.md`](docs/evidence/ENFORCEMENT_2026-09-28-MUSE.md) | The same question for Muse 1.4.0, over `write_file`; the MSP-approval route measured dead |
 | [`docs/evidence/DEPLOYMENT_2026-09-20.md`](docs/evidence/DEPLOYMENT_2026-09-20.md) | Raw output of the first deployment, including the CloudTrail events that show Bedrock called by the function's own role |
 | [`docs/evidence/BENCHMARK_2026-09-22.md`](docs/evidence/BENCHMARK_2026-09-22.md) | The standard-task matrix with `claude-sonnet-5`: 54 runs, a governed violation landed in 17% / 0% / 0% of runs with no guidance, with the rules in `CLAUDE.md` and with Threefold enforcing |
 | [`docs/evidence/BENCHMARK_2026-09-22-HAIKU.md`](docs/evidence/BENCHMARK_2026-09-22-HAIKU.md) | The same 54 runs with `claude-haiku-4-5`: 39% / 17% / 0% |

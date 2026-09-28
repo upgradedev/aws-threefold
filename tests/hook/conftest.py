@@ -29,7 +29,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import pytest
 
 HOOK_PATH = Path(__file__).resolve().parents[2] / "src" / "threefold" / "hooks" / "threefold_hook.py"
-AGENTS = ("claude-code", "codex", "antigravity")
+AGENTS = ("claude-code", "codex", "antigravity", "muse")
 
 
 def load_hook():
@@ -190,7 +190,14 @@ class Payloads:
             added = "\n".join("+" + line for line in content.split("\n"))
             patch = f"*** Begin Patch\n*** Add File: {relative}\n{added}\n*** End Patch\n"
             return self.codex_patch(patch)
-        return self.antigravity("write_to_file", {"TargetFile": path, "CodeContent": content})
+        if agent == "muse":
+            # As measured on the wire: the path is relative to the cwd the
+            # payload carries, never absolute. Shapes and enforcement are in
+            # docs/evidence/ENFORCEMENT_2026-09-28-MUSE.md.
+            return self.muse("write_file", {"path": relative, "content": content})
+        if agent == "antigravity":
+            return self.antigravity("write_to_file", {"TargetFile": path, "CodeContent": content})
+        raise ValueError(f"unknown agent: {agent}")
 
     def command(self, agent: str, command: str) -> Dict[str, Any]:
         if agent == "claude-code":
@@ -209,7 +216,11 @@ class Payloads:
                 "tool_name": "Bash",
                 "tool_input": {"command": command},
             }
-        return self.antigravity("run_command", {"CommandLine": command, "Cwd": str(self.project)})
+        if agent == "muse":
+            return self.muse("powershell", {"command": command, "description": "run it", "workdir": str(self.project)})
+        if agent == "antigravity":
+            return self.antigravity("run_command", {"CommandLine": command, "Cwd": str(self.project)})
+        raise ValueError(f"unknown agent: {agent}")
 
     def codex_patch(self, patch: str) -> Dict[str, Any]:
         return {
@@ -225,6 +236,21 @@ class Payloads:
             "toolCall": {"name": name, "args": args},
             "conversationId": "acme-conversation-1",
             "workspacePaths": [str(self.project)],
+        }
+
+    def muse(self, tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "hook_event_name": "PreToolUse",
+            "tool_name": tool_name,
+            "tool_input": tool_input,
+            "tool_use_id": "call_muse1",
+            "session_id": "muse-session-1",
+            "turn_id": "muse-turn-1",
+            "cwd": str(self.project),
+            "transcript_path": None,
+            "model": "muse-spark-1.3-contributor",
+            "permission_mode": "default",
+            "model_provider": "meta",
         }
 
 

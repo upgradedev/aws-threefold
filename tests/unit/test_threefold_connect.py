@@ -251,6 +251,11 @@ def machine(tmp_path, monkeypatch):
     repo.mkdir()
     assert _git(repo, "init", "-q").returncode == 0
     (repo / "README.md").write_text("# Acme Ledger\n", encoding="utf-8")
+    # No agent command is reachable except through the test: with muse on this
+    # machine's PATH the installer would run the real one.
+    empty = tmp_path / "empty-bin"
+    empty.mkdir()
+    monkeypatch.setenv("PATH", os.pathsep.join([str(empty), os.path.dirname(shutil.which("git"))]))
     return SimpleNamespace(home=home, threefold_home=home / ".threefold", repo=repo, tmp=tmp_path)
 
 
@@ -332,6 +337,8 @@ def _executable(folder: Path, name: str) -> None:
     ([".antigravity"], [], [("antigravity", "~/.antigravity exists")]),
     ([], ["antigravity"], [("antigravity", "antigravity is on PATH")]),
     ([".gemini"], [], []),
+    ([".local/share/muse"], [], [("muse", "~/.local/share/muse exists")]),
+    ([], ["muse"], [("muse", "muse is on PATH")]),
     ([".codex"], ["claude", "antigravity"], [
         ("claude-code", "claude is on PATH"), ("codex", "~/.codex exists"), ("antigravity", "antigravity is on PATH"),
     ]),
@@ -363,21 +370,24 @@ def test_connect_with_every_default_writes_managed_mode_and_the_folder_alias(mac
     assert (machine.repo / ".claude" / "settings.local.json").is_file()
     assert (machine.repo / ".codex" / "hooks.json").is_file()
     assert not (machine.repo / ".agents").exists(), "Antigravity was not found, so it is not registered"
+    assert not (machine.repo / ".threefold-muse").exists(), "Muse was not found, so it is not registered"
     assert "claude-code (~/.claude exists), codex (codex is on PATH)" in result.out
     assert "from the folder name" in result.out
     assert "Codex: trust this project in Codex" in result.out
     assert "Antigravity" not in result.out.split("Next", 1)[1]
 
 
-def test_with_no_agent_found_all_three_are_registered_and_the_output_says_why(machine, stack, monkeypatch) -> None:
+def test_with_no_agent_found_all_four_are_registered_and_the_output_says_why(machine, stack, monkeypatch) -> None:
     empty = machine.tmp / "empty-bin"
-    empty.mkdir()
+    empty.mkdir(exist_ok=True)
     monkeypatch.setenv("PATH", os.pathsep.join([str(empty), os.path.dirname(shutil.which("git"))]))
     result = run(installer, "connect", str(machine.repo), "--endpoint", stack.endpoint, "--no-open")
     assert result.code == 0, result.out
-    assert "all three, because none was found" in result.out
+    assert "all four, because none was found" in result.out
     for relative in (".claude/settings.local.json", ".codex/hooks.json", ".agents/hooks.json"):
         assert (machine.repo / relative).is_file()
+    assert (machine.repo / ".threefold-muse" / "manifest.json").is_file()
+    assert "muse is not on PATH" in result.out
     assert "Antigravity: if it asks whether to trust this workspace's hooks, say yes." in result.out
 
 
@@ -996,6 +1006,21 @@ def test_a_served_copy_connects_from_the_stacks_bundle_with_no_endpoint_given(ma
     assert len(stack.sent("GET", "dist/manifest.json")) == 1 and len(stack.sent("GET", "dist/threefold-bundle.zip")) == 1
     assert "first call  recorded" in result.out
     assert "threefold_install.py status" in result.out and ".threefold/bin/threefold_install.py" in result.out
+
+
+def test_a_served_copy_renders_the_muse_bundle_from_the_download(machine, stack, tmp_path) -> None:
+    """A served copy has no bundle beside it: the hook comes from the download, the manifest from its own text."""
+    served, _ = served_installer(stack, tmp_path)
+    monkeypatch_open(served)
+    files = serve_bundle(stack)
+    result = run(served, "connect", str(machine.repo), "--agents", "muse", "--no-open")
+    assert result.code == 0, result.out
+    plugin = machine.repo / ".threefold-muse"
+    assert (plugin / "hooks" / "threefold_hook.py").read_bytes() == files["bin/threefold_hook.py"]
+    assert (plugin / ".muse-plugin" / "plugin.json").read_bytes() == served.MUSE_PLUGIN_JSON.encode("utf-8")
+    manifest = json.loads((plugin / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["written_by"] == "threefold_install.py"
+    assert "muse is not on PATH" in result.out
 
 
 def test_the_kept_copy_of_a_served_installer_runs_status_later(machine, stack, tmp_path) -> None:

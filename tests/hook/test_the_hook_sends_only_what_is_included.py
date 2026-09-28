@@ -41,7 +41,7 @@ import pytest
 
 from threefold.domain import path_match
 
-AGENTS = ("claude-code", "codex", "antigravity")
+AGENTS = ("claude-code", "codex", "antigravity", "muse")
 INCLUDE = ["repos/acme-alpha/**", "repos/acme-beta/**"]
 LOG_LINE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z not-included$")
 CREDENTIAL = "AKIA" + "ACMEEXAMPLE00000"
@@ -73,6 +73,10 @@ def command_in(payloads, agent: str, command: str, directory: Path) -> Dict[str,
     if agent == "codex":
         payload = payloads.command(agent, command)
         payload["tool_input"]["workdir"] = os.path.relpath(directory, payloads.project)
+        return payload
+    if agent == "muse":
+        payload = payloads.command(agent, command)
+        payload["tool_input"]["workdir"] = str(directory)
         return payload
     return payloads.antigravity("run_command", {"CommandLine": command, "Cwd": str(directory)})
 
@@ -357,7 +361,7 @@ def test_antigravity_opened_on_an_included_checkout_is_governed_from_the_workspa
     assert sent(stub)["arguments"]["file_path"] == "repos/acme-beta/src/x.py"
 
 
-@pytest.mark.parametrize("agent", ["claude-code", "antigravity"])
+@pytest.mark.parametrize("agent", ["claude-code", "antigravity", "muse"])
 def test_a_left_out_checkout_is_held_back_even_with_a_project_in_the_environment(agent, checkouts, payloads, stub, run_hook, held_back_lines, monkeypatch) -> None:
     """The case the list exists for. Stopping at the checkout's own .git, the
     hook found no list there, took the project from the environment, and sent
@@ -366,6 +370,9 @@ def test_a_left_out_checkout_is_held_back_even_with_a_project_in_the_environment
     gamma = checkouts / "repos" / "acme-gamma"
     if agent == "claude-code":
         payload = command_in(payloads, agent, "npm test", gamma)
+    elif agent == "muse":
+        payload = payloads.write("muse", "src/y.py", "y = 2\n")
+        payload["cwd"] = str(gamma)
     else:
         payload = payloads.antigravity("write_to_file", {"TargetFile": str(gamma / "src" / "y.py"), "CodeContent": "y = 2\n"})
         payload["workspacePaths"] = [str(gamma)]
