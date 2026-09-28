@@ -765,6 +765,8 @@
     // ------------------------------------------------------------ router
 
     let current = { token: 0, route: null, params: {}, args: [], leave: [], actions: {} };
+    // Whether a screen has been drawn yet: the first is the page loading.
+    let routed = false;
 
     function compile(path) {
       return new RegExp('^' + path.replace(/:[a-z]+/g, '([^/]+)') + '$');
@@ -812,6 +814,8 @@
     function route() {
       current.leave.forEach(fn => { try { fn(); } catch (err) { /* cleanup is best effort */ } });
       closeDialog();
+      const first = !routed;
+      routed = true;
       const token = current.token + 1;
       const { path, params } = parseHash(location.hash);
       const found = resolve(path);
@@ -835,8 +839,12 @@
       } catch (err) {
         ctx.render(T.errorHtml({ kind: 'http', message: String(err && err.message || err) }, 'this screen', null));
       }
+      // A route change moves the focus to the new screen's title, so Tab and a
+      // screen reader carry on from the top of what just opened. The page's
+      // first screen leaves it at the start of the document, as a page a
+      // browser loads does, so the first Tab reaches "Skip to content".
       const title = document.getElementById('view-title');
-      if (title && typeof title.focus === 'function') {
+      if (!first && title && typeof title.focus === 'function') {
         try { title.focus({ preventScroll: true }); } catch (err) { /* focus is a courtesy */ }
       }
       if (typeof window.scrollTo === 'function') { try { window.scrollTo(0, 0); } catch (err) { /* no scroll */ } }
@@ -6378,7 +6386,7 @@
         <p class="tf-ops-scroll-hint" data-tf-scroll-hint hidden>${T.icon('arrowright', 14)}The table scrolls sideways: Threefold enforcing and its tests passed are to the right.</p>
         <div class="tf-scroll-x" data-tf-scroll="The benchmark, every series"><table class="tf-table" data-proof="series">
           <thead><tr>
-            <th scope="col">Series</th><th scope="col">No guidance</th><th scope="col">Rules in CLAUDE.md or AGENTS.md</th>
+            <th scope="col">Series</th><th scope="col">No guidance</th><th scope="col">Rules in ${rulesFiles(list)}</th>
             <th scope="col">Threefold enforcing</th><th scope="col">Tests passed, Threefold</th>
           </tr></thead>
           <tbody>${list.map(b => html`<tr data-series="${b.family || 'standard'}">
@@ -6403,12 +6411,35 @@
     // out: it proves the harness, not a rate.
     const CONDITION_ORDER = ['none', 'prompt', 'threefold'];
     const CONDITION_COLORS = { threefold: T.CATEGORICAL[0], prompt: T.CATEGORICAL[1], none: T.CATEGORICAL[2] };
-    // The chart names a condition by what it is for every agent: the rules go
-    // to CLAUDE.md for Claude Code and to AGENTS.md for Codex, so one name
-    // taken from one series would be wrong for the other. Each series' own
-    // card below keeps the snapshot's words.
+    // The rules condition writes the rules to the file the series' agent
+    // reads: CLAUDE.md for Claude Code, AGENTS.md for Codex (the benchmark's
+    // harness.py, RULES_FILE_NAME). A snapshot written before report.py named
+    // the file per agent says CLAUDE.md for Codex too, so wherever a
+    // condition's label names a rules file, the page names the one the
+    // series' agent read. For an agent it does not know, the snapshot's
+    // words stand.
+    const RULES_FILES = { 'claude code': 'CLAUDE.md', 'claude-code': 'CLAUDE.md', codex: 'AGENTS.md' };
+    function rulesFileOf(b) { return b && typeof b.agent === 'string' ? RULES_FILES[b.agent.trim().toLowerCase()] || '' : ''; }
+    function conditionLabel(b, c) {
+      const said = String((c && (c.label || c.condition)) || '');
+      const file = rulesFileOf(b);
+      return file ? said.replace(/\b(?:CLAUDE|AGENTS)\.md\b/g, file) : said;
+    }
+    // The rules files of these series, as one name: "CLAUDE.md or AGENTS.md"
+    // for both agents, one file for one, and the agent's own file when a
+    // series' agent is not one the page knows.
+    function rulesFiles(list) {
+      const files = list.map(rulesFileOf);
+      if (!files.length || files.some(f => !f)) return 'the agent\'s own instructions file';
+      return ['CLAUDE.md', 'AGENTS.md'].filter(f => files.indexOf(f) !== -1).join(' or ');
+    }
+    // The chart names a condition by what it is for every series it draws,
+    // and a lane by what it was for its own series' agent.
     const CONDITION_NAMES = { none: 'No guidance', prompt: 'Rules in CLAUDE.md or AGENTS.md', threefold: 'Threefold enforcing' };
-    function conditionName(c, name) { return CONDITION_NAMES[name] || (c && c.label) || name; }
+    function conditionName(c, name, b) {
+      if (name === 'prompt' && b && rulesFileOf(b)) return 'Rules in ' + rulesFileOf(b);
+      return CONDITION_NAMES[name] || (c && c.label) || name;
+    }
 
     function conditionOf(b, name) {
       return (Array.isArray(b.conditions) ? b.conditions : []).find(c => c && c.condition === name) || null;
@@ -6427,7 +6458,7 @@
         : html`With Threefold enforcing, a governed violation landed in ${num(governed.length - clean)} of ${plural(governed.length, 'measured series', 'measured series')}${baseline.length ? html`; with no guidance, in ${num(landed)} of ${plural(baseline.length, 'series', 'series')}` : ''}.`;
       const legendKeys = CONDITION_ORDER.map(name => {
         const c = shown.map(b => conditionOf(b, name)).find(Boolean);
-        return { label: conditionName(c, name), color: CONDITION_COLORS[name] };
+        return { label: name === 'prompt' ? 'Rules in ' + rulesFiles(shown) : conditionName(c, name), color: CONDITION_COLORS[name] };
       });
       const partsOf = b => String(b.label || (Array.isArray(b.models) ? b.models.join(', ') : 'Series')).split(' · ');
       // The series by family, in the snapshot's order: the family is named
@@ -6440,22 +6471,63 @@
         if (!f) families.push(f = { key, name: parts[0], series: [] });
         f.series.push(b);
       });
-      // What enforcing cost, from the same snapshot: the tests passed with
-      // Threefold enforcing, family by family.
+      // The tests passed under one condition, from the same snapshot, family
+      // by family: summed over the family's series measured under it (or over
+      // those of them in `only`), with the spread of those series' rates.
       const lower = t => t.charAt(0).toLowerCase() + t.slice(1);
-      const costs = families.map(f => {
-        const done = f.series.map(b => conditionOf(b, 'threefold')).filter(c => c && measured(c.completion)).map(c => c.completion);
+      const passedUnder = (name, only) => families.map(f => {
+        const done = f.series.filter(b => !only || only.indexOf(b) !== -1)
+          .map(b => conditionOf(b, name)).filter(c => c && measured(c.completion)).map(c => c.completion);
         if (!done.length) return null;
         const k = done.reduce((n, st) => n + st.k, 0);
         const n = done.reduce((m, st) => m + st.n, 0);
         const rates = done.map(st => st.rate);
         const low = Math.min.apply(null, rates);
         const high = Math.max.apply(null, rates);
-        return { name: f.name, k, n, all: k === n, spread: low === high ? pct(low) : pct(low).replace('%', '') + '–' + pct(high) };
+        return { family: f, name: f.name, k, n, all: k === n, spread: low === high ? pct(low) : pct(low).replace('%', '') + '–' + pct(high) };
       }).filter(Boolean);
+      // What enforcing cost: the tests passed with Threefold enforcing.
+      const costs = passedUnder('threefold');
       const short = costs.some(c => !c.all);
       const cost = costs.length
         ? html`What it cost: with Threefold enforcing, the tests passed in ${costs.map((c, i) => html`${i ? ', and in ' : ''}${c.all ? html`every run of the ${lower(c.name)} (<strong>${num(c.k)}/${num(c.n)}</strong>)` : html`<strong>${num(c.k)} of ${num(c.n)}</strong> runs of the ${lower(c.name)} (${c.spread} a series)`}`)}${short ? ': where they did not, the agent stopped and reported rather than land the violation' : ''}.`
+        : '';
+      // The same comparison against the rules written down, not only against
+      // no guidance: the series where neither let a violation land, the
+      // series where the rules did and what Threefold did in them, and the
+      // tests passed with the rules written down beside those with Threefold
+      // enforcing, over the same series. Only a series measured under both
+      // conditions is counted, and every figure is k of n runs as the
+      // snapshot holds it.
+      const familyOf = b => families.find(f => f.series.indexOf(b) !== -1);
+      const familyWords = f => /^[a-z][a-z-]*$/.test(String(f.key)) ? 'the ' + f.key + ' tasks' : 'the ' + lower(f.name);
+      const seriesWords = b => html`${partsOf(b).slice(1).join(' · ') || partsOf(b)[0]} on ${familyWords(familyOf(b))}`;
+      const runs = st => html`${num(st.k)} of ${num(st.n)}`;
+      const listed = items => items.map((x, i) => html`${i ? (i === items.length - 1 ? ' and ' : ', ') : ''}${x}`);
+      const paired = shown.map(b => ({ b, rules: conditionOf(b, 'prompt'), tf: conditionOf(b, 'threefold') }))
+        .filter(x => x.rules && measured(x.rules.violation) && x.tf && measured(x.tf.violation));
+      const neither = paired.filter(x => x.rules.violation.k === 0 && x.tf.violation.k === 0);
+      const rulesLet = paired.filter(x => x.rules.violation.k > 0);
+      const onlyThreefold = paired.filter(x => x.rules.violation.k === 0 && x.tf.violation.k > 0);
+      const ofPaired = html`the ${plural(paired.length, 'series', 'series')}${paired.length < shown.length ? ' measured under both' : ''}`;
+      const landedIn = (items, of) => listed(items.map(x => html`${runs(x[of].violation)} runs (${seriesWords(x.b)})`));
+      const threefoldThere = rulesLet.filter(x => x.tf.violation.k > 0);
+      const rulesDid = neither.length
+        ? html`in ${neither.length + rulesLet.length === paired.length ? html`the other ${num(rulesLet.length)}` : num(rulesLet.length)} the rules did`
+        : html`the rules let a violation land in ${num(rulesLet.length)} of ${ofPaired}`;
+      const threefoldDid = threefoldThere.length ? landedIn(threefoldThere, 'tf') : rulesLet.length === 1 ? 'none' : 'none of them';
+      const bothPassed = paired.filter(x => measured(x.rules.completion) && measured(x.tf.completion)).map(x => x.b);
+      const threefoldPassed = passedUnder('threefold', bothPassed);
+      const rulesPassed = passedUnder('prompt', bothPassed).map(r => ({ r, t: threefoldPassed.find(c => c.family === r.family) }));
+      const clauses = [
+        neither.length === paired.length ? html`neither they nor Threefold let a violation land in any of ${ofPaired}`
+          : neither.length ? html`neither they nor Threefold let a violation land in ${num(neither.length)} of ${ofPaired}` : '',
+        rulesLet.length ? html`${rulesDid}, in ${landedIn(rulesLet, 'rules')}, and Threefold in ${threefoldDid}` : '',
+        onlyThreefold.length ? html`Threefold let a violation land where the rules did not in ${landedIn(onlyThreefold, 'tf')}` : '',
+        rulesPassed.length ? html`with the rules written down, the tests passed in ${listed(rulesPassed.map(p => html`${runs(p.r)} runs of ${familyWords(p.r.family)}`))}${rulesPassed.every(p => p.t) ? html`, against ${listed(rulesPassed.map(p => runs(p.t)))} with Threefold enforcing` : ''}` : ''
+      ].filter(Boolean);
+      const againstRules = paired.length
+        ? html`Against the rules written in ${rulesFiles(paired.map(x => x.b))}: ${clauses.map((c, i) => html`${i ? '; ' : ''}${c}`)}.`
         : '';
       const ticks = [0, 25, 50, 75, 100];
       const lane = (b, name) => {
@@ -6463,12 +6535,12 @@
         if (!c || !measured(c.violation)) return '';
         const v = c.violation;
         const color = CONDITION_COLORS[name] || T.CATEGORICAL_OTHER;
-        const said = conditionName(c, name) + ': ' + pct(v.rate) + ', ' + num(v.k) + ' of ' + num(v.n) + ' runs';
+        const said = conditionName(c, name, b) + ': ' + pct(v.rate) + ', ' + num(v.k) + ' of ' + num(v.n) + ' runs';
         // The lead lane names itself where its bar is short: at 0% its bar
         // is only the tick, and the name says which lane that is. The lanes
         // are not tab stops; the table after the chart holds every figure.
         const named = name === 'threefold' && v.rate <= 0.5;
-        return html`<div class="tf-ops-vlane" role="img" aria-label="${partsOf(b).join(', ')}. ${said}" data-tf-tip="${partsOf(b).slice(1).join(' · ') || partsOf(b)[0]} · ${conditionName(c, name)}" data-tf-tip-value="${pct(v.rate)} · ${num(v.k)}/${num(v.n)} runs" data-tf-tip-color="${color}" style="--v:${Math.max(0, Math.min(1, v.rate))};--c:${color}">
+        return html`<div class="tf-ops-vlane" role="img" aria-label="${partsOf(b).join(', ')}. ${said}" data-tf-tip="${partsOf(b).slice(1).join(' · ') || partsOf(b)[0]} · ${conditionName(c, name, b)}" data-tf-tip-value="${pct(v.rate)} · ${num(v.k)}/${num(v.n)} runs" data-tf-tip-color="${color}" style="--v:${Math.max(0, Math.min(1, v.rate))};--c:${color}">
           <span class="tf-ops-vtrack"><span class="tf-ops-vfill"></span></span>
           <span class="tf-ops-vval" aria-hidden="true">${named ? html`<b>Threefold</b> ` : ''}${pct(v.rate)} <small>${num(v.k)}/${num(v.n)}</small></span>
         </div>`;
@@ -6498,7 +6570,7 @@
             })}`)}
         </figure>`;
       return card('Did a violation land?', 'The share of runs in which the benchmark\'s own checkers found a governed violation in what the agent left behind, every series on one scale from 0 to 100%. A lane at its baseline tick is none.', html`
-        <div class="tf-ops-verdict mb-4">${T.icon('shield', 20)}<div class="min-w-0"><p>${verdict}</p>${cost ? html`<p data-proof="cost">${cost}</p>` : ''}</div></div>
+        <div class="tf-ops-verdict mb-4">${T.icon('shield', 20)}<div class="min-w-0"><p>${verdict}</p>${cost ? html`<p data-proof="cost">${cost}</p>` : ''}${againstRules ? html`<p data-proof="against-rules">${againstRules}</p>` : ''}</div></div>
         <div class="mb-3">${T.legend(legendKeys)}</div>
         ${figure}
         <p class="text-xs text-gray-500 mt-3">Each lane is k of n runs of one series under one condition, and its tick at 0% wears its colour; the table below gives every figure with its 95% interval, and each series' own card follows it.</p>`, 'min-w-0');
@@ -6553,7 +6625,7 @@
       const title = typeof label === 'string' && label ? label : 'The benchmark';
       if (!b || typeof b !== 'object') {
         return card(title, null, notMeasured('This snapshot carries no benchmark result.',
-          'The benchmark gives a coding agent the same Acme tasks with no guidance, with the rules in CLAUDE.md, and with Threefold enforcing.'));
+          'The benchmark gives a coding agent the same Acme tasks with no guidance, with the rules written in the file the agent reads (CLAUDE.md for Claude Code, AGENTS.md for Codex), and with Threefold enforcing.'));
       }
       const conditions = Array.isArray(b.conditions) ? b.conditions : [];
       const list = v => (Array.isArray(v) && v.length ? v.join(', ') : 'not recorded');
@@ -6568,7 +6640,7 @@
             <th scope="col">Self-corrected</th><th scope="col">Overhead against no guidance</th>
           </tr></thead>
           <tbody>${conditions.map(c => html`<tr data-condition="${c.condition}">
-            <th scope="row" class="font-normal min-w-[9rem]"><span class="text-gray-200">${c.label || c.condition}</span><span class="block text-xs text-gray-500 font-mono">${c.condition}</span></th>
+            <th scope="row" class="font-normal min-w-[9rem]"><span class="text-gray-200">${conditionLabel(b, c)}</span><span class="block text-xs text-gray-500 font-mono">${c.condition}</span></th>
             <td class="num"><span class="font-mono">${num(c.n)}</span>${c.not_measured ? html`<span class="block text-xs text-amber-300">${plural(c.not_measured, 'run')} measured nothing</span>` : ''}</td>
             <td>${share(c.violation)}</td>
             <td>${share(c.completion)}</td>
@@ -6594,7 +6666,7 @@
 
     function ownUseCard(p) {
       const title = 'The owner\'s own use';
-      const sub = 'Threefold governing the owner\'s real work, anonymised: aggregates only, never a project name, a path, a developer or a target.';
+      const sub = 'Threefold on the owner\'s real work, anonymised: aggregates only, never a project name, a path, a developer or a target.';
       if (!p || typeof p !== 'object') {
         return card(title, sub, notMeasured('This snapshot carries no totals from the owner\'s own work.',
           'They are read from the owner\'s private stack with the operator key, and only the totals are kept.'));
@@ -6614,11 +6686,35 @@
         ['Projects', num(p.projects), 'projects', 'counted, never named'],
         ['Agents', num(p.agents), 'agents', 'counted, never named']
       ];
+      // What stage the projects were in, and whether anything was refused. A
+      // project in Observe has every call judged and recorded and none
+      // refused, so these totals say what the rules would have done, not what
+      // enforcing did. The stages are the snapshot's moment; the refusals are
+      // counted over the window.
+      const stages = p.stages && typeof p.stages === 'object' && typeof p.stages.observe === 'number' && typeof p.stages.enforce === 'number' ? p.stages : null;
+      const allObserve = !!stages && stages.enforce === 0 && stages.observe > 0;
+      const staged = !stages ? ''
+        : allObserve ? (stages.observe === 1 ? 'the one project was in Observe, not Enforce' : html`all ${plural(stages.observe, 'project')} were in Observe and none in Enforce`)
+          : html`${plural(stages.observe, 'project')} ${stages.observe === 1 ? 'was' : 'were'} in Observe and ${num(stages.enforce)} in Enforce`;
+      const span = typeof p.window_days === 'number' ? html`the ${plural(p.window_days, 'day')} these totals cover` : 'the window these totals cover';
+      const nothingRefused = p.refused === 0;
+      const refusals = first => nothingRefused ? html`${first ? 'No' : 'no'} call was refused in ${span}${allObserve ? ': every call was judged and recorded, and a rule in Observe refuses nothing' : ''}`
+        : typeof p.refused === 'number' && p.refused > 0 ? html`${plural(p.refused, 'call')} ${p.refused === 1 ? 'was' : 'were'} refused in ${span}` : '';
+      const standing = staged
+        ? html`At the snapshot, ${staged}${refusals(false) ? html`, and ${refusals(false)}` : ''}.`
+        : refusals(true) ? html`${refusals(true)}.` : '';
+      // Self-correction is counted on refused calls, so with none refused
+      // there is nothing to count, and the line says that rather than an
+      // empty figure.
+      const corrected = nothingRefused
+        ? 'Self-corrected: none to count. It is counted on refused calls, and no call was refused in this window.'
+        : p.self_correction ? html`Self-corrected: ${selfCorrectionWords(p.self_correction)}.` : '';
       return card(title, sub, html`
         <div class="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-7 gap-3">${tiles.map(([label, value, metric, note]) => html`<div class="tf-card-quiet tf-tile">
           <span class="tf-tile-label">${label}</span><span class="tf-tile-value" data-metric="${metric}">${value}</span><span class="tf-tile-sub">${note}</span>
         </div>`)}</div>
-        ${p.self_correction ? html`<p class="text-xs text-gray-400 mt-3">Self-corrected: ${selfCorrectionWords(p.self_correction)}.</p>` : ''}
+        ${standing ? html`<p class="text-sm text-gray-300 mt-3" data-proof="stages">${standing}</p>` : ''}
+        ${corrected ? html`<p class="text-xs text-gray-400 mt-2" data-proof="self-corrected">${corrected}</p>` : ''}
         ${provenance(p.source, p.snapshot_at)}`, 'min-w-0');
     }
 
@@ -6678,12 +6774,15 @@
         const written = typeof proof.generated_at === 'string' && proof.generated_at
           ? html`Snapshot written ${when(proof.generated_at)}` : 'The snapshot does not record when it was written';
         const by = typeof proof.generated_by === 'string' && proof.generated_by ? html` by <span class="font-mono">${proof.generated_by}</span>` : '';
-        ctx.render(html`${pageTitle('Proof', PROOF_SUB, null, null, html`<p class="tf-ops-sub mt-2" data-proof="generated">${written}${by}. It changes only when a new one is deployed.</p>`)}
+        // The snapshot replaces the loading screen, title and all. A route
+        // change gave that title the focus, so the drawn title takes it back;
+        // on the page's first screen nothing had it, and nothing takes it.
+        keepFocus(() => ctx.render(html`${pageTitle('Proof', PROOF_SUB, null, null, html`<p class="tf-ops-sub mt-2" data-proof="generated">${written}${by}. It changes only when a new one is deployed.</p>`)}
           <div class="space-y-4">
             ${benchmarkCards(proof)}
             ${ownUseCard(proof.private)}
             ${methodCard(proof)}
-          </div>`);
+          </div>`));
         // A table's box is a keyboard stop, announced as scrolling, only
         // while the table is wider than it: measured now it is drawn, and
         // again by the design system when the width or the fonts change.
@@ -6691,15 +6790,15 @@
       }, err => {
         if (!ctx.alive()) return;
         if (err && err.kind === 'not_found') {
-          ctx.render(html`${pageTitle('Proof', PROOF_SUB)}<div class="tf-card p-6 md:p-8 space-y-3" data-state="empty">
+          keepFocus(() => ctx.render(html`${pageTitle('Proof', PROOF_SUB)}<div class="tf-card p-6 md:p-8 space-y-3" data-state="empty">
             <h2 class="text-lg font-semibold text-white">Not measured yet</h2>
             <p class="text-sm text-gray-400 max-w-2xl">This stack has no proof snapshot deployed, so this page shows nothing rather than something invented.</p>
             <p class="text-xs text-gray-500 max-w-2xl">A snapshot is written by <span class="font-mono">scripts/build_proof.py</span> from the benchmark's result rows and, when the owner adds them, the totals of the owner's own use.</p>
             <div class="flex flex-wrap gap-2"><a class="tf-btn" href="#/overview">The overview</a><a class="tf-btn" href="#/try">Try it in two minutes</a></div>
-          </div>`);
+          </div>`));
           return;
         }
-        ctx.render(html`${pageTitle('Proof', PROOF_SUB)}${failure(err, 'the proof snapshot')}`);
+        keepFocus(() => ctx.render(html`${pageTitle('Proof', PROOF_SUB)}${failure(err, 'the proof snapshot')}`));
       });
     }
 

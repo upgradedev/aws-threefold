@@ -183,7 +183,9 @@ def test_a_measured_snapshot_shows_each_figure_with_its_source_and_its_date(tmp_
     assert out["metrics"] == {"days_observed": "8", "calls_governed": "4,210", "would_refuse": "210", "reviewed": "150",
                               "false_alarm_rate": "8%", "projects": "9", "agents": "2"}
     assert "12 of 150 reviewed" in words and "of the last 30" in words
-    assert "Self-corrected: no agent (hook or CI) refusal in this window." in words
+    # Nothing was refused, so self-correction has nothing to count, and the
+    # line says why rather than giving an empty figure.
+    assert "Self-corrected: none to count. It is counted on refused calls, and no call was refused in this window." in words
     assert page.count('data-proof="provenance"') == 2, "Both sections say where they came from and when"
     assert "2026-09-29T08:00:00+00:00" in page and "2026-09-30" in page
     assert "GET /api/overview?days=30 and GET /api/projects on the owner's private stack" in page
@@ -318,6 +320,283 @@ def test_the_snapshot_route_the_page_reads_is_in_the_published_document() -> Non
     spec = json.loads((WEB / "openapi.json").read_text(encoding="utf-8"))
     assert "get" in spec["paths"]["/proof.json"]
     assert "T.api('/proof.json')" in page_source("dashboard.html")
+
+
+# ------------------------------------------------- what the proof compares with
+
+# The file the rules condition wrote the rules to, per agent, as the benchmark's
+# harness names it (benchmark/harness.py, RULES_FILE_NAME).
+RULES_FILES = {"Claude Code": "CLAUDE.md", "Codex": "AGENTS.md"}
+
+
+def _said(markup: str, key: str) -> str:
+    """The words of the paragraph marked data-proof=key, as a reader reads them."""
+    found = re.search(rf'data-proof="{key}">(.*?)</p>', markup, re.S)
+    assert found, f"No paragraph marked {key}"
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", _unescaped(found.group(1)))).strip()
+
+
+def _prompt_label(card: str) -> str:
+    found = re.search(r'<tr data-condition="prompt">.*?<span class="text-gray-200">([^<]*)</span>', card, re.S)
+    assert found, "The card has no row for the rules condition"
+    return _unescaped(found.group(1))
+
+
+def _with_codex_labels_corrected(snapshot: dict) -> dict:
+    """The snapshot as report.py writes it once it names the file per agent."""
+    fixed = json.loads(json.dumps(snapshot))
+    for b in fixed["benchmarks"]:
+        for c in b["conditions"]:
+            if b["agent"] in RULES_FILES:
+                c["label"] = re.sub(r"\b(?:CLAUDE|AGENTS)\.md\b", RULES_FILES[b["agent"]], c["label"])
+    return fixed
+
+
+@pytest.mark.parametrize("corrected", [False, True])
+def test_each_series_names_the_rules_file_its_agent_read(tmp_path: Path, corrected: bool) -> None:
+    """Both Codex cards said "rules in CLAUDE.md"; Codex was given the rules in AGENTS.md, as their headlines say.
+
+    A snapshot written before report.py named the file per agent carries that
+    label, so the page names the file from the series' agent, and says the
+    same of a snapshot that already does. A lane's name says the same, and the
+    legend and the table heading name every file the series used.
+    """
+    snapshot = _with_codex_labels_corrected(COMMITTED) if corrected else COMMITTED
+    out = proof(
+        f"""
+  answer = proofAnswer({json.dumps(snapshot)});
+  await visit('#/proof');
+  out.view = view();
+""",
+        tmp_path,
+    )
+    page = _unescaped(out["view"])
+    series = [b for b in snapshot["benchmarks"] if b["agent"] in RULES_FILES]
+    assert {b["agent"] for b in series} == set(RULES_FILES), "The committed snapshot holds both agents"
+    for b in series:
+        label = _prompt_label(_card(page, b["label"]))
+        other = next(f for f in RULES_FILES.values() if f != RULES_FILES[b["agent"]])
+        assert RULES_FILES[b["agent"]] in label and other not in label, f"{b['label']}: {label}"
+        assert RULES_FILES[b["agent"]] in b["headline"], "The card's own headline names the same file"
+    lanes = re.findall(r'<div class="tf-ops-vlane" role="img" aria-label="([^"]*)"', out["view"])
+    for b in series:
+        name = ", ".join(b["label"].split(" · "))
+        (lane,) = [_unescaped(l) for l in lanes if _unescaped(l).startswith(name + ". Rules in ")]
+        assert lane.startswith(f"{name}. Rules in {RULES_FILES[b['agent']]}:"), lane
+    assert '<th scope="col">Rules in CLAUDE.md or AGENTS.md</th>' in out["view"]
+    assert "Rules in CLAUDE.md or AGENTS.md</li>" in out["view"], "The legend names both files"
+
+
+def test_an_agent_the_page_does_not_know_keeps_the_snapshot_s_words(tmp_path: Path) -> None:
+    out = proof(
+        r"""
+  const other = JSON.parse(JSON.stringify(MEASURED.benchmark));
+  Object.assign(other, { agent: 'Acme Agent', label: 'Standard tasks · Acme Agent · acme-model' });
+  answer = proofAnswer(Object.assign({}, MEASURED, { benchmarks: [other], benchmark: other }));
+  await visit('#/proof');
+  out.view = view();
+""",
+        tmp_path,
+    )
+    page = _unescaped(out["view"])
+    assert _prompt_label(_card(page, "Standard tasks · Acme Agent · acme-model")) == "rules in CLAUDE.md"
+    assert "<th scope=\"col\">Rules in the agent's own instructions file</th>" in page, "No file is named that the page cannot vouch for"
+
+
+def _series_words(b: dict) -> str:
+    parts = b["label"].split(" · ")
+    family = b.get("family") or ""
+    where = f"the {family} tasks" if re.fullmatch(r"[a-z][a-z-]*", family) else "the " + parts[0][:1].lower() + parts[0][1:]
+    return f"{' · '.join(parts[1:]) or parts[0]} on {where}"
+
+
+def _condition(b: dict, name: str) -> dict | None:
+    return next((c for c in b.get("conditions", []) if c.get("condition") == name), None)
+
+
+def _measured(stat: dict | None) -> bool:
+    return bool(stat) and isinstance(stat.get("n"), int) and stat["n"] > 0 and isinstance(stat.get("rate"), (int, float))
+
+
+def test_the_lead_compares_threefold_with_the_rules_written_down(tmp_path: Path) -> None:
+    """The callout compared Threefold only with no guidance; against the rules in the file it ties in half the series.
+
+    One sentence says it, read from the committed snapshot: the series where
+    neither let a violation land, each series where the rules did, with its
+    runs, and what Threefold did there, and the tests passed with the rules
+    written down beside those with Threefold enforcing. Every figure is
+    computed here from the same snapshot, so a rebuilt one is checked the same
+    way.
+    """
+    out = proof(
+        r"""
+  answer = proofAnswer(COMMITTED);
+  await visit('#/proof');
+  out.view = view();
+""",
+        tmp_path,
+    )
+    said = _said(out["view"], "against-rules")
+    shown = [b for b in COMMITTED["benchmarks"] if not b.get("pilot")]
+    paired = [b for b in shown if _measured((_condition(b, "prompt") or {}).get("violation")) and _measured((_condition(b, "threefold") or {}).get("violation"))]
+    assert paired, "The committed snapshot measures both conditions"
+    files = " or ".join(f for f in ("CLAUDE.md", "AGENTS.md") if f in {RULES_FILES[b["agent"]] for b in paired})
+    assert said.startswith(f"Against the rules written in {files}: "), said
+    neither = [b for b in paired if _condition(b, "prompt")["violation"]["k"] == 0 and _condition(b, "threefold")["violation"]["k"] == 0]
+    rules_let = [b for b in paired if _condition(b, "prompt")["violation"]["k"] > 0]
+    if 0 < len(neither) < len(paired):
+        assert f"neither they nor Threefold let a violation land in {len(neither)} of the {len(paired)} series" in said
+    for b in rules_let:
+        v = _condition(b, "prompt")["violation"]
+        assert f"{v['k']} of {v['n']} runs ({_series_words(b)})" in said, f"{b['label']} is not named with its runs"
+    for b in neither:
+        assert f"({_series_words(b)})" not in said, "A series where neither let one land is counted, not listed"
+    if rules_let and all(_condition(b, "threefold")["violation"]["k"] == 0 for b in rules_let):
+        assert "and Threefold in none" in said
+    # The tests passed, family by family, over the series measured under both.
+    families: dict[str, list[dict]] = {}
+    for b in paired:
+        families.setdefault(b["family"], []).append(b)
+    rules_passed, threefold_passed = [], []
+    for family, members in families.items():
+        for name, into in (("prompt", rules_passed), ("threefold", threefold_passed)):
+            done = [_condition(b, name)["completion"] for b in members]
+            into.append(f"{sum(d['k'] for d in done)} of {sum(d['n'] for d in done)}")
+    words = [f"{k} runs of the {family} tasks" for k, family in zip(rules_passed, families)]
+    joined = lambda items: items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]  # noqa: E731
+    assert f"with the rules written down, the tests passed in {joined(words)}, against {joined(threefold_passed)} with Threefold enforcing." in said
+    assert "%" not in said, "Every figure is k of n runs, as the snapshot holds it"
+
+
+def test_the_comparison_counts_only_series_measured_under_both_and_says_what_threefold_let_land(tmp_path: Path) -> None:
+    """A series with no rules condition is left out and said to be; where Threefold let one land, the sentence says so."""
+    out = proof(
+        r"""
+  const run = (k, n) => ({ k, n, rate: k / n, ci_low: 0, ci_high: 1 });
+  const series = (label, agent, family, conditions) => ({
+    label, agent, family, pilot: false, models: [label.split(' · ')[2]], source: 'benchmark/report.py over ' + label,
+    conditions: conditions.map(([condition, violation, completion]) => ({ condition, label: condition, n: violation.n, violation, completion }))
+  });
+  const list = [
+    series('Standard tasks · Claude Code · model-a', 'Claude Code', 'standard', [['none', run(5, 18), run(18, 18)], ['prompt', run(2, 18), run(17, 18)], ['threefold', run(1, 18), run(18, 18)]]),
+    series('Standard tasks · Codex · model-b', 'Codex', 'standard', [['none', run(4, 18), run(18, 18)], ['prompt', run(0, 18), run(18, 18)], ['threefold', run(0, 18), run(18, 18)]]),
+    series('Pressure tasks · Codex · model-c', 'Codex', 'pressure', [['none', run(9, 9), run(9, 9)], ['prompt', run(0, 9), run(9, 9)], ['threefold', run(2, 9), run(5, 9)]]),
+    series('Pressure tasks · Claude Code · model-d', 'Claude Code', 'pressure', [['none', run(9, 9), run(9, 9)], ['threefold', run(0, 9), run(4, 9)]])
+  ];
+  answer = proofAnswer({ schema: 1, benchmarks: list, benchmark: list[0] });
+  await visit('#/proof');
+  out.view = view();
+""",
+        tmp_path,
+    )
+    assert _said(out["view"], "against-rules") == (
+        "Against the rules written in CLAUDE.md or AGENTS.md: "
+        "neither they nor Threefold let a violation land in 1 of the 3 series measured under both; "
+        "in 1 the rules did, in 2 of 18 runs (Claude Code · model-a on the standard tasks), "
+        "and Threefold in 1 of 18 runs (Claude Code · model-a on the standard tasks); "
+        "Threefold let a violation land where the rules did not in 2 of 9 runs (Codex · model-c on the pressure tasks); "
+        "with the rules written down, the tests passed in 35 of 36 runs of the standard tasks and 9 of 9 runs of the pressure tasks, "
+        "against 36 of 36 and 5 of 9 with Threefold enforcing."
+    )
+
+
+def test_the_owner_s_own_use_says_its_projects_only_observed_and_nothing_was_refused(tmp_path: Path) -> None:
+    """The section said "Threefold governing the owner's real work" over ten projects in Observe and no refusal.
+
+    Beside the tiles it now says, from the snapshot, what stage the projects
+    were in and whether anything was refused, and self-correction says it has
+    nothing to count rather than reading as a measurement. Where projects
+    enforce and calls were refused, it says that instead.
+    """
+    out = proof(
+        r"""
+  answer = proofAnswer(COMMITTED);
+  await visit('#/proof');
+  out.committed = view();
+  const enforcing = JSON.parse(JSON.stringify(MEASURED));
+  Object.assign(enforcing.private, { refused: 6, stages: { observe: 7, enforce: 2 } });
+  enforcing.private.self_correction = { refusals_considered: 6, self_corrected: 3, rate: 0.5, median_calls_to_correct: 2, rows_read: 900, complete: true };
+  answer = proofAnswer(enforcing);
+  await visit('#/overview');
+  await visit('#/proof');
+  out.enforcing = view();
+  const older = JSON.parse(JSON.stringify(MEASURED));
+  delete older.private.stages; delete older.private.refused;
+  answer = proofAnswer(older);
+  await visit('#/overview');
+  await visit('#/proof');
+  out.older = view();
+""",
+        tmp_path,
+    )
+    own = COMMITTED["private"]
+    stages = own["stages"]
+    stage_words = (f"all {stages['observe']} projects were in Observe and none in Enforce" if stages["enforce"] == 0
+                   else f"{stages['observe']} projects were in Observe and {stages['enforce']} in Enforce")
+    said = _said(out["committed"], "stages")
+    assert said.startswith(f"At the snapshot, {stage_words}"), said
+    if own["refused"] == 0:
+        assert f"no call was refused in the {own['window_days']} days these totals cover" in said
+        assert _said(out["committed"], "self-corrected") == (
+            "Self-corrected: none to count. It is counted on refused calls, and no call was refused in this window.")
+    assert "Threefold governing the owner" not in _unescaped(out["committed"])
+    assert _said(out["enforcing"], "stages") == "At the snapshot, 7 projects were in Observe and 2 in Enforce, and 6 calls were refused in the 30 days these totals cover."
+    assert _said(out["enforcing"], "self-corrected") == "Self-corrected: 50% of 6 agent refusals · median 2 calls."
+    assert 'data-proof="stages"' not in out["older"] and 'data-proof="self-corrected"' in out["older"], \
+        "A snapshot that carries neither says nothing of them, and keeps its self-correction line"
+
+
+def test_the_first_screen_leaves_the_focus_at_the_start_and_a_route_change_moves_it(tmp_path: Path) -> None:
+    """On first load the title took the focus, so the first Tab skipped "Skip to content" and the header."""
+    out = run(
+        "dashboard.html",
+        r"""
+  out.first = document.activeElement && document.activeElement.id;
+  out.drawn = /id="view-title"/.test(view());
+  answer = contract();
+  await visit('#/overview');
+  out.after = document.activeElement && document.activeElement.id;
+""",
+        tmp_path,
+        before=FIXTURES + PROOF_FIXTURES + f"\nconst COMMITTED = {json.dumps(COMMITTED)};\nanswer = proofAnswer(COMMITTED);\nopenAt('#/proof');\n",
+    )
+    assert out["drawn"] and not out["first"], "The page's first screen is drawn and nothing takes the focus"
+    assert out["after"] == "view-title", "A route change moves the focus to the new screen's title"
+
+
+def test_in_a_browser_the_first_tab_on_the_proof_reaches_skip_to_content(tmp_path: Path) -> None:
+    """Opened at #/proof, the snapshot drawn, the focus is still the document's, and the first stop is the skip link.
+
+    Reached by a route change instead, the proof's title has the focus once
+    the snapshot has replaced the loading screen, title and all.
+    """
+    result = measure(
+        "dashboard.html",
+        tmp_path,
+        width=1440,
+        height=900,
+        replies={
+            "/proof.json": {"status": 200, "body": COMMITTED},
+            "/api/auth/whoami": {"status": 200, "body": {"authenticated": False, "via": None, "reads_public": True, "sandbox_writes": True}},
+        },
+        moments={"drawn": 1500, "away": 2500, "back": 3500},
+        # Each moment reads where the focus is, then takes the next step.
+        probe=r"""() => {
+  const stops = Array.from(document.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), select, textarea, summary, [tabindex]'))
+    .filter(e => e.getAttribute('tabindex') !== '-1' && e.getClientRects().length > 0);
+  const a = document.activeElement;
+  const seen = { active: !a || a === document.body ? 'body' : (a.id || a.tagName), first: stops.length ? stops[0].textContent.trim() : null,
+    drawn: !!document.querySelector('[data-proof="against-rules"]') };
+  window.__step = (window.__step || 0) + 1;
+  if (window.__step === 1) location.hash = '#/overview';
+  if (window.__step === 2) location.hash = '#/proof';
+  return seen;
+}""",
+        before="window.tailwind = {}; history.replaceState(null, '', '#/proof');",
+    )
+    taken = result["taken"]
+    assert taken["drawn"] == {"active": "body", "first": "Skip to content", "drawn": True}, taken["drawn"]
+    assert taken["back"]["drawn"] and taken["back"]["active"] == "view-title", taken["back"]
 
 
 # ------------------------------------------------------------ self-correction
