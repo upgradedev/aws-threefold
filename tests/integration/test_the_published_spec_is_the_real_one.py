@@ -113,3 +113,19 @@ def test_the_yaml_twin_says_what_the_served_document_says() -> None:
     served = json.loads((root / "src/threefold/web/openapi.json").read_text(encoding="utf-8"))
     twin = yaml.safe_load((root / "docs/openapi.yaml").read_text(encoding="utf-8"))
     assert twin == served, "Run scripts/generate_openapi_yaml.py after editing openapi.json"
+
+
+def test_the_spec_names_muse_and_its_refusal_shape_in_both_twins() -> None:
+    """The fourth agent is a known caller, and its deny is Claude Code's shape."""
+    yaml = pytest.importorskip("yaml")
+    root = Path(__file__).resolve().parents[2]
+    served = json.loads(_get("/openapi.json")["body"])
+    twin = yaml.safe_load((root / "docs/openapi.yaml").read_text(encoding="utf-8"))
+    for spec in (served, twin):
+        request = spec["paths"]["/evaluate-tool-call"]["post"]["requestBody"]["content"]["application/json"]["schema"]
+        agent = request["properties"]["agent"]
+        assert agent["enum"] == ["claude-code", "codex", "antigravity", "muse", "pre-commit", "ci", "page"]
+        assert "muse" in agent["description"]
+        hook = spec["paths"]["/hooks/threefold_hook.py"]["get"]["description"]
+        assert "Muse" in hook
+        assert "A refusal to Muse is written in the same shape as to Claude Code." in hook

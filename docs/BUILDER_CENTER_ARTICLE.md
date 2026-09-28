@@ -20,9 +20,9 @@ flag it, in CI, after the agent has moved on to the next file and built on top
 of the mistake.
 
 There is exactly one moment when that edit can still be refused cheaply: when
-the agent asks to make it. Claude Code, Codex and Antigravity all let a hook
-see a tool call before it runs and deny it. Threefold is a hook and a small
-service on AWS that uses that moment.
+the agent asks to make it. Claude Code, Codex, Antigravity and Muse all let a
+hook see a tool call before it runs and deny it. Threefold is a hook and a
+small service on AWS that uses that moment.
 
 ## Deterministic code decides, Bedrock explains
 
@@ -186,7 +186,10 @@ and the function runs at 1,024 MB with a reserved concurrency of 25
   tool only: the hook refused an `apply_patch` adding `import boto3` to a
   governed domain file, and the file's SHA-256 was unchanged afterwards. Its
   shell route is not measured **[STATE-FILE]**,
-  `docs/evidence/ENFORCEMENT_2026-09-23.md`.
+  `docs/evidence/ENFORCEMENT_2026-09-23.md`. Muse 1.4.0 was measured on
+  2026-09-28: the hook refused a `write_file` and the refused file was not
+  created; its edit and shell routes are not measured
+  (`docs/evidence/ENFORCEMENT_2026-09-28-MUSE.md`).
 - **Does the live stack do what the documents say?** A probe script checks the
   public stack claim by claim. On 2026-09-27, after that day's deploy, it
   passed 117 checks, 0 FAIL, 3 SKIP through the CloudFront URL and the same at

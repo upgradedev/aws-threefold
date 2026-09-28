@@ -625,7 +625,7 @@ def test_observe_mode_is_described_as_the_hook_runs_it(tmp_path: Path) -> None:
 # 2026-09-23, which measured Codex, is what the Codex row is held to and
 # 2026-09-21's "not measured" row for Codex stops voting. An agent no later
 # file names keeps the verdict of the file that did name it.
-EVIDENCE_FILES = ("ENFORCEMENT_2026-09-21.md", "ENFORCEMENT_2026-09-23.md")
+EVIDENCE_FILES = ("ENFORCEMENT_2026-09-21.md", "ENFORCEMENT_2026-09-23.md", "ENFORCEMENT_2026-09-28-MUSE.md")
 
 # The worst row an agent has is the verdict a page may claim: a single row
 # showing a write that happened anyway outranks any number that were stopped,
@@ -635,7 +635,8 @@ VERDICT_ORDER = ("wrote-anyway", "stopped", "not-measured")
 
 def _rows_in(evidence: str) -> dict[str, set[str]]:
     """Every result row of one evidence file, as a verdict per agent."""
-    names = {"Claude Code": "claude-code", "Codex CLI": "codex", "Codex": "codex", "Antigravity": "antigravity"}
+    names = {"Claude Code": "claude-code", "Codex CLI": "codex", "Codex": "codex", "Antigravity": "antigravity",
+             "Muse": "muse"}
     rows: dict[str, set[str]] = {}
     for line in evidence.splitlines():
         cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
@@ -696,6 +697,9 @@ def test_each_agents_enforcement_claim_is_what_the_evidence_measured() -> None:
     codex = re.search(r'<tr[^>]*data-agent="codex".*?</tr>', body, re.S)
     assert codex and "shell" in codex.group(0), (
         "The Codex cell says a route is not measured without saying it is the shell")
+    muse = re.search(r'<tr[^>]*data-agent="muse".*?</tr>', body, re.S)
+    assert muse and "edit_file" in muse.group(0) and "powershell" in muse.group(0), (
+        "The Muse cell says a route is not measured without naming the edit and shell routes")
 
 
 def test_the_evidence_reader_takes_the_worst_row_and_the_newest_file() -> None:

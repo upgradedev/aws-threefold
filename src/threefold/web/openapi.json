@@ -184,11 +184,12 @@
                       "claude-code",
                       "codex",
                       "antigravity",
+                      "muse",
                       "pre-commit",
                       "ci",
                       "page"
                     ],
-                    "description": "Which caller sent the call: claude-code, codex, antigravity, pre-commit, ci or page. Stored on the ledger row. Any other value is recorded as 'unknown' and reported in warnings."
+                    "description": "Which caller sent the call: claude-code, codex, antigravity, muse, pre-commit, ci or page. Stored on the ledger row. Any other value is recorded as 'unknown' and reported in warnings."
                   },
                   "origin": {
                     "type": "string",
@@ -735,7 +736,7 @@
     "/hooks/threefold_hook.py": {
       "get": {
         "summary": "The hook itself",
-        "description": "The hook itself: one standard-library script that puts Threefold in front of Claude Code, Codex or Antigravity, served as readable text rather than as a download a reader cannot inspect, and answered without a key even where reads are private, because a product nobody can obtain is a demo. The agent is detected from the shape of its input, or named with --agent. The same file is served at /hooks/claude_code_hook.py and /claude_code_hook.py, so an install copied earlier keeps working.",
+        "description": "The hook itself: one standard-library script that puts Threefold in front of Claude Code, Codex, Antigravity or Muse, served as readable text rather than as a download a reader cannot inspect, and answered without a key even where reads are private, because a product nobody can obtain is a demo. The agent is detected from the shape of its input, or named with --agent. A refusal to Muse is written in the same shape as to Claude Code. The same file is served at /hooks/claude_code_hook.py and /claude_code_hook.py, so an install copied earlier keeps working.",
         "responses": {
           "200": {
             "description": "The script, as text/plain",
@@ -2174,7 +2175,7 @@
                         },
                         "coding_agents": {
                           "type": "integer",
-                          "description": "Of those, the coding agents (claude-code, codex, antigravity): the length of coding_agents."
+                          "description": "Of those, the coding agents (claude-code, codex, antigravity, muse): the length of coding_agents."
                         }
                       }
                     },
@@ -3559,7 +3560,7 @@
               "ci",
               "unknown"
             ],
-            "description": "coding_agent for claude-code, codex and antigravity; page for a visitor pressing a button on a page here; ci for a pipeline or a pre-commit check (agent ci or pre-commit); unknown for a row written before the agent field existed, and for any value not listed here."
+            "description": "coding_agent for claude-code, codex, antigravity and muse; page for a visitor pressing a button on a page here; ci for a pipeline or a pre-commit check (agent ci or pre-commit); unknown for a row written before the agent field existed, and for any value not listed here."
           },
           "calls_in_sandboxes": {
             "type": "integer",

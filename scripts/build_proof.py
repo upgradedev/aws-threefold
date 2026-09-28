@@ -478,7 +478,7 @@ def _coding_agents(totals: Mapping[str, Any]) -> Optional[int]:
 
     `agents` counts every value of a call's agent field, so the demo's page
     buttons and rows older than the field count there too; this is the number
-    of Claude Code, Codex and Antigravity alone.
+    of Claude Code, Codex, Antigravity and Muse alone.
     """
     value = totals.get("coding_agents")
     if value is None:

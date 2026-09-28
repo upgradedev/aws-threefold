@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "name": "threefold",
+  "version": "1.0.0",
+  "description": "Threefold governs this project's tool calls: each write and command is judged before it runs.",
+  "compat": {
+    "manifestDir": ".muse-plugin"
+  },
+  "capabilities": {
+    "hooks": [
+      {
+        "id": "govern",
+        "event": "PreToolUse",
+        "command": ["python", "hooks/threefold_hook.py", "--agent", "muse"],
+        "timeoutMs": 10000,
+        "statusMessage": "Threefold is judging this call"
+      }
+    ]
+  }
+}

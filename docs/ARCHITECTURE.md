@@ -19,7 +19,7 @@ file it comes from.
 ```mermaid
 flowchart LR
   subgraph dev["Developer machine"]
-    agent["Coding agent<br/>Claude Code · Codex · Antigravity"]
+    agent["Coding agent<br/>Claude Code · Codex · Antigravity · Muse"]
     hook["threefold_hook.py<br/>local checks first"]
     agent -- "PreToolUse" --> hook
   end
@@ -169,10 +169,10 @@ and `tests/unit/test_edge_page_not_found.py` holds it to what
 ### 2.2 A coding agent's tool call
 
 1. The agent is about to run `Write`, `Edit`, `MultiEdit`, `NotebookEdit` or
-   `Bash` (Claude Code), `apply_patch`, `Edit`, `Write` or `Bash` (Codex), or
+   `Bash` (Claude Code), `apply_patch`, `Edit`, `Write` or `Bash` (Codex),
    `write_to_file`, `replace_file_content`, `multi_replace_file_content` or
-   `run_command` (Antigravity), and hands the call to `threefold_hook.py` on
-   stdin.
+   `run_command` (Antigravity), or `write_file`, `edit_file` or `powershell`
+   (Muse), and hands the call to `threefold_hook.py` on stdin.
 2. The hook decides locally what may leave the machine (section 3). A
    credential is refused there and never sent.
 3. What remains is one `POST /evaluate-tool-call` to the endpoint the
@@ -252,11 +252,13 @@ because the project is a sandbox, and `POST /api/sandbox` is open there only
 
 ## 3. The hook on the developer machine
 
-`src/threefold/hooks/threefold_hook.py` is one standard-library file for three
+`src/threefold/hooks/threefold_hook.py` is one standard-library file for four
 agents, served at `/hooks/threefold_hook.py` and inside
 `/dist/threefold-bundle.zip`. The installer puts one shared copy in
 `THREEFOLD_HOME/bin/` (`~/.threefold` unless set) and registers it in
-`.claude/settings.local.json`, `.codex/hooks.json` and `.agents/hooks.json`.
+`.claude/settings.local.json`, `.codex/hooks.json` and `.agents/hooks.json`,
+and for Muse as a native plugin from the `.threefold-muse/` bundle it writes
+(`src/threefold/tools/threefold_muse_plugin/`).
 
 **Configuration.** Each setting is read from the environment variable, then
 `<project root>/.threefold.json`, then `THREEFOLD_HOME/config.json`.

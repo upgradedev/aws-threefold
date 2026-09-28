@@ -1,4 +1,4 @@
-"""The installer puts the hook in front of three agents and takes it out again, exactly.
+"""The installer puts the hook in front of four agents and takes it out again, exactly.
 
 Every test runs against a repository made by `git init` in a temporary
 directory, with HOME, THREEFOLD_HOME and git's global configuration pointed
@@ -19,6 +19,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import socket
 import stat
 import subprocess
@@ -81,6 +82,11 @@ def machine(tmp_path, monkeypatch):
     repo.mkdir()
     assert _git(repo, "init", "-q").returncode == 0
     (repo / "README.md").write_text("# Acme Ledger\n", encoding="utf-8")
+    # No agent command is reachable except through the test: with muse on this
+    # machine's PATH the installer would run the real one.
+    empty = tmp_path / "empty-bin"
+    empty.mkdir()
+    monkeypatch.setenv("PATH", os.pathsep.join([str(empty), os.path.dirname(shutil.which("git"))]))
     return SimpleNamespace(home=home, threefold_home=home / ".threefold", repo=repo, tmp=tmp_path)
 
 
@@ -115,11 +121,14 @@ def commands_in(document: dict) -> List[str]:
 
 # --- install --------------------------------------------------------------------------
 
-def test_an_install_writes_the_config_and_registers_the_hook_for_all_three_agents(machine) -> None:
+def test_an_install_writes_the_config_and_registers_the_hook_for_all_four_agents(machine) -> None:
     result = run(machine)
     assert result.code == 0, result.out
     config = json.loads((machine.repo / ".threefold.json").read_text(encoding="utf-8"))
     assert config == {"project": "Acme-Ledger", "mode": "observe"}
+    for relative in (".muse-plugin/plugin.json", "hooks/threefold_hook.py", "manifest.json"):
+        assert (machine.repo / ".threefold-muse" / relative).is_file()
+    assert "muse is not on PATH" in result.out
     hook_copy = (machine.threefold_home / "bin" / "threefold_hook.py").as_posix()
     for relative, matcher in MATCHERS.items():
         agent = {".claude": "claude-code", ".codex": "codex", ".agents": "antigravity"}[relative.split("/")[0]]
@@ -155,6 +164,7 @@ def test_only_the_agents_asked_for_are_registered(machine) -> None:
     run(machine, "--agents", "codex")
     assert (machine.repo / ".codex" / "hooks.json").is_file()
     assert not (machine.repo / ".claude").exists() and not (machine.repo / ".agents").exists()
+    assert not (machine.repo / ".threefold-muse").exists()
 
 
 def test_a_second_install_changes_nothing(machine) -> None:
@@ -268,7 +278,11 @@ def test_with_core_hooks_path_set_nothing_is_installed_in_git_hooks_and_the_outp
 def test_every_file_written_is_listed_in_info_exclude_and_nothing_shows_as_untracked(machine) -> None:
     run(machine)
     exclude = (machine.repo / ".git" / "info" / "exclude").read_text(encoding="utf-8").splitlines()
-    for line in ["/.threefold.json", "/.claude/settings.local.json", "/.codex/hooks.json", "/.agents/hooks.json"]:
+    for line in [
+        "/.threefold.json", "/.claude/settings.local.json", "/.codex/hooks.json", "/.agents/hooks.json",
+        "/.threefold-muse/.muse-plugin/plugin.json", "/.threefold-muse/hooks/threefold_hook.py",
+        "/.threefold-muse/manifest.json",
+    ]:
         assert line in exclude
     assert not (machine.repo / ".gitignore").exists()
     status = _git(machine.repo, "status", "--porcelain").stdout.splitlines()
@@ -426,9 +440,13 @@ def test_a_path_that_is_not_a_directory_is_refused(machine) -> None:
 #
 # A workspace root holds several repositories and is not one itself. It used
 # to be refused, which left no way to govern the repositories inside it from
-# one place. It is now installed with the four configuration files only.
+# one place. It is now installed with the configuration file, the three
+# settings files and the three Muse plugin files only.
 
-WORKSPACE_FILES = [".threefold.json", ".claude/settings.local.json", ".codex/hooks.json", ".agents/hooks.json"]
+WORKSPACE_FILES = [
+    ".threefold.json", ".claude/settings.local.json", ".codex/hooks.json", ".agents/hooks.json",
+    ".threefold-muse/.muse-plugin/plugin.json", ".threefold-muse/hooks/threefold_hook.py", ".threefold-muse/manifest.json",
+]
 
 
 @pytest.fixture
@@ -462,7 +480,9 @@ def test_a_directory_git_does_not_recognise_is_installed_in_workspace_mode(machi
 
     added = sorted(set(snapshot(workspace)) - set(before))
     assert added == sorted(["acme-workspace/" + relative for relative in WORKSPACE_FILES]
-                           + ["acme-workspace/.claude", "acme-workspace/.codex", "acme-workspace/.agents"])
+                           + ["acme-workspace/.claude", "acme-workspace/.codex", "acme-workspace/.agents",
+                              "acme-workspace/.threefold-muse", "acme-workspace/.threefold-muse/.muse-plugin",
+                              "acme-workspace/.threefold-muse/hooks"])
     assert not (workspace / ".git").exists()
     assert json.loads((workspace / ".threefold.json").read_text(encoding="utf-8")) == {"project": "Acme-Workspace", "mode": "observe"}
     for relative, matcher in MATCHERS.items():

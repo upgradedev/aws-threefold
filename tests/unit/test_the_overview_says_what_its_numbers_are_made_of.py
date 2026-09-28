@@ -112,6 +112,7 @@ def test_each_agent_is_marked_with_the_kind_of_caller_it_is() -> None:
 
 @pytest.mark.parametrize("agent, kind", [
     ("claude-code", "coding_agent"), ("codex", "coding_agent"), ("antigravity", "coding_agent"),
+    ("muse", "coding_agent"),
     ("page", "page"), ("ci", "ci"), ("pre-commit", "ci"), ("unknown", "unknown"), ("acme-bot", "unknown"), ("", "unknown"),
 ])
 def test_the_kind_of_every_agent_value(agent, kind) -> None:

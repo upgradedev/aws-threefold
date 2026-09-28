@@ -200,7 +200,7 @@ def is_governance_path(path: str, deletes: bool = False) -> bool:
     checkout has its own settings. `.threefold/` is included beside the listed
     files: it holds the rules the pre-commit check falls back to, and rewriting
     them is the same act as rewriting the hook settings. Case is ignored, since
-    two of the three agents run on file systems that ignore it too.
+    three of the four agents run on file systems that ignore it too.
     """
     if not path:
         return False
