@@ -17,6 +17,7 @@ import pytest
 
 from threefold.application import evaluator as evaluator_module
 from threefold.application import projects as stages
+from threefold.application import sandbox as sandbox_module
 from threefold.application.dtos import ToolCallRequestDTO
 from threefold.application.evaluator import GovernanceEvaluator
 from threefold.infrastructure.dynamo_repo import DynamoDBSessionRepository
@@ -287,6 +288,140 @@ def test_an_expired_sandbox_reads_as_unconfigured(repo, monkeypatch) -> None:
     monkeypatch.setattr(time_module, "time", lambda: real() + 120)
     assert repo.load_project_config("Acme-Sandbox-0a1b2c3d") is None
     assert "Acme-Sandbox-0a1b2c3d" not in repo.list_project_configs()
+
+
+# ---------------------------------------------------------------- a visitor's sandbox, on two containers
+
+
+class _CountingStore(DynamoDBSessionRepository):
+    """One store that both "containers" of a test share, counting each project's stage reads."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.reads: dict = {}
+
+    def load_project_config(self, project):
+        self.reads[project] = self.reads.get(project, 0) + 1
+        return super().load_project_config(project)
+
+
+@pytest.fixture
+def no_interval_ends(monkeypatch):
+    """Nothing a container holds grows old during the test, however slow the machine.
+
+    So a stage that changes on the other container can only be seen because it
+    was read again, never because the interval happened to run out.
+    """
+    monkeypatch.setattr(evaluator_module, "RULES_REFRESH_SECONDS", 3600.0)
+
+
+def _walkthrough_call(session_id: str, project: str) -> ToolCallRequestDTO:
+    """The walkthrough's last step as #/try sends it: a hook's call, managed, not a dry run.
+
+    The same write the sandbox was seeded with, which python-domain-stays-pure
+    flags. Without the model's sentence, so the test stays offline.
+    """
+    return _call(session_id, project=project, hook_mode="managed", explain=False)
+
+
+def _promote(evaluator: GovernanceEvaluator, name: str, enforce: list) -> None:
+    """What POST /api/projects/<name>/promote does, on the container that takes it."""
+    keys = stages.project_rule_keys(evaluator.rules_in_force(name)[0])
+    current = evaluator.project_config(name, fresh=True)
+    evaluator.save_project_config(
+        name, stages.promoted(current, NOW, "anonymous", enforce, keys), ttl_seconds=stages.SANDBOX_TTL_SECONDS
+    )
+
+
+def _demote(evaluator: GovernanceEvaluator, name: str) -> None:
+    """What POST /api/projects/<name>/demote does, on the container that takes it."""
+    keys = stages.project_rule_keys(evaluator.rules_in_force(name)[0])
+    current = evaluator.project_config(name, fresh=True)
+    evaluator.save_project_config(
+        name, stages.demoted(current, NOW, "anonymous", keys), ttl_seconds=stages.SANDBOX_TTL_SECONDS
+    )
+
+
+def test_a_sandbox_promoted_on_one_container_is_enforced_at_once_on_another(observe_default, no_interval_ends) -> None:
+    """The walkthrough's payoff, found approved under Observe by a judge who was quick.
+
+    One container reads the sandbox in Observe, another takes the promotion,
+    and the first judges the same call again straight away: refused, under
+    Enforce, and recorded so. The demotion comes back the same way.
+    """
+    repo = DynamoDBSessionRepository()
+    took_it = GovernanceEvaluator(session_repo=repo)
+    elsewhere = GovernanceEvaluator(session_repo=repo)
+    name = sandbox_module.create_sandbox(took_it)["project"]
+
+    before = elsewhere.evaluate_tool_call(_walkthrough_call("try-before", name))
+    assert (before.status, before.project_stage) == ("APPROVED", "observe")
+    assert name in elsewhere._project_configs, "The other container holds what it read"
+
+    _promote(took_it, name, ["python-domain-stays-pure"])
+    after = elsewhere.evaluate_tool_call(_walkthrough_call("try-after", name))
+    assert after.status == "BLOCKED_BOUNDARY_VIOLATION", "Refused at once on the container that did not take the promotion"
+    assert after.project_stage == "enforce"
+    row = _row(elsewhere, after.verdict_id)
+    assert (row["stage"], row["rule_key"]) == ("enforce", "python-domain-stays-pure")
+
+    _demote(took_it, name)
+    again = elsewhere.evaluate_tool_call(_walkthrough_call("try-demoted", name))
+    assert (again.status, again.project_stage) == ("APPROVED", "observe"), "A demotion lands at once as well"
+
+
+def test_an_ordinary_project_keeps_its_interval_while_a_sandbox_is_read_every_time(observe_default, no_interval_ends) -> None:
+    """The price of the sandbox's fresh stage, counted: one read per evaluation of a sandbox, none elsewhere."""
+    repo = _CountingStore()
+    took_it = GovernanceEvaluator(session_repo=repo)
+    elsewhere = GovernanceEvaluator(session_repo=repo)
+    _configure(took_it, "observe")
+    name = sandbox_module.create_sandbox(took_it)["project"]
+    assert repo.reads.get(name) == len(sandbox_module.SEEDED_CALLS), (
+        "Seeding reads the sandbox's stage once per seeded call, although the container that made it holds it"
+    )
+    assert repo.reads.get(PROJECT) is None, "An ordinary project saved here is held here, and never read"
+
+    for index in range(4):
+        elsewhere.evaluate_tool_call(_walkthrough_call(f"stage-held-{index}", PROJECT))
+        elsewhere.evaluate_tool_call(_walkthrough_call(f"try-read-{index}", name))
+    assert repo.reads[PROJECT] == 1, "An ordinary project is read once and then held for the interval"
+    assert repo.reads[name] == len(sandbox_module.SEEDED_CALLS) + 4, "A sandbox is read on every evaluation"
+
+    _configure(took_it, "enforce")
+    assert elsewhere.evaluate_tool_call(_walkthrough_call("stage-held-late", PROJECT)).status == "APPROVED", (
+        "Inside the interval an ordinary project's stage is still the one held, as docs/RUNBOOK.md says"
+    )
+    assert repo.reads[PROJECT] == 1
+
+
+def test_a_configuration_marked_sandbox_is_read_every_time_whatever_its_name(no_interval_ends) -> None:
+    repo = _CountingStore()
+    evaluator = GovernanceEvaluator(session_repo=repo)
+    evaluator.save_project_config("Acme-Visitor-Trial", stages.new_config(NOW, stage="observe", sandbox=True))
+    for index in range(3):
+        evaluator.evaluate_tool_call(_walkthrough_call(f"stage-marked-{index}", "Acme-Visitor-Trial"))
+    assert repo.reads.get("Acme-Visitor-Trial", 0) == 3
+
+
+def test_a_sandbox_whose_read_fails_keeps_the_stage_held(observe_default, no_interval_ends) -> None:
+    """Read every time, a sandbox reaches the failure path every time: it keeps what was held, as any project does."""
+
+    class _Flaky(DynamoDBSessionRepository):
+        failing = False
+
+        def load_project_config(self, project):
+            if self.failing:
+                raise ConnectionError("simulated DynamoDB outage")
+            return super().load_project_config(project)
+
+    repo = _Flaky()
+    evaluator = GovernanceEvaluator(session_repo=repo)
+    name = sandbox_module.create_sandbox(evaluator)["project"]
+    _promote(evaluator, name, ["python-domain-stays-pure"])
+    repo.failing = True
+    verdict = evaluator.evaluate_tool_call(_walkthrough_call("try-flaky", name))
+    assert (verdict.status, verdict.project_stage) == ("BLOCKED_BOUNDARY_VIOLATION", "enforce")
 
 
 # ---------------------------------------------------------------- the hook's mode
