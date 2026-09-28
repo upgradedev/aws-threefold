@@ -124,8 +124,9 @@ which the install script writes when it is given both.
 
 In enforce mode a write to the files that decide whether the hooks run
 (`.claude/settings*.json`, `.codex/hooks.json`, `.codex/config.toml`,
-`.agents/hooks.json`, `.threefold.json`, `.git/hooks/`, `.git/config`) is refused before
-anything is sent, so turning governance off does not depend on the network.
+`.agents/hooks.json`, `.threefold.json`, `.threefold-muse/`, `.git/hooks/`,
+`.git/config`) is refused before anything is sent, so turning governance off
+does not depend on the network.
 In managed mode the same is true while the stage last seen for the project is
 `enforce`, and only then, because a project in Observe is promised that
 nothing but a credential is refused on its machines. In observe mode,
@@ -271,7 +272,7 @@ _GOVERNANCE_PAIRS = frozenset(
     )
 )
 _GOVERNANCE_FILES = frozenset((".threefold.json",))
-_GOVERNANCE_DIRECTORIES = frozenset((".claude", ".codex", ".agents", ".git", ".threefold"))
+_GOVERNANCE_DIRECTORIES = frozenset((".claude", ".codex", ".agents", ".git", ".threefold", ".threefold-muse"))
 
 # Copied from threefold.domain.boundary_guard.SecretScanner.PATTERNS, because
 # this file is downloaded alone and cannot import it. A test compares the two
@@ -679,10 +680,13 @@ def detect_agent(payload: Dict[str, Any], forced: Optional[str] = None) -> str:
     if payload.get("model_provider") == "meta":
         return "muse"
     tool_name = payload.get("tool_name")
+    # The frozenset hashes what it is asked about, so an unhashable tool_name
+    # is asked about nothing: it falls through to the shapes below instead of
+    # raising TypeError out of detect_agent into main's catch-all.
     if (
         tool_name in MUSE_WRITE_TOOLS
         or tool_name in MUSE_COMMAND_TOOLS
-        or tool_name in MUSE_IGNORE_TOOLS
+        or (isinstance(tool_name, str) and tool_name in MUSE_IGNORE_TOOLS)
         or (isinstance(tool_name, str) and tool_name.startswith(MUSE_IGNORE_PREFIXES))
     ):
         return "muse"
@@ -1458,6 +1462,10 @@ def is_governance_path(path: str, deletes: bool = False) -> bool:
     if any(parts[index] == ".git" and parts[index + 1] == "hooks" for index in range(len(parts) - 1)):
         return True
     if ".threefold" in parts:
+        return True
+    # The Muse plugin bundle, laid out in subdirectories like .threefold
+    # rather than as named files: the hook beside its manifest.
+    if ".threefold-muse" in parts:
         return True
     return deletes and parts[-1] in _GOVERNANCE_DIRECTORIES
 

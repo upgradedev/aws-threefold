@@ -16,7 +16,7 @@ import pytest
 
 from threefold.domain.boundary_guard import SecretScanner
 
-AGENTS = ("claude-code", "codex", "antigravity")
+AGENTS = ("claude-code", "codex", "antigravity", "muse")
 LOG_LINE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z (outside-root|agent-config|data-file|never-send|no-project)$")
 
 

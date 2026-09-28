@@ -138,6 +138,24 @@ def test_a_muse_credential_is_refused_in_claude_s_shape(hook, tmp_path) -> None:
     assert "credential" in output["hookSpecificOutput"]["permissionDecisionReason"]
 
 
+def test_a_muse_write_to_its_own_plugin_bundle_is_refused_without_a_request(hook, tmp_path, monkeypatch) -> None:
+    """The bundle decides whether this hook runs, like every other agent's
+    settings: a Muse agent neutering its own hook is refused on the machine."""
+    calls = []
+    monkeypatch.setattr(hook, "post_evaluation", lambda body, endpoint, key=None: calls.append(body) or (200, {"status": "APPROVED"}, "OK"))
+    for relative in (
+        ".threefold-muse/hooks/threefold_hook.py",
+        ".threefold-muse/.muse-plugin/plugin.json",
+        ".threefold-muse/manifest.json",
+    ):
+        raw = _muse("write_file", {"path": relative, "content": "{}\n"}, str(tmp_path))
+        output, _ = hook.handle(raw, "muse")
+        assert output is not None, relative
+        assert output["hookSpecificOutput"]["permissionDecision"] == "deny", relative
+        assert relative in output["hookSpecificOutput"]["permissionDecisionReason"], relative
+    assert calls == []
+
+
 def test_a_muse_refusal_from_the_service_keeps_claude_s_shape(hook, tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(
         hook, "post_evaluation",

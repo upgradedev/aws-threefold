@@ -14,7 +14,7 @@ import json
 
 import pytest
 
-AGENTS = ("claude-code", "codex", "antigravity")
+AGENTS = ("claude-code", "codex", "antigravity", "muse")
 
 EXPLANATION = "Importing the AWS SDK into the domain couples your core to infrastructure."
 SUMMARY = "Checked fix: move boto3 out of the domain behind OrderPort; adapter: src/infrastructure/order_adapter.py."
