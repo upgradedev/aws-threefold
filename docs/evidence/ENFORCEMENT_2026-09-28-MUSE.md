@@ -16,22 +16,25 @@ afterwards — and, for the hook's own paths, what the plugin runner reports.
 | Muse | 1.4.0 | `write_file`, service BLOCKED through the plugin runner (runner reported blocked; disk not checked) | yes, and refused it | **no** |
 | Muse | 1.4.0 | `edit_file`, live session against a local enforcing server (owner runs, disk checked) | yes, and refused it | **no** |
 | Muse | 1.4.0 | shell (`powershell`), live session against a local enforcing server (owner runs, disk checked) | yes, and refused it | **no** |
-| Muse | 1.4.0 | `write_file`, clean write in the same live session (owner runs, disk checked) | yes, and allowed it | yes, as it should |
 
 Read the rows exactly as they are written:
 
 - **Rows 1, 4 and 5 are the decisive ones.** In the owner's runs a deny from
-  the hook stops the write, the edit and the shell command in Muse Code
-  1.4.0: the refused file was not created or changed, the agent reported each
-  call blocked, and no workaround was found in the measured runs.
+  the hook stops the write in Muse Code 1.4.0 over `write_file`: the refused
+  file was not created, the agent reported the call blocked, and no
+  workaround was found in the measured runs. The same live session stops the
+  edit over `edit_file` and the shell command over `powershell`, with the
+  refused file unchanged on the disk each time.
 - **Rows 2 and 3 are the runner's word, not the disk's.** The plugin runner
   was asked to run the real hook over a `write_file` carrying a credential
   and over one the stub service answered BLOCKED; both times the hook printed
   the Claude-style deny and the runner reported `should_block: true` with
   `permission_decision: "deny"`. No file was checked afterwards.
-- **Row 6 is the control.** The same live session created a clean file
-  unimpeded, so the three refusals above are the guardrail judging, not the
-  hook failing closed on everything.
+
+The control sits outside the table because the table's last column is
+machine-read: the same live session created a clean file unimpeded, so the
+three refusals above are the guardrail judging, not the hook failing closed
+on everything.
 
 ## The MSP route is dead
 
