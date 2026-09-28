@@ -90,7 +90,7 @@ def test_a_threefold_run_whose_hook_never_fired_is_not_a_measurement():
     rows = _matrix() + [_row(condition="threefold", rep=9, hook_fired=False, hook_missing=True, governed_calls=4)]
     summary = report.aggregate(rows)
     assert summary["by_condition"]["threefold"]["n"] == 4
-    assert summary["invalid"][0]["reason"].startswith("the Threefold hook never fired although the agent made 4 governed call(s)")
+    assert summary["invalid"][0]["reason"].startswith("the Threefold hook never fired although the agent made 4 governed calls")
 
 
 def test_no_headline_when_nothing_was_measured():

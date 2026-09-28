@@ -189,7 +189,7 @@ def _governance_problem(row: Mapping[str, Any]) -> Optional[str]:
     if not _uses_threefold(row):
         return None
     if row.get("hook_missing"):
-        return (f"the Threefold hook never fired although the agent made {row.get('governed_calls')} governed call(s); "
+        return (f"the Threefold hook never fired although the agent made {plural(row.get('governed_calls'), 'governed call')}; "
                 f"{AGENT_LABELS.get(agent_of(row), 'the agent')} did not load it, so this run did not measure Threefold")
     if row.get("governance_problem"):
         return str(row["governance_problem"])
@@ -221,7 +221,7 @@ def mixed_ledger_problem(rows: Sequence[Mapping[str, Any]]) -> Optional[str]:
         if not is_scripted(row) and _uses_threefold(row):
             sources.setdefault((agent_of(row), family_of(row)), Counter())[ledger_source(row)] += 1
     mixed = [f"the {AGENT_LABELS.get(agent, agent)}{'' if family == 'standard' else f' {family}-family'} Threefold rows "
-             f"hold {counts['remote']} run(s) against a remote Threefold and {counts['local']} against a local server"
+             f"hold {plural(counts['remote'], 'run')} against a remote Threefold and {counts['local']} against a local server"
              for (agent, family), counts in sources.items() if len(counts) > 1]
     if not mixed:
         return None

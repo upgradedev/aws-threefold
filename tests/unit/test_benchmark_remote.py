@@ -922,7 +922,7 @@ def test_the_report_never_pools_live_rows_with_the_matrix_s():
     live = _report_row(run_id="live", ledger_source="remote", threefold_endpoint="https://threefold.acme.test/")
     assert report.mixed_ledger_problem([local]) is None and report.mixed_ledger_problem([live]) is None
     problem = report.mixed_ledger_problem([local, live])
-    assert "1 run(s) against a remote Threefold and 1 against a local server" in problem
+    assert "1 run against a remote Threefold and 1 against a local server" in problem
     with pytest.raises(ValueError, match="remote Threefold"):
         report.build_summary([local, live], ["x.jsonl"])
     # Another agent's live rows beside Claude Code's matrix are not pooled anyway.

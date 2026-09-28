@@ -235,6 +235,11 @@ def test_each_condition_names_the_file_its_series_agent_read_the_rules_from(tmp_
               for section in build_proof.build([], series=[claude, codex])["benchmarks"]}
     assert labels["Claude Code"] == {"none": "no guidance", "prompt": "rules in CLAUDE.md", "threefold": "Threefold enforcing"}
     assert labels["Codex"] == {"none": "no guidance", "prompt": "rules in AGENTS.md", "threefold": "Threefold enforcing"}
+    # Rows of both agents given as one benchmark hold both agents' runs in each
+    # condition, so the label names both files, never Claude Code's alone.
+    both = build_proof.build([claude, codex])["benchmark"]
+    assert {c["condition"]: c["label"] for c in both["conditions"]}["prompt"] == "rules in CLAUDE.md or AGENTS.md"
+    assert "Claude Code: " in both["headline"] and "Codex: " in both["headline"]
 
 
 def test_the_committed_series_name_the_right_rules_file_and_count_in_plain_words() -> None:
