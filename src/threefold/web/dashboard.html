@@ -404,7 +404,7 @@
   <script src="assets/threefold.js"></script>
 </head>
 <body class="min-h-screen flex flex-col overflow-x-hidden">
-  <a class="tf-skip" href="#view">Skip to content</a>
+  <a id="tf-skip" class="tf-skip" href="#view">Skip to content</a>
 
   <!-- The shell every page wears, the same markup as the other pages', so the
        header, the navigation and the title stand still from page to page. -->
@@ -809,13 +809,38 @@
       };
     }
 
+    // The skip link names #view, the element every screen is drawn into, so
+    // it works on a page without script. With script the router would read
+    // that as a route and swap the screen for "Not found", taking a keyboard
+    // reader out of whatever they were doing. So the link moves the focus to
+    // the screen and changes nothing else: not the address, not the screen.
+    const SKIP_HASH = '#view';
+    function skipToView(event) {
+      if (event && typeof event.preventDefault === 'function') event.preventDefault();
+      const view = document.getElementById('view');
+      if (view && typeof view.focus === 'function') { try { view.focus(); } catch (err) { /* focus is a courtesy */ } }
+    }
+    const skipLink = document.getElementById('tf-skip');
+    if (skipLink && typeof skipLink.addEventListener === 'function') skipLink.addEventListener('click', skipToView);
+
     function route() {
+      // The address can still come to name #view without the link's click (a
+      // link opened afresh, or typed). The screen on show stays, with its
+      // address put back; opened at #view, the page draws its first screen.
+      if (location.hash === SKIP_HASH) {
+        if (current.route) {
+          try { history.replaceState(null, '', current.hash || '#/overview'); } catch (err) { /* the address stays */ }
+          skipToView();
+          return;
+        }
+        try { history.replaceState(null, '', location.pathname + location.search); } catch (err) { /* read as the first screen below */ }
+      }
       current.leave.forEach(fn => { try { fn(); } catch (err) { /* cleanup is best effort */ } });
       closeDialog();
       const token = current.token + 1;
-      const { path, params } = parseHash(location.hash);
+      const { path, params } = parseHash(location.hash === SKIP_HASH ? '' : location.hash);
       const found = resolve(path);
-      current = { token, route: found ? found.route : null, params, args: found ? found.args : [], leave: [], actions: {} };
+      current = { token, route: found ? found.route : null, hash: location.hash, params, args: found ? found.args : [], leave: [], actions: {} };
       T.mountNav(document.getElementById('tf-nav'), { active: found ? found.route.nav : '', inDashboard: true });
       // The proof is a committed snapshot, not a live read, and says so.
       const foot = document.getElementById('foot-words');
@@ -4255,6 +4280,17 @@
 }
 @media (min-width: 1024px) { .tf-try-actions { margin: auto -40px 0; padding: 18px 40px 22px; } }
 .tf-try-hint { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 0; font-size: 0.75rem; line-height: 1.25rem; color: var(--tf-text-3); }
+.tf-try-waited { margin: 0; max-width: 46ch; font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-3); }
+.tf-try-waited b { font-weight: 600; color: var(--tf-text); font-variant-numeric: tabular-nums; }
+.tf-try .tf-btn-primary[aria-busy="true"] { opacity: 1; }
+/* The sticky bar and the sticky header (and on a phone the rail) cover what
+   scrolls under them, so everything on the stage keeps that much room below
+   and above it when it is scrolled to: whatever the keyboard moves to stops
+   clear of them. The bar's own buttons keep none below, or reaching them
+   would scroll the page. The sizes are measured from the bar and the rail as
+   drawn (makeRoom). */
+.tf-try-stage * { scroll-margin: calc(var(--tf-header-h) + var(--tf-try-rail-h, 0px) + 8px) 0 calc(var(--tf-try-bar-h, 0px) + 8px); }
+.tf-try-stage .tf-try-actions * { scroll-margin-bottom: 0; }
 .tf-try-muted { color: var(--tf-text-3); font-size: 0.75rem; line-height: 1.125rem; }
 .tf-try-keys { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
 .tf-try-wait { display: contents; }
@@ -4565,6 +4601,12 @@
 .tf-try-verdict-icon { display: inline-flex; align-items: center; justify-content: center; width: 52px; height: 52px; flex-shrink: 0; border-radius: 16px;
   background: var(--tf-approved-soft); border: 1px solid var(--tf-approved-line); color: var(--tf-approved-text); }
 .tf-try-verdict-banner[data-tone="refused"] .tf-try-verdict-icon { background: var(--tf-refused-soft); border-color: var(--tf-refused-line); color: var(--tf-refused-text); }
+.tf-try-verdict-banner[data-tone="observed"] { border-color: var(--tf-observed-line);
+  background: radial-gradient(120% 160% at 0% 0%, color-mix(in srgb, var(--tf-observed) 16%, transparent), color-mix(in srgb, var(--tf-observed) 4%, transparent) 60%), var(--tf-surface-2); }
+.tf-try-verdict-banner[data-tone="observed"] .tf-try-verdict-icon { background: var(--tf-observed-soft); border-color: var(--tf-observed-line); color: var(--tf-observed-text); }
+.tf-try-verdict-banner[data-tone="observed"] .tf-try-verdict-reason mark { background: var(--tf-observed-soft); color: var(--tf-observed-text); }
+.tf-try-would { font-weight: 600; color: var(--tf-text); }
+.tf-try-sends { margin: 0; }
 .tf-try-verdict-icon .tf-icon { width: 28px; height: 28px; }
 .tf-try-verdict-body { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .tf-try-verdict-lead { margin: 0; font: 650 1.125rem/1.5rem var(--tf-font-sans); letter-spacing: -0.01em; color: var(--tf-text); }
@@ -4690,11 +4732,15 @@
     // falls under, which the rule's own definition lists; without that it
     // ends in an ellipsis rather than mid-word as if that were the end. A
     // command's reason is said of the call, since the card names the command.
+    // An approval's reason opens with why nothing was refused (the stage, a
+    // dry run, or the rule still observed); that opening is taken off here,
+    // and a screen that shows what is left says it is what would have been
+    // refused, never beside an approval as if it had been.
     function tryWhy(row, defs) {
       const full = String(reasonOf(row) || '');
       const cut = full.length >= 240;
       const text = full
-        .replace(/^Observe stage, not enforced\. This call would have been refused: /, '')
+        .replace(/^(?:Observe stage|Dry run|Rule \S+ is observed in this project), not enforced\. This call would have been refused: /, '')
         .replace(/^Clean Architecture violation: Layering rule '[^']*' refuses this write: /, '');
       const command = /^Command '.*' (reaches .*)$/.exec(text);
       if (command) return { sentence: tryStop('It ' + command[1]), imports: null };
@@ -4831,13 +4877,55 @@
       return Array.from(new Set((rows || []).map(r => r.agent))).sort((a, b) => tryAgentRank(a) - tryAgentRank(b)).map(agentLabel);
     }
 
+    // How long a request has been waited on, in whole seconds from the moment
+    // it left: a count, never an estimate of what is left, since nothing the
+    // page holds knows that.
+    function tryWaited(since) {
+      return Math.max(0, Math.floor((Date.now() - since) / 1000)) + ' s';
+    }
+
+    // A clock for one long request: it writes the seconds waited into one
+    // element, once a second, and nothing else. No step waits on it, and no
+    // step is drawn by it; the step moves on when the answer lands. The stop
+    // it returns is called then, on a failure, and when the reader leaves.
+    function tryClock(id, since) {
+      const timer = setInterval(() => {
+        const node = document.getElementById(id);
+        if (node) node.textContent = tryWaited(since);
+      }, 1000);
+      return () => clearInterval(timer);
+    }
+
+    // A proposed file whose body only throws is a skeleton: the gates can
+    // pass it, and the body is still the reader's to write. The answer
+    // carries no flag for that, so it is read from the file, by the line the
+    // fix proposer writes where a body belongs ("Call boto3 here", "Delegate
+    // to requests here"), in each language it writes.
+    const TRY_STUB_BODY = /(?:raise NotImplementedError|throw new (?:Error|UnsupportedOperationException|System\.NotImplementedException))\("(?:Call|Delegate to) [^"\n]* here"\)/;
+    function tryIsSkeleton(write) { return !!(write && typeof write.content === 'string' && TRY_STUB_BODY.test(write.content)); }
+
+    // A code token that ends a sentence, with its full stop kept on its line.
+    // BLOCKED_BOUNDARY_VIOLATION has nowhere a line may break, so a narrow
+    // card broke it wherever it overflowed and once left the stop alone on
+    // a line. Here it may break after an underscore or a slash (a dash is a
+    // place to break already), so its last part and the stop never part.
+    function tryTokenStop(token, cls) {
+      const parts = String(token == null ? '' : token).split(/(?<=[_/])/);
+      return html`<span class="tf-mono${cls ? ' ' + cls : ''}">${parts.map((p, i) => html`${i ? raw('<wbr>') : ''}${p}`)}.</span>`;
+    }
+
     function viewTry(ctx) {
       ensureTryStyle();
       const state = {
         step: 1, project: '', stage: null, seeded: null, calls: null, callsError: null, readiness: null, before: null, observed: [], flaggedRead: false, labels: {}, cursor: 0,
         selected: null, promoted: null, observing: null, result: null, replay: null, planned: false, error: null, busy: false, who: null, play: {}, focusId: null,
-        saves: [], rulesDef: null, lastLabel: null, seededAlarm: null
+        saves: [], rulesDef: null, lastLabel: null, seededAlarm: null, sends: [], makingSince: null
       };
+      // The clock of the one request a visitor may wait long on, making the
+      // sandbox; stopped when it answers or fails, and when the reader leaves.
+      let stopClock = () => {};
+      function waited() { stopClock(); stopClock = () => {}; state.makingSince = null; }
+      ctx.onLeave(() => waited());
       // A sandbox made earlier in this browser can be resumed. Its record
       // keeps what the stack answered about the call it seeded as a false
       // alarm, so a resumed walk still asks the reader to find it and says
@@ -4865,6 +4953,25 @@
       // How many calls a label went to, as a reader says it: "no call", not "0 calls".
       function marked(n) { return n === 0 ? 'no call' : plural(n, 'call'); }
       function readinessRules() { return (state.readiness && Array.isArray(state.readiness.rules)) ? state.readiness.rules : []; }
+
+      // What one answer from /evaluate-tool-call says, read from its own
+      // fields and nothing else: its verdict, the stage it reports, and the
+      // rules it names as ones that would have refused the call. Every word
+      // step 5 and the finish say about a sent call is built from these, so
+      // an answer judged in Observe is never worded as one judged in Enforce.
+      function answerOf(body) {
+        const r = body && typeof body === 'object' ? body : {};
+        const status = typeof r.status === 'string' ? r.status : '';
+        return {
+          status,
+          refused: !!(status && status !== 'APPROVED'),
+          stage: typeof r.project_stage === 'string' && STAGES[r.project_stage] ? r.project_stage : '',
+          observed: Array.isArray(r.observed_rules) ? r.observed_rules.filter(k => typeof k === 'string' && k) : []
+        };
+      }
+      function stageWord(stage) { return STAGES[stage] ? STAGES[stage].label : ''; }
+      // An answer in a few words: "APPROVED in Observe".
+      function answerWords(a) { return a.status + (a.stage ? ' in ' + stageWord(a.stage) : ''); }
 
       // Below 640px the labels move to the sticky bar (see verdicts()), and
       // a change of width redraws step 3 so they move with it.
@@ -4984,9 +5091,14 @@
 
       // ----------------------------------------------------- the stage
 
+      // While a request is out the button says what it is doing and stays
+      // where the keyboard left it: busy, and disabled only for the reader's
+      // tools (aria-disabled), not by the browser, which would drop the focus
+      // to the page and grey the words out. Pressing it again does nothing
+      // (see the guard on ctx.actions below).
       function primary(action, label, busyLabel, disabled) {
         const busy = state.busy;
-        return html`<button type="button" id="try-primary" class="tf-btn tf-btn-primary tf-btn-lg tf-try-primary" data-action="${action}"${busy ? raw(' aria-busy="true" disabled') : disabled ? raw(' disabled') : ''}>${busy ? (busyLabel || 'Working…') : label}${busy ? '' : T.icon('arrowright', 16)}</button>`;
+        return html`<button type="button" id="try-primary" class="tf-btn tf-btn-primary tf-btn-lg tf-try-primary" data-action="${action}"${busy ? raw(' aria-busy="true" aria-disabled="true"') : disabled ? raw(' disabled') : ''}>${busy ? (busyLabel || 'Working…') : label}${busy ? '' : T.icon('arrowright', 16)}</button>`;
       }
 
       function stageChipFlip(from, to, flip) {
@@ -5075,12 +5187,14 @@
             kicker: 'Step 1 of 5',
             title: 'Make a sandbox project',
             sentence: 'The stack makes you a project in Observe and sends it about a dozen synthetic calls from three agents, through the real evaluator.',
-            visual: html`${state.resume ? html`<div class="tf-callout tf-callout-accent tf-try-resume">${T.icon('clock', 18)}<div class="tf-callout-body"><p>You started one earlier: <span class="tf-mono tf-try-strong">${state.resume}</span>. <button type="button" class="tf-link" data-action="try-resume">Continue with it</button> where you left off, or make a new one.</p></div></div>` : ''}
-              ${lanes(null, play)}
+            visual: html`${state.resume ? html`<div class="tf-callout tf-callout-accent tf-try-resume">${T.icon('clock', 18)}<div class="tf-callout-body"><p>You started one earlier: ${tryTokenStop(state.resume, 'tf-try-strong')} <button type="button" class="tf-link" data-action="try-resume">Continue with it</button> where you left off, or make a new one.</p></div></div>` : ''}
               ${legend()}
+              ${lanes(null, play)}
               ${peeks(play)}`,
             foot: 'Its stage expires within a day, and the project then drops out of the overview and the project list; the calls and the labels stay in the public call lists for 30 days.',
-            actions: primary('try-create', 'Make my sandbox', 'Making your sandbox…')
+            actions: html`${primary('try-create', 'Make my sandbox', 'Making your sandbox…')}${state.busy && state.makingSince
+              ? html`<p class="tf-try-waited"><b id="try-waited">${tryWaited(state.makingSince)}</b> so far. The stack answers once it has made your project and judged every seeded call.</p>`
+              : ''}`
           };
         }
         const calls = Array.isArray(state.calls) ? state.calls : null;
@@ -5091,7 +5205,7 @@
             kicker: 'Step 1 of 5',
             title: 'Opening your sandbox',
             sentence: html`Reading the calls, the labels and the stage of <span class="tf-mono tf-try-strong">${state.project}</span> from the ledger.`,
-            visual: html`${lanes(null, play)}${legend()}`,
+            visual: html`${legend()}${lanes(null, play)}`,
             actions: primary('try-resume', 'Continue', 'Reading your sandbox…')
           };
         }
@@ -5106,8 +5220,8 @@
           title: state.seeded !== null ? plural(state.seeded, 'call') + ' arrived' : calls && calls.length ? plural(calls.length, 'call') + ' in your sandbox' : 'Your sandbox is ready',
           sentence: html`Every call was judged and recorded in <span class="tf-mono tf-try-strong">${state.project}</span>${refusedWords}${stageWords}.`,
           visual: html`${projectBar(calls ? html`${stat('approved', t.approved, 'approved')}${stat('observed', t.observed, 'would refuse')}${stat('refused', t.refused, 'refused')}` : '')}
-            ${lanes(calls, play)}
             ${legend()}
+            ${lanes(calls, play)}
             ${shortRead ? html`<p class="tf-try-muted">The list read back ${num(calls.length)} of the ${num(state.seeded)} so far: the ledger can lag a moment behind a write, and the next step reads it again.</p>` : ''}
             ${!calls && state.callsError ? html`<p class="tf-try-muted">The calls were recorded, but the list could not be read just now (${state.callsError.message || 'no answer'}). The next step reads it again.</p>` : ''}`,
           actions: primary('try-show', 'Show what would be refused', 'Reading the ledger…')
@@ -5575,11 +5689,16 @@
         const more = [];
         if (steps.length) more.push(plural(steps.length, 'step'));
         if (writes.length) more.push(plural(writes.length, 'proposed file'));
+        // Checked means the gates pass the files; a file whose body only
+        // throws still has to be written. Said beside the chip, so the one
+        // is never read without the other.
+        const skeleton = writes.some(tryIsSkeleton);
         return html`<section class="tf-try-fix" data-fix="${checked ? 'checked' : 'unchecked'}" aria-label="The fix in the response">
           <header class="tf-try-fix-head">
             <p class="tf-label">Suggested fix</p>
             ${typeof fix.kind === 'string' ? html`<span class="tf-chip tf-chip-gray">${fixKindLabel(fix.kind, fix.kind)}</span>` : ''}
             ${checked ? html`<span class="tf-chip tf-chip-emerald">${T.icon('check', 13)}Checked by Threefold: passes the same gates</span>` : ''}
+            ${skeleton ? html`<span class="tf-chip tf-chip-amber" data-skeleton>${T.icon('code', 13)}A skeleton: ${checked ? 'the gates pass; ' : ''}the body is yours to write</span>` : ''}
           </header>
           <p class="tf-try-fix-summary">${tryPlurals(fix.summary)}</p>
           ${checks.length ? html`<p class="tf-try-fix-checks" data-passed="${passed === checks.length ? 'all' : 'some'}">${T.icon(passed === checks.length ? 'shield' : 'alert', 16)}${num(passed)} of ${num(checks.length)} gate checks passed on the proposed files</p>` : ''}
@@ -5588,7 +5707,7 @@
             <div class="tf-try-fix-body">
               ${steps.length ? html`<ol class="tf-try-fix-steps">${steps.map(s => html`<li class="tf-break">${s}</li>`)}</ol>` : ''}
               ${writes.length ? html`<div class="tf-try-fix-writes">${writes.map(w => html`<div>
-                <p class="tf-try-fix-path">${w.path}${w.new_file === true ? ' · a new file: if it exists, add to it' : ''}${w.partial === true ? ' · add this with an Edit where the command put it' : ''}${typeof w.old_string === 'string' ? ' · an Edit: in place of the text you replaced' : ''}${w.content === '' ? ' · empty' : ''}</p>
+                <p class="tf-try-fix-path">${w.path}${tryIsSkeleton(w) ? ' · a skeleton: its body throws until you write it' : ''}${w.new_file === true ? ' · a new file: if it exists, add to it' : ''}${w.partial === true ? ' · add this with an Edit where the command put it' : ''}${typeof w.old_string === 'string' ? ' · an Edit: in place of the text you replaced' : ''}${w.content === '' ? ' · empty' : ''}</p>
                 <pre class="tf-pre tf-pre-plain"><code>${w.content}</code></pre>
               </div>`)}</div>` : ''}
             </div>
@@ -5605,41 +5724,91 @@
         return 'Stopped before the file was written';
       }
 
+      // Where the stage the reader promoted to was read from: the promotion's
+      // own answer, the project's configuration read on a return visit, or
+      // neither, when the page has only the reader's click to go on.
+      function promotedFrom() {
+        const p = state.promoted;
+        if (!p) return '';
+        if (p.earlier) return 'its configuration read Enforce when you came back to it';
+        return p.answered && p.stage === 'enforce' ? 'the promotion was answered with Enforce' : 'you promoted it to Enforce';
+      }
+
+      // Why an approval was an approval, in the answer's own terms: the
+      // stage it reports, and whether it names a rule that would have
+      // refused the call. No cause the answer does not carry is offered.
+      function approvedWords(a, what) {
+        const rule = a.observed[0] || '';
+        if (a.stage === 'observe') {
+          const from = promotedFrom();
+          return 'The answer reports your sandbox in Observe' + (from ? ', though ' + from : '') + '. In Observe a rule records a call it would refuse and lets it run'
+            + (rule ? ': ' + rule + ' recorded this ' + what + '.' : ', and no rule flagged this ' + what + '.');
+        }
+        if (a.stage === 'enforce') {
+          return rule
+            ? 'The answer reports Enforce, and names ' + rule + ' as a rule still observed in this project: it recorded this ' + what + ' and let it run.'
+            : 'The answer reports Enforce, and no rule flagged this ' + what + '.';
+        }
+        return 'The answer reports no stage' + (rule ? '; it names ' + rule + ' as a rule that would have refused this ' + what + ', and let it run.' : ', and no rule flagged this ' + what + '.');
+      }
+
+      // Every answer this sandbox's call was given, oldest first, when there
+      // was more than one: "Sent 2 times: APPROVED in Observe, then
+      // BLOCKED_BOUNDARY_VIOLATION in Enforce."
+      function sendsWords() {
+        if (state.sends.length < 2) return '';
+        return 'Sent ' + plural(state.sends.length, 'time') + ': ' + state.sends.map(answerWords).join(', then ') + '.';
+      }
+
       function screenClimax(play) {
         const r = state.result || {};
+        const a = answerOf(r);
         const plan = state.replay;
-        const refused = !!(r.status && r.status !== 'APPROVED');
+        const refused = a.refused;
+        const rule = a.observed[0] || '';
+        // Refused, approved with a rule that would have refused it, or
+        // approved with nothing flagged: the page's three outcomes, each
+        // read from the answer.
+        const outcome = refused ? 'refused' : rule ? 'observed' : 'approved';
         // A sentence from the model is quoted under a caption that names it.
         // One the model did not write adds nothing to the rule's reason the
         // banner already gives, so it is not quoted: one quiet line says why
         // there is no model sentence, and the fix takes the width.
         const modelSaid = !!(r.bedrock_explanation && r.explanation_source === 'bedrock');
-        const noModel = !modelSaid && (r.bedrock_explanation || r.explanation_source === 'deterministic_fallback')
-          ? (r.explanation_source === 'deterministic_fallback'
-            ? 'No model sentence this time: Amazon Bedrock was asked and did not answer. The rule\'s reason above is the service\'s own, and the deterministic gate made the verdict either way.'
-            : 'No model sentence this time: the rule\'s reason above is the service\'s own, and the deterministic gate made the verdict.')
+        // Plain words first: the rule's reason as a reader would say it. The
+        // precise terms (the rule, the verdict, the stage) come second. An
+        // approval shows a rule's reason only when the answer names a rule
+        // that would have refused the call, and says it is that.
+        const why = r.reason && outcome !== 'approved'
+          ? tryWhy({ status: refused ? r.status : 'APPROVED', observed_rules: a.observed, reason: r.reason, rule_key: plan && plan.rule }, state.rulesDef)
+          : null;
+        const asked = r.explanation_source === 'deterministic_fallback';
+        const madeIt = why ? 'the rule\'s reason above is the service\'s own, and the deterministic gate made the verdict' : 'the deterministic gate made the verdict';
+        const noModel = !modelSaid && (r.bedrock_explanation || asked)
+          ? (asked
+            ? 'No model sentence this time: Amazon Bedrock was asked and did not answer. ' + madeIt.charAt(0).toUpperCase() + madeIt.slice(1) + ' either way.'
+            : 'No model sentence this time: ' + madeIt + '.')
           : '';
         const fixHtml = tryFix(r.suggested_fix);
-        // Plain words first: the rule's reason as a reader would say it. The
-        // precise terms (the rule, the verdict, the stage) come second.
-        const why = r.reason ? tryWhy({ status: r.status || 'APPROVED', reason: r.reason, rule_key: plan && plan.rule }, state.rulesDef) : null;
         const what = plan ? planWhat(plan) : 'call';
         const same = plan ? sameWords(plan) : '';
+        const inStage = a.stage ? ' in ' + stageWord(a.stage) : '';
+        const sends = sendsWords();
         return {
           tone: refused ? 'refused' : '',
-          kicker: refused ? 'Step 5 of 5 · refused' : 'Step 5 of 5 · the answer',
-          title: refused ? 'Refused, before it ran' : 'The service approved it',
+          kicker: 'Step 5 of 5 · ' + (refused ? 'refused' : 'approved'),
+          title: refused ? 'Refused, before it ran' : 'Approved' + inStage,
           sentence: refused
             ? (same
-              ? 'The ' + what + ' that ran in Observe is refused in Enforce: ' + same + ', a new stage.'
-              : 'The ' + what + ' built from the rule is refused now that your sandbox is in Enforce.')
-            : 'This call was not refused' + (r.project_stage ? ' in stage ' + r.project_stage : '') + ': the rule it was built from may not be in force here.',
+              ? 'The ' + what + ' that ran in Observe is refused' + inStage + ': ' + same + (a.stage === 'enforce' ? ', a new stage.' : '.')
+              : 'The ' + what + ' built from the rule is refused' + (a.stage === 'enforce' ? ' now that your sandbox is in Enforce.' : inStage + '.'))
+            : approvedWords(a, what),
           visual: html`<div class="tf-try-climax${play.climax ? ' tf-try-play' : ''}">
-            <div class="tf-try-verdict-banner" data-tone="${refused ? 'refused' : 'approved'}">
-              <span class="tf-try-verdict-icon" aria-hidden="true">${T.icon(refused ? 'stop' : 'check', 28)}</span>
+            <div class="tf-try-verdict-banner" data-tone="${outcome}">
+              <span class="tf-try-verdict-icon" aria-hidden="true">${T.icon(tryOutcomeIcon(outcome), 28)}</span>
               <div class="tf-try-verdict-body">
-                <p class="tf-try-verdict-lead">${refused ? stoppedWords(plan) : 'Answered with an approval'}</p>
-                ${why ? html`<p class="tf-try-verdict-reason">${tryWhyHtml(why)}</p>` : ''}
+                <p class="tf-try-verdict-lead">${refused ? stoppedWords(plan) : rule ? 'Recorded, not refused' : 'Approved: no rule flagged it'}</p>
+                ${why ? html`<p class="tf-try-verdict-reason">${refused ? '' : html`<span class="tf-try-would">It would have been refused:</span> `}${tryWhyHtml(why)}</p>` : ''}
                 <p class="tf-try-verdict-terms">
                   ${plan && plan.rule ? html`<span class="tf-try-term"><span>Rule</span><span class="tf-mono">${plan.rule}</span></span>` : ''}
                   <span class="tf-try-term"><span>Verdict</span><span class="tf-mono">${r.status || '—'}</span></span>
@@ -5647,8 +5816,9 @@
                 </p>
               </div>
             </div>
+            ${sends ? html`<p class="tf-try-muted tf-try-sends">${sends}</p>` : ''}
             ${plan ? html`<div class="tf-try-compare tf-try-climax-compare">
-              <div class="tf-try-now-col"><p class="tf-try-then-label">${refused ? 'Now, in Enforce · refused' : 'Now · approved'}</p>${editor(plan, refused ? 'refused' : 'approved')}</div>
+              <div class="tf-try-now-col"><p class="tf-try-then-label">Now${a.stage ? ', in ' + stageWord(a.stage) : ''} · ${refused ? 'refused' : 'approved'}</p>${editor(plan, refused ? 'refused' : 'approved')}</div>
               <div class="tf-try-then-col">${thenCard(plan)}</div>
             </div>` : ''}
             ${modelSaid || fixHtml ? html`<div class="tf-try-climax-grid"${modelSaid ? '' : raw(' data-single')}>
@@ -5661,7 +5831,11 @@
             </div>` : ''}
             ${noModel ? html`<p class="tf-try-muted tf-try-nomodel">${T.icon('info', 14)}<span>${noModel}</span></p>` : ''}
           </div>`,
-          actions: primary('try-finish', 'See what just happened')
+          // An approval is not the end of it: the same call can be sent
+          // again, beside the way on to the summary.
+          actions: refused || !plan
+            ? primary('try-finish', 'See what just happened')
+            : html`${primary('try-send', 'Send it again', 'Sending…')}<button type="button" class="tf-btn tf-btn-lg" data-action="try-finish"${state.busy ? raw(' aria-disabled="true"') : ''}>See what just happened</button>`
         };
       }
 
@@ -5706,20 +5880,29 @@
           source: 'POST …/reviews · GET …/projects · POST …/promote'
         });
         const r = state.result || {};
-        const refused = !!(r.status && r.status !== 'APPROVED');
+        const a = answerOf(r);
+        const refused = a.refused;
         const fix = r.suggested_fix && typeof r.suggested_fix === 'object' && typeof r.suggested_fix.summary === 'string' ? r.suggested_fix : null;
         const fixChecks = fix && Array.isArray(fix.checks) ? fix.checks.filter(x => x && typeof x === 'object') : [];
+        const skeleton = !!(fix && Array.isArray(fix.writes) && fix.writes.some(tryIsSkeleton));
         // A fix is called checked only when the service says so, and called
-        // unchecked only when there were checks for it to fail.
+        // unchecked only when there were checks for it to fail; one whose
+        // body is left to write is called a skeleton, as step 5 calls it.
         const extras = [];
-        if (fix) extras.push(fix.validated === true ? 'a fix checked by Threefold' : fixChecks.length ? 'a fix the gates did not pass' : 'a suggested fix');
+        if (fix) extras.push(fix.validated === true ? (skeleton ? 'a skeleton fix checked by Threefold' : 'a fix checked by Threefold') : fixChecks.length ? 'a fix the gates did not pass' : 'a suggested fix');
         if (r.explanation_source === 'bedrock') extras.push('a sentence from Amazon Bedrock');
         const rule = state.replay && state.replay.rule ? ' by ' + state.replay.rule : '';
+        const observedBy = a.observed[0] || '';
+        // Named by the stage the answer reports, never by the stage the page
+        // expected: an answer judged in Observe reads "in Observe".
+        const call = state.replay && earlierRow(state.replay) ? 'the same call' : 'the same kind of call';
+        const before = state.sends.slice(0, -1).map(answerWords);
+        const earlier = before.length ? ' Sent ' + plural(state.sends.length, 'time') + (before.length === 1 ? '; the answer before was ' : '; the answers before were ') + tryList(before) + '.' : '';
         facts.push({
-          figure: refused ? 'Refused' : (r.status ? 'Approved' : '—'), tone: refused ? 'refused' : '',
-          label: state.replay && earlierRow(state.replay) ? 'the same call, in Enforce' : 'the same kind of call, in Enforce',
-          text: r.status
-            ? (refused ? 'Stopped' + rule + ' before it ran' : 'Approved') + (extras.length ? ', with ' + tryList(extras) : '') + '. Its verdict: ' + r.status + '.'
+          figure: refused ? 'Refused' : (a.status ? 'Approved' : '—'), tone: refused ? 'refused' : '',
+          label: a.status ? call + (a.stage ? ', in ' + stageWord(a.stage) : '') : state.planned && !state.replay ? 'no call sent again' : call + ', not answered',
+          text: a.status
+            ? html`${refused ? 'Stopped' + rule + ' before it ran' : 'Approved' + (a.stage ? ' in ' + stageWord(a.stage) : '') + (observedBy ? ', and recorded as a call ' + observedBy + ' would have refused' : ', with no rule flagging it')}${extras.length ? ', with ' + tryList(extras) : ''}. Its verdict: ${tryTokenStop(a.status)}${earlier}`
             : state.planned && !state.replay ? 'No call was sent: no rule in force can be shown by a single call.' : 'No answer was recorded.',
           source: 'POST /evaluate-tool-call'
         });
@@ -5733,11 +5916,21 @@
         </a>`;
       }
 
+      // What the reader did, and only that: a sandbox where nothing was
+      // flagged had nothing to label. Demote is one click, and it moves the
+      // whole project back to Observe, not one rule.
+      function doneWords() {
+        const did = ['watched'];
+        if (labelledCount()) did.push('labelled');
+        if (state.promoted) did.push('promoted');
+        return 'You ' + tryList(did) + (state.promoted ? '; if a rule bites wrong, one click demotes the project to Observe.' : '.') + ' Here is what the service answered.';
+      }
+
       function screenDone(play) {
         return {
           kicker: 'Done',
           title: 'That was the whole rollout',
-          sentence: 'Watch, label, promote, and demote in one click if a rule bites wrong: here is what the service answered.',
+          sentence: doneWords(),
           visual: html`<ol class="tf-try-facts${play.enter ? ' tf-try-play' : ''}">${completionFacts().map((f, i) => html`<li class="tf-try-fact tf-try-rise" style="--tf-try-i:${i}" data-tone="${f.tone || ''}">
               <span class="tf-try-fact-n">${f.figure}</span>
               <span class="tf-try-fact-label">${f.label}</span>
@@ -5777,6 +5970,8 @@
       function draw() {
         const play = state.play || {};
         state.play = {};
+        // A button the keyboard pressed is drawn again as busy, and keeps the focus.
+        const onPrimary = !!(document.activeElement && document.activeElement.id === 'try-primary');
         const s = screen(play);
         ctx.render(html`${head()}<div class="tf-try${play.enter ? ' tf-try-entering' : ''}" data-step="${state.step}"${closedHere() ? raw(' data-closed="true"') : ''}>
           ${side()}
@@ -5789,21 +5984,50 @@
             ${state.error ? html`<div class="tf-callout tf-callout-danger" role="alert">${T.icon('alert', 18)}<div class="tf-callout-body"><p>${state.error}</p></div></div>` : ''}
             <div class="tf-try-visual">${s.visual || ''}</div>
             ${s.foot ? html`<p class="tf-try-foot">${s.foot}</p>` : ''}
-            <div class="tf-try-actions">${s.actions || ''}</div>
+            <div id="try-actions" class="tf-try-actions">${s.actions || ''}</div>
           </section>
         </div>`);
         if (!ctx.alive()) return;
+        makeRoom();
         // A promotion plays at the top of the stage (the title, the chip and
         // the switch), while the button that made it sits in the bar at the
         // foot of a long list; on a phone the reader is taken back up to it.
         if (play.enter || play.promote) scrollToStage();
-        const id = state.focusId;
+        const id = state.focusId || (onPrimary ? 'try-primary' : null);
         state.focusId = null;
         if (id) {
           const node = document.getElementById(id);
           if (node && typeof node.focus === 'function' && !node.disabled) { try { node.focus({ preventScroll: true }); } catch (err) { /* focus is a courtesy */ } }
         }
       }
+
+      // The room the stage keeps below what the keyboard moves to, for the
+      // sticky bar, and above it for the rail where the rail sticks (a
+      // phone): each as tall as it is drawn, so no control is parked under
+      // either (the walkthrough's styles read them into the stage's scroll
+      // margins). Set after every draw and on a change of width, and taken
+      // off on leaving.
+      function makeRoom() {
+        const root = document.documentElement;
+        if (!root || !root.style || typeof root.style.setProperty !== 'function') return;
+        const bar = document.getElementById('try-actions');
+        const rail = document.getElementById('try-rail');
+        const tall = node => (node && typeof node.getBoundingClientRect === 'function' ? Math.ceil(node.getBoundingClientRect().height) : 0);
+        let railSticks = false;
+        try { railSticks = !!(rail && typeof getComputedStyle === 'function' && getComputedStyle(rail).position === 'sticky'); } catch (err) { railSticks = false; }
+        root.style.setProperty('--tf-try-bar-h', tall(bar) + 'px');
+        root.style.setProperty('--tf-try-rail-h', (railSticks ? tall(rail) : 0) + 'px');
+      }
+      function onResize() { if (ctx.alive()) makeRoom(); }
+      if (typeof window.addEventListener === 'function') window.addEventListener('resize', onResize);
+      ctx.onLeave(() => {
+        if (typeof window.removeEventListener === 'function') window.removeEventListener('resize', onResize);
+        const root = document.documentElement;
+        if (root && root.style && typeof root.style.removeProperty === 'function') {
+          root.style.removeProperty('--tf-try-bar-h');
+          root.style.removeProperty('--tf-try-rail-h');
+        }
+      });
 
       // A new step starts at the top of the stage: on a desk the page goes back
       // to its top, where the page head stands above the stage and both are in
@@ -6102,13 +6326,22 @@
       document.addEventListener('keydown', onKey);
       ctx.onLeave(() => document.removeEventListener('keydown', onKey));
 
-      ctx.actions({
+      const actions = {
         'try-create': () => {
-          state.busy = true; state.error = null; draw();
+          state.busy = true; state.error = null;
+          // Making a sandbox can take several seconds (the stack judges every
+          // seeded call before it answers), so the bar counts the seconds
+          // from the moment the request leaves, and the keyboard stays on the
+          // button that says it is working.
+          state.makingSince = Date.now();
+          stopClock = tryClock('try-waited', state.makingSince);
+          state.focusId = 'try-primary';
+          announce('Making your sandbox. The stack answers once it has judged every seeded call.');
+          draw();
           return T.api('/api/sandbox', { method: 'POST', body: {} }).then(body => {
             if (!ctx.alive()) return;
             const name = body && body.project ? String(body.project) : '';
-            if (!/^Acme-Sandbox-[0-9a-f]{8}$/.test(name)) { fail({ message: 'the stack returned no sandbox name', kind: 'http' }, 'create'); return; }
+            if (!/^Acme-Sandbox-[0-9a-f]{8}$/.test(name)) { waited(); fail({ message: 'the stack returned no sandbox name', kind: 'http' }, 'create'); return; }
             state.project = name;
             // The contract makes every sandbox in Observe.
             state.stage = 'observe';
@@ -6117,11 +6350,12 @@
             remember();
             return loadCalls().then(() => {
               if (!ctx.alive()) return;
+              waited();
               state.busy = false;
               enter(1, { arrive: true });
               draw();
             });
-          }, err => { if (ctx.alive()) fail(err, 'create'); });
+          }, err => { waited(); if (ctx.alive()) fail(err, 'create'); });
         },
         'try-resume': () => {
           state.project = state.resume; state.seeded = null; state.stage = null; state.busy = true; state.error = null;
@@ -6220,7 +6454,11 @@
               const history = Array.isArray(config.history) ? config.history : [];
               const entry = history.filter(h => h && h.action === 'promote' && Array.isArray(h.enforce)).pop();
               const inForce = entry ? entry.enforce.map(String) : enforce;
-              state.promoted = { stage, enforce: inForce, observe: Array.isArray(config.observe_rules) ? config.observe_rules.map(String) : state.observing.slice() };
+              // Whether the stage is the answer's word or the page's own
+              // default, so step 5 says "the promotion was answered with
+              // Enforce" only when it was.
+              const answered = typeof config.stage === 'string' || !!(answer && typeof answer.stage === 'string');
+              state.promoted = { stage, answered, enforce: inForce, observe: Array.isArray(config.observe_rules) ? config.observe_rules.map(String) : state.observing.slice() };
               return planReplay(inForce);
             })
             .then(plan => {
@@ -6274,6 +6512,8 @@
             if (!ctx.alive()) return;
             state.busy = false;
             state.result = body || {};
+            // Every answer is kept, so a second send never hides the first.
+            state.sends.push(answerOf(state.result));
             enter(5, { climax: true });
             draw();
           }, err => { if (ctx.alive()) fail(err, 'send'); });
@@ -6287,12 +6527,22 @@
           try { localStorage.removeItem(TRY_STORAGE); } catch (err) { /* nothing stored */ }
           Object.assign(state, {
             step: 1, project: '', stage: null, seeded: null, calls: null, callsError: null, readiness: null, before: null, observed: [], flaggedRead: false, labels: {}, cursor: 0,
-            selected: null, promoted: null, observing: null, result: null, replay: null, planned: false, error: null, busy: false, resume: null, saves: [], rulesDef: null, lastLabel: null, seededAlarm: null
+            selected: null, promoted: null, observing: null, result: null, replay: null, planned: false, error: null, busy: false, resume: null, saves: [], rulesDef: null, lastLabel: null, seededAlarm: null,
+            sends: []
           });
+          waited();
           enter(1);
           draw();
         }
+      };
+      // A busy button is aria-disabled, not disabled, so it keeps the focus;
+      // a key press still clicks it. While a request is out, the actions that
+      // start one, or move past its answer, do nothing, so none is sent twice.
+      ['try-create', 'try-resume', 'try-show', 'try-review', 'try-readiness', 'try-promote', 'try-next', 'try-send', 'try-finish'].forEach(name => {
+        const act = actions[name];
+        actions[name] = (el, event) => (state.busy ? undefined : act(el, event));
       });
+      ctx.actions(actions);
 
       state.play = { peeks: true };
       draw();
