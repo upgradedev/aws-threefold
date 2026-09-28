@@ -687,6 +687,10 @@
       tag.className = 'tf-chip ' + (halted ? 'tf-chip-rose' : 'tf-chip-emerald');
       tag.innerHTML = glyph(halted ? 'stop' : 'check') + (halted ? 'Halted' : 'Running');
 
+      // Why a breaker stopped it: GET /sessions/{id} does not say, and the
+      // listing already read does, so it is taken from there.
+      const listed = sessions.find(s => s && s.session_id === data.session_id) || {};
+      const reason = halted ? (data.trip_reason || listed.trip_reason || '') : '';
       const budget = Number(data.budget_usd) || 0;
       const spent = Number(data.cumulative_cost_usd) || 0;
       const used = budget > 0 ? Math.min(100, (spent / budget) * 100) : 0;
@@ -702,8 +706,8 @@
           detailRow('Budget left', '$' + (Number(data.budget_remaining_usd) || 0).toFixed(4),
             (Number(data.budget_remaining_usd) || 0) > 0 ? 'tf-good' : 'tf-bad') +
           detailRow('Stopped', halted ? 'yes' : 'no', halted ? 'tf-bad' : 'tf-good') +
-          (data.trip_reason ? detailRow('Why', whyStopped(data.trip_reason)) : '') +
-          (data.trip_reason && whyStopped(data.trip_reason) !== String(data.trip_reason) ? detailRow('The breaker said', data.trip_reason, 'text-gray-400') : '') +
+          (reason ? detailRow('Why', whyStopped(reason)) : '') +
+          (reason && whyStopped(reason) !== String(reason) ? detailRow('The breaker said', reason, 'text-gray-400') : '') +
           detailRow('Started', formatTimestamp(data.created_at), 'text-gray-400') +
         '</dl>' +
         '<div class="mt-4">' +

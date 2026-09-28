@@ -1808,7 +1808,10 @@ answer = api({
   '/api/projects': { status: 200, body: { projects: [
     { project: 'Acme-Payments', source: 'fleet', stage: 'observe', calls: 50 }, { project: 'Acme-Probe', source: 'probe', stage: 'observe', calls: 1 },
     { project: 'Acme-Demo', source: 'other', stage: 'observe', calls: 3 }
-  ] } }
+  ] } },
+  // As GET /sessions/{id} answers: no trip_reason of its own.
+  '/sessions/sim-0a1b2c3d': { status: 200, body: { session_id: 'sim-0a1b2c3d', project_name: 'Acme-Demo', is_tripped: true,
+    tool_call_history_count: 3, cumulative_cost_usd: 0.027, budget_usd: 10, budget_remaining_usd: 9.973, created_at: '2026-09-28T04:08:10.097110+00:00' } }
 });
 """
 
@@ -1824,6 +1827,8 @@ def test_the_sessions_page_says_where_its_sessions_come_from_and_why_they_stoppe
   out.calls = [el('kpi-calls-note').innerText, el('kpi-calls-note').hidden];
   out.tripped = [el('kpi-tripped-note').innerText, el('kpi-tripped-note').hidden];
   out.reads = calls.map(c => c.url);
+  await selectSession('sim-0a1b2c3d');
+  out.detail = el('detail-body').innerHTML;
 """,
         tmp_path,
         before=SESSIONS,
@@ -1843,6 +1848,9 @@ def test_the_sessions_page_says_where_its_sessions_come_from_and_why_they_stoppe
     assert started and started.groups() == ("2026-09-28T04:08:10.097Z", "2026-09-28 04:08:10Z", "Sep 28, 04:08"), \
         "The column shows the day and the minute; the whole value is the element's"
     assert "https://example.test/prod/api/projects" in out["reads"], "The chips come from the same stack as the rows"
+    detail = html.unescape(out["detail"])
+    assert "<dt>Why</dt><dd class=\"\">The same call kept repeating</dd>" in detail, "The detail says why, from the listing the page already read"
+    assert "Monomorphic loop detected: Tool 'run_command' invoked with identical arguments 3 consecutive times" in detail, "and keeps the breaker's own words"
 
 
 def test_calls_observed_says_what_it_counts(tmp_path: Path) -> None:
