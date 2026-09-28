@@ -41,7 +41,7 @@ SENTENCE = (
     "Deterministic gates on AWS judge each write and command from Claude Code, Codex, Antigravity or Muse. "
     "Each repository only watches until you promote its rules."
 )
-SCOPE = "A refusal is measured to stop the write in Claude Code and Antigravity, in Codex once, over its patch tool only, and in Muse over its file-write tool only."
+SCOPE = "A refusal is measured to stop the write in Claude Code and Antigravity, in Codex once, over its patch tool only, and in Muse over its file-write, edit and shell tools."
 ACTIONS = [
     ("hero-try", "dashboard.html#/try", "Try the two-stage rollout — 2 min"),
     ("hero-dashboard", "dashboard.html#/overview", "Open the live dashboard"),
@@ -429,8 +429,8 @@ def test_each_agent_is_described_in_the_words_of_the_evidence_it_links() -> None
             assert " ".join(words.split()) in " ".join(evidence.replace("`", "").split()), f"{words!r} is not in {link}"
     assert "tf-chip-amber" in agents[2] and "Measured once, over its patch tool" in agents[2], "Codex is not rounded up"
     assert "shell route is not measured" in _text(agents[2])
-    assert "tf-chip-amber" in agents[3] and "Measured over its file-write tool" in agents[3], "Muse is not rounded up"
-    assert "routes are not measured" in _text(agents[3])
+    assert "tf-chip-amber" in agents[3] and "Measured over its file-write, edit and shell tools" in agents[3], "Muse is not rounded up"
+    assert "not measured" not in _text(agents[3])
 
 
 def test_the_page_promises_a_fix_only_where_one_can_be_made() -> None:

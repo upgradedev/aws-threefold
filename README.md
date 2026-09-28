@@ -209,8 +209,9 @@ one run: the hook refused an `apply_patch` that added `boto3` to a governed
 file, and the file's sha256 was unchanged afterwards. For Codex that is one
 route, one run; the shell route and a refusal from a hook that makes no network
 call are not measured. Muse 1.4.0 was measured on 2026-09-28: the hook refused
-a `write_file` and the refused file was not created; its edit and shell routes
-are not measured. Method and results:
+a `write_file` and the refused file was not created, and in a live session a deny
+stopped an `edit_file` and a shell command too, each file unchanged on the disk.
+Method and results:
 [`docs/evidence/ENFORCEMENT_2026-09-21.md`](docs/evidence/ENFORCEMENT_2026-09-21.md),
 [`docs/evidence/ENFORCEMENT_2026-09-23.md`](docs/evidence/ENFORCEMENT_2026-09-23.md)
 and
@@ -507,7 +508,7 @@ Then open <http://localhost:8001/> or <http://localhost:8001/dashboard.html>.
 | [`docs/evidence/PROBES_2026-09-27-2-edge.md`](docs/evidence/PROBES_2026-09-27-2-edge.md), [`docs/evidence/PROBES_2026-09-27-2.md`](docs/evidence/PROBES_2026-09-27-2.md) | `scripts/probe_live.py` against the site and against the origin URL on 2026-09-27: 117 PASS, 0 FAIL, 3 SKIP each, with every check's evidence line. The earlier runs sit beside them, the first on 2026-09-22 against the origin: 113 PASS, 0 FAIL, 3 SKIP |
 | [`docs/evidence/ENFORCEMENT_2026-09-21.md`](docs/evidence/ENFORCEMENT_2026-09-21.md) | Whether a deny stops the write, per agent, checked on the file system |
 | [`docs/evidence/ENFORCEMENT_2026-09-23.md`](docs/evidence/ENFORCEMENT_2026-09-23.md) | The same question for Codex CLI 0.155.0, over its patch tool, in one run |
-| [`docs/evidence/ENFORCEMENT_2026-09-28-MUSE.md`](docs/evidence/ENFORCEMENT_2026-09-28-MUSE.md) | The same question for Muse 1.4.0, over `write_file`; the MSP-approval route measured dead |
+| [`docs/evidence/ENFORCEMENT_2026-09-28-MUSE.md`](docs/evidence/ENFORCEMENT_2026-09-28-MUSE.md) | The same question for Muse 1.4.0, over `write_file`, `edit_file` and the shell; the MSP-approval route measured dead |
 | [`docs/evidence/DEPLOYMENT_2026-09-20.md`](docs/evidence/DEPLOYMENT_2026-09-20.md) | Raw output of the first deployment, including the CloudTrail events that show Bedrock called by the function's own role |
 | [`docs/evidence/BENCHMARK_2026-09-22.md`](docs/evidence/BENCHMARK_2026-09-22.md) | The standard-task matrix with `claude-sonnet-5`: 54 runs, a governed violation landed in 17% / 0% / 0% of runs with no guidance, with the rules in `CLAUDE.md` and with Threefold enforcing |
 | [`docs/evidence/BENCHMARK_2026-09-22-HAIKU.md`](docs/evidence/BENCHMARK_2026-09-22-HAIKU.md) | The same 54 runs with `claude-haiku-4-5`: 39% / 17% / 0% |

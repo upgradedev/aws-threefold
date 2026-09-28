@@ -188,7 +188,8 @@ and the function runs at 1,024 MB with a reserved concurrency of 25
   shell route is not measured **[STATE-FILE]**,
   `docs/evidence/ENFORCEMENT_2026-09-23.md`. Muse 1.4.0 was measured on
   2026-09-28: the hook refused a `write_file` and the refused file was not
-  created; its edit and shell routes are not measured
+  created, and in a live session a deny stopped an `edit_file` and a shell
+  command too, each file unchanged on the disk
   (`docs/evidence/ENFORCEMENT_2026-09-28-MUSE.md`).
 - **Does the live stack do what the documents say?** A probe script checks the
   public stack claim by claim. On 2026-09-27, after that day's deploy, it

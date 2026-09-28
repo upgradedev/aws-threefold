@@ -214,7 +214,7 @@
           <span class="tf-step-num">3</span>
           <div>
             <p class="tf-stepper-title">A refusal is handed back as a deny</p>
-            <p class="tf-stepper-text">Measured on 2026-09-21: Claude Code and the Antigravity desktop app stopped the refused write. Measured on 2026-09-23, in one run: Codex stopped it over <span class="font-mono">apply_patch</span>. Measured on 2026-09-28: Muse stopped it over <span class="font-mono">write_file</span>. The table further down has the detail, and says which Codex and Muse routes are still not measured.</p>
+            <p class="tf-stepper-text">Measured on 2026-09-21: Claude Code and the Antigravity desktop app stopped the refused write. Measured on 2026-09-23, in one run: Codex stopped it over <span class="font-mono">apply_patch</span>. Measured on 2026-09-28: Muse stopped it over <span class="font-mono">write_file</span>, <span class="font-mono">edit_file</span> and the shell. The table further down has the detail, and says which Codex routes are still not measured.</p>
           </div>
         </li>
       </ol>
@@ -347,8 +347,9 @@
               Codex CLI 0.155.0 was measured on 2026-09-23, once: the hook refused an <span class="font-mono">apply_patch</span>
               that added <span class="font-mono">boto3</span> to a governed file, and the file's sha256 was unchanged afterwards.
               Muse 1.4.0 was measured on 2026-09-28: the hook refused a <span class="font-mono">write_file</span> and the
-              refused file was not created; its edit and shell routes are not measured.
-              One machine, Windows, those versions: method, results and the routes that are not measured are in
+              refused file was not created, and in a live session a deny stopped an <span class="font-mono">edit_file</span>
+              and a shell command too, each file unchanged on the disk.
+              One machine, Windows, those versions: method, results and the Codex routes that are not measured are in
               <span class="font-mono">docs/evidence/ENFORCEMENT_2026-09-21.md</span>,
               <span class="font-mono">docs/evidence/ENFORCEMENT_2026-09-23.md</span> and
               <span class="font-mono">docs/evidence/ENFORCEMENT_2026-09-28-MUSE.md</span> in the repository.
@@ -637,7 +638,7 @@
               <td data-label="Stops the write?">
                 <div>
                   <span class="tf-chip tf-chip-emerald">stops the write · measured</span>
-                  <p class="tf-micro mt-1.5">1.4.0: a <span class="font-mono">write_file</span> was refused and the file was not created. The <span class="font-mono">edit_file</span> and <span class="font-mono">powershell</span> routes are not measured.</p>
+                  <p class="tf-micro mt-1.5">1.4.0: a <span class="font-mono">write_file</span> was refused and the file was not created, and in a live session an <span class="font-mono">edit_file</span> and a <span class="font-mono">powershell</span> command were refused with each file unchanged on the disk.</p>
                 </div>
               </td>
             </tr>

@@ -691,15 +691,17 @@ def test_each_agents_enforcement_claim_is_what_the_evidence_measured() -> None:
                 f"connect.html does not say which route is not measured for {agent}")
     assert "being verified" not in body
 
-    # The phrase alone is cheap: every cell here ends with one "not measured"
-    # about the tools nobody ran. Codex is the agent whose evidence has a route
-    # measured and a route not, so its cell has to name the one that was not.
+    # The phrase alone is cheap: Codex's cell ends with the one "not measured"
+    # about the route nobody ran, so it has to name the shell. Muse's evidence
+    # measured all three routes, so its cell names them and says nothing is not.
     codex = re.search(r'<tr[^>]*data-agent="codex".*?</tr>', body, re.S)
     assert codex and "shell" in codex.group(0), (
         "The Codex cell says a route is not measured without saying it is the shell")
     muse = re.search(r'<tr[^>]*data-agent="muse".*?</tr>', body, re.S)
     assert muse and "edit_file" in muse.group(0) and "powershell" in muse.group(0), (
-        "The Muse cell says a route is not measured without naming the edit and shell routes")
+        "The Muse cell does not name the edit and shell routes it measured")
+    assert "not measured" not in muse.group(0), (
+        "The Muse cell says a route is not measured; the evidence measured all three")
 
 
 def test_the_evidence_reader_takes_the_worst_row_and_the_newest_file() -> None:

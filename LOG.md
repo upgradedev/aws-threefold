@@ -277,3 +277,7 @@
 - `proof.json` rebuilt with the key (29,118 bytes); suite 6320 passed, 6 skipped, exit 0. The committed-snapshot red-by-design is gone.
 - **Deployed** `threefold-prod`, `threefold-dogfood` (`PublicReads=false` kept) and `threefold-prod-edge`, pages published (12 objects, one `/*` invalidation). Checks: `/prod/status` HEALTHY, `/prod/` 200, the edge's installer names the edge.
 - Probes: edge 117/0/3 (`docs/evidence/PROBES_2026-09-28-2-edge.md`), API 117/0/3 (`docs/evidence/PROBES_2026-09-28-2.md`), private 101/0 read-only (evidence outside the repo). 38 commits pushed; CI and CodeQL green on the pushed head.
+
+## 2026-09-28T18:14:00+03:00 — The pages catch up with the Muse measurement
+- The live edit/shell measurement landed in the evidence file but the pages and submission texts still said those routes were not measured, and two tests pinned the stale words. The first screen (scope, chip, quote), the connect page (stepper, manual, enforcement row), README, the dossier, the article and the video script now say Muse 1.4.0 was measured over `write_file`, `edit_file` and the shell, each refused file unchanged on the disk; the tests hold the new words instead.
+- Pages published, probes rerun: edge and API 117/0/3 (`docs/evidence/PROBES_2026-09-28-3-edge.md`, `docs/evidence/PROBES_2026-09-28-3.md`). Targeted pages tests 109 passed.
