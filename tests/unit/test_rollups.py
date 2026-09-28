@@ -57,13 +57,20 @@ def _day(evaluator, project=PROJECT) -> dict:
 def test_every_decision_adds_to_its_projects_day(monkeypatch) -> None:
     monkeypatch.delenv("DEFAULT_HOOK_STAGE", raising=False)  # observe, so the violation is observed
     evaluator = GovernanceEvaluator(session_repo=DynamoDBSessionRepository())
+    # The day is the UTC day the calls are made on, read around them rather
+    # than at import: a suite that runs across midnight UTC would otherwise
+    # compare the rollup with yesterday.
+    before = str(datetime.datetime.now(datetime.timezone.utc).date())
     _call(evaluator, "rollup-1", {"file_path": "README.md"}, tool="Read", action="FILE_READ")
     _call(evaluator, "rollup-2", {"file_path": "src/acme/domain/order.py", "content": "import boto3\n"}, agent="codex")
     _call(evaluator, "rollup-3", {"file_path": "src/acme/app.py", "content": "x = 1\n"}, origin="page", agent="page")
     _call(evaluator, "rollup-4", {"file_path": ".env"}, tool="Read", action="FILE_READ", origin="page", agent="page")
+    after = str(datetime.datetime.now(datetime.timezone.utc).date())
+    if before != after:
+        pytest.skip("the calls straddled midnight UTC, so they are split over two days")
 
     day = _day(evaluator)
-    assert day["day"] == DAY and day["project"] == PROJECT
+    assert day["day"] == after and day["project"] == PROJECT
     assert day["calls"] == 4
     assert (day["approved"], day["observed"], day["refused"]) == (2, 1, 1), "Disjoint, so they add up to calls"
     assert day["agent:claude-code"] == 1 and day["agent:codex"] == 1 and day["agent:page"] == 2
