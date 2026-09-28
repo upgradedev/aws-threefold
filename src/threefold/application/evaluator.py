@@ -421,7 +421,8 @@ class GovernanceEvaluator:
         # A project's stage, held the same way and for the same interval, so
         # an evaluation costs no extra read most of the time, a promotion
         # applies at once on the container that took it, and on every other
-        # container within RULES_REFRESH_SECONDS.
+        # container within RULES_REFRESH_SECONDS. A visitor's sandbox is the
+        # exception: it is read on every evaluation (_reads_every_time).
         self._project_configs: "OrderedDict[str, _HeldConfig]" = OrderedDict()
 
     def _adopt_saved_policy(self) -> None:
@@ -597,12 +598,14 @@ class GovernanceEvaluator:
         """A project's stage configuration, or None when it has none.
 
         Read at most once per interval, like a project's rules, unless `fresh`
-        asks for the stored copy, as the routes that change it do. A read that
-        fails keeps what this container holds, and one that fails before
-        anything is held reads as "not configured" until the next interval: the
-        stack's default stage, which is the same staleness a warm container
-        already accepts for rules. A name outside AllowedProjectPattern is never
-        looked up, because no configuration can be saved for it.
+        asks for the stored copy, as the routes that change it do, or the
+        project is a visitor's sandbox, which is read every time
+        (_reads_every_time). A read that fails keeps what this container holds,
+        and one that fails before anything is held reads as "not configured"
+        until the next read: the stack's default stage, which is the same
+        staleness a warm container already accepts for rules. A name outside
+        AllowedProjectPattern is never looked up, because no configuration can
+        be saved for it.
         """
         if not is_labelled(project):
             return None
@@ -611,7 +614,12 @@ class GovernanceEvaluator:
             return None
         now = time.monotonic()
         held = self._project_configs.get(project)
-        if not fresh and held is not None and now - held.read_at < RULES_REFRESH_SECONDS:
+        if (
+            not fresh
+            and held is not None
+            and now - held.read_at < RULES_REFRESH_SECONDS
+            and not self._reads_every_time(project, held)
+        ):
             self._project_configs.move_to_end(project)
             return held.config
         kept = held.config if held is not None else None
@@ -654,6 +662,27 @@ class GovernanceEvaluator:
         """The project's stage and the configuration it came from."""
         config = self.project_config(project)
         return stages.stage_of(config, project), config
+
+    @staticmethod
+    def _reads_every_time(project: str, held: _HeldConfig) -> bool:
+        """Whether a project's stage is read on every evaluation instead of held.
+
+        A visitor's sandbox is: `Acme-Sandbox-<8 hex>` by name, which is what
+        makes a configuration a sandbox's however it was written, or `sandbox`
+        on the copy held. The walkthrough promotes it and sends the same call
+        seconds later, and that call can land on a container that read it in
+        Observe a moment before. Held for the interval, that container
+        approved the call under Observe after the promotion, and that call
+        being refused is the payoff of the walkthrough. The read is strongly
+        consistent, as every read of a stage is (load_project_config in
+        infrastructure/dynamo_repo.py), so it returns the last write whichever
+        container made it, this one included. A sandbox's traffic is the dozen
+        calls that seed it and the few a visitor sends, so the price is one
+        GetItem per evaluation of a sandbox and no extra read anywhere else.
+        """
+        if stages.SANDBOX_PATTERN.match(project):
+            return True
+        return bool(held.config and held.config.get("sandbox"))
 
     def _hold_config(self, project: str, config: Optional[Dict[str, Any]], read_at: float) -> None:
         self._project_configs[project] = _HeldConfig(config=config, read_at=read_at)

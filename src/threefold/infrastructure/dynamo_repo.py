@@ -976,11 +976,22 @@ class DynamoDBSessionRepository:
         A failed read raises, as a failed read of rules does: None means "never
         configured", and a warm container would take it as an instruction to
         fall back to the stack's default stage.
+
+        The read is strongly consistent. A visitor's sandbox is read on every
+        evaluation, the first of them milliseconds after the write that made
+        it, and the walkthrough's call seconds after the write that promoted
+        it. An eventually consistent read may answer with the copy from before
+        that write, or with nothing for an item just made, and the evaluator
+        would hold that answer over the one it had just saved. The routes
+        that change a stage read it first and write back what they read, so
+        they need the latest copy too. It costs twice what an eventually
+        consistent read does: one read request unit for each 4 KB of the item
+        instead of half of one.
         """
         key = f"{PROJECT_CONFIG_PREFIX}{project}"
         if self._table is not None:
             try:
-                res = self._table.get_item(Key={"PK": key, "SK": "METADATA"})
+                res = self._table.get_item(Key={"PK": key, "SK": "METADATA"}, ConsistentRead=True)
             except Exception as exc:
                 logger.warning("Failed to read the stage of %s from DynamoDB: %s", key, exc)
                 raise

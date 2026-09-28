@@ -13,13 +13,16 @@ Names are synthetic, as the clean-room rule requires.
 """
 from __future__ import annotations
 
+import copy
+
 import pytest
 
 from threefold.application import evaluator as evaluator_module
 from threefold.application import projects as stages
+from threefold.application import sandbox as sandbox_module
 from threefold.application.dtos import ToolCallRequestDTO
 from threefold.application.evaluator import GovernanceEvaluator
-from threefold.infrastructure.dynamo_repo import DynamoDBSessionRepository
+from threefold.infrastructure.dynamo_repo import DECISION_PARTITION, PROJECT_CONFIG_PREFIX, DynamoDBSessionRepository
 
 PROJECT = "Acme-Stage"
 DOMAIN_WRITE = {"file_path": "src/acme/domain/order.py", "content": "import boto3\n"}
@@ -287,6 +290,233 @@ def test_an_expired_sandbox_reads_as_unconfigured(repo, monkeypatch) -> None:
     monkeypatch.setattr(time_module, "time", lambda: real() + 120)
     assert repo.load_project_config("Acme-Sandbox-0a1b2c3d") is None
     assert "Acme-Sandbox-0a1b2c3d" not in repo.list_project_configs()
+
+
+# ---------------------------------------------------------------- a visitor's sandbox, on two containers
+
+
+class _CountingStore(DynamoDBSessionRepository):
+    """One store that both "containers" of a test share, counting each project's stage reads."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.reads: dict = {}
+
+    def load_project_config(self, project):
+        self.reads[project] = self.reads.get(project, 0) + 1
+        return super().load_project_config(project)
+
+
+@pytest.fixture
+def no_interval_ends(monkeypatch):
+    """Nothing a container holds grows old during the test, however slow the machine.
+
+    So a stage that changes on the other container can only be seen because it
+    was read again, never because the interval happened to run out.
+    """
+    monkeypatch.setattr(evaluator_module, "RULES_REFRESH_SECONDS", 3600.0)
+
+
+def _walkthrough_call(session_id: str, project: str) -> ToolCallRequestDTO:
+    """The walkthrough's last step as #/try sends it: a hook's call, managed, not a dry run.
+
+    A write of the file and the import the sandbox was seeded with, which
+    python-domain-stays-pure flags. Without the model's sentence, so the test
+    stays offline.
+    """
+    return _call(session_id, project=project, hook_mode="managed", explain=False)
+
+
+def _promote(evaluator: GovernanceEvaluator, name: str, enforce: list) -> None:
+    """What POST /api/projects/<name>/promote does, on the container that takes it."""
+    keys = stages.project_rule_keys(evaluator.rules_in_force(name)[0])
+    current = evaluator.project_config(name, fresh=True)
+    evaluator.save_project_config(
+        name, stages.promoted(current, NOW, "anonymous", enforce, keys), ttl_seconds=stages.SANDBOX_TTL_SECONDS
+    )
+
+
+def _demote(evaluator: GovernanceEvaluator, name: str) -> None:
+    """What POST /api/projects/<name>/demote does, on the container that takes it."""
+    keys = stages.project_rule_keys(evaluator.rules_in_force(name)[0])
+    current = evaluator.project_config(name, fresh=True)
+    evaluator.save_project_config(
+        name, stages.demoted(current, NOW, "anonymous", keys), ttl_seconds=stages.SANDBOX_TTL_SECONDS
+    )
+
+
+def test_a_sandbox_promoted_on_one_container_is_enforced_at_once_on_another(observe_default, no_interval_ends) -> None:
+    """The walkthrough's payoff, found approved under Observe by a judge who was quick.
+
+    One container reads the sandbox in Observe, another takes the promotion,
+    and the first judges the same call again straight away: refused, under
+    Enforce, and recorded so. The demotion comes back the same way.
+    """
+    repo = DynamoDBSessionRepository()
+    took_it = GovernanceEvaluator(session_repo=repo)
+    elsewhere = GovernanceEvaluator(session_repo=repo)
+    name = sandbox_module.create_sandbox(took_it)["project"]
+
+    before = elsewhere.evaluate_tool_call(_walkthrough_call("try-before", name))
+    assert (before.status, before.project_stage) == ("APPROVED", "observe")
+    assert name in elsewhere._project_configs, "The other container holds what it read"
+
+    _promote(took_it, name, ["python-domain-stays-pure"])
+    after = elsewhere.evaluate_tool_call(_walkthrough_call("try-after", name))
+    assert after.status == "BLOCKED_BOUNDARY_VIOLATION", "Refused at once on the container that did not take the promotion"
+    assert after.project_stage == "enforce"
+    row = _row(elsewhere, after.verdict_id)
+    assert (row["stage"], row["rule_key"]) == ("enforce", "python-domain-stays-pure")
+
+    _demote(took_it, name)
+    again = elsewhere.evaluate_tool_call(_walkthrough_call("try-demoted", name))
+    assert (again.status, again.project_stage) == ("APPROVED", "observe"), "A demotion lands at once as well"
+
+
+def test_an_ordinary_project_keeps_its_interval_while_a_sandbox_is_read_every_time(observe_default, no_interval_ends) -> None:
+    """The price of the sandbox's fresh stage, counted: one read per evaluation of a sandbox, none elsewhere."""
+    repo = _CountingStore()
+    took_it = GovernanceEvaluator(session_repo=repo)
+    elsewhere = GovernanceEvaluator(session_repo=repo)
+    _configure(took_it, "observe")
+    name = sandbox_module.create_sandbox(took_it)["project"]
+    assert repo.reads.get(name) == len(sandbox_module.SEEDED_CALLS), (
+        "Seeding reads the sandbox's stage once per seeded call, although the container that made it holds it"
+    )
+    assert repo.reads.get(PROJECT) is None, "An ordinary project saved here is held here, and never read"
+
+    for index in range(4):
+        elsewhere.evaluate_tool_call(_walkthrough_call(f"stage-held-{index}", PROJECT))
+        elsewhere.evaluate_tool_call(_walkthrough_call(f"try-read-{index}", name))
+    assert repo.reads[PROJECT] == 1, "An ordinary project is read once and then held for the interval"
+    assert repo.reads[name] == len(sandbox_module.SEEDED_CALLS) + 4, "A sandbox is read on every evaluation"
+
+    _configure(took_it, "enforce")
+    assert elsewhere.evaluate_tool_call(_walkthrough_call("stage-held-late", PROJECT)).status == "APPROVED", (
+        "Inside the interval an ordinary project's stage is still the one held, as docs/RUNBOOK.md says"
+    )
+    assert repo.reads[PROJECT] == 1
+
+
+def test_a_configuration_marked_sandbox_is_read_every_time_whatever_its_name(no_interval_ends) -> None:
+    repo = _CountingStore()
+    evaluator = GovernanceEvaluator(session_repo=repo)
+    evaluator.save_project_config("Acme-Visitor-Trial", stages.new_config(NOW, stage="observe", sandbox=True))
+    for index in range(3):
+        evaluator.evaluate_tool_call(_walkthrough_call(f"stage-marked-{index}", "Acme-Visitor-Trial"))
+    assert repo.reads.get("Acme-Visitor-Trial", 0) == 3
+
+
+def test_a_sandbox_whose_read_fails_keeps_the_stage_held(observe_default, no_interval_ends) -> None:
+    """Read every time, a sandbox reaches the failure path every time: it keeps what was held, as any project does."""
+
+    class _Flaky(DynamoDBSessionRepository):
+        failing = False
+
+        def load_project_config(self, project):
+            if self.failing:
+                raise ConnectionError("simulated DynamoDB outage")
+            return super().load_project_config(project)
+
+    repo = _Flaky()
+    evaluator = GovernanceEvaluator(session_repo=repo)
+    name = sandbox_module.create_sandbox(evaluator)["project"]
+    _promote(evaluator, name, ["python-domain-stays-pure"])
+    repo.failing = True
+    verdict = evaluator.evaluate_tool_call(_walkthrough_call("try-flaky", name))
+    assert (verdict.status, verdict.project_stage) == ("BLOCKED_BOUNDARY_VIOLATION", "enforce")
+
+
+# ---------------------------------------------------------------- a replica one write behind
+
+
+class _ReplicaBehind:
+    """A table whose eventually consistent reads of a stage answer from a replica one write behind.
+
+    DynamoDB acknowledges a write before every replica holds it, and a GetItem
+    without ConsistentRead may be answered by one that does not yet: with the
+    copy from before the write, or with nothing for an item just made. Here
+    that replica never catches up. Only a stage's own partition lags, so no
+    other read in the test changes; everything else answers as written.
+    """
+
+    def __init__(self) -> None:
+        self.items: dict = {}
+        self.behind: dict = {}
+        self.stage_reads: list = []
+
+    def put_item(self, Item, **_):  # noqa: N803 - boto3 spells it this way
+        key = (Item["PK"], Item["SK"])
+        self.behind[key] = self.items.get(key)
+        self.items[key] = copy.deepcopy(Item)
+
+    def get_item(self, Key, ConsistentRead=False, **_):  # noqa: N803
+        key = (Key["PK"], Key["SK"])
+        found = self.items.get(key)
+        if key[0].startswith(PROJECT_CONFIG_PREFIX):
+            self.stage_reads.append(ConsistentRead)
+            if not ConsistentRead:
+                found = self.behind.get(key)
+        return {"Item": copy.deepcopy(found)} if found else {}
+
+    def update_item(self, **_):
+        return {}
+
+    def stage_item(self, name: str) -> dict:
+        return self.items[(f"{PROJECT_CONFIG_PREFIX}{name}", "METADATA")]
+
+    def decisions(self, name: str) -> list:
+        return [
+            item for (partition, _), item in self.items.items()
+            if partition.startswith(DECISION_PARTITION) and item.get("project_name") == name
+        ]
+
+
+def _container(table: _ReplicaBehind) -> GovernanceEvaluator:
+    """A Lambda container: a repository and a memory of its own, on the table every container shares."""
+    resource = type("Resource", (), {"Table": lambda self, _name: table})()
+    return GovernanceEvaluator(session_repo=DynamoDBSessionRepository(boto3_resource=resource))
+
+
+def test_a_sandbox_is_judged_on_the_last_write_even_where_a_replica_is_behind(monkeypatch, no_interval_ends) -> None:
+    """The stage just saved, on this container or another, is the stage a sandbox's call is judged under.
+
+    On a stack whose default stage is enforce, a read that missed the item
+    just made would seed the sandbox under Enforce. A read that missed the
+    promotion would approve the walkthrough's call under Observe, on the
+    container that took the promotion as much as on any other, and a
+    promotion or demotion that read an older copy would write it back over
+    the newer one. Every read of a stage is strongly consistent, and that is
+    all that rules these out.
+    """
+    monkeypatch.setenv("DEFAULT_HOOK_STAGE", "enforce")
+    table = _ReplicaBehind()
+    took_it, elsewhere = _container(table), _container(table)
+    name = sandbox_module.create_sandbox(took_it)["project"]
+
+    seeded = table.decisions(name)
+    assert len(seeded) == len(sandbox_module.SEEDED_CALLS)
+    assert {row["stage"] for row in seeded} == {"observe"}, "Seeded in Observe, although the stack's default enforces"
+    before = elsewhere.evaluate_tool_call(_walkthrough_call("try-replica-before", name))
+    assert (before.status, before.project_stage) == ("APPROVED", "observe")
+
+    _promote(took_it, name, ["python-domain-stays-pure"])
+    assert table.stage_item(name)["sandbox"] is True, "The promotion changed the sandbox's copy, not a missing one"
+    here = took_it.evaluate_tool_call(_walkthrough_call("try-replica-here", name))
+    assert (here.status, here.project_stage) == ("BLOCKED_BOUNDARY_VIOLATION", "enforce"), (
+        "The container that took the promotion judges under it"
+    )
+    there = elsewhere.evaluate_tool_call(_walkthrough_call("try-replica-there", name))
+    assert (there.status, there.project_stage) == ("BLOCKED_BOUNDARY_VIOLATION", "enforce")
+
+    _demote(took_it, name)
+    assert [entry["action"] for entry in table.stage_item(name)["history"]] == ["promote", "demote"]
+    again = elsewhere.evaluate_tool_call(_walkthrough_call("try-replica-demoted", name))
+    assert (again.status, again.project_stage) == ("APPROVED", "observe")
+
+    assert table.stage_reads and all(read is True for read in table.stage_reads), "Every read of a stage is consistent"
+    behind = table.get_item(Key={"PK": f"{PROJECT_CONFIG_PREFIX}{name}", "SK": "METADATA"})["Item"]
+    assert behind["stage"] == "enforce", "The replica is a write behind, so a read that did not ask would be wrong"
 
 
 # ---------------------------------------------------------------- the hook's mode
