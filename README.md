@@ -191,7 +191,7 @@ name, the action type and the call's arguments, which for a write carry the
 text being written, with paths relative to the project root; plus which agent
 this is, that it came from a hook, and its mode. It holds back, and so never
 checks, a call whose target is outside the project root, anything under
-`~/.claude`, `~/.codex` or `~/.gemini`, data files by extension and by
+`~/.claude`, `~/.codex`, `~/.gemini` or `~/.local/share/muse`, data files by extension and by
 directory, any call containing a term from your own `never_send.txt`, and,
 when `.threefold.json` has an `include` list, anything outside it. The
 never-send list, your aliases and the list of governed repositories stay in

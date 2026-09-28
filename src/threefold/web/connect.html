@@ -555,7 +555,7 @@
           <p class="font-semibold tf-warn-text">Never sent</p>
           <ul class="text-[12px] space-y-2 list-disc pl-4">
             <li>A tool call whose target does not resolve inside the project root. <span class="text-gray-500">The service governs the project, not the rest of your disk.</span></li>
-            <li>Paths under an agent's own configuration or memory: <span class="font-mono text-gray-300">~/.claude</span>, <span class="font-mono text-gray-300">~/.codex</span>, <span class="font-mono text-gray-300">~/.gemini</span>. <span class="text-gray-500">Those hold your instructions and history for the agent, not project code.</span></li>
+            <li>Paths under an agent's own configuration or memory: <span class="font-mono text-gray-300">~/.claude</span>, <span class="font-mono text-gray-300">~/.codex</span>, <span class="font-mono text-gray-300">~/.gemini</span>, <span class="font-mono text-gray-300">~/.local/share/muse</span>. <span class="text-gray-500">Those hold your instructions and history for the agent, not project code.</span></li>
             <li>Data files, recognised by extension and by directory. <span class="text-gray-500">The gates judge code; a data file is where records live.</span></li>
             <li>Any call containing a term from your never-send list. <span class="text-gray-500">You name what must not leave, in <span class="font-mono">never_send.txt</span>, and the hook checks it before it sends anything.</span></li>
           </ul>

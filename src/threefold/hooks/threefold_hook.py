@@ -230,7 +230,9 @@ DATA_DIRECTORIES = frozenset(
 
 # Each agent's own configuration and memory. What an agent writes there is about
 # the developer, not about the project being governed.
-AGENT_CONFIG_DIRECTORIES = (".claude", ".codex", ".gemini")
+# Home-relative paths, not names: Muse keeps its configuration and memory two
+# levels down, and only its own directory is held back, never all of ~/.local.
+AGENT_CONFIG_DIRECTORIES = (".claude", ".codex", ".gemini", ".local/share/muse")
 
 HELD_BACK_CATEGORIES = ("outside-root", "agent-config", "not-included", "data-file", "never-send", "no-project")
 

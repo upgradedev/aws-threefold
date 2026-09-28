@@ -65,7 +65,7 @@ def test_without_a_cwd_or_workspace_the_root_is_where_the_hook_runs(hook, machin
 
 # --- the agents' own configuration and memory -------------------------------------
 
-@pytest.mark.parametrize("directory", [".claude", ".codex", ".gemini"])
+@pytest.mark.parametrize("directory", [".claude", ".codex", ".gemini", ".local/share/muse"])
 def test_a_write_into_an_agents_own_configuration_is_held_back(directory, machine, stub, run_hook, held_back_lines) -> None:
     """Checked before outside-root, and here the root is the home directory,
     so only the agent-config rule can be what held it back."""
@@ -76,6 +76,19 @@ def test_a_write_into_an_agents_own_configuration_is_held_back(directory, machin
         "tool_input": {"file_path": str(machine.home / directory / "settings.json"), "content": "{}"},
     }
     _held_back(stub, run_hook, payload, held_back_lines, "agent-config")
+
+
+def test_a_write_into_another_program_s_share_is_sent(machine, stub, run_hook) -> None:
+    """Only Muse's own directory is held back, never all of ~/.local."""
+    payload = {
+        "session_id": "s",
+        "cwd": str(machine.home),
+        "tool_name": "Write",
+        "tool_input": {"file_path": str(machine.home / ".local" / "share" / "other-app" / "settings.py"), "content": "x = 1\n"},
+    }
+    code, out, err = run_hook(payload)
+    assert (code, out, err) == (0, "", "")
+    assert len(stub.requests) == 1, "Another program's share is not an agent's configuration"
 
 
 def test_a_write_into_threefold_home_is_held_back(machine, stub, run_hook, held_back_lines) -> None:
@@ -95,6 +108,7 @@ def test_a_write_into_threefold_home_is_held_back(machine, stub, run_hook, held_
         "grep -r token $HOME/.codex",
         'type "%USERPROFILE%\\.gemini\\settings.json"',
         "ls ${HOME}/.gemini/antigravity",
+        "cat ~/.local/share/muse/sessions/01a0e7.jsonl",
         "cp notes.md ~/.threefold/",
     ],
 )
@@ -146,6 +160,7 @@ BASH_HOME_VARIABLES = [
     'cat "$USERPROFILE/.claude/projects/p/memory/MEMORY.md"',
     "ls ${USERPROFILE}/.codex",
     "cat $HOMEDRIVE$HOMEPATH/.gemini/settings.json",
+    'cat "$USERPROFILE/.local/share/muse/memory/MEMORY.md"',
 ]
 
 
@@ -183,7 +198,7 @@ def test_a_drive_written_the_git_bash_way_is_read_as_a_drive_only_on_windows(hoo
 
 @pytest.mark.skipif(os.name != "nt", reason="/c/Users names a real directory on a POSIX machine")
 @pytest.mark.parametrize("prefix", ["", "/cygdrive", "/mnt"])
-@pytest.mark.parametrize("directory", [".claude", ".codex", ".gemini", ".threefold"])
+@pytest.mark.parametrize("directory", [".claude", ".codex", ".gemini", ".threefold", ".local/share/muse"])
 def test_a_command_naming_the_agents_configuration_the_git_bash_way_is_held_back(
     prefix, directory, machine, payloads, stub, run_hook, held_back_lines
 ) -> None:

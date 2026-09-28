@@ -274,7 +274,7 @@ the owner paired that endpoint with the key file in `THREEFOLD_HOME/config.json`
   refused locally, in every mode, and never sent.
 - Six kinds of call are held back, neither sent nor recorded by the service:
   `outside-root` (a target outside the project root), `agent-config` (under
-  `~/.claude`, `~/.codex` or `~/.gemini`), `data-file` (by extension and by
+  `~/.claude`, `~/.codex`, `~/.gemini` or `~/.local/share/muse`), `data-file` (by extension and by
   directory, `.git` included), `never-send` (a term from the owner's local
   `never_send.txt`), `not-included` (outside the `include` globs) and
   `no-project` (no project configured). `held_back.log` records the time and

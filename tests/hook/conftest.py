@@ -2,7 +2,7 @@
 
 The hook reads its configuration from the environment and keeps its lists and
 logs under THREEFOLD_HOME, which defaults to the owner's own ~/.threefold, and
-it treats ~/.claude, ~/.codex and ~/.gemini as off limits. So every test here
+it treats ~/.claude, ~/.codex, ~/.gemini and ~/.local/share/muse as off limits. So every test here
 runs with HOME, USERPROFILE and THREEFOLD_HOME pointed into a temporary
 directory and every other THREEFOLD_* variable removed: a forgotten monkeypatch
 cannot read the owner's never-send list or append to their logs.
