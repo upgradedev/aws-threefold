@@ -255,7 +255,7 @@ def test_a_data_file_is_held_back_by_its_extension(relative, payloads, stub, run
     "relative",
     [
         "data/loader.py", "src/datasets/split.py", "outputs/run1/log.txt", "node_modules/acme/index.js",
-        ".git/hooks/pre-commit", ".venv/lib/site.py", ".git/info/attributes", ".git/config",
+        ".venv/lib/site.py", ".git/info/attributes",
     ],
 )
 @pytest.mark.parametrize("agent", AGENTS)
@@ -263,7 +263,9 @@ def test_a_file_under_a_data_directory_is_held_back(agent, relative, payloads, s
     """Run in observe mode, where nothing is refused, so holding back is the
     only thing that can keep a call here. In enforce mode the hook scripts and
     .git/config are refused before this check, and the next test pins that
-    they are not sent there either."""
+    they are not sent there either. The two files under .git that run the
+    hooks are not in this list: observe mode sends them as their path alone,
+    and the test after next pins that."""
     monkeypatch.setenv("THREEFOLD_MODE", "observe")
     _held_back(stub, run_hook, payloads.write(agent, relative), held_back_lines, "data-file", ["--agent", agent])
 
@@ -275,6 +277,26 @@ def test_in_enforce_mode_the_files_under_git_that_run_the_hooks_are_refused_and_
     assert code == 0
     assert "deny" in out
     assert stub.requests == []
+
+
+@pytest.mark.parametrize("relative", [".git/hooks/pre-commit", ".git/config"])
+@pytest.mark.parametrize("agent", AGENTS)
+def test_in_observe_mode_the_files_under_git_that_run_the_hooks_leave_as_their_path_alone(agent, relative, payloads, stub, run_hook, held_back_lines, monkeypatch) -> None:
+    """.git/config holds remote URLs, which can carry a token or a
+    repository's real name, so the content stays home. The path goes: holding
+    the whole call back instead would let turning the hooks off run unjudged,
+    while a shell redirect to the same place has always been sent."""
+    monkeypatch.setenv("THREEFOLD_MODE", "observe")
+    content = '[remote "origin"]\n\turl = https://acme-bot:acme-token-value@example.invalid/acme.git\n'
+    code, out, _ = run_hook(payloads.write(agent, relative, content), ["--agent", agent])
+    assert (code, out) == (0, "")
+    assert len(stub.requests) == 1
+    arguments = stub.requests[0]["body"]["arguments"]
+    assert arguments["file_path"] == relative
+    assert arguments["content"] == ""
+    assert "content not sent" in arguments["note"]
+    assert "acme-token-value" not in json.dumps(stub.requests)
+    assert held_back_lines() == []
 
 
 def test_the_data_directories_are_read_inside_the_project_not_above_it(machine, stub, run_hook, held_back_lines) -> None:
@@ -435,7 +457,9 @@ def test_a_command_that_writes_no_data_file_is_still_sent(command, payloads, stu
 def test_a_command_that_writes_under_git_is_still_sent_for_the_service_to_refuse(
     command, mode, payloads, stub, run_hook, held_back_lines, monkeypatch
 ) -> None:
-    """.git is a data directory for a Write, which carries the file's content.
+    """.git is a data directory for a Write, which carries the file's content,
+    except the two files that decide whether the hooks run, which go as their
+    path alone.
 
     A command carries only its text, and a command that redirects into
     .git/hooks is what the service's protected-path rule exists to refuse.

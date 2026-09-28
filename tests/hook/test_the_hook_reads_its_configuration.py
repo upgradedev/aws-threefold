@@ -367,18 +367,23 @@ def test_in_observe_mode_the_same_write_is_sent_as_its_path_alone(agent, relativ
     assert "acme-private-remark" not in json.dumps(request)
 
 
+@pytest.mark.parametrize("agent", AGENTS)
 @pytest.mark.parametrize("relative", [".git/hooks/pre-commit", ".git/config"])
-def test_in_observe_mode_nothing_under_git_is_sent_even_the_files_that_run_the_hooks(relative, machine, payloads, stub, run_hook, held_back_lines, unconfigured) -> None:
-    """.git is a data directory and .git/config holds remote URLs, which can
-    carry a token or a repository's real name. Enforce mode refuses the write
-    before anything is sent; observe mode holds it back, as day one did."""
+def test_in_observe_mode_the_files_under_git_that_run_the_hooks_are_sent_as_their_path_alone(agent, relative, machine, payloads, stub, run_hook, held_back_lines, unconfigured) -> None:
+    """Observe mode stops nothing and the rollout sees the attempt, but
+    .git/config holds remote URLs, which can carry a token or a repository's
+    real name, so what the write says stays here. Holding the whole call back
+    instead would let turning the hooks off run unjudged."""
     _write_json(machine.project / ".threefold.json", {"project": "Acme-Ledger", "mode": "observe"})
     content = '[remote "origin"]\n\turl = https://acme-bot:acme-token-value@example.invalid/acme-ledger.git\n'
-    code, out, err = run_hook(payloads.write("claude-code", relative, content))
+    code, out, _ = run_hook(payloads.write(agent, relative, content), ["--agent", agent])
     assert (code, out) == (0, "")
-    assert stub.requests == []
-    assert held_back_lines()[-1].endswith(" data-file")
-    assert "acme-token-value" not in err
+    request = _sent(stub)
+    assert request["body"]["dry_run"] is True
+    assert request["body"]["arguments"]["file_path"] == relative
+    assert request["body"]["arguments"]["content"] == ""
+    assert "acme-token-value" not in json.dumps(request)
+    assert held_back_lines() == []
 
 
 def test_an_ordinary_settings_file_elsewhere_in_the_project_is_not_protected(payloads, stub, run_hook) -> None:

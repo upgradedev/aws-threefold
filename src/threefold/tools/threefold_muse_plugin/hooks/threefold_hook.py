@@ -2083,13 +2083,18 @@ def held_back_category(
             return "outside-root"
         if include is not None and not _included(resolved, canonical_root, include):
             return "not-included"
-        # Everything under .git is held back, the hook scripts and .git/config
-        # included. Those two decide whether the hooks run, but .git/config also
-        # holds remote URLs, which can carry a token or a repository name, and
-        # the day-one contract never sends a data directory. Wherever the mode
-        # guards the hooks' own files (enforce, or managed while the project
-        # enforces), a write to either has already been refused before this.
+        # Everything under .git is held back, except the two files that decide
+        # whether the hooks run, which go as their path alone. .git/config also
+        # holds remote URLs, which can carry a token or a repository name, so
+        # the content stays home and _strip_governance_content takes it out
+        # below, but the attempt itself is recorded, as a shell redirect to
+        # the same place always has been. Holding it back instead would let
+        # turning the hooks off run unjudged. Wherever the mode guards the
+        # hooks' own files (enforce, or managed while the project enforces), a
+        # write to either has already been refused before this.
         if call.action_type == FILE_WRITE and _is_data_file(resolved, canonical_root):
+            if is_governance_path(os.path.relpath(resolved, canonical_root).replace(os.sep, "/")):
+                continue
             return "data-file"
 
     if call.command is not None:

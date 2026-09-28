@@ -225,15 +225,19 @@ def test_in_managed_mode_while_the_project_enforces_the_write_is_refused_without
 
 
 @pytest.mark.parametrize("relative", [".git/hooks/pre-commit", ".git/config"])
-def test_in_managed_mode_while_the_project_observes_nothing_under_git_is_sent(relative, machine, payloads, stub, run_hook, managed, held_back_lines) -> None:
-    """.git is a data directory, and .git/config can carry a token in a remote URL."""
+def test_in_managed_mode_while_the_project_observes_the_files_under_git_are_sent_as_their_path_alone(relative, machine, payloads, stub, run_hook, managed, held_back_lines) -> None:
+    """.git/config can carry a token in a remote URL, so what the write says
+    stays here. Holding the whole call back instead would let turning the
+    hooks off run unjudged."""
     _cache(machine, "observe")
     content = '[remote "origin"]\n\turl = https://acme-bot:acme-token-value@example.invalid/acme.git\n'
-    code, out, err = run_hook(payloads.write("claude-code", relative, content))
+    code, out, _ = run_hook(payloads.write("claude-code", relative, content))
     assert (code, out) == (0, "")
-    assert stub.requests == []
-    assert held_back_lines()[-1].endswith(" data-file")
-    assert "acme-token-value" not in err
+    body = _only(stub)
+    assert body["arguments"]["file_path"] == relative
+    assert body["arguments"]["content"] == ""
+    assert "acme-token-value" not in json.dumps(stub.requests)
+    assert held_back_lines() == []
 
 
 def test_a_promotion_the_service_reports_is_followed_on_the_next_call_and_so_is_a_demotion(machine, payloads, stub, run_hook, managed, verdict) -> None:

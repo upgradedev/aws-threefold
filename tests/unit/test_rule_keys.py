@@ -103,6 +103,7 @@ def test_a_layering_refusal_is_keyed_by_the_rule_that_decided(path, content, exp
         ("keys-env", "Read", "FILE_READ", {"file_path": ".env"}, PROTECTED_PATH),
         ("keys-cat-env", "Bash", "COMMAND_EXEC", {"command": "cat .env"}, PROTECTED_PATH),
         ("keys-settings", "Write", "FILE_WRITE", _write(".claude/settings.json", "{}"), PROTECTED_PATH),
+        ("keys-githooks", "Write", "FILE_WRITE", _write(".git/hooks/pre-commit", ""), PROTECTED_PATH),
         ("keys-no-verify", "Bash", "COMMAND_EXEC", {"command": "git commit --no-verify -m wip"}, PROTECTED_PATH),
         ("keys-destructive", "Bash", "COMMAND_EXEC", {"command": "rm -rf /"}, PROTECTED_PATH),
         ("keys-cp", "Bash", "COMMAND_EXEC", {"command": "cp /tmp/acme.py src/domain/acme_user.py"}, UNREADABLE_WRITE),

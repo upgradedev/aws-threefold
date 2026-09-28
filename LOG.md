@@ -296,3 +296,7 @@
 ## 2026-09-28T20:59:00+03:00 — The merge gate is load-bearing
 - Branch protection on main names `Judge the diff` as a required check, without requiring pull requests, so direct pushes keep working and every pull request is judged. PR #6 proved it: a shaped token failed the check in 9 s with the merge BLOCKED, removing it passed in 11 s, and the red-to-green pair merged as one merge commit.
 - Regionals redeployed with the counter change and the pages published; probes after: edge and API 117/0/3 (`docs/evidence/PROBES_2026-09-28-6-edge.md`, `docs/evidence/PROBES_2026-09-28-6.md`), private 101/0 read-only.
+
+## 2026-09-28T21:52:00+03:00 — Tamper attempts reach the ledger
+- A file-tool write to `.git/hooks/` or `.git/config` used to be held back as a data directory outside enforce, so switching the pre-commit check off that way never showed up in Observe, while the same write through a shell was sent. The two files are now exempt from the hold-back and go as their path alone through the existing strip, in both hook copies with the bundle manifest re-pinned; the service already judged them under `PROTECTED_PATH`, so no service change.
+- Three tests' expectations rewritten (they pinned the blind spot), one path-only test added per surface plus a `PROTECTED_PATH` verdict case for a `.git/hooks` file write. README blind row and the STATE contract updated. Suite 6341 passed, 6 skipped; regionals redeployed, probes 117/0/3, 117/0/3, 101/0 (`docs/evidence/PROBES_2026-09-28-7-edge.md`, `docs/evidence/PROBES_2026-09-28-7.md`).
