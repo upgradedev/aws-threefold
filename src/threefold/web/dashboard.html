@@ -7129,12 +7129,10 @@
       const standing = staged
         ? html`At the snapshot, ${staged}${refusals(false) ? html`, and ${refusals(false)}` : ''}.`
         : refusals(true) ? html`${refusals(true)}.` : '';
-      // Self-correction is counted on refused calls, so with none refused
-      // there is nothing to count, and the line says that rather than an
-      // empty figure.
-      const corrected = nothingRefused
-        ? 'Self-corrected: none to count. It is counted on refused calls, and the service refused no call in this window.'
-        : p.self_correction ? html`Self-corrected: ${selfCorrectionWords(p.self_correction)}.` : '';
+      // Self-correction in the same words as every other screen: the figure
+      // carries its own empty branches, and a second wording beside them
+      // would contradict the counts when a snapshot carries any.
+      const corrected = p.self_correction ? html`Self-corrected: ${selfCorrectionWords(p.self_correction)}.` : '';
       return card(title, sub, html`
         <div class="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-7 gap-3">${tiles.map(([label, value, metric, note]) => html`<div class="tf-card-quiet tf-tile">
           <span class="tf-tile-label">${label}</span><span class="tf-tile-value" data-metric="${metric}">${value}</span><span class="tf-tile-sub">${note}</span>
