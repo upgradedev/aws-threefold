@@ -168,7 +168,7 @@ def mixed_pilot_problem(rows: Sequence[Mapping[str, Any]]) -> Optional[str]:
         if not is_scripted(row):
             labels.setdefault((agent_of(row), family_of(row)), Counter())[bool(row.get("pilot"))] += 1
     mixed = [f"the {AGENT_LABELS.get(agent, agent)}{'' if family == 'standard' else f' {family}-family'} rows hold "
-             f"{counts[True]} pilot row(s) and {counts[False]} that are not"
+             f"{plural(counts[True], 'pilot row')} and {counts[False]} that {'is' if counts[False] == 1 else 'are'} not"
              for (agent, family), counts in labels.items() if len(counts) > 1]
     if not mixed:
         return None
@@ -189,7 +189,7 @@ def _governance_problem(row: Mapping[str, Any]) -> Optional[str]:
     if not _uses_threefold(row):
         return None
     if row.get("hook_missing"):
-        return (f"the Threefold hook never fired although the agent made {row.get('governed_calls')} governed call(s); "
+        return (f"the Threefold hook never fired although the agent made {plural(row.get('governed_calls'), 'governed call')}; "
                 f"{AGENT_LABELS.get(agent_of(row), 'the agent')} did not load it, so this run did not measure Threefold")
     if row.get("governance_problem"):
         return str(row["governance_problem"])
@@ -221,7 +221,7 @@ def mixed_ledger_problem(rows: Sequence[Mapping[str, Any]]) -> Optional[str]:
         if not is_scripted(row) and _uses_threefold(row):
             sources.setdefault((agent_of(row), family_of(row)), Counter())[ledger_source(row)] += 1
     mixed = [f"the {AGENT_LABELS.get(agent, agent)}{'' if family == 'standard' else f' {family}-family'} Threefold rows "
-             f"hold {counts['remote']} run(s) against a remote Threefold and {counts['local']} against a local server"
+             f"hold {plural(counts['remote'], 'run')} against a remote Threefold and {counts['local']} against a local server"
              for (agent, family), counts in sources.items() if len(counts) > 1]
     if not mixed:
         return None
@@ -474,6 +474,11 @@ def _whole(summary: Mapping[str, Any]) -> Dict[str, Any]:
 
 # --- words -----------------------------------------------------------------------
 
+def plural(count: int, word: str, words: Optional[str] = None) -> str:
+    """The count and its noun as a sentence says them: `1 run`, `3 runs`, never `run(s)`."""
+    return f"{count} {word if count == 1 else words or word + 's'}"
+
+
 def pct(value: Optional[float]) -> str:
     return "n/a" if value is None else f"{100 * value:.0f}%"
 
@@ -505,15 +510,18 @@ def headline(summary: Mapping[str, Any]) -> str:
     missing = [name for name in needed if name not in stats or not stats[name]["n"]]
     if missing:
         if summary["real_rows"] and not summary["valid_rows"]:
-            reasons = "; ".join(f"{reason} ({count} run(s))" for reason, count in summary["invalid_reasons"].items())
-            return f"{prefix}No headline: none of the {summary['real_rows']} real-agent run(s) produced a measurement. {reasons}."
+            reasons = "; ".join(f"{reason} ({plural(count, 'run')})" for reason, count in summary["invalid_reasons"].items())
+            none = ("the one real-agent run produced no measurement" if summary["real_rows"] == 1 else
+                    f"none of the {plural(summary['real_rows'], 'real-agent run')} produced a measurement")
+            return f"{prefix}No headline: {none}. {reasons}."
         if not summary["real_rows"]:
             return f"{prefix}No headline: there are no real-agent runs in these results."
         return f"{prefix}No headline: no valid runs yet under {', '.join(condition_label(name, agent) for name in missing)}."
     models = ", ".join(summary["models"])
     n = sum(stats[name]["n"] for name in needed)
-    tasks = (f"{len(summary['tasks'])} Acme pressure task(s), whose prompts ask for the forbidden shortcut,"
-             if summary.get("family") == "pressure" else f"{len(summary['tasks'])} Acme task(s),")
+    count = len(summary["tasks"])
+    tasks = (f"{plural(count, 'Acme pressure task')}, whose {'prompt asks' if count == 1 else 'prompts ask'} for the "
+             "forbidden shortcut," if summary.get("family") == "pressure" else f"{plural(count, 'Acme task')},")
     return (
         f"{prefix}Across {n} {AGENT_LABELS.get(agent, 'agent')} runs of {models} on {tasks} "
         f"a governed violation landed in "
@@ -549,7 +557,7 @@ def caveats(summary: Mapping[str, Any]) -> List[str]:
     if len(by_family) > 1:
         of_any = f"{of_any} in either family" if of_any else " in either family"
     sample = (
-        f"Small samples. The smallest condition{of_any} has {smallest} valid run(s) and a "
+        f"Small samples. The smallest condition{of_any} has {plural(smallest, 'valid run')} and a "
         f"task-by-condition cell holds at most {max(cell_sizes, default=0)}; the 95% intervals above are wide and "
         "differences inside them are not established."
         if whole["valid_rows"] else
@@ -604,17 +612,24 @@ def caveats(summary: Mapping[str, Any]) -> List[str]:
                 "nothing in the files, so it is not counted: that task's violation rates are a floor."))
     retried = sum(stat.get("retried_runs", 0) for stat in all_stats)
     if retried or whole["superseded"]:
+        superseded = whole["superseded"]
         items.append(
-            f"{retried} valid run(s) were cut short by the service (a usage limit or an overload) and measured on a second attempt "
-            f"after a pause, in a fresh copy of the repository. {whole['superseded']} earlier row(s) of runs that were "
-            "run again after a resume are replaced by their latest row and counted nowhere."
+            f"{plural(retried, 'valid run')} {'was' if retried == 1 else 'were'} cut short by the service (a usage limit or an "
+            "overload) and measured on a second attempt after a pause, in a fresh copy of the repository. "
+            + ("1 earlier row of a run that was run again after a resume is replaced by its latest row and counted nowhere."
+               if superseded == 1 else
+               f"{superseded} earlier rows of runs that were run again after a resume are replaced by their latest row and "
+               "counted nowhere.")
         )
     timed_out = sum(stat["timed_out"] for stat in all_stats)
     if timed_out:
         items.append(
-            f"{timed_out} valid run(s) were stopped at the per-run timeout. They count, with completion from the acceptance run, but Claude Code "
-            "reports turns, cost and tokens only at the end, so those runs are missing from the turn, cost and token means, and their time is "
-            "the wall time."
+            ("1 valid run was stopped at the per-run timeout. It counts, with completion from the acceptance run, but Claude Code "
+             "reports turns, cost and tokens only at the end, so that run is missing from the turn, cost and token means, and its time "
+             "is the wall time.") if timed_out == 1 else
+            (f"{timed_out} valid runs were stopped at the per-run timeout. They count, with completion from the acceptance run, but "
+             "Claude Code reports turns, cost and tokens only at the end, so those runs are missing from the turn, cost and token means, "
+             "and their time is the wall time.")
         )
     redirecting = [task for task in ("catalog-vat-regen", "pressure-catalog-shell-regen") if task in whole["tasks"]]
     if redirecting and "claude-code" in agents:
@@ -689,7 +704,7 @@ def _codex_confinement(sandboxes: Mapping[str, int], platforms: Sequence[str]) -
             "and the environment gave installs no package index and AWS credentials that do not exist.",
         )
     runs = ", ".join(
-        f"{count} run(s) " + ("with no sandbox recorded" if mode == "unrecorded" else f"under `{mode}`")
+        f"{plural(count, 'run')} " + ("with no sandbox recorded" if mode == "unrecorded" else f"under `{mode}`")
         for mode, count in sorted(sandboxes.items()))
     return (
         "Shell commands ran with approvals off, not under Claude Code's prefix rules. The sandbox each row records "
@@ -708,7 +723,7 @@ def _claude_reach(summary: Mapping[str, Any], named: bool) -> List[str]:
         "Claude Code also loads CLAUDE.md, .claude/CLAUDE.md and .claude/rules from every folder above its working directory, as project "
         "instructions, whatever `--setting-sources` says. The runner therefore puts the work root where no folder above it holds one "
         "(a temp folder under the home folder would hand the agent the owner's ~/.claude/CLAUDE.md) and records what it finds with each row. "
-        + (f"{len(above)} run(s) had one above their work root and may have read it: "
+        + (f"{plural(len(above), 'run')} had one above {'its' if len(above) == 1 else 'their'} work root and may have read it: "
            + ", ".join(sorted({path for row in above for path in row})) + "." if above else
            "No run had one above its work root.")
     )
@@ -991,7 +1006,9 @@ def matrix_estimate(summary: Mapping[str, Any], timeout_s: int = 1200, budget_us
     seconds, costs = summary.get("valid_total_seconds") or [], summary.get("valid_costs") or []
     if seconds:
         hours = rounds * statistics.fmean(seconds) / 3600
-        typical = (f" From the {len(seconds)} measured run(s) here (mean {statistics.fmean(seconds) / 60:.1f} minutes each, set-up and "
+        minutes = statistics.fmean(seconds) / 60
+        took = f"{minutes:.1f} minutes" if len(seconds) == 1 else f"mean {minutes:.1f} minutes each"
+        typical = (f" From the {plural(len(seconds), 'measured run')} here ({took}, set-up and "
                    f"judging included), expect about {hours:.1f} hours")
         typical += f" and about ${runs * statistics.fmean(costs):.0f}." if costs else "."
     else:

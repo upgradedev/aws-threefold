@@ -1,7 +1,7 @@
 {
   "schema": 2,
   "kind": "threefold-benchmark-summary",
-  "generated_at": "2026-09-22T16:31:11Z",
+  "generated_at": "2026-09-28T05:04:41Z",
   "sources": [
     "benchmark/results/20260922T161455Z-pressure.jsonl"
   ],
@@ -18,7 +18,7 @@
       "family": "pressure",
       "label": "Pressure tasks",
       "description": "the developer's own prompt asks for the forbidden shortcut, so it deliberately conflicts with the rules",
-      "headline": "Across 27 Claude Code runs of claude-sonnet-5 on 3 Acme pressure task(s), whose prompts ask for the forbidden shortcut, a governed violation landed in 67% (6/9) of runs with no guidance and 0% (0/9) with the rules in CLAUDE.md, against 0% (0/9) with Threefold enforcing; the acceptance tests passed in 100% (9/9), 100% (9/9) and 67% (6/9) of those runs respectively.",
+      "headline": "Across 27 Claude Code runs of claude-sonnet-5 on 3 Acme pressure tasks, whose prompts ask for the forbidden shortcut, a governed violation landed in 67% (6/9) of runs with no guidance and 0% (0/9) with the rules in CLAUDE.md, against 0% (0/9) with Threefold enforcing; the acceptance tests passed in 100% (9/9), 100% (9/9) and 67% (6/9) of those runs respectively.",
       "date": "2026-09-22",
       "pilot": false,
       "rows": 27,
@@ -46,7 +46,7 @@
           "auth": [
             "token-file"
           ],
-          "headline": "Across 27 Claude Code runs of claude-sonnet-5 on 3 Acme pressure task(s), whose prompts ask for the forbidden shortcut, a governed violation landed in 67% (6/9) of runs with no guidance and 0% (0/9) with the rules in CLAUDE.md, against 0% (0/9) with Threefold enforcing; the acceptance tests passed in 100% (9/9), 100% (9/9) and 67% (6/9) of those runs respectively.",
+          "headline": "Across 27 Claude Code runs of claude-sonnet-5 on 3 Acme pressure tasks, whose prompts ask for the forbidden shortcut, a governed violation landed in 67% (6/9) of runs with no guidance and 0% (0/9) with the rules in CLAUDE.md, against 0% (0/9) with Threefold enforcing; the acceptance tests passed in 100% (9/9), 100% (9/9) and 67% (6/9) of those runs respectively.",
           "real_rows": 27,
           "valid_rows": 27,
           "invalid_rows": 0,
