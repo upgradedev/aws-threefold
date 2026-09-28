@@ -101,17 +101,24 @@
     /* The two buttons share a row where they fit and grow to fill it; where
        they do not, whatever the width or the font, each grows to the full
        row it wrapped onto, so they stack at one width instead of one of them
-       sitting alone. The quiet link always takes the line under them. */
+       sitting alone. The two quiet links always take the line under them,
+       each as wide as its words, so its focus ring goes round its words. */
     @media (min-width: 640px) {
       .tf-hero-actions { max-width: 36rem; }
       .tf-hero-actions .tf-btn { flex: 1 1 auto; }
-      .tf-hero-actions .tf-hero-link { flex-basis: 100%; justify-content: flex-start; }
+      .tf-hero-actions .tf-hero-links { flex-basis: 100%; justify-content: flex-start; }
     }
     /* A label that does not fit wraps inside its button rather than pushing a
        phone's page sideways. */
     .tf-hero-actions .tf-btn { white-space: normal; height: auto; min-height: 44px; padding-top: 10px; padding-bottom: 10px; line-height: 1.25; text-align: center; }
-    /* The quiet link starts where the buttons above it start: it has no padding
-       of its own, and the 44 px it needs to be pressed comes from its height. */
+    /* The quiet links start where the buttons above them start: they have no
+       padding of their own, and the 44 px each needs to be pressed comes from
+       its height. On a phone they sit centred under the buttons, one line
+       each where the two do not fit on one, 36 px tall there (well over the
+       24 px WCAG 2.2 asks), so the demonstration's verdict still lands on
+       the first screen. */
+    .tf-hero-links { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 0 20px; margin: 0; }
+    @media (max-width: 639px) { .tf-hero-links .tf-hero-link { min-height: 36px; } }
     .tf-hero-link {
       display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; padding: 0; border-radius: var(--tf-radius);
       font: 500 var(--tf-fs-small)/1.25 var(--tf-font-sans); color: var(--tf-text-2);
@@ -119,6 +126,8 @@
     }
     .tf-hero-link:hover { color: var(--tf-text); text-decoration-color: currentColor; }
     .tf-hero-link .tf-icon { width: 14px; height: 14px; }
+    /* The link to the scenarios goes down this page, and its arrow says so. */
+    .tf-hero-link-down .tf-icon { transform: rotate(90deg); }
     .tf-hero-scope { display: flex; gap: 8px; margin: 0; max-width: 36rem; font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-3); overflow-wrap: break-word; text-wrap: balance; }
     .tf-hero-scope .tf-icon { width: 14px; height: 14px; margin-top: 2px; }
 
@@ -290,6 +299,7 @@
     .tf-bench-of { font-size: 0.8125rem; line-height: 1.25rem; color: var(--tf-text-2); }
     .tf-bench p { margin: 0; font-size: 0.8125rem; line-height: 1.25rem; color: var(--tf-text-2); }
     .tf-bench .tf-bench-price, .tf-bench .tf-bench-note { font-size: 0.75rem; line-height: 1.125rem; color: var(--tf-text-3); }
+    .tf-bench .tf-bench-case strong { font-weight: 600; color: var(--tf-text); }
     .tf-bench .tf-hbars { gap: 10px; }
     .tf-bench .tf-hbar-head > :first-child { font-family: var(--tf-font-sans); color: var(--tf-text-2); }
     .tf-bench-more { align-self: flex-start; font-size: 0.8125rem; line-height: 1.25rem; }
@@ -551,6 +561,8 @@
     .tf-session-stats { display: flex; flex-wrap: wrap; gap: 6px 20px; font-size: 0.75rem; line-height: 1rem; color: var(--tf-text-3); }
     .tf-session-stats b { font: 600 0.8125rem/1rem var(--tf-font-mono); color: var(--tf-text); }
     .tf-session-stats b.tf-kpi-none { font: 400 0.75rem/1rem var(--tf-font-sans); color: var(--tf-text-3); }
+    /* What the spend counts, on a line of its own under the figures. */
+    .tf-session-stats .tf-session-note { flex-basis: 100%; line-height: 1.125rem; text-wrap: pretty; }
     .tf-contract { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: var(--tf-space-2); font-size: 0.75rem; color: var(--tf-text-3); }
     .tf-connection { margin-top: var(--tf-space-2); }
     /* The summary's words and the status chip wrap as one piece, the chip under
@@ -604,7 +616,9 @@
 
   <main id="main" class="tf-main tf-landing" tabindex="-1">
     <!-- THE FIRST TEN SECONDS. What Threefold is in one line, one sentence of how,
-         the three things to do next, and beside them the product's core moment:
+         the things to do next (two buttons, then a quiet link down to the
+         flagship's scenarios and one to connect a repository), and beside them
+         the product's core moment:
          an agent's proposed write refused before it is written. No number in
          this section is written into the page but the walkthrough's own
          length, on the button that opens it: the demonstration is drawn from
@@ -617,11 +631,14 @@
       <div class="tf-hero-copy">
         <p class="tf-eyebrow"><span data-tf-icon="shield"></span>Threefold · governance for coding agents</p>
         <h1 id="hero-promise" class="tf-hero-title">Stop bad agent writes <em>before they reach your code.</em></h1>
-        <p id="hero-sentence" class="tf-hero-lede">Deterministic gates on AWS judge each write and command from Claude Code, Codex or Antigravity, and your repos observe before they enforce.</p>
+        <p id="hero-sentence" class="tf-hero-lede">Deterministic gates on AWS judge each write and command from Claude Code, Codex or Antigravity. Each repository only watches until you promote its rules.</p>
         <div id="hero-actions" class="tf-hero-actions">
           <a id="hero-try" href="dashboard.html#/try" class="tf-btn tf-btn-primary tf-btn-lg"><span data-tf-icon="play"></span>Try the two-stage rollout — 2 min</a>
           <a id="hero-dashboard" href="dashboard.html#/overview" class="tf-btn tf-btn-lg"><span data-tf-icon="grid"></span>Open the live dashboard</a>
-          <a id="hero-connect" href="dashboard.html#/connect" class="tf-hero-link">Connect your repository<span data-tf-icon="arrowright"></span></a>
+          <p class="tf-hero-links">
+            <a id="hero-watch" href="#watch-the-gates" class="tf-hero-link tf-hero-link-down">Watch a loop get halted, no account<span data-tf-icon="arrowright"></span></a>
+            <a id="hero-connect" href="dashboard.html#/connect" class="tf-hero-link">Connect your repository<span data-tf-icon="arrowright"></span></a>
+          </p>
         </div>
       </div>
 
@@ -658,14 +675,15 @@
     <!-- THE PROOF STRIP. Every figure is read as the page loads: the counts from
          GET /api/overview, without a key, and the benchmark from GET /proof.json.
          One clause says where the counts come from, once, where a reader first
-         meets them. Where nothing is measured, the strip says so. -->
+         meets them. Where nothing is measured, the strip says so, and the line
+         beside the heading names only the reads whose figures are shown. -->
     <section id="proof" aria-labelledby="proof-title">
       <div class="tf-sec-row">
         <div class="tf-sec-head">
           <p class="tf-eyebrow"><span data-tf-icon="chart"></span>Proof</p>
           <h2 id="proof-title" class="tf-h2">At work on this stack, and measured in a benchmark</h2>
         </div>
-        <p class="tf-proof-links">Read as this page loaded, from
+        <p id="proof-links" class="tf-proof-links">Reading, as this page loads, from
           <a class="tf-spec-link" href="swagger.html#/default/get_api_overview" data-tf-page="swagger.html#/default/get_api_overview" title="Open this operation in the published OpenAPI document">GET /api/overview</a>
           and
           <a class="tf-spec-link" href="swagger.html#/default/get_proof_json" data-tf-page="swagger.html#/default/get_proof_json" title="Open this operation in the published OpenAPI document">GET /proof.json</a>
@@ -1009,8 +1027,9 @@
               <div id="bedrock-box" class="tf-explain">Waiting for a scenario: its verdict is explained here, with the name of whatever wrote the sentence.</div>
             </div>
             <div class="tf-session-stats" aria-label="The last scenario's session">
-              <span>Session spend <b id="kpi-spend" class="tf-kpi-none">none yet</b></span>
+              <span>Projected spend <b id="kpi-spend" class="tf-kpi-none">none yet</b></span>
               <span id="kpi-tokens"></span>
+              <span id="kpi-note" class="tf-session-note" hidden></span>
             </div>
           </div>
           <div class="tf-result-more">
@@ -1494,21 +1513,57 @@
     }
 
     // The last scenario's spend, or words saying there is none yet: a dash in
-    // the bold mono face read as a solid bar.
-    function setSpend(spend, tokens) {
+    // the bold mono face read as a solid bar. The note under it says what the
+    // figure counts, and is hidden while there is no figure.
+    function setSpend(spend, tokens, note) {
       const el = document.getElementById('kpi-spend');
       el.innerText = spend || 'none yet';
       el.classList.toggle('tf-kpi-none', !spend);
       document.getElementById('kpi-tokens').innerText = tokens || '';
+      const said = document.getElementById('kpi-note');
+      said.textContent = spend && note ? note : '';
+      said.hidden = !(spend && note);
+    }
+
+    // The token counts Scenario 4 declares for each of its calls, as its
+    // requests send them; the note under its spend reads them from here.
+    const DEMO_TOKENS = { input: 1200, output: 400 };
+
+    // A certificate's token total, called what it is: the sum of the counts
+    // its calls declared, not tokens anything consumed. Not a whole count,
+    // not shown.
+    function projectedTokens(total) {
+      const n = wholeNumber(total);
+      return n === null ? '' : formatCount(n) + ' projected tokens';
+    }
+
+    // What the spend counts. No token is metered: a session's cost is the
+    // service's projection from the token counts each call declares (for a
+    // call that declares none, the service's own default), and only a call
+    // that passed every gate adds to it, so a refusal's session can read
+    // $0.0000. The sentence explaining a verdict is a call of the service's,
+    // not of the agent's: where a model was asked for it, the note says that
+    // call is not in the figure, so a zero never reads as the model's cost.
+    function spendNote(verdict, declared) {
+      const counts = declared
+        ? 'this demo declares, ' + formatCount(declared.input) + ' input and ' + formatCount(declared.output) + ' output per call'
+        : 'this demo declares, or the service’s default where none is declared';
+      const source = verdict && typeof verdict === 'object' ? verdict.explanation_source : null;
+      const model = source === 'bedrock'
+        ? ' The Amazon Bedrock call behind the sentence above is not counted.'
+        : source === 'deterministic_fallback'
+          ? ' The model call asked for the sentence above is not counted.'
+          : '';
+      return 'Projected from the token counts ' + counts + '; approved calls only, nothing metered.' + model;
     }
 
     // The session's spend as a verdict reports it: every verdict carries
     // current_session_cost_usd, the running cost of the session it was judged
-    // in, so a live answer shows what it measured instead of "none yet". A
+    // in, so a live answer shows what it was told instead of "none yet". A
     // value that is not a finite, non-negative number leaves the words alone.
     function setSpendFrom(verdict) {
       const cost = verdict && typeof verdict === 'object' ? verdict.current_session_cost_usd : null;
-      if (typeof cost === 'number' && isFinite(cost) && cost >= 0) setSpend('$' + cost.toFixed(4), null);
+      if (typeof cost === 'number' && isFinite(cost) && cost >= 0) setSpend('$' + cost.toFixed(4), null, spendNote(verdict, null));
     }
 
     // Everything back to where it started. A scenario starts from here too, and
@@ -1562,7 +1617,8 @@
     }
 
     // One line of the terminal. `tone` names its colour: agent, ok, bad, warn,
-    // muted or accent, and "strong" may follow.
+    // muted or accent, and "strong" may follow. The line is returned, so one
+    // that stands for a wait can be taken away when the wait is over.
     function logTerminal(msg, tone = 'plain', isHtml = false) {
       const log = document.getElementById('terminal-log');
       const p = document.createElement('p');
@@ -1574,6 +1630,30 @@
       }
       log.appendChild(p);
       log.scrollTop = log.scrollHeight;
+      return p;
+    }
+
+    // A line that says what the terminal is waiting for once the wait passes
+    // LOOP_SLOW_MS, and counts the seconds since the request went. The
+    // count is hidden from a screen reader: the terminal is a log, which
+    // would read it out every second. Returns the function that ends the
+    // wait, which takes the line away.
+    const LOOP_SLOW_MS = 1000;
+    function waitLine(words) {
+      const started = Date.now();
+      let line = null;
+      let ticker = null;
+      const seconds = () => Math.floor((Date.now() - started) / 1000) + ' s';
+      const slow = setTimeout(() => {
+        line = logTerminal(`${escapeHtml(words)} <span class="tf-log-accent" aria-hidden="true" data-tf-waited>${seconds()}</span>`, 'muted', true);
+        const count = line && typeof line.querySelector === 'function' ? line.querySelector('[data-tf-waited]') : null;
+        if (count) ticker = setInterval(() => { count.textContent = seconds(); }, 1000);
+      }, LOOP_SLOW_MS);
+      return () => {
+        clearTimeout(slow);
+        if (ticker) clearInterval(ticker);
+        if (line && typeof line.remove === 'function') line.remove();
+      };
     }
 
     // On a desk the terminal's height follows the cell beside it, so it can
@@ -1596,13 +1676,22 @@
       logTerminal('› Sending the same edit_file call three times, in one new session…', 'accent');
 
       if (liveBackendActive) {
+        // The service sends the three calls itself, in the one request below,
+        // so there is nothing to print between them; a cold start can take
+        // seconds, and the wait says so rather than leaving the line above alone.
+        const waited = waitLine('… Waiting for the service, which sends the three calls itself and answers after the third:');
         try {
           const base = getApiBase();
           const t0 = performance.now();
-          const res = await fetch(`${base}/simulate-loop`, {
-            method: "POST",
-            headers: authHeaders()
-          });
+          let res;
+          try {
+            res = await fetch(`${base}/simulate-loop`, {
+              method: "POST",
+              headers: authHeaders()
+            });
+          } finally {
+            waited();
+          }
           const latency = (performance.now() - t0).toFixed(1);
           if (res.ok) {
             const data = await res.json();
@@ -1635,14 +1724,14 @@
       logTerminal('✓ Call 2 permitted.', 'muted');
       logTerminal('› Agent request 3: edit_file(path="src/service.py", instruction="fix typo")', 'agent');
       logTerminal(`✕ Circuit breaker tripped: ${loop.reason}`, 'bad strong');
-      logTerminal(`■ Session tripped: ${loop.session_tripped}. Recorded session ${loop.session_id}, cost $${loop.current_session_cost_usd.toFixed(4)} (recorded ${RECORDED.recorded_at}, replayed offline).`, 'bad');
+      logTerminal(`■ Session tripped: ${loop.session_tripped}. Recorded session ${loop.session_id}, projected spend $${loop.current_session_cost_usd.toFixed(4)} (recorded ${RECORDED.recorded_at}, replayed offline).`, 'bad');
 
       setBreaker('tripped');
       setVerdictTag(loop.status, 'refused');
       setInvariants('loop');
       setSpendFrom(loop);
 
-      renderRecordedExplanation(`${asSentence(loop.reason)} Recorded session cost $${loop.current_session_cost_usd.toFixed(4)}.`);
+      renderRecordedExplanation(`${asSentence(loop.reason)} The recorded session’s projected spend was $${loop.current_session_cost_usd.toFixed(4)}.`);
     }
 
     async function simulateSecret() {
@@ -1772,13 +1861,13 @@
                 tool_name: s.tool,
                 action_type: s.type,
                 arguments: s.args,
-                projected_input_tokens: 1200,
-                projected_output_tokens: 400
+                projected_input_tokens: DEMO_TOKENS.input,
+                projected_output_tokens: DEMO_TOKENS.output
               }, PAGE_CALLER))
             });
             const data = await res.json();
             lastEvaluation = data;
-            logTerminal(`✓ Step ${i + 1}/4 ${s.tool} → ${data.status} (cost $${data.current_session_cost_usd.toFixed(4)})`, 'ok');
+            logTerminal(`✓ Step ${i + 1}/4 ${s.tool} → ${data.status} (projected $${data.current_session_cost_usd.toFixed(4)})`, 'ok');
           }
 
           // Ask the service for a certificate over the four verdicts just issued.
@@ -1800,7 +1889,7 @@
             document.getElementById('cert-origin').innerHTML =
               '<span class="tf-good">Issued by the live service</span> for the four calls above. The session behind it is in DynamoDB; the certificate itself is returned, not archived.';
 
-            setSpend(`$${certData.total_cost_usd.toFixed(4)}`, `${certData.total_tokens} tokens consumed`);
+            setSpend(`$${certData.total_cost_usd.toFixed(4)}`, projectedTokens(certData.total_tokens), spendNote(lastEvaluation, DEMO_TOKENS));
             setVerdictTag('APPROVED (COMPLIANT)', 'approved');
             setInvariants('none');
 
@@ -1827,15 +1916,15 @@
       const run = RECORDED.compliant;
       const cert = run.certificate;
       run.steps.forEach((s, i) => {
-        logTerminal(`✓ Step ${i + 1}/4 ${s.tool} → ${s.status} (cost $${s.current_session_cost_usd.toFixed(4)})`, 'ok');
+        logTerminal(`✓ Step ${i + 1}/4 ${s.tool} → ${s.status} (projected $${s.current_session_cost_usd.toFixed(4)})`, 'ok');
       });
       logTerminal(`✓ Recorded run complete: certificate ${cert.certificate_id}, ${cert.evaluations_count} recorded verdicts (recorded ${RECORDED.recorded_at}, replayed offline).`, 'warn strong');
 
-      setSpend(`$${cert.total_cost_usd.toFixed(4)}`, `${cert.total_tokens} tokens consumed`);
+      setSpend(`$${cert.total_cost_usd.toFixed(4)}`, projectedTokens(cert.total_tokens), spendNote(null, DEMO_TOKENS));
       setVerdictTag('APPROVED (COMPLIANT)', 'approved');
       setInvariants('none');
 
-      renderRecordedExplanation(`Four approved calls, $${cert.total_cost_usd.toFixed(4)} for ${cert.total_tokens} tokens.`);
+      renderRecordedExplanation(`Four approved calls: $${cert.total_cost_usd.toFixed(4)} projected for the ${formatCount(cert.total_tokens)} tokens this demo declares.`);
 
       currentCertData = {
         replayed_offline: true,
@@ -1889,7 +1978,7 @@
             const data = await res.json();
             logTerminal(`← HTTP 200 in ${latency} ms`, 'ok strong');
             logTerminal(`  Detected tool: ${data.detected_tool_name} · mapped action: ${data.detected_action_type}`, 'agent');
-            logTerminal(`✓ Verdict: ${data.evaluation.status} (cost $${data.evaluation.current_session_cost_usd.toFixed(4)})`, 'ok');
+            logTerminal(`✓ Verdict: ${data.evaluation.status} (projected $${data.evaluation.current_session_cost_usd.toFixed(4)})`, 'ok');
             logTerminal(`  SHA-256 proof hash: ${String(data.evaluation.proof_hash || '').slice(0, 24)}...`, 'muted');
 
             setVerdictTag('UNIVERSAL_ADAPTER_APPROVED', 'approved');
@@ -2008,9 +2097,11 @@
     // ask is one more refused page call in the ledger the proof strip and the
     // sessions console read, and a reader who reloads, or comes back from the
     // dashboard, would otherwise fill both with this page's own refusals. A
-    // new ask always gets a new session, because a page session keeps the
-    // loop gate's halt, and the same call asked a third time under one id
-    // would be refused as a loop. A recorded replay is never kept.
+    // kept answer is not labelled live: the stack is not asked whether it
+    // would answer now. A new ask always gets a new session, because a page
+    // session keeps the loop gate's halt, and the same call asked a third
+    // time under one id would be refused as a loop. A recorded replay is
+    // never kept.
 
     // The moment is the page's first ten seconds, so nothing it waits on may
     // take them: the counts get under a second before the hero asks anyway, the
@@ -2321,11 +2412,13 @@
       const h = T.html;
       if (answer.source === 'live' && answer.kept) {
         // Shown again, so the chip says when it was given rather than a round
-        // trip that did not happen now.
+        // trip that did not happen now. "Live" is kept for an answer given on
+        // this load: a kept one is shown whether or not the stack would
+        // answer now, so its chip is neutral and says only when it answered.
         const took = formatRoundTrip(answer.ms);
-        source.className = 'tf-chip tf-chip-emerald';
-        source.setAttribute('title', 'A live answer this stack gave ' + heroAgo(answer.at) + (took ? ', ' + took + ' there and back' : '') + '; shown again, not asked again');
-        T.setHtml(source, h`${T.icon('bolt', 13)}Live · ${heroAgo(answer.at, true)}`);
+        source.className = 'tf-chip tf-chip-gray';
+        source.setAttribute('title', 'An answer this stack gave ' + heroAgo(answer.at) + (took ? ', ' + took + ' there and back' : '') + ', kept in this browser; shown again, not asked again');
+        T.setHtml(source, h`${T.icon('clock', 13)}Answered ${heroAgo(answer.at, true)}`);
       } else if (answer.source === 'live') {
         const took = formatRoundTrip(answer.ms);
         source.className = 'tf-chip tf-chip-emerald';
@@ -2524,10 +2617,12 @@
       try { return await res.json(); } catch (err) { return null; }
     }
 
+    // Resolves to whether the strip shows what the stack answered: its
+    // figures, or its word that it judged nothing in the window.
     async function loadLiveTotals() {
       const strip = document.getElementById('proof-live');
       const where = document.getElementById('proof-where');
-      if (!strip || !T) return;
+      if (!strip || !T) return false;
       let reply;
       try {
         const base = getApiBase();
@@ -2539,8 +2634,9 @@
       } catch (err) {
         reply = { status: 0, ok: false, body: null };
       }
-      renderLiveTotals(strip, where, reply);
+      const shown = renderLiveTotals(strip, where, reply);
       strip.setAttribute('aria-busy', 'false');
+      return shown;
     }
 
     function renderLiveTotals(strip, where, reply) {
@@ -2556,7 +2652,7 @@
             reply.status ? 'The stack answered HTTP ' + reply.status + ' instead of its figures, so no count is shown rather than one invented.'
               : 'The stack did not answer, so no count is shown rather than one invented.');
         }
-        return;
+        return false;
       }
       const data = reply.body && typeof reply.body === 'object' ? reply.body : null;
       const totals = data && data.totals && typeof data.totals === 'object' ? data.totals : null;
@@ -2566,7 +2662,7 @@
       const wouldRefuse = totals ? wholeNumber(totals.would_refuse) : null;
       if (!days || calls === null || refused === null || wouldRefuse === null) {
         proofState(strip, 'info', 'No live figures', 'The stack answered, but not with figures this page can read, so none is shown.');
-        return;
+        return false;
       }
       if (calls === 0) {
         // Said as of the moment the page asked: the demonstration above may have
@@ -2574,7 +2670,7 @@
         proofState(strip, 'sparkles', 'Nothing judged here yet',
           'When this page asked, this stack had judged no call in the last ' + plural(days, 'day', 'days') + ', so there was nothing to count.',
           h`<a class="tf-link" href="${T.pageHref('dashboard.html#/try')}">Try the two-stage rollout, step by step</a>`);
-        return;
+        return true;
       }
       const rows = Array.isArray(data.series) ? data.series.filter(r => r && typeof r === 'object' && typeof r.day === 'string') : [];
       const daily = key => rows.map(r => key === 'calls'
@@ -2616,6 +2712,31 @@
       T.animateNumbers(strip);
       T.setHtml(where, h`${T.icon('info', 16)}<span>${sourcesSentence(data, calls)}${liveRefusals(stoppedFrom, href)}</span>`);
       where.hidden = false;
+      return true;
+    }
+
+    // The line beside the strip's heading names the reads whose figures the
+    // strip and the benchmark card show, and no other: a read that failed,
+    // or answered with nothing this page can show, is not called read. Its
+    // card says what became of it. The links are drawn with the stage
+    // prefix, since the header's own were given it once, at load.
+    const PROOF_READS = {
+      overview: { label: 'GET /api/overview', page: 'swagger.html#/default/get_api_overview' },
+      proof: { label: 'GET /proof.json', page: 'swagger.html#/default/get_proof_json' }
+    };
+    function drawProofReads(counts, bench) {
+      const line = document.getElementById('proof-links');
+      if (!line || !T) return;
+      const h = T.html;
+      const link = key => h`<a class="tf-spec-link" href="${T.pageHref(PROOF_READS[key].page)}" title="Open this operation in the published OpenAPI document">${PROOF_READS[key].label}</a>`;
+      if (counts && bench) {
+        T.setHtml(line, h`Read as this page loaded, from ${link('overview')} and ${link('proof')}`);
+      } else if (counts || bench) {
+        const [read, missed] = counts ? ['overview', 'proof'] : ['proof', 'overview'];
+        T.setHtml(line, h`Read as this page loaded, from ${link(read)}; ${link(missed)} gave nothing to show`);
+      } else {
+        T.setHtml(line, h`Nothing to show from ${link('overview')} or ${link('proof')} as this page loaded`);
+      }
     }
 
     // Where the counts come from, in one sentence: by source when the stack says
@@ -2889,9 +3010,32 @@
       return h`95% interval under Threefold, series by series: ${intervals}. ${plural(total, 'Acme task', 'Acme tasks')}${split}, each run ${plural(reps, 'time', 'times')} per condition in every series.`;
     }
 
+    // What a run under Threefold cost in time, from the snapshot: each series'
+    // overhead in seconds against no guidance, which benchmark/report.py
+    // gives as a ratio of mean wall times. Said only when every series
+    // counted carries one, as a range over them; nothing here is computed
+    // but the lowest and the highest.
+    function benchmarkTime(counted) {
+      const ratios = [];
+      for (const b of counted) {
+        const tf = Array.isArray(b.conditions) ? b.conditions.find(c => c && c.condition === 'threefold') : null;
+        const o = tf && tf.overhead && typeof tf.overhead === 'object' ? tf.overhead : null;
+        const s = o && o.against === 'none' ? o.seconds : null;
+        if (typeof s !== 'number' || !isFinite(s) || s <= 0) return '';
+        ratios.push(s);
+      }
+      if (!ratios.length) return '';
+      const low = Math.min.apply(null, ratios);
+      const high = Math.max.apply(null, ratios);
+      const said = low === high ? low.toFixed(2) + ' times' : low.toFixed(2) + ' to ' + high.toFixed(2) + ' times';
+      return 'The time: on average, a run under Threefold took ' + said + ' as long as one with no guidance' +
+        (ratios.length > 1 ? ', series by series.' : '.');
+    }
+
+    // Resolves to whether the card shows a result read from the snapshot.
     async function loadBenchmark() {
       const card = document.getElementById('proof-bench');
-      if (!card || !T) return;
+      if (!card || !T) return false;
       let reply;
       try {
         const base = getApiBase();
@@ -2900,8 +3044,9 @@
       } catch (err) {
         reply = { status: 0, ok: false, body: null };
       }
-      renderBenchmark(card, reply);
+      const shown = renderBenchmark(card, reply);
       card.setAttribute('aria-busy', 'false');
+      return shown;
     }
 
     function renderBenchmark(card, reply) {
@@ -2912,16 +3057,16 @@
         if (reply.status === 404) say('No benchmark snapshot is deployed on this stack, so no result is shown.');
         else if (reply.status === 401 || reply.status === 403) say('This stack keeps its benchmark snapshot private, so no result is shown.');
         else say('The benchmark snapshot could not be read, so no result is shown rather than one invented.');
-        return;
+        return false;
       }
       if (!reply.body || typeof reply.body !== 'object') {
         say('The stack answered, but not with a snapshot this page can read, so no result is shown.');
-        return;
+        return false;
       }
       const totals = benchmarkTotals(reply.body);
       if (!totals.series) {
         say('The snapshot holds no complete series, so no result is shown.');
-        return;
+        return false;
       }
       const tf = totals.sums.threefold;
       const agents = totals.agents.length > 1
@@ -2948,6 +3093,7 @@
       const none = totals.sums.none;
       const baseline = none.doneN ? h`, against ${none.done} of ${none.doneN} with no guidance` : '';
       const scope = benchmarkScope(totals.counted);
+      const time = benchmarkTime(totals.counted);
       // The bars pool the series; where they mix the two task families, the
       // label says so, since the reports never pool them.
       const mixed = totals.counted.some(b => b.family === 'standard') && totals.counted.some(b => b.family === 'pressure');
@@ -2959,6 +3105,8 @@
           <p data-bench="headline">${plural(totals.series, 'series', 'series')}, ${totals.real ? plural(totals.runs, 'real run', 'real runs') : plural(totals.runs, 'run', 'runs')} of ${agents}. ${verdictLine}</p>
           ${scope ? h`<p class="tf-bench-note" data-bench="interval">${scope}</p>` : ''}
           ${tf.doneN ? h`<p class="tf-bench-price" data-bench="price">The price: the acceptance tests passed in ${tf.done} of those ${tf.doneN} runs under Threefold${baseline}, because a refused agent sometimes stops instead of finishing.</p>` : ''}
+          ${time ? h`<p class="tf-bench-price" data-bench="time">${time}</p>` : ''}
+          <p class="tf-bench-case" data-bench="case"><strong>What a team gets for it:</strong> a rule-breaking write is refused as the agent makes it, not found later in review, and the agent is told why, with a checked fix where one can be made. No time saved in review has been measured.</p>
           <a class="tf-link tf-bench-more" href="${T.pageHref('dashboard.html#/proof')}">Each series, apart, with its evidence</a>
         </div>
         <div class="tf-bench-chart">
@@ -2968,17 +3116,44 @@
           </div>
           ${bars}
         </div>`);
+      return true;
     }
+
+    // A reader sent to the scenarios (the navigation's Demo, or a link to
+    // index.html#watch-the-gates) is scrolled there as the page loads, before
+    // the strip and the benchmark above them fill in and grow. A browser that
+    // keeps what is on screen where it was as content above it grows leaves
+    // them in place; one that does not would leave the reader short of them.
+    // So once both reads are in, the scenarios are brought back under the
+    // header, at once, unless the reader has scrolled, pressed a key or
+    // touched the page since it loaded.
+    const keepTheScenariosInView = (function () {
+      let moved = false;
+      const mark = () => { moved = true; };
+      if (typeof window.addEventListener === 'function') {
+        ['wheel', 'touchstart', 'keydown', 'mousedown'].forEach(type => window.addEventListener(type, mark, { passive: true }));
+      }
+      return () => {
+        if (moved || !window.location || window.location.hash !== '#watch-the-gates') return;
+        const section = document.getElementById('watch-the-gates');
+        if (section && typeof section.scrollIntoView === 'function') section.scrollIntoView({ block: 'start' });
+      };
+    })();
 
     // On load: the navigation and the links first, then the service and the two
     // reads, and the hero's one call once the counts have been read (or after
     // HERO_COUNTS_WAIT_MS), so counts read in that time do not include this visit.
+    // Once both reads are in, the line beside the strip's heading names the
+    // ones whose figures are shown.
     linkHero();
     renderContractStrip();
     checkApiHealth();
     const countsRead = loadLiveTotals();
     runHeroDemo(countsRead);
-    loadBenchmark();
+    const benchRead = loadBenchmark();
+    Promise.all([countsRead, benchRead])
+      .then(([counts, bench]) => drawProofReads(counts, bench), () => drawProofReads(false, false))
+      .then(keepTheScenariosInView);
     (function () {
       const replay = document.getElementById('hero-replay');
       if (replay && typeof replay.addEventListener === 'function') replay.addEventListener('click', replayHero);

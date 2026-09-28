@@ -39,6 +39,8 @@ def test_the_loop_replay_shows_the_recorded_refusal(tmp_path: Path) -> None:
   out.explained = el('bedrock-box').innerHTML;
   out.loopBadge = el('inv-loop').innerText;
   out.spend = el('kpi-spend').innerText;
+  out.note = el('kpi-note').textContent;
+  out.noteHidden = el('kpi-note').hidden;
 """,
         tmp_path,
     )
@@ -47,8 +49,11 @@ def test_the_loop_replay_shows_the_recorded_refusal(tmp_path: Path) -> None:
     assert "Recorded 2026-09-25, replayed offline" in out["explained"]
     assert "Monomorphic loop detected" in out["explained"]
     assert "$0.0270" in out["explained"]
-    assert "3 consecutive times. Recorded session cost $0.0270." in out["explained"],         "A review read the recorded reason and the cost as one sentence: the reason ends in a stop of its own"
-    assert out["spend"] == "$0.0270", "The recorded session's cost is its spend, as the certificate's replay shows its own"
+    assert "3 consecutive times. The recorded session’s projected spend was $0.0270." in out["explained"], \
+        "A review read the recorded reason and the cost as one sentence: the reason ends in a stop of its own"
+    assert out["spend"] == "$0.0270", "The recorded session's projected cost is its spend, as the certificate's replay shows its own"
+    assert out["note"].startswith("Projected from the token counts this demo declares") and not out["noteHidden"], \
+        "A judge: the spend is projected from declared token counts, never metered, and says so"
 
 
 def test_the_secret_replay_shows_the_recorded_reason(tmp_path: Path) -> None:
@@ -96,6 +101,8 @@ def test_the_compliant_replay_shows_the_recorded_certificate(tmp_path: Path) -> 
   await simulateCompliant(); await tick();
   out.spend = el('kpi-spend').innerText;
   out.tokens = el('kpi-tokens').innerText;
+  out.note = el('kpi-note').textContent;
+  out.explained = el('bedrock-box').innerHTML;
   out.certId = el('cert-id').innerText;
   out.certHash = el('cert-hash').innerText;
   out.certOrigin = el('cert-origin').innerHTML;
@@ -104,7 +111,12 @@ def test_the_compliant_replay_shows_the_recorded_certificate(tmp_path: Path) -> 
         tmp_path,
     )
     assert out["spend"] == "$0.0384"
-    assert out["tokens"] == "6400 tokens consumed"
+    # A judge: "6400 tokens consumed" read as tokens a model used. They are the
+    # counts the demo declares for its four calls, 1,200 in and 400 out each.
+    assert out["tokens"] == "6,400 projected tokens"
+    assert out["note"] == ("Projected from the token counts this demo declares, 1,200 input and 400 output per call; "
+                           "approved calls only, nothing metered.")
+    assert "Four approved calls: $0.0384 projected for the 6,400 tokens this demo declares." in out["explained"]
     assert out["certId"] == "CERT-TF-38EC0B01"
     assert "32c95977d310b51080bdae0c99bd2f93cf7608c87e652f082b8626fd159cd4b6" in out["certHash"]
     assert "Recorded 2026-09-25, replayed offline" in out["certOrigin"]

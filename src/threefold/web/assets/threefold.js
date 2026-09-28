@@ -1240,7 +1240,7 @@
     { id: 'sessions', label: 'Sessions', page: 'sessions.html', icon: 'terminal', primary: true, hint: 'Every agent session the service has judged' },
     { id: 'connect', label: 'Connect', page: 'dashboard.html', hash: '#/connect', icon: 'plug', hint: 'Govern a repository with one command' },
     { id: 'proof', label: 'Proof', page: 'dashboard.html', hash: '#/proof', icon: 'flask', hint: 'The benchmark: agents with and without Threefold' },
-    { id: 'demo', label: 'Demo', page: 'index.html', icon: 'play', hint: 'The flagship scenarios, no account needed' },
+    { id: 'demo', label: 'Demo', page: 'index.html#watch-the-gates', icon: 'play', hint: 'The flagship scenarios, no account needed' },
     { id: 'api', label: 'API', page: 'swagger.html', icon: 'book', hint: 'The published OpenAPI document' },
     { id: 'settings', label: 'Settings', page: 'settings.html', icon: 'settings', hint: 'Sign-in, the policy and your own names for projects' }
   ];

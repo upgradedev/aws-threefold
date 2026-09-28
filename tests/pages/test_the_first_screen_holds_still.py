@@ -127,7 +127,7 @@ def test_a_phone_keeps_the_demonstrations_bar_to_one_line_and_never_scrolls_side
     got = measure("index.html", tmp_path, width=375, height=812, replies=_replies(hero), moments={"landed": 3200}, probe=PROBE,
                   before=KEPT if label == "kept" else "")
     landed = got["taken"]["landed"]
-    assert landed["source"] == {"live": "Live · 450 ms", "kept": "Live · 12 min ago", "recorded": "Recorded 2026-09-25, replayed offline"}[label]
+    assert landed["source"] == {"live": "Live · 450 ms", "kept": "Answered 12 min ago", "recorded": "Recorded 2026-09-25, replayed offline"}[label]
     middles = [item["middle"] for item in landed["barItems"]]
     assert max(middles) - min(middles) <= 2, f"The bar broke onto a second line with the {label} label: {landed['barItems']}"
     assert all(item["right"] <= landed["bar"]["right"] + 0.5 for item in landed["barItems"]), "Nothing in the bar reaches past its edge"
@@ -155,7 +155,8 @@ LAYOUT = r"""() => {
     flowShown: Array.from(document.querySelectorAll('#how-it-works svg.tf-diagram-wide, #how-it-works svg.tf-diagram-narrow')).filter(shown).map(e => e.getAttribute('class')),
     connectors: getComputedStyle(document.querySelector('.tf-step-card'), '::before').content,
     slack: outcome.bottom - Math.max.apply(null, landed.map(e => e.getBoundingClientRect().bottom + scrollY)),
-    actions: Array.from(document.querySelectorAll('#hero-actions > *')).map(e => { const b = e.getBoundingClientRect(); return { id: e.id, top: b.top, left: b.left, width: b.width }; }),
+    actions: ['hero-try', 'hero-dashboard', 'hero-watch', 'hero-connect'].map(id => { const b = document.getElementById(id).getBoundingClientRect(); return { id: id, top: b.top, left: b.left, right: b.right, width: b.width }; }),
+    actionsRow: box('#hero-actions'),
     names: Array.from(document.querySelectorAll('.tf-scenario-name')).map(e => e.getBoundingClientRect().top),
     scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth
   };
@@ -203,14 +204,28 @@ def test_the_verdict_fills_the_room_its_ghost_held(tmp_path: Path, width: int, h
 
 @pytest.mark.parametrize("face", ["page", "wide"])
 def test_the_hero_actions_never_leave_one_button_alone_on_a_row(tmp_path: Path, face: str) -> None:
+    """The two quiet links take the line under the buttons, each as wide as its words.
+
+    A judge found the connect link stretched across the row, its focus ring
+    round some 576 px for 170 px of words. Where both links fit on one line
+    they share it; where they do not, the second starts the next line where
+    the first did.
+    """
     for width, height in ((768, 1024), (1024, 768), (1280, 800), (1440, 900)):
-        acts = {a["id"]: a for a in _layout(tmp_path, width, height, WIDE_FONT if face == "wide" else "")["actions"]}
-        primary, secondary, link = acts["hero-try"], acts["hero-dashboard"], acts["hero-connect"]
+        got = _layout(tmp_path, width, height, WIDE_FONT if face == "wide" else "")
+        acts = {a["id"]: a for a in got["actions"]}
+        primary, secondary, watch, connect = acts["hero-try"], acts["hero-dashboard"], acts["hero-watch"], acts["hero-connect"]
         side_by_side = abs(primary["top"] - secondary["top"]) < 1
         stacked = abs(primary["left"] - secondary["left"]) < 1 and abs(primary["width"] - secondary["width"]) < 1
         assert side_by_side or stacked, f"At {width} px, in the {face} face, the two buttons are neither on one row nor one column"
-        assert link["top"] > max(primary["top"], secondary["top"]) and abs(link["left"] - primary["left"]) < 1, \
-            f"At {width} px the quiet link has the line under the buttons to itself"
+        assert watch["top"] > max(primary["top"], secondary["top"]) and abs(watch["left"] - primary["left"]) < 1, \
+            f"At {width} px the quiet links start on the line under the buttons, where the buttons start"
+        beside = abs(connect["top"] - watch["top"]) < 1 and connect["left"] > watch["right"]
+        under = connect["top"] > watch["top"] and abs(connect["left"] - watch["left"]) < 1
+        assert beside or under, f"At {width} px, in the {face} face, the connect link is neither beside the first link nor under it"
+        row = got["actionsRow"]["width"]
+        for link in (watch, connect):
+            assert link["width"] < 0.75 * row, f"At {width} px {link['id']} is {link['width']:.0f} px of a {row:.0f} px row: stretched past its words"
 
 
 def test_the_scenario_names_line_up_whether_or_not_their_card_is_numbered(tmp_path: Path) -> None:

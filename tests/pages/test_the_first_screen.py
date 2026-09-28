@@ -2,8 +2,9 @@
 
 A judge who opens the public URL meets the hero before anything else: one
 promise line under twelve words, one sentence of how, "Try the two-stage
-rollout — 2 min", "Open the live dashboard" and a quiet "Connect your
-repository", and beside them the product's core moment. That moment is one
+rollout — 2 min", "Open the live dashboard", and two quiet links, one down to
+the flagship's scenarios and one to connect a repository, and beside them the
+product's core moment. That moment is one
 proposed write, the boundary write RECORDED.boundary was recorded from, asked
 of this stack through the route a hook asks: the answer is the stack's own when
 it gives one, labelled live, with its reason and whatever fix came with it, and the
@@ -34,14 +35,17 @@ from pathlib import Path
 from _browser import ROOT, page_source, run
 
 PROMISE = "Stop bad agent writes before they reach your code."
+# A judge read "your repos observe before they enforce" twice before it made
+# sense; the second sentence says the same in the page's own plain words.
 SENTENCE = (
-    "Deterministic gates on AWS judge each write and command from Claude Code, Codex or Antigravity, and your "
-    "repos observe before they enforce."
+    "Deterministic gates on AWS judge each write and command from Claude Code, Codex or Antigravity. "
+    "Each repository only watches until you promote its rules."
 )
 SCOPE = "A refusal is measured to stop the write in Claude Code and Antigravity, and in Codex once, over its patch tool only."
 ACTIONS = [
     ("hero-try", "dashboard.html#/try", "Try the two-stage rollout — 2 min"),
     ("hero-dashboard", "dashboard.html#/overview", "Open the live dashboard"),
+    ("hero-watch", "#watch-the-gates", "Watch a loop get halted, no account"),
     ("hero-connect", "dashboard.html#/connect", "Connect your repository"),
 ]
 SECTIONS = ["what-threefold-is", "proof", "how-it-works", "built-on-aws", "watch-the-gates"]
@@ -144,6 +148,7 @@ def _run_loaded(tmp_path: Path, overview: str, hero: str, proof: str, before: st
   out.where = el('proof-where').innerHTML;
   out.whereHidden = el('proof-where').hidden;
   out.bench = el('proof-bench').innerHTML;
+  out.reads = el('proof-links').innerHTML;
   out.overviewAsked = calls.filter(c => c.url.indexOf('/api/overview') !== -1).map(c => ({ url: c.url, method: c.method, headers: c.headers }));
   out.proofAsked = calls.filter(c => c.url.indexOf('/proof.json') !== -1).map(c => ({ url: c.url, method: c.method, headers: c.headers }));
   out.heroAsked = calls.filter(c => c.url.indexOf('/evaluate-tool-call') !== -1).map(c => ({ url: c.url, method: c.method, headers: c.headers, body: c.body }));
@@ -196,7 +201,12 @@ def test_the_hero_leads_with_one_promise_under_twelve_words() -> None:
     assert hero.index('id="hero-promise"') < hero.index('id="hero-sentence"') < hero.index('id="hero-actions"')
 
 
-def test_the_three_actions_come_next_each_one_click_in_this_order() -> None:
+def test_the_actions_come_next_each_one_click_in_this_order() -> None:
+    """A judge: the flagship sat some 3,500 px down and nothing on the first screen led to it.
+
+    CLAUDE.md rule 6's loop halt and certificate are one quiet link away now,
+    beside connecting a repository, both under the two buttons.
+    """
     hero = _hero()
     actions = hero.split('id="hero-actions"', 1)[1].split("</div>", 1)[0]
     found = re.findall(r'<a id="([^"]+)" href="([^"]+)" class="([^"]*)"[^>]*>(.*?)</a>', actions, re.S)
@@ -204,7 +214,12 @@ def test_the_three_actions_come_next_each_one_click_in_this_order() -> None:
     classes = [set(cls.split()) for _, _, cls, _ in found]
     assert {"tf-btn", "tf-btn-primary"} <= classes[0], "Trying the two-stage rollout is the primary action"
     assert "tf-btn" in classes[1] and "tf-btn-primary" not in classes[1], "The dashboard is the secondary one"
-    assert "tf-btn" not in classes[2] and "tf-hero-link" in classes[2], "Connecting is a quiet text link"
+    for quiet in classes[2:]:
+        assert "tf-btn" not in quiet and "tf-hero-link" in quiet, "Watching the gates and connecting are quiet text links"
+    assert re.search(r'<p class="tf-hero-links">\s*<a id="hero-watch"[^>]*>.*?</a>\s*<a id="hero-connect"', actions, re.S), \
+        "The two quiet links share one line under the buttons"
+    assert f'<section id="{ACTIONS[2][1][1:]}"' in page_source("index.html"), "The link lands on the scenarios"
+    assert "tf-hero-link-down" in classes[2], "Its arrow points down the page, where it goes"
 
 
 def test_each_length_of_time_is_said_where_it_is_true() -> None:
@@ -475,7 +490,56 @@ def test_the_links_carry_the_stage_prefix_when_served(tmp_path: Path) -> None:
         tmp_path,
         before=DEMO_DOM,
     )
-    assert out["links"] == [f"https://example.test/prod/{href}" for _, href, _ in ACTIONS]
+    assert out["links"] == [f"https://example.test/prod/{href}" for ident, href, _ in ACTIONS if ident != "hero-watch"]
+
+
+def test_the_navigation_s_demo_item_opens_the_flagship_scenarios(tmp_path: Path) -> None:
+    """A judge: Demo, whose hint says it opens the flagship scenarios, reloaded the top of this page.
+
+    Its fragment rides in the item's page, not in its hash: the navigation
+    gives a dashboard route's hash alone on the dashboard, where this one
+    would be taken for a route of its own.
+    """
+    for page, options in (("index.html", "{ active: 'demo' }"), ("settings.html", "{ active: 'settings' }"),
+                          ("settings.html", "{ active: 'overview', inDashboard: true }")):
+        out = run(page, f"  Threefold.mountNav(el('page-nav'), {options});\n  out.nav = el('page-nav').innerHTML;\n", tmp_path,
+                  before=DEMO_DOM if page == "index.html" else "")
+        more = out["nav"].split("data-tf-more-menu", 1)[1].split("</div>", 1)[0]
+        demo = re.search(r'<a href="([^"]+)" class="tf-menu-item"[^>]*>(?:(?!</a>).)*?</svg>Demo</a>', more, re.S)
+        assert demo and demo.group(1) == "https://example.test/prod/index.html#watch-the-gates", f"{page} {options}: {demo and demo.group(1)}"
+    assert '<section id="watch-the-gates"' in page_source("index.html")
+
+
+def test_a_reader_sent_to_the_scenarios_is_left_on_them_once_the_figures_above_fill_in(tmp_path: Path) -> None:
+    """The strip and the benchmark card above the scenarios grow after the browser has scrolled to them.
+
+    Chromium keeps them in view on its own; a browser without scroll
+    anchoring would leave the reader short of them. Once both reads are in,
+    the page brings them back under the header, but never against a reader
+    who has scrolled, pressed a key or touched the page in the meantime.
+    """
+    def landed(hash_: str, meddle: str = "") -> list:
+        return run(
+            "index.html",
+            r"""
+  """ + meddle + r"""
+  gate.release({ status: 200, body: OVERVIEW });
+  await tick();
+  out.scrolled = scrolledTo;
+""",
+            tmp_path,
+            before=DEMO_DOM + LIVE_REFUSAL + f"openAt({json.dumps(hash_)});\n"
+            + "const scrolledTo = [];\nel('watch-the-gates').scrollIntoView = o => scrolledTo.push(o);\n"
+            + "const gate = held();\nconst OVERVIEW = " + _overview() + ";\n"
+            + "answer = api({ '/status': { status: 200, body: { service: 'Threefold', status: 'HEALTHY' } }, "
+            + "'/api/overview': () => gate.promise, 'POST /evaluate-tool-call': { status: 200, body: LIVE_REFUSAL }, '/proof.json': 'network' });\n",
+        )["scrolled"]
+
+    assert landed("#watch-the-gates") == [{"block": "start"}], "Brought back under the header, at once, once"
+    assert landed("") == [] and landed("#proof") == [], "Only a reader sent to the scenarios"
+    for event in ("wheel", "touchstart", "keydown", "mousedown"):
+        assert landed("#watch-the-gates", f"(winListeners[{json.dumps(event)}] || []).forEach(f => f({{}}));") == [], \
+            f"A reader who used {event} since the page loaded is left where they are"
 
 
 def test_the_hero_asks_the_stack_once_and_shows_its_live_answer(tmp_path: Path) -> None:
@@ -547,9 +611,18 @@ def test_a_live_answer_is_kept_in_this_browser_with_only_what_the_hero_shows(tmp
 
 
 def test_a_visit_within_the_hour_shows_the_kept_answer_and_asks_nothing(tmp_path: Path) -> None:
-    out = _load(tmp_path, overview="{ status: 200, body: " + _overview() + " }", before=_kept(12))
+    """A judge: a kept answer's chip read green "Live · 12 min ago" with the stack unreachable.
+
+    "Live" is kept for an answer given on this load. A kept one is shown
+    without asking the stack anything, so its chip is neutral and says only
+    when the stack answered.
+    """
+    out = _load(tmp_path, overview="{ status: 200, body: " + _overview() + " }", before=_kept(12),
+                scenario="  out.sourceClass = el('hero-source').className;\n  out.sourceTitle = el('hero-source').getAttribute('title');\n")
     assert out["heroAsked"] == [], "A reload adds no refused page call to the ledger"
-    assert _text(out["source"]) == "Live · 12 min ago", "The chip says when the answer was given, not a round trip that did not happen now"
+    assert _text(out["source"]) == "Answered 12 min ago", "The chip says when the answer was given, not a round trip that did not happen now"
+    assert "tf-chip-gray" in out["sourceClass"] and "tf-chip-emerald" not in out["sourceClass"], "Not coloured as a live answer"
+    assert "live" not in out["sourceTitle"].lower() and out["sourceTitle"].startswith("An answer this stack gave 12 minutes ago")
     assert out["caption"] == "Judged by this stack 12 minutes ago and shown again, so a reload adds no call to its ledger."
     assert out["dataSource"] == "live" and out["landed"] == "refused" and out["flagged"] == [True, False, False]
     assert _read(out["reason"]) == PLAIN_REASON + " " + RULE_LINE
@@ -769,7 +842,7 @@ def test_a_kept_answer_is_labelled_as_one_before_its_verdict_lands(tmp_path: Pat
     )
     early = out["early"]
     assert early["landed"] is None, "Measured before the verdict lands"
-    assert _text(early["source"]) == "Live · 12 min ago" and "Asking" not in early["source"]
+    assert _text(early["source"]) == "Answered 12 min ago" and "Asking" not in early["source"]
     assert _read(early["caption"]).startswith("Judged by this stack 12 minutes ago") and "Asking" not in early["caption"]
     assert early["waiting"] == "Showing the answer this stack gave 12 minutes ago"
     assert out["heroAsked"] == []
@@ -1343,6 +1416,64 @@ def test_the_benchmark_is_pooled_from_the_snapshot_this_stack_serves(tmp_path: P
     if families == {"standard", "pressure"}:
         assert f"By condition, the {want['series']} series pooled, standard and pressure tasks together." in bench, \
             "The bars pool the two families, which the reports never do, so they say so"
+    time = re.search(r'<p class="tf-bench-price" data-bench="time">(.*?)</p>', out["bench"], re.S)
+    assert time and _text(time.group(1)) == _time_line(proof), "The time Threefold cost is read from the snapshot, beside its price"
+    case = re.search(r'<p class="tf-bench-case" data-bench="case">(.*?)</p>', out["bench"], re.S)
+    assert case and _text(case.group(1)) == CASE, "The case for a team's time is said where its evidence is shown"
+    assert out["bench"].index('data-bench="price"') < out["bench"].index('data-bench="time"') < out["bench"].index('data-bench="case"')
+
+
+# The case for a team's time that the evidence supports, and no more: where a
+# rule-breaking write is caught, and what the agent gets back. Nothing
+# measured time saved, and the sentence says so.
+CASE = ("What a team gets for it: a rule-breaking write is refused as the agent makes it, not found later in review, "
+        "and the agent is told why, with a checked fix where one can be made. No time saved in review has been measured.")
+
+
+def _time_line(proof: dict) -> str:
+    """What the card must say of the time, from each series' own overhead in the snapshot (a ratio of mean wall times)."""
+    ratios = []
+    for b in proof["benchmarks"]:
+        if b.get("pilot"):
+            continue
+        overhead = {c["condition"]: c for c in b["conditions"]}["threefold"]["overhead"]
+        assert overhead["against"] == "none"
+        ratios.append(overhead["seconds"])
+    low, high = min(ratios), max(ratios)
+    said = f"{low:.2f} times" if low == high else f"{low:.2f} to {high:.2f} times"
+    return (f"The time: on average, a run under Threefold took {said} as long as one with no guidance"
+            + (", series by series." if len(ratios) > 1 else "."))
+
+
+def test_the_time_is_said_only_from_a_ratio_every_series_carries(tmp_path: Path) -> None:
+    """A judge: a #workplace-efficiency entry omitted the wall time its own benchmark measured.
+
+    The line is a range over each counted series' overhead in seconds against
+    no guidance; a series without one, or with one that is not a positive
+    number, leaves the line out rather than let the range speak for it.
+    """
+    def series(seconds, against="none"):
+        conditions = [
+            {"condition": "none", "violation": {"k": 5, "n": 9}, "completion": {"k": 9, "n": 9}, "overhead": None},
+            {"condition": "prompt", "violation": {"k": 2, "n": 9}, "completion": {"k": 9, "n": 9}},
+            {"condition": "threefold", "violation": {"k": 0, "n": 9}, "completion": {"k": 7, "n": 9},
+             "overhead": {"against": against, "turns": 1.2, "seconds": seconds, "cost": None}},
+        ]
+        return {"agent": "Codex", "pilot": False, "scripted_rows": 0, "conditions": conditions}
+
+    def time_of(*benchmarks) -> str:
+        out = _load(tmp_path, proof="{ status: 200, body: " + json.dumps({"benchmarks": list(benchmarks)}) + " }")
+        found = re.search(r'data-bench="time">(.*?)</p>', out["bench"], re.S)
+        assert "<img" not in out["bench"], "Service data reached the page as markup"
+        return _text(found.group(1)) if found else ""
+
+    assert time_of(series(1.56)) == "The time: on average, a run under Threefold took 1.56 times as long as one with no guidance."
+    assert time_of(series(2.31), series(1.18), series(1.4)) == (
+        "The time: on average, a run under Threefold took 1.18 to 2.31 times as long as one with no guidance, series by series.")
+    for hostile in (None, 0, -1.2, "'1.5'", "'<img src=x>'"):
+        value = hostile.strip("'") if isinstance(hostile, str) else hostile
+        assert time_of(series(1.3), series(value)) == "", f"seconds {hostile!r}: no range over the series that carry one"
+    assert time_of(series(1.3), series(1.5, against="prompt")) == "", "A ratio against another baseline is not this one"
 
 
 def _pct(value: float) -> str:
@@ -1427,6 +1558,39 @@ def test_no_benchmark_result_is_shown_without_a_snapshot(tmp_path: Path) -> None
         out = _load(tmp_path, proof=reply)
         assert words in _text(out["bench"]), reply
         assert "data-metric" not in out["bench"], reply
+        assert 'data-bench="time"' not in out["bench"] and 'data-bench="case"' not in out["bench"], \
+            f"{reply}: the case and its cost are said only beside the evidence for them"
+
+
+def test_the_line_beside_the_proof_heading_names_only_the_reads_it_shows(tmp_path: Path) -> None:
+    """A judge: with both reads failing, the heading still said "Read as this page loaded, from GET …".
+
+    The line now names the reads whose figures the strip and the card show,
+    after both have answered; a read that failed or gave nothing to show is
+    named as such. Each link keeps the stage prefix, though it is drawn after
+    the header's own links were given theirs.
+    """
+    assert re.search(r'<p id="proof-links" class="tf-proof-links">Reading, as this page loads, from\s*<a',
+                     _section("proof")), "Before the reads answer, the line says they are being read"
+    overview = "{ status: 200, body: " + _overview() + " }"
+    snapshot = "{ status: 200, body: " + PROOF_FILE.read_text(encoding="utf-8") + " }"
+    nothing_judged = "{ status: 200, body: " + _overview(calls=0, refused=0, would_refuse=0, projects=0) + " }"
+    both = "Read as this page loaded, from GET /api/overview and GET /proof.json"
+    neither = "Nothing to show from GET /api/overview or GET /proof.json as this page loaded"
+    cases = {
+        "both answered": (overview, snapshot, both),
+        "nothing judged yet is still an answer": (nothing_judged, snapshot, both),
+        "the benchmark failed": (overview, "'network'", "Read as this page loaded, from GET /api/overview; GET /proof.json gave nothing to show"),
+        "the counts failed": ("{ status: 503, body: {} }", snapshot, "Read as this page loaded, from GET /proof.json; GET /api/overview gave nothing to show"),
+        "both unreachable": ("'network'", "'network'", neither),
+        "both private": ("{ status: 401, body: {} }", "{ status: 401, body: {} }", neither),
+        "answers with nothing to show": ("{ status: 200, body: { totals: 'many' } }", "{ status: 200, body: { benchmarks: 'many' } }", neither),
+    }
+    for name, (counts, bench, said) in cases.items():
+        out = _load(tmp_path, overview=counts, proof=bench)
+        assert _read(out["reads"]).replace(" ;", ";") == said, name
+        for label, anchor in (("GET /api/overview", "get_api_overview"), ("GET /proof.json", "get_proof_json")):
+            assert f'href="https://example.test/prod/swagger.html#/default/{anchor}"' in out["reads"], f"{name}: {label} keeps the stage prefix"
 
 
 # ---------------------------------------------------------------- the gates
@@ -1494,9 +1658,136 @@ def test_a_live_answer_shows_the_session_spend_it_carries(tmp_path: Path) -> Non
         before=DEMO_DOM,
     )
     assert out["loop"] == ["$0.0270", False], "The live loop shows the cost its answer carried"
-    assert out["secret"] == ["$0.0000", False], "A measured zero is shown as one"
+    assert out["secret"] == ["$0.0000", False], "A zero the answer carried is shown as one, with what it counts (the next test)"
     assert out["boundary"] == ["$0.0012", False] and out["adapter"] == ["$0.0096", False]
     assert out["unread"] == [["none yet", True]] * 4, "A cost that is not a finite, non-negative number is not shown"
+
+
+SPEND_NOTE = "Projected from the token counts this demo declares, or the service’s default where none is declared; approved calls only, nothing metered."
+CERTIFIED_NOTE = "Projected from the token counts this demo declares, 1,200 input and 400 output per call; approved calls only, nothing metered."
+
+
+def test_the_spend_says_it_is_projected_and_what_it_counts(tmp_path: Path) -> None:
+    """A judge: "Session spend $0.0384" and "6400 tokens consumed" came from token counts the demo declares.
+
+    No token is metered: the service projects a session's cost from the
+    counts each call declares, and adds only the calls that passed every
+    gate. So the figure is called projected, the note under it says what it
+    counts, and where Amazon Bedrock was asked for the sentence beside it, a
+    $0.0000 never reads as the model's cost: the note says that call is not
+    in it.
+    """
+    healthy = "'/status': { status: 200, body: { service: 'Threefold', status: 'HEALTHY' } }"
+    out = run(
+        "index.html",
+        r"""
+  const note = () => [el('kpi-note').textContent, el('kpi-note').hidden];
+  out.idle = note();
+  const secret = source => ({ status: 200, body: { status: 'BLOCKED_SECRET_DETECTED', reason: 'Sensitive credential detected', session_id: 'sim-2', current_session_cost_usd: 0, explanation_source: source, bedrock_explanation: 'A sentence.' } });
+  for (const source of ['bedrock', 'deterministic_fallback', 'deterministic']) {
+    answer = api({ """ + healthy + r""", 'POST /simulate-secret': secret(source) });
+    await checkApiHealth();
+    await simulateSecret(); await tick();
+    out[source] = [el('kpi-spend').innerText].concat(note());
+  }
+  let n = 0;
+  answer = api({ """ + healthy + r""",
+    'POST /evaluate-tool-call': () => { n += 1; return { status: 200, body: { status: 'APPROVED', reason: 'ok', current_session_cost_usd: 0.0096 * n, explanation_source: 'deterministic' } }; },
+    'POST /issue-certificate': { status: 200, body: { certificate_id: 'CERT-TF-1', total_cost_usd: 0.0384, total_tokens: 6400, sha256_fingerprint: 'ab', signature: null } } });
+  await checkApiHealth();
+  await simulateCompliant(); await tick();
+  out.certified = [el('kpi-spend').innerText, el('kpi-tokens').innerText].concat(note());
+  out.declared = calls.filter(c => c.url.endsWith('/evaluate-tool-call')).slice(-4).map(c => [c.body.projected_input_tokens, c.body.projected_output_tokens]);
+  resetDemo();
+  out.reset = [el('kpi-spend').innerText, el('kpi-tokens').innerText].concat(note());
+""",
+        tmp_path,
+        before=DEMO_DOM,
+    )
+    assert out["idle"][0] == "" and '<span id="kpi-note" class="tf-session-note" hidden></span>' in page_source("index.html"), \
+        "No note before there is a figure"
+    assert out["bedrock"] == ["$0.0000", SPEND_NOTE + " The Amazon Bedrock call behind the sentence above is not counted.", False]
+    assert out["deterministic_fallback"] == ["$0.0000", SPEND_NOTE + " The model call asked for the sentence above is not counted.", False]
+    assert out["deterministic"] == ["$0.0000", SPEND_NOTE, False], "No model was asked, so none is mentioned"
+    assert out["declared"] == [[1200, 400]] * 4, "The note's counts are the ones the requests declare"
+    assert out["certified"] == ["$0.0384", "6,400 projected tokens", CERTIFIED_NOTE, False]
+    assert out["reset"] == ["none yet", "", "", True], "Reset takes the note away with the figure"
+    body = page_source("index.html")
+    stats = body.split('class="tf-session-stats"', 1)[1].split("</div>", 1)[0]
+    assert "<span>Projected spend <b id=\"kpi-spend\"" in stats and "Session spend" not in body
+    assert "tokens consumed" not in body and "(cost $" not in body, "Nothing calls a projection a cost consumed"
+
+
+# A terminal whose lines are kept, each able to be taken away, with the
+# counter a waiting line carries.
+LOGGED = r"""
+const logged = [];
+document.createElement = tag => ({
+  tagName: tag, className: '', textContent: '', innerHTML: '', removed: false, counter: { textContent: '' },
+  setAttribute() {}, click() {}, remove() { this.removed = true; },
+  querySelector(sel) { return sel === '[data-tf-waited]' ? this.counter : null; }
+});
+el('terminal-log').appendChild = node => logged.push(node);
+const shown = () => logged.filter(n => !n.removed).map(n => text(n.innerHTML || n.textContent));
+"""
+
+
+def test_a_slow_loop_says_what_it_waits_for_and_counts_the_seconds(tmp_path: Path) -> None:
+    """A judge: on a cold start the loop showed only "Sending…" for several seconds.
+
+    POST /simulate-loop sends its three calls on the service, in one request,
+    so there is no call to print as it goes; past a second, a line says what
+    the terminal waits for and counts the seconds (hidden from a screen
+    reader, since the terminal is a log), and it goes when the answer comes,
+    whether a verdict, an error or no answer at all.
+    """
+    healthy = "'/status': { status: 200, body: { service: 'Threefold', status: 'HEALTHY' } }"
+    loop = "{ status: 200, body: { status: 'BLOCKED_LOOP_DETECTED', reason: 'Loop detected', session_id: 'sim-1', session_tripped: true, current_session_cost_usd: 0.027, explanation_source: 'deterministic' } }"
+    out = run(
+        "index.html",
+        r"""
+  const waitFor = async reply => {
+    const gate = held();
+    answer = api({ """ + healthy + r""", 'POST /simulate-loop': () => gate.promise });
+    await checkApiHealth();
+    logged.length = 0;
+    const running = simulateLoop();
+    await new Promise(r => setTimeout(r, 400));
+    const early = shown();
+    await new Promise(r => setTimeout(r, 900));
+    const waiting = shown();
+    const line = logged.find(n => /Waiting/.test(n.innerHTML));
+    const timers = intervals.size;
+    await new Promise(r => setTimeout(r, 1000));
+    await runIntervals();
+    const counted = line ? line.counter.textContent : null;
+    gate.release(reply);
+    await running; await tick();
+    return { early, waiting, markup: line ? line.innerHTML : '', timers, counted, after: shown(), timersAfter: intervals.size,
+      tag: el('verdict-tag').innerText, badge: el('terminal-badge').innerText };
+  };
+  out.answered = await waitFor(""" + loop + r""");
+  out.failed = await waitFor({ status: 503, body: {} });
+  out.unreachable = await waitFor('network');
+  answer = api({ """ + healthy + r""", 'POST /simulate-loop': """ + loop + r""" });
+  logged.length = 0;
+  await simulateLoop(); await new Promise(r => setTimeout(r, 1200)); await tick();
+  out.fast = shown();
+""",
+        tmp_path,
+        before=DEMO_DOM + LOGGED,
+    )
+    waiting_words = "… Waiting for the service, which sends the three calls itself and answers after the third:"
+    for name in ("answered", "failed", "unreachable"):
+        got = out[name]
+        assert not any("Waiting" in line for line in got["early"]), f"{name}: no waiting line in the first second"
+        assert [line for line in got["waiting"] if "Waiting" in line] == [waiting_words + " 1 s"], f"{name}: past a second, it says what it waits for"
+        assert 'aria-hidden="true" data-tf-waited>1 s</span>' in got["markup"], f"{name}: the count is hidden from a screen reader"
+        assert got["timers"] == 1 and got["counted"] == "2 s", f"{name}: the count goes up each second"
+        assert not any("Waiting" in line for line in got["after"]) and got["timersAfter"] == 0, f"{name}: the line and its timer go with the wait"
+        assert got["tag"] == "BLOCKED_LOOP_DETECTED"
+    assert out["answered"]["badge"] == "Live answer" and out["failed"]["badge"] == "Recorded replay" == out["unreachable"]["badge"]
+    assert not any("Waiting" in line for line in out["fast"]), "An answer inside a second leaves no line behind"
 
 
 def _explained(tmp_path: Path, text: str, source: str = "bedrock") -> dict:
