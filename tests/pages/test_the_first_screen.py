@@ -429,7 +429,7 @@ def test_each_agent_is_described_in_the_words_of_the_evidence_it_links() -> None
             assert " ".join(words.split()) in " ".join(evidence.replace("`", "").split()), f"{words!r} is not in {link}"
     assert "tf-chip-amber" in agents[2] and "Measured once, over its patch tool" in agents[2], "Codex is not rounded up"
     assert "shell route is not measured" in _text(agents[2])
-    assert "tf-chip-amber" in agents[3] and "Measured over its file-write, edit and shell tools" in agents[3], "Muse is not rounded up"
+    assert "tf-chip-amber" in agents[3] and "Measured over write, edit and shell" in agents[3], "Muse is not rounded up"
     assert "not measured" not in _text(agents[3])
 
 

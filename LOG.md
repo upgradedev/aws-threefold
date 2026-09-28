@@ -281,3 +281,6 @@
 ## 2026-09-28T18:14:00+03:00 — The pages catch up with the Muse measurement
 - The live edit/shell measurement landed in the evidence file but the pages and submission texts still said those routes were not measured, and two tests pinned the stale words. The first screen (scope, chip, quote), the connect page (stepper, manual, enforcement row), README, the dossier, the article and the video script now say Muse 1.4.0 was measured over `write_file`, `edit_file` and the shell, each refused file unchanged on the disk; the tests hold the new words instead.
 - Pages published, probes rerun: edge and API 117/0/3 (`docs/evidence/PROBES_2026-09-28-3-edge.md`, `docs/evidence/PROBES_2026-09-28-3.md`). Targeted pages tests 109 passed.
+
+## 2026-09-28T18:37:00+03:00 — The Muse card shortened to hold the phone budget
+- The first wording pushed How-it-works to 2.909 phone screens against the 2.9 bound, and CI failed it. The Muse card now says the same measured truth in one quote instead of two (2.857 screens in both faces, measured twice). Full pages layer 433 passed locally, pages published, probes rerun: edge and API 117/0/3 (`docs/evidence/PROBES_2026-09-28-4-edge.md`, `docs/evidence/PROBES_2026-09-28-4.md`).
