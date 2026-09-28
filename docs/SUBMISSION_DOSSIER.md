@@ -8,7 +8,7 @@ is tagged [STATE-FILE]. Everything else describes the code on `main`.
 **Application name:** Threefold
 **Category:** `#workplace-efficiency` · **Lane:** `#community`
 **Tagline:** Threefold refuses a coding agent's edit the moment it is made, not after the commit, so your architecture does not rot while you sleep.
-**Live application:** <https://d1og72wpk4aqig.cloudfront.net/> (CloudFront edge), origin <https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/> (API Gateway). Both answered anonymously with 200 on 2026-09-27 (`docs/evidence/PROBES_2026-09-27-2-edge.md`, `docs/evidence/PROBES_2026-09-27-2.md`) [PRIMARY, 2026-09-27].
+**Live application:** <https://d1og72wpk4aqig.cloudfront.net/> (CloudFront edge), origin <https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/> (API Gateway). Both answered anonymously with 200 on 2026-09-28 (`docs/evidence/PROBES_2026-09-28-7-edge.md`, `docs/evidence/PROBES_2026-09-28-7.md`) [PRIMARY, 2026-09-28].
 **Try it in about two minutes, no account:** <https://d1og72wpk4aqig.cloudfront.net/dashboard.html#/try>, the two-stage rollout on a sandbox project of your own. The first screen's loop halt, <https://d1og72wpk4aqig.cloudfront.net/>, is one click and well under a minute.
 
 ---
@@ -32,8 +32,16 @@ that earned it, or demotes it with one click. A refusal carries a fix that has
 itself been run through the same gates. Amazon Bedrock never decides: it
 phrases a refusal for a person reading a page and drafts rules for an
 architect, and every response says which of the two produced the sentence.
+Pull requests are judged the same way with nothing installed: every added or
+changed file is sent to the service as the write it is, and a required check
+fails the merge when a rule fires — which covers agents that never installed
+anything, including ones running outside the developer's machine.
 
 ## 2. Inspiration
+
+I run three coding agents on one laptop and pay for their tokens. Threefold
+started as the guardrail for my own nine projects, and the `#community` it
+stands in is builders who do the same.
 
 Coding agents write code faster than anyone reviews it, and the architecture
 checks teams already have (import linters, architecture tests) run in CI,
@@ -67,7 +75,7 @@ so the rollout had to show what a rule would stop before it stops anything.
    (`EnforceProjectPattern`); the public stack names the `Acme-Live-*`
    projects a real coding agent works in (section 6), since no operator is
    there to promote them. Both such projects read Enforce on the overview
-   with no stage stored for them [PRIMARY, 2026-09-27: `GET /api/overview`].
+   with no stage stored for them [PRIMARY, 2026-09-28: `GET /api/overview`].
 4. **Suggests a validated fix with every refusal it can.** A rewritten file,
    a port and an adapter, or an environment lookup in place of a literal
    credential, run back through the same gates before it is offered; the hook
@@ -85,7 +93,7 @@ so the rollout had to show what a rule would stop before it stops anything.
    Daily rollups keep the charts exact however busy the ledger is. On the
    public stack the overview says where its calls came from: the synthetic
    Acme fleet, the live agent, visitors' sandboxes, or anything else
-   [PRIMARY, 2026-09-27: `GET /api/overview`, its `sources`]. The code on
+   [PRIMARY, 2026-09-28: `GET /api/overview`, its `sources`]. The code on
    `main` counts the service's own probes apart as well, a fifth source.
 6. **Connects in one command and signs in without a key.** `install.py`, served
    by the stack with its own address written in, installs the hook for the
@@ -95,6 +103,12 @@ so the rollout had to show what a rule would stop before it stops anything.
    page an architect describes a boundary in a sentence; Claude Haiku 4.5
    proposes a rule, which is validated like a save, set to observe and tried on
    example files. Nothing is saved without the operator.
+8. **Judges pull requests, installed or not.** `scripts/judge_pr.py` with
+   `.github/workflows/pr-judge.yml`, a required check on `main`: every added
+   or changed file judged through `/evaluate-tool-call`, red on a refusal or
+   a fired rule, fail-closed on anything unjudged. This repository's own pull
+   requests are judged that way; PR #6 proved it, a shaped token failing the
+   check with the merge BLOCKED and its removal passing.
 
 ## 4. How we built it
 
@@ -127,9 +141,9 @@ so the rollout had to show what a rule would stop before it stops anything.
 - **Infrastructure as code:** two CloudFormation templates, `deploy/template.yml`
   (SAM transform) and `deploy/edge.yml`.
 - **Checking it live:** `scripts/probe_live.py`: 117 PASS, 0 FAIL, 3 SKIP
-  through the edge and the same at the API origin on 2026-09-27, after that
-  day's deploy (`docs/evidence/PROBES_2026-09-27-2-edge.md`,
-  `docs/evidence/PROBES_2026-09-27-2.md`) [PRIMARY, 2026-09-27].
+  through the edge and the same at the API origin on 2026-09-28, after that
+  day's deploy (`docs/evidence/PROBES_2026-09-28-7-edge.md`,
+  `docs/evidence/PROBES_2026-09-28-7.md`) [PRIMARY, 2026-09-28].
 
 ## 5. Challenges we ran into
 
@@ -167,27 +181,35 @@ so the rollout had to show what a rule would stop before it stops anything.
    Looking for a way around the fix found an older hole, closed in the same
    change: inside double quotes the shell drops the backslash before `$`, so
    `bash -c "echo ... > src/domain/\$f"` had been approved [STATE-FILE].
+6. **The agents that never installed anything.** A hook governs the machine
+   it is on; cloud agents meet the product at the merge instead. The same
+   gates judge the pull request's diff, file by file, with the same verdicts
+   — one agent surface less to trust.
 
 ## 6. Accomplishments we are proud of
 
 - The owner's own work has been governed since 2026-09-22 at nine locations,
   under `Acme-Proj-*` aliases, in Observe, reporting to a private stack from the
-  same template [STATE-FILE].
-- The public stack passed its own live probe on 2026-09-27, 117 checks PASS,
+  same template [STATE-FILE]: 5,392 calls governed as of 2026-09-28, 163
+  would-be refusals surfaced, none a false alarm [PRIMARY, 2026-09-28: the
+  private stack's `/api/overview`].
+- The public stack passed its own live probe on 2026-09-28, 117 checks PASS,
   0 FAIL, 3 SKIP through the edge and the same at the API [PRIMARY,
-  2026-09-27], and the private stack 101 PASS, 0 FAIL, read-only
+  2026-09-28], and the private stack 101 PASS, 0 FAIL, read-only
   [STATE-FILE].
 - A real coding agent works on the public stack.
   `scripts/daily_live_agent.py` gives Claude Code or Codex, alternating by
   date, one of the benchmark's Acme tasks in an `Acme-Live-*` project that
   starts in Enforce, and the overview counts its calls as a source of their
-  own. Until the owner creates its scheduled task, a day runs only when the
-  script is started by hand [STATE-FILE]. Two runs as of 2026-09-27: Codex on
-  2026-09-26, 8 calls, one refused (falsely, challenge 5), and Claude Code on
-  2026-09-27, 4 calls, none refused; the overview's live source held those
-  12 calls in 2 projects [PRIMARY, 2026-09-27: `GET /api/overview`]. In both
-  runs no violation landed and the acceptance tests passed, by their rows in
+  own. A scheduled task runs it daily from the owner's machine. Three runs as
+  of 2026-09-28: Codex on 2026-09-26, 8 calls, one refused (falsely, challenge
+  5); Claude Code on 2026-09-27, 4 calls, none refused; Codex on 2026-09-28, 5
+  calls, none refused; the overview's live source held those 17 calls in 2
+  projects [PRIMARY, 2026-09-28: `GET /api/overview`]. In all runs no
+  violation landed and the acceptance tests passed, by their rows in
   `benchmark/results/live/`.
+- This repository's pull requests cannot merge with a firing rule: the judge
+  is a required check on `main`, proven red-to-green on PR #6.
 - Threefold was measured against the alternative rather than asserted over it.
   162 Claude Code runs on 2026-09-22, two models, two task families, graded by
   a checker that does not import Threefold: a governed violation landed in
@@ -229,7 +251,7 @@ so the rollout had to show what a rule would stop before it stops anything.
   refusal on the governed write over the shell, under the real hook and under a
   deny-only one, and one over `apply_patch` from a hook that makes no network
   call.
-- Verify a certificate before a merge: the document is now issued from stored
-  history and signed, but nothing in CI requires one. A check that refuses a
-  pull request whose session has no valid certificate would make it
-  load-bearing [STATE-FILE].
+- Govern the fifth agent. Copilot CLI grew `PreToolUse` hooks; the Muse track
+  is the template (adapter, installer wiring, measured enforcement, pages and
+  docs). After that, what is still missing is a proxy that meters real model
+  usage instead of trusting caller-declared tokens.

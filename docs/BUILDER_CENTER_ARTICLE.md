@@ -140,7 +140,8 @@ to the deployed distribution (`aws cloudfront list-distributions`), and
 point-in-time recovery is `ENABLED` on the table
 (`aws dynamodb describe-continuous-backups`). Rechecked **[PRIMARY,
 2026-09-27]**, after that day's deploy (`docs/ARCHITECTURE.md`, section 1):
-the eleven alarms exist and were all `OK` (`aws cloudwatch describe-alarms`),
+the eleven alarms exist and were all `OK` then, and a recheck on 2026-09-28
+found none firing **[PRIMARY, 2026-09-28]** (`aws cloudwatch describe-alarms`),
 and the function runs at 1,024 MB with a reserved concurrency of 25
 (`aws lambda get-function-configuration`, `get-function-concurrency`).
 
@@ -192,11 +193,11 @@ and the function runs at 1,024 MB with a reserved concurrency of 25
   command too, each file unchanged on the disk
   (`docs/evidence/ENFORCEMENT_2026-09-28-MUSE.md`).
 - **Does the live stack do what the documents say?** A probe script checks the
-  public stack claim by claim. On 2026-09-27, after that day's deploy, it
-  passed 117 checks, 0 FAIL, 3 SKIP through the CloudFront URL and the same at
-  the API Gateway URL **[PRIMARY, 2026-09-27]**,
-  `docs/evidence/PROBES_2026-09-27-2-edge.md` and
-  `docs/evidence/PROBES_2026-09-27-2.md`.
+  public stack claim by claim. On 2026-09-28, after the last deploy of the
+  day, it passed 117 checks, 0 FAIL, 3 SKIP through the CloudFront URL and the
+  same at the API Gateway URL **[PRIMARY, 2026-09-28]**,
+  `docs/evidence/PROBES_2026-09-28-7-edge.md` and
+  `docs/evidence/PROBES_2026-09-28-7.md`.
 - **Does Threefold change what an agent does?** Measured on 2026-09-22
   **[PRIMARY]**. Claude Code ran headless on six synthetic tasks, each tempting
   a governed violation, and on three *pressure* variants whose prompt asks for
@@ -232,21 +233,25 @@ and the function runs at 1,024 MB with a reserved concurrency of 25
 - **Does it hold for a real agent on the live stack?**
   `scripts/daily_live_agent.py` gives Claude Code or Codex, alternating by
   date, one of the benchmark's tasks in an `Acme-Live-*` project on the public
-  stack, which starts in Enforce. Until the owner creates its scheduled task,
-  a day runs only when the script is started by hand **[STATE-FILE]**. It had
-  run twice by 2026-09-27: Codex on 2026-09-26, 8 calls, and Claude Code on
-  2026-09-27, 4 calls **[PRIMARY, 2026-09-27: `GET /api/overview`, the live
-  source at 12 calls in 2 projects]**. In both runs no violation landed and
-  the acceptance tests passed, by their rows in `benchmark/results/live/`.
+  stack, which starts in Enforce. It runs daily from a scheduled task on the
+  owner's machine **[STATE-FILE]**. It had run three times by 2026-09-28:
+  Codex on 2026-09-26, 8 calls, Claude Code on 2026-09-27, 4 calls, and Codex
+  again on 2026-09-28, 5 calls **[PRIMARY, 2026-09-28: `GET /api/overview`,
+  the live source at 17 calls in 3 runs]**. In all three runs no violation
+  landed and the acceptance tests passed, by their rows in
+  `benchmark/results/live/`.
   Codex's one refusal was false: a read ending in
   PowerShell's `2>$null`, which the command check took for a write. The fix
   was deployed the next day, and looking for a way around it closed an older
   hole: `bash -c "echo ... > src/domain/\$f"` had been approved
   **[STATE-FILE]**.
-  Two runs are not a rate; they show the path working with real agents.
+  Three runs are not a rate; they show the path working with real agents.
 - **The certificate** Threefold issues covers the session's own stored
   verdicts and carries a KMS signature where the stack holds a signing key.
-  Nothing requires one before a merge **[STATE-FILE]**.
+  The merge is judged separately: every pull request's diff goes through the
+  same gates, and a required check fails the merge when a rule fires — this
+  repository's own PR #6 proved it, red on a planted key, then green
+  **[STATE-FILE]**.
 
 ## Takeaways
 
