@@ -11,8 +11,10 @@ snapshot was taken. A section that was not measured is left out, and the page
 says "not measured yet" rather than showing a zero.
 
 benchmark   What benchmark/report.py computes from the result rows given, or
-            from a summary its aggregate() produced, per condition, with its
-            headline sentence exactly as report.headline() words it. Nothing
+            from a summary its aggregate() produced, per condition, each
+            condition in report.condition_label()'s words for the series'
+            agent (the rules in AGENTS.md for Codex), with its headline
+            sentence exactly as report.headline() words it. Nothing
             here recomputes a rate: the numbers are report.py's own, so the
             page and docs/evidence/BENCHMARK_*.md cannot disagree. The
             report a series cites is the one that says it was made from
@@ -208,11 +210,14 @@ def _rate(stat: Mapping[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _condition(name: str, stat: Mapping[str, Any], base: Optional[Mapping[str, Any]], unmeasured: int) -> Dict[str, Any]:
+def _condition(name: str, stat: Mapping[str, Any], base: Optional[Mapping[str, Any]], unmeasured: int,
+               agent: Optional[str]) -> Dict[str, Any]:
     refused = stat["refused_runs"]
     return {
         "condition": name,
-        "label": report.CONDITION_LABELS.get(name, name),
+        # report.py's words for the condition, naming the file this series'
+        # agent read the rules from: AGENTS.md for Codex, CLAUDE.md for Claude Code.
+        "label": report.condition_label(name, agent),
         "n": stat["n"],
         "not_measured": unmeasured,
         "violation": _rate(stat["violation"]),
@@ -273,7 +278,7 @@ def benchmark_section(summary: Mapping[str, Any], sources: Sequence[str]) -> Dic
     unmeasured = Counter(str(item.get("condition")) for item in summary.get("invalid") or [] if isinstance(item, Mapping))
     base = stats.get("none") if stats.get("none", {}).get("n") else None
     conditions = [
-        _condition(name, stats.get(name) or report.condition_stats([]), base, unmeasured.get(name, 0))
+        _condition(name, stats.get(name) or report.condition_stats([]), base, unmeasured.get(name, 0), summary.get("agent"))
         for name in names
     ]
     evidence = [{"label": "The report benchmark/report.py wrote: method, every result and its limits",
@@ -707,7 +712,8 @@ def main(argv: Optional[Sequence[str]] = None, opener: Optional[Opener] = None) 
     args.out.write_text(json.dumps(document, indent=2, ensure_ascii=False) + "\n", encoding="utf-8", newline="\n")
     bench = document.get("benchmark")
     said = [
-        (f"benchmark{' (PILOT)' if bench['pilot'] else ''}: {bench['valid_rows']} of {bench['real_rows']} real-agent run(s) measured"
+        (f"benchmark{' (PILOT)' if bench['pilot'] else ''}: {bench['valid_rows']} of "
+         f"{report.plural(bench['real_rows'], 'real-agent run')} measured"
          if bench else "no benchmark section"),
         "a private section of totals" if "private" in document else "no private section",
     ]

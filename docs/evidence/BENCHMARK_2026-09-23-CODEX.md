@@ -2,7 +2,7 @@
 
 ## Headline
 
-Across 54 Codex runs of codex-default on 6 Acme task(s), a governed violation landed in 17% (3/18) of runs with no guidance and 0% (0/18) with the rules in AGENTS.md, against 0% (0/18) with Threefold enforcing; the acceptance tests passed in 100% (18/18), 100% (18/18) and 100% (18/18) of those runs respectively.
+Across 54 Codex runs of codex-default on 6 Acme tasks, a governed violation landed in 17% (3/18) of runs with no guidance and 0% (0/18) with the rules in AGENTS.md, against 0% (0/18) with Threefold enforcing; the acceptance tests passed in 100% (18/18), 100% (18/18) and 100% (18/18) of those runs respectively.
 
 ## Method
 
@@ -64,7 +64,7 @@ The tasks:
 
 ## Limits
 
-- Small samples. The smallest condition has 18 valid run(s) and a task-by-condition cell holds at most 3; the 95% intervals above are wide and differences inside them are not established.
+- Small samples. The smallest condition has 18 valid runs and a task-by-condition cell holds at most 3; the 95% intervals above are wide and differences inside them are not established.
 - Models: codex-default. Agents: Codex codex-cli 0.155.0, on Windows. Other agents and models may behave differently; Antigravity is not measured here.
 - The tasks were written by the people who built Threefold, to tempt exactly the violations its shipped rules cover. The violation rates are rates under temptation, not base rates of everyday work, and a task set chosen by someone else could favour a condition differently.
 - The Threefold condition does not give the agent the rules in advance: it learns them from refusals. The prompt condition gives them in AGENTS.md for Codex and nothing enforces them. Teams would normally use both; `prompt+threefold` measures that and is not in the default matrix.
@@ -90,6 +90,6 @@ python benchmark/run.py --agent codex --reps 3 --parallel 3      # the same matr
 python benchmark/report.py benchmark/results/<run-id>.jsonl
 ```
 
-The full matrix of the standard tasks is 54 runs per agent; at `--parallel 3` that is 18 rounds. Each run is capped at 20 minutes (`--timeout 1200`), so it cannot take longer than about 6 hours, and at $5 per run (`--budget-usd`) a Claude Code matrix cannot cost more than $270 at API list price; under a subscription that is usage against its limits, not money. Codex has no budget cap of its own, and its runs count against the plan's usage limits. From the 54 measured run(s) here (mean 1.1 minutes each, set-up and judging included), expect about 0.3 hours.
+The full matrix of the standard tasks is 54 runs per agent; at `--parallel 3` that is 18 rounds. Each run is capped at 20 minutes (`--timeout 1200`), so it cannot take longer than about 6 hours, and at $5 per run (`--budget-usd`) a Claude Code matrix cannot cost more than $270 at API list price; under a subscription that is usage against its limits, not money. Codex has no budget cap of its own, and its runs count against the plan's usage limits. From the 54 measured runs here (mean 1.1 minutes each, set-up and judging included), expect about 0.3 hours.
 
 Source rows: `benchmark/results/20260923T025154Z-codex.jsonl`. Run ids: 20260923T025154Z-codex.

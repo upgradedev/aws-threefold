@@ -222,13 +222,45 @@ def test_each_series_is_its_own_section_and_never_pooled(tmp_path: Path) -> None
     assert document["benchmark"] == sections[0]
 
 
+def test_each_condition_names_the_file_its_series_agent_read_the_rules_from(tmp_path: Path) -> None:
+    """Codex was given the rules in AGENTS.md, so a Codex series never calls its prompt condition "rules in CLAUDE.md".
+
+    The proof page shows each condition under this label, and a judge found
+    the Codex cards naming Claude Code's file while their headline, a line
+    above, named AGENTS.md.
+    """
+    claude = _rows_file(tmp_path, MEASURED, "claude.jsonl")
+    codex = _rows_file(tmp_path, [dict(row, agent="codex", model="codex-default") for row in MEASURED], "codex.jsonl")
+    labels = {section["agent"]: {c["condition"]: c["label"] for c in section["conditions"]}
+              for section in build_proof.build([], series=[claude, codex])["benchmarks"]}
+    assert labels["Claude Code"] == {"none": "no guidance", "prompt": "rules in CLAUDE.md", "threefold": "Threefold enforcing"}
+    assert labels["Codex"] == {"none": "no guidance", "prompt": "rules in AGENTS.md", "threefold": "Threefold enforcing"}
+
+
+def test_the_committed_series_name_the_right_rules_file_and_count_in_plain_words() -> None:
+    """Built from the committed rows: no Codex series mentions CLAUDE.md, and no headline says "task(s)"."""
+    sections = build_proof.build([], series=SERIES)["benchmarks"]
+    assert [section["agent"] for section in sections].count("Codex") == 2
+    for section in sections:
+        prompt = next(c for c in section["conditions"] if c["condition"] == "prompt")
+        if section["agent"] == "Codex":
+            assert "CLAUDE.md" not in json.dumps(section), section["label"]
+            assert prompt["label"] == "rules in AGENTS.md" and "with the rules in AGENTS.md" in section["headline"]
+        else:
+            assert prompt["label"] == "rules in CLAUDE.md" and "with the rules in CLAUDE.md" in section["headline"]
+        assert "(s)" not in section["headline"], section["label"]
+        tasks = len(section["tasks"])
+        assert f" on {tasks} Acme {'pressure ' if section['family'] == 'pressure' else ''}tasks, " in section["headline"]
+
+
 def test_the_command_line_takes_several_series(tmp_path: Path, capsys) -> None:
     first = _rows_file(tmp_path, MEASURED, "a.jsonl")
     second = _rows_file(tmp_path, MEASURED, "b.jsonl")
     out = tmp_path / "proof.json"
     assert build_proof.main(["--series", str(first), "--series", str(second), "--out", str(out)]) == 0
     assert len(json.loads(out.read_text(encoding="utf-8"))["benchmarks"]) == 2
-    assert "2 series shown apart" in capsys.readouterr().out
+    said = capsys.readouterr().out
+    assert "2 series shown apart" in said and "benchmark: 6 of 7 real-agent runs measured" in said
 
 
 def test_each_committed_series_cites_the_report_made_from_its_own_rows() -> None:

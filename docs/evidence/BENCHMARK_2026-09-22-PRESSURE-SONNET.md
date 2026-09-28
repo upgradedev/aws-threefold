@@ -4,7 +4,7 @@
 
 Pressure tasks: the developer's own prompt asks for the forbidden shortcut, so it deliberately conflicts with the rules. These rates are never pooled with the standard tasks'.
 
-Across 27 Claude Code runs of claude-sonnet-5 on 3 Acme pressure task(s), whose prompts ask for the forbidden shortcut, a governed violation landed in 67% (6/9) of runs with no guidance and 0% (0/9) with the rules in CLAUDE.md, against 0% (0/9) with Threefold enforcing; the acceptance tests passed in 100% (9/9), 100% (9/9) and 67% (6/9) of those runs respectively.
+Across 27 Claude Code runs of claude-sonnet-5 on 3 Acme pressure tasks, whose prompts ask for the forbidden shortcut, a governed violation landed in 67% (6/9) of runs with no guidance and 0% (0/9) with the rules in CLAUDE.md, against 0% (0/9) with Threefold enforcing; the acceptance tests passed in 100% (9/9), 100% (9/9) and 67% (6/9) of those runs respectively.
 
 ## Method
 
@@ -62,7 +62,7 @@ The pressure tasks:
 
 ## Limits
 
-- Small samples. The smallest condition has 9 valid run(s) and a task-by-condition cell holds at most 3; the 95% intervals above are wide and differences inside them are not established.
+- Small samples. The smallest condition has 9 valid runs and a task-by-condition cell holds at most 3; the 95% intervals above are wide and differences inside them are not established.
 - Models: claude-sonnet-5. Agents: Claude Code 2.1.220 (Claude Code), on Windows. Other agents and models may behave differently; Codex and Antigravity are not measured here.
 - The tasks were written by the people who built Threefold, to tempt exactly the violations its shipped rules cover. The violation rates are rates under temptation, not base rates of everyday work, and a task set chosen by someone else could favour a condition differently.
 - The pressure tasks' prompts ask for the forbidden shortcut outright, as a hurried developer would (boto3 inside the domain entity, a key pasted into the config module for now, a domain module regenerated quickly through a shell redirect), so they deliberately conflict with the rules. Their rates are rates under an explicit request, reported on their own and never pooled with the standard tasks', whose prompts only tempt. An agent that keeps the rules there declines part of what it was asked, so a pressure task's completion means its acceptance tests passed, not that the developer got everything they asked for.
@@ -92,6 +92,6 @@ python benchmark/run.py --agent codex --reps 3 --parallel 3      # the same matr
 python benchmark/report.py benchmark/results/<run-id>.jsonl
 ```
 
-The full matrix of the pressure tasks is 27 runs per agent; at `--parallel 3` that is 9 rounds. Each run is capped at 20 minutes (`--timeout 1200`), so it cannot take longer than about 3 hours, and at $5 per run (`--budget-usd`) a Claude Code matrix cannot cost more than $135 at API list price; under a subscription that is usage against its limits, not money. Codex has no budget cap of its own, and its runs count against the plan's usage limits. From the 27 measured run(s) here (mean 0.9 minutes each, set-up and judging included), expect about 0.1 hours and about $6.
+The full matrix of the pressure tasks is 27 runs per agent; at `--parallel 3` that is 9 rounds. Each run is capped at 20 minutes (`--timeout 1200`), so it cannot take longer than about 3 hours, and at $5 per run (`--budget-usd`) a Claude Code matrix cannot cost more than $135 at API list price; under a subscription that is usage against its limits, not money. Codex has no budget cap of its own, and its runs count against the plan's usage limits. From the 27 measured runs here (mean 0.9 minutes each, set-up and judging included), expect about 0.1 hours and about $6.
 
 Source rows: `benchmark/results/20260922T161455Z-pressure.jsonl`. Run ids: 20260922T161455Z-pressure.
