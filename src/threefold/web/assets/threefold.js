@@ -2143,7 +2143,7 @@
               ${r.href ? html`<a href="${r.href}" class="tf-link-quiet">${r.label}</a>` : html`<span>${r.label}</span>`}
               <span class="tf-hbar-value">${r.value !== undefined ? r.value : num(totals[i])}</span>
             </div>
-            <div class="tf-hbar" role="img" aria-label="${r.label}: ${described}"${raw(linked ? '' : ' tabindex="0"')}>
+            <div class="tf-hbar" role="img" aria-label="${r.label}: ${described}"${linked ? '' : raw(' tabindex="0"')}>
               <div class="tf-hbar-fill" style="width:${round1(width)}%">
                 ${segs.map(function (seg) {
                   var label = r.label + ': ' + num(seg.value) + ' ' + seg.label;

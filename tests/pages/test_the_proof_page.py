@@ -183,9 +183,9 @@ def test_a_measured_snapshot_shows_each_figure_with_its_source_and_its_date(tmp_
     assert out["metrics"] == {"days_observed": "8", "calls_governed": "4,210", "would_refuse": "210", "reviewed": "150",
                               "false_alarm_rate": "8%", "projects": "9", "agents": "2"}
     assert "12 of 150 reviewed" in words and "of the last 30" in words
-    # Nothing was refused, so self-correction has nothing to count, and the
-    # line says why rather than giving an empty figure.
-    assert "Self-corrected: none to count. It is counted on refused calls, and the service refused no call in this window." in words
+    # Nothing was refused, so the shared empty branch speaks, in the same
+    # words as every other screen.
+    assert "Self-corrected: no agent (hook or CI) refusal in this window." in words
     assert page.count('data-proof="provenance"') == 2, "Both sections say where they came from and when"
     assert "2026-09-29T08:00:00+00:00" in page and "2026-09-30" in page
     assert "GET /api/overview?days=30 and GET /api/projects on the owner's private stack" in page
@@ -538,7 +538,7 @@ def test_the_owner_s_own_use_says_its_projects_only_observed_and_nothing_was_ref
     if own["refused"] == 0:
         assert f"the service refused no call in the {own['window_days']} days these totals cover" in said
         assert _said(out["committed"], "self-corrected") == (
-            "Self-corrected: none to count. It is counted on refused calls, and the service refused no call in this window.")
+            "Self-corrected: no agent (hook or CI) refusal among the calls read · read stopped after the newest 2,000 calls.")
     assert "Threefold governing the owner" not in _unescaped(out["committed"])
     assert _said(out["enforcing"], "stages") == "At the snapshot, 7 projects were in Observe and 2 in Enforce, and the service refused 6 calls in the 30 days these totals cover."
     assert _said(out["enforcing"], "self-corrected") == "Self-corrected: 50% of 6 agent refusals · median 2 calls."

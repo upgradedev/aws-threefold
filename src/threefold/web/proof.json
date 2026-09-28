@@ -1,13 +1,13 @@
 {
   "schema": 1,
-  "generated_at": "2026-09-27T20:30:24Z",
+  "generated_at": "2026-09-28T10:03:40Z",
   "generated_by": "scripts/build_proof.py",
   "benchmarks": [
     {
       "source": "benchmark/report.py over benchmark/results/20260922T143932Z.jsonl",
       "snapshot_at": "2026-09-22",
       "pilot": false,
-      "headline": "Across 54 Claude Code runs of claude-sonnet-5 on 6 Acme task(s), a governed violation landed in 17% (3/18) of runs with no guidance and 0% (0/18) with the rules in CLAUDE.md, against 0% (0/18) with Threefold enforcing; the acceptance tests passed in 100% (18/18), 100% (18/18) and 100% (18/18) of those runs respectively.",
+      "headline": "Across 54 Claude Code runs of claude-sonnet-5 on 6 Acme tasks, a governed violation landed in 17% (3/18) of runs with no guidance and 0% (0/18) with the rules in CLAUDE.md, against 0% (0/18) with Threefold enforcing; the acceptance tests passed in 100% (18/18), 100% (18/18) and 100% (18/18) of those runs respectively.",
       "agent": "Claude Code",
       "agent_versions": [
         "2.1.220"
@@ -142,7 +142,7 @@
       "source": "benchmark/report.py over benchmark/results/20260922T145644Z.jsonl",
       "snapshot_at": "2026-09-22",
       "pilot": false,
-      "headline": "Across 54 Claude Code runs of claude-haiku-4-5-20251001 on 6 Acme task(s), a governed violation landed in 39% (7/18) of runs with no guidance and 17% (3/18) with the rules in CLAUDE.md, against 0% (0/18) with Threefold enforcing; the acceptance tests passed in 100% (18/18), 94% (17/18) and 100% (18/18) of those runs respectively.",
+      "headline": "Across 54 Claude Code runs of claude-haiku-4-5-20251001 on 6 Acme tasks, a governed violation landed in 39% (7/18) of runs with no guidance and 17% (3/18) with the rules in CLAUDE.md, against 0% (0/18) with Threefold enforcing; the acceptance tests passed in 100% (18/18), 94% (17/18) and 100% (18/18) of those runs respectively.",
       "agent": "Claude Code",
       "agent_versions": [
         "2.1.220"
@@ -277,7 +277,7 @@
       "source": "benchmark/report.py over benchmark/results/20260923T025154Z-codex.jsonl",
       "snapshot_at": "2026-09-23",
       "pilot": false,
-      "headline": "Across 54 Codex runs of codex-default on 6 Acme task(s), a governed violation landed in 17% (3/18) of runs with no guidance and 0% (0/18) with the rules in AGENTS.md, against 0% (0/18) with Threefold enforcing; the acceptance tests passed in 100% (18/18), 100% (18/18) and 100% (18/18) of those runs respectively.",
+      "headline": "Across 54 Codex runs of codex-default on 6 Acme tasks, a governed violation landed in 17% (3/18) of runs with no guidance and 0% (0/18) with the rules in AGENTS.md, against 0% (0/18) with Threefold enforcing; the acceptance tests passed in 100% (18/18), 100% (18/18) and 100% (18/18) of those runs respectively.",
       "agent": "Codex",
       "agent_versions": [],
       "models": [
@@ -330,7 +330,7 @@
         },
         {
           "condition": "prompt",
-          "label": "rules in CLAUDE.md",
+          "label": "rules in AGENTS.md",
           "n": 18,
           "not_measured": 0,
           "violation": {
@@ -410,7 +410,7 @@
       "source": "benchmark/report.py over benchmark/results/20260922T161455Z-pressure.jsonl",
       "snapshot_at": "2026-09-22",
       "pilot": false,
-      "headline": "Across 27 Claude Code runs of claude-sonnet-5 on 3 Acme pressure task(s), whose prompts ask for the forbidden shortcut, a governed violation landed in 67% (6/9) of runs with no guidance and 0% (0/9) with the rules in CLAUDE.md, against 0% (0/9) with Threefold enforcing; the acceptance tests passed in 100% (9/9), 100% (9/9) and 67% (6/9) of those runs respectively.",
+      "headline": "Across 27 Claude Code runs of claude-sonnet-5 on 3 Acme pressure tasks, whose prompts ask for the forbidden shortcut, a governed violation landed in 67% (6/9) of runs with no guidance and 0% (0/9) with the rules in CLAUDE.md, against 0% (0/9) with Threefold enforcing; the acceptance tests passed in 100% (9/9), 100% (9/9) and 67% (6/9) of those runs respectively.",
       "agent": "Claude Code",
       "agent_versions": [
         "2.1.220"
@@ -542,7 +542,7 @@
       "source": "benchmark/report.py over benchmark/results/20260922T162306Z-pressure.jsonl",
       "snapshot_at": "2026-09-22",
       "pilot": false,
-      "headline": "Across 27 Claude Code runs of claude-haiku-4-5-20251001 on 3 Acme pressure task(s), whose prompts ask for the forbidden shortcut, a governed violation landed in 100% (9/9) of runs with no guidance and 56% (5/9) with the rules in CLAUDE.md, against 0% (0/9) with Threefold enforcing; the acceptance tests passed in 100% (9/9), 89% (8/9) and 44% (4/9) of those runs respectively.",
+      "headline": "Across 27 Claude Code runs of claude-haiku-4-5-20251001 on 3 Acme pressure tasks, whose prompts ask for the forbidden shortcut, a governed violation landed in 100% (9/9) of runs with no guidance and 56% (5/9) with the rules in CLAUDE.md, against 0% (0/9) with Threefold enforcing; the acceptance tests passed in 100% (9/9), 89% (8/9) and 44% (4/9) of those runs respectively.",
       "agent": "Claude Code",
       "agent_versions": [
         "2.1.220"
@@ -674,7 +674,7 @@
       "source": "benchmark/report.py over benchmark/results/20260923T031215Z-pressure-codex.jsonl",
       "snapshot_at": "2026-09-23",
       "pilot": false,
-      "headline": "Across 27 Codex runs of codex-default on 3 Acme pressure task(s), whose prompts ask for the forbidden shortcut, a governed violation landed in 100% (9/9) of runs with no guidance and 11% (1/9) with the rules in AGENTS.md, against 0% (0/9) with Threefold enforcing; the acceptance tests passed in 100% (9/9), 100% (9/9) and 67% (6/9) of those runs respectively.",
+      "headline": "Across 27 Codex runs of codex-default on 3 Acme pressure tasks, whose prompts ask for the forbidden shortcut, a governed violation landed in 100% (9/9) of runs with no guidance and 11% (1/9) with the rules in AGENTS.md, against 0% (0/9) with Threefold enforcing; the acceptance tests passed in 100% (9/9), 100% (9/9) and 67% (6/9) of those runs respectively.",
       "agent": "Codex",
       "agent_versions": [],
       "models": [
@@ -724,7 +724,7 @@
         },
         {
           "condition": "prompt",
-          "label": "rules in CLAUDE.md",
+          "label": "rules in AGENTS.md",
           "n": 9,
           "not_measured": 0,
           "violation": {
@@ -805,7 +805,7 @@
     "source": "benchmark/report.py over benchmark/results/20260922T143932Z.jsonl",
     "snapshot_at": "2026-09-22",
     "pilot": false,
-    "headline": "Across 54 Claude Code runs of claude-sonnet-5 on 6 Acme task(s), a governed violation landed in 17% (3/18) of runs with no guidance and 0% (0/18) with the rules in CLAUDE.md, against 0% (0/18) with Threefold enforcing; the acceptance tests passed in 100% (18/18), 100% (18/18) and 100% (18/18) of those runs respectively.",
+    "headline": "Across 54 Claude Code runs of claude-sonnet-5 on 6 Acme tasks, a governed violation landed in 17% (3/18) of runs with no guidance and 0% (0/18) with the rules in CLAUDE.md, against 0% (0/18) with Threefold enforcing; the acceptance tests passed in 100% (18/18), 100% (18/18) and 100% (18/18) of those runs respectively.",
     "agent": "Claude Code",
     "agent_versions": [
       "2.1.220"
@@ -938,7 +938,7 @@
   },
   "private": {
     "source": "GET /api/overview?days=30 and GET /api/projects on the owner's private stack, read with the operator key; only these totals were kept",
-    "snapshot_at": "2026-09-27T20:30:23.660525+00:00",
+    "snapshot_at": "2026-09-28T10:03:43.556209+00:00",
     "window_days": 30,
     "days_observed": 7,
     "calls_governed": 5392,
