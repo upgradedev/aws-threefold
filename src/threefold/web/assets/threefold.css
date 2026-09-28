@@ -870,6 +870,9 @@ html.tf-lock, html.tf-lock body { overflow: hidden; }
 .tf-palette-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; padding: 10px 16px; border-top: 1px solid var(--tf-hairline); background: var(--tf-inset); font-size: var(--tf-fs-micro); color: var(--tf-text-3); }
 .tf-palette-foot span { display: inline-flex; align-items: center; gap: 6px; }
 @media (max-width: 639px) { .tf-palette-overlay { padding-top: 12px; } .tf-palette { max-height: calc(100dvh - 24px); } .tf-palette-foot { display: none; } }
+/* On a phone a project's hint (its stage, where its calls come from, how
+   many) wraps rather than losing its end to an ellipsis. */
+@media (max-width: 639px) { .tf-palette-hint { white-space: normal; } }
 
 /* The tooltip every chart mark shares: value first, label after. */
 .tf-tip {

@@ -79,6 +79,46 @@ def test_the_menu_sheet_holds_the_focus_while_it_covers_the_page(tmp_path: Path,
     assert closed["inert"] == [], "Closed, nothing the menu made inert is left so"
 
 
+PALETTE_PROBE = r"""() => {
+  if (!window.__opened) { window.__opened = true; document.querySelector('[data-tf-palette-open]').click(); return null; }
+  const rows = Array.from(document.querySelectorAll('.tf-palette-item')).filter(r => r.querySelector('.tf-palette-hint'));
+  const palette = document.getElementById('tf-palette').getBoundingClientRect();
+  return {
+    projects: rows.filter(r => /^Acme-/.test(r.querySelector('.tf-palette-label').textContent)).map(r => {
+      const hint = r.querySelector('.tf-palette-hint');
+      const h = hint.getBoundingClientRect();
+      return { text: hint.textContent, whole: hint.scrollWidth <= hint.clientWidth + 1, inside: h.right <= r.getBoundingClientRect().right + 0.5 };
+    }),
+    inside: Math.round(palette.right) <= document.documentElement.clientWidth,
+    scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth
+  };
+}"""
+
+
+def test_the_palette_says_where_a_project_s_calls_come_from_in_full_on_a_phone(tmp_path: Path) -> None:
+    projects = {"projects": [
+        {"project": "Acme-Probe", "source": "probe", "stage": "observe", "calls": 14, "needs_review": 14},
+        {"project": "Acme-Payments", "source": "fleet", "stage": "enforce", "calls": 1, "needs_review": 0},
+    ]}
+    result = measure(
+        "sessions.html",
+        tmp_path,
+        width=375,
+        height=812,
+        replies={"/api/auth/whoami": {"status": 200, "body": WHOAMI}, "/api/projects": {"status": 200, "body": projects}},
+        moments={"open": 1000, "read": 1800},
+        probe=PALETTE_PROBE,
+        before="window.tailwind = {};",
+    )
+    got = result["taken"]["read"]
+    hints = {p["text"]: p for p in got["projects"]}
+    assert "Observe · Probe, synthetic · 14 calls in 7 days · 14 to review" in hints, hints
+    assert "Enforce · Fleet · 1 call in 7 days" in hints, "One call is a call"
+    for text, hint in hints.items():
+        assert hint["whole"] and hint["inside"], f"A project's hint is read whole inside its row at 375 px: {text}"
+    assert got["inside"] and got["scrollWidth"] <= got["clientWidth"]
+
+
 OVERVIEW = {
     "window_days": 7, "generated_at": "2026-09-28T04:00:00+00:00", "source": "rollups",
     "totals": {"calls": 1108, "approved": 991, "refused": 4, "would_refuse": 113, "needs_review": 47, "false_alarms": 2,
