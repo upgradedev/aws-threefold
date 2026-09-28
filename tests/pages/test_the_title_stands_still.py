@@ -54,7 +54,7 @@ PROBE = r"""() => {
   const head = title && title.closest('.tf-page-head');
   const lead = head && head.querySelector('.tf-eyebrow, .tf-crumbs');
   return {
-    title: Object.assign(box(title) || {}, { size: title ? getComputedStyle(title).fontSize : null }),
+    title: Object.assign(box(title) || {}, { size: title ? getComputedStyle(title).fontSize : null, line: title ? getComputedStyle(title).lineHeight : null }),
     lead: box(lead), primitive: !!head && !!lead,
     brand: box(document.querySelector('.tf-header .tf-brand')),
     mount: box(document.querySelector('.tf-header .tf-nav-mount')),
@@ -86,7 +86,17 @@ def test_the_header_the_navigation_and_the_title_stand_where_they_stood(tmp_path
     first = seen["dashboard.html#/overview"]
     for name, where in seen.items():
         assert where["primitive"], f"{name}: the title is the design system's page head, with its eyebrow or breadcrumb"
-        assert where["title"] == first["title"], f"{name}: the title stands where the overview's does ({where['title']} against {first['title']})"
+        # Where the title starts and how it is set, not how many lines it takes:
+        # a longer title wraps on a phone, and a browser's own font decides
+        # where (CI's Linux Chrome breaks "Try the two-stage rollout" at 375 px
+        # where Windows Edge does not). It must still be whole lines of its type.
+        placed = {k: v for k, v in where["title"].items() if k != "height"}
+        assert placed == {k: v for k, v in first["title"].items() if k != "height"}, \
+            f"{name}: the title stands where the overview's does ({where['title']} against {first['title']})"
+        line = str(where["title"]["line"] or "")
+        assert line.endswith("px"), f"{name}: the h1 sets its own line height ({line!r})"
+        lines = where["title"]["height"] / float(line[:-2])
+        assert round(lines) >= 1 and abs(lines - round(lines)) < 0.1, f"{name}: the title is whole lines of the h1's type ({where['title']})"
         assert where["lead"] == first["lead"], f"{name}: the eyebrow or breadcrumb is one line, where the overview's is"
         for part in ("header", "brand", "mount"):
             assert where[part] == first[part], f"{name}: the {part} stands where the overview's does"
