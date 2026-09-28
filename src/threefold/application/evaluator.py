@@ -671,12 +671,11 @@ class GovernanceEvaluator:
         makes a configuration a sandbox's however it was written, or `sandbox`
         on the copy held. The walkthrough promotes it and sends the same call
         seconds later, and that call can land on a container that read it in
-        Observe a moment before. Held for the interval, the call a judge sent
-        about 26 seconds after making the sandbox was approved under Observe
-        in two runs of three, after the promotion, and that call being refused
-        is the payoff of the walkthrough. A sandbox's traffic is the dozen
-        calls that seed it and the few a visitor sends, so the price is one
-        read per evaluation of a sandbox and nothing anywhere else.
+        Observe a moment before. Held for the interval, that container
+        approved the call under Observe after the promotion, and that call
+        being refused is the payoff of the walkthrough. A sandbox's traffic is
+        the dozen calls that seed it and the few a visitor sends, so the price
+        is one read per evaluation of a sandbox and nothing anywhere else.
         """
         if stages.SANDBOX_PATTERN.match(project):
             return True

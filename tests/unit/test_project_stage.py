@@ -318,8 +318,9 @@ def no_interval_ends(monkeypatch):
 def _walkthrough_call(session_id: str, project: str) -> ToolCallRequestDTO:
     """The walkthrough's last step as #/try sends it: a hook's call, managed, not a dry run.
 
-    The same write the sandbox was seeded with, which python-domain-stays-pure
-    flags. Without the model's sentence, so the test stays offline.
+    A write of the file and the import the sandbox was seeded with, which
+    python-domain-stays-pure flags. Without the model's sentence, so the test
+    stays offline.
     """
     return _call(session_id, project=project, hook_mode="managed", explain=False)
 
