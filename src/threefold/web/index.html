@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Threefold — Stop bad agent writes before they reach your code</title>
+  <title>Threefold - Stop bad agent writes before they reach your code</title>
   <meta name="description" content="Threefold governs Claude Code, Codex, Antigravity and Muse: a hook asks before every write or command, deterministic gates on AWS decide, and every project observes before it enforces." />
   <script>
       // The server rewrites __THREEFOLD_BASE_PATH__ to the API Gateway stage prefix
@@ -633,7 +633,7 @@
         <h1 id="hero-promise" class="tf-hero-title">Stop bad agent writes <em>before they reach your code.</em></h1>
         <p id="hero-sentence" class="tf-hero-lede">Deterministic gates on AWS judge each write and command from Claude Code, Codex, Antigravity or Muse. Each repository only watches until you promote its rules.</p>
         <div id="hero-actions" class="tf-hero-actions">
-          <a id="hero-try" href="dashboard.html#/try" class="tf-btn tf-btn-primary tf-btn-lg"><span data-tf-icon="play"></span>Try the two-stage rollout — 2 min</a>
+          <a id="hero-try" href="dashboard.html#/try" class="tf-btn tf-btn-primary tf-btn-lg"><span data-tf-icon="play"></span>Try the two-stage rollout - 2 min</a>
           <a id="hero-dashboard" href="dashboard.html#/overview" class="tf-btn tf-btn-lg"><span data-tf-icon="grid"></span>Open the live dashboard</a>
           <p class="tf-hero-links">
             <a id="hero-watch" href="#watch-the-gates" class="tf-hero-link tf-hero-link-down">Watch a loop get halted, no account<span data-tf-icon="arrowright"></span></a>
@@ -1086,7 +1086,7 @@
           </div>
           <div class="tf-actions">
             <button type="button" id="btnCheckConnection" onclick="checkApiHealth()" class="tf-btn tf-btn-sm"><span data-tf-icon="refresh" data-tf-size="14"></span>Check</button>
-            <button type="button" id="btnExportCert" onclick="downloadCert()" class="tf-btn tf-btn-sm"><span data-tf-icon="download" data-tf-size="14"></span>Export governance certificate</button>
+            <button type="button" id="btnExportCert" onclick="downloadCert()" disabled title="Run a scenario first, so there is a certificate of your own to export." class="tf-btn tf-btn-sm"><span data-tf-icon="download" data-tf-size="14"></span>Export governance certificate</button>
             <button type="button" id="btnEmergencyFreeze" onclick="triggerManualFreeze()" disabled
                     title="Run a scenario first, so there is a session of your own to freeze."
                     class="tf-btn tf-btn-sm tf-btn-danger"><span data-tf-icon="stop" data-tf-size="14"></span>Freeze session</button>
@@ -1888,7 +1888,7 @@
 
           if (certRes.ok) {
             const certData = await certRes.json();
-            currentCertData = certData;
+            setCertData(certData);
 
             logTerminal(`✓ All 4 steps compliant. The service returned certificate ${certData.certificate_id}, computed from the four verdicts above.`, 'ok strong');
             document.getElementById('cert-origin').innerHTML =
@@ -1931,7 +1931,7 @@
 
       renderRecordedExplanation(`Four approved calls: $${cert.total_cost_usd.toFixed(4)} projected for the ${formatCount(cert.total_tokens)} tokens this demo declares.`);
 
-      currentCertData = {
+      setCertData({
         replayed_offline: true,
         disclaimer: `REPLAYED OFFLINE. Recorded from a live evaluation on ${RECORDED.recorded_at} and replayed without contacting the service. This document describes the recorded session ${run.session_id}, not a run just made.`,
         certificate_id: cert.certificate_id,
@@ -1945,7 +1945,7 @@
         sha256_fingerprint: cert.sha256_fingerprint,
         signature: cert.signature,
         signing_key_id: cert.signing_key_id
-      };
+      });
 
       document.getElementById('cert-id').innerText = cert.certificate_id;
       document.getElementById('cert-hash').innerText = 'SHA256: ' + cert.sha256_fingerprint;
@@ -2036,6 +2036,13 @@
       } catch (err) {
         alert("Freeze error: " + err.message);
       }
+    }
+
+    // The only writer of the certificate the export buttons download. Setting
+    // it enables the always-visible export, which starts disabled.
+    function setCertData(data) {
+      currentCertData = data;
+      document.getElementById('btnExportCert').disabled = false;
     }
 
     function downloadCert() {

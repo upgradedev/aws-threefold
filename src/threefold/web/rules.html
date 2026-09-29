@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Threefold — Architecture Rules</title>
+  <title>Threefold - Architecture Rules</title>
   <meta name="description" content="The architecture rules Threefold enforces on coding agents: what each layer of your code may not import, drafted from a sentence, tried on a file, observed before it refuses." />
   <!-- Tailwind CSS via CDN, pinned to an exact version: an unpinned major is a
        script that can change under a page that did not change, and it runs on the
@@ -302,12 +302,12 @@ public class Order { }</textarea>
         <div class="space-y-3 text-[11px] text-gray-400">
           <div class="tf-card-quiet p-4 space-y-1.5">
             <p class="text-gray-200 font-semibold text-xs">Each rule</p>
-            <p><span class="font-mono tf-accent-text">id</span> — what a refusal quotes.</p>
-            <p><span class="font-mono tf-accent-text">description</span> — the sentence a developer reads when stopped.</p>
-            <p><span class="font-mono tf-accent-text">mode</span> — <span class="font-mono">enforce</span> (default) or <span class="font-mono">observe</span>.</p>
-            <p><span class="font-mono tf-accent-text">when_path_matches</span> — globs; <span class="font-mono">**</span> crosses folders, <span class="font-mono">*</span> does not. Case is ignored.</p>
-            <p><span class="font-mono tf-accent-text">forbid_imports</span> — <span class="font-mono">System.Data</span> forbids it and everything under it, never <span class="font-mono">System.DataAnnotations</span>.</p>
-            <p><span class="font-mono tf-accent-text">allow_imports</span> — exceptions. The more specific pattern wins.</p>
+            <p><span class="font-mono tf-accent-text">id</span> - what a refusal quotes.</p>
+            <p><span class="font-mono tf-accent-text">description</span> - the sentence a developer reads when stopped.</p>
+            <p><span class="font-mono tf-accent-text">mode</span> - <span class="font-mono">enforce</span> (default) or <span class="font-mono">observe</span>.</p>
+            <p><span class="font-mono tf-accent-text">when_path_matches</span> - globs; <span class="font-mono">**</span> crosses folders, <span class="font-mono">*</span> does not. Case is ignored.</p>
+            <p><span class="font-mono tf-accent-text">forbid_imports</span> - <span class="font-mono">System.Data</span> forbids it and everything under it, never <span class="font-mono">System.DataAnnotations</span>.</p>
+            <p><span class="font-mono tf-accent-text">allow_imports</span> - exceptions. The more specific pattern wins.</p>
           </div>
           <div id="validation" class="tf-card-quiet p-4" aria-live="polite"></div>
           <label class="tf-field">
@@ -444,7 +444,7 @@ public class Order { }</textarea>
     }
 
     function chips(values, tone) {
-      if (!values || !values.length) return '<span class="text-gray-600">—</span>';
+      if (!values || !values.length) return '<span class="text-gray-600">-</span>';
       // A long path pattern breaks inside its chip rather than widening the
       // page: at 375 px one did, by 4 px, and the browser shrank the page to fit.
       return values.map(v => '<span class="inline-block max-w-full break-all px-1.5 py-0.5 mr-1 mb-1 rounded-md font-mono text-[10.5px] leading-4 border ' + tone + '">' + escapeHtml(v) + '</span>').join('');
@@ -532,13 +532,13 @@ public class Order { }</textarea>
     //
     // So a write whose words name a project goes through writeNaming, which
     // keeps the function that built them and exactly what it produced. On the
-    // switch, redrawNaming runs that function again — from what this page has
-    // already read, never a second request — and only while the panel still
+    // switch, redrawNaming runs that function again - from what this page has
+    // already read, never a second request - and only while the panel still
     // holds what it wrote. Anything else on screen means the page has moved
     // on, and the memo is dropped rather than put back over newer words.
     // What is kept is what the panel reports after the write, not the string it
-    // was handed: a browser writes the markup back its own way — an escaped
-    // apostrophe in a name of the reader's own comes back as an apostrophe —
+    // was handed: a browser writes the markup back its own way - an escaped
+    // apostrophe in a name of the reader's own comes back as an apostrophe -
     // and comparing against the string we built would call an untouched panel
     // changed, drop the memo, and leave the name on screen.
     const namingPanels = {};
@@ -1080,7 +1080,7 @@ public class Order { }</textarea>
         : verdict === 'OBSERVE' ? 'tf-chip-amber'
         : verdict === 'ALLOW' ? 'tf-chip-emerald'
         : 'tf-chip-gray';
-      return '<span class="tf-chip tf-chip-dot ' + tone + '">' + escapeHtml(verdict || '—') + '</span>';
+      return '<span class="tf-chip tf-chip-dot ' + tone + '">' + escapeHtml(verdict || '-') + '</span>';
     }
 
     // One row per file tried: what it should do, what the rule did and whether
@@ -1496,7 +1496,7 @@ public class Order { }</textarea>
     if (window.Threefold) Threefold.onAuthChange(updateDraftSaveState);
     // The switch in the navigation turns the reader's own names off and on.
     // Everything that names a project is written again from what is already
-    // here — the badge and the sentence beside the list, the stale note, and
+    // here - the badge and the sentence beside the list, the stale note, and
     // every panel that is still holding the words it was given, which is what
     // redrawNaming is for. The rules themselves are not read a second time.
     if (window.Threefold) {

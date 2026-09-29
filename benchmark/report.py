@@ -854,7 +854,7 @@ def render(summary: Mapping[str, Any], tasks: Sequence[task_library.Task], sourc
     pilot = whole["pilot"]
     date = whole["dates"][-1] if whole["dates"] else datetime.date.today().isoformat()
     only = _only_family(summary)
-    title = f"# Agent benchmark{' — pressure tasks' if only == 'pressure' else ''}{' — PILOT' if pilot else ''}, {date}"
+    title = f"# Agent benchmark{' - pressure tasks' if only == 'pressure' else ''}{' - PILOT' if pilot else ''}, {date}"
     out: List[str] = [title, ""]
     if pilot:
         out += ["> **PILOT.** These rows prove the harness end to end. They are not a result, and no number below should be quoted as one.", ""]

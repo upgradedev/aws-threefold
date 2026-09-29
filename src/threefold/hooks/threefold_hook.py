@@ -668,7 +668,7 @@ def detect_agent(payload: Dict[str, Any], forced: Optional[str] = None) -> str:
     A Codex patch arrives as a tool_input whose only key is `command`, which is
     also what a Claude Code Bash call looks like, so the key shape alone cannot
     tell them apart: a command that is nothing but a patch envelope is what
-    does. Finding the marker anywhere in the command is not enough — `git commit
+    does. Finding the marker anywhere in the command is not enough - `git commit
     -m 'see *** Begin Patch in the docs'` is a Bash call, and calling it Codex
     both mislabels it in the ledger and sends it down a path with nothing to parse.
 
@@ -1761,7 +1761,7 @@ def _next_separator(pieces: Sequence[str], index: int) -> str:
 # text, and nothing reads the files it names. `cp src/a.py data/a.py` names a
 # data file and carries none of it; `rm -rf src > out.csv` carries nothing at
 # all. Holding either back would take the call away from the service
-# altogether, so appending `> x.csv` to any command would hide it — unjudged
+# altogether, so appending `> x.csv` to any command would hide it - unjudged
 # in enforce mode, and missing from the ledger in observe. That is the
 # reasoning the `.git` carve-out in _is_written_data already follows, read for
 # every destination instead of one directory.

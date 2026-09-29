@@ -110,7 +110,7 @@ def named_path(text: str) -> str:
     One limit is kept, and it is a real limit rather than a claim about what
     a path can be: a value longer than MAX_PATHLIKE_LENGTH names nothing here,
     so a whole file's text sent under a mistyped path key is never walked as a
-    path — and so a path that long is not judged either.
+    path - and so a path that long is not judged either.
     """
     if not isinstance(text, str) or len(text) > MAX_PATHLIKE_LENGTH:
         return ""
@@ -282,8 +282,8 @@ class ArchitecturalBoundaryGuard:
 
         A generator on purpose. `evaluate_tool_boundary` takes the first and
         stops, so an ordinary verdict costs exactly what it cost before; only a
-        caller that has to look past a finding — because the project is still
-        only observing that rule — pays for the rest.
+        caller that has to look past a finding - because the project is still
+        only observing that rule - pays for the rest.
 
         `blocked_patterns` are the policy's additional secret shapes, asked
         after every gate above. A pattern that does not compile is skipped
@@ -385,9 +385,9 @@ class ArchitecturalBoundaryGuard:
                             from_shell=command is not None,
                         )
                         break
-            # A word the command never treats as a file — the pattern `grep` is
+            # A word the command never treats as a file - the pattern `grep` is
             # given, the line `echo` appends to .gitignore, the path `git` is
-            # asked about — is blanked (`spelled`, read at the top of this
+            # asked about - is blanked (`spelled`, read at the top of this
             # walk) before the credential-store patterns run over the command,
             # exactly as `.git` was taken out of them on 2026-09-22. A command
             # that cannot be read this way is scanned whole, as it always was.
@@ -577,8 +577,8 @@ def target_paths(
 #
 # - A word is only taken out of the command it was read from, at the place it
 #   was written. Searching the line for it blanked the first occurrence that
-#   matched literally, so `cat .env; echo ".e"nv` — where the benign word is
-#   quote-split and has no literal occurrence of its own — erased the `.env`
+#   matched literally, so `cat .env; echo ".e"nv` - where the benign word is
+#   quote-split and has no literal occurrence of its own - erased the `.env`
 #   that `cat` opens.
 # - A word the command *prints* is a word anything reading its output can
 #   open: `echo .env | xargs cat` reads the store as surely as `cat .env`.
@@ -995,8 +995,8 @@ def governed_write_targets(invocation: ToolInvocation) -> List[str]:
 
     A call that carries a command used to give up every target, and a Write
     with a real `file_path` beside a `command` field therefore wrote
-    .claude/settings.json — the file that decides whether any of this runs at
-    all — with this check switched off. The command's own words are still
+    .claude/settings.json - the file that decides whether any of this runs at
+    all - with this check switched off. The command's own words are still
     left alone, because `write_pairs` would read them as paths the call names
     and refuse a read for naming a settings file; what the call names under a
     path key is a path it names, whatever else it carries.

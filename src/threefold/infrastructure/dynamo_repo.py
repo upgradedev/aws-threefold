@@ -88,7 +88,7 @@ def rollup_counters(decision: Dict[str, Any]) -> tuple:
 
     Nothing here reads a reason or maps an invariant to a rule: that is the
     application layer's business. The row's own two fields are only counted
-    together when they agree — `rule_key` is the first of `observed_rules` —
+    together when they agree - `rule_key` is the first of `observed_rules` -
     so a row that carries an invariant name from an older writer is counted
     under its key alone, exactly as it was before.
     """

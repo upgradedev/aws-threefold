@@ -6,7 +6,7 @@ would not keep, credentials included. It redacted the arguments after
 newline as the two characters backslash and n. That puts 'n', a word character,
 directly in front of a token that began a line, so the ``(?<![A-Za-z0-9_])``
 lookbehind in most of the credential patterns no longer matches and the token
-went to the model exactly as the caller wrote it — on the very call the gate
+went to the model exactly as the caller wrote it - on the very call the gate
 had just refused for carrying it. A tab, a carriage return and any non-ASCII
 character, which is escaped as ``\\uXXXX``, do the same thing.
 

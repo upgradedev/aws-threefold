@@ -2,7 +2,7 @@
 
 A judge who opens the public URL meets the hero before anything else: one
 promise line under twelve words, one sentence of how, "Try the two-stage
-rollout — 2 min", "Open the live dashboard", and two quiet links, one down to
+rollout - 2 min", "Open the live dashboard", and two quiet links, one down to
 the flagship's scenarios and one to connect a repository, and beside them the
 product's core moment. That moment is one
 proposed write, the boundary write RECORDED.boundary was recorded from, asked
@@ -43,7 +43,7 @@ SENTENCE = (
 )
 SCOPE = "A refusal is measured to stop the write in Claude Code and Antigravity, in Codex once, over its patch tool only, and in Muse over its file-write, edit and shell tools."
 ACTIONS = [
-    ("hero-try", "dashboard.html#/try", "Try the two-stage rollout — 2 min"),
+    ("hero-try", "dashboard.html#/try", "Try the two-stage rollout - 2 min"),
     ("hero-dashboard", "dashboard.html#/overview", "Open the live dashboard"),
     ("hero-watch", "#watch-the-gates", "Watch a loop get halted, no account"),
     ("hero-connect", "dashboard.html#/connect", "Connect your repository"),
@@ -223,7 +223,7 @@ def test_the_actions_come_next_each_one_click_in_this_order() -> None:
 
 
 def test_each_length_of_time_is_said_where_it_is_true() -> None:
-    """A judge: the button read "— 60 s", and the walkthrough it opens says "About two minutes".
+    """A judge: the button read "- 60 s", and the walkthrough it opens says "About two minutes".
 
     The walkthrough's own figure goes on the button that opens it. The flagship
     claim of CLAUDE.md rule 6, the circuit breaker's halt and the certificate
@@ -236,7 +236,7 @@ def test_each_length_of_time_is_said_where_it_is_true() -> None:
     assert _text(walkthrough.group(1)).startswith("About two minutes on the public demo"), \
         "The walkthrough gives another figure now: the button that opens it must say the same"
     label = {ident: words for ident, _, words in ACTIONS}["hero-try"]
-    assert label.endswith("— 2 min") and "60" not in _text(_hero()), "The hero's button says the walkthrough's length"
+    assert label.endswith("- 2 min") and "60" not in _text(_hero()), "The hero's button says the walkthrough's length"
     # The page's own words are pinned below; of the owner's rule only its figure
     # is checked, so rewording rule 6 does not fail a page that has not changed.
     assert "60 seconds" in (ROOT / "CLAUDE.md").read_text(encoding="utf-8"), "CLAUDE.md rule 6 gives another figure now"

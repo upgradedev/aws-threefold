@@ -319,7 +319,7 @@ class _EveryKey:
     """Every rule, watching. What Observe and a dry run are.
 
     A frozenset cannot spell "including every layering rule anyone might
-    declare", and the alternative — collecting the ids first — would make the
+    declare", and the alternative - collecting the ids first - would make the
     stage depend on the rules rather than on the project.
     """
 
@@ -1401,8 +1401,8 @@ class GovernanceEvaluator:
         is_loop_free, loop_reason = self.loop_detector.evaluate_loop_risk(session.history, invocation)
         if is_loop_free:
             # The fuzzy tier: the same tools on the same targets with differing
-            # arguments, at a longer fuse. Everything below — observe, reads,
-            # halts, dry runs — reads these two names, so it applies unchanged.
+            # arguments, at a longer fuse. Everything below - observe, reads,
+            # halts, dry runs - reads these two names, so it applies unchanged.
             is_loop_free, loop_reason = self.loop_detector.evaluate_fuzzy_loop_risk(
                 session.history, invocation, _fuzzy_signature
             )

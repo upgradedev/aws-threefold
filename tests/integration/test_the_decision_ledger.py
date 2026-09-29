@@ -3,7 +3,7 @@
 Refusals used to vanish. The gates return early, so only approved calls reached
 the session write, and a boundary violation or an intercepted credential left
 nothing behind but an in-process event. Nothing could answer which rule refused
-what, for whom, last week — the only question a platform owner actually has.
+what, for whom, last week - the only question a platform owner actually has.
 """
 from __future__ import annotations
 

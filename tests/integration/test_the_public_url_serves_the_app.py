@@ -101,11 +101,11 @@ def test_head_on_an_open_read_is_not_refused_when_keys_are_enforced(monkeypatch)
 @pytest.mark.parametrize(
     "path, title",
     [
-        ("/settings.html", "Threefold — Policy Settings"),
-        ("/sessions.html", "Threefold — Governed Sessions"),
-        ("/connect.html", "Threefold — Connect a Coding Agent"),
-        ("/console.html", "Threefold — Enforcement Console"),
-        ("/rules.html", "Threefold — Architecture Rules"),
+        ("/settings.html", "Threefold - Policy Settings"),
+        ("/sessions.html", "Threefold - Governed Sessions"),
+        ("/connect.html", "Threefold - Connect a Coding Agent"),
+        ("/console.html", "Threefold - Enforcement Console"),
+        ("/rules.html", "Threefold - Architecture Rules"),
     ],
 )
 def test_the_operator_pages_are_reachable(path: str, title: str) -> None:

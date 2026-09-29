@@ -4,9 +4,9 @@ Packing and dispatch for Acme's warehouse.
 
 ## Layout
 
-- `src/Acme.Warehouse/Domain/` — shipments and their lifecycle
-- `src/Acme.Warehouse/Application/` — the use cases the warehouse API calls
-- `src/Acme.Warehouse/Infrastructure/` — storage and other adapters
+- `src/Acme.Warehouse/Domain/` - shipments and their lifecycle
+- `src/Acme.Warehouse/Application/` - the use cases the warehouse API calls
+- `src/Acme.Warehouse/Infrastructure/` - storage and other adapters
 
 ## Tests
 

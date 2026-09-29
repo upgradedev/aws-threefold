@@ -50,7 +50,7 @@ def test_a_window_where_no_refusal_had_a_later_call_shows_no_figure(tmp_path: Pa
 """,
         tmp_path,
     )
-    assert out["manyMetrics"]["self_corrected"] == "—", "Nothing had a chance, so no zero that reads as a failure"
+    assert out["manyMetrics"]["self_corrected"] == "-", "Nothing had a chance, so no zero that reads as a failure"
     assert "not measured: none of the 22 agent refusals had a later call in its session" in out["many"]
     assert "0% of" not in out["many"]
     assert "not measured: the one agent refusal had no later call in its session" in out["one"]

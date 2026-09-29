@@ -1,4 +1,4 @@
-# Threefold — Known Traps & Pitfalls
+# Threefold - Known Traps & Pitfalls
 
 Append-only. Document anything that costs over 30 minutes to prevent re-learning.
 

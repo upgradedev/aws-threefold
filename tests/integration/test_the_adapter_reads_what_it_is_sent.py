@@ -3,8 +3,8 @@
 The adapter is offered as the way a team puts Threefold in front of an agent
 without writing glue: send the tool call as the agent emits it. It read an
 Anthropic `tool_use` object and a `{name, arguments}` pair, and nothing else.
-The two shapes OpenAI actually returns — a message-level `function_call` object
-and a `tool_calls` array — fell through to a branch that named the call
+The two shapes OpenAI actually returns - a message-level `function_call` object
+and a `tool_calls` array - fell through to a branch that named the call
 "unknown_tool" with no arguments at all, and a call with no arguments passes
 every gate. So a command exporting an access key came back APPROVED, from the
 route whose whole job is to read it, while the same command sent as a
@@ -187,8 +187,8 @@ def test_the_adapter_and_the_native_route_agree_on_the_same_call() -> None:
 # them was judged as whichever was tested first and the other was never read.
 # `name` and `input` were tested first, so adding them to any native payload
 # shadowed it: the gate judged the empty `input`, answered APPROVED, and the
-# `tool_calls`, `function_call` or `function` beside it — the command exporting
-# an access key id — reached nobody. These send the credential in the shape a
+# `tool_calls`, `function_call` or `function` beside it - the command exporting
+# an access key id - reached nobody. These send the credential in the shape a
 # caller means and a decoy in the shape that used to win.
 SHADOWING_DECOYS = {
     "tool_calls behind an empty input": dict(

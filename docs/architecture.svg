@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1160 450" font-family="Verdana, 'DejaVu Sans', sans-serif" role="img">
+  <title>Threefold architecture: four agents through one hook into CloudFront and one Lambda; pull requests through the merge judge</title>
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#57606a"/>
+    </marker>
+  </defs>
+  <style>
+    .box { fill: #f6f8fa; stroke: #57606a; stroke-width: 1.5; }
+    .accent { fill: #ddf4ff; stroke: #0969da; stroke-width: 1.5; }
+    .t { font-size: 13px; font-weight: 600; fill: #1f2328; text-anchor: middle; }
+    .c { font-size: 12px; font-family: ui-monospace, Menlo, Consolas, monospace; fill: #1f2328; text-anchor: middle; }
+    .s { font-size: 10.5px; fill: #57606a; text-anchor: middle; }
+    .arr { stroke: #57606a; stroke-width: 1.5; fill: none; marker-end: url(#ah); }
+    .div { stroke: #57606a; stroke-width: 1; }
+    .cap { font-size: 11px; fill: #57606a; }
+  </style>
+
+  <!-- row 1: every write asks before it runs -->
+  <rect class="box" x="20" y="40" width="150" height="110" rx="8"/>
+  <text class="t" x="95" y="72">4 coding agents</text>
+  <text class="s" x="95" y="92">Claude Code · Codex</text>
+  <text class="s" x="95" y="110">Antigravity · Muse</text>
+
+  <rect class="box" x="195" y="40" width="180" height="110" rx="8"/>
+  <text class="c" x="285" y="72">threefold_hook.py</text>
+  <text class="s" x="285" y="92">one file, every agent</text>
+  <text class="s" x="285" y="110">asks before each write</text>
+
+  <rect class="box" x="400" y="40" width="180" height="110" rx="8"/>
+  <text class="t" x="490" y="72">CloudFront + WAF</text>
+  <text class="s" x="490" y="92">us-east-1</text>
+  <text class="s" x="490" y="110">pages + every API path</text>
+
+  <rect class="box" x="605" y="40" width="155" height="110" rx="8"/>
+  <text class="t" x="682" y="72">API Gateway</text>
+  <text class="s" x="682" y="92">HTTP API · prod</text>
+  <text class="s" x="682" y="110">eu-west-1</text>
+
+  <rect class="accent" x="785" y="40" width="155" height="110" rx="8"/>
+  <text class="t" x="862" y="72">one Lambda</text>
+  <text class="s" x="862" y="92">Python 3.11 · arm64</text>
+  <text class="s" x="862" y="110">reserved 25</text>
+
+  <rect class="box" x="965" y="40" width="175" height="210" rx="8"/>
+  <line class="div" x1="965" y1="110" x2="1140" y2="110"/>
+  <line class="div" x1="965" y1="180" x2="1140" y2="180"/>
+  <text class="t" x="1052" y="68">DynamoDB</text>
+  <text class="s" x="1052" y="86">one table · PITR</text>
+  <text class="t" x="1052" y="138">Bedrock Haiku 4.5</text>
+  <text class="s" x="1052" y="156">explains, never decides</text>
+  <text class="t" x="1052" y="208">CloudWatch</text>
+  <text class="s" x="1052" y="226">EMF · 11 alarms</text>
+
+  <path class="arr" d="M170,95 H195"/>
+  <path class="arr" d="M375,95 H400"/>
+  <path class="arr" d="M580,95 H605"/>
+  <path class="arr" d="M760,95 H785"/>
+  <path class="arr" d="M940,95 H965"/>
+
+  <!-- row 2: the reader and the pages -->
+  <rect class="box" x="20" y="200" width="150" height="64" rx="8"/>
+  <text class="t" x="95" y="226">browser</text>
+  <text class="s" x="95" y="244">reads + demo · no key</text>
+
+  <rect class="box" x="400" y="200" width="180" height="64" rx="8"/>
+  <text class="t" x="490" y="226">S3, private</text>
+  <text class="s" x="490" y="244">pages + assets · OAC</text>
+
+  <path class="arr" d="M170,232 H385 V130 H400"/>
+  <path class="arr" d="M490,150 V200"/>
+
+  <!-- row 3: the merge is judged with nothing installed -->
+  <rect class="box" x="20" y="330" width="240" height="70" rx="8"/>
+  <text class="t" x="140" y="358">GitHub pull request</text>
+  <text class="s" x="140" y="377">any agent, or none</text>
+
+  <rect class="box" x="285" y="330" width="270" height="70" rx="8"/>
+  <text class="c" x="420" y="358">judge_pr.py</text>
+  <text class="s" x="420" y="377">every added file, same gates</text>
+
+  <rect class="accent" x="580" y="330" width="270" height="70" rx="8"/>
+  <text class="t" x="715" y="358">required check</text>
+  <text class="s" x="715" y="377">red-to-green on PR #6</text>
+
+  <rect class="box" x="875" y="330" width="265" height="70" rx="8"/>
+  <text class="t" x="1007" y="358">merge to main</text>
+  <text class="s" x="1007" y="377">blocked while red</text>
+
+  <path class="arr" d="M260,365 H285"/>
+  <path class="arr" d="M555,365 H580"/>
+  <path class="arr" d="M850,365 H875"/>
+
+  <text class="cap" x="20" y="428">Hooks are voluntary on laptops; the merge is where refusal is enforced.</text>
+</svg>

@@ -158,11 +158,11 @@ class LoopDetector:
         """Whether next_call repeats the shape of what came before it.
 
         The second tier, asked only when the byte-exact tier finds nothing.
-        `fuzzy` normalizes a call to what it does — the same tool on the same
-        targets — and returns None where a call has no shape to compare, which
+        `fuzzy` normalizes a call to what it does - the same tool on the same
+        targets - and returns None where a call has no shape to compare, which
         keeps targetless calls out of both sequences rather than lumping them
-        into one false shape. A longer run is required than the exact tier —
-        threshold plus FUZZY_THRESHOLD_BUMP consecutive shapes — because
+        into one false shape. A longer run is required than the exact tier -
+        threshold plus FUZZY_THRESHOLD_BUMP consecutive shapes - because
         sameness here is cheaper than identity.
         """
         current = fuzzy(next_call)

@@ -12,7 +12,7 @@ import urllib.parse
 from threefold.interfaces.api_handlers import lambda_handler
 
 
-def _evaluate(session_id: str, tool_name: str = "read_file") -> dict:
+def _evaluate(session_id: str, tool_name: str = "read_file", path: str = "README.md") -> dict:
     response = lambda_handler(
         {
             "httpMethod": "POST",
@@ -25,7 +25,7 @@ def _evaluate(session_id: str, tool_name: str = "read_file") -> dict:
                     "project_name": "Acme-Console",
                     "tool_name": tool_name,
                     "action_type": "FILE_READ",
-                    "arguments": {"path": "README.md"},
+                    "arguments": {"path": path},
                     "projected_input_tokens": 100,
                     "projected_output_tokens": 50,
                     "budget_usd": 5.0,
@@ -111,6 +111,27 @@ def test_a_session_id_that_must_be_escaped_still_reads_back() -> None:
     assert body["session_id"] == session_id
     assert body["project_name"] == "Acme-Console", "The real session was found, not a fresh one"
     assert body["tool_call_history_count"] >= 1
+
+
+def test_the_detail_reports_the_cumulative_call_count() -> None:
+    """The detail panel must agree with the listing: cumulative, never capped.
+
+    UAT found the detail answering only `tool_call_history_count`, the retained
+    window of at most 50, while the listing's `calls` is cumulative. Same
+    session, two numbers, no label telling them apart.
+    """
+    session_id = "console-cumulative-001"
+    for index in range(3):
+        _evaluate(session_id, path=f"README-{index}.md")
+
+    listed = {s["session_id"]: s for s in _list_sessions()["sessions"]}
+    assert listed[session_id]["calls"] == 3
+
+    response = lambda_handler({"httpMethod": "GET", "path": f"/sessions/{session_id}", "headers": {}})
+    assert response["statusCode"] == 200
+    body = json.loads(response["body"])
+    assert body["total_calls"] == 3
+    assert body["total_calls"] == listed[session_id]["calls"], "Detail and listing agree"
 
 
 def test_the_kill_switch_reaches_an_escaped_session_id() -> None:

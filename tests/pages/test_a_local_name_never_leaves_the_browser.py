@@ -261,7 +261,7 @@ def test_a_browser_that_answers_a_read_and_refuses_a_write_still_keeps_the_names
 
     An old private mode and a full quota both look like this. Reading again
     would hand back the map from before and lose what this tab was just told,
-    so the panel's promise — kept for this tab, at least — would be false.
+    so the panel's promise - kept for this tab, at least - would be false.
     """
     out = dash(
         r"""
@@ -498,7 +498,7 @@ def test_a_name_with_an_apostrophe_in_it_is_hidden_like_any_other(tmp_path: Path
     """A browser writes markup back its own way, and an escaped apostrophe comes back as one.
 
     A panel that compared what it wrote with what the element then held would
-    call itself changed and leave the name on screen — on a real browser only,
+    call itself changed and leave the name on screen - on a real browser only,
     which is why the stub browser writes an apostrophe back the same way.
     """
     out = run(

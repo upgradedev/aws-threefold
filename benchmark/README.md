@@ -577,16 +577,16 @@ each part rests on:
 
 ## Files
 
-- `tasks/<id>/` — `task.json` (prompt, family, checks, acceptance command, the number of tests the acceptance run passes, extra test-configuration files; for a pressure task the standard task it varies, `variant_of`; for a prompt that asks for a shell redirect, the command, `violating_command`, which the scripted stand-in runs), `repo/` (the template; a pressure task has none and runs on its base task's), `reference/clean` and `reference/violating` (solutions the suite uses to prove each task measures what it claims)
-- `tasks/pressure-*/` — the pressure family; `tests/unit/test_benchmark_pressure.py` proves each one can be finished without the violation and that the violation it asks for is caught
-- `conditions/CLAUDE.prompt.md` — the rules the `prompt` condition writes into `CLAUDE.md` or `AGENTS.md`
-- `task_library.py` — loads the tasks and their families
-- `checks.py` — the independent checkers; they never import Threefold
-- `harness.py`, `run.py` — one run, and the matrix (retries, stopping, resuming)
-- `credentials.py` — the token file and `--check-auth`
-- `codex_agent.py` — Codex's command, the checks before a Codex run, and reading its JSON events
-- `scripted_agent.py` — a fixed script in place of the model, to test the harness
-- `fake_agents.py` — stand-ins for the `claude` and `codex` executables, used only by the suite; they reach no service
-- `fake_threefold.py` — a stand-in for a remote Threefold on 127.0.0.1, used only by the suite
-- `report.py` — the aggregation, the report and the summary file
-- `results/` — the recorded rows and their summaries; `results/live/` the daily live runs' rows
+- `tasks/<id>/` - `task.json` (prompt, family, checks, acceptance command, the number of tests the acceptance run passes, extra test-configuration files; for a pressure task the standard task it varies, `variant_of`; for a prompt that asks for a shell redirect, the command, `violating_command`, which the scripted stand-in runs), `repo/` (the template; a pressure task has none and runs on its base task's), `reference/clean` and `reference/violating` (solutions the suite uses to prove each task measures what it claims)
+- `tasks/pressure-*/` - the pressure family; `tests/unit/test_benchmark_pressure.py` proves each one can be finished without the violation and that the violation it asks for is caught
+- `conditions/CLAUDE.prompt.md` - the rules the `prompt` condition writes into `CLAUDE.md` or `AGENTS.md`
+- `task_library.py` - loads the tasks and their families
+- `checks.py` - the independent checkers; they never import Threefold
+- `harness.py`, `run.py` - one run, and the matrix (retries, stopping, resuming)
+- `credentials.py` - the token file and `--check-auth`
+- `codex_agent.py` - Codex's command, the checks before a Codex run, and reading its JSON events
+- `scripted_agent.py` - a fixed script in place of the model, to test the harness
+- `fake_agents.py` - stand-ins for the `claude` and `codex` executables, used only by the suite; they reach no service
+- `fake_threefold.py` - a stand-in for a remote Threefold on 127.0.0.1, used only by the suite
+- `report.py` - the aggregation, the report and the summary file
+- `results/` - the recorded rows and their summaries; `results/live/` the daily live runs' rows

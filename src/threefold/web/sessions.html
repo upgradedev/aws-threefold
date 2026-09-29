@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Threefold — Governed Sessions</title>
+  <title>Threefold - Governed Sessions</title>
   <meta name="description" content="Every coding-agent session Threefold has judged: its calls, its spend, and whether a breaker stopped it." />
   <!-- Tailwind CSS via CDN, pinned to an exact version: an unpinned major is a
        script that can change under a page that did not change, and it runs on the
@@ -96,25 +96,25 @@
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-3" id="kpis">
       <div class="tf-card tf-tile">
         <span class="tf-tile-label"><span data-tf-icon="list"></span>Sessions shown</span>
-        <span id="kpi-count" class="tf-tile-value">—</span>
+        <span id="kpi-count" class="tf-tile-value">-</span>
         <span id="kpi-count-note" class="tf-tile-sub">Newest first</span>
       </div>
       <div class="tf-card tf-tile">
         <span class="tf-tile-label"><span data-tf-icon="stop"></span>Stopped by a breaker</span>
-        <span id="kpi-tripped" class="tf-tile-value">—</span>
+        <span id="kpi-tripped" class="tf-tile-value">-</span>
         <span id="kpi-tripped-note" class="tf-tile-sub" hidden></span>
         <span class="tf-tile-sub">A demo loop, the budget, or an operator's freeze. A governed agent's loop is refused call by call and never halts its session</span>
       </div>
       <div class="tf-card tf-tile">
         <span class="tf-tile-label"><span data-tf-icon="bolt"></span>Spend recorded</span>
-        <span id="kpi-cost" class="tf-tile-value">—</span>
+        <span id="kpi-cost" class="tf-tile-value">-</span>
         <span class="tf-tile-sub">Summed over the sessions shown. Hooks declare no token counts, so an agent's session costs nothing here</span>
       </div>
       <div class="tf-card tf-tile">
-        <span class="tf-tile-label"><span data-tf-icon="clock"></span>Calls kept in history</span>
-        <span id="kpi-calls" class="tf-tile-value">—</span>
+        <span class="tf-tile-label"><span data-tf-icon="clock"></span>Calls recorded</span>
+        <span id="kpi-calls" class="tf-tile-value">-</span>
         <span id="kpi-calls-note" class="tf-tile-sub" hidden></span>
-        <span class="tf-tile-sub">The last 50 calls per session are kept for detail; the count is cumulative</span>
+        <span class="tf-tile-sub">Cumulative across the sessions shown; each session keeps its last 50 calls in history</span>
       </div>
     </div>
 
@@ -129,7 +129,7 @@
           </div>
           <div class="tf-actions">
             <span id="apiConnectionStatus" class="tf-chip tf-chip-gray" role="status">Not read yet</span>
-            <span id="persistenceBadge" class="tf-chip tf-chip-gray">Last write: —</span>
+            <span id="persistenceBadge" class="tf-chip tf-chip-gray">Last write: -</span>
           </div>
         </div>
 
@@ -391,7 +391,7 @@
     // when this browser holds one. The shared layer escaped both halves; this
     // is display only, and no request this page makes carries the name.
     function projectShown(name) {
-      if (!name) return '—';
+      if (!name) return '-';
       return window.Threefold ? String(Threefold.projectName(name)) : escapeHtml(name);
     }
 
@@ -401,7 +401,7 @@
     }
 
     function formatTimestamp(value) {
-      if (!value) return '—';
+      if (!value) return '-';
       const parsed = Date.parse(value);
       if (Number.isNaN(parsed)) return String(value);
       return new Date(parsed).toISOString().replace('T', ' ').slice(0, 19) + 'Z';
@@ -412,7 +412,7 @@
     // datetime and its title.
     const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     function startedMarkup(value) {
-      if (!value) return '—';
+      if (!value) return '-';
       const parsed = Date.parse(value);
       if (Number.isNaN(parsed)) return escapeHtml(value);
       const at = new Date(parsed);
@@ -700,7 +700,7 @@
         '<dl class="tf-dl">' +
           detailRow('Session', data.session_id, 'tf-accent-text') +
           detailRowMarkup('Project', projectShown(data.project_name)) +
-          detailRow('Calls recorded', String(data.tool_call_history_count)) +
+          detailRow('Calls recorded', String(data.total_calls || data.tool_call_history_count)) +
           detailRow('Spent so far', '$' + spent.toFixed(4)) +
           detailRow('Budget', '$' + budget.toFixed(2)) +
           detailRow('Budget left', '$' + (Number(data.budget_remaining_usd) || 0).toFixed(4),

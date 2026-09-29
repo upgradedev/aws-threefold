@@ -658,6 +658,10 @@ def _route(event: Dict[str, Any], http_method: str, request_id: str) -> Dict[str
                 "budget_usd": session.budget_usd,
                 "budget_remaining_usd": round(max(0.0, session.budget_usd - session.total_cost_usd), 4),
                 "is_tripped": session.is_tripped,
+                # Cumulative like the listing's `calls` (app_routes.py), so the
+                # detail never disagrees with it; old rows fall back to what
+                # they retained, as the listing does.
+                "total_calls": session.total_calls or len(session.history),
                 "tool_call_history_count": len(session.history),
                 "created_at": session.created_at,
             })
@@ -1116,8 +1120,8 @@ def _universal_tool_call(tc: Any) -> tuple:
     A payload naming two of them is refused rather than dispatched to whichever
     is tested first. Told apart in order, `name` and `input` beside a native
     envelope shadowed it: the gate judged the empty `input` and answered
-    APPROVED while the `tool_calls`, `function_call` or `function` beside it —
-    a command exporting an access key id — was never read at all. Picking the
+    APPROVED while the `tool_calls`, `function_call` or `function` beside it -
+    a command exporting an access key id - was never read at all. Picking the
     other order only moves which shape can hide behind which, so the payload
     that names two is the caller's to send as one.
     """
@@ -1169,8 +1173,8 @@ def _checked_session_id(value: Any) -> str:
     Refused rather than cut or redacted, unlike those two: an id shortened or
     rewritten on the way in would address a different session than the caller
     named, so the freeze would lock one row and answer for another. 200
-    characters is far above what names a session in practice — an agent's is a
-    UUID — and the limit is on the id, never on how many sessions there may be.
+    characters is far above what names a session in practice - an agent's is a
+    UUID - and the limit is on the id, never on how many sessions there may be.
     """
     if not isinstance(value, str) or not value.strip():
         raise InvalidRequestError("session_id must be text.", "session_id")

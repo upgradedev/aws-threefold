@@ -135,9 +135,9 @@ _KEY_BY_FINDING = {
 def finding_key(finding: Any) -> str:
     """The key of one thing the guard found, taken from the gate that found it.
 
-    The sentences below quote the caller's own command — a destructive command
+    The sentences below quote the caller's own command - a destructive command
     and a command-protected path both embed its first 120 characters, and a
-    layering refusal embeds the target path — so reading the key back out of
+    layering refusal embeds the target path - so reading the key back out of
     them let a trailing comment file a refusal under whichever rule it named.
     A project that observes that rule then approved the call. The gate is a
     fact the guard states; `refusal_key` below stays for a stored row, which is
@@ -287,8 +287,8 @@ def stored_rule_keys(row: Mapping[str, Any]) -> list:
 
     One for a refusal: the gate that decided. For an observation, every rule
     that would have refused it, because the rollup counted it once for each.
-    A review of the row is therefore a review for each of them — the reviewer
-    labels the call, and each of those rules flagged that same call — and
+    A review of the row is therefore a review for each of them - the reviewer
+    labels the call, and each of those rules flagged that same call - and
     without that the rules past the first would read unreviewed for ever and
     never become promotable.
 

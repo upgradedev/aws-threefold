@@ -68,7 +68,7 @@ def test_a_spaced_directory_does_not_hide_the_hooks_own_settings() -> None:
 def test_a_spaced_directory_does_not_hide_a_credential_store() -> None:
     """And the refusal names the path, not the command it was mistaken for.
 
-    Before the path key was trusted, this was refused — but by the command scan
+    Before the path key was trusted, this was refused - but by the command scan
     below it, which called the write "Command 'my project/.env'". A test that
     only looked for the word "protected" in the sentence passed either way and
     pinned nothing.

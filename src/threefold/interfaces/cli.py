@@ -17,7 +17,7 @@ from threefold.domain.boundary_guard import SecretScanner
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="threefold",
-        description="Threefold — Autonomous Coding Agent Governance & Cost Circuit-Breaker",
+        description="Threefold - Autonomous Coding Agent Governance & Cost Circuit-Breaker",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 

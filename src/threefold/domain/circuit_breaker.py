@@ -28,8 +28,8 @@ class TokenCostCalculator:
     def _rates_for(cls, model_id: str) -> Dict[str, float]:
         """The per-million-token rates for a model id, defaulting honestly.
 
-        An exact table hit wins; otherwise a Haiku id in any naming — a dated
-        build, a regional prefix, an inference profile — takes the Haiku row.
+        An exact table hit wins; otherwise a Haiku id in any naming - a dated
+        build, a regional prefix, an inference profile - takes the Haiku row.
         Everything else is priced at the default Sonnet-class rate, which is
         what every call cost before model ids were plumbed. No rate is
         invented for a model whose price is not in the table.

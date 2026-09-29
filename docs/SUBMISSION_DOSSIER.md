@@ -34,7 +34,7 @@ phrases a refusal for a person reading a page and drafts rules for an
 architect, and every response says which of the two produced the sentence.
 Pull requests are judged the same way with nothing installed: every added or
 changed file is sent to the service as the write it is, and a required check
-fails the merge when a rule fires — which covers agents that never installed
+fails the merge when a rule fires - which covers agents that never installed
 anything, including ones running outside the developer's machine.
 
 ## 2. Inspiration
@@ -66,7 +66,7 @@ so the rollout had to show what a rule would stop before it stops anything.
    two repeats later, over normalized call shapes; a spend ceiling on the
    tokens the caller declares, priced per model. Declared tokens only: a hook
    declares none, so hook calls are priced at $0.00 and the ceiling cannot
-   meter a model's inference spend — the 2026-09-29 live row records an org
+   meter a model's inference spend - the 2026-09-29 live row records an org
    spend limit the hook never saw. Threefold enforces tool and file boundary
    safety; LLM token-stream metering stays with the model providers.
 3. **Rolls out in two stages.** Observe, review, readiness per rule (Ready,
@@ -188,7 +188,7 @@ so the rollout had to show what a rule would stop before it stops anything.
 6. **The agents that never installed anything.** A hook governs the machine
    it is on; cloud agents meet the product at the merge instead. The same
    gates judge the pull request's diff, file by file, with the same verdicts
-   — one agent surface less to trust.
+   - one agent surface less to trust.
 
 ## 6. Accomplishments we are proud of
 

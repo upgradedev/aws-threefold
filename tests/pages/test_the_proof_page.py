@@ -99,7 +99,7 @@ def test_the_proof_route_draws_a_screen_and_the_navigation_links_to_it(tmp_path:
 """,
         tmp_path,
     )
-    assert 'id="view-title"' in out["view"] and out["title"] == "Proof — Threefold"
+    assert 'id="view-title"' in out["view"] and out["title"] == "Proof - Threefold"
     assert 'href="#/proof"' in out["nav"] and ">Proof</a>" in out["nav"]
     assert re.search(r'href="#/proof"[^>]*aria-current="page"|aria-current="page"[^>]*href="#/proof"', out["nav"]), "The navigation marks the page"
     assert "https://example.test/prod/proof.json" in out["fetched"]
@@ -243,7 +243,7 @@ def test_a_false_alarm_rate_the_totals_cannot_give_says_why(tmp_path: Path) -> N
 """,
         tmp_path,
     )
-    assert out["metrics"]["false_alarm_rate"] == "—", "No rate is a dash, never a figure over unlike counts"
+    assert out["metrics"]["false_alarm_rate"] == "-", "No rate is a dash, never a figure over unlike counts"
     assert "not given: calls were refused in this window, and these totals count their labels too" in out["text"]
     assert "The rate is given only for a window in which nothing was refused" in out["text"]
 
@@ -643,7 +643,7 @@ def test_the_overview_tile_is_honest_when_there_was_nothing_to_correct(tmp_path:
         tmp_path,
     )
     assert "no agent (hook or CI) refusal in this window" in out["none"]
-    assert out["noneMetrics"]["self_corrected"] == "—", "No refusals is a dash, not a zero that reads as a failure"
+    assert out["noneMetrics"]["self_corrected"] == "-", "No refusals is a dash, not a zero that reads as a failure"
     assert "not reported by this stack" in out["older"], "A stack that predates the field says so"
 
 
@@ -659,7 +659,7 @@ def test_a_ledger_that_could_not_be_read_says_so_and_shows_no_figure(tmp_path: P
     )
     assert "not measured: the ledger could not be read" in out["view"]
     assert "no agent (hook or CI) refusal" not in out["view"], "An unread ledger is not a window with no refusal"
-    assert out["metrics"]["self_corrected"] == "—"
+    assert out["metrics"]["self_corrected"] == "-"
 
 
 def test_the_project_page_shows_the_same_figure_for_its_project(tmp_path: Path) -> None:

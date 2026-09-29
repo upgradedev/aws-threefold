@@ -26,7 +26,7 @@ MAX_PATTERNS_PER_RULE = 40
 # shows what it would have stopped before anyone is stopped.
 #
 # The default is to refuse. Defaulting to watch would have quietly turned every
-# rule already saved, and every shipped rule, into a suggestion — the same kind
+# rule already saved, and every shipped rule, into a suggestion - the same kind
 # of silent weakening an earlier review caught in this module.
 ENFORCE = "enforce"
 OBSERVE = "observe"

@@ -523,7 +523,7 @@ def _propose(
         # A rule the project is still only watching decided nothing here, so it
         # decides nothing about the answer either. Rewriting a file only that
         # rule flags would hand the agent work it was never stopped for, under
-        # a summary line — the one the hook prints — naming a rule that did not
+        # a summary line - the one the hook prints - naming a rule that did not
         # refuse the call.
         rules = [rule for rule in rules if rule.get("id") not in skip_keys]
     if diagnosis.kind == KIND_CREDENTIAL:

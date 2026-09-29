@@ -4,6 +4,12 @@
 
 Built for the AWS Zero to Shipped hackathon. **Category:** `#workplace-efficiency` · **Lane:** `#community`
 
+[Live demo](https://d1og72wpk4aqig.cloudfront.net/) ·
+[Dashboard](https://d1og72wpk4aqig.cloudfront.net/dashboard.html#/overview) ·
+[API](https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/) ·
+[CI](https://github.com/upgradedev/aws-threefold/actions/workflows/ci.yml) ·
+[Evidence](#evidence) · [Install](#install-it-in-front-of-your-own-agent)
+
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://python.org)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green)](LICENSE)
 [![CI](https://github.com/upgradedev/aws-threefold/actions/workflows/ci.yml/badge.svg)](https://github.com/upgradedev/aws-threefold/actions/workflows/ci.yml)
@@ -25,6 +31,15 @@ false alarm, promotes the project to **Enforce** with the rules that earned it,
 and demotes it with one click. Amazon Bedrock never decides; it phrases a
 refusal for a person reading a page and drafts rules for an architect, and
 every response names which of the two you are reading.
+
+## Contents
+
+[Live](#live) · [Two minutes](#two-minutes-no-account) ·
+[Install](#install-it-in-front-of-your-own-agent) · [Rollout](#the-two-stage-rollout) ·
+[Sign in](#sign-in-without-pasting-a-key) ·
+[Gates](#what-the-gates-watch-and-what-they-are-blind-to) ·
+[Architecture](#architecture-in-brief) · [Run it](#run-it-locally) ·
+[Evidence](#evidence) · [Clean room](#clean-room) · [Licence](#licence)
 
 ## Live
 
@@ -248,7 +263,7 @@ six series.
 The price is the last column: under the pressure prompts the governed Claude
 Code finished 10 of 18 runs (6 of 9, then 4 of 9) and the governed Codex 6 of
 9, and in the other runs the agent stopped and reported the conflict instead of
-finishing — among them, for both agents, every run of the task whose prompt
+finishing - among them, for both agents, every run of the task whose prompt
 forbids a new module, where the compliant design and the request cannot both
 be met. Samples are small (18 or 9 runs a cell) and the 95% intervals are wide;
 the tasks were written by the people who built Threefold, so these are rates
@@ -264,14 +279,16 @@ report made from its own rows, linked in this repository.
 **A real agent on the public stack.** `scripts/daily_live_agent.py` has a real
 agent, Claude Code and Codex on alternate days, do one of the standard tasks
 against the site, as `Acme-Live-<task>`, which the public stack starts in
-Enforce. Its first two runs, rows in `benchmark/results/live/` [PRIMARY]:
+Enforce. Four rows by 2026-09-29, in `benchmark/results/live/` [PRIMARY]:
 Codex on 2026-09-26, 8 calls, 7 approved and 1 refused, and that refusal was
 false: a PowerShell read ending in `2>$null` taken for a write. It was fixed
 and deployed on 2026-09-27, and looking for a way around the fix closed an
 older hole, a shell write into a domain file through `bash -c "... > src/domain/\$f"`,
 which had been approved. Claude Code on 2026-09-27, 4 calls, none refused.
-Neither run landed a violation, and both passed their acceptance tests. These
-are single runs, reported apart from the matrix and never pooled with it.
+Codex on 2026-09-28, 5 calls, none refused. Claude Code on 2026-09-29 never
+started: the run was cut short by the org's monthly spend limit, 0 calls.
+Where an agent ran, no violation landed and the acceptance tests passed. Single
+runs, reported apart from the matrix and never pooled with it.
 
 ### By hand, one agent at a time
 
@@ -441,10 +458,12 @@ Also true [STATE-FILE]:
   table does not list, at the default Sonnet-class rate.
 - The governance certificate covers the session's own stored verdicts, never
   the caller's word, and carries a KMS signature where the stack holds a
-  signing key. It is returned rather than archived, and nothing in CI requires
-  one before a merge. The S3 bucket the stack provisions is empty.
-- The sessions listing's call count is cumulative; a session keeps its last
-  50 calls for detail.
+  signing key. It is returned rather than archived. The certificate itself is
+  still not required before a merge; the diff is judged instead, by the
+  required check this repository's own PR #6 proved red-to-green. The S3
+  bucket the stack provisions is empty.
+- Call counts are cumulative everywhere, in the listing and in the detail; a
+  session keeps its last 50 calls in history.
 - When the demo page cannot reach the service, its four scenario panels
   replay one real run each, recorded against the live API and labelled
   "recorded, replayed offline"; no value in them is invented.
@@ -457,6 +476,8 @@ Also true [STATE-FILE]:
 ---
 
 ## Architecture in brief
+
+<img src="docs/architecture.svg" alt="Threefold architecture: four agents through one hook into CloudFront and one Lambda; pull requests through the merge judge." width="100%">
 
 ```
 agent ─► threefold_hook.py ─┐   (local: credential refusal, hold-back, mode)
@@ -488,6 +509,20 @@ pillars against what is deployed: [`docs/WELL_ARCHITECTED.md`](docs/WELL_ARCHITE
 Deploying, publishing the pages, probing, rolling back and tearing down:
 [`docs/RUNBOOK.md`](docs/RUNBOOK.md).
 
+The repository, top to bottom:
+
+```
+├── src/threefold/      domain · application · infrastructure · interfaces · hooks · tools · web
+├── tests/              unit · integration · pages · hook · security
+├── benchmark/          tasks · harness · results
+├── scripts/            install · judge · probes · publish · live agent
+├── deploy/             CloudFormation: the regional stack · the edge stack · IAM
+├── docs/               architecture · runbook · dossier · evidence
+├── .github/workflows/  CI · CodeQL · merge gate · keepalive · deploy
+├── README.md  STATE.md  LOG.md  TRAPS.md  CLAUDE.md
+└── pyproject.toml  Dockerfile  LICENSE
+```
+
 ## Run it locally
 
 The tests are hermetic: `tests/conftest.py` sets `THREEFOLD_OFFLINE=1` before
@@ -515,7 +550,7 @@ Then open <http://localhost:8001/> or <http://localhost:8001/dashboard.html>.
 
 | File | What it shows |
 |---|---|
-| [`docs/evidence/PROBES_2026-09-27-2-edge.md`](docs/evidence/PROBES_2026-09-27-2-edge.md), [`docs/evidence/PROBES_2026-09-27-2.md`](docs/evidence/PROBES_2026-09-27-2.md) | `scripts/probe_live.py` against the site and against the origin URL on 2026-09-27: 117 PASS, 0 FAIL, 3 SKIP each, with every check's evidence line. The earlier runs sit beside them, the first on 2026-09-22 against the origin: 113 PASS, 0 FAIL, 3 SKIP |
+| [`docs/evidence/PROBES_2026-09-28-7-edge.md`](docs/evidence/PROBES_2026-09-28-7-edge.md), [`docs/evidence/PROBES_2026-09-28-7.md`](docs/evidence/PROBES_2026-09-28-7.md) | `scripts/probe_live.py` against the site and against the origin URL on 2026-09-28: 117 PASS, 0 FAIL, 3 SKIP each, with every check's evidence line. The earlier runs sit beside them, the first on 2026-09-22 against the origin: 113 PASS, 0 FAIL, 3 SKIP |
 | [`docs/evidence/ENFORCEMENT_2026-09-21.md`](docs/evidence/ENFORCEMENT_2026-09-21.md) | Whether a deny stops the write, per agent, checked on the file system |
 | [`docs/evidence/ENFORCEMENT_2026-09-23.md`](docs/evidence/ENFORCEMENT_2026-09-23.md) | The same question for Codex CLI 0.155.0, over its patch tool, in one run |
 | [`docs/evidence/ENFORCEMENT_2026-09-28-MUSE.md`](docs/evidence/ENFORCEMENT_2026-09-28-MUSE.md) | The same question for Muse 1.4.0, over `write_file`, `edit_file` and the shell; the MSP-approval route measured dead |
@@ -537,3 +572,7 @@ benchmark's Claude Code and Codex runs (`benchmark/results/`) and the daily real
 agent's `live-<task>-<date>` sessions are real agent runs on synthetic Acme
 tasks. A project name outside the stack's `AllowedProjectPattern` is stored and
 shown as `unlabelled`, and developers appear in public only as short hashes.
+
+## Licence
+
+Apache-2.0. See [LICENSE](LICENSE).

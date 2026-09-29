@@ -105,7 +105,7 @@ globalThis.history = {
 const store = {};
 let storageBlocked = false;
 // A browser that answers a read and refuses a write: an old private mode, or a
-// quota already full. It is its own flag because it is the harder case — the
+// quota already full. It is its own flag because it is the harder case - the
 // page reads back what storage held before, not what it was just told.
 let storageWriteBlocked = false;
 globalThis.localStorage = {

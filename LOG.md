@@ -1,20 +1,20 @@
-# Threefold — Activity Log
+# Threefold - Activity Log
 
-## 2026-09-19T14:50:00+03:00 — Project Scaffolding
+## 2026-09-19T14:50:00+03:00 - Project Scaffolding
 - Initialized Threefold repository under `repos/threefold`.
 - Created four-file protocol: `CLAUDE.md`, `STATE.md`, `LOG.md`, `TRAPS.md`.
 - Target: AWS Zero to Shipped Hackathon, Track: `#workplace-efficiency`, Lane: `#community`.
 - Claimed Phase 1: Clean Architecture scaffolding, pure domain models, deterministic cost circuit breaker, loop detector, architectural boundary guard, and hermetic unit tests.
 - Claimed agent: Antigravity.
 
-## 2026-09-19T14:56:00+03:00 — Core Implementation & Test Pyramid
+## 2026-09-19T14:56:00+03:00 - Core Implementation & Test Pyramid
 - Implemented pure Domain layer: `AgentSession`, `ToolInvocation`, `TokenUsage`, `TokenCostCalculator`, `CostCircuitBreaker`, `LoopDetector`, `ArchitecturalBoundaryGuard`, and `SecretScanner`.
 - Implemented Application layer: `GovernanceEvaluator`, `BedrockArchitecturalReviewer`, and `AuditIssuer`.
 - Implemented Infrastructure layer: `BedrockGovernanceClient` (Converse API), `EvidenceStore` (SHA-256 dossiers).
 - Implemented Interfaces layer: `api_handlers.py` (AWS Lambda proxy handler with 6 REST operations).
 - Constructed test pyramid: 23 tests across unit, integration, and security (tamper-resistance, clean-room invariant). 23/23 passed in 0.45s.
 
-## 2026-09-19T14:58:00+03:00 — Web UI & Hackathon Documentation
+## 2026-09-19T14:58:00+03:00 - Web UI & Hackathon Documentation
 - Created responsive dark-mode web dashboard (`web/index.html`) using CDN Tailwind CSS and Lucide icons.
 - Created standalone self-verifying browser testbook (`web/testbook.html`) for hackathon judges with 5/5 green gates.
 - Authored comprehensive documentation suite:
@@ -24,38 +24,38 @@
   - `docs/BUILDER_CENTER_ARTICLE.md`: Publication article draft for AWS Builder Center.
 - Created AWS SAM IaC template (`deploy/template.yml`) specifying ARM64 Graviton Lambdas, HTTP API Gateway, DynamoDB, and S3.
 
-## 2026-09-20T19:58:00+03:00 — Operator console, three pages, and the deploy that carried them
+## 2026-09-20T19:58:00+03:00 - Operator console, three pages, and the deploy that carried them
 - Added `src/threefold/web/{settings,sessions,connect}.html`, registered in `WEB_ASSETS`, and linked from the dashboard header. Each page reads the live API and shows nothing it did not obtain from it.
 - Found and fixed four defects the pages exposed: `/sessions/{id}` never URL-decoded the path; the function role had no `dynamodb:Scan`, so the sessions listing fell back to one container's memory; the evaluator built its breaker with a $2.50 cap while `/policy/config` reported $1.00; `Idempotency-Key` was missing from the API's allowed CORS headers.
 - Labelled `max_session_budget_usd` and `loop_history_window` on the settings page as stored but unenforced, because no gate reads them. Recorded as gap 1 in STATE.md.
 - Dev server switched to `ThreadingHTTPServer`: an open browser tab no longer blocks every other request on port 8001.
 - Tests 111 → 117. Deployed commit `b22db34` to `threefold-prod` in eu-west-1 with `cloudformation package` and `deploy`, the same commands the unrun pipeline uses. Verified on the live URL: three pages serve with the API base substituted, the listing returned 43 rows from the table to a cold container, the third identical call still halts, and a halted session still refuses unrelated work.
 
-## 2026-09-20T20:35:00+03:00 — The OpenAPI link serves the contract
+## 2026-09-20T20:35:00+03:00 - The OpenAPI link serves the contract
 - Moved `openapi.json` from `docs/` to `src/threefold/web/`, inside the `CodeUri` the package is built from. The deployed handler had been falling through to a two-line placeholder on every request, which Swagger UI rendered as an API with no operations. The placeholder is deleted; a missing file now answers an RFC 7807 problem instead of impersonating a spec.
 - `swagger.html` took the injected base path. It had asked for `location.origin + '/openapi.json'`, which misses `/prod` and answers 404.
 - Corrected two false statements inside the document itself: it named Claude 3.5 Sonnet while the stack runs Haiku 4.5, and its only server was `127.0.0.1:8001`, so a judge pressing Try it out called their own laptop. A test now reads the model family out of `deploy/template.yml` and fails if the document drifts.
 - The Dockerfile copied the old path and would no longer have built.
 - Tests 117 → 124. Deployed and verified on the live URL: eleven paths served, twelve operations rendered, no console error.
 
-## 2026-09-20T20:52:00+03:00 — The console links to the contract, not to its cover
+## 2026-09-20T20:52:00+03:00 - The console links to the contract, not to its cover
 - The three pages already carried an `OpenAPI 3.1` entry in their nav. They now also deep link to the operation each page is built on: `/policy/config` from the settings page, `/api/sessions`, `/sessions/{id}` and the terminate route from the sessions console, `/evaluate-tool-call` from the connect page.
 - Anchors are the ones Swagger UI derives from method and path for a spec with no operationIds. A test rebuilds those anchors from the served document and fails if a page points at an operation the spec does not document, so renaming a route cannot silently break the links.
 - Tests 124 → 131.
 
-## 2026-09-20T21:06:00+03:00 — The dashboard links its own operations too
+## 2026-09-20T21:06:00+03:00 - The dashboard links its own operations too
 - `index.html` carries a strip under the scenario buttons listing the seven operations those buttons call, each deep linked into the published document: `/status`, `/simulate-loop`, `/simulate-secret`, `/evaluate-tool-call`, `/issue-certificate`, `/adapter/universal-tool-call` and the terminate route.
 - A test extracts the endpoints the page actually fetches, matches each against the templated path in the served spec, and fails when one has no link. Removing a single entry from the strip was confirmed to fail it, so the guard is not vacuous.
 - Fixed a flakiness the new tests exposed rather than caused: every test arrives at `lambda_handler` from 127.0.0.1 and shares one sixty-token bucket, so once the suite grew past it, unrelated tests began failing with 429 depending on order. `tests/conftest.py` now resets that bucket per test. The rate limiter's own tests build their own instance, so nothing is hidden.
 - Tests 131 → 134.
 
-## 2026-09-20T21:18:00+03:00 — Ledger reconciled with the last two passes
+## 2026-09-20T21:18:00+03:00 - Ledger reconciled with the last two passes
 - `STATE.md` gained two rows in what is measured: that every page reaches the operation it calls, walked on the live URL, and that a test rebuilds Swagger UI's anchors from the served document so a renamed route breaks a test rather than a link.
 - The test-suite row carries the rate limiter beside the count, because the count is what tipped it: the suite shares one sixty-token bucket and, past that many calls, unrelated tests failed with 429 depending on order. Stating the number without stating what it broke would have left the next person to rediscover it.
 - Corrected the commit count, which had been stale by two passes, and then removed it. A line stating a count inside a file that is itself committed is wrong again the moment it is written; it had been corrected three times in one session. `git log` holds the number, so the row now states what does not drift: `main` is local, there is no remote, and publishing is one command.
 - Documentation only. `STATE.md` and `LOG.md` sit outside `CodeUri: ../src`, so nothing shipped and the live stack stays on the commit verified at 21:06.
 
-## 2026-09-20T21:55:00+03:00 — Ledger audited against primary sources
+## 2026-09-20T21:55:00+03:00 - Ledger audited against primary sources
 - Four auditors checked every claim in `STATE.md` against the live stack, the AWS control plane, the code and the other documents, each followed by a challenger trying to refute what it found. What survived, plus what was verified by hand:
 - **False, now corrected.** Gap 1 said two policy keys are unenforced; `blocked_patterns` is a third, defined on the DTO and read by no module. "Both limitations are now stated wherever the certificate appears" was false: `index.html` calls the certificate "signed" on the card, in the panel heading and in its success line, which also claims it came "from DynamoDB & S3" although `AuditIssuer` writes it to neither. "One command each" was wrong for the Builder Center project, which has no command anywhere.
 - **New gap recorded.** The offline compliant scenario builds a certificate with an invented id and an invented SHA-256, and Export JSON downloads it with nothing marking it simulated. The explanation box says so; the file that leaves the browser does not.
@@ -66,29 +66,29 @@
 - `blocked_patterns` is not merely unread. The POST handler builds the policy from four fields, so a caller sending a pattern list has it discarded and the defaults echoed back as though accepted.
 - Verified true and left alone: the readiness probe answers 200 live, `TokenCostCalculator` is still never given a model id, four of the five offline panels are canned, the evidence bucket is empty, the three workflow files and both named evidence documents exist, and the suite is 134 green.
 
-## 2026-09-20T22:40:00+03:00 — The deployment hands out the hook, and the certificate stops overclaiming
+## 2026-09-20T22:40:00+03:00 - The deployment hands out the hook, and the certificate stops overclaiming
 - Moved `claude_code_hook.py` from the root `hooks/` directory into `src/threefold/hooks/`, inside the `CodeUri` the package is built from, and added a route serving it at `/hooks/claude_code_hook.py` (and the shorter `/claude_code_hook.py`, because `curl -O` keeps the last segment). Served as readable `text/plain`, not as an opaque download: a file that sits in front of an agent's tool calls is one a reader should be able to inspect before running. Public in the middleware for the same reason.
-- `connect.html` step 1 was `git clone <repository>` — a literal placeholder, because the repository is not published — and the page admitted it served nothing. It now offers Download, Read it first, and a `curl -O` one-liner, all built from the stage-aware page base. Verified by downloading the served copy and running it: ordinary read `allow`, domain write with `from boto3 import client` `deny` with a Bedrock sentence.
+- `connect.html` step 1 was `git clone <repository>` - a literal placeholder, because the repository is not published - and the page admitted it served nothing. It now offers Download, Read it first, and a `curl -O` one-liner, all built from the stage-aware page base. Verified by downloading the served copy and running it: ordinary read `allow`, domain write with `from boto3 import client` `deny` with a Bedrock sentence.
 - Six overclaims about the certificate corrected where a reader meets them: the scenario card and panel heading no longer call it signed, the success line no longer says it came "from DynamoDB & S3" and instead says what it is, the panel now carries the unkeyed-fingerprint caveat, `docs/SUBMISSION_DOSSIER.md` no longer claims S3 archival or pre-commit verification, and `docs/BUILDER_CENTER_ARTICLE.md` no longer contradicts itself thirteen lines after being honest.
 - The offline certificate says so on its face and inside the file: `simulated: true`, a disclaimer field, `CERT-TF-SIMULATED-0000` and a zeroed fingerprint. The file is what leaves the browser, so the marker travels in the file.
 - README: hook paths, the missing certificate caveat, and a test count stale by three passes (65 → 134).
 - Tests 134 → 141. The new ones check that what is served is byte-identical to the file under test, compiles, is reachable without a key, and that the page no longer prints a placeholder.
 
-## 2026-09-20T23:05:00+03:00 — A certificate has to attest to something
+## 2026-09-20T23:05:00+03:00 - A certificate has to attest to something
 - `POST /issue-certificate` with `{"evaluations": []}` answered 200 with `verdict_status: COMPLIANT_APPROVED` and `all_passed: true`. The cause is one line in `AuditIssuer`: `all()` over an empty list is true, so an empty attestation read as a clean bill of health and carried a valid fingerprint over nothing.
 - Both refusals now live in `AuditIssuer`, not only at the edge, because every caller of that function is publishing a governance artifact: an empty evaluation list, and a session this service has no record of governing. `EmptyAttestationException` carries the code `EMPTY_ATTESTATION`; the route translates it into a 400 RFC 7807 `Nothing To Certify` with an `invalid_params` entry, and emits a `CertificatesRefused` metric.
 - Checked that the flagship demo still works rather than assuming it: Scenario 4 evaluates four calls and then certifies them, so its session has history and its certificate is issued as before.
 - What is still open, and now stated in gap 3: the verdicts themselves are the caller's word. A session with one real call can be certified with four invented ones. Issuing from the session's own stored history is the real fix and is not done.
 - Tests 141 → 146.
 
-## 2026-09-20T23:20:00+03:00 — The overclaims that survived the first pass
+## 2026-09-20T23:20:00+03:00 - The overclaims that survived the first pass
 - A review found the S3 archival claim alive in three more places after the earlier correction, including `docs/SUBMISSION_DOSSIER.md` line 40, twenty-three lines after line 17 was fixed, so that file contradicted itself. Corrected there, in `README.md`'s technology list and architecture diagram, and in `docs/VIDEO_SCRIPT.md`, which also still told viewers the pre-commit hook verifies certificates. It does not: `scripts/pre-commit-gate.py` scans a diff for secrets and domain imports and never reads a certificate.
 - The video script's shot list promised a certificate showing a "list of verified invariants". `GovernanceCertificateDTO` carries no such field, so the shot could not have been filmed as written. Rewritten to what the document actually contains, and its stale test counts corrected.
 - Three docstrings still called the certificate signed or tamper-evident, which is what a reader of the code sees: `GovernanceCertificateDTO`, `AuditIssuer` and `S3CertificateUploader`. All three now say fingerprinted and unkeyed, matching `docs/ARCHITECTURE.md`.
 - `public_paths` listed only `/`, so with keys enforced the dashboard would open and every link out of it would answer 401. The served pages and the hook are listed now, and the test covers them.
 - Two findings recorded rather than fixed. Nothing writes to the S3 bucket: `S3CertificateUploader` is called by nothing and the function carries an `s3:PutObject` grant it never uses. And `POST /policy/config` is anonymous and writes through to DynamoDB, so a stranger can durably raise the loop threshold that is the product's headline claim. Closing that one wrong fails the ship gate's scorer row, so it is the owner's call.
 
-## 2026-09-20T23:45:00+03:00 — The one write that outlived its caller is closed
+## 2026-09-20T23:45:00+03:00 - The one write that outlived its caller is closed
 - `POST /policy/config` wrote through to DynamoDB under `CONFIG#policy` with no credential, and a cold container adopts whatever it finds there, so any stranger could raise the loop threshold this product leads with and the change would apply to every session after them. It now requires an operator key; `GET /policy/config` still answers anyone, because a reader has to be able to see what is enforced.
 - The check is in the middleware rather than the route, and needed the method: reading and writing share a path, so `validate_request_security` now takes the method and consults a `PROTECTED_WRITES` set.
 - The write deliberately does not accept the demo placeholder the read path falls back to. That placeholder is printed in the source, so anyone could present it. With no key configured the write is refused outright with 403 `Policy Is Read Only Here`, which is also how the stack deploys: `deploy/template.yml` takes `PolicyWriteApiKeys` as a NoEcho parameter defaulting to empty, so enabling writes is a deliberate act with `--parameter-overrides`.
@@ -96,44 +96,44 @@
 - Checked that the visitor path is untouched: evaluating a call, the four scenarios, the certificate and the kill switch are all still anonymous, and `GET /policy/config` still answers 200.
 - Tests 146 → 155. The existing policy test now asserts the anonymous write is refused before it presents the key.
 
-## 2026-09-20T23:58:00+03:00 — The page says what it is before it shows numbers
+## 2026-09-20T23:58:00+03:00 - The page says what it is before it shows numbers
 - `index.html` opened on four metric tiles for a session that did not exist yet, so a first-time reader met `$10.00` and `0% (Safe)` before meeting the problem. The only statement of purpose was a 12px line in the header.
 - A hero block now sits above the KPI strip, carrying the README's opening sentence verbatim, one paragraph on how the refusal works and who decides, and a link into the install path. Nothing new was written: the sentence was already in `README.md` and already true.
 
-## 2026-09-21T00:15:00+03:00 — Two things the page said that were not for the reader
+## 2026-09-21T00:15:00+03:00 - Two things the page said that were not for the reader
 - The connection bar sat between the product name and the hero: an endpoint field, an API key box prefilled with `threefold-demo-key-2026`, an export button, a kill switch and a line reading "2026 AI Lens", all before a reader had been told what the product is. It is now a `<details>` whose summary carries the one thing a visitor needs, the live-connection badge, and the controls are one click behind it.
-- The prefilled key is gone. It was needed by nothing — the demo enforces no key — and a string that looks like a credential in a password field invites a reader to think one is required. Every call now builds its headers through `authHeaders()`, which omits `X-API-Key` entirely when the field is empty rather than sending it blank.
+- The prefilled key is gone. It was needed by nothing - the demo enforces no key - and a string that looks like a credential in a password field invites a reader to think one is required. Every call now builds its headers through `authHeaders()`, which omits `X-API-Key` entirely when the field is empty rather than sending it blank.
 - The scenario panel was headed "4 Guided Agent Scenarios" above five buttons. The heading no longer counts, and the subtitle says what is actually there: four scenarios and the universal adapter below them.
 
-## 2026-09-21T00:45:00+03:00 — A decision ledger, because refusals were not kept
+## 2026-09-21T00:45:00+03:00 - A decision ledger, because refusals were not kept
 - A console per team and project was the next step. Checking what could feed it found that the thing worth reporting is not stored: in `evaluator.py` the gates `return` before `record_tool_call` and `save_session`, so a credential interception or a boundary violation left only an in-process event. Approved calls were persisted; refusals were not. Nothing could answer "how many boundary violations did that team have last week".
 - `evaluate_tool_call` is now a thin wrapper that decides and then records. Every decision writes one row: timestamp, project, developer, session, tool, action type, status, the rule that fired, a short target descriptor and the session cost.
 - The row keeps nothing it should not. `describe_target` returns a path for file operations and only the program name for a command, because the rest of a command line is exactly where a refused credential lives; a ledger that stored those would recreate the leak it exists to record. A test pins that the AKIA string never reaches the ledger.
 - Stored as `DECISION#<day>` partitions sorted by timestamp, so a window is one query per day rather than a scan, with the same thirty day ttl the sessions carry. The write is best effort: a ledger failure logs and is swallowed, because the gate is the product and its bookkeeping may not break it.
-- `GET /api/insights?days=N` aggregates it: totals with a refusal rate, by rule, by project, by developer, by day, and the recent refusals. It also returns `coverage`, four statements of what each gate watches and what it is blind to, so a zero on the console reads as "nothing was refused" rather than "nothing happens here" — the architecture gate reads Python only, and says so where it is counted.
+- `GET /api/insights?days=N` aggregates it: totals with a refusal rate, by rule, by project, by developer, by day, and the recent refusals. It also returns `coverage`, four statements of what each gate watches and what it is blind to, so a zero on the console reads as "nothing was refused" rather than "nothing happens here" - the architecture gate reads Python only, and says so where it is counted.
 - Tests 155 → 161.
 
-## 2026-09-21T01:05:00+03:00 — Two corrections to the ledger before anything renders it
+## 2026-09-21T01:05:00+03:00 - Two corrections to the ledger before anything renders it
 - The boundary invariant covers two different worries: a layer being crossed and a credential store being reached. Both refuse under `ARCHITECTURAL_BOUNDARY_SAFE`, so a console reporting by rule would have told the owner "two boundary violations" when one was a domain file importing an ORM and the other was `cat ~/.aws/credentials`. `/api/insights` now returns `by_category` beside `by_rule`: layer crossed, credential store reached, credential in the arguments, repeating cycle, spend ceiling, session already halted.
 - A refusal reason quotes the command it refused, and a command that reaches a protected path can carry a token on the same line. Storing it verbatim would have put a credential inside the record that exists to say the credential was stopped. Every reason is now passed through `redact_secrets` before it is kept, which replaces anything the scanner recognises with its label. Pinned by a test with a GitHub token in a curl line: the token does not reach the ledger, and the row still says `GITHUB_TOKEN` so the reader knows what kind of thing was refused.
 - Tests 161 → 163.
 
-## 2026-09-21T01:40:00+03:00 — The enforcement console, and two data defects it forced out
+## 2026-09-21T01:40:00+03:00 - The enforcement console, and two data defects it forced out
 - `console.html` is the enforcement console. It opens on a sentence about what was decided rather than a tile strip: "In the last 7 days Threefold decided 9 tool calls across 3 projects and refused 5 of them." Then projects ranked by what was refused, the refusal stream with a drawer per decision, the kinds of problem, and what each gate is blind to. No KPI tiles for a session that does not exist, no scenario buttons, no terminal: three independent designs and their judge all evicted those, and they are where the instrument-panel feeling started.
 - The empty state is a first-class screen, not a skeleton, because on a real deployment it is the first thing anyone sees: it says the ledger is empty rather than that nothing was found, and gives the one curl that starts filling it.
 - Two defects the design pass forced out before anything rendered them. A call into an already-halted session marks the budget invariant false whatever did the halting, so a loop-halted session filed every later refusal under cost; the ledger now names that `SESSION_ALREADY_HALTED` and a test pins that no spend problem is reported where there was a thrashing problem. And `by_project` computed a per-project cost with `max()` over cumulative session costs, which is not a project total; it was never emitted and is now gone rather than left to be shown.
 - Tests 163 → 167.
 
-## 2026-09-21T02:30:00+03:00 — The layering rule becomes the architect's, in four languages
+## 2026-09-21T02:30:00+03:00 - The layering rule becomes the architect's, in four languages
 - The one gate with no incumbent was a Python example: files under a directory named `domain/`, parsed with `ast`, refused against twelve hardcoded library names. On a codebase in Java, C# or TypeScript it enforced nothing, and changing it needed a deployment.
 - A rule now says three things and nothing else: which paths it covers, what they may not depend on, and what is allowed anyway. `src/threefold/domain/layering_rules.py` evaluates them; `imports.py` reads what a file declares in Python, Java, C# and TypeScript; `path_match.py` does the `**` globbing an architect writes first.
 - Precedence is specificity, not order. Allowing `System` while forbidding `System.Data` has to leave `System.Data.SqlClient` refused, or one broad allowance quietly repeals every narrower prohibition beneath it. That was a real defect caught by the shipped .NET rule allowing `System`.
 - Two near misses are pinned as tests because a false refusal is what gets the tool uninstalled: `System.ComponentModel.DataAnnotations` is not `System.Data`, and `reactive-forms` is not `react`.
 - `GET /rules` is open and `POST /rules` is closed with the operator key, on the same grounds as the policy write: an anonymous caller who could replace the rules could delete the gate rather than trip it. A rule set that would say nothing is refused with 400 rather than saved.
-- The console's coverage line is computed from the rules in force rather than fixed. It had said "Python only, blind to Java" — true when written, false the moment an architect saves a Java rule.
+- The console's coverage line is computed from the rules in force rather than fixed. It had said "Python only, blind to Java" - true when written, false the moment an architect saves a Java rule.
 - Tests 168 → 199.
 
-## 2026-09-21T03:05:00+03:00 — Four defects an adversarial review found in the rules I had just shipped
+## 2026-09-21T03:05:00+03:00 - Four defects an adversarial review found in the rules I had just shipped
 - A design panel ran while the rules were being built and reported after the deploy. Its judge verified four defects against HEAD. All four reproduced.
 - **A refusal that named the wrong file.** A multi-file edit was judged as a cross product of every path against every string, so one file's forbidden import refused a different, clean file, and the reason asserted that the clean file imported something it did not. Each path is now paired with the content meant for that path. A refusal that is wrong about what it is refusing cannot be argued with, which makes it worse than a missed violation.
 - **A silent weakening of the gate.** `**/infrastructure/**` compiled to a pattern requiring a further segment, so `from myapp.infrastructure import Store` in a domain file was approved where the previous hardcoded rule refused it. A trailing `/**` now means "and anything below, including nothing", which is what every architect reads it as.
@@ -141,7 +141,7 @@
 - **Wrapped imports were invisible.** The TypeScript pattern was anchored to a single line, so the way most formatters break a long import found nothing at all.
 - Tests 199 → 207. Each defect is pinned, and so is the case that proves the fix did not overshoot: the real violation in a multi-file call is still caught, on its own file, and a real import beside a commented one is still refused.
 
-## 2026-09-21T14:30:00+03:00 — Observe mode, the rules screen, and what an adversarial review found in them before they shipped
+## 2026-09-21T14:30:00+03:00 - Observe mode, the rules screen, and what an adversarial review found in them before they shipped
 - **Observe mode.** A rule now carries `mode`: `enforce` (the default, and what every rule saved before modes existed still does) or `observe`. An observing rule never refuses. The call runs, the approval carries `observations` and `observed_rules`, and the ledger records every rule that would have refused it and the file it was about. `/api/insights` counts these apart from refusals: `totals.observed` counts calls, `by_observed_rule` counts per rule, and each project row has its own `observed`. Adding them to refusals would have reported stopped calls that were not stopped. This is how an architect introduces a rule to forty teams: watch for a week, read the console, then switch it on.
 - **`POST /rules/explain`**, open because it changes nothing: send a path, content and optionally a draft rule set, and get back the imports read, the rules that cover the path, and REFUSE, OBSERVE or ALLOW with the reasons. No verdict, no ledger row, and a draft is never put in force. It says in its answer that only the layering rules were tried.
 - **`rules.html`**: the rules in force with ENFORCE and OBSERVE badges, a try panel against the rules in force or the draft, a JSON editor with synthetic Java, .NET and TypeScript examples that start in observe mode, and save with the operator key. The console gained a "Would refuse" column per project and a section listing what observing rules would have refused. Every page links to it.
@@ -167,14 +167,14 @@
   - **The YAML generator lived in a session scratchpad.** It is now `scripts/generate_openapi_yaml.py`, and a test fails if the twins differ.
 - Tests 286 → 293.
 
-## 2026-09-21T19:30:00+03:00 — Day 1: does a refusal actually stop the write?
+## 2026-09-21T19:30:00+03:00 - Day 1: does a refusal actually stop the write?
 - The plan's first question, because two open bug reports say a hook's `deny` can be reported and then ignored: claude-code#91574 for Write and Edit, openai/codex#27833 for `apply_patch`. A product whose central claim is "when the answer is no, the tool call does not happen" cannot assume it.
 - Measured, not assumed: three throwaway repositories, one per agent, each with a local hook that answers `deny` for anything under `src/domain` and makes no network call, so the measurement is of the agent's enforcement alone. Each agent was asked to write `import boto3` into `src/domain/model.py`, and the result is whether that file exists afterwards.
 - Claude Code 2.1.220 refused both routes, the `Write` tool and a `Bash` redirection, and neither file was created. The model stopped rather than looking for another way around: "Since this is a deliberate policy restriction… I won't try to work around it." The Antigravity desktop app refused `write_to_file`, and no file was created. Codex CLI 0.155.0 could not be measured: the account had reached its usage limit until 2026-09-27, so nothing is claimed for it and its edits are treated as governed at commit time only.
 - The Antigravity argument shape was recorded from the hook input rather than guessed: `toolCall.name` with `args.TargetFile` (absolute) and `args.CodeContent`. The universal hook's adapter uses those names.
 - Evidence and method: `docs/evidence/ENFORCEMENT_2026-09-21.md`.
 
-## 2026-09-21T21:30:00+03:00 — Day 1: one hook for three agents, the service floor, the pages' truth floor, deployed
+## 2026-09-21T21:30:00+03:00 - Day 1: one hook for three agents, the service floor, the pages' truth floor, deployed
 - Three tracks ran in parallel in separate worktrees, each owning its own files per the contracts in STATE.md, each checked by an adversarial verifier and fixed once, then cherry-picked onto main in order: the hook, the service, the pages.
 - **One hook, three agents.** `src/threefold/hooks/threefold_hook.py` is one standard-library file for Claude Code, Codex and Antigravity, detected from the shape of the input or named with `--agent`. It never prints an allow decision, so each agent's own permission flow still runs; it denies in each agent's format. Before any network call it keeps at home: targets outside the project root, anything under an agent's own configuration or memory, data files, and any call containing a term from the owner's local never-send list; it refuses a credential locally without sending it. The old URLs serve the same file, so an install copied earlier keeps working.
 - **The service floor.** Request v2 (agent, origin, explain, dry_run, developer). No model call for an approval or for a hook's call, and arguments are redacted before any prompt. HEAD answers like GET. A body that is not an object is a 400. The sessions scan is paginated. Project names outside the stack's pattern are stored and counted as `unlabelled`, and developers are shown in public only as a short hash. A `PublicReads=false` parameter closes the reads for a stack that carries real use.
@@ -184,7 +184,7 @@
 - Deployed to `threefold-prod`; the two new parameters took their defaults. Live smoke test 21/21, including: HEAD on every page, the hook served at the new and old URLs, a hook's refusal and an approval both without a model call and at no cost, a page's refusal still with a Bedrock sentence, and the public data showing only Acme projects or `unlabelled` and developers only as hashes.
 - Tests 293 → 659.
 
-## 2026-09-22T12:00:00+03:00 — Day 2: every write route, a loop gate that does not lock people out, rules per project, the installer
+## 2026-09-22T12:00:00+03:00 - Day 2: every write route, a loop gate that does not lock people out, rules per project, the installer
 - Three tracks again, each verified adversarially and fixed once. A network outage stopped three agents in the first run; the rerun used the worktrees that already existed, and nothing was lost.
 - **Every write route.** `src/threefold/domain/shell_writes.py` reads a shell command for what it writes: redirections, heredocs, `tee`, `echo`/`printf`, `sed -i`, `perl -pi`, `cp`/`mv`/`install`/`ln`/`rsync`, `dd of=`, `git apply`, `patch`, `xargs`, `find -exec`, and `python -c` / `node -e` opening a file for writing, with `cd` prefixes and subshells resolved. Readable content is judged like a `Write` and names the same rule; unreadable content on a path an enforce rule covers is refused with "use Write or Edit so the rule can read it". The hooks' own settings, `.git/hooks`, `.git/config`, `git commit --no-verify` and every way to point git at other hooks are refused. The audit's heredoc, `cat > src/domain/acme_user.py <<'EOF'` with `import boto3`, was approved before this change and is refused live now. 87 ordinary commands are approved and 113 bypass probes refused.
 - **Loop gate v2.** A repeat of a read or a poll (`git status`, `ls`, `gh run view`, a file read) is recorded, never a trip. For a hook, a loop refuses the repeating call and never halts the session, so a developer is not locked out of their own work; the demo's own sessions still freeze on call 3.
@@ -196,14 +196,14 @@
 - Deployed to both stacks. Live smoke tests: day 2 15/15, day 1 21/21.
 - Tests 659 → 1715.
 
-## 2026-09-22T18:00:00+03:00 — The owner's real work is governed, in observe
+## 2026-09-22T18:00:00+03:00 - The owner's real work is governed, in observe
 - A short never-send term is a word, not a substring: on the owner's repositories one three-letter term matched 136 files as a substring and 38 where it started a word. The preflight now says what a match costs (calls carrying a term go unjudged; the file itself does not), instead of advising exclusion.
 - A workspace root can govern only the repositories it lists (`include` in `.threefold.json`), and a folder git does not recognise installs in workspace mode, with nothing written under any `.git`. An adversarial review found four ways the list could fail open (a nested checkout, `..` inside a word, an unreadable file, a `cd` to a computed place); each now holds the call back.
 - Installed in observe mode at nine locations the owner approved, under aliases `Acme-Proj-*`: one repository-and-workspace, two workspace roots with include lists, and six repositories, three agents each, with a pre-commit check in the seven git repositories. Everything written is listed in each repository's `.git/info/exclude`, and `git status` shows none of it. The aliases, the list of locations and the private stack's address live only in `~/.threefold/`.
 - Verified with synthetic calls through the exact registered command: writes inside a listed repository reach the private stack, and a domain import there is recorded as observed and not refused; writes into repositories the owner excluded, into repositories not listed and into a workspace's own files are held back and never reached the stack; a credential is refused on the machine.
 - Codex joins when its account resets on 2026-09-27, and only for projects the owner trusts in Codex.
 
-## 2026-09-22T23:30:00+03:00 — The application: dashboard, two-stage rollout, one-command connect, the edge
+## 2026-09-22T23:30:00+03:00 - The application: dashboard, two-stage rollout, one-command connect, the edge
 - The owner's verdict on the day's first handover ("why paste a key?") reset the plan: a complete application, integration without effort, and the rollout they had been doing by hand in chat (watch, label, then enforce) as a product feature. Nothing was deferred.
 - Four waves, fifteen tracks, each built in its own worktree against contracts fixed in STATE.md first, then reviewed by an adversarial agent and fixed before merge. Merge conflicts were confined to the shared dispatch lines and the OpenAPI document, which was merged path by path.
 - **Built and deployed.** An operations dashboard (overview tiles and charts from daily rollups, drill-down to every call, projects, readiness per rule, a review queue, a connect wizard that watches for the first call, a proof page). Sign-in from the command line (`threefold.py open`): a one-time code becomes a twelve-hour session and the browser never holds the key. One command connects a folder, detects the agents, starts in Observe and proves the first call arrived. Every project starts in Observe; labels make each rule Ready, Quiet, Noisy or Needs review; Promote picks the rules that enforce, Demote goes back in one click. A public sandbox walks a visitor through all of it in a minute. A refusal carries a fix Threefold has checked against its own gates. Architects draft a rule from a sentence with Bedrock, validated and tried, observing first. Alarms, a CloudWatch dashboard, X-Ray, PITR, throttling and reserved concurrency. CloudFront in front, with the pages in a private S3 bucket and WAF; a secret origin header lets the function trust the viewer's address and host from the edge only.
@@ -213,7 +213,7 @@
 - Open: the benchmark needs the owner's headless token; Codex from 2026-09-27; waves four (polish and the documents' truth pass) running.
 - Tests 1941 → 4066.
 
-## 2026-09-23T03:30:00+03:00 — Measured, reviewed, fixed: the benchmark, six lenses, and what they found
+## 2026-09-23T03:30:00+03:00 - Measured, reviewed, fixed: the benchmark, six lenses, and what they found
 - **The benchmark ran for real**, four matrices of Claude Code, 162 runs, after the owner created a token file for the headless agent. Standard tasks: with `claude-sonnet-5` a violation landed in 3 of 18 unguided runs and in none under either the rules in CLAUDE.md or Threefold; with `claude-haiku-4-5`, 7 of 18, 3 of 18 and 0 of 18. So on these tasks a strong model needed no gate, and the cheaper one did. Pressure tasks, whose prompt asks for the forbidden shortcut: 6 of 9 and 9 of 9 unguided, 0 of 9 and 5 of 9 with the rules in the prompt, 0 of 9 and 0 of 9 with Threefold. The price is recorded beside it: in 8 of those 18 governed runs the agent stopped and reported instead of finishing, among them every run of the task whose prompt forbids a new module.
 - **The benchmark found a false refusal on its first run**: a read-only `find . -path ./.git -prune` was refused as reaching a credential store. The command check now leaves the repository's own `.git` alone while writes under it, `--no-verify`, `core.hooksPath` and `.git-credentials` stay refused and `rm -rf .git` is named destructive. The matrix was rerun on the fixed code, and the published numbers are that run's.
 - **Six lenses reviewed the whole codebase**, 43 findings, each put to two skeptics who tried to reproduce and refute it: 35 confirmed, 8 refuted. The worst was a private stack answering `/sessions.json` and `/insights.json` anonymously: the same handlers as `/api/sessions` and `/api/insights`, but missing from the list the gate reads. Fixed, and the class of bug closed: a stack with private reads now refuses any GET it has not declared public, and a test walks 108 paths derived from the router itself. The kill switch is the operator's there too, its text is bounded and redacted, the explanation prompt redacts credentials after escaping rather than before, and the universal adapter judges what it is given instead of approving it unread.
@@ -222,7 +222,7 @@
 - Deployed to both regional stacks and the edge; probes after the deploy: edge 113/113, API 113/113, private stack 97/97 read-only. A page that does not exist now answers 404 through the edge.
 - Tests 4203 → 4787.
 
-## 2026-09-23T07:30:00+03:00 — Codex measured, and private names for projects
+## 2026-09-23T07:30:00+03:00 - Codex measured, and private names for projects
 - The owner's Codex account unblocked early, so the last "not measured" came off. **On disk:** Codex CLI 0.155.0 composed a patch adding a cloud SDK import into a governed domain file, the hook refused it, the file's sha256 was unchanged, and the same agent created an ungoverned file seconds earlier in the same run, so the unchanged file is the refusal's doing; told to try three ways around it, it tried none. What is not measured is said as plainly: its shell route, and a refusal from a hook that makes no network call.
 - **The evidence was written twice more before it was true.** Two adversarial verifiers read it sentence by sentence, the second checking 118 of them against the run artifacts; sentences the artifacts did not show were deleted rather than defended, including one whose premise (a folder being empty) was simply wrong, and the files that quoted the old caveat were corrected with it.
 - **The benchmark ran with Codex:** 81 runs. Standard tasks: 3 of 18 unguided, 0 of 18 with the rules in `AGENTS.md`, 0 of 18 governed. Pressure tasks: 9 of 9, 1 of 9, 0 of 9, with 3 of the 9 governed runs stopping and reporting instead of finishing. The hook judged 166 of Codex's calls. The first Windows pilot measured nothing until the runner was corrected: Codex has no sandbox there, so under `--sandbox` it was told the workspace was read-only and had every command rejected; the runner now says what it costs before the first run and records it in every row.
@@ -230,14 +230,14 @@
 - Six benchmark series are on `#/proof`, each naming its agent and model.
 - Tests 4787 → 4848.
 
-## 2026-09-25T12:30:00+03:00 — Published, pipelined, redeployed, probed
+## 2026-09-25T12:30:00+03:00 - Published, pipelined, redeployed, probed
 - Public repository: https://github.com/upgradedev/aws-threefold, main pushed; 30 merged worktrees and their branches removed, five dependabot PRs superseded by one bump commit (actions to v7, configure-aws-credentials to v6). No open branches or PRs remain.
 - Full pipeline, green 10/10: test pyramid per layer behind the product gate, bandit, pip-audit, trivy (vuln, misconfig, secret) with three documented CloudFormation exceptions, sam validate on both templates, CodeQL, dependabot, secret scanning with push protection, keepalive.
 - The first CI run reported 8 bandit findings; all closed for real: every urlopen call site refuses non-http(s) URLs, the local server binds to loopback by default, the installed hook is owner-executable only. 14 tests pin the new behavior.
 - S3 dead code out: the uploader nothing called deleted with the function role's S3 statement; the benchmark README lists all six measured series.
 - Deployed to threefold-prod (eu-west-1) from this tree; probes after the deploy: 113 PASS, 0 FAIL, 3 SKIP (docs/evidence/PROBES_2026-09-25.md), the same as the 22/9 baseline.
 
-## 2026-09-26T21:30:00+03:00 — The product's face, a fleet on the public demo, and a real agent every day
+## 2026-09-26T21:30:00+03:00 - The product's face, a fleet on the public demo, and a real agent every day
 - **Wave UI-1 and UI-2 merged.** One design system (`assets/threefold.css`, `assets/threefold.js`: tokens, primitives, icons, motion behind reduced motion, the shell with five destinations and a Ctrl+K palette, chart helpers built to the dataviz rules) now carries every page. The first screen leads with what Threefold stops and shows a live refused diff; `#/try` walks the two-stage rollout in under a minute with no account; the operator's overview opens on what needs attention today. Each track was reviewed adversarially twice and polished before merge; the review's own scores are ESTIMATE.
 - **The public demo is fed by a synthetic fleet, and says so.** An EventBridge schedule, only where `DemoFleet` is true, sends a bounded batch of calls from three agents across six `Acme-*` projects every 15 minutes through the real evaluator, and acts as an operator now and then. Nothing is backdated. `sources` on the overview and `source` on every project row tell fleet, sandbox and everything else apart. The fleet's Java project is `Acme-Treasury`, because `Acme-Ledger` already held review probes from 22/9 that would have been counted as the fleet's.
 - **Projects can start in Enforce by name.** `EnforceProjectPattern` (empty by default) names projects that start in Enforce until configured; the public stack sets `^Acme-Live-.+$` for the daily real agent, which has no operator to promote it. Pre-configuring those projects was tried first and reverted, because the overview would have shown nine projects in Enforce with nothing in them.
@@ -246,11 +246,11 @@
 - **The first daily real-agent run:** Codex on `warehouse-carrier-notify`, 8 calls on the public ledger in Enforce, no violation, acceptance tests green, and one false refusal: a read ending in PowerShell's `2>$null`, taken for a write to a shell expansion. Fixed the same day (a redirect to `$null` is the null device when nothing in the command could give the variable a value), and the search for a way around the fix closed an older hole: `bash -c "... > src/domain/\$f"` was approved, because the check kept the backslash that double quotes drop. The scheduled task is the owner's to create.
 - **Enforce mode is described as what it does** in the dashboard, the installer and the hook's help: the project's stage decides, as in managed, and the machine also refuses writes to the hooks' own files.
 
-## 2026-09-27T08:00:00+03:00 — The command-check fix and the enforce wording, deployed
+## 2026-09-27T08:00:00+03:00 - The command-check fix and the enforce wording, deployed
 - `threefold-prod` and `threefold-dogfood` deployed and the pages published: a read ending in PowerShell's `2>$null` is approved, and `bash -c "... > src/domain/\$f"` and the `trap`, `${!y:=...}` and BASH_ENV routes to `$null` are refused, checked on the edge. The first cut of the `$null` rule let those three routes through in a real bash; it was tightened and each is pinned before anything was deployed.
 - Probes: edge 113/0/3 and API 113/0/3 (`docs/evidence/PROBES_2026-09-27-edge.md`, `docs/evidence/PROBES_2026-09-27.md`), private 97/0, read-only. Tests 5423 passed, 6 skipped.
 
-## 2026-09-27T16:00:00+03:00 — The finishing wave: a faster dashboard, a truthful alarm, a live source, the probes and the deploy role
+## 2026-09-27T16:00:00+03:00 - The finishing wave: a faster dashboard, a truthful alarm, a live source, the probes and the deploy role
 - **An alarm email was the lead.** `function-duration-p95` fired at 07:53 UTC; the logs showed the demo fleet's tick, one invocation carrying about thirty synthetic calls, taking 3.7 to 5.3 s and being the only invocation at night, and the dashboard's overview taking 2.5 to 3.5 s. Nothing had failed. The slow-call alarm now reads the HTTP API's p95 latency, a second alarm watches any run nearing the 15 s timeout, and the function runs at 1024 MB (`FunctionMemoryMb`), because Lambda gives CPU in proportion to memory.
 - **The overview and the fleet read only what they use.** A ledger page can be read for some of its fields; the self-correction figure reads nine of about twenty-six, the fleet's sweep thirteen. Every payload was compared field by field before and after, and is the same. Live: the overview 0.6 s warm, the tick 1.3 s.
 - **One request per Bedrock call.** A botocore Config's `max_attempts: 1` counts retries, so every unanswered call went out twice and a draft could outlive the function; both clients now set `total_max_attempts: 1`. Found by the alarm track's fixer and checked offline.
@@ -259,45 +259,45 @@
 - **The deploy role**: its trust named a repository that does not exist, fixed and tied to the README by a test; the policy audited against the template. Not created, by the owner's decision: without a permissions boundary it is in practice an administrator.
 - `proof.json` rebuilt from the private stack with today's contract. A test that failed in some directory orders (the draft budget left spent by an earlier test) now starts each test unspent. Tests 5624 passed, 6 skipped.
 
-## 2026-09-28T02:52:00+03:00 — Judge readiness: every text checked, the screens reviewed as a judge would, and what the review found fixed at its root
+## 2026-09-28T02:52:00+03:00 - Judge readiness: every text checked, the screens reviewed as a judge would, and what the review found fixed at its root
 - **The texts.** About 500 claims in README, the benchmark's account, the dossier, the Builder Center article, the video script, the architecture, the Well-Architected review, the proof of the AWS session and the runbook were checked against the code, STATE and the evidence; about 100 were stale or false and were corrected, each checked again by a verifier who tried to refute it. The worst: "Codex not measured" (measured since 2026-09-23), "four series" (six), "no probe of the edge" (two committed), the Codex reports saying its commands ran in a sandbox (they ran with none). The two demos' lengths were measured with a script, and each document says the walkthrough takes about two minutes and the flagship scenario well under one.
 - **The screens, reviewed as a judge.** Four journeys on the live site at desktop and phone widths scored ESTIMATE 7.5 (first screen), 7.5 (walkthrough), 6.5 (operator), 7 (proof and trust). Three rounds of fixes, each checked again by a fresh reviewer, ended at ESTIMATE 8 to 9 per track. What held the operator's screens down was on the server, so it was fixed there: the service's own probes are a source of their own (`probe`), a rule is Ready only on labels, the sandbox answer names the false alarm it seeds, each benchmark series cites the report made from its own rows, and a page address with no page will answer the product's own 404 (edge.yml, not deployed yet).
 - **Free text no longer decides structure.** A refusal's rule key, its category on the console and the family of fix it is offered come from the gate that fired, never from words the caller's command carried; a rule may not take a gate's key.
 - **Found along the way.** A page test harness gained `querySelector` for a page's own meta tags, so a link could leave the script the CSP check reads; a test that failed only after tests/security (the draft budget left spent) now starts unspent; the local server gives each request its own id, as API Gateway does.
 - **The daily live agent is scheduled** on the owner's machine since 2026-09-27; since 2026-09-28 it may start on battery and catches up a missed time.
 
-## 2026-09-28T13:00:00+03:00 — Round four merged, verified first: Muse measures up as the fourth agent
+## 2026-09-28T13:00:00+03:00 - Round four merged, verified first: Muse measures up as the fourth agent
 - The previous session died on its spend limit with six round-four branches unmerged. Six verifiers (one per branch) plus a merge plan ran first: five branches mergeable as committed, FACE needing the chart-bars keyboard fix, and a merge order verified end to end in a scratch clone. All six merged in that order with no conflicts.
 - The bars fix landed on main: a bar row with linked segments keeps the links as its stops; a row with none is one stop itself, named by the label that counts even the zero segments no bar is drawn for. Plain segments lost tabindex and aria-label; their tooltips stay for the mouse.
 - The full suite then found two real failures the isolated branch runs could not see. The bars fix had passed a ternary to raw(), which the escaping-hygiene test rightly rejects: the branch moved outside raw(), which now takes only its literal. And APP-PROOF's "none to count" short-circuit contradicted the self-correction figure beside it whenever a snapshot carried counts while refusing nothing, breaking the invariant that #/proof words the figure as every other screen does; the special case is gone and the shared words speak. Suite: 6096 passed, 6 skipped, 1 red-by-design (the committed snapshot, awaiting the keyed proof.json rebuild).
 - Muse (Muse Code 1.4.0) measured as the fourth governed agent. Its plugin hooks fire PreToolUse per tool call with a Claude-shaped payload; the Claude-style deny blocks a write, the agent reports it blocked, and project-scope install governs while an uninstalled project-local manifest does not. The MSP-approval route was measured dead: no approval/request reaches a bare MSP client under any mode, and view/subscribe is not served. A MUSE track is implementing the adapter, the plugin bundle, the installer wiring, the service enum and the pages and docs, with evidence of only what was measured.
 
-## 2026-09-28T17:53:00+03:00 — Muse merged and measured, round four and Muse deployed, probed, pushed
-- **Muse is the fourth governed agent, on main.** The MUSE track merged after its review's three substantive findings were fixed (the plugin bundle as governance, the hook-test matrix extended to muse, a guard in detect). On top: the hook holds back Muse's own home (`~/.local/share/muse`) like the other agent homes, and a live deny was measured in a real Muse session against a local enforcing server — write, edit and shell violations blocked with the refused file unchanged on the disk, a clean write passing (`docs/evidence/ENFORCEMENT_2026-09-28-MUSE.md`).
+## 2026-09-28T17:53:00+03:00 - Muse merged and measured, round four and Muse deployed, probed, pushed
+- **Muse is the fourth governed agent, on main.** The MUSE track merged after its review's three substantive findings were fixed (the plugin bundle as governance, the hook-test matrix extended to muse, a guard in detect). On top: the hook holds back Muse's own home (`~/.local/share/muse`) like the other agent homes, and a live deny was measured in a real Muse session against a local enforcing server - write, edit and shell violations blocked with the refused file unchanged on the disk, a clean write passing (`docs/evidence/ENFORCEMENT_2026-09-28-MUSE.md`).
 - `proof.json` rebuilt with the key (29,118 bytes); suite 6320 passed, 6 skipped, exit 0. The committed-snapshot red-by-design is gone.
 - **Deployed** `threefold-prod`, `threefold-dogfood` (`PublicReads=false` kept) and `threefold-prod-edge`, pages published (12 objects, one `/*` invalidation). Checks: `/prod/status` HEALTHY, `/prod/` 200, the edge's installer names the edge.
 - Probes: edge 117/0/3 (`docs/evidence/PROBES_2026-09-28-2-edge.md`), API 117/0/3 (`docs/evidence/PROBES_2026-09-28-2.md`), private 101/0 read-only (evidence outside the repo). 38 commits pushed; CI and CodeQL green on the pushed head.
 
-## 2026-09-28T18:14:00+03:00 — The pages catch up with the Muse measurement
+## 2026-09-28T18:14:00+03:00 - The pages catch up with the Muse measurement
 - The live edit/shell measurement landed in the evidence file but the pages and submission texts still said those routes were not measured, and two tests pinned the stale words. The first screen (scope, chip, quote), the connect page (stepper, manual, enforcement row), README, the dossier, the article and the video script now say Muse 1.4.0 was measured over `write_file`, `edit_file` and the shell, each refused file unchanged on the disk; the tests hold the new words instead.
 - Pages published, probes rerun: edge and API 117/0/3 (`docs/evidence/PROBES_2026-09-28-3-edge.md`, `docs/evidence/PROBES_2026-09-28-3.md`). Targeted pages tests 109 passed.
 
-## 2026-09-28T18:37:00+03:00 — The Muse card shortened to hold the phone budget
+## 2026-09-28T18:37:00+03:00 - The Muse card shortened to hold the phone budget
 - The first wording pushed How-it-works to 2.909 phone screens against the 2.9 bound, and CI failed it. The Muse card now says the same measured truth in one quote instead of two (2.857 screens in both faces, measured twice). Full pages layer 433 passed locally, pages published, probes rerun: edge and API 117/0/3 (`docs/evidence/PROBES_2026-09-28-4-edge.md`, `docs/evidence/PROBES_2026-09-28-4.md`).
 
-## 2026-09-28T19:21:00+03:00 — Regionals redeployed so the origin serves the latest pages
+## 2026-09-28T19:21:00+03:00 - Regionals redeployed so the origin serves the latest pages
 - Verification found the edge on the new words while the API origin still served the pre-fix pages: the regional stacks had deployed before the wording fix. Redeployed `threefold-prod` and `threefold-dogfood` (`PublicReads=false` kept, `/prod/status` HEALTHY); the origin now serves the latest card. Probes after the redeploy: edge and API 117/0/3 (`docs/evidence/PROBES_2026-09-28-5-edge.md`, `docs/evidence/PROBES_2026-09-28-5.md`), private 101/0 read-only.
 
-## 2026-09-28T20:44:00+03:00 — The merge gate, and sessions that count every call
-- `scripts/judge_pr.py` judges every added or changed file in a pull request through `/evaluate-tool-call` (agent `ci`, origin `ci`, no explanation) and fails the check when the service refuses one or a rule fires on one — including observed rules on Observe-stage projects. Fail-closed throughout: the service down, non-JSON, throttles past retries, over either cap, all exit 2. Proven live against the origin before wiring: a `boto3` domain import and a shaped credential each drew the refusal with a GitHub annotation. 12 unit tests, no network.
+## 2026-09-28T20:44:00+03:00 - The merge gate, and sessions that count every call
+- `scripts/judge_pr.py` judges every added or changed file in a pull request through `/evaluate-tool-call` (agent `ci`, origin `ci`, no explanation) and fails the check when the service refuses one or a rule fires on one - including observed rules on Observe-stage projects. Fail-closed throughout: the service down, non-JSON, throttles past retries, over either cap, all exit 2. Proven live against the origin before wiring: a `boto3` domain import and a shaped credential each drew the refusal with a GitHub annotation. 12 unit tests, no network.
 - Not done on purpose: excluding AWS published-example keys service-side would break the security suite's convention of using them as bait, so the judge scrubs the inert pair client-side (the pre-commit gate's set) and excludes the adversarial fixtures visibly.
 - `.github/workflows/pr-judge.yml` runs it on pull requests to main; runbook section 12 documents adoption. The sessions listing's `calls` is cumulative now (`total_calls` beside the fifty kept for the window, old rows read back the retained length), with a round-trip test past the cap. Suite 6334 passed, 6 skipped.
 
-## 2026-09-28T20:59:00+03:00 — The merge gate is load-bearing
+## 2026-09-28T20:59:00+03:00 - The merge gate is load-bearing
 - Branch protection on main names `Judge the diff` as a required check, without requiring pull requests, so direct pushes keep working and every pull request is judged. PR #6 proved it: a shaped token failed the check in 9 s with the merge BLOCKED, removing it passed in 11 s, and the red-to-green pair merged as one merge commit.
 - Regionals redeployed with the counter change and the pages published; probes after: edge and API 117/0/3 (`docs/evidence/PROBES_2026-09-28-6-edge.md`, `docs/evidence/PROBES_2026-09-28-6.md`), private 101/0 read-only.
 
-## 2026-09-28T21:52:00+03:00 — Tamper attempts reach the ledger
+## 2026-09-28T21:52:00+03:00 - Tamper attempts reach the ledger
 - A file-tool write to `.git/hooks/` or `.git/config` used to be held back as a data directory outside enforce, so switching the pre-commit check off that way never showed up in Observe, while the same write through a shell was sent. The two files are now exempt from the hold-back and go as their path alone through the existing strip, in both hook copies with the bundle manifest re-pinned; the service already judged them under `PROTECTED_PATH`, so no service change.
 - Three tests' expectations rewritten (they pinned the blind spot), one path-only test added per surface plus a `PROTECTED_PATH` verdict case for a `.git/hooks` file write. README blind row and the STATE contract updated. Suite 6341 passed, 6 skipped; regionals redeployed, probes 117/0/3, 117/0/3, 101/0 (`docs/evidence/PROBES_2026-09-28-7-edge.md`, `docs/evidence/PROBES_2026-09-28-7.md`).
 
@@ -308,3 +308,8 @@
 ## 2026-09-29T08:00:00+03:00 -- The spend limit the hook never saw, committed
 - The 2026-09-29 daily row records no run: Claude Code never started, cut short by the orgs monthly spend limit (agent_ran false, 0 calls, 0 governed). Committed as benchmark/results/live/2026-09-29-claude-code.jsonl; hiding a failed row would be worse than explaining it.
 - The row is now the proof of the metering limit an adversarial audit (antigravity, 29/9) named FIN-01: the ceiling meters declared tokens only, a hook declares none, so hook calls cost $0.00 and inference spend stays with the model providers. Stated in the dossier (point 2), STATE (item 4), the article (Spend bullet) and the video script. Live-agent copy in all three now counts four rows, three with an agent that ran.
+
+## 2026-09-29 -- UAT judgment day: two fixed, two refuted, one deferred
+- A 4-agent live UAT workflow filed 3 ship-blockers and 2 pre-deadline items. Verified each against code and bytes: the export-cert silent button was real (btnExportCert enabled pre-run, downloadCert returned silently) and is fixed (starts disabled with a reason, setCertData is the only writer and enables it; tests/pages/test_the_certificate_export_waits_for_a_run.py). The sessions count split was real and deeper than filed (detail capped at 50, listing cumulative, KPI title stale): GET /sessions/{id} now answers total_calls, the panel prefers it with fallback, KPI reads Calls recorded; integration + harness tests added.
+- Two blockers refuted with evidence: /proof.json IS in the live spec and the swagger anchor is test-pinned; the 4xx Detail was a display artifact (wire bytes are lowercase detail, probes assert it) that fooled the agents. Wrong-method 404 (no 405) confirmed but deferred: a proper fix restructures the router, wrong trade pre-deadline. Transient 503 on /readyz attributed to Lambda throttle under 4 parallel agents (reserved 25, documented).
+- README restructured archon-style (link row, contents, repo tree, docs/architecture.svg, licence) with every pinned string kept; stale lines fixed (4 live rows, merge gate, cumulative counts, probes -7). Em-dash sweep: 240 replacements in 56 files at byte level, evidence records untouched, both hook copies identical, muse manifest re-pinned.

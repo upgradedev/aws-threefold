@@ -1,4 +1,4 @@
-# Threefold — Router
+# Threefold - Router
 
 **Read this first, then `STATE.md` for live truth, then `TRAPS.md` before touching code or infrastructure.**
 Rules live here; state never does.

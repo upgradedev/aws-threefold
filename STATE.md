@@ -1,10 +1,10 @@
-# Threefold — State Ledger
+# Threefold - State Ledger
 
 **Last updated:** 2026-09-28
 **Hackathon:** AWS Zero to Shipped, submissions close 2026-10-02 23:59 PDT
 **Category:** `#workplace-efficiency` · **Lane:** `#community` (hedge to `#commercial-potential` / `#startup` decided 2026-09-28)
 **Entries permitted:** one. The Rules tab, ELIGIBILITY section, reads "Limit one entry per person." Threefold is that entry.
-**Active agent claim:** Claude Code (this session), 2026-09-22 to 2026-09-29 — the application: dashboard, two-stage rollout, one-command connect. Tracks and the files each owns (a file outside a track's list is changed only by the owner at merge):
+**Active agent claim:** Claude Code (this session), 2026-09-22 to 2026-09-29 - the application: dashboard, two-stage rollout, one-command connect. Tracks and the files each owns (a file outside a track's list is changed only by the owner at merge):
 - A, hook and connect: `src/threefold/hooks/**`, `src/threefold/tools/**` (new: the installer and the CLI move here so the stack can serve them), `scripts/threefold_*.py`, `scripts/pre-commit-gate.py`, `tests/hook/**`, `tests/unit/test_threefold_*.py`
 - B1, ledger and stages: `src/threefold/application/**`, `src/threefold/domain/**`, `src/threefold/infrastructure/dynamo_repo.py`, `src/threefold/interfaces/app_routes.py` (new), `tests/unit/**` except A's, `tests/integration/test_app_*.py` (new), `tests/conftest.py`
 - B2, access and distribution: `src/threefold/infrastructure/security_middleware.py`, `src/threefold/infrastructure/auth_store.py` (new), `src/threefold/interfaces/access_routes.py` (new), `deploy/**`, `tests/security/**`, `tests/integration/test_access_*.py` (new); the only track besides the owner that touches `deploy/`
@@ -60,7 +60,7 @@ Fixed before the tracks split, so no track waits on another for a field name.
 - **Every write route (day 2).** A `Bash` call is read for the writes it makes: redirections (`>`, `>>`, `tee`), heredoc bodies, `sed -i`, `perl -pi`, `cp`, `mv`, `install`, `ln`, `rsync`, `dd of=`, `git apply`, `patch`, and `python -c` / `node -e` opening a file for writing. A write whose content can be read is judged like a `Write`. A write to a path an enforce rule covers whose content cannot be read is refused, with the reason "use Write or Edit so the rule can read it"; under an observe rule it is recorded. Writes to agent hook settings (`.claude/settings*.json`, `.codex/hooks.json`, `.agents/hooks.json`) and to `.git/hooks`, `git commit --no-verify` and `git -c core.hooksPath=…` are refused as protected-path calls.
 - **Two stacks.** `threefold-prod` stays the public demo. `threefold-dogfood` is created from the same template with `PublicReads=false`, so its ledger and sessions need the operator key to read, and it carries the owner's real use under aliases. Only anonymised totals from it are ever shown in public.
 
-## Contracts, 2026-09-22 — the application
+## Contracts, 2026-09-22 - the application
 
 Fixed before the tracks split. A track that needs a field not listed here asks the owner; it does not invent one.
 
@@ -99,7 +99,7 @@ Fixed before the tracks split. A track that needs a field not listed here asks t
 
 **The application (D).** `dashboard.html` is one page with hash routes: `#/overview` (tiles, a stacked daily chart, by agent, by rule, by project; every tile and bar opens the rows behind it), `#/projects`, `#/projects/<name>` (stage, readiness per rule, Promote and Demote, recent calls, agents and their hook mode, setup), `#/review` (the queue of unreviewed would-refuse calls, grouped by project and rule, labelled one at a time or in bulk), `#/calls?<filters>` and `#/call?timestamp=&verdict_id=` (drill-down), `#/connect` (choose a name, copy one command, then watch for the first call), `#/signin?code=&next=`, and `#/try` (the sandbox walkthrough for an anonymous visitor on the public stack). Charts are inline SVG from `assets/threefold.js`, no chart library. Every page shares the navigation and the sign-in state from `assets/threefold.js`. `console.html` sends the reader to `dashboard.html#/overview`.
 
-## Contracts, 2026-09-26 — the demo fleet
+## Contracts, 2026-09-26 - the demo fleet
 
 The public demo is fed by a synthetic Acme fleet so that every chart and tile has something true to show. It is labelled wherever it appears.
 
@@ -147,7 +147,7 @@ governs, and the runbook's teardown section says the same.
 | The spec names what is deployed | Its description said Claude 3.5 Sonnet while the stack runs `eu.anthropic.claude-haiku-4-5-20251001-v1:0`, and its only server was `127.0.0.1:8001`, so Try it out went to the reader's own laptop. Both corrected, and a test now reads the model family out of `deploy/template.yml` and fails if the document drifts from it |
 | Every page reaches the operation it calls | The four pages deep link into the document rather than at its cover: the dashboard lists the seven operations its buttons call, settings links `/policy/config`, the sessions console links `/api/sessions`, `/sessions/{id}` and the terminate route, and connect links `/evaluate-tool-call`. Walked on the live URL: following one opens Swagger UI with that operation expanded |
 | The links cannot drift from the routes | Swagger UI derives its anchors from method and path, so a renamed route would break every link pointing at it silently. A test rebuilds those anchors from the served document, extracts the endpoints the dashboard actually fetches, and fails when one is unlinked. Confirmed by deleting a single entry and watching it fail |
-| A visitor can take the hook | The deployment serves it at `/hooks/claude_code_hook.py`, anonymously, as readable text. Downloaded from the live URL and run: an ordinary read came back `allow`, a `from boto3 import client` write into a domain file came back `deny` with a Bedrock sentence. Before this, `connect.html` told the reader to `git clone <repository>` — a literal placeholder, since the repository is not published — and the install path ended there |
+| A visitor can take the hook | The deployment serves it at `/hooks/claude_code_hook.py`, anonymously, as readable text. Downloaded from the live URL and run: an ordinary read came back `allow`, a `from boto3 import client` write into a domain file came back `deny` with a Bedrock sentence. Before this, `connect.html` told the reader to `git clone <repository>` - a literal placeholder, since the repository is not published - and the install path ended there |
 | A certificate cannot attest to nothing | `POST /issue-certificate` with `{"evaluations": []}` used to answer 200 with `verdict_status: COMPLIANT_APPROVED` and `all_passed: true`, because `all()` over an empty list is true. It now answers 400 `Nothing To Certify`, as does a session this service has no record of governing. Verified against the live stack, and the dashboard's Scenario 4 still issues its certificate |
 | A pull request is judged before merge | `.github/workflows/pr-judge.yml`, a required check on main: every added or changed file judged through `/evaluate-tool-call`, red on a refusal or a fired rule, fail-closed on anything unjudged. Proven on PR #6: a shaped token failed the check in 9 s with the merge BLOCKED, removing it passed in 11 s |
 | Turning the hooks off is seen, not silent | A file-tool write to `.git/hooks/` or `.git/config` is sent as its path alone outside the modes that refuse it on the machine, and recorded under `PROTECTED_PATH` like the same write through a shell; the content stays home because remote URLs can carry tokens |
@@ -316,13 +316,13 @@ traffic.
    a stronger one: the certificate is issued from the session's stored verdicts
    and signed with a KMS key where the stack holds one, and a CI check now
    refuses a pull request whose diff fires a rule, whatever session produced
-   it — which covers pull requests from agents that never installed anything.
+   it - which covers pull requests from agents that never installed anything.
    The certificate itself is still not required before a merge.
 4. Fixed on 2026-09-25: the evaluate request carries `model_id`, the
    calculator prices Haiku ids on the Haiku row and everything else on the
    default rate, and the ledger row keeps the model so a cost can be audited.
    The ceiling meters declared tokens only: a hook declares none, so its calls
-   are priced $0.00 and inference spend is outside what the gate can see — the
+   are priced $0.00 and inference spend is outside what the gate can see - the
    2026-09-29 live row is the proof, an org spend limit with zero governed calls.
 5. The API still enforces no key on reads, deliberately: `STAGE` is unset so an
    anonymous judge and the AI scorer reach everything, which is the ship gate's

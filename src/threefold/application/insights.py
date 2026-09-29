@@ -52,8 +52,8 @@ def _is_refusal(status: str) -> bool:
 
 
 # A rule is an invariant; a category is what a reader recognises. The boundary
-# invariant covers two different worries — a layer being crossed and a
-# credential store being reached — and a console that reported them as one
+# invariant covers two different worries - a layer being crossed and a
+# credential store being reached - and a console that reported them as one
 # number would tell a platform owner nothing he could act on differently.
 #
 # The category is read off the row's rule key, the gate that decided as the

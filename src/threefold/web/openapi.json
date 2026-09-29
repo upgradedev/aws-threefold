@@ -514,7 +514,7 @@
     "/sessions/{session_id}": {
       "get": {
         "summary": "Inspect Session State",
-        "description": "Retrieves cumulative spend, history length and circuit breaker status for a session that has been recorded. Reading never creates a session.",
+        "description": "Retrieves cumulative spend, the cumulative and retained call counts and circuit breaker status for a session that has been recorded. Reading never creates a session.",
         "parameters": [
           {
             "name": "session_id",

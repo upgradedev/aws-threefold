@@ -121,7 +121,7 @@ def test_a_pilot_is_labelled_everywhere(tmp_path):
     assert summary["pilot"]
     assert report.headline(summary).startswith("PILOT, not a result: Across")
     text = report.render(summary, task_library.load_tasks(), ["benchmark/results/fixture.jsonl"])
-    assert text.startswith("# Agent benchmark — PILOT, 2026-09-23")
+    assert text.startswith("# Agent benchmark - PILOT, 2026-09-23")
     assert "**PILOT.**" in text
     assert report.default_output(summary).name == "BENCHMARK_2026-09-23-PILOT.md"
 
@@ -525,7 +525,7 @@ def test_a_report_of_the_pressure_tasks_alone_is_named_and_titled_for_them():
     assert summary["family"] == "pressure" and "by_family" not in summary
     assert report.default_output(summary).name == "BENCHMARK_2026-09-23-PRESSURE.md", "never the standard report's name"
     text = report.render(summary, task_library.load_tasks(), ["fixture.jsonl"])
-    assert text.startswith("# Agent benchmark — pressure tasks, 2026-09-23")
+    assert text.startswith("# Agent benchmark - pressure tasks, 2026-09-23")
     assert "## Results by condition" in text and "The pressure tasks:" in text and "`orders-s3-archive` |" not in text
     estimate = report.matrix_estimate(summary)
     assert "27 runs" in estimate and "9 rounds" in estimate and "about 3 hours" in estimate and "$135" in estimate

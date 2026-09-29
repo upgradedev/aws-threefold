@@ -368,8 +368,8 @@ outside the standard library.
    is `BLOCKED_BOUNDARY_VIOLATION`.
 3. **The loop detector** looks for any repeating cycle of byte-identical call
    signatures, up to the policy's history window, and then for the same cycle
-   over same-shape calls — same tool, targets and argument keys, values
-   ignored — at a longer fuse. A repeated read or poll (`git status`, `ls`,
+   over same-shape calls - same tool, targets and argument keys, values
+   ignored - at a longer fuse. A repeated read or poll (`git status`, `ls`,
    `gh run view`, a file read) is noted and never refused. For a hook the
    repeating call is refused and the session is not halted; for the demo's
    `sim-*` and page sessions the session is halted, which is the flagship demo.
@@ -382,7 +382,7 @@ outside the standard library.
    which nothing in `src/` overrides), or past the policy's own session
    ceiling, which binds every session regardless of the budget the caller
    declared. Tokens are the caller's own declaration, priced by the
-   `model_id` the call names — a Haiku id takes the Haiku row, everything
+   `model_id` the call names - a Haiku id takes the Haiku row, everything
    else the default Sonnet-class rate. A hook declares no tokens, so a hook
    call costs nothing here.
 

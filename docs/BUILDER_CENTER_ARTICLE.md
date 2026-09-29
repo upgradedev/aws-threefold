@@ -219,7 +219,7 @@ and the function runs at 1,024 MB with a reserved concurrency of 25
   model, not the task family. With `claude-sonnet-5`, writing the rules into
   `CLAUDE.md` was enough on its own in both families, even where the prompt
   asked for the shortcut. With `claude-haiku-4-5` it was enough in neither, and
-  the pressure prompt made it much worse — 17% against 56%. Threefold left no
+  the pressure prompt made it much worse - 17% against 56%. Threefold left no
   violation in any of the four series, and the price shows in the last column:
   under the pressure prompts the governed agent finished 10 of 18 runs and
   otherwise stopped and reported the conflict rather than break a rule. Codex
@@ -252,7 +252,7 @@ and the function runs at 1,024 MB with a reserved concurrency of 25
 - **The certificate** Threefold issues covers the session's own stored
   verdicts and carries a KMS signature where the stack holds a signing key.
   The merge is judged separately: every pull request's diff goes through the
-  same gates, and a required check fails the merge when a rule fires — this
+  same gates, and a required check fails the merge when a rule fires - this
   repository's own PR #6 proved it, red on a planted key, then green
   **[STATE-FILE]**.
 

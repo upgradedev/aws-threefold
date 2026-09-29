@@ -1853,6 +1853,41 @@ def test_the_sessions_page_says_where_its_sessions_come_from_and_why_they_stoppe
     assert "Monomorphic loop detected: Tool 'run_command' invoked with identical arguments 3 consecutive times" in detail, "and keeps the breaker's own words"
 
 
+def test_the_detail_panel_prefers_the_cumulative_call_count(tmp_path: Path) -> None:
+    """The detail agrees with the listing: cumulative, never capped at 50."""
+    fixture = SESSIONS.replace(
+        "tool_call_history_count: 3, cumulative_cost_usd",
+        "tool_call_history_count: 3, total_calls: 107, cumulative_cost_usd",
+    )
+    assert fixture != SESSIONS, "The detail mock moved; re-pin this test to it"
+    out = run(
+        "sessions.html",
+        r"""
+  await tick();
+  await selectSession('sim-0a1b2c3d');
+  out.detail = el('detail-body').innerHTML;
+""",
+        tmp_path,
+        before=fixture,
+    )
+    assert '<dt>Calls recorded</dt><dd class="">107</dd>' in html.unescape(out["detail"])
+
+
+def test_the_detail_panel_falls_back_to_the_history_count(tmp_path: Path) -> None:
+    """Old detail answers carry no total_calls; the panel still shows a count."""
+    out = run(
+        "sessions.html",
+        r"""
+  await tick();
+  await selectSession('sim-0a1b2c3d');
+  out.detail = el('detail-body').innerHTML;
+""",
+        tmp_path,
+        before=SESSIONS,
+    )
+    assert '<dt>Calls recorded</dt><dd class="">3</dd>' in html.unescape(out["detail"])
+
+
 def test_calls_observed_says_what_it_counts(tmp_path: Path) -> None:
     """A judge found a project's calls observed differing from its calls elsewhere, unexplained."""
     out = ops(

@@ -211,7 +211,7 @@
   // or a full quota. Storage then still answers with whatever it held before,
   // which is not what this tab was told, so once a write has been refused this
   // tab answers from memory until one succeeds. Without this the panel's
-  // promise — kept for this tab, at least — was false on that browser: the
+  // promise - kept for this tab, at least - was false on that browser: the
   // name went nowhere and every page drew the bare alias again.
   var namesMemoryOnly = false;
   var hiddenMemoryOnly = false;
@@ -286,8 +286,8 @@
   }
 
   // Clear all takes the switch with the names: a name saved after this would
-  // otherwise be invisible, with the switch gone from the navigation — it is
-  // drawn only once a name is set — and nothing on screen to explain it.
+  // otherwise be invisible, with the switch gone from the navigation - it is
+  // drawn only once a name is set - and nothing on screen to explain it.
   function clearLocalNames() {
     var namesGone = writeLocalNames({});
     var switchGone = setLocalNamesHidden(false);
@@ -516,26 +516,26 @@
 
   // A count as a reader reads it, or a dash for a value the service did not give.
   function num(value) {
-    if (!isNumber(value)) return '—';
+    if (!isNumber(value)) return '-';
     if (Math.abs(value) >= 100000) return (value / 1000).toFixed(0) + 'K';
     if (Math.abs(value) >= 10000) return (value / 1000).toFixed(1).replace(/\.0$/, '') + 'K';
     return Math.round(value).toLocaleString('en-US');
   }
 
   function pct(value) {
-    if (!isNumber(value)) return '—';
+    if (!isNumber(value)) return '-';
     var p = value * 100;
     return (p > 0 && p < 1 ? '<1' : String(Math.round(p))) + '%';
   }
 
   function usd(value) {
-    if (!isNumber(value)) return '—';
+    if (!isNumber(value)) return '-';
     return '$' + value.toFixed(value < 1 ? 4 : 2);
   }
 
   function timeAgo(iso) {
     var then = Date.parse(iso);
-    if (isNaN(then)) return iso ? String(iso) : '—';
+    if (isNaN(then)) return iso ? String(iso) : '-';
     var seconds = Math.round((Date.now() - then) / 1000);
     if (seconds < 45) return 'just now';
     var minutes = Math.round(seconds / 60);
@@ -557,7 +557,7 @@
 
   function dateTime(iso) {
     var then = new Date(iso);
-    if (isNaN(then.getTime())) return iso ? String(iso) : '—';
+    if (isNaN(then.getTime())) return iso ? String(iso) : '-';
     return then.getDate() + ' ' + MONTHS[then.getMonth()] + ' ' + then.getFullYear() + ', ' +
       String(then.getHours()).padStart(2, '0') + ':' + String(then.getMinutes()).padStart(2, '0');
   }
@@ -755,7 +755,7 @@
   // The pages take Tailwind's utilities from the Play CDN. Its grays are
   // re-stepped here to the ink the tokens use, so a page's bg-gray-900 is the
   // card surface and its text-gray-500 is the muted text, which clears WCAG AA
-  // (4.5:1) on every surface — Tailwind's own #6b7280 is 3.8:1 on a card. Applied
+  // (4.5:1) on every surface - Tailwind's own #6b7280 is 3.8:1 on a card. Applied
   // when this file loads, so a page sets its own tailwind.config before it.
 
   var INK_GRAY = {

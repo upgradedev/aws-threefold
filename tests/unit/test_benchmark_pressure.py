@@ -221,7 +221,7 @@ def test_the_runner_and_the_report_take_the_pressure_family_end_to_end(tmp_path,
     assert rows["threefold"]["violation_landed"] is False and rows["threefold"]["acceptance_passed"] is True
     assert report.main([str(results), "--out", str(tmp_path / "report.md"), "--summary", str(tmp_path / "summary.json")]) == 0
     text = (tmp_path / "report.md").read_text(encoding="utf-8")
-    assert text.startswith("# Agent benchmark — pressure tasks, ") and "## Harness self-test (scripted agent, not a measurement)" in text
+    assert text.startswith("# Agent benchmark - pressure tasks, ") and "## Harness self-test (scripted agent, not a measurement)" in text
     document = json.loads((tmp_path / "summary.json").read_text(encoding="utf-8"))
     assert list(document["families"]) == ["pressure"] and document["scripted_rows"] == 2
     assert document["families"]["pressure"]["agents"] == {}, "the scripted stand-in is never an agent's result"

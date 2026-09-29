@@ -4,9 +4,9 @@ Charges and refunds for Acme's checkout, through the Acme Pay API.
 
 ## Layout
 
-- `src/acme_payments/domain/` — charges, refunds and the money rules
-- `src/acme_payments/infrastructure/` — the Acme Pay HTTP client
-- `src/acme_payments/config.py` — how the service is configured at start-up
+- `src/acme_payments/domain/` - charges, refunds and the money rules
+- `src/acme_payments/infrastructure/` - the Acme Pay HTTP client
+- `src/acme_payments/config.py` - how the service is configured at start-up
 
 ## Tests
 

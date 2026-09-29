@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="tf-repository" content="https://github.com/upgradedev/aws-threefold" />
-  <title>Threefold — Operations</title>
+  <title>Threefold - Operations</title>
   <meta name="description" content="Threefold operations dashboard: what every coding agent's tool call was judged, by project, rule and agent, with the two-stage rollout from Observe to Enforce." />
   <!-- Tailwind CSS via CDN, pinned to an exact version: an unpinned major is a
        script that can change under a page that did not change, and it runs on the
@@ -474,7 +474,7 @@
     ];
 
     // A day is the smallest thing a rollup holds, so the shortest window
-    // the service can answer is one UTC day — today, from 00:00 UTC. It was
+    // the service can answer is one UTC day - today, from 00:00 UTC. It was
     // offered as '24 h' and worded 'the last 24 hours', which at 00:05 UTC
     // described five minutes of calls. The names below say what it is.
     const DAY_CHOICES = [
@@ -564,7 +564,7 @@
     // that refused some is not said to have flagged nothing.
     function stateChip(state, refused) {
       const s = STATES[state];
-      if (!s) return html`<span class="tf-chip tf-chip-gray">${state || '—'}</span>`;
+      if (!s) return html`<span class="tf-chip tf-chip-gray">${state || '-'}</span>`;
       const says = s.saysRefused && refused > 0 ? s.saysRefused : s.says;
       return html`<span class="tf-chip ${s.chip}" title="${s.label}: ${says}">${s.label}</span>`;
     }
@@ -855,12 +855,12 @@
         : 'Every number on this page is read from the API as you look at it';
       const ctx = makeContext(token, params, current.args);
       if (!found) {
-        document.title = 'Not found — Threefold';
+        document.title = 'Not found - Threefold';
         ctx.render(html`${pageTitle('Nothing lives at this address', 'The link may be from an older version of this dashboard.')}
           <div class="flex flex-wrap gap-2"><a class="tf-btn tf-btn-primary" href="#/overview">Go to the overview</a><a class="tf-btn" href="#/projects">Projects</a></div>`);
         return;
       }
-      document.title = found.route.title + ' — Threefold';
+      document.title = found.route.title + ' - Threefold';
       try {
         found.route.view(ctx);
       } catch (err) {
@@ -1110,7 +1110,7 @@
     function readinessCell(p, fa) {
       const would = p.would_refuse;
       const waiting = p.needs_review;
-      if (typeof would !== 'number' || typeof waiting !== 'number') return html`<span class="text-gray-500">—</span>`;
+      if (typeof would !== 'number' || typeof waiting !== 'number') return html`<span class="text-gray-500">-</span>`;
       const reading = fa === undefined;
       const seen = (fa && fa.byProject[p.project]) || { any: 0, observed: 0 };
       const known = !!fa && (fa.complete || seen.any > 0);
@@ -1799,7 +1799,7 @@
     }
 
     function chipList(values, label) {
-      if (!Array.isArray(values) || !values.length) return html`<span class="text-gray-600">—</span>`;
+      if (!Array.isArray(values) || !values.length) return html`<span class="text-gray-600">-</span>`;
       return html`<span class="inline-flex flex-wrap gap-1">${values.map(v => html`<span class="tf-chip tf-chip-gray">${label ? label(v) : v}</span>`)}</span>`;
     }
 
@@ -2331,7 +2331,7 @@
               <input type="checkbox" class="mt-0.5 accent-purple-500" ${first ? raw('id="dialog-first"') : ''} data-change="promote-toggle" data-rule="${r.rule_key}" ${chosen.has(r.rule_key) ? raw('checked') : ''} />
               <span class="min-w-0 flex-1">
                 <span class="flex flex-wrap items-center gap-2"><span class="font-mono text-xs text-white tf-break">${r.rule_key}</span>${stateChip(s, r.refused)}</span>
-                <span class="block text-xs text-gray-400 mt-1">${num(r.would_refuse)} flagged${r.refused > 0 ? html` · ${num(r.refused)} refused` : ''} · ${num(r.correct)} correct · ${num(r.false_alarms)} false alarm${r.false_alarms === 1 ? '' : 's'} · ${num(r.unreviewed)} unreviewed${ruleSays(r) ? html` — ${ruleSays(r)}` : ''}</span>
+                <span class="block text-xs text-gray-400 mt-1">${num(r.would_refuse)} flagged${r.refused > 0 ? html` · ${num(r.refused)} refused` : ''} · ${num(r.correct)} correct · ${num(r.false_alarms)} false alarm${r.false_alarms === 1 ? '' : 's'} · ${num(r.unreviewed)} unreviewed${ruleSays(r) ? html` - ${ruleSays(r)}` : ''}</span>
               </span>
             </label>
           </li>`;
@@ -2490,7 +2490,7 @@
             ${showProject ? html`<td><span class="flex flex-wrap items-center gap-x-2 gap-y-1"><span class="font-mono text-gray-300 tf-break">${T.projectName(row.project_name)}</span>${chip(row)}</span></td>` : ''}
             <td class="text-gray-300 whitespace-nowrap">${agentLabel(row.agent)}</td>
             <td class="min-w-[12rem]"><span class="font-mono text-gray-200">${row.tool_name}</span> <span class="font-mono text-gray-500 tf-break">${breakable(targetOf(row))}</span>${foldRule && outcomeOf(row) !== 'approved' ? html`<span class="block font-mono text-xs text-gray-400 mt-0.5">${breakable(ruleKeyOf(row))}</span>` : ''}</td>
-            ${foldRule ? '' : html`<td class="font-mono text-gray-400 whitespace-nowrap">${outcomeOf(row) === 'approved' ? html`<span class="text-gray-600">—</span>` : ruleKeyOf(row)}</td>`}
+            ${foldRule ? '' : html`<td class="font-mono text-gray-400 whitespace-nowrap">${outcomeOf(row) === 'approved' ? html`<span class="text-gray-600">-</span>` : ruleKeyOf(row)}</td>`}
             <td>${outcomeOf(row) === 'observed' ? reviewChip(row.review) : ''}</td>
           </tr>`)}</tbody>
         </table>
@@ -3722,7 +3722,7 @@
     }
 
     function fieldValue(key, value) {
-      if (value === null || value === undefined || value === '') return html`<span class="text-gray-600">—</span>`;
+      if (value === null || value === undefined || value === '') return html`<span class="text-gray-600">-</span>`;
       if (key === 'suggested_fix_kind') return html`${value} <span class="text-gray-500">(${fixKindLabel(value, 'a fix')})</span>`;
       if (key === 'suggested_fix_validated') return value === true ? 'yes: every proposed write passed the same gates' : 'no: not validated by the gates';
       if (key === 'timestamp' || key === 'reviewed_at') return html`${dateTime(value)} <span class="text-gray-500">(${timeAgo(value)})</span>`;
@@ -3733,7 +3733,7 @@
       if (key === 'agent') return agentLabel(value);
       if (key === 'dry_run') return value ? 'yes' : 'no';
       if (key === 'reason' || key === 'observed_reason') return reasonHtml(value);
-      if (Array.isArray(value)) return value.length ? value.join(', ') : html`<span class="text-gray-600">—</span>`;
+      if (Array.isArray(value)) return value.length ? value.join(', ') : html`<span class="text-gray-600">-</span>`;
       if (typeof value === 'object') return JSON.stringify(value);
       return String(value);
     }
@@ -3889,7 +3889,7 @@
                 Array.isArray(list) && list.length ? html`<div><p class="tf-label">${label}</p><div class="flex flex-wrap gap-1">${list.map(v => html`<span class="tf-chip tf-chip-gray font-mono">${v}</span>`)}</div></div>` : '')}
               <a class="tf-link" href="${T.pageHref('rules.html' + query({ project: T.PROJECT_PATTERN.test(row.project_name || '') ? row.project_name : '' }))}">Read or try this project's rules</a>
             </div>`
-          : html`<p class="text-xs text-gray-300"><span class="font-mono text-white">${key}</span> — ${GATE_KEYS[key] || 'a built-in gate'}.</p>
+          : html`<p class="text-xs text-gray-300"><span class="font-mono text-white">${key}</span> - ${GATE_KEYS[key] || 'a built-in gate'}.</p>
               <p class="text-xs text-gray-500 mt-2">A gate is part of the service, not a layering rule a project writes, so it has no definition to show.</p>`;
 
         const sessionBody = session
@@ -5429,7 +5429,7 @@
         return html`<article class="tf-try-flag tf-try-rise" style="--tf-try-i:${i}">
           <header class="tf-try-flag-top"><span class="tf-mono tf-try-strong tf-break">${g.key}</span><span class="tf-try-kind">${tryIsGate(g.key) ? 'gate' : 'layering rule'}</span>${T.statusChip('observed', plural(g.rows.length, 'call'))}</header>
           <p class="tf-try-flag-why">${why.sentence}</p>
-          <dl class="tf-try-dl">${g.rows.map(r => html`<div><dt>${agentLabel(r.agent)}</dt><dd class="tf-try-file">${tryTarget(r) ? tryPath(tryTarget(r)) : '—'}</dd></div>`)}</dl>
+          <dl class="tf-try-dl">${g.rows.map(r => html`<div><dt>${agentLabel(r.agent)}</dt><dd class="tf-try-file">${tryTarget(r) ? tryPath(tryTarget(r)) : '-'}</dd></div>`)}</dl>
         </article>`;
       }
 
@@ -5993,7 +5993,7 @@
                 ${why ? html`<p class="tf-try-verdict-reason">${refused ? '' : html`<span class="tf-try-would">It would have been refused:</span> `}${tryWhyHtml(why)}</p>` : ''}
                 <p class="tf-try-verdict-terms">
                   ${plan && plan.rule ? html`<span class="tf-try-term"><span>Rule</span><span class="tf-mono">${plan.rule}</span></span>` : ''}
-                  <span class="tf-try-term"><span>Verdict</span><span class="tf-mono">${r.status || '—'}</span></span>
+                  <span class="tf-try-term"><span>Verdict</span><span class="tf-mono">${r.status || '-'}</span></span>
                   ${r.project_stage ? html`<span class="tf-try-term"><span>Stage</span>${stageChip(r.project_stage)}</span>` : ''}
                 </p>
               </div>
@@ -6056,7 +6056,7 @@
         const noisy = readinessRules().filter(r => r.state === 'noisy').map(r => r.rule_key)
           .filter(key => !p || p.observe.indexOf(key) !== -1);
         facts.push({
-          figure: p ? num(p.enforce.length) : '—',
+          figure: p ? num(p.enforce.length) : '-',
           label: p && p.enforce.length === 1 ? 'rule moved to Enforce' : 'rules moved to Enforce',
           text: 'You marked ' + marked(c.correct) + ' correct and ' + marked(c.false_alarm) + ' a false alarm' + (noisy.length ? ', so ' + tryList(noisy) + ' stayed in Observe.' : '.'),
           source: 'POST …/reviews · GET …/projects · POST …/promote'
@@ -6081,7 +6081,7 @@
         const before = state.sends.slice(0, -1).map(answerWords);
         const earlier = before.length ? ' Sent ' + plural(state.sends.length, 'time') + (before.length === 1 ? '; the answer before was ' : '; the answers before were ') + tryList(before) + '.' : '';
         facts.push({
-          figure: refused ? 'Refused' : (a.status ? 'Approved' : '—'), tone: refused ? 'refused' : '',
+          figure: refused ? 'Refused' : (a.status ? 'Approved' : '-'), tone: refused ? 'refused' : '',
           label: a.status ? call + (a.stage ? ', in ' + stageWord(a.stage) : '') : state.planned && !state.replay ? 'no call sent again' : call + ', not answered',
           text: a.status
             ? html`${refused ? 'Stopped' + rule + ' before it ran' : 'Approved' + (a.stage ? ' in ' + stageWord(a.stage) : '') + (observedBy ? ', and recorded as a call ' + observedBy + ' would have refused' : ', with no rule flagging it')}${extras.length ? ', with ' + tryList(extras) : ''}. Its verdict: ${tryTokenStop(a.status)}${earlier}`
@@ -6782,7 +6782,7 @@
     }
 
     function ratio(value) {
-      return typeof value === 'number' && isFinite(value) ? value.toFixed(2) + '×' : '—';
+      return typeof value === 'number' && isFinite(value) ? value.toFixed(2) + '×' : '-';
     }
 
     function overheadCell(condition) {

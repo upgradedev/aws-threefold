@@ -5,9 +5,9 @@ fulfilled here.
 
 ## Layout
 
-- `src/acme_orders/domain/` — the order model and its lifecycle
-- `src/acme_orders/application/` — the use cases the API calls
-- `src/acme_orders/infrastructure/` — storage and other adapters
+- `src/acme_orders/domain/` - the order model and its lifecycle
+- `src/acme_orders/application/` - the use cases the API calls
+- `src/acme_orders/infrastructure/` - storage and other adapters
 
 ## Tests
 

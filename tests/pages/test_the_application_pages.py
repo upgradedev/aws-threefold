@@ -180,7 +180,7 @@ def test_every_route_draws_a_screen_with_a_heading(tmp_path: Path) -> None:
     )
     for route, screen in out["screens"].items():
         assert screen["heading"], f"{route} drew no heading"
-        assert screen["title"].endswith("— Threefold"), f"{route} left the document title as {screen['title']!r}"
+        assert screen["title"].endswith("- Threefold"), f"{route} left the document title as {screen['title']!r}"
         assert screen["words"] > 80, f"{route} drew almost nothing"
 
 
@@ -2501,7 +2501,7 @@ def _ttl_days(module: str, name: str) -> int:
     source = (ROOT / "src" / "threefold" / module).read_text(encoding="utf-8")
     match = re.search(rf"^{name} = (.+)$", source, re.M)
     assert match, f"{module} defines no {name}"
-    return round(eval(match.group(1), {"__builtins__": {}}) / 86400)  # noqa: S307 — an arithmetic literal from our own source
+    return round(eval(match.group(1), {"__builtins__": {}}) / 86400)  # noqa: S307 - an arithmetic literal from our own source
 
 
 def test_the_walkthrough_says_what_expires_in_a_day_and_what_stays_thirty(tmp_path: Path) -> None:

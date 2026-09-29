@@ -4,7 +4,7 @@ Naming a session creates it. The two recording routes, the certificate and the
 freeze each create the session they name, `/api/sessions` lists the id exactly
 as it arrived, and `public_row()` rewrites only the project name and the
 developer. So on a stack whose reads are public the id was the third piece of
-caller text on that page, beside the operator and the reason a freeze writes —
+caller text on that page, beside the operator and the reason a freeze writes -
 and unlike those two it was unbounded and unredacted: a 448-character id
 carrying a credential was listed in full.
 

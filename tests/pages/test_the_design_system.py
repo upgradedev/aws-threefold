@@ -414,7 +414,7 @@ def test_a_stat_tile_and_an_empty_state_say_what_they_mean(tmp_path: Path) -> No
     assert re.search(r'data-metric="refused"[^>]*title="12,345">12.3K<', tile), \
         "The value shown is the API's, compacted as num() does, with the exact count on hover"
     assert "Stopped before it ran" in tile and "BLOCKED_*" in tile and "tf-delta-bad" in tile, "Up is bad for refusals"
-    assert "<img" not in out["plain"] and "&lt;img" in out["plain"] and ">—<" in out["plain"], "No value, a dash"
+    assert "<img" not in out["plain"] and "&lt;img" in out["plain"] and ">-<" in out["plain"], "No value, a dash"
     assert 'data-state="empty"' in out["empty"] and 'href="#/connect"' in out["empty"] and "tf-btn-primary" in out["empty"]
     assert "</svg>Refused</span>" in out["chip"], "A status is an icon and a word"
     assert "</svg>Would have been stopped</span>" in out["observed"]

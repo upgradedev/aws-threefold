@@ -96,8 +96,8 @@ def test_the_runbook_states_the_inline_limit_and_no_size_that_goes_stale() -> No
 
     # The only size in the runbook is the limit itself. A size read off a file
     # is wrong the next time that file is edited, which is how this broke. It is
-    # matched however it is spelled — grouped or not, in bytes, kilobytes or
-    # kibibytes — so the guard cannot be walked around by writing "48 KiB".
+    # matched however it is spelled - grouped or not, in bytes, kilobytes or
+    # kibibytes - so the guard cannot be walked around by writing "48 KiB".
     counts = set(re.findall(SIZE, runbook))
     assert counts == {"51,200 bytes"}, f"The runbook records sizes that go stale: {sorted(counts - {'51,200 bytes'})}"
 
