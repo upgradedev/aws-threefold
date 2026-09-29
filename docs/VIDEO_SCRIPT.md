@@ -26,7 +26,7 @@
   > "One hook file sits in front of Claude Code, Codex, Antigravity and Muse. It
   > refuses a credential on the machine and sends the rest to AWS.
   > Deterministic gates decide: layering rules, credentials, writes that
-  > switch the hooks off, repeating calls, a spend ceiling. Amazon Bedrock
+  > switch the hooks off, repeating calls, a spend ceiling on declared tokens. Amazon Bedrock
   > never decides. It explains a refusal to a person, and every response says
   > which one you are reading."
 

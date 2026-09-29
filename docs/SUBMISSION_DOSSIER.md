@@ -64,7 +64,11 @@ so the rollout had to show what a rule would stop before it stops anything.
    (redirections, heredocs, `sed -i`, `cp`, `git apply` and more); repeating
    cycles up to the policy's history window (six by default), byte-exact and,
    two repeats later, over normalized call shapes; a spend ceiling on the
-   tokens the caller declares, priced per model.
+   tokens the caller declares, priced per model. Declared tokens only: a hook
+   declares none, so hook calls are priced at $0.00 and the ceiling cannot
+   meter a model's inference spend — the 2026-09-29 live row records an org
+   spend limit the hook never saw. Threefold enforces tool and file boundary
+   safety; LLM token-stream metering stays with the model providers.
 3. **Rolls out in two stages.** Observe, review, readiness per rule (Ready,
    Quiet, Needs review, Noisy), Promote with the chosen rules, Demote in one
    click. Ready rests on labels alone: a rule is Ready when calls it flagged
@@ -201,13 +205,15 @@ so the rollout had to show what a rule would stop before it stops anything.
   `scripts/daily_live_agent.py` gives Claude Code or Codex, alternating by
   date, one of the benchmark's Acme tasks in an `Acme-Live-*` project that
   starts in Enforce, and the overview counts its calls as a source of their
-  own. A scheduled task runs it daily from the owner's machine. Three runs as
-  of 2026-09-28: Codex on 2026-09-26, 8 calls, one refused (falsely, challenge
+  own. A scheduled task runs it daily from the owner's machine. Four rows as
+  of 2026-09-29: Codex on 2026-09-26, 8 calls, one refused (falsely, challenge
   5); Claude Code on 2026-09-27, 4 calls, none refused; Codex on 2026-09-28, 5
-  calls, none refused; the overview's live source held those 17 calls in 2
-  projects [PRIMARY, 2026-09-28: `GET /api/overview`]. In all runs no
-  violation landed and the acceptance tests passed, by their rows in
-  `benchmark/results/live/`.
+  calls, none refused; Claude Code on 2026-09-29 never started, cut short by
+  the org's monthly spend limit with 0 calls. The overview's live source held
+  those 17 calls in 2 projects [PRIMARY, 2026-09-28: `GET /api/overview`].
+  Where an agent ran, no violation landed and the acceptance tests passed, by
+  their rows in `benchmark/results/live/`; the fourth row records the spend
+  limit instead of a run.
 - This repository's pull requests cannot merge with a firing rule: the judge
   is a required check on `main`, proven red-to-green on PR #6.
 - Threefold was measured against the alternative rather than asserted over it.

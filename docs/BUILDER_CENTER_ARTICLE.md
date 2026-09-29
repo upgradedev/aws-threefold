@@ -52,7 +52,8 @@ So the gates are standard-library Python:
   `gh run view` is noted and never refused, and a hook's loop refuses the
   repeating call without halting the developer's session.
 - **Spend**: a ceiling on the tokens a caller declares, which bounds honest
-  overruns rather than an adversary.
+  overruns rather than an adversary. A hook declares none, so hook calls cost
+  $0.00 and inference spend stays with the model providers.
 
 Amazon Bedrock has two jobs, both after the fact. When a person is reading a
 page, Claude Haiku 4.5, through the `eu.` cross-region inference profile and
@@ -234,10 +235,11 @@ and the function runs at 1,024 MB with a reserved concurrency of 25
   `scripts/daily_live_agent.py` gives Claude Code or Codex, alternating by
   date, one of the benchmark's tasks in an `Acme-Live-*` project on the public
   stack, which starts in Enforce. It runs daily from a scheduled task on the
-  owner's machine **[STATE-FILE]**. It had run three times by 2026-09-28:
-  Codex on 2026-09-26, 8 calls, Claude Code on 2026-09-27, 4 calls, and Codex
-  again on 2026-09-28, 5 calls **[PRIMARY, 2026-09-28: `GET /api/overview`,
-  the live source at 17 calls in 3 runs]**. In all three runs no violation
+  owner's machine **[STATE-FILE]**. It had four rows by 2026-09-29: Codex on
+  2026-09-26, 8 calls, Claude Code on 2026-09-27, 4 calls, Codex again on
+  2026-09-28, 5 calls, and Claude Code on 2026-09-29 never started, cut short
+  by the org's monthly spend limit **[PRIMARY, 2026-09-28: `GET /api/overview`,
+  the live source at 17 calls in 3 runs]**. Where an agent ran, no violation
   landed and the acceptance tests passed, by their rows in
   `benchmark/results/live/`.
   Codex's one refusal was false: a read ending in
@@ -245,7 +247,8 @@ and the function runs at 1,024 MB with a reserved concurrency of 25
   was deployed the next day, and looking for a way around it closed an older
   hole: `bash -c "echo ... > src/domain/\$f"` had been approved
   **[STATE-FILE]**.
-  Three runs are not a rate; they show the path working with real agents.
+  Four rows, three with an agent that ran, are not a rate; they show the path
+  working with real agents.
 - **The certificate** Threefold issues covers the session's own stored
   verdicts and carries a KMS signature where the stack holds a signing key.
   The merge is judged separately: every pull request's diff goes through the
