@@ -550,7 +550,7 @@ Then open <http://localhost:8001/> or <http://localhost:8001/dashboard.html>.
 
 | File | What it shows |
 |---|---|
-| [`docs/evidence/PROBES_2026-09-28-7-edge.md`](docs/evidence/PROBES_2026-09-28-7-edge.md), [`docs/evidence/PROBES_2026-09-28-7.md`](docs/evidence/PROBES_2026-09-28-7.md) | `scripts/probe_live.py` against the site and against the origin URL on 2026-09-28: 117 PASS, 0 FAIL, 3 SKIP each, with every check's evidence line. The earlier runs sit beside them, the first on 2026-09-22 against the origin: 113 PASS, 0 FAIL, 3 SKIP |
+| [`docs/evidence/PROBES_2026-09-29.md`](docs/evidence/PROBES_2026-09-29.md), [`docs/evidence/PROBES_2026-09-29-17b59ee4.md`](docs/evidence/PROBES_2026-09-29-17b59ee4.md) | `scripts/probe_live.py` against the site and against the origin URL on 2026-09-29: 117 PASS, 0 FAIL, 3 SKIP each, with every check's evidence line. The earlier runs sit beside them, the first on 2026-09-22 against the origin: 113 PASS, 0 FAIL, 3 SKIP |
 | [`docs/evidence/ENFORCEMENT_2026-09-21.md`](docs/evidence/ENFORCEMENT_2026-09-21.md) | Whether a deny stops the write, per agent, checked on the file system |
 | [`docs/evidence/ENFORCEMENT_2026-09-23.md`](docs/evidence/ENFORCEMENT_2026-09-23.md) | The same question for Codex CLI 0.155.0, over its patch tool, in one run |
 | [`docs/evidence/ENFORCEMENT_2026-09-28-MUSE.md`](docs/evidence/ENFORCEMENT_2026-09-28-MUSE.md) | The same question for Muse 1.4.0, over `write_file`, `edit_file` and the shell; the MSP-approval route measured dead |
