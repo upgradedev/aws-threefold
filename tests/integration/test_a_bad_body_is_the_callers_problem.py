@@ -107,7 +107,10 @@ def test_invalid_json_is_a_400_that_names_the_body() -> None:
     assert problem["invalid_params"][0]["name"] == "body"
 
 
-@pytest.mark.parametrize("evaluations", ['["x"]', '"verdict"', "42", "[{}]", '[{"rule_evaluations": {"X": "false"}}]'])
+EVALUATIONS_CASES = ['["x"]', '"verdict"', "42", "[{}]", '[{"rule_evaluations": {"X": "false"}}]']
+
+
+@pytest.mark.parametrize("evaluations", EVALUATIONS_CASES)
 def test_a_supplied_evaluations_field_is_ignored_not_read(evaluations: str) -> None:
     """The certificate covers the session's stored verdicts, whatever the body claims.
 
@@ -115,7 +118,10 @@ def test_a_supplied_evaluations_field_is_ignored_not_read(evaluations: str) -> N
     session still gets its certificate, and an ungoverned one is still refused
     for having no recorded verdicts rather than for the field's shape.
     """
-    session_id = f"bodies-ignored-{abs(hash(evaluations)) % 100000}"
+    # The session is the case's index, not a hash of its body: hash() is salted
+    # per process, so two cases shared a session under some seeds and the
+    # second one counted two stored verdicts instead of one.
+    session_id = f"bodies-ignored-{EVALUATIONS_CASES.index(evaluations)}"
     status, _, _ = _post(
         "/evaluate-tool-call",
         json.dumps({"session_id": session_id, "project_name": "Acme-Bodies", "tool_name": "view_file"}),

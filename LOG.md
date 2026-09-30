@@ -324,3 +324,6 @@
 ## 2026-09-30 -- Judgment fixes deployed and probed
 - Regionals redeployed with the spec-signing sentence and the connect merge-gate section (threefold-prod + threefold-dogfood UPDATE_COMPLETE, dogfood PublicReads=false kept); 12 pages published with invalidation. CI + CodeQL success on the deployed head e8ecd2c before the deploy.
 - Probes: edge and API origin 117/0/3 (docs/evidence/PROBES_2026-09-30-96808134.md, the edge, and docs/evidence/PROBES_2026-09-30.md, the origin), private 101/0/19 read-only with the operator key, its evidence outside the repo. Verified live: the served spec carries the KMS sentence and no longer says nothing signs them; connect.html carries the merge-gate section naming scripts/judge_pr.py.
+
+## 2026-09-30 -- A seed-dependent test flaked in CI and is pinned
+- CI failed on the evidence commit with one integration failure: test_a_supplied_evaluations_field_is_ignored_not_read counted 2 stored verdicts instead of 1. The test named its sessions bodies-ignored-{hash(body) % 100000}, and hash() is salted per process, so two of the five cases shared a session under the seed CI happened to roll. Reproduced locally (PYTHONHASHSEED=3148 fails the same case), then named the sessions by the case index instead. Full integration layer green under that seed, 855 passed, 4 skipped.
