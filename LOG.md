@@ -327,3 +327,7 @@
 
 ## 2026-09-30 -- A seed-dependent test flaked in CI and is pinned
 - CI failed on the evidence commit with one integration failure: test_a_supplied_evaluations_field_is_ignored_not_read counted 2 stored verdicts instead of 1. The test named its sessions bodies-ignored-{hash(body) % 100000}, and hash() is salted per process, so two of the five cases shared a session under the seed CI happened to roll. Reproduced locally (PYTHONHASHSEED=3148 fails the same case), then named the sessions by the case index instead. Full integration layer green under that seed, 855 passed, 4 skipped.
+
+## 2026-09-30 -- Owner handoff written, article freshened
+- New docs/OWNER_HANDOFF.md: three copy-paste packages for the only work left that needs the owner logins (Builder Center project, article, video), with the hackathon URL verified 200, the deadline, and an after-all-three checklist. Pre-record facts verified live so the owner does not recheck them: sandbox seeds the python-domain-stays-pure false alarm, proof.json serves six series, all shoot URLs answer 200.
+- BUILDER_CENTER_ARTICLE.md probe paragraph moved to the 2026-09-30 judgment-fix deploy (117/0/3 edge+origin, new evidence files); the five live-agent rows and 26 calls were already current.

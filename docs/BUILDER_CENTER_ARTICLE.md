@@ -194,11 +194,11 @@ and the function runs at 1,024 MB with a reserved concurrency of 25
   command too, each file unchanged on the disk
   (`docs/evidence/ENFORCEMENT_2026-09-28-MUSE.md`).
 - **Does the live stack do what the documents say?** A probe script checks the
-  public stack claim by claim. On 2026-09-29, after the UAT-fix deploy, it
+  public stack claim by claim. On 2026-09-30, after the judgment-fix deploy, it
   passed 117 checks, 0 FAIL, 3 SKIP through the CloudFront URL and the same at
-  the API Gateway URL **[PRIMARY, 2026-09-29]**,
-  `docs/evidence/PROBES_2026-09-29.md` and
-  `docs/evidence/PROBES_2026-09-29-17b59ee4.md`.
+  the API Gateway URL **[PRIMARY, 2026-09-30]**,
+  `docs/evidence/PROBES_2026-09-30-96808134.md` and
+  `docs/evidence/PROBES_2026-09-30.md`.
 - **Does Threefold change what an agent does?** Measured on 2026-09-22
   **[PRIMARY]**. Claude Code ran headless on six synthetic tasks, each tempting
   a governed violation, and on three *pressure* variants whose prompt asks for
