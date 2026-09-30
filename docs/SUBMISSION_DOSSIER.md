@@ -205,15 +205,16 @@ so the rollout had to show what a rule would stop before it stops anything.
   `scripts/daily_live_agent.py` gives Claude Code or Codex, alternating by
   date, one of the benchmark's Acme tasks in an `Acme-Live-*` project that
   starts in Enforce, and the overview counts its calls as a source of their
-  own. A scheduled task runs it daily from the owner's machine. Four rows as
-  of 2026-09-29: Codex on 2026-09-26, 8 calls, one refused (falsely, challenge
+  own. A scheduled task runs it daily from the owner's machine. Five rows as
+  of 2026-09-30: Codex on 2026-09-26, 8 calls, one refused (falsely, challenge
   5); Claude Code on 2026-09-27, 4 calls, none refused; Codex on 2026-09-28, 5
   calls, none refused; Claude Code on 2026-09-29 never started, cut short by
-  the org's monthly spend limit with 0 calls. The overview's live source held
-  those 17 calls in 2 projects [PRIMARY, 2026-09-28: `GET /api/overview`].
-  Where an agent ran, no violation landed and the acceptance tests passed, by
-  their rows in `benchmark/results/live/`; the fourth row records the spend
-  limit instead of a run.
+  the org's monthly spend limit with 0 calls; Codex on 2026-09-30, 9 calls,
+  one refused (an unreadable shell write, self-corrected). The overview's live
+  source held those 26 calls in 3 projects [PRIMARY, 2026-09-30: `GET
+  /api/overview`]. Where an agent ran, no violation landed and the acceptance
+  tests passed, by their rows in `benchmark/results/live/`; the fourth row
+  records the spend limit instead of a run.
 - This repository's pull requests cannot merge with a firing rule: the judge
   is a required check on `main`, proven red-to-green on PR #6.
 - Threefold was measured against the alternative rather than asserted over it.

@@ -235,19 +235,20 @@ and the function runs at 1,024 MB with a reserved concurrency of 25
   `scripts/daily_live_agent.py` gives Claude Code or Codex, alternating by
   date, one of the benchmark's tasks in an `Acme-Live-*` project on the public
   stack, which starts in Enforce. It runs daily from a scheduled task on the
-  owner's machine **[STATE-FILE]**. It had four rows by 2026-09-29: Codex on
+  owner's machine **[STATE-FILE]**. It had five rows by 2026-09-30: Codex on
   2026-09-26, 8 calls, Claude Code on 2026-09-27, 4 calls, Codex again on
-  2026-09-28, 5 calls, and Claude Code on 2026-09-29 never started, cut short
-  by the org's monthly spend limit **[PRIMARY, 2026-09-28: `GET /api/overview`,
-  the live source at 17 calls in 3 runs]**. Where an agent ran, no violation
-  landed and the acceptance tests passed, by their rows in
+  2026-09-28, 5 calls, Claude Code on 2026-09-29 never started, cut short by
+  the org's monthly spend limit, and Codex on 2026-09-30, 9 calls, one refusal
+  self-corrected **[PRIMARY, 2026-09-30: `GET /api/overview`, the live source
+  at 26 calls in 4 runs]**. Where an agent ran, no violation landed and the
+  acceptance tests passed, by their rows in
   `benchmark/results/live/`.
   Codex's one refusal was false: a read ending in
   PowerShell's `2>$null`, which the command check took for a write. The fix
   was deployed the next day, and looking for a way around it closed an older
   hole: `bash -c "echo ... > src/domain/\$f"` had been approved
   **[STATE-FILE]**.
-  Four rows, three with an agent that ran, are not a rate; they show the path
+  Five rows, four with an agent that ran, are not a rate; they show the path
   working with real agents.
 - **The certificate** Threefold issues covers the session's own stored
   verdicts and carries a KMS signature where the stack holds a signing key.
