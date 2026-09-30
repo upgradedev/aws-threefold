@@ -530,6 +530,18 @@
       </div>
     </div>
 
+    <!-- THE MERGE GATE. Hooks are voluntary on laptops; the merge is where
+         refusal is enforced. This transcribes docs/RUNBOOK.md section 12. -->
+    <section id="merge-gate" class="tf-card tf-panel" aria-labelledby="merge-gate-title">
+      <div class="tf-panel-head">
+        <div>
+          <h2 id="merge-gate-title" class="tf-panel-title"><span data-tf-icon="git" data-tf-size="18"></span>If a repository installs nothing</h2>
+          <p class="tf-panel-sub">Every pull request is judged with nothing installed on any machine.</p>
+        </div>
+      </div>
+      <p>Hooks ask before each write, but no hook can compel an engineer to install it. The merge can: <span class="font-mono">scripts/judge_pr.py</span>, run by <span class="font-mono">.github/workflows/pr-judge.yml</span> as a required check, sends every added or changed file through the same gates and fails the merge on a refusal or a fired rule. Anything it cannot judge fails the merge too: the gate fails closed. This repository's own pull request <a class="tf-link" href="https://github.com/upgradedev/aws-threefold/pull/6">PR #6</a> proved it, red on a planted credential, then green.</p>
+    </section>
+
     <!-- WHAT LEAVES YOUR MACHINE. This transcribes the contract in STATE.md and
          stops there. A reassurance the hook cannot back is worse than none, so
          nothing is added that the contract does not fix. -->

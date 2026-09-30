@@ -3,7 +3,7 @@
   "info": {
     "title": "Threefold Governance Sidecar API",
     "version": "1.0.0",
-    "description": "Autonomous coding agent governance sidecar and cost circuit-breaker. Deterministic code decides: it scans arguments for credential shapes, refuses writes that cross a Clean Architecture boundary, halts a session that repeats a cycle of tool calls, and caps projected spend. Amazon Bedrock (Claude Haiku 4.5) only phrases the verdict, and every response says which of the two produced the sentence it carries, in explanation_source. Certificates are SHA-256 fingerprints over a session's verdicts: they detect corruption, not an adversary, because nothing signs them.",
+    "description": "Autonomous coding agent governance sidecar and cost circuit-breaker. Deterministic code decides: it scans arguments for credential shapes, refuses writes that cross a Clean Architecture boundary, halts a session that repeats a cycle of tool calls, and caps projected spend. Amazon Bedrock (Claude Haiku 4.5) only phrases the verdict, and every response says which of the two produced the sentence it carries, in explanation_source. Certificates are SHA-256 fingerprints over a session's verdicts; where the stack holds a signing key, a KMS signature covers the same bytes.",
     "contact": {
       "name": "Threefold",
       "url": "https://d1og72wpk4aqig.cloudfront.net/"

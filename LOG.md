@@ -316,3 +316,7 @@
 
 ## 2026-09-29 -- UAT fixes deployed and probed
 - Regionals redeployed with the export-button fix and the cumulative session count (threefold-prod + threefold-dogfood UPDATE_COMPLETE, dogfood PublicReads=false kept); 12 pages published with /* invalidation. Probes: edge and API origin 117/0/3 (docs/evidence/PROBES_2026-09-29.md, docs/evidence/PROBES_2026-09-29-17b59ee4.md). Verified live: the export button ships disabled with its reason, GET /sessions/{id} answers total_calls. The private stack was not probed: same deploy, but its operator key lives outside the repo.
+
+## 2026-09-30 -- Judgment fixes: the spec stops lying, the merge gate gets a page
+- Live judgment caught the served spec saying certificates are unsigned because nothing signs them. Prod holds a KMS signing key and the walkthrough certificate came back signed, so the sentence was false. openapi.json now says a KMS signature covers the same bytes where the stack holds a key; the YAML twin regenerated; a spec test pins it.
+- Same judgment found the merge gate invisible in the product. connect.html now carries a merge-gate section after the install story (judge, required check, fail-closed, PR #6 link), in the pages own components; static tests pin it and its placement.

@@ -106,6 +106,13 @@ def test_the_spec_names_the_model_the_template_deploys() -> None:
     assert f"{major}.{minor}" in description, f"The spec does not name version {major}.{minor}"
 
 
+def test_the_spec_says_where_a_signature_comes_from() -> None:
+    """The document once said nothing signs them; the stacks hold KMS signing keys."""
+    description = json.loads(_get("/openapi.json")["body"])["info"]["description"]
+    assert "nothing signs them" not in description
+    assert "KMS signature covers the same bytes" in description
+
+
 def test_the_yaml_twin_says_what_the_served_document_says() -> None:
     """The twins disagreed within one change while both were kept by hand."""
     yaml = pytest.importorskip("yaml")
