@@ -320,3 +320,7 @@
 ## 2026-09-30 -- Judgment fixes: the spec stops lying, the merge gate gets a page
 - Live judgment caught the served spec saying certificates are unsigned because nothing signs them. Prod holds a KMS signing key and the walkthrough certificate came back signed, so the sentence was false. openapi.json now says a KMS signature covers the same bytes where the stack holds a key; the YAML twin regenerated; a spec test pins it.
 - Same judgment found the merge gate invisible in the product. connect.html now carries a merge-gate section after the install story (judge, required check, fail-closed, PR #6 link), in the pages own components; static tests pin it and its placement.
+
+## 2026-09-30 -- Judgment fixes deployed and probed
+- Regionals redeployed with the spec-signing sentence and the connect merge-gate section (threefold-prod + threefold-dogfood UPDATE_COMPLETE, dogfood PublicReads=false kept); 12 pages published with invalidation. CI + CodeQL success on the deployed head e8ecd2c before the deploy.
+- Probes: edge and API origin 117/0/3 (docs/evidence/PROBES_2026-09-30-96808134.md, the edge, and docs/evidence/PROBES_2026-09-30.md, the origin), private 101/0/19 read-only with the operator key, its evidence outside the repo. Verified live: the served spec carries the KMS sentence and no longer says nothing signs them; connect.html carries the merge-gate section naming scripts/judge_pr.py.

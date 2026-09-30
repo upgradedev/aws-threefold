@@ -8,7 +8,7 @@ is tagged [STATE-FILE]. Everything else describes the code on `main`.
 **Application name:** Threefold
 **Category:** `#workplace-efficiency` · **Lane:** `#community`
 **Tagline:** Threefold refuses a coding agent's edit the moment it is made, not after the commit, so your architecture does not rot while you sleep.
-**Live application:** <https://d1og72wpk4aqig.cloudfront.net/> (CloudFront edge), origin <https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/> (API Gateway). Both answered anonymously with 200 on 2026-09-29 (`docs/evidence/PROBES_2026-09-29.md`, the edge, and `docs/evidence/PROBES_2026-09-29-17b59ee4.md`, the origin) [PRIMARY, 2026-09-29].
+**Live application:** <https://d1og72wpk4aqig.cloudfront.net/> (CloudFront edge), origin <https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/> (API Gateway). Both answered anonymously with 200 on 2026-09-30 (`docs/evidence/PROBES_2026-09-30-96808134.md`, the edge, and `docs/evidence/PROBES_2026-09-30.md`, the origin) [PRIMARY, 2026-09-30].
 **Try it in about two minutes, no account:** <https://d1og72wpk4aqig.cloudfront.net/dashboard.html#/try>, the two-stage rollout on a sandbox project of your own. The first screen's loop halt, <https://d1og72wpk4aqig.cloudfront.net/>, is one click and well under a minute.
 
 ---
@@ -145,9 +145,9 @@ so the rollout had to show what a rule would stop before it stops anything.
 - **Infrastructure as code:** two CloudFormation templates, `deploy/template.yml`
   (SAM transform) and `deploy/edge.yml`.
 - **Checking it live:** `scripts/probe_live.py`: 117 PASS, 0 FAIL, 3 SKIP
-  through the edge and the same at the API origin on 2026-09-29, after the
-  UAT-fix deploy (`docs/evidence/PROBES_2026-09-29.md`,
-  `docs/evidence/PROBES_2026-09-29-17b59ee4.md`) [PRIMARY, 2026-09-29].
+  through the edge and the same at the API origin on 2026-09-30, after the
+  judgment-fix deploy (`docs/evidence/PROBES_2026-09-30-96808134.md`,
+  `docs/evidence/PROBES_2026-09-30.md`) [PRIMARY, 2026-09-30].
 
 ## 5. Challenges we ran into
 
