@@ -14,10 +14,8 @@ and was not re-measured for this article.
 ## The moment that matters
 
 A coding agent asked to archive orders to S3 can take the shortest path:
-`import boto3` in the domain entity, because that makes the test pass. Every
-architecture check most teams run (import linters, architecture tests) would
-flag it, in CI, after the agent has moved on to the next file and built on top
-of the mistake.
+`import boto3` in the domain entity, because that makes the test pass. Architecture checks would flag it in CI, after the agent has built on the
+mistake.
 
 There is exactly one moment when that edit can still be refused cheaply: when
 the agent asks to make it. Claude Code, Codex, Antigravity and Muse all let a
@@ -26,101 +24,45 @@ small service on AWS that uses that moment.
 
 ## Deterministic code decides, Bedrock explains
 
-The first design rule was that no model sits between an agent and its verdict.
-A verdict has to be the same for the same call, fast enough to sit in front of
-every edit, free to repeat, and immune to what the call itself says. A model
-is none of those, and it would be reading text an agent wrote, which is where
-a prompt injection would live.
-
-So the gates are standard-library Python:
-
-- **Layering rules**, per project, that an architect writes as three things:
-  which paths a rule covers, what they may not depend on, and what is allowed
-  anyway. Imports are read from each file's own statements in Python, Java, C#
-  and TypeScript, so `from boto3 import client` is caught as surely as
-  `import boto3`, and a commented-out import is not.
-- **Credentials**, ten shapes at any depth of the arguments.
-- **Protected paths**: the agents' own hook settings, `.git/hooks`,
-  `git commit --no-verify`, and every other way to switch the hooks off.
-- **Every shell route to a write.** Refuse an agent's `Write` and it may reach
-  for `cat > file <<'EOF'`. The service reads a command for the writes it makes
-  (redirections, heredocs, `sed -i`, `cp`, `git apply` and more) and judges
-  readable content exactly like a `Write`.
-- **Loops**: any repeating cycle up to the policy's history window, six calls
-  by default, of byte-identical calls and, two repeats later, of calls with
-  the same shape and different values. A repeated `git status` or
-  `gh run view` is noted and never refused, and a hook's loop refuses the
-  repeating call without halting the developer's session.
-- **Spend**: a ceiling on the tokens a caller declares, which bounds honest
-  overruns rather than an adversary. A hook declares none, so hook calls cost
-  $0.00 and inference spend stays with the model providers.
-
-Amazon Bedrock has two jobs, both after the fact. When a person is reading a
-page, Claude Haiku 4.5, through the `eu.` cross-region inference profile and
-the Converse API, phrases a refusal in a sentence; the prompt tells it the gate
-has already decided and never to contradict it, and every response carries
-`explanation_source` so a reader knows whether a model or the code wrote the
-sentence. A hook always sends `explain: false`, so a real agent's verdict never
-waits on a model. And on the rules page, Bedrock drafts a layering rule from an
-architect's sentence, which is then treated as untrusted: parsed, validated like
-a save, set to observe, and tried on example files. Nothing is saved without an
-operator.
+No model sits between an agent and its verdict: a verdict must repeat exactly,
+run in milliseconds, and ignore what the call itself says. So the gates are
+standard-library Python: per-project layering rules over real imports (Python,
+Java, C#, TypeScript); ten credential shapes at any depth; protected paths
+covering every way to switch the hooks off; every shell route to a write
+judged like a `Write`; loops over repeating calls (reads like `git status`
+are noted, never refused); and a spend ceiling. Amazon Bedrock works only
+after the fact: Haiku 4.5 phrases refusals for people (`explanation_source`
+says who wrote each sentence) and drafts rules that are then validated and
+tried on examples. Hooks send `explain: false`, so verdicts never wait on a
+model, and nothing is saved without an operator.
 
 ## A refusal that says what to do instead
 
-A deny that only says no sends the agent back to guess, and its next guess
-can be the same call spelled differently. So a refusal carries a fix when one
-fits: the file rewritten through a port and an adapter, or an environment
-lookup in place of a literal credential. A fix that would itself be refused is
-worse than none, so every write it proposes is run back through the same gates
-with the same rules before it is offered, and the response says whether all of
-them passed. The hook appends the fix's one-line summary to the deny reason.
-No model writes the fix.
+A refusal carries a fix when one fits: the file rewritten through a port and
+adapter, or an environment lookup for a credential. Every proposed write runs
+back through the same gates first. No model writes the fix.
 
 ## Rolling a rule out without breaking every team at once
 
-A rule switched on everywhere at once is a rule that gets uninstalled on its
-first false alarm. So by default a connected project starts in **Observe**:
-calls are judged and recorded, and no rule refuses anything. A credential is
-still refused by the hook on the developer's own machine, and so is a request the
-service cannot take at all, such as a body over 1 MB, since the hook reads any
-4xx answer other than 429 as a refusal. The dashboard shows what each rule
-*would* have refused. An operator marks each of those correct or a false alarm,
-and each rule reads its state from the labels alone: **Ready** when calls it
-flagged were marked correct and none a false alarm, **Quiet** when no label
-says anything about it, **Noisy** after a false alarm. A refusal nobody
-labelled, such as one of the demo page's, makes no rule Ready. **Promote**
-moves the project to Enforce with the rules that earned it, and the others
-keep observing. **Demote** is one click. A stack can also name
-projects that start in Enforce (`EnforceProjectPattern`); the public one does
-for the projects a real agent works in, because no operator is there to
-promote them.
-
-On the public stack a visitor can walk both stages on a sandbox project of
-their own, in about two minutes by the walkthrough's own count. The stack
-seeds the sandbox with a dozen synthetic hook calls from three agents through
-the real evaluator, and its answer names the one a reviewer should reject: a
-test under `tests/domain/`, flagged because the Python rule's path pattern
-covers any folder named `domain`. The page asks the visitor to spot it and
-says whether they did, checks only the Ready rules for promotion, and shows
-the call it will send again before sending it. That call is refused only
-because the project now enforces.
-
-Connecting a repository is one command, copied from the dashboard:
+A rule switched on everywhere at once gets uninstalled on its first false
+alarm. So a connected project starts in **Observe**: calls are judged and
+recorded, and no rule refuses anything. Still refused there: a credential, anything switching the hooks off (both on
+the developer's machine), and any request the service cannot take. The dashboard shows what each rule
+*would* have refused; the operator marks each correct or a false alarm, and
+each rule reads its state from the labels alone: **Ready**, **Quiet**,
+**Noisy**. **Promote** moves the project to Enforce with the rules that earned
+it; **Demote** is one click. On the public stack a visitor walks both stages
+on a sandbox project of their own in about two minutes, seeded with synthetic
+calls through the real evaluator, including one the page asks them to spot and
+reject. Connecting a repository is one command:
 
 ```bash
 curl -fsSL https://d1og72wpk4aqig.cloudfront.net/install.py -o threefold.py && python3 threefold.py connect --project Acme-Billing
 ```
 
-The stack serves `install.py` with its own address written in. It downloads the
-hook and the pre-commit check, keeps a file only when its SHA-256 matches the
-stack's manifest, registers the hook for the agents it finds, lists everything
-it wrote in `.git/info/exclude`, sends one harmless call, and opens the project
-page. It installs in `managed` mode, so the project's stage on the service
-decides every call, and moving to Enforce is one step on the dashboard, with
-nothing to install again. An operator of a private stack signs in with
-`threefold.py open`, which trades the key in a local file for a single-use
-link, so no key is ever pasted into a browser.
+The stack serves `install.py` with its own address in; it verifies files
+against the SHA-256 manifest, registers the hook, and opens the project page
+in `managed` mode.
 
 ## What runs on AWS
 
@@ -136,77 +78,35 @@ browser ─────────────────────►├─
 EventBridge Scheduler (public stack only) ─► the same Lambda, every 15 minutes
 ```
 
-Checked on the live stacks **[PRIMARY, 2026-09-22]**: the web ACL is attached
-to the deployed distribution (`aws cloudfront list-distributions`), and
-point-in-time recovery is `ENABLED` on the table
-(`aws dynamodb describe-continuous-backups`). Rechecked **[PRIMARY,
-2026-09-27]**, after that day's deploy (`docs/ARCHITECTURE.md`, section 1):
-the eleven alarms exist and were all `OK` then, and a recheck on 2026-09-28
-found none firing **[PRIMARY, 2026-09-28]** (`aws cloudwatch describe-alarms`),
-and the function runs at 1,024 MB with a reserved concurrency of 25
-(`aws lambda get-function-configuration`, `get-function-concurrency`).
-
-- **One Lambda function** answers every route, so the page's "try it" and a
-  hook's verdict run the same code. The price: page reads and verdicts share one
-  reserved concurrency of 25, and nothing keeps them apart. API Gateway's
-  throttle (100 requests a second, burst 200) applies to each route
-  separately, and the edge limits each address; both bound a flood, and
-  neither stops dashboard loads from crowding out verdicts.
-- **One DynamoDB table** holds sessions, the decision ledger by day, daily
-  rollups written with `ADD` so charts stay exact however busy the ledger is,
-  rules, project stages and sign-in records (stored only as hashes). All of it
-  is read by key except the sessions listing, a bounded scan; TTLs expire it and
-  point-in-time recovery backs it up.
-- **CloudFront** serves the pages from a private bucket and sends the API paths
-  to the function with a secret origin header, so the function believes the
-  viewer's address and host only from the edge. That fixed two real problems:
-  every viewer of one edge server shared one rate-limit bucket, and an
-  installer fetched from the edge pointed its hook past the firewall. Fetched
-  from the edge, `install.py` now names the edge; fetched from the API URL, it
-  names the API URL **[PRIMARY, 2026-09-22]**. The secret is not
-  authentication; the API's own URL stays public. The template also answers a
-  page address that has no page with the product's own 404 page and status
-  404, through two CloudFront Functions on the pages' behavior alone: a
-  distribution-wide error page would have replaced the API's own problem
-  documents as well.
-- **A synthetic fleet gives the public dashboard something true to show.** On
-  the public stack only, an Amazon EventBridge Scheduler schedule invokes the
-  function every 15 minutes, and each tick sends a bounded batch of synthetic
-  calls from six `Acme-*` projects through the real gates, with no model
-  call. Nothing is backdated, and the overview and the first screen count
-  those calls apart and call them synthetic.
-- **The hook fails open.** If the service cannot answer, the agent's own
-  permissions decide, because a governance outage that stopped every developer
-  would end the rollout. `THREEFOLD_FAIL_CLOSED=1` flips that.
+**One Lambda** answers every route, so demos and verdicts run the same code;
+the price is one shared reserved concurrency of 25. **One DynamoDB table**
+holds sessions, the ledger, rollups, rules and hashed sign-ins, read by key
+except one bounded scan, with TTLs and recovery **[PRIMARY, 2026-09-22]**.
+**CloudFront** serves pages from a private bucket and sends API paths on with
+a secret origin header; WAF attached **[PRIMARY, 2026-09-22]**, eleven alarms
+`OK`, none firing **[PRIMARY, 2026-09-28]**. A **synthetic fleet** ticks every
+15 minutes, public stack only, through the real gates with no model call,
+counted apart and labelled synthetic. The hook **fails open** unless
+`THREEFOLD_FAIL_CLOSED=1`, because a governance outage that stopped every
+developer would end the rollout.
 
 ## What was measured, and what was not
 
-- **Does a deny stop the write?** Measured per agent on the file system on
-  2026-09-21: in Claude Code 2.1.220 and the Antigravity desktop app the
-  refused file was not created (`docs/evidence/ENFORCEMENT_2026-09-21.md`).
-  Codex CLI 0.155.0 was measured on 2026-09-23, in one run and over its patch
-  tool only: the hook refused an `apply_patch` adding `import boto3` to a
-  governed domain file, and the file's SHA-256 was unchanged afterwards. Its
-  shell route is not measured **[STATE-FILE]**,
-  `docs/evidence/ENFORCEMENT_2026-09-23.md`. Muse 1.4.0 was measured on
-  2026-09-28: the hook refused a `write_file` and the refused file was not
-  created, and in a live session a deny stopped an `edit_file` and a shell
-  command too, each file unchanged on the disk
-  (`docs/evidence/ENFORCEMENT_2026-09-28-MUSE.md`).
+- **Does a deny stop the write?** Measured per agent on the file system:
+  Claude Code and Antigravity on 2026-09-21, Codex on 2026-09-23 over its
+  patch tool (shell route unmeasured **[STATE-FILE]**), Muse on 2026-09-28.
+  Each refused file was unchanged
+  (`docs/evidence/ENFORCEMENT_2026-09-*.md`).
 - **Does the live stack do what the documents say?** A probe script checks the
-  public stack claim by claim. On 2026-09-30, after the judgment-fix deploy, it
-  passed 117 checks, 0 FAIL, 3 SKIP through the CloudFront URL and the same at
-  the API Gateway URL **[PRIMARY, 2026-09-30]**,
-  `docs/evidence/PROBES_2026-09-30-96808134.md` and
-  `docs/evidence/PROBES_2026-09-30.md`.
-- **Does Threefold change what an agent does?** Measured on 2026-09-22
-  **[PRIMARY]**. Claude Code ran headless on six synthetic tasks, each tempting
-  a governed violation, and on three *pressure* variants whose prompt asks for
-  the forbidden shortcut outright, under three conditions: no guidance, the
-  same rules written into the repository's `CLAUDE.md` with nothing enforcing
-  them, and Threefold enforcing. A checker that does not import Threefold then
-  read what each run left behind, and the task's own tests were restored and
-  run. The two families are never pooled.
+  public stack claim by claim: on 2026-10-01, 117 PASS, 0 FAIL, 3 SKIP through
+  the CloudFront URL and the same at the API URL **[PRIMARY, 2026-10-01]**,
+  `docs/evidence/PROBES_2026-10-01-3da6ffb2.md` and
+  `docs/evidence/PROBES_2026-10-01.md`.
+- **Does Threefold change what an agent does?** On 2026-09-22 **[PRIMARY]**,
+  Claude Code ran headless on six tasks tempting a violation, plus three
+  *pressure* variants asking for the shortcut outright, under no guidance,
+  rules in `CLAUDE.md`, and Threefold enforcing, graded by an independent
+  checker. Families never pooled.
 
   | Tasks, model | Runs | Violation: no guidance | rules in `CLAUDE.md` | Threefold | Tests passed, Threefold |
   |---|---|---|---|---|---|
@@ -215,66 +115,36 @@ and the function runs at 1,024 MB with a reserved concurrency of 25
   | pressure, `claude-sonnet-5` | 27 | 67% (6/9) | 0% (0/9) | **0% (0/9)** | 67% (6/9) |
   | pressure, `claude-haiku-4-5` | 27 | 100% (9/9) | 56% (5/9) | **0% (0/9)** | 44% (4/9) |
 
-  What that says, without stretching it: the `CLAUDE.md` column follows the
-  model, not the task family. With `claude-sonnet-5`, writing the rules into
-  `CLAUDE.md` was enough on its own in both families, even where the prompt
-  asked for the shortcut. With `claude-haiku-4-5` it was enough in neither, and
-  the pressure prompt made it much worse - 17% against 56%. Threefold left no
-  violation in any of the four series, and the price shows in the last column:
-  under the pressure prompts the governed agent finished 10 of 18 runs and
-  otherwise stopped and reported the conflict rather than break a rule. Codex
-  CLI 0.155.0 ran the same tasks on 2026-09-23, with the rules in `AGENTS.md`
-  instead: 17% / 0% / 0% on the standard tasks and 100% / 11% / 0% under
-  pressure, so for Codex the rules held on the standard tasks and slipped
-  under pressure, and the governed agent finished 6 of 9 pressure runs
-  (`docs/evidence/BENCHMARK_2026-09-23-CODEX*.md`). The limits go with it: 18
-  or 9 runs a cell, two agents, tasks written by the people who built
-  Threefold: rates under temptation, not base rates
-  (`docs/evidence/BENCHMARK_2026-09-22*.md`).
-- **Does it hold for a real agent on the live stack?**
-  `scripts/daily_live_agent.py` gives Claude Code or Codex, alternating by
-  date, one of the benchmark's tasks in an `Acme-Live-*` project on the public
-  stack, which starts in Enforce. It runs daily from a scheduled task on the
-  owner's machine **[STATE-FILE]**. It had five rows by 2026-09-30: Codex on
-  2026-09-26, 8 calls, Claude Code on 2026-09-27, 4 calls, Codex again on
-  2026-09-28, 5 calls, Claude Code on 2026-09-29 never started, cut short by
-  the org's monthly spend limit, and Codex on 2026-09-30, 9 calls, one refusal
-  self-corrected **[PRIMARY, 2026-09-30: `GET /api/overview`, the live source
-  at 26 calls in 4 runs]**. Where an agent ran, no violation landed and the
-  acceptance tests passed, by their rows in
-  `benchmark/results/live/`.
-  Codex's one refusal was false: a read ending in
-  PowerShell's `2>$null`, which the command check took for a write. The fix
-  was deployed the next day, and looking for a way around it closed an older
-  hole: `bash -c "echo ... > src/domain/\$f"` had been approved
-  **[STATE-FILE]**.
-  Five rows, four with an agent that ran, are not a rate; they show the path
-  working with real agents.
-- **The certificate** Threefold issues covers the session's own stored
-  verdicts and carries a KMS signature where the stack holds a signing key.
-  The merge is judged separately: every pull request's diff goes through the
-  same gates, and a required check fails the merge when a rule fires - this
-  repository's own PR #6 proved it, red on a planted key, then green
-  **[STATE-FILE]**.
+  Written rules held everywhere for Sonnet, nowhere for Haiku. Threefold left
+  no violation in any series; under pressure the governed agent finished 10 of
+  18 runs and otherwise stopped and reported the conflict. Codex on 2026-09-23:
+  17% / 0% / 0% standard, 100% / 11% / 0% pressure. Limits: 18 or 9 runs a
+  cell, two agents, our own tasks
+  (`docs/evidence/BENCHMARK_2026-09-2*.md`).
+- **Does it hold live?** A daily script gives Claude Code or Codex one
+  benchmark task in an Enforce project **[STATE-FILE]**. Five rows by
+  2026-09-30 (one never started): where an agent ran, no violation landed
+  **[PRIMARY, 2026-09-30: 26 calls in 4 runs]**. Not a rate; the path working.
+- **The certificate** covers the session's own stored verdicts, KMS-signed
+  where the stack holds a key. The merge is judged separately: every pull
+  request's diff goes through the same gates as a required check, proven
+  red-to-green and merged on this repository's own PR #6 **[STATE-FILE]**.
 
 ## Takeaways
 
-1. **Put hard limits in deterministic code** and give the model the jobs it is
-   good at: explaining to a person, and proposing drafts a deterministic check
-   then validates.
-2. **Make every rule earn its enforcement.** Observe, label, promote, and demote
-   in one click.
-3. **Give the agent a fix, and check the fix with the same gate.**
-4. **Measure the enforcement per agent.** A hook's deny is a request, and
-   whether an agent honours it is an empirical question.
+1. **Put hard limits in deterministic code;** give the model explaining and
+   drafting, validated afterwards.
+2. **Make every rule earn its enforcement:** observe, label, promote, demote in
+   one click.
+3. **Give the agent a fix, checked by the same gate** - and measure enforcement
+   per agent, because a deny is a request the agent may or may not honour.
 
 ## Try it
 
-- The two-stage rollout on a sandbox project of your own, in about two
-  minutes: <https://d1og72wpk4aqig.cloudfront.net/dashboard.html#/try>
-- The demo, where the third identical call halts the session, one click and
-  well under a minute: <https://d1og72wpk4aqig.cloudfront.net/>
-- The operations dashboard, which names where its calls come from:
-  <https://d1og72wpk4aqig.cloudfront.net/dashboard.html#/overview>
-- The benchmark's six series, side by side, each citing the report made from
-  its own rows: <https://d1og72wpk4aqig.cloudfront.net/dashboard.html#/proof>
+- The two-stage rollout on your own sandbox project, about two minutes:
+  <https://d1og72wpk4aqig.cloudfront.net/dashboard.html#/try>
+- The demo, where the third identical call halts the session, under a minute:
+  <https://d1og72wpk4aqig.cloudfront.net/>
+- The operations dashboard: <https://d1og72wpk4aqig.cloudfront.net/dashboard.html#/overview>
+- The benchmark's six series, side by side:
+  <https://d1og72wpk4aqig.cloudfront.net/dashboard.html#/proof>

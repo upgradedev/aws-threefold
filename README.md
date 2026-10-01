@@ -15,6 +15,14 @@ Built for the AWS Zero to Shipped hackathon. **Category:** `#workplace-efficienc
 [![CI](https://github.com/upgradedev/aws-threefold/actions/workflows/ci.yml/badge.svg)](https://github.com/upgradedev/aws-threefold/actions/workflows/ci.yml)
 [![Still up](https://github.com/upgradedev/aws-threefold/actions/workflows/keepalive.yml/badge.svg)](https://github.com/upgradedev/aws-threefold/actions/workflows/keepalive.yml)
 
+**TL;DR:** a hook in front of your coding agent asks Threefold about each write
+or command before it runs; deterministic gates on AWS refuse architecture
+violations, credentials, disarms, loops and overspend in milliseconds. Projects
+start in Observe (nothing refused, everything recorded), you label what each
+rule would have refused, then promote to Enforce.
+
+![Threefold refusing a bad agent write before it was written](docs/screenshot-demo.png)
+
 Threefold sits in front of the tool calls a coding agent makes (Claude Code,
 Codex, Antigravity and Muse, through one hook file) and answers each write or
 command before it runs. Deterministic gates decide: a domain file importing
@@ -464,7 +472,8 @@ Also true [STATE-FILE]:
   the caller's word, and carries a KMS signature where the stack holds a
   signing key. It is returned rather than archived. The certificate itself is
   still not required before a merge; the diff is judged instead, by the
-  required check this repository's own PR #6 proved red-to-green. The S3
+  required check this repository's own PR #6 proved red-to-green and was
+  merged. The S3
   bucket the stack provisions is empty.
 - Call counts are cumulative everywhere, in the listing and in the detail; a
   session keeps its last 50 calls in history.

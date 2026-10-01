@@ -37,7 +37,10 @@ architect, and every response says which of the two produced the sentence.
 Pull requests are judged the same way with nothing installed: every added or
 changed file is sent to the service as the write it is, and a required check
 fails the merge when a rule fires - which covers agents that never installed
-anything, including ones running outside the developer's machine.
+anything, including ones running outside the developer's machine. Threefold is
+not an agent runtime: whatever runs the agent - an IDE extension, a CLI, or a
+managed runtime such as Bedrock AgentCore - can ask the same evaluate endpoint
+about each tool call before it runs.
 
 ## 2. Inspiration
 
@@ -114,7 +117,8 @@ so the rollout had to show what a rule would stop before it stops anything.
    or changed file judged through `/evaluate-tool-call`, red on a refusal or
    a fired rule, fail-closed on anything unjudged. This repository's own pull
    requests are judged that way; PR #6 proved it, a shaped token failing the
-   check with the merge BLOCKED and its removal passing.
+   check with the merge BLOCKED and its removal passing, and the request
+   itself was merged.
 
 ## 4. How we built it
 
@@ -199,10 +203,11 @@ so the rollout had to show what a rule would stop before it stops anything.
   same template [STATE-FILE]: 5,392 calls governed as of 2026-09-28, 163
   would-be refusals surfaced, none a false alarm [PRIMARY, 2026-09-28: the
   private stack's `/api/overview`].
-- The public stack passed its own live probe on 2026-09-28, 117 checks PASS,
+- The public stack passed its own live probe on 2026-10-01, 117 checks PASS,
   0 FAIL, 3 SKIP through the edge and the same at the API [PRIMARY,
-  2026-09-28], and the private stack 101 PASS, 0 FAIL, read-only
-  [STATE-FILE].
+  2026-10-01: `docs/evidence/PROBES_2026-10-01-3da6ffb2.md`,
+  `docs/evidence/PROBES_2026-10-01.md`], and the private stack 101 PASS,
+  0 FAIL, 19 SKIP, read-only.
 - A real coding agent works on the public stack.
   `scripts/daily_live_agent.py` gives Claude Code or Codex, alternating by
   date, one of the benchmark's Acme tasks in an `Acme-Live-*` project that
@@ -218,7 +223,8 @@ so the rollout had to show what a rule would stop before it stops anything.
   tests passed, by their rows in `benchmark/results/live/`; the fourth row
   records the spend limit instead of a run.
 - This repository's pull requests cannot merge with a firing rule: the judge
-  is a required check on `main`, proven red-to-green on PR #6.
+  is a required check on `main`, proven red-to-green on PR #6, which was
+  merged.
 - Threefold was measured against the alternative rather than asserted over it.
   162 Claude Code runs on 2026-09-22, two models, two task families, graded by
   a checker that does not import Threefold: a governed violation landed in
@@ -264,3 +270,17 @@ so the rollout had to show what a rule would stop before it stops anything.
   is the template (adapter, installer wiring, measured enforcement, pages and
   docs). After that, what is still missing is a proxy that meters real model
   usage instead of trusting caller-declared tokens.
+
+## 9. Blind spots, stated plainly
+
+| Blind spot | Standing on 2026-10-01 |
+|---|---|
+| Codex shell-route enforcement | Unmeasured; patch tool only |
+| Antigravity benchmark cells | Unmeasured |
+| Muse settings files | Format unknown; held back, never refused |
+| Project `.gemini/settings.json` | Sent and approved; no rule covers it |
+| Mobile 390px pages | Clipping unverified; deferred pre-deadline |
+| Cost gate | Trusts caller-declared tokens |
+| Hook outage | Fails open unless `THREEFOLD_FAIL_CLOSED=1` |
+| Removal past one shell level | Runs ledgered, not refused |
+| External adoption | Dogfood only; no outside user yet |
