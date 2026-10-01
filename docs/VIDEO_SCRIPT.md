@@ -24,7 +24,7 @@
   DynamoDB, and Bedrock off to the side.
 - **Narration:**
   > "One hook file sits in front of Claude Code, Codex, Antigravity and Muse. It
-  > refuses a credential on the machine and sends the rest to AWS.
+  > refuses credentials and disarm attempts on the machine and sends the rest to AWS.
   > Deterministic gates decide: layering rules, credentials, writes that
   > switch the hooks off, repeating calls, a spend ceiling on declared tokens. Amazon Bedrock
   > never decides. It explains a refusal to a person, and every response says
@@ -135,7 +135,7 @@
 | Visitors can promote only sandbox projects on the public stack | `infrastructure/security_middleware.py`: a project write is open without a key only where reads are public and the name is `Acme-Sandbox-<8 hex>`; the public stack has no operator key [STATE-FILE] |
 | A refused file is not created: Claude Code and Antigravity, Codex over its patch tool, and Muse over its file-write, edit and shell tools | [STATE-FILE], `docs/evidence/ENFORCEMENT_2026-09-21.md`, `docs/evidence/ENFORCEMENT_2026-09-23.md` and `docs/evidence/ENFORCEMENT_2026-09-28-MUSE.md`. Codex is one run, over `apply_patch`; its shell route is not measured. Muse is over `write_file`, `edit_file` and the shell, each refused file unchanged on the disk, with a clean file created in the same session |
 | Eleven CloudWatch alarms | [PRIMARY, 2026-09-27] `aws cloudwatch describe-alarms --alarm-name-prefix threefold-prod-`: 11 alarms, all `OK` |
-| Claude Code and Codex, graded by a checker that does not import Threefold: a violation landed in every series with no guidance, in three with the rules only written down, and in none with Threefold enforcing; 16 of 27 pressure runs finished | [PRIMARY, 2026-09-22] the four Claude Code reports `docs/evidence/BENCHMARK_2026-09-22.md`, `-HAIKU.md`, `-PRESSURE-SONNET.md` and `-PRESSURE-HAIKU.md`, 162 runs from `benchmark/results/20260922T143932Z.jsonl`, `…145644Z.jsonl`, `…161455Z-pressure.jsonl` and `…162306Z-pressure.jsonl`; [PRIMARY, 2026-09-23] the two Codex reports `docs/evidence/BENCHMARK_2026-09-23-CODEX.md` and `-CODEX-PRESSURE.md`, 81 runs from `benchmark/results/20260923T025154Z-codex.jsonl` and `…031215Z-pressure-codex.jsonl`. Violation landed, no guidance / rules only written down (in `CLAUDE.md`, or `AGENTS.md` for Codex) / Threefold: 17% / 0% / 0%, then 39% / 17% / 0%, then 67% / 0% / 0%, then 100% / 56% / 0% for Claude Code, and 17% / 0% / 0%, then 100% / 11% / 0% for Codex; acceptance tests passed under Threefold 100% (18/18), 100% (18/18), 67% (6/9), 44% (4/9), then 100% (18/18), 67% (6/9). The pressure runs finished: Claude Code's two series 10 of 18, Codex's 6 of 9, 16 of 27 in all, the figure the live `#/proof` card's verdict states for the pressure tasks across both agents [PRIMARY, 2026-09-27: `GET /proof.json`, snapshot 2026-09-27T08:09:51Z]. Grading is `benchmark/checks.py`, which does not import Threefold |
+| Claude Code and Codex, graded by a checker that does not import Threefold: a violation landed in every series with no guidance, in three with the rules only written down, and in none with Threefold enforcing; 16 of 27 pressure runs finished | [PRIMARY, 2026-09-22] the four Claude Code reports `docs/evidence/BENCHMARK_2026-09-22.md`, `-HAIKU.md`, `-PRESSURE-SONNET.md` and `-PRESSURE-HAIKU.md`, 162 runs from `benchmark/results/20260922T143932Z.jsonl`, `…145644Z.jsonl`, `…161455Z-pressure.jsonl` and `…162306Z-pressure.jsonl`; [PRIMARY, 2026-09-23] the two Codex reports `docs/evidence/BENCHMARK_2026-09-23-CODEX.md` and `-CODEX-PRESSURE.md`, 81 runs from `benchmark/results/20260923T025154Z-codex.jsonl` and `…031215Z-pressure-codex.jsonl`. Violation landed, no guidance / rules only written down (in `CLAUDE.md`, or `AGENTS.md` for Codex) / Threefold: 17% / 0% / 0%, then 39% / 17% / 0%, then 67% / 0% / 0%, then 100% / 56% / 0% for Claude Code, and 17% / 0% / 0%, then 100% / 11% / 0% for Codex; acceptance tests passed under Threefold 100% (18/18), 100% (18/18), 67% (6/9), 44% (4/9), then 100% (18/18), 67% (6/9). The pressure runs finished: Claude Code's two series 10 of 18, Codex's 6 of 9, 16 of 27 in all, the figure the live `#/proof` card's verdict states for the pressure tasks across both agents [PRIMARY, 2026-10-01: `GET /proof.json` serves snapshot 2026-09-28T10:03:40Z with six series]. Grading is `benchmark/checks.py`, which does not import Threefold |
 
 ---
 
@@ -172,7 +172,7 @@
 - [ ] Before filming scene 5, check that the live `#/proof` page shows the
       six series and no PILOT banner, each series' card citing the report made
       from its own rows, as the snapshot committed in
-      `src/threefold/web/proof.json` (written 2026-09-27T20:30:24Z, with
+      `src/threefold/web/proof.json` (written 2026-09-28T10:03:40Z, with
       `--evidence-base`) does: a new snapshot reaches the page only with a
       regional deploy (`docs/RUNBOOK.md` section 1). Narrating measured results
       over a PILOT banner is the one thing this scene must not do.

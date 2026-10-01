@@ -122,9 +122,10 @@ developer would end the rollout.
   cell, two agents, our own tasks
   (`docs/evidence/BENCHMARK_2026-09-2*.md`).
 - **Does it hold live?** A daily script gives Claude Code or Codex one
-  benchmark task in an Enforce project **[STATE-FILE]**. Five rows by
-  2026-09-30 (one never started): where an agent ran, no violation landed
-  **[PRIMARY, 2026-09-30: 26 calls in 4 runs]**. Not a rate; the path working.
+  benchmark task in an Enforce project **[STATE-FILE]**. Six rows by
+  2026-10-01 (two never started: a spend limit, a weekly usage limit): where
+  an agent ran, no violation landed **[PRIMARY, 2026-10-01: 26 calls in 4
+  runs]**. Not a rate; the path working.
 - **The certificate** covers the session's own stored verdicts, KMS-signed
   where the stack holds a key. The merge is judged separately: every pull
   request's diff goes through the same gates as a required check, proven

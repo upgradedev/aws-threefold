@@ -8,7 +8,7 @@ is tagged [STATE-FILE]. Everything else describes the code on `main`.
 **Application name:** Threefold
 **Category:** `#workplace-efficiency` · **Lane:** `#community`
 **Tagline:** Threefold refuses a coding agent's edit the moment it is made, not after the commit, so your architecture does not rot while you sleep.
-**Live application:** <https://d1og72wpk4aqig.cloudfront.net/> (CloudFront edge), origin <https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/> (API Gateway). Both answered anonymously with 200 on 2026-09-30 (`docs/evidence/PROBES_2026-09-30-96808134.md`, the edge, and `docs/evidence/PROBES_2026-09-30.md`, the origin) [PRIMARY, 2026-09-30].
+**Live application:** <https://d1og72wpk4aqig.cloudfront.net/> (CloudFront edge), origin <https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/> (API Gateway). Both answered anonymously with 200 on 2026-10-01 (`docs/evidence/PROBES_2026-10-01-3da6ffb2.md`, the edge, and `docs/evidence/PROBES_2026-10-01.md`, the origin) [PRIMARY, 2026-10-01].
 **Try it in about two minutes, no account:** <https://d1og72wpk4aqig.cloudfront.net/dashboard.html#/try>, the two-stage rollout on a sandbox project of your own. The first screen's loop halt, <https://d1og72wpk4aqig.cloudfront.net/>, is one click and well under a minute.
 
 ---
@@ -151,9 +151,9 @@ so the rollout had to show what a rule would stop before it stops anything.
 - **Infrastructure as code:** two CloudFormation templates, `deploy/template.yml`
   (SAM transform) and `deploy/edge.yml`.
 - **Checking it live:** `scripts/probe_live.py`: 117 PASS, 0 FAIL, 3 SKIP
-  through the edge and the same at the API origin on 2026-09-30, after the
-  judgment-fix deploy (`docs/evidence/PROBES_2026-09-30-96808134.md`,
-  `docs/evidence/PROBES_2026-09-30.md`) [PRIMARY, 2026-09-30].
+  through the edge and the same at the API origin on 2026-10-01, after the
+  review-fix deploy (`docs/evidence/PROBES_2026-10-01-3da6ffb2.md`,
+  `docs/evidence/PROBES_2026-10-01.md`) [PRIMARY, 2026-10-01].
 
 ## 5. Challenges we ran into
 
@@ -212,16 +212,17 @@ so the rollout had to show what a rule would stop before it stops anything.
   `scripts/daily_live_agent.py` gives Claude Code or Codex, alternating by
   date, one of the benchmark's Acme tasks in an `Acme-Live-*` project that
   starts in Enforce, and the overview counts its calls as a source of their
-  own. A scheduled task runs it daily from the owner's machine. Five rows as
-  of 2026-09-30: Codex on 2026-09-26, 8 calls, one refused (falsely, challenge
+  own. A scheduled task runs it daily from the owner's machine. Six rows as
+  of 2026-10-01: Codex on 2026-09-26, 8 calls, one refused (falsely, challenge
   5); Claude Code on 2026-09-27, 4 calls, none refused; Codex on 2026-09-28, 5
   calls, none refused; Claude Code on 2026-09-29 never started, cut short by
   the org's monthly spend limit with 0 calls; Codex on 2026-09-30, 9 calls,
-  one refused (an unreadable shell write, self-corrected). The overview's live
-  source held those 26 calls in 3 projects [PRIMARY, 2026-09-30: `GET
-  /api/overview`]. Where an agent ran, no violation landed and the acceptance
-  tests passed, by their rows in `benchmark/results/live/`; the fourth row
-  records the spend limit instead of a run.
+  one refused (an unreadable shell write, self-corrected); Claude Code on
+  2026-10-01 never started, cut short by the weekly usage limit with 0 calls.
+  The overview's live source held those 26 calls in 3 projects [PRIMARY,
+  2026-10-01: `GET /api/overview`]. Where an agent ran, no violation landed
+  and the acceptance tests passed, by their rows in `benchmark/results/live/`;
+  the fourth and sixth rows record the limits instead of runs.
 - This repository's pull requests cannot merge with a firing rule: the judge
   is a required check on `main`, proven red-to-green on PR #6, which was
   merged.

@@ -2,7 +2,7 @@
 
 The hackathon asks for a coding agent connected to the AWS console, with
 documented proof of the connection. This page is that proof. It records what
-the agent did against account `308857099262`, and how a reader can check each
+the agent did against the stack's AWS account, and how a reader can check each
 claim without taking our word for it.
 
 ## The agent
@@ -30,7 +30,7 @@ in its own Region.
 
 | # | The agent ran | AWS answered | What changed |
 |---|---|---|---|
-| 1 | `aws sts get-caller-identity` | `arn:aws:iam::308857099262:user/<the operator's IAM user>` | Connection confirmed before anything was created |
+| 1 | `aws sts get-caller-identity` | `arn:aws:iam::<account-id>:user/<the operator's IAM user>` | Connection confirmed before anything was created |
 | 2 | `aws cloudformation package --template-file deploy/template.yml --s3-bucket cf-templates-qd4r568jc7n6-eu-west-1` | uploaded 116,087 bytes | The Lambda zip, built without SAM and without installing anything locally |
 | 3 | `aws cloudformation deploy --stack-name threefold-prod --capabilities CAPABILITY_IAM` | `CREATE_COMPLETE` | Stack `threefold-prod` in eu-west-1 |
 | 4 | `curl https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/status` | **HTTP 404** | The first real defect. API Gateway prefixes the path with the stage name, and the handler routed on `/prod/status`. Found in minutes because the deploy came first |

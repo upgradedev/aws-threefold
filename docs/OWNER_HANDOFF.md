@@ -7,7 +7,7 @@ yours. Each package below is copy-paste ready.
 **Deadline: 2026-10-02 23:59 PDT.** Keep the stacks up through winners week;
 teardown is in `docs/RUNBOOK.md` and must not run before judging completes.
 
-**Links used below (all checked 200 on 2026-09-30):**
+**Links used below (all checked 200 on 2026-10-01):**
 
 - Hackathon page: <https://builder.aws.com/build/hackathons/e83e84e5-4f4c-383b-bbe9-4a15ac195d55/zero-to-shipped>
   (fallback: <https://builder.aws.com/build/hackathons>, search "Zero to Shipped")
@@ -75,7 +75,8 @@ paragraph and link the file on GitHub.
 ## Package B: the article
 
 The article is written and fresh: `docs/BUILDER_CENTER_ARTICLE.md`
-(probes rechecked 2026-09-30, five live-agent rows, six benchmark series).
+(rewritten to ~1200 words, probes rechecked 2026-10-01, six live-agent rows
+with four runs, six benchmark series).
 
 **Title (the file's first line):**
 
@@ -103,7 +104,7 @@ After posting, copy the article URL back into the project's links.
 The script is written and timed: `docs/VIDEO_SCRIPT.md` (2:45, hard cap
 3:00). The recording checklist at its end is the shoot list.
 
-**Already verified for you on 2026-09-30 (no need to recheck):**
+**Already verified for you on 2026-10-01 (no need to recheck):**
 
 - The live sandbox seeds the false alarm the script describes
   (`python-domain-stays-pure`).
@@ -146,7 +147,7 @@ Category #workplace-efficiency, lane #community, AWS Zero to Shipped 2026.
 
 - [ ] Builder Center project exists and links the live app, repo, video,
       and article.
-- [ ] Article posted with the six series and the 2026-09-30 probe figures.
+- [ ] Article posted with the six series and the 2026-10-01 probe figures.
 - [ ] Video uploaded, 2:35 to 2:45, linked from the project.
 - [ ] Stacks still up (`threefold-prod`, `threefold-dogfood`,
       `threefold-prod-edge`).
