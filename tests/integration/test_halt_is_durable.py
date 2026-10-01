@@ -165,3 +165,65 @@ def test_operator_termination_survives_an_existing_trip() -> None:
     assert reloaded.is_terminated is True
     assert reloaded.terminated_by == "ops-lead"
     assert reloaded.termination_reason == "incident review"
+
+
+def test_large_arguments_are_stored_bounded_and_stay_distinct() -> None:
+    """Three large writes used to push the row past DynamoDB's 400 KB ceiling.
+
+    The failed put fell back to the container's memory, so a halt stopped
+    being durable. Stored arguments are bounded now, and each keeps the sha256
+    of the whole, so two different arguments still read back different and
+    the loop detector's signatures keep their meaning across containers.
+    """
+    import json
+
+    repo_a, repo_b = _shared_store_repos()
+    worker = GovernanceEvaluator(session_repo=repo_a)
+    contents = ["x = 1  # " + letter * 100000 for letter in ("A", "B", "A")]
+    for content in contents:
+        request = ToolCallRequestDTO(
+            session_id="session-durable-big",
+            developer_id="dev-durable",
+            project_name="Acme-Ledger",
+            tool_name="write_file",
+            action_type="FILE_WRITE",
+            arguments={"path": "src/app.py", "content": content},
+            projected_input_tokens=1000,
+            projected_output_tokens=200,
+            budget_usd=10.00,
+        )
+        assert worker.evaluate_tool_call(request).status == "APPROVED"
+
+    item = repo_a._memory_store["SESSION#session-durable-big#METADATA"]
+    assert len(json.dumps(item)) < 50000, "300 KB of arguments must not reach the row"
+
+    reloaded = repo_b.get_session("session-durable-big")
+    assert reloaded is not None and len(reloaded.history) == 3
+    assert "[truncated sha256:" in reloaded.history[0].arguments["content"]
+    signatures = [call.canonical_signature for call in reloaded.history]
+    assert signatures[0] == signatures[2], "The same large call reads back identical"
+    assert signatures[0] != signatures[1], "Different large calls must not compare equal"
+
+
+def test_a_large_call_repeated_is_still_a_loop_past_the_truncation() -> None:
+    """The row holds the bounded form while the call being judged carries the
+    whole. The loop gate compares both sides bounded, so three identical
+    large writes trip exactly like three small ones."""
+    repo_a, _ = _shared_store_repos()
+    worker = GovernanceEvaluator(session_repo=repo_a)
+    request = ToolCallRequestDTO(
+        session_id="session-durable-big-loop",
+        developer_id="dev-durable",
+        project_name="Acme-Ledger",
+        tool_name="write_file",
+        action_type="FILE_WRITE",
+        arguments={"path": "src/app.py", "content": "x = 1  # " + "A" * 100000},
+        projected_input_tokens=1000,
+        projected_output_tokens=200,
+        budget_usd=10.00,
+    )
+    assert worker.evaluate_tool_call(request).status == "APPROVED"
+    assert worker.evaluate_tool_call(request).status == "APPROVED"
+    third = worker.evaluate_tool_call(request)
+    assert third.status == "BLOCKED_LOOP_DETECTED"
+    assert third.session_tripped is True

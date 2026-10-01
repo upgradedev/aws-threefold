@@ -64,9 +64,10 @@ regional stack, `threefold-prod`, eu-west-1) and `deploy/edge.yml` (the edge,
   `lambda:GetFunctionConfiguration`. See `ARCHITECTURE.md` section 8.6.
 - The content security policy allows `'unsafe-inline'` scripts and styles,
   because the pages use inline scripts and handlers.
-- Evaluating a call, the scenarios, the certificate and the kill switch are
-  open POSTs on the public stack by design, each bounded by the session it
-  names [STATE-FILE].
+- Evaluating a call, the scenarios and the certificate are open POSTs on the
+  public stack by design, each bounded by the session it names; the kill
+  switch answers anonymously only for a scenario session (sim-*), and freezing
+  an id nobody recorded is 404 [STATE-FILE].
 - The function role holds no S3 rights at all: the uploader nothing called and
   its grant were deleted together, and the provisioned bucket stays empty. The
   Bedrock grant covers every Claude model on those two patterns, not only the

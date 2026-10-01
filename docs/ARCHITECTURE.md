@@ -278,7 +278,12 @@ the owner paired that endpoint with the key file in `THREEFOLD_HOME/config.json`
   directory, `.git` included), `never-send` (a term from the owner's local
   `never_send.txt`), `not-included` (outside the `include` globs) and
   `no-project` (no project configured). `held_back.log` records the time and
-  the category only. A call held back is not checked by anything.
+  the category only. A call held back is not checked by anything. The
+  exception is a write to the files under those directories that decide
+  whether the hooks run - an agent's settings file, anything under
+  `~/.threefold/bin/` - and a command that deletes them or unplugs Threefold
+  from the agent: those are refused on the machine, in every mode, with
+  nothing sent.
 - A write made with a file tool (`Write`, `Edit`, a patch, `write_to_file` and
   the like) to the files that decide whether the hooks run
   (`.claude/settings*.json`, `.codex/hooks.json`, `.codex/config.toml`,

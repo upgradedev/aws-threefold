@@ -501,7 +501,7 @@ def _headers(content_type: str) -> Dict[str, str]:
     headers = dict(_api().CORS_HEADERS)
     headers["Content-Type"] = content_type
     headers["Cache-Control"] = "no-cache"
-    headers["X-Content-Type-Options"] = "nosniff"
+    headers.update(_api().ORIGIN_SECURITY_HEADERS)
     return headers
 
 

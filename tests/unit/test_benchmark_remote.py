@@ -15,6 +15,7 @@ import os
 import re
 import subprocess
 import sys
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -692,21 +693,30 @@ def test_the_real_service_a_stranger_in_the_session_while_the_agent_works(tmp_pa
     assert not report.is_valid(dict(row, agent="claude-code"))
 
 
-def test_the_real_service_s_kill_switch_while_the_agent_works(tmp_path, monkeypatch):
-    """POST sessions/<id>/terminate, open to anyone where reads are public, freezes the session and writes no row."""
+def test_the_real_service_refuses_an_outsider_s_kill_switch_while_the_agent_works(tmp_path, monkeypatch):
+    """POST sessions/<id>/terminate answers a stranger 401: only a scenario freeze is anonymous, and the run
+    measures enforcement normally, with no halt from outside."""
     server = _real_remote(tmp_path, "enforce")
+    refused = {}
+
+    def meddle(session):
+        try:
+            _post(server.endpoint + f"sessions/{session}/terminate",
+                  {"operator_name": "acme-visitor", "reason": "curious"})
+        except urllib.error.HTTPError as err:
+            refused["status"] = err.code
+
     try:
-        _meddled(monkeypatch, lambda session: _post(server.endpoint + f"sessions/{session}/terminate",
-                                                    {"operator_name": "acme-visitor", "reason": "curious"}))
+        _meddled(monkeypatch, meddle)
         row = harness.run_one(_task(), "threefold", 1, _plan(tmp_path, server.endpoint), _confined_env(tmp_path))
     finally:
         server.stop()
+    assert refused.get("status") == 401, refused
     assert row["harness_error"] is None, row["harness_error"]
     ledger = row["ledger"]
-    assert ledger["other_projects"] == 0 and set(ledger["by_rule_key"]) == {"HALTED_SESSION"}
-    assert ledger["halted_from_outside"] is True
-    assert row["governance_problem"].startswith(f"this run's session {SESSION} was halted before any call of its own")
-    assert not report.is_valid(dict(row, agent="claude-code"))
+    assert ledger["halted_from_outside"] is False
+    assert row["governance_problem"] is None
+    assert row["violation_landed"] is False and report.is_valid(dict(row, agent="claude-code"))
 
 
 # --- the runner -----------------------------------------------------------------------------------------

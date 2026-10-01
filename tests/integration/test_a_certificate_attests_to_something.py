@@ -89,7 +89,30 @@ def old_session():
 
 
 def test_a_session_with_no_recorded_verdicts_is_refused() -> None:
-    status, body = _post("/issue-certificate", {"session_id": "cert-empty-001"})
+    """A row with calls but no verdicts still refuses rather than passing.
+
+    Saved through the repository: a row like this is what a legacy write
+    left behind, and the route mints no row of its own. Removed afterwards,
+    because the handler's repository is module level.
+    """
+    session = AgentSession(
+        session_id="cert-empty-001",
+        developer_id="cert-test",
+        project_name="Acme-Cert",
+        budget_usd=5.0,
+    )
+    session.record_tool_call(
+        ToolInvocation(
+            tool_name="view_file",
+            action_type=ToolActionType.FILE_READ,
+            arguments={"path": "README.md"},
+        )
+    )
+    _evaluator.session_repo.save_session(session, force=True)
+    try:
+        status, body = _post("/issue-certificate", {"session_id": "cert-empty-001"})
+    finally:
+        _evaluator.session_repo._memory_store.pop("SESSION#cert-empty-001#METADATA", None)
     assert status == 400, "A certificate over no verdicts must not be issued"
     assert body["title"] == "Nothing To Certify"
     assert body["type"] == "urn:threefold:error:empty-attestation"
@@ -97,9 +120,11 @@ def test_a_session_with_no_recorded_verdicts_is_refused() -> None:
 
 
 def test_a_session_this_service_never_governed_is_refused() -> None:
+    """Unknown ids are 404, and mint no row: there is nothing to attest to."""
     status, body = _post("/issue-certificate", {"session_id": "cert-stranger-001"})
-    assert status == 400
-    assert "no recorded verdicts" in body["detail"]
+    assert status == 404
+    assert body["type"] == "urn:threefold:error:session-not-found"
+    assert _evaluator.session_repo.get_session("cert-stranger-001") is None
 
 
 def test_supplied_evaluations_are_ignored_not_certified() -> None:
@@ -109,14 +134,15 @@ def test_supplied_evaluations_are_ignored_not_certified() -> None:
     nothing, and an invented rejection cannot stain a session it governed
     cleanly. What the body claims is not what the document covers.
     """
-    status, _ = _post(
+    status, problem = _post(
         "/issue-certificate",
         {
             "session_id": "cert-invented-001",
             "evaluations": [{"status": "APPROVED", "proof_hash": "deadbeef"}],
         },
     )
-    assert status == 400
+    assert status == 404, "No recorded session: the field alone certifies nothing"
+    assert problem["type"] == "urn:threefold:error:session-not-found"
 
     session_id = "cert-invented-002"
     _govern_one_call(session_id)
@@ -452,3 +478,34 @@ def test_a_configured_signer_signs_the_canonical_bytes() -> None:
     assert cert.signature == "c2lnbmF0dXJl"
     assert cert.signing_key_id == "key-test-123"
     assert hashlib.sha256(seen["canonical"]).hexdigest() == cert.sha256_fingerprint
+
+
+def test_a_refusal_buried_under_fifty_clean_calls_still_taints_the_certificate() -> None:
+    """The store keeps the last fifty verdicts; the marker keeps the failure.
+
+    One refusal and then fifty clean calls used to certify COMPLIANT_APPROVED,
+    because the refusal had scrolled out of what the issuer read. The session
+    now carries a sticky marker, set by the same predicate the issuer uses, so
+    the certificate still says non-compliant while counting the fifty it saw.
+    The fifty reads name distinct files, so no loop trip is involved.
+    """
+    session_id = "cert-buried-001"
+    _govern_one_call(
+        session_id,
+        tool_name="run_command",
+        action_type="COMMAND_EXEC",
+        arguments={"command": "cat ~/.aws/credentials"},
+    )
+    for index in range(50):
+        _govern_one_call(
+            session_id,
+            tool_name="view_file",
+            action_type="FILE_READ",
+            arguments={"path": f"README-{index:02d}.md"},
+        )
+
+    status, cert = _post("/issue-certificate", {"session_id": session_id})
+    assert status == 200
+    assert cert["evaluations_count"] == 50
+    assert cert["verdict_status"] == "NON_COMPLIANT_REJECTED"
+    assert _evaluator.session_repo.get_session(session_id).has_failed_verdict is True

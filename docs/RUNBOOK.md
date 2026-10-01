@@ -564,7 +564,12 @@ merge: `scripts/judge_pr.py` sends every added or changed text file in a pull
 request to `/evaluate-tool-call` as the Write it is, and fails the check when
 the service refuses one or a rule fires on one. A hook nobody installed cannot
 be bypassed here, because there is no hook: a cloud agent's pull request is
-judged exactly like a local one's.
+judged exactly like a local one's. The judge itself cannot be neutered by the
+request either: the workflow runs on `pull_request_target` from the base
+branch, checks the base out for its copy of the judge and the request's head
+beside it as data only, and runs the base's copy with the request as `--repo`.
+CODEOWNERS names `.github/` and `scripts/judge_pr.py` so a rewrite of the
+gate always asks its owner for review.
 
 ```bash
 python scripts/judge_pr.py --endpoint https://<api>/prod/ --project Acme-Widget

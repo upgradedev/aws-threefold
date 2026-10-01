@@ -141,10 +141,11 @@ Parameters:
     Description: >-
       Project names this stack stores, counts and shows as they are sent. Any
       other name is recorded as "unlabelled", on the ledger, the session row
-      and the CloudWatch Project dimension, and the response carries a warning.
-      This keeps a caller's real repository names off the public pages and
-      stops a caller creating a new metric with every request. The default is
-      the synthetic Acme namespace the demo uses.
+      and the CloudWatch record, and the response carries a warning. This keeps
+      a caller's real repository names off the public pages; the CloudWatch
+      record carries the project as a property rather than a dimension, so a
+      new name mints no new metric. The default is the synthetic Acme namespace
+      the demo uses.
 
   PublicReads:
     Type: String
@@ -515,11 +516,11 @@ Resources:
 
   # The service's own metrics, read back per stack. The function writes one
   # Embedded Metric Format record per evaluated call to namespace
-  # Threefold/Governance with the dimensions Project and Environment, and
-  # Environment is always "Production". Both stacks run in this account and
+  # Threefold/Governance with the dimension Environment, always "Production";
+  # the project rides along as a property, not a dimension, so a new Acme-*
+  # name mints no new metric. Both stacks run in this account and
   # region and write that same namespace, so an alarm on those metrics could
-  # not tell the public demo from the private stack, and the per-project
-  # dimension leaves no single series to alarm on. These filters read the same
+  # not tell the public demo from the private stack. These filters read the same
   # records from this stack's own log group into a namespace named after the
   # stack. Two routes evaluate a call: /evaluate-tool-call's record counts it
   # as ToolCallsEvaluated and the universal adapter's as UniversalToolEvaluated,

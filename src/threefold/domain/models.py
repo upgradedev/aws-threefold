@@ -123,6 +123,10 @@ class AgentSession:
     total_calls: int = 0
     history: List[ToolInvocation] = field(default_factory=list)
     verdicts: List[StoredVerdict] = field(default_factory=list)
+    # Sticky: set once a stored verdict fails the enforced pass, and never
+    # cleared. The store keeps the last fifty verdicts, so without this a
+    # refusal followed by fifty clean calls would certify as compliant.
+    has_failed_verdict: bool = False
     is_tripped: bool = False
     trip_reason: Optional[str] = None
     is_terminated: bool = False

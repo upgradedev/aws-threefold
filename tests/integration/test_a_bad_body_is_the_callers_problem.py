@@ -116,7 +116,7 @@ def test_a_supplied_evaluations_field_is_ignored_not_read(evaluations: str) -> N
 
     Malformed, mistyped or invented evaluations change nothing: a governed
     session still gets its certificate, and an ungoverned one is still refused
-    for having no recorded verdicts rather than for the field's shape.
+    for naming nothing recorded rather than for the field's shape.
     """
     # The session is the case's index, not a hash of its body: hash() is salted
     # per process, so two cases shared a session under some seeds and the
@@ -134,8 +134,8 @@ def test_a_supplied_evaluations_field_is_ignored_not_read(evaluations: str) -> N
 
     raw = '{"session_id": "bodies-ignored-evaluations-stranger", "evaluations": %s}' % evaluations
     status, problem, _ = _post("/issue-certificate", raw)
-    assert status == 400
-    assert problem["type"] == "urn:threefold:error:empty-attestation"
+    assert status == 404
+    assert problem["type"] == "urn:threefold:error:session-not-found"
 
 
 def test_a_verdict_that_sends_no_invariants_is_still_accepted() -> None:

@@ -1065,9 +1065,11 @@ def test_the_filters_match_the_record_an_evaluated_call_actually_writes(capsys) 
     for record in records:
         definition = record["_aws"]["CloudWatchMetrics"][0]
         assert definition["Namespace"] == "Threefold/Governance"
-        assert definition["Dimensions"] == [["Project", "Environment"]], (
-            "Per project, so no single series exists to alarm on; this is why the filters exist"
+        assert definition["Dimensions"] == [["Environment"]], (
+            "Environment alone, so a new project name mints no new metric; the filters exist "
+            "because both stacks share this namespace"
         )
+        assert record["Project"] == "Acme-Template", "The project rides along as a searchable property"
 
     filters = _filters()
     first, third = records[0], records[2]

@@ -18,6 +18,7 @@ import os
 import re
 import threading
 import time
+from urllib.parse import unquote
 from typing import Any, Dict, Optional, Tuple, Union
 
 from threefold.infrastructure import auth_store
@@ -386,13 +387,31 @@ def is_protected_write(method: str, path: str) -> bool:
 def is_session_terminate(method: str, path: str) -> bool:
     """True for POST /sessions/{id}/terminate, the kill switch.
 
-    Open on a stack whose reads are public, as STATE.md says: freezing a
-    session can only stop work, and the demo's visitors have no key to present.
-    It is not open on a stack that keeps its reads private, where the sessions
+    The operator's on a stack that keeps its reads private, where the sessions
     it can freeze are the owner's own agent sessions and the ids to name them
-    by are exactly what those private reads hold back.
+    by are exactly what those private reads hold back. Where the reads are
+    public, only a scenario session's freeze is anonymous; any other id needs
+    the operator, because a stranger who learned a session id could otherwise
+    freeze a real session, and every later call in it comes back
+    BLOCKED_CIRCUIT_BREAKER. See step 3d below.
     """
     return method.upper() == "POST" and path.startswith("/sessions/") and path.endswith("/terminate")
+
+
+def is_scenario_session_terminate(method: str, path: str) -> bool:
+    """True for an anonymous freeze the demo keeps: POST /sessions/sim-*/terminate.
+
+    The scenarios run each under a `sim-loop-*` or `sim-sec-*` session, and the
+    first screen's freeze button acts on the session the last scenario ran
+    under. Those ids are minted per request and carry no real work, so freezing
+    one anonymously stops nothing but the demo's own run. The id is decoded
+    exactly as the route decodes it, so an encoded spelling neither opens what
+    the route would freeze under another name nor closes a scenario's own id.
+    """
+    if not is_session_terminate(method, path):
+        return False
+    session_id = unquote(path[len("/sessions/"):-len("/terminate")].strip())
+    return session_id.startswith("sim-")
 
 
 # Sign-in. Minting a link is the one thing a session may not do: a session that
@@ -803,12 +822,15 @@ def validate_request_security(
             ),
         )
 
-    # 3d. The kill switch, on a stack that keeps its reads private. It stays
-    # open where the reads are, because the demo's visitors have no key and
-    # freezing a session can only stop work. Where they are not, a stranger who
-    # learned a session id could freeze the owner's own agent session, and every
-    # later call in it comes back BLOCKED_CIRCUIT_BREAKER, so it is the
-    # operator's as the reads beside it are.
+    # 3d. The kill switch. On a stack that keeps its reads private it is the
+    # operator's as the reads beside it are: a stranger who learned a session
+    # id could freeze the owner's own agent session, and every later call in
+    # it comes back BLOCKED_CIRCUIT_BREAKER. Where the reads are public, only
+    # a scenario session's freeze stays anonymous, for the first screen's
+    # freeze button, which acts on the session the last scenario ran under.
+    # Any other id needs the operator there too: fleet and live sessions have
+    # predictable names, and on a stack with no operator key a freeze cannot
+    # be undone, since the resume already needs one.
     if is_session_terminate(verb, path) and not reads_are_public():
         return _require_operator_key(
             headers,
@@ -826,6 +848,28 @@ def validate_request_security(
                 "sign-in session via 'Authorization: Bearer <token>'."
             ),
         )
+    if (
+        is_session_terminate(verb, path)
+        and reads_are_public()
+        and not is_scenario_session_terminate(verb, path)
+    ):
+        return _require_operator_key(
+            headers,
+            path,
+            closed_title="Only Scenario Sessions Freeze Anonymously Here",
+            closed_detail=(
+                "This deployment answers reads to anyone and has no operator key "
+                "configured, so only a scenario session (sim-*) can be frozen, "
+                "anonymously, and any other id is refused."
+            ),
+            closed_type="urn:threefold:error:freeze-needs-operator",
+            missing_detail=(
+                "Only a scenario session (sim-*) freezes anonymously here, so freezing "
+                "this id requires the operator: the key via 'X-API-Key' or "
+                "'Authorization: Bearer <key>', or a sign-in session via "
+                "'Authorization: Bearer <token>'."
+            ),
+        )
 
     # 4. The pages, the hook and what connecting downloads, open on every stack.
     if path in PUBLIC_PATHS or is_served_asset(verb, path):
@@ -837,8 +881,9 @@ def validate_request_security(
     # decided in step 3. When keys are enforced, the kill switch under
     # /sessions/{id}/terminate needs one like every other unlisted call; a
     # deployment that enforces no key and keeps its reads public, as the demo
-    # stack does, answers it anonymously, and STATE.md says so. Where the reads
-    # are private, step 3d above has already closed it.
+    # stack does, answers a scenario session's freeze anonymously and asks the
+    # operator for any other id, and STATE.md says so. Where the reads are
+    # private, step 3d above has already closed it.
     if is_page_read(verb, path):
         if reads_are_public():
             return True, None

@@ -33,6 +33,7 @@ from threefold.domain.boundary_guard import (
     shell_command,
     target_paths,
 )
+from threefold.application.audit_issuer import is_enforced_pass
 from threefold.application.fix_proposer import propose_fix
 from threefold.application.dtos import (
     EvaluationResultDTO,
@@ -780,9 +781,17 @@ class GovernanceEvaluator:
         lister = getattr(self.session_repo, "list_rollups", None)
         return lister(days=days, project=project) if lister else []
 
-    def terminate_session(self, session_id: str, operator_name: str, reason: str) -> AgentSession:
-        """Manual enterprise kill-switch to immediately freeze an agent session."""
-        session = self.get_or_create_session(session_id)
+    def terminate_session(self, session_id: str, operator_name: str, reason: str) -> Optional[AgentSession]:
+        """Manual enterprise kill-switch to immediately freeze an agent session.
+
+        None for a session this service has no record of. Like a resume, a
+        freeze never creates the session it names: freezing an id nobody
+        recorded would let any caller mint locked rows by typo or malice, and
+        on a stack with no operator key the lock could never be cleared.
+        """
+        session = self.session_repo.get_session(session_id)
+        if session is None:
+            return None
         session.terminate_manually(operator=operator_name, reason=reason)
         # An operator may halt a session that has already tripped itself, so this
         # write deliberately overrides the terminal-state guard.
@@ -1155,15 +1164,19 @@ class GovernanceEvaluator:
             if stored is None:
                 logger.warning("No session to record the verdict on: %s", request.session_id)
                 return
-            stored.record_verdict(
-                StoredVerdict(
-                    verdict_id=str(result.verdict_id or ""),
-                    status=str(result.status or ""),
-                    rule_evaluations={str(k): v is True for k, v in (result.rule_evaluations or {}).items()},
-                    dry_run=bool(getattr(result, "dry_run", False)),
-                    proof_hash=str(result.proof_hash or ""),
-                )
+            recorded = StoredVerdict(
+                verdict_id=str(result.verdict_id or ""),
+                status=str(result.status or ""),
+                rule_evaluations={str(k): v is True for k, v in (result.rule_evaluations or {}).items()},
+                dry_run=bool(getattr(result, "dry_run", False)),
+                proof_hash=str(result.proof_hash or ""),
             )
+            stored.record_verdict(recorded)
+            # Sticky, and judged by the same predicate the issuer uses: the
+            # store keeps the last fifty verdicts, so a failure that scrolls
+            # out must still taint the certificate.
+            if not is_enforced_pass(recorded.status, recorded.dry_run, recorded.rule_evaluations):
+                stored.has_failed_verdict = True
             try:
                 self.session_repo.save_session(stored, force=stored.is_tripped)
             except SessionConflictError:

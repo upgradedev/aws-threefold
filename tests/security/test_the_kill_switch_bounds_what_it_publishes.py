@@ -1,7 +1,7 @@
 """What a caller writes into a freeze is shown on a page, so it is bounded and redacted.
 
-`POST /sessions/<id>/terminate` needs no key on the public demo, on purpose:
-freezing a session can only stop work. What it writes, though, does not stop
+`POST /sessions/sim-*/terminate` needs no key on the public demo, on purpose:
+the first screen freezes the session its last scenario ran under. What it writes, though, does not stop
 there. `models.py` builds `trip_reason` as "MANUALLY_TERMINATED by <operator>:
 <reason>", the sessions listing returns that string as it is, and `public_row()`
 rewrites only the project name and the developer. So both fields reached
@@ -54,35 +54,54 @@ def _trip_reason(session_id: str) -> str | None:
     return None if row is None else row.get("trip_reason")
 
 
+def _record(session_id: str) -> None:
+    """One ordinary call, so the freeze below names a session that exists."""
+    status, _ = _call(
+        "POST",
+        "/evaluate-tool-call",
+        {
+            "session_id": session_id,
+            "project_name": "Acme-Ledger",
+            "tool_name": "read_file",
+            "action_type": "FILE_READ",
+            "arguments": {"path": "README.md"},
+        },
+    )
+    assert status == 200
+
+
+
 def test_a_credential_in_the_reason_is_replaced_by_its_label() -> None:
     """Otherwise the freeze publishes the very thing the gate exists to stop."""
-    status, body = _freeze("kill-redact-1", {"operator_name": "Acme on-call", "reason": f"saw {SYNTHETIC_TOKEN}"})
+    _record("sim-redact-1")
+    status, body = _freeze("sim-redact-1", {"operator_name": "Acme on-call", "reason": f"saw {SYNTHETIC_TOKEN}"})
     assert status == 200
     assert SYNTHETIC_TOKEN not in json.dumps(body)
 
-    shown = _trip_reason("kill-redact-1")
+    shown = _trip_reason("sim-redact-1")
     assert SYNTHETIC_TOKEN not in shown
     assert "[GITHUB_TOKEN REDACTED]" in shown
 
 
 def test_a_credential_in_the_operator_name_is_replaced_too() -> None:
-    status, body = _freeze("kill-redact-2", {"operator_name": SYNTHETIC_TOKEN, "reason": "review"})
+    _record("sim-redact-2")
+    status, body = _freeze("sim-redact-2", {"operator_name": SYNTHETIC_TOKEN, "reason": "review"})
     assert status == 200
     assert SYNTHETIC_TOKEN not in json.dumps(body)
-    assert SYNTHETIC_TOKEN not in _trip_reason("kill-redact-2")
+    assert SYNTHETIC_TOKEN not in _trip_reason("sim-redact-2")
 
 
 def test_a_reason_past_its_bound_is_refused_and_freezes_nothing() -> None:
     """A caller could publish a megabyte of their own text on the sessions page."""
-    status, problem = _freeze("kill-bound-1", {"operator_name": "Acme on-call", "reason": "x" * 5000})
+    status, problem = _freeze("sim-bound-1", {"operator_name": "Acme on-call", "reason": "x" * 5000})
     assert status == 400
     assert problem["type"] == "urn:threefold:error:bad-request"
     assert "240" in problem["detail"]
-    assert _trip_reason("kill-bound-1") is None, "the session was frozen by a refused request"
+    assert _trip_reason("sim-bound-1") is None, "the session was frozen by a refused request"
 
 
 def test_an_operator_name_past_its_bound_is_refused() -> None:
-    status, problem = _freeze("kill-bound-2", {"operator_name": "a" * 500, "reason": "review"})
+    status, problem = _freeze("sim-bound-2", {"operator_name": "a" * 500, "reason": "review"})
     assert status == 400
     assert "120" in problem["detail"]
 
@@ -93,15 +112,16 @@ def test_a_field_that_is_not_text_is_refused(field, value) -> None:
     """Stored as it arrived, a dict reached the page as whatever json.dumps made of it."""
     body = {"operator_name": "Acme on-call", "reason": "review"}
     body[field] = value
-    status, problem = _freeze(f"kill-type-{field}", body)
+    status, problem = _freeze(f"sim-type-{field}", body)
     assert status == 400, problem
     assert problem["invalid_params"][0]["name"] == field
 
 
 def test_an_ordinary_freeze_from_the_console_is_unchanged() -> None:
     """Both pages send a short operator and a short reason; both must still work."""
+    _record("sim-ordinary-1")
     status, body = _freeze(
-        "kill-ordinary-1",
+        "sim-ordinary-1",
         {
             "operator_name": "Sessions console operator",
             "reason": "Manual kill switch invoked from the sessions console",
@@ -110,7 +130,7 @@ def test_an_ordinary_freeze_from_the_console_is_unchanged() -> None:
     assert status == 200
     assert body["status"] == "SESSION_FROZEN"
     assert body["is_tripped"] is True
-    assert _trip_reason("kill-ordinary-1") == (
+    assert _trip_reason("sim-ordinary-1") == (
         "MANUALLY_TERMINATED by Sessions console operator: "
         "Manual kill switch invoked from the sessions console"
     )
@@ -118,11 +138,12 @@ def test_an_ordinary_freeze_from_the_console_is_unchanged() -> None:
 
 def test_a_freeze_that_names_neither_field_still_records_the_defaults() -> None:
     """An empty body froze a session before this, and still does."""
-    status, body = _freeze("kill-default-1", {})
+    _record("sim-default-1")
+    status, body = _freeze("sim-default-1", {})
     assert status == 200
     assert body["operator"] == DEFAULT_OPERATOR
     assert body["reason"] == DEFAULT_REASON
-    assert _trip_reason("kill-default-1") == (
+    assert _trip_reason("sim-default-1") == (
         f"MANUALLY_TERMINATED by {DEFAULT_OPERATOR}: {DEFAULT_REASON}"
     )
 
@@ -149,19 +170,20 @@ def test_a_reason_the_labels_push_past_the_bound_is_refused() -> None:
     """
     reason = _reason_packed_with_key_ids(240)
     assert len(reason) == 240
-    status, problem = _freeze("kill-grown-1", {"reason": reason})
+    status, problem = _freeze("sim-grown-1", {"reason": reason})
     assert status == 400, problem
     assert problem["invalid_params"][0]["name"] == "reason"
     assert "240" in problem["detail"]
-    assert _trip_reason("kill-grown-1") is None
+    assert _trip_reason("sim-grown-1") is None
 
 
 def test_what_a_freeze_publishes_is_never_longer_than_the_bound_it_states() -> None:
     """One key id still fits inside 240 characters, so it is kept and redacted."""
     reason = f"saw {SYNTHETIC_KEY_ID} in the log"
-    status, body = _freeze("kill-grown-2", {"reason": reason})
+    _record("sim-grown-2")
+    status, body = _freeze("sim-grown-2", {"reason": reason})
     assert status == 200, body
-    published = _trip_reason("kill-grown-2")
+    published = _trip_reason("sim-grown-2")
     assert SYNTHETIC_KEY_ID not in published
     assert "[AWS_ACCESS_KEY REDACTED]" in published
     assert len(published) <= len(f"MANUALLY_TERMINATED by {DEFAULT_OPERATOR}: ") + 240

@@ -118,6 +118,27 @@ def _read_web_asset(filename: str, stage: str) -> Any:
     return markup.replace("__THREEFOLD_BASE_PATH__", base_path)
 
 
+# The origin's own security headers. Through the edge the distribution's
+# headers policy overrides these on every response, so they only ever show
+# on a fetch straight from the API URL - which is exactly where they are
+# needed, since that fetch used to arrive with no protection at all. The
+# HSTS value mirrors the edge's; the framing-only CSP intersects safely with
+# the edge's full policy on the way through, and no page frames anything.
+ORIGIN_SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "Strict-Transport-Security": "max-age=63072000; includeSubDomains",
+}
+
+ORIGIN_PAGE_HEADERS = {
+    **ORIGIN_SECURITY_HEADERS,
+    "X-Frame-Options": "DENY",
+    "Content-Security-Policy": "frame-ancestors 'none'",
+    # Nothing this service answers reads the Referer, so none is sent: a page
+    # URL can carry a session id or a project name in its query.
+    "Referrer-Policy": "no-referrer",
+}
+
+
 def build_script_response(source: str, filename: str) -> Dict[str, Any]:
     """Hands back a script as text a browser will show and a shell can pipe.
 
@@ -128,7 +149,7 @@ def build_script_response(source: str, filename: str) -> Dict[str, Any]:
     headers = dict(CORS_HEADERS)
     headers["Content-Type"] = "text/plain; charset=utf-8"
     headers["Cache-Control"] = "no-cache"
-    headers["X-Content-Type-Options"] = "nosniff"
+    headers.update(ORIGIN_SECURITY_HEADERS)
     headers["Content-Disposition"] = f'inline; filename="{filename}"'
     return {"statusCode": 200, "headers": headers, "body": source}
 
@@ -138,6 +159,7 @@ def build_html_response(status_code: int, markup: str) -> Dict[str, Any]:
     headers = dict(CORS_HEADERS)
     headers["Content-Type"] = "text/html; charset=utf-8"
     headers["Cache-Control"] = "no-cache"
+    headers.update(ORIGIN_PAGE_HEADERS)
     return {"statusCode": status_code, "headers": headers, "body": markup}
 
 
@@ -149,6 +171,7 @@ def build_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
 
     headers = dict(CORS_HEADERS)
     headers["Content-Type"] = content_type
+    headers.update(ORIGIN_SECURITY_HEADERS)
 
     return {
         "statusCode": status_code,
@@ -460,9 +483,12 @@ def _route(event: Dict[str, Any], http_method: str, request_id: str) -> Dict[str
                     "CurrentSessionCostUSD": result.current_session_cost_usd,
                     "LatencyMs": latency_ms,
                 },
-                # Already labelled, so a caller cannot mint a metric per request
-                # by sending a new project name each time.
-                dimensions={"Project": request.project_name, "Environment": "Production"},
+                # The project is a property, not a dimension: as a dimension
+                # every new Acme-* name a caller sent was five new metrics, and
+                # a new charge. As a property it is still searchable in Logs
+                # Insights, exactly as the adapter keeps the tool name.
+                dimensions={"Environment": "Production"},
+                extra_properties={"Project": request.project_name},
             )
             return build_response(200, result.to_dict())
 
@@ -588,7 +614,20 @@ def _route(event: Dict[str, Any], http_method: str, request_id: str) -> Dict[str
             # verdicts, and a body that still sends the field gets the same
             # document as one that does not. The field is ignored rather than
             # refused so older callers keep working against the true record.
-            session = _evaluator.get_or_create_session(session_id)
+            # The session is read, never created: certifying an id nobody
+            # governed would mint rows by typo, like the freeze and the resume.
+            session = _evaluator.session_repo.get_session(session_id)
+            if session is None:
+                return build_response(
+                    404,
+                    rfc7807_error(
+                        404,
+                        "No Such Session",
+                        f"No session named {session_id!r} has been recorded.",
+                        path,
+                        error_type="urn:threefold:error:session-not-found",
+                    ),
+                )
 
             # A certificate that attests to nothing is the one artifact this
             # product cannot afford to hand out, so the refusal is reported as a
@@ -683,6 +722,17 @@ def _route(event: Dict[str, Any], http_method: str, request_id: str) -> Dict[str
             operator_name = _bounded_text(body, "operator_name", 120, DEFAULT_TERMINATION_OPERATOR)
             reason = _bounded_text(body, "reason", 240, DEFAULT_TERMINATION_REASON)
             frozen_session = _evaluator.terminate_session(target_session_id, operator_name, reason)
+            if frozen_session is None:
+                return build_response(
+                    404,
+                    rfc7807_error(
+                        404,
+                        "No Such Session",
+                        f"No session named {target_session_id!r} has been recorded.",
+                        path,
+                        error_type="urn:threefold:error:session-not-found",
+                    ),
+                )
 
             res_dict = {
                 "status": "SESSION_FROZEN",

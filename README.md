@@ -22,10 +22,12 @@ infrastructure under the architect's layering rules, a credential in the
 arguments, a write that switches the hooks off, the same call repeating, a
 spend ceiling. A team connects a repository with one command, and by default a
 project starts in **Observe**: calls are judged and recorded and no rule refuses
-anything. What is still refused there is a credential, by the hook on the
-developer's own machine, and a request the service cannot take at all (a body
-over 1 MB, a malformed call, a key it rejects), because the hook reads any 4xx
-answer other than 429 as a refusal. The operations dashboard shows what
+anything. What is still refused there is a credential and anything that would
+switch the hooks off - an agent's settings file, Threefold's own binary,
+unplugging the plugin - by the hook on the developer's own machine, and a
+request the service cannot take at all (a body over 1 MB, a malformed call,
+a key it rejects), because the hook reads any 4xx answer other than 429 as a
+refusal. The operations dashboard shows what
 each rule *would* have refused; the operator marks each of those correct or a
 false alarm, promotes the project to **Enforce** with the rules that earned it,
 and demotes it with one click. Amazon Bedrock never decides; it phrases a

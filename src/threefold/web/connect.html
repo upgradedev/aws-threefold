@@ -539,7 +539,7 @@
           <p class="tf-panel-sub">Every pull request is judged with nothing installed on any machine.</p>
         </div>
       </div>
-      <p>Hooks ask before each write, but no hook can compel an engineer to install it. The merge can: <span class="font-mono">scripts/judge_pr.py</span>, run by <span class="font-mono">.github/workflows/pr-judge.yml</span> as a required check, sends every added or changed file through the same gates and fails the merge on a refusal or a fired rule. Anything it cannot judge fails the merge too: the gate fails closed. This repository's own pull request <a class="tf-link" href="https://github.com/upgradedev/aws-threefold/pull/6">PR #6</a> proved it, red on a planted credential, then green.</p>
+      <p>Hooks ask before each write, but no hook can compel an engineer to install it. The merge can: <span class="font-mono">scripts/judge_pr.py</span>, run by <span class="font-mono">.github/workflows/pr-judge.yml</span> as a required check, sends every added or changed file through the same gates and fails the merge on a refusal or a fired rule. The judge runs from the base branch with the request as data only, so the request cannot neuter it. Anything it cannot judge fails the merge too: the gate fails closed. This repository's own pull request <a class="tf-link" href="https://github.com/upgradedev/aws-threefold/pull/6">PR #6</a> proved it, red on a planted credential, then green.</p>
     </section>
 
     <!-- WHAT LEAVES YOUR MACHINE. This transcribes the contract in STATE.md and

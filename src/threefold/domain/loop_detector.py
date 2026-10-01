@@ -1,7 +1,10 @@
 """Cycle detection over tool-call signatures, and which calls are only looking."""
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Callable, List, Optional, Sequence, Tuple
+from threefold.domain.argument_bounds import bounded_arguments
 from threefold.domain.boundary_guard import CONTENT_KEYS, READ_TOOLS, analysed, command_cwd, shell_command
 from threefold.domain.models import ToolActionType, ToolInvocation
 from threefold.domain.shell_writes import program_name
@@ -85,6 +88,19 @@ def is_read_or_poll(invocation: ToolInvocation) -> bool:
     return all(_polls(argv) for argv in analysis.commands)
 
 
+def _bounded_signature(invocation: ToolInvocation) -> str:
+    """The loop gate's fingerprint of a call: the canonical signature over bounded arguments.
+
+    The row holds the bounded form while the call being judged still carries
+    the whole, so the raw signature would never see a repeat of a large call.
+    Spelled exactly like canonical_signature, so under the caps the two are
+    identical and every existing pin holds.
+    """
+    canonical_args = json.dumps(bounded_arguments(invocation.arguments), sort_keys=True, default=str)
+    payload = f"{invocation.tool_name}:{canonical_args}"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+
 class LoopDetector:
     """Detects runaway agent loops and ping-pong tool thrashing."""
 
@@ -129,8 +145,8 @@ class LoopDetector:
         if not history:
             return True, "No prior history"
 
-        next_sig = next_call.canonical_signature
-        sequence = [call.canonical_signature for call in history] + [next_sig]
+        next_sig = _bounded_signature(next_call)
+        sequence = [_bounded_signature(call) for call in history] + [next_sig]
 
         period = self._repeating_period(sequence)
         if period is None:

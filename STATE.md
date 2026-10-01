@@ -199,9 +199,12 @@ hidden in a document that a judge would read as finished work.
    verdicts. Every judged call records its verdict on the session, approvals
    and refusals alike, and a supplied `evaluations` list is ignored. The same
    canonical bytes carry a KMS signature where the stack holds a signing key
-   (unsigned with the absence stated, anywhere else). A session with no
-   recorded verdicts is refused with 400. What remains is requiring a
-   certificate before a merge, which nothing in CI does.
+   (unsigned with the absence stated, anywhere else). A recorded session with
+   no recorded verdicts is refused with 400, and an id nobody governed with
+   404; the route mints no row. A refusal anywhere in the session's past
+   taints the certificate through a sticky marker, even after it scrolls out
+   of the stored fifty. What remains is requiring a certificate before a
+   merge, which nothing in CI does.
 5. Fixed on 2026-09-25: the four offline panels replay one real run each,
    recorded against the live API that day and embedded in the page, with every
    panel labelled "recorded, replayed offline". No value in them is invented;
@@ -328,11 +331,12 @@ traffic.
    anonymous judge and the AI scorer reach everything, which is the ship gate's
    scorer row. The two writes that outlive their caller, the policy and the
    layering rules, are closed. Everything else a visitor can POST (evaluating a
-   call, the scenarios, the certificate, the kill switch) is still open and is
-   bounded by the session it names. If `STAGE=prod` or `ENFORCE_API_KEY` is ever
-   set, the reads the pages make stay open by method and those POSTs need the
-   key. A test pins both halves by setting the environment, which is what the
-   middleware reads.
+   call, the scenarios, the certificate) is still open and is bounded by the
+   session it names; the kill switch answers anonymously only for a scenario
+   session (sim-*), and freezing an id nobody recorded is 404. If `STAGE=prod`
+   or `ENFORCE_API_KEY` is ever set, the reads the pages make stay open by
+   method and those POSTs need the key. A test pins both halves by setting the
+   environment, which is what the middleware reads.
 6. The cost gate trusts caller-declared token counts. A caller declaring zero is
    not stopped. A proxy that meters real usage is the stronger control and this
    is not one.

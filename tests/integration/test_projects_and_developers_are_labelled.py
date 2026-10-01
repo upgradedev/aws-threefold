@@ -106,11 +106,19 @@ def test_a_call_that_names_no_project_is_unlabelled_rather_than_attributed_to_on
     assert _ledger_row("labels-missing")["project_name"] == "unlabelled"
 
 
-def test_the_metric_dimension_carries_the_label_rather_than_the_request(capsys) -> None:
-    """A dimension a caller controls is a new metric, and a new charge, per request."""
+def test_the_project_is_a_property_not_a_dimension(capsys) -> None:
+    """A dimension a caller controls is a new metric, and a new charge, per request.
+
+    The label alone did not stop that: any new name inside the pattern still
+    minted one. So the record carries the project as a searchable property and
+    dimensions only on the fixed Environment, exactly as the adapter keeps the
+    tool name. The dimension set is asserted too, because moving a key out of
+    it silently retires any alarm that was keyed on it.
+    """
     _evaluate("labels-metric", project_name=RAW_PROJECT)
     record = _emf(capsys.readouterr().out)
-    assert record["Project"] == "unlabelled"
+    assert record["_aws"]["CloudWatchMetrics"][0]["Dimensions"] == [["Environment"]]
+    assert record["Project"] == "unlabelled", "The label is still recorded"
 
 
 def test_the_universal_adapter_logs_the_tool_name_rather_than_dimensioning_on_it(capsys) -> None:

@@ -105,12 +105,32 @@ def test_dynamic_policy_configuration() -> None:
     assert post_body["config"]["max_session_budget_usd"] == 25.00
 
 
-def test_emergency_kill_switch_freezes_session() -> None:
+def _record(session_id: str) -> None:
+    """One ordinary call, so the freeze below names a session that exists."""
+    res = lambda_handler({
+        "httpMethod": "POST",
+        "path": "/evaluate-tool-call",
+        "headers": {"Content-Type": "application/json"},
+        "body": json.dumps({
+            "session_id": session_id,
+            "project_name": "Acme-Ledger",
+            "tool_name": "read_file",
+            "action_type": "FILE_READ",
+            "arguments": {"path": "README.md"},
+        }),
+    })
+    assert res["statusCode"] == 200
+
+
+def test_emergency_kill_switch_freezes_session(monkeypatch) -> None:
+    """The operator freezes a recorded session; later calls in it are blocked."""
+    monkeypatch.setenv("THREEFOLD_API_KEYS", "operator-key-kill-switch")
     session_id = "sess-kill-test-001"
+    _record(session_id)
     event = {
         "httpMethod": "POST",
         "path": f"/sessions/{session_id}/terminate",
-        "headers": {"Content-Type": "application/json"},
+        "headers": {"Content-Type": "application/json", "X-API-Key": "operator-key-kill-switch"},
         "body": json.dumps({
             "operator_name": "VP of AI Safety",
             "reason": "Suspicious tool actuation anomaly",
@@ -142,15 +162,18 @@ def test_emergency_kill_switch_freezes_session() -> None:
     assert "Session execution frozen" in tool_body["reason"]
 
 
-def test_idempotency_key_caching_on_kill_switch() -> None:
+def test_idempotency_key_caching_on_kill_switch(monkeypatch) -> None:
+    monkeypatch.setenv("THREEFOLD_API_KEYS", "operator-key-kill-switch")
     global_idempotency_cache.clear()
     idemp_key = "idemp-agentic-test-key-999"
+    _record("sess-idemp-01")
 
     event = {
         "httpMethod": "POST",
         "path": "/sessions/sess-idemp-01/terminate",
         "headers": {
             "Content-Type": "application/json",
+            "X-API-Key": "operator-key-kill-switch",
             "Idempotency-Key": idemp_key,
         },
         "body": json.dumps({

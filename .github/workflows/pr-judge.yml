@@ -6,6 +6,14 @@ name: Judge the diff
 # on one. A hook nobody installed cannot be bypassed here, because there is no
 # hook: a cloud agent's pull request is judged exactly like a local one's.
 #
+# The judge itself cannot be neutered by the pull request either. This runs on
+# pull_request_target, so the workflow comes from the base branch; the base is
+# checked out for its copy of scripts/judge_pr.py, and the pull request's head
+# is checked out beside it as data only: nothing in it is executed, and no
+# pull-request text reaches a run step. A request that rewrites the judge
+# still has its files judged by the base's copy. CODEOWNERS names the gate's
+# own files so such a rewrite always asks its owner for review.
+#
 # Wiring it as a required check is what makes it load-bearing: branch
 # protection on main names this check, without requiring pull requests, so
 # direct pushes keep working and every pull request is judged. See
@@ -16,7 +24,7 @@ name: Judge the diff
 # the edge: shared runners must not depend on the WAF's per-address luck.
 
 on:
-  pull_request:
+  pull_request_target:
     branches: [main]
     types: [opened, synchronize, reopened]
 
@@ -28,9 +36,18 @@ jobs:
     name: Judge the diff
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - name: Check out the base for its judge
+        uses: actions/checkout@v7
         with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+
+      - name: Check out the pull request as data
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
+          path: pr
 
       - uses: actions/setup-python@v7
         with:
@@ -38,8 +55,9 @@ jobs:
 
       - name: Judge the diff through Threefold
         run: >
-          python scripts/judge_pr.py
+          python base/scripts/judge_pr.py
           --endpoint https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/
           --project Acme-Threefold
+          --repo pr
           --base origin/${{ github.base_ref }}
           --session-id judge-pr-${{ github.event.pull_request.number }}-${{ github.run_id }}

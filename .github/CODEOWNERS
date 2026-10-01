@@ -1,0 +1,4 @@
+# The merge gate's own wiring. A change here alters what every pull request is
+# judged by, so it always asks the repository owner for review.
+.github/ @upgradedev
+scripts/judge_pr.py @upgradedev

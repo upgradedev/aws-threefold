@@ -1,13 +1,16 @@
 """DynamoDB repository for Threefold persistent session state and governance records."""
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
+import re
 import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Sequence, Tuple
+from threefold.domain.argument_bounds import bounded_arguments
 from threefold.domain.models import AgentSession, StoredVerdict, ToolActionType, ToolInvocation
 
 logger = logging.getLogger(__name__)
@@ -371,6 +374,7 @@ class DynamoDBSessionRepository:
             total_calls=stored_calls if stored_calls else len(history),
             history=history,
             verdicts=verdicts,
+            has_failed_verdict=bool(item.get("has_failed_verdict", False)),
             is_tripped=bool(item.get("is_tripped", False)),
             trip_reason=item.get("trip_reason") or None,
             is_terminated=bool(item.get("is_terminated", False)),
@@ -1071,7 +1075,7 @@ class DynamoDBSessionRepository:
             {
                 "tool_name": h.tool_name,
                 "action_type": h.action_type.value,
-                "arguments": h.arguments,
+                "arguments": bounded_arguments(h.arguments),
                 "timestamp": h.timestamp,
             }
             for h in session.history[-50:]  # Keep last 50 actions for sliding window
@@ -1088,6 +1092,7 @@ class DynamoDBSessionRepository:
             "total_input_tokens": session.total_input_tokens,
             "total_output_tokens": session.total_output_tokens,
             "total_calls": session.total_calls,
+            "has_failed_verdict": bool(session.has_failed_verdict),
             "is_tripped": session.is_tripped,
             "trip_reason": session.trip_reason or "",
             "is_terminated": session.is_terminated,

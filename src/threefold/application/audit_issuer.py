@@ -32,6 +32,20 @@ def _default_signer(canonical: bytes) -> Optional[Tuple[str, str]]:
     return sign_certificate(canonical)
 
 
+def is_enforced_pass(status: str, dry_run: bool, rule_evaluations: Dict[str, bool]) -> bool:
+    """Whether one verdict counts towards a compliant certificate.
+
+    Shared by the issuer and the recorder, so the sticky marker on the
+    session means exactly what the certificate would have said with the full
+    fifty verdicts in front of it.
+    """
+    return (
+        status == "APPROVED"
+        and not dry_run
+        and all(value is True for value in (rule_evaluations or {}).values())
+    )
+
+
 class AuditIssuer:
     """Builds deterministic audit certificates from recorded history."""
 
@@ -69,7 +83,7 @@ class AuditIssuer:
             for v in stored
         ]
 
-        all_passed = all(AuditIssuer._is_enforced_pass(e) for e in evaluations)
+        all_passed = all(AuditIssuer._is_enforced_pass(e) for e in evaluations) and not session.has_failed_verdict
         shown_project = project_label(session.project_name)
         canonical_data = {
             "session_id": session.session_id,
@@ -107,8 +121,4 @@ class AuditIssuer:
 
     @staticmethod
     def _is_enforced_pass(entry: EvaluationResultDTO) -> bool:
-        return (
-            entry.status == "APPROVED"
-            and not entry.dry_run
-            and all(value is True for value in (entry.rule_evaluations or {}).values())
-        )
+        return is_enforced_pass(entry.status, entry.dry_run, entry.rule_evaluations)

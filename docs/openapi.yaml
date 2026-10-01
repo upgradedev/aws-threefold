@@ -15,8 +15,10 @@ info:
     name: Threefold
     url: https://d1og72wpk4aqig.cloudfront.net/
 servers:
+- url: https://d1og72wpk4aqig.cloudfront.net/prod
+  description: Live deployment, through the CloudFront edge.
 - url: https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod
-  description: Live deployment, eu-west-1. Answers an anonymous request with no key.
+  description: The regional API in eu-west-1, answered directly.
 - url: http://127.0.0.1:8001
   description: Local runtime, started by make run.
 paths:
@@ -403,15 +405,17 @@ paths:
       summary: Issue Governance Certificate
       description: >-
         Issues a Governance Certificate over a session's own stored verdicts: the session id is the only input,
-        and any evaluations the body still sends are ignored. The SHA-256 fingerprint is unkeyed and detects corruption
-        and casual edits; where the stack holds a signing key the same bytes carry a KMS signature. Nothing in CI
-        requires one before a merge.
+        and any evaluations the body still sends are ignored. A refusal anywhere in the session's past taints the
+        certificate even after it scrolls out of the stored fifty. The SHA-256 fingerprint is unkeyed and detects
+        corruption and casual edits; where the stack holds a signing key the same bytes carry a KMS signature. Nothing
+        in CI requires one before a merge.
       responses:
         '200':
           description: The certificate, returned rather than archived
         '400':
-          description: 'The body is not a JSON object, or there is nothing to certify: a session with no recorded
-            verdicts'
+          description: The body is not a JSON object, or a recorded session has no recorded verdicts
+        '404':
+          description: No session with that id has been recorded
   /policy/config:
     get:
       summary: Get Dynamic Policy Configuration
@@ -484,7 +488,9 @@ paths:
   /sessions/{session_id}/terminate:
     post:
       summary: Enterprise Emergency Kill Switch
-      description: Immediately freezes and terminates an autonomous agent session, revoking further tool executions.
+      description: >-
+        Immediately freezes an autonomous agent session, revoking further tool executions. Freezing an id nobody
+        recorded answers 404; without the operator key only a scenario (sim-*) session can be frozen.
       parameters:
       - name: session_id
         in: path
@@ -513,6 +519,10 @@ paths:
       responses:
         '200':
           description: Session frozen confirmation
+        '401':
+          description: Missing operator key for a non-scenario session
+        '404':
+          description: No session with that id has been recorded
   /sessions/{session_id}/resume:
     post:
       summary: Resume a halted session

@@ -134,16 +134,17 @@ def test_the_detail_reports_the_cumulative_call_count() -> None:
     assert body["total_calls"] == listed[session_id]["calls"], "Detail and listing agree"
 
 
-def test_the_kill_switch_reaches_an_escaped_session_id() -> None:
+def test_the_kill_switch_reaches_an_escaped_session_id(monkeypatch) -> None:
     session_id = "console freeze <target>"
     _evaluate(session_id)
+    monkeypatch.setenv("THREEFOLD_API_KEYS", "operator-key-console-freeze")
 
     encoded = urllib.parse.quote(session_id, safe="")
     response = lambda_handler(
         {
             "httpMethod": "POST",
             "path": f"/sessions/{encoded}/terminate",
-            "headers": {"Content-Type": "application/json"},
+            "headers": {"Content-Type": "application/json", "X-API-Key": "operator-key-console-freeze"},
             "body": json.dumps(
                 {"operator_name": "Sessions console operator", "reason": "Escaped id freeze"}
             ),

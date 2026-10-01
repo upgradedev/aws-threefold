@@ -65,15 +65,27 @@ def test_without_a_cwd_or_workspace_the_root_is_where_the_hook_runs(hook, machin
 
 # --- the agents' own configuration and memory -------------------------------------
 
-@pytest.mark.parametrize("directory", [".claude", ".codex", ".gemini", ".local/share/muse"])
-def test_a_write_into_an_agents_own_configuration_is_held_back(directory, machine, stub, run_hook, held_back_lines) -> None:
+@pytest.mark.parametrize(
+    "directory, filename",
+    [
+        (".claude", "todos/session.jsonl"),
+        (".codex", "sessions/019.jsonl"),
+        (".gemini", "history/session.jsonl"),
+        (".local/share/muse", "settings.json"),
+    ],
+)
+def test_a_write_into_an_agents_own_configuration_is_held_back(
+    directory, filename, machine, stub, run_hook, held_back_lines
+) -> None:
     """Checked before outside-root, and here the root is the home directory,
-    so only the agent-config rule can be what held it back."""
+    so only the agent-config rule can be what held it back. The settings
+    files themselves are refused instead - see test_the_hook_refuses_to_disarm_itself -
+    except Muse's, whose settings format is unknown."""
     payload = {
         "session_id": "s",
         "cwd": str(machine.home),
         "tool_name": "Write",
-        "tool_input": {"file_path": str(machine.home / directory / "settings.json"), "content": "{}"},
+        "tool_input": {"file_path": str(machine.home / directory / filename), "content": "{}"},
     }
     _held_back(stub, run_hook, payload, held_back_lines, "agent-config")
 

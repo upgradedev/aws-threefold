@@ -440,13 +440,13 @@ def test_a_resume_climbs_the_same_ladder_a_policy_write_does(monkeypatch) -> Non
     assert _call(method, path, body, {"X-API-Key": "operator-key-1"})[0] == 200
 
 
-def test_the_kill_switch_was_not_closed_with_the_resume() -> None:
-    """Freezing a session can only stop work, and the demo stack answers it anonymously on purpose."""
-    status, body = _call(
+def test_the_kill_switch_answers_a_stranger_only_for_a_scenario_session() -> None:
+    """A stranger could freeze any session they could name, including the fleet's predictable ids."""
+    status, problem = _call(
         "POST", "/sessions/perimeter-freeze/terminate", {"operator_name": "probe", "reason": "probe"}
     )
-    assert status == 200
-    assert body["status"] == "SESSION_FROZEN"
+    assert status == 403
+    assert problem["type"] == "urn:threefold:error:freeze-needs-operator"
 
 
 def test_the_resume_predicate_names_only_the_resume() -> None:

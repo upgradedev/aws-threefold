@@ -12,11 +12,12 @@ import re
 from collections import Counter
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 from threefold.domain.layering_rules import (
     DEFAULT_RULES,
     ENFORCE,
     OBSERVE,
+    introduced_violations,
     observed as observed_layering,
     rules_for_path,
     violations,
@@ -52,6 +53,14 @@ SHELL_TOOLS = frozenset(
 WORKING_DIRECTORY_KEYS = ("cwd", "workdir")
 
 
+# An edit's file before and after it, as the hook reconstructs them. Read only
+# by the introduced-imports check: yielding them with every other string would
+# judge the file's past in each whole-arguments scan, refusing an edit for a
+# secret, a command or a path the file already held. What the edit itself
+# writes is still scanned under its own keys.
+EDIT_CONTEXT_KEYS = frozenset(("edit_before", "edit_after"))
+
+
 def iter_string_leaves(value: Any) -> Iterator[str]:
     """Yields every string anywhere inside an argument structure.
 
@@ -63,6 +72,8 @@ def iter_string_leaves(value: Any) -> Iterator[str]:
     elif isinstance(value, dict):
         for key, item in value.items():
             if isinstance(key, str):
+                if key.lower() in EDIT_CONTEXT_KEYS:
+                    continue
                 yield key
             yield from iter_string_leaves(item)
     elif isinstance(value, (list, tuple, set)):
@@ -190,6 +201,110 @@ class SecretScanner:
         return True, "No credentials detected"
 
 
+class _SpanMatch:
+    """The slice of text a linear matcher found, shaped like re.Match.
+
+    Only what the callers of DESTRUCTIVE_COMMANDS read: truthiness and
+    group(0).
+    """
+
+    __slots__ = ("text",)
+
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+    def __bool__(self) -> bool:
+        return True
+
+    def group(self, index: int = 0) -> str:
+        if index != 0:
+            raise IndexError(f"no such group: {index}")
+        return self.text
+
+
+class _RmRemovesRepository:
+    """Whether `rm` with a recursive flag removes `.git`, read in one walk.
+
+    This used to be one regular expression with three quantified flag groups
+    around the recursive flag, and the engine backtracked over every split of
+    a long flag run: `rm` with nine thousand `-r` took 14 seconds, so one
+    anonymous request held a Lambda slot to its timeout. The walk below reads
+    each token once and matches the same language: `rm` at a word boundary, a
+    run of short (`-[A-Za-z]*`) or long (`--[a-z-]+`) flags holding at least
+    one recursive flag (`-[A-Za-z]*r[A-Za-z]*` or `--recursive`), then
+    `(\\./)?\\.git/?` followed by whitespace, the end, `;`, `&` or `|`.
+    Attempts share a memo of visited token positions, so a flag run that
+    itself spells `rm` costs one walk, not one per flag. Exposes search() so
+    both readers of DESTRUCTIVE_COMMANDS use it as a pattern.
+    """
+
+    _RM = re.compile(r"rm", re.IGNORECASE)
+    _SPACE = re.compile(r"\s+")
+    _SHORT = re.compile(r"-[A-Za-z]*")
+    _LONG = re.compile(r"--[a-z-]+", re.IGNORECASE)
+    _SHORT_RECURSIVE = re.compile(r"-[A-Za-z]*r[A-Za-z]*", re.IGNORECASE)
+    _GIT = re.compile(r"(\./)?\.git/?(\s|$|;|&|\|)", re.IGNORECASE)
+
+    def search(self, text: str) -> Optional[_SpanMatch]:
+        memo: Dict[Tuple[int, bool], Optional[int]] = {}
+        for occurrence in self._RM.finditer(text):
+            found = self._match_from(text, occurrence.start(), memo)
+            if found is not None:
+                return found
+        return None
+
+    @classmethod
+    def _match_from(
+        cls, text: str, start: int, memo: Dict[Tuple[int, bool], Optional[int]]
+    ) -> Optional[_SpanMatch]:
+        if start > 0 and (text[start - 1].isalnum() or text[start - 1] == "_"):
+            return None  # no word boundary before rm
+        gap = cls._SPACE.match(text, start + 2)
+        if gap is None:
+            return None
+        # Where the walk past a token position with a recursive flag seen or
+        # not ends: the anchor's end on a match, None past it. The walk is
+        # deterministic from the position on, so what one attempt learns holds
+        # for every later one, and each position is read once.
+        trail: List[Tuple[int, bool]] = []
+        end: Optional[int] = None
+        outcome: Optional[_SpanMatch] = None
+        pos = gap.end()
+        seen_recursive = False
+        while True:
+            state = (pos, seen_recursive)
+            if state in memo:
+                end = memo[state]
+                outcome = None if end is None else _SpanMatch(text[start:end])
+                break
+            trail.append(state)
+            token_end = pos
+            while token_end < len(text) and not text[token_end].isspace():
+                token_end += 1
+            token = text[pos:token_end]
+            if not token:
+                break  # flags ran into the end: no .git anchor
+            if cls._SHORT.fullmatch(token):
+                if cls._SHORT_RECURSIVE.fullmatch(token):
+                    seen_recursive = True
+            elif cls._LONG.fullmatch(token):
+                if token.lower() == "--recursive":
+                    seen_recursive = True
+            else:
+                anchor = cls._GIT.match(text, pos)
+                if anchor is not None and seen_recursive:
+                    end = anchor.end()
+                    outcome = _SpanMatch(text[start:end])
+                break
+            gap = cls._SPACE.match(text, token_end)
+            if gap is None:
+                break
+            pos = gap.end()
+        for state in trail:
+            memo[state] = end
+        return outcome
+
+
 class ArchitecturalBoundaryGuard:
     """Enforces Clean Architecture layer boundaries and protected paths."""
 
@@ -230,14 +345,12 @@ class ArchitecturalBoundaryGuard:
         pattern for pattern in PROTECTED_PATH_PATTERNS if pattern.pattern != r"\.git(?![A-Za-z0-9_])"
     ] + [re.compile(r"\.git-credentials(?![A-Za-z0-9_])", re.IGNORECASE)]
 
-    DESTRUCTIVE_COMMANDS: List[re.Pattern] = [
+    DESTRUCTIVE_COMMANDS: List[Union[re.Pattern, _RmRemovesRepository]] = [
         re.compile(r"\brm\s+-rf\s+(/|\*|~|\$HOME)", re.IGNORECASE),
         # The repository's history, whatever the order or spelling of the flags.
-        re.compile(
-            r"\brm\s+(-[A-Za-z]*\s+|--[a-z-]+\s+)*(-[A-Za-z]*r[A-Za-z]*|--recursive)\s+(-[A-Za-z]*\s+|--[a-z-]+\s+)*"
-            r"(\./)?\.git/?(\s|$|;|&|\|)",
-            re.IGNORECASE,
-        ),
+        # A linear token walk, not the nested-quantifier pattern it replaced:
+        # both readers only call search() and read group(0).
+        _RmRemovesRepository(),
         re.compile(r"\bformat\s+[a-z]:", re.IGNORECASE),
         re.compile(r"\bgit\s+push\s+.*(--force|-f)\b", re.IGNORECASE),
         re.compile(r"\bdrop\s+database\b", re.IGNORECASE),
@@ -356,12 +469,35 @@ class ArchitecturalBoundaryGuard:
         #    FILE_WRITE: the declared action type is a hint from the agent, and a
         #    guard that only inspects calls which admit to being writes is one
         #    omitted field away from silence.
+        flagged: set = set()
         for target, content in write_pairs(arguments):
             if not rules_for_path(target, active_rules):
                 continue
             found, _ = violations(target, content, active_rules)
             for item in found:
+                flagged.add((item["rule_id"], item["module"]))
                 if item["mode"] == ENFORCE:
+                    yield BoundaryFinding(
+                        LAYERING_FOUND,
+                        f"Clean Architecture violation: {item['reason']}",
+                        rule_id=item["rule_id"],
+                        path=target,
+                    )
+
+        # 3b. The imports an edit introduces. A partial-line edit sends no
+        #     import syntax in its own text, so the hook sends the file before
+        #     and after beside it, and only the difference is judged here: a
+        #     pre-existing import is already answered for above when the edit's
+        #     own text declares it, and is otherwise the file's past, not this
+        #     edit's. Already-flagged pairs are skipped so one import is not
+        #     counted twice.
+        for target, before, after in edit_contexts(arguments):
+            if not rules_for_path(target, active_rules):
+                continue
+            found, _ = introduced_violations(target, before, after, active_rules)
+            for item in found:
+                if item["mode"] == ENFORCE and (item["rule_id"], item["module"]) not in flagged:
+                    flagged.add((item["rule_id"], item["module"]))
                     yield BoundaryFinding(
                         LAYERING_FOUND,
                         f"Clean Architecture violation: {item['reason']}",
@@ -834,6 +970,36 @@ def _written_leaves(value: Any) -> Iterator[str]:
             yield from _written_leaves(item)
 
 
+def edit_contexts(arguments: Any) -> List[Tuple[str, str, str]]:
+    """Each path in a call with the file before and after the edit, if sent.
+
+    The hook reconstructs both when the edit applies cleanly to the file on
+    the machine; anything else sends nothing and is judged as it always was.
+    """
+    found: List[Tuple[str, str, str]] = []
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            path = ""
+            for key, value in node.items():
+                if isinstance(key, str) and isinstance(value, str) and key.lower() in PATH_KEYS:
+                    named = named_path(value)
+                    if named:
+                        path = named
+            before = node.get("edit_before")
+            after = node.get("edit_after")
+            if path and isinstance(before, str) and isinstance(after, str):
+                found.append((path, before, after))
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, (list, tuple, set)):
+            for item in node:
+                walk(item)
+
+    walk(arguments)
+    return found
+
+
 def write_pairs(arguments: Any) -> List[Tuple[str, str]]:
     """Each path in a call with the content meant for it, however the call is shaped."""
     pairs = iter_write_targets(arguments)
@@ -863,9 +1029,17 @@ def observe_layering(invocation: ToolInvocation, rules: Optional[List[Dict[str, 
     """
     active_rules = rules if rules is not None else DEFAULT_RULES
     found: List[Dict[str, str]] = []
+    flagged: set = set()
     for target, content in write_pairs(invocation.arguments or {}):
         for item in observed_layering(target, content, active_rules):
+            flagged.add((item["rule_id"], item["module"]))
             found.append(dict(item, path=target))
+    for target, before, after in edit_contexts(invocation.arguments or {}):
+        introduced, _ = introduced_violations(target, before, after, active_rules)
+        for item in introduced:
+            if item["mode"] == OBSERVE and (item["rule_id"], item["module"]) not in flagged:
+                flagged.add((item["rule_id"], item["module"]))
+                found.append(dict(item, path=target))
     command = shell_command(invocation)
     if command is not None:
         found.extend(shell_observations(analysed(command, command_cwd(invocation)), active_rules))

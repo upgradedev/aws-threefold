@@ -1,10 +1,11 @@
 """The session id is caller text a page publishes, so it is bounded and carries no credential.
 
-Naming a session creates it. The two recording routes, the certificate and the
-freeze each create the session they name, `/api/sessions` lists the id exactly
-as it arrived, and `public_row()` rewrites only the project name and the
-developer. So on a stack whose reads are public the id was the third piece of
-caller text on that page, beside the operator and the reason a freeze writes -
+Naming a session can create it. The two recording routes and the certificate
+create the session they name, while the freeze refuses an id nobody recorded;
+`/api/sessions` lists the id exactly as it arrived, and `public_row()`
+rewrites only the project name and the developer. So on a stack whose reads
+are public the id was the third piece of caller text on that page, beside the
+operator and the reason a freeze writes -
 and unlike those two it was unbounded and unredacted: a 448-character id
 carrying a credential was listed in full.
 
@@ -47,8 +48,24 @@ def _call(method: str, path: str, body: dict | None = None):
     return response["statusCode"], json.loads(response["body"])
 
 
+OPERATOR_KEY = "operator-key-bounded-ids"
+
+
+@pytest.fixture(autouse=True)
+def _an_operator_key_is_configured(monkeypatch):
+    """Only a scenario freeze is anonymous; the freeze below carries the key."""
+    monkeypatch.setenv("THREEFOLD_API_KEYS", OPERATOR_KEY)
+
+
 def _freeze(session_id: str):
-    return _call("POST", f"/sessions/{session_id}/terminate", {})
+    event = {
+        "rawPath": f"/prod/sessions/{session_id}/terminate",
+        "headers": {"Content-Type": "application/json", "X-API-Key": OPERATOR_KEY},
+        "requestContext": {"http": {"method": "POST"}, "stage": "prod"},
+        "body": json.dumps({}),
+    }
+    response = lambda_handler(event)
+    return response["statusCode"], json.loads(response["body"])
 
 
 def _record(session_id: str):

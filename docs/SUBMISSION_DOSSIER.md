@@ -24,8 +24,10 @@ credential in the arguments, a write that switches the hooks off, the same call
 repeating, a spend ceiling. A team connects a repository with one command.
 By default a project starts in Observe, where calls are judged and recorded
 and no rule refuses anything; a credential is still refused on the developer's
-machine, and so is a request the service cannot take at all, such as a body
-over 1 MB, because the hook reads any 4xx other than 429 as a refusal. The
+machine, as is anything that would switch the hooks off - an agent's settings
+file, Threefold's own binary, unplugging the plugin - with nothing sent, and
+so is a request the service cannot take at all, such as a body over 1 MB,
+because the hook reads any 4xx other than 429 as a refusal. The
 operations dashboard shows what each rule would have refused; the operator labels each of those
 correct or a false alarm, and promotes the project to Enforce with the rules
 that earned it, or demotes it with one click. A refusal carries a fix that has

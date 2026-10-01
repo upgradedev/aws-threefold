@@ -286,6 +286,14 @@ def violations(path: str, content: str, rules: List[Dict[str, Any]]) -> Tuple[Li
     if not modules:
         return [], f"No import declared in this {language} file"
 
+    found = _check_modules(path, modules, applicable, introduced=False)
+    return found, f"Checked {len(modules)} import(s) against {len(applicable)} rule(s)"
+
+
+def _check_modules(
+    path: str, modules: List[str], applicable: List[Dict[str, Any]], introduced: bool
+) -> List[Dict[str, str]]:
+    """Every rule these imports break, one finding per rule."""
     found: List[Dict[str, str]] = []
     for rule in applicable:
         for module in modules:
@@ -301,20 +309,48 @@ def violations(path: str, content: str, rules: List[Dict[str, Any]]) -> Tuple[Li
                 continue
             description = rule.get("description") or rule["id"]
             verb = "refuses this write" if rule.get("mode", ENFORCE) == ENFORCE else "would refuse this write"
+            if introduced:
+                how = f"This edit introduces '{module}' into '{path}', which matches '{offending}'"
+            else:
+                how = f"'{path}' imports '{module}', which matches '{offending}'"
             found.append(
                 {
                     "rule_id": rule["id"],
                     "mode": rule.get("mode", ENFORCE),
                     "module": module,
                     "pattern": offending,
-                    "reason": (
-                        f"Layering rule '{rule['id']}' {verb}: {description}. "
-                        f"'{path}' imports '{module}', which matches '{offending}'"
-                    ),
+                    "reason": f"Layering rule '{rule['id']}' {verb}: {description}. {how}",
                 }
             )
             break  # one finding per rule is enough to act on
-    return found, f"Checked {len(modules)} import(s) against {len(applicable)} rule(s)"
+    return found
+
+
+def introduced_violations(
+    path: str, before: str, after: str, rules: List[Dict[str, Any]]
+) -> Tuple[List[Dict[str, str]], str]:
+    """Every rule an edit newly breaks, judged on the imports it adds.
+
+    A partial-line edit carries no import syntax in what it sends: changing
+    `json` to `boto3` sends the word `boto3`, which declares no import. The
+    hook therefore sends the file before and after the edit alongside, and
+    only the difference is judged: imports the file already had are the
+    author's past, not this edit's, so editing around a pre-existing violation
+    stays allowed and removing one is never refused for containing it.
+    """
+    applicable = rules_for_path(path, rules)
+    if not applicable:
+        return [], "No layering rule covers this path"
+    language = language_for(path)
+    if not language:
+        return [], "The file type is one Threefold does not read, so no import could be checked"
+    _, before_modules = declared_imports(path, before)
+    _, after_modules = declared_imports(path, after)
+    introduced = [module for module in after_modules if module not in set(before_modules)]
+    if not introduced:
+        return [], "The edit introduces no import"
+    found = _check_modules(path, introduced, applicable, introduced=True)
+    return found, f"Checked {len(introduced)} introduced import(s) against {len(applicable)} rule(s)"
 
 
 def evaluate(path: str, content: str, rules: List[Dict[str, Any]]) -> Tuple[bool, str]:

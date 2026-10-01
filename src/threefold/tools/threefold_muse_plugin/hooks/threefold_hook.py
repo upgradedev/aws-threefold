@@ -129,12 +129,18 @@ In enforce mode a write to the files that decide whether the hooks run
 does not depend on the network.
 In managed mode the same is true while the stage last seen for the project is
 `enforce`, and only then, because a project in Observe is promised that
-nothing but a credential is refused on its machines. In observe mode,
+nothing but a credential or a disarm is refused on its machines. In observe mode,
 and in managed mode at any other stage, including none seen yet, the same
 write is sent as its path with the content left out, except under `.git`,
 which is a data directory and is not sent at all. The service refuses such a
 write by where it lands whenever the project enforces, so a stale stage here
 decides only what happens while the service cannot be reached.
+
+The same files under the home folder - an agent's settings, Threefold's own
+`bin/` - and a command that deletes them or unplugs Threefold from the agent,
+are refused in every mode, with nothing sent: self-protection is not project
+governance, and no mode lets the agent turn the guard off. The rest of the
+agents' directories keeps its privacy and is held back silently.
 
 Standard library only and a single file, because it is downloaded alone and run
 by whatever Python the developer already has.
@@ -233,6 +239,19 @@ DATA_DIRECTORIES = frozenset(
 # Home-relative paths, not names: Muse keeps its configuration and memory two
 # levels down, and only its own directory is held back, never all of ~/.local.
 AGENT_CONFIG_DIRECTORIES = (".claude", ".codex", ".gemini", ".local/share/muse")
+
+# The files under the agents' own directories that decide whether the hooks
+# run. A write to one is refused on the machine, in every mode, before
+# anything is sent; the rest of those directories keeps its privacy and is
+# held back silently. Muse's settings format is unknown, so its directory
+# names no governed file.
+GOVERNED_AGENT_FILES = {
+    ".claude": ("settings.json", "settings.local.json"),
+    ".codex": ("config.toml",),
+    ".gemini": ("settings.json",),
+}
+# A settings file at the home root itself, outside the agents' directories.
+GOVERNED_HOME_FILES = (".claude.json",)
 
 HELD_BACK_CATEGORIES = ("outside-root", "agent-config", "not-included", "data-file", "never-send", "no-project")
 
@@ -745,7 +764,7 @@ def shape_of(payload: Any, max_keys: int = 200, max_depth: int = 6) -> List[str]
 class NormalisedCall:
     """One tool call in the shape request v2 carries, whichever agent made it."""
 
-    __slots__ = ("action_type", "files", "command", "command_base", "command_cwd", "touched")
+    __slots__ = ("action_type", "files", "command", "command_base", "command_cwd", "touched", "edit_pairs")
 
     def __init__(
         self,
@@ -754,10 +773,15 @@ class NormalisedCall:
         command: Optional[str] = None,
         command_base: Optional[str] = None,
         touched: Optional[List[str]] = None,
+        edit_pairs: Optional[List[Any]] = None,
     ):
         self.action_type = action_type
         self.files = files or []
         self.command = command
+        # One list of (old, new) per file entry, or None where the tool names
+        # no old text. Never sent itself: _attach_edit_context reads the file
+        # the pair applies to and sends the before and after beside the edit.
+        self.edit_pairs = edit_pairs or []
         self.command_base = command_base
         # Where the command runs, relative to the governed root, once
         # _relative_to_root has worked it out. Empty means the root itself.
@@ -858,8 +882,11 @@ def _normalise_claude_code(payload: Dict[str, Any]) -> Optional[NormalisedCall]:
         raise UnknownShape(payload)
     if tool == "Write":
         content = tool_input.get("content")
+        pairs: Any = None
     elif tool == "Edit":
         content = tool_input.get("new_string")
+        old = tool_input.get("old_string")
+        pairs = [(old, content)] if isinstance(old, str) and isinstance(content, str) else None
     elif tool == "MultiEdit":
         # The new strings only. old_string is what the edit removes, and an
         # earlier version of the service refused the removal of a forbidden
@@ -871,9 +898,21 @@ def _normalise_claude_code(payload: Dict[str, Any]) -> Optional[NormalisedCall]:
             if isinstance(edit, dict) and isinstance(edit.get("new_string"), str)
         ]
         content = "\n".join(pieces)
+        pairs = [
+            (edit["old_string"], edit["new_string"])
+            for edit in (edits if isinstance(edits, list) else [])
+            if isinstance(edit, dict)
+            and isinstance(edit.get("old_string"), str)
+            and isinstance(edit.get("new_string"), str)
+        ] or None
     else:
         content = tool_input.get("new_source")
-    return NormalisedCall(FILE_WRITE, [{"file_path": path, "content": content if isinstance(content, str) else ""}])
+        pairs = None
+    return NormalisedCall(
+        FILE_WRITE,
+        [{"file_path": path, "content": content if isinstance(content, str) else ""}],
+        edit_pairs=[pairs],
+    )
 
 
 def _normalise_codex(payload: Dict[str, Any]) -> Optional[NormalisedCall]:
@@ -1767,6 +1806,26 @@ def _next_separator(pieces: Sequence[str], index: int) -> str:
 # every destination instead of one directory.
 _TEE_LIKE = frozenset(("tee", "sponge", "tee-object", "out-file", "set-content", "add-content"))
 _COPY_LIKE = frozenset(("cp", "mv", "install", "rsync", "copy-item", "move-item"))
+# The agents' own CLIs, which can unplug Threefold from the agent that runs them.
+_PLUGIN_CLIS = frozenset(("muse", "claude", "codex"))
+_PLUGIN_REMOVAL = re.compile(r"plugins?\s+(?:remove|uninstall|disable|delete|rm)\b", re.IGNORECASE)
+# Commands that delete what they name, across shells.
+_DELETION_COMMANDS = frozenset(("rm", "del", "erase", "remove-item", "ri", "rd", "rmdir", "unlink"))
+# Commands that write their last operand: a copy, a move, a link. `move`,
+# `copy` and `xcopy` are cmd's, which _COPY_LIKE does not name - it reads
+# what carries data rows, not what writes bytes.
+_OVERWRITE_LIKE = frozenset(("cp", "mv", "install", "rsync", "copy-item", "move-item", "copy", "move", "xcopy", "ln"))
+# Commands that remove their first operand by moving it away.
+_MOVE_LIKE = frozenset(("mv", "move", "move-item"))
+# A redirection's destination. `2>&1` names no file: `&` is not a word.
+_REDIRECT_TO = re.compile(r">>?[ \t]*([^ \t;&|()<>]+)")
+# Words before the command that do not change what runs.
+_COMMAND_WRAPPERS = frozenset(("sudo", "doas", "runas", "env", "command", "builtin", "time"))
+_ENV_ASSIGNMENT = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
+# Shells whose `-c` argument is a command of its own, one level down.
+_SHELL_RUNNERS = frozenset(("sh", "bash", "dash", "zsh", "ksh", "fish", "cmd", "powershell", "pwsh"))
+_SHELL_COMMAND_FLAGS = frozenset(("-c", "-lc", "-ic", "-ec", "/c", "/k", "-command", "--command"))
+_SUBSTITUTION = re.compile(r"\$\(([^()]*)\)|`([^`]*)`")
 # Commands whose operands are the bytes they write, so the rows are in the
 # command's text. A heredoc or a here-string is the other way to carry them.
 _WRITES_ITS_OPERANDS = frozenset(
@@ -2156,9 +2215,10 @@ def held_back_category(
 def governance_target(call: NormalisedCall, payload: Dict[str, Any], home: str) -> Optional[str]:
     """The first project-relative path this call writes or removes that governs the hooks, if any.
 
-    Only targets inside the project count. The agents' own directories under
-    the home folder are the developer's, and the day-one contract keeps those
-    calls on the machine unjudged rather than refused.
+    Only targets inside the project count. The agents' own files under the
+    home folder are read by governed_home_target instead: most stay on the
+    machine unjudged, but the files that decide whether the hooks run are
+    refused.
     """
     cwd = project_root(payload)
     canonical_root = _canonical(governed_root(payload))
@@ -2171,6 +2231,191 @@ def governance_target(call: NormalisedCall, payload: Dict[str, Any], home: str) 
         relative = os.path.relpath(resolved, canonical_root).replace(os.sep, "/")
         if is_governance_path(relative, deletes=target in removed):
             return relative
+    return None
+
+
+def _governed_home_paths() -> Tuple[str, ...]:
+    """Each file under the home folder that decides whether the hooks run, canonical."""
+    user_home = os.path.expanduser("~")
+    paths = [os.path.join(user_home, name) for name in GOVERNED_HOME_FILES]
+    for directory, files in GOVERNED_AGENT_FILES.items():
+        paths.extend(os.path.join(user_home, directory, name) for name in files)
+    return tuple(_canonical(path) for path in paths)
+
+
+def _home_display(resolved: str) -> str:
+    """A home-folder path with the login shortened to `~`, so a refusal names the file and not the developer."""
+    user_home = _canonical(os.path.expanduser("~"))
+    if _is_within(resolved, user_home):
+        return "~/" + os.path.relpath(resolved, user_home).replace(os.sep, "/")
+    return os.path.basename(resolved) or resolved
+
+
+def governed_home_target(call: NormalisedCall, payload: Dict[str, Any], home: str) -> Optional[str]:
+    """The first file this call writes under the home folder that decides whether the hooks run, if any.
+
+    The mirror of governance_target for the agents' own directories and
+    Threefold's own binary: a write to an agent's settings file, or to
+    anything under Threefold's bin directory, is refused on the machine in
+    every mode, with nothing sent. Reads never reach here - normalise leaves
+    them ungoverned - and neither does anything else under those directories,
+    which keeps its privacy and is held back silently.
+    """
+    cwd = project_root(payload)
+    canonical_bin = _canonical(os.path.join(home, "bin"))
+    governed = _governed_home_paths()
+    for target in call.targets():
+        resolved = _resolve(target, cwd)
+        if _is_within(resolved, canonical_bin) or resolved in governed:
+            return _home_display(resolved)
+    return None
+
+
+def _simple_commands(command: str) -> Iterator[str]:
+    """Each command in a shell line on its own: `a && b` is two commands, `a | b` two as well."""
+    for piece in re.split(r"[;&|()\n]+", command):
+        piece = piece.strip()
+        if piece:
+            yield piece
+
+
+def _command_name(words: List[str]) -> Tuple[str, List[str]]:
+    """The command a simple command runs, past wrappers and the path, with its arguments.
+
+    An assignment whose value runs a substitution keeps the substitution:
+    `X=$(muse plugins remove threefold)` runs the removal, while `X=1`
+    runs nothing.
+    """
+    rest = list(words)
+    while rest:
+        first = rest[0]
+        if first.lower() in _COMMAND_WRAPPERS:
+            rest = rest[1:]
+            continue
+        assigned = _ENV_ASSIGNMENT.match(first)
+        if not assigned:
+            break
+        value = assigned.group(2)
+        if "$(" in value or "`" in value:
+            rest[0] = value
+            break
+        rest = rest[1:]
+    if not rest:
+        return "", []
+    name = rest[0].rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower()
+    name = name.lstrip("$`(").lstrip("'\"")
+    if name.endswith(".exe"):
+        name = name[:-4]
+    return name, rest[1:]
+
+
+def _shell_inner(arguments: List[str]) -> Optional[str]:
+    """The command a shell runner's `-c` carries: the rest of the line, unquoted, or None."""
+    for index, word in enumerate(arguments):
+        if word.lower() in _SHELL_COMMAND_FLAGS and index + 1 < len(arguments):
+            return _unquoted(" ".join(arguments[index + 1 :]))
+    return None
+
+
+def _overwrite_candidates(name: str, arguments: List[str], simple: str) -> Iterator[str]:
+    """Each word a command writes bytes through, resolved by the caller.
+
+    A redirection's destination, a tee's operands, a copy's last operand,
+    dd's `of=`. Unlike _carried_write_targets this reads what the command
+    writes, not what it carries: `cat evil > settings.json` carries nothing
+    in its text and still overwrites the file.
+    """
+    named = [word for word in arguments if not word.startswith("-")]
+    if name in _TEE_LIKE:
+        for word in named:
+            yield word
+    elif name in _OVERWRITE_LIKE and named:
+        yield named[-1]
+    elif name == "dd":
+        for word in named:
+            if word.lower().startswith("of="):
+                yield word[3:]
+    for match in _REDIRECT_TO.finditer(simple):
+        yield _unquoted(match.group(1))
+
+
+def disarming_command(
+    command: str, base: str, home: str, _depth: int = 0
+) -> Optional[Tuple[str, str, str]]:
+    """What this command changes that decides whether the hooks run, or None.
+
+    Three shapes: a plugin command that unplugs Threefold, a deletion of a
+    governed file or of a directory above one, and a write a redirection, a
+    tee or a copy carries into a governed file. The paths are resolved from
+    where the command runs, the way held_back_category resolves them. A
+    command that only names a governed file - `cat`, `echo`, a copy of the
+    settings elsewhere - is none of these and keeps its privacy.
+
+    A command a shell runner's `-c` carries, or a substitution runs, is read
+    one level down, so neither is a way past this. Past one level the reading
+    stops: a removal buried deeper runs in the open, its text sent and
+    ledgered like any command that names no governed file.
+
+    Returns what the command does (`unplug`, `delete`, `delete-tree` or
+    `overwrite`), the path or command it does it to, and for a directory
+    above a governed file the governed file that goes with it.
+    """
+    canonical_base = _canonical(base)
+    canonical_bin = _canonical(os.path.join(home, "bin"))
+    governed = _governed_home_paths()
+
+    def is_governed(resolved: str) -> bool:
+        return _is_within(resolved, canonical_bin) or resolved in governed
+
+    def resolve(word: str) -> str:
+        resolved = _word_as_path(word, canonical_base)
+        if resolved is None:
+            resolved = _canonical(os.path.join(canonical_base, _as_path(word)))
+        return resolved
+
+    def killed_by(resolved: str) -> Optional[str]:
+        if is_governed(resolved):
+            return None
+        for path in (canonical_bin,) + governed:
+            if _is_within(path, resolved):
+                return path
+        return None
+
+    for simple in _simple_commands(command):
+        name, arguments = _command_name(simple.split())
+        if _depth < 1:
+            inners = []
+            if name in _SHELL_RUNNERS:
+                inner = _shell_inner(arguments)
+                if inner:
+                    inners.append(inner)
+            for match in _SUBSTITUTION.finditer(simple):
+                inners.append(match.group(1) or match.group(2) or "")
+            for inner in inners:
+                found = disarming_command(inner, base, home, _depth + 1)
+                if found is not None:
+                    return found
+        if name in _PLUGIN_CLIS:
+            rest = " ".join(arguments)
+            if _PLUGIN_REMOVAL.search(rest) and ("threefold" in rest.lower() or "--all" in rest):
+                return ("unplug", _one_line(simple.strip(), 120), "")
+        if name in _MOVE_LIKE:
+            named = [word for word in arguments if not word.startswith("-")]
+            if named and is_governed(resolve(named[0])):
+                return ("delete", _home_display(resolve(named[0])), "")
+        if name in _DELETION_COMMANDS:
+            for _, candidate in _command_paths(simple, canonical_base):
+                if is_governed(candidate):
+                    return ("delete", _home_display(candidate), "")
+                killed = killed_by(candidate)
+                if killed is not None:
+                    return ("delete-tree", _home_display(candidate), _home_display(killed))
+        for destination in _overwrite_candidates(name, arguments, simple):
+            if not destination or destination.lower() in _DEVICE_TOKENS:
+                continue
+            resolved = resolve(destination)
+            if is_governed(resolved):
+                return ("overwrite", _home_display(resolved), "")
     return None
 
 
@@ -2243,6 +2488,88 @@ def _relative_to_root(call: NormalisedCall, root: str, cwd: Optional[str] = None
         call.command = _shorten(call.command, root, os.path.relpath(real_root, runs_in).replace(os.sep, "/"))
 
 
+# The most of a file an edit's before and after may carry. Past it the hook
+# sends the edit as it always has, and the service judges the fragment.
+_EDIT_CONTEXT_MAX_BYTES = 65536
+_EDIT_RESULT_MAX_BYTES = 131072
+
+
+def _reconstructed_edit(path: str, pairs: Any) -> Any:
+    """The file before and after the edit, or None where it cannot be known.
+
+    Reads the file the edit names and applies each old/new pair in order, as
+    the tool will. Any doubt - the file is missing, too large, not UTF-8, an
+    old string does not occur exactly once - answers None, and the edit goes
+    as its new text alone, judged as it always was. Read-only: the tool does
+    the writing, after this hook answers.
+    """
+    if not pairs or not isinstance(path, str) or not os.path.isabs(path):
+        return None
+    try:
+        if os.path.getsize(path) > _EDIT_CONTEXT_MAX_BYTES:
+            return None
+        with open(path, "rb") as handle:
+            raw = handle.read(_EDIT_CONTEXT_MAX_BYTES + 1)
+    except OSError:
+        return None
+    if len(raw) > _EDIT_CONTEXT_MAX_BYTES:
+        return None
+    try:
+        before = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    after = before
+    for pair in pairs:
+        try:
+            old, new = pair
+        except (TypeError, ValueError):
+            return None
+        if not isinstance(old, str) or not isinstance(new, str) or not old:
+            return None
+        if after.count(old) != 1:
+            return None
+        after = after.replace(old, new, 1)
+    if len(after.encode("utf-8")) > _EDIT_RESULT_MAX_BYTES:
+        return None
+    return before, after
+
+
+def _attach_edit_context(call: NormalisedCall, home: str) -> None:
+    """Sends the file before and after an edit beside it, where that is safe.
+
+    A partial-line edit carries no import syntax in its own text, so the
+    service cannot tell what the edit adds from the fragment alone. Runs after
+    the hold-back decision, so a file the hook would not send is never read
+    for this; the never-send list is read again here, because the file's
+    unchanged surroundings were never in the payload that decision saw, and
+    anything they name keeps the context home.
+    """
+    pairs_per_file = getattr(call, "edit_pairs", None) or []
+    if not pairs_per_file or not isinstance(call.files, list):
+        return
+    wanted = [
+        (entry, pairs_per_file[index])
+        for index, entry in enumerate(call.files)
+        if index < len(pairs_per_file) and pairs_per_file[index] and isinstance(entry, dict)
+    ]
+    if not wanted:
+        return
+    never_send = load_never_send(home)
+    terms = [] if never_send.problem is not None else never_send.terms
+    for entry, pairs in wanted:
+        try:
+            rebuilt = _reconstructed_edit(str(entry.get("file_path", "")), pairs)
+        except Exception:  # noqa: BLE001 - a context that cannot be built is simply not sent
+            continue
+        if rebuilt is None:
+            continue
+        before, after = rebuilt
+        if terms and mentions_never_send("", {"edit_before": before, "edit_after": after}, terms):
+            continue
+        entry["edit_before"] = before
+        entry["edit_after"] = after
+
+
 def _strip_governance_content(call: NormalisedCall) -> None:
     """Wherever the hook does not refuse it, a write to the hooks' own files goes as its path alone.
 
@@ -2256,6 +2583,8 @@ def _strip_governance_content(call: NormalisedCall) -> None:
     for entry in call.files:
         if is_governance_path(entry.get("file_path", "")) and entry.get("content"):
             entry["content"] = ""
+            entry.pop("edit_before", None)
+            entry.pop("edit_after", None)
             entry["note"] = "content not sent: this file decides whether the agent's hooks run"
 
 
@@ -2655,11 +2984,53 @@ def handle(raw_text: Optional[str], forced_agent: Optional[str] = None) -> Tuple
                 "whether the agent's hooks run. Nothing was sent. A person changes that file, not the agent.",
             ), notes
 
+    # Self-protection, not project governance: no mode lets the agent turn
+    # the guard off, so this runs unconditionally, before the hold-back that
+    # would otherwise keep a disarm on the machine unjudged and allowed.
+    disarmed = governed_home_target(call, payload, home)
+    if disarmed:
+        return deny(
+            agent,
+            f"Threefold refused this call before it left the machine: it changes {disarmed}, which decides "
+            "whether the agent's hooks run. Nothing was sent. A person changes that file, not the agent.",
+        ), notes
+    if call.command is not None:
+        disarming = disarming_command(call.command, command_directory(call, payload), home)
+        if disarming:
+            kind, display, killed = disarming
+            if kind == "unplug":
+                reason = (
+                    f"Threefold refused this call before it left the machine: it unplugs Threefold from the agent "
+                    f"({display}), which stops the agent's hooks from running. Nothing was sent. A person changes "
+                    "the agent's plugins, not the agent."
+                )
+            elif kind == "delete-tree":
+                reason = (
+                    f"Threefold refused this call before it left the machine: it deletes {display}, which holds "
+                    f"{killed}, which decides whether the agent's hooks run. Nothing was sent. A person changes "
+                    "that file, not the agent."
+                )
+            elif kind == "overwrite":
+                reason = (
+                    f"Threefold refused this call before it left the machine: it overwrites {display}, which decides "
+                    "whether the agent's hooks run. Nothing was sent. A person changes that file, not the agent."
+                )
+            else:
+                reason = (
+                    f"Threefold refused this call before it left the machine: it deletes {display}, which decides "
+                    "whether the agent's hooks run. Nothing was sent. A person changes that file, not the agent."
+                )
+            return deny(agent, reason), notes
+
     category = held_back_category(call, payload, raw_text or "", home, settings.include, notes, project)
     if category:
         record_held_back(home, category)
         return None, notes
 
+    # After the hold-back, while the paths are still absolute: the file an
+    # edit changes is read so the service can judge what the edit adds, and a
+    # file the hook would not send is never read for this.
+    _attach_edit_context(call, home)
     _relative_to_root(
         call,
         governed_root(payload),

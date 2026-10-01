@@ -2011,7 +2011,7 @@
     async function triggerManualFreeze() {
       const target = lastSessionId;
       if (!target) {
-        alert("Nothing to freeze yet.\n\nRun a scenario first. The freeze acts on the session that scenario ran under, and pressing it before one has run would create an empty session only to lock it.");
+        alert("Nothing to freeze yet.\n\nRun a scenario first. The freeze acts on the session that scenario ran under, and pressing it before one has run would answer 404: the freeze only locks a session the service has recorded.");
         return;
       }
       if (!confirm("Freeze session " + target + "?\n\n" +
