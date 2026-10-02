@@ -384,7 +384,7 @@ class ArchitecturalBoundaryGuard:
         # glob: `-rf`, `-fr`, `-r -f`, `--recursive --force`, `"$HOME"`. The
         # flag run is bounded, so a long run of flags costs a fixed walk.
         re.compile(
-            r"\brm\s+(?=(?:-[\w-]+\s+){0,7}(?:-[a-zA-Z]*[rR]|--recursive\b))"
+            r"(?<![\w.-])rm\s+(?=(?:-[\w-]+\s+){0,7}(?:-[a-zA-Z]*[rR]|--recursive\b))"
             r"(?:-[\w-]+\s+){1,8}(?:/|\*|~|\"?\$\{?HOME)",
             re.IGNORECASE,
         ),
