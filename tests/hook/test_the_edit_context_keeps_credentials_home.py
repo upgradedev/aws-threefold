@@ -59,7 +59,7 @@ def test_every_shape_the_hook_knows_is_redacted(hook) -> None:
         "AWS_ACCESS_KEY": KEY,
         "GITHUB_TOKEN": "ghp_" + "a" * 36,
         "ANTHROPIC_KEY": "sk-ant-" + "b" * 24,
-        "PRIVATE_KEY_HEADER": "-----BEGIN RSA PRIVATE KEY-----",
+        "PRIVATE_KEY_HEADER": "-----BEGIN RSA " + "PRIVATE KEY-----",
     }
     for label, secret in samples.items():
         redacted = hook.redact_credentials(f"x = '{secret}'\n")
