@@ -219,8 +219,9 @@ so the rollout had to show what a rule would stop before it stops anything.
   the org's monthly spend limit with 0 calls; Codex on 2026-09-30, 9 calls,
   one refused (an unreadable shell write, self-corrected); Claude Code on
   2026-10-01 never started, cut short by the weekly usage limit with 0 calls.
-  The overview's live source held those 26 calls in 3 projects [PRIMARY,
-  2026-10-01: `GET /api/overview`]. Where an agent ran, no violation landed
+  The overview's live source held 31 calls in 4 projects [PRIMARY,
+  2026-10-01: `GET /api/overview`], 26 of them the agent rows' and 5 the
+  author's own verification calls. Where an agent ran, no violation landed
   and the acceptance tests passed, by their rows in `benchmark/results/live/`;
   the fourth and sixth rows record the limits instead of runs.
 - This repository's pull requests cannot merge with a firing rule: the judge

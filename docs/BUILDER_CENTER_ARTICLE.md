@@ -66,6 +66,8 @@ in `managed` mode.
 
 ## What runs on AWS
 
+![Threefold architecture: four agents through one hook into CloudFront and one Lambda; pull requests through the merge judge.](https://raw.githubusercontent.com/upgradedev/aws-threefold/main/docs/architecture.svg)
+
 ```
 agent ─► hook (local checks) ─┐
 browser ─────────────────────►├─► CloudFront + AWS WAF (us-east-1)

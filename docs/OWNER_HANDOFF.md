@@ -84,6 +84,10 @@ with four runs, six benchmark series).
 Refuse the edit, not the pull request: governing coding agents on AWS with deterministic gates and Amazon Bedrock
 ```
 
+**Image:** the article carries the architecture diagram by URL
+(`docs/architecture.svg` on GitHub, verified 200 on 2026-10-01). If Builder
+Center does not render it, upload that file from the repo in its place.
+
 **Tags:**
 
 ```text
