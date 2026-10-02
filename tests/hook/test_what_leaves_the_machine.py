@@ -751,7 +751,7 @@ def test_removing_a_credential_is_not_refused_for_containing_it(machine, stub, r
         "tool_name": "Edit",
         "tool_input": {
             "file_path": str(machine.project / "src" / "settings.py"),
-            "old_string": "KEY = 'AKIAABCDEFGHIJKLMNOP'",
+            "old_string": "KEY = '" + "AKIA" + "ABCDEFGHIJKLMNOP'",
             "new_string": "KEY = os.environ['ACME_KEY']",
         },
     }

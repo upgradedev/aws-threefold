@@ -206,6 +206,17 @@ def _internal_error(path: str, request_id: str) -> Dict[str, Any]:
     return problem
 
 
+# Past any real call. A negative count would lower the spend a ceiling has
+# already seen, and a 400-digit integer overflowed the price arithmetic into
+# a 500, so both are the caller's mistake, answered 400.
+MAX_DECLARED_TOKENS = 10**12
+
+
+def _token_counts_in_range(request: ToolCallRequestDTO) -> bool:
+    counts = (request.projected_input_tokens, request.projected_output_tokens)
+    return all(0 <= count <= MAX_DECLARED_TOKENS for count in counts)
+
+
 def lambda_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
     """Primary AWS Lambda event router.
 
@@ -443,13 +454,13 @@ def _route(event: Dict[str, Any], http_method: str, request_id: str) -> Dict[str
             _check_named_session(body)
             request = ToolCallRequestDTO.from_payload(body)
 
-            if request.projected_input_tokens < 0 or request.projected_output_tokens < 0:
+            if not _token_counts_in_range(request):
                 return build_response(
                     400,
                     rfc7807_error(
                         400,
                         "Invalid Parameter",
-                        "Token counts cannot be negative numbers",
+                        "Token counts must be between 0 and a trillion",
                         path,
                         invalid_params=[{"name": "projected_tokens", "reason": "Must be >= 0"}],
                     ),
@@ -539,13 +550,13 @@ def _route(event: Dict[str, Any], http_method: str, request_id: str) -> Dict[str
             )
             # The same two refusals the evaluate route makes: a negative count
             # would lower the spend a ceiling has already seen.
-            if req.projected_input_tokens < 0 or req.projected_output_tokens < 0:
+            if not _token_counts_in_range(req):
                 return build_response(
                     400,
                     rfc7807_error(
                         400,
                         "Invalid Parameter",
-                        "Token counts cannot be negative numbers",
+                        "Token counts must be between 0 and a trillion",
                         path,
                         invalid_params=[{"name": "projected_tokens", "reason": "Must be >= 0"}],
                     ),
