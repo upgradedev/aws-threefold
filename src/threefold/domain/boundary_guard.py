@@ -397,7 +397,7 @@ class ArchitecturalBoundaryGuard:
         # costs one pass, not one pass per push (`.*` made it quadratic).
         # `--force-with-lease` and a branch named `release-f` are not forced pushes.
         re.compile(
-            r"\bgit\s+push\s+(?:(?!\bgit\s+push\b)[^;&|\n])*?(--force(?![\w-])|(?<![\w-])-f\b)", re.IGNORECASE
+            r"\bgit\s+push\b(?:(?!\bgit\s+push\b)[^;&|\n])*?(--force(?![\w-])|(?<![\w-])-f\b)", re.IGNORECASE
         ),
         re.compile(r"\bdrop\s+database\b", re.IGNORECASE),
     ]

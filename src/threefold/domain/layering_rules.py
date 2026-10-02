@@ -270,7 +270,7 @@ def rules_for_path(path: str, rules: List[Dict[str, Any]]) -> List[Dict[str, Any
 # (bounded, so an unclosed parenthesis costs a fixed read, not the rest of the
 # file per statement). Read by line rather than by a second parse, which would
 # double the cost of judging a large file.
-_FROM_IMPORT = re.compile(r"(?m)^[ \t]*from[ \t]+(\.*[\w.]*)[ \t]+import[ \t]+(\([^)]{0,1000}\)|[^\n#;]*)")
+_FROM_IMPORT = re.compile(r"(?m)^[ \t]*from[ \t]+([\w.]+)[ \t]+import[ \t]+(\([^)]{0,1000}\)|[^\n#;]*)")
 
 
 def python_names_imported(language: Optional[str], content: str, modules: List[str]) -> List[str]:
