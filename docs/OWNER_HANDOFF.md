@@ -151,7 +151,8 @@ Category #workplace-efficiency, lane #community, AWS Zero to Shipped 2026.
 ## After all three
 
 - [ ] Builder Center project exists and links the live app, repo, video,
-      and article.
+      and article. Cover: upload `docs/builder-cover.png` (1200x675,
+      no text).
 - [ ] Article posted with the six series and the 2026-10-01 probe figures.
 - [ ] Video uploaded, 2:35 to 2:45, linked from the project.
 - [ ] Stacks still up (`threefold-prod`, `threefold-dogfood`,
