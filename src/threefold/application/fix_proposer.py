@@ -190,6 +190,7 @@ from threefold.application.rule_keys import (
 )
 from threefold.domain.imports import declared_imports, language_for
 from threefold.domain.layering_rules import (
+    python_names_imported,
     DEFAULT_RULES,
     ENFORCE,
     normalise_rules,
@@ -404,6 +405,7 @@ def propose_fix(
         # The memo holds the agent's source for the length of one proposal and
         # no longer: a warm container must not keep one caller's files around.
         _imports.cache_clear()
+        _declared.cache_clear()
         _parse_python.cache_clear()
         _FLAGGED.clear()
 
@@ -956,6 +958,30 @@ def _python_removal(content: str, modules: Collection[str]) -> Tuple[str, List[_
             replacement = ("import " + ", ".join(_alias_text(alias) for alias in keep)) if keep else None
             for alias in hits:
                 removed.append(_Removed(alias.name, "import " + _alias_text(alias), [alias.asname or alias.name]))
+        elif isinstance(node, ast.ImportFrom) and node.module not in modules and any(
+            f"{node.module + '.' if node.module else ''}{alias.name}" in modules for alias in node.names
+        ):
+            # `from acme import infrastructure`: the name after `import` is the
+            # layer. Only the flagged names leave; the rest of the statement stays.
+            prefix = node.module + "." if node.module else ""
+            hits = [alias for alias in node.names if prefix + alias.name in modules]
+            keep = [alias for alias in node.names if prefix + alias.name not in modules]
+            dots = "." * node.level
+            replacement = (
+                f"from {dots}{node.module or ''} import {', '.join(_alias_text(alias) for alias in keep)}"
+                if keep
+                else None
+            )
+            for alias in hits:
+                removed.append(
+                    _Removed(
+                        prefix + alias.name,
+                        f"from {dots}{node.module or ''} import {_alias_text(alias)}",
+                        [alias.asname or alias.name],
+                        level=node.level,
+                        names=[_alias_text(alias)],
+                    )
+                )
         elif isinstance(node, ast.ImportFrom) and node.module in modules:
             replacement = None
             module = node.module
@@ -1163,7 +1189,15 @@ def _imports(path: str, content: str) -> Tuple[str, ...]:
     The same content is asked about by the site filter, the removal and its
     check; each ask used to be a full parse. propose_fix clears it on the way out.
     """
-    return tuple(declared_imports(path, content)[1])
+    language, modules = _declared(path, content)
+    return tuple(modules) + tuple(python_names_imported(language, content, list(modules)))
+
+
+@functools.lru_cache(maxsize=64)
+def _declared(path: str, content: str) -> Tuple[str, Tuple[str, ...]]:
+    """declared_imports itself, remembered with _imports for one proposal."""
+    language, modules = declared_imports(path, content)
+    return language, tuple(modules)
 
 
 # What the rules said about one write's imports, for the length of one
@@ -1214,6 +1248,13 @@ def _flagged_modules(path: str, content: str, rules: List[Dict[str, Any]]) -> Di
             rule_id = _flagging_rule(module, applicable)
             if rule_id:
                 known[module] = rule_id
+        # `from boto3 import client` is flagged under `boto3`, and its statement
+        # goes with it; `boto3.client` read off the same statement is no second
+        # import to take out.
+        declared = set(_declared(path, content)[1])
+        for name in [module for module in known if module not in declared]:
+            if any(name.startswith(other + ".") for other in known if other in declared):
+                del known[name]
         if len(_FLAGGED) >= _FLAGGED_MAX_ENTRIES:
             _FLAGGED.clear()
         _FLAGGED[key] = known

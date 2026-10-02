@@ -31,12 +31,13 @@ except ImportError:
 
     class SecretScanner:
         @staticmethod
-        def scan_text(text: str) -> tuple[bool, str]:
+        def scan_payload(text: str) -> tuple[bool, str]:
+            """(is_clean, description), the shape the package's scanner answers in."""
             if "AKIA" in text and re.search(r"AKIA[0-9A-Z]{16}", text):
-                return True, "AWS Access Key ID leaked"
-            if "-----BEGIN OPENSSH PRIVATE KEY-----" in text or "-----BEGIN RSA PRIVATE KEY-----" in text:
-                return True, "Private key leaked"
-            return False, ""
+                return False, "AWS Access Key ID leaked"
+            if re.search(r"-----BEGIN [A-Z ]*PRIVATE KEY-----", text):
+                return False, "Private key leaked"
+            return True, ""
 
     class ArchitecturalBoundaryGuard:
         @staticmethod

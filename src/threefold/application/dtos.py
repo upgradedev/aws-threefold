@@ -50,7 +50,14 @@ def _flag(body: Dict[str, Any], key: str, default: bool) -> bool:
     raise InvalidRequestError(f"{key} must be true or false.", key)
 
 
-def _number(body: Dict[str, Any], key: str, default: float, cast: type) -> Any:
+# Past any real call: a trillion tokens, a million dollars. The bound keeps a
+# 400-digit integer from overflowing the price arithmetic into a 500; the
+# routes refuse a negative count themselves, with their own problem title.
+MAX_TOKENS = 10**12
+MAX_BUDGET_USD = 1_000_000.0
+
+
+def _number(body: Dict[str, Any], key: str, default: float, cast: type, high: float = MAX_TOKENS) -> Any:
     """Reads a numeric field, refusing what would pass a comparison by accident.
 
     JSON as Python parses it admits NaN and Infinity, and a budget of NaN is
@@ -65,6 +72,8 @@ def _number(body: Dict[str, Any], key: str, default: float, cast: type) -> Any:
         raise InvalidRequestError(f"{key} must be a number.", key) from None
     if isinstance(number, float) and not math.isfinite(number):
         raise InvalidRequestError(f"{key} must be a finite number.", key)
+    if number > high:
+        raise InvalidRequestError(f"{key} must be at most {high:g}.", key)
     return number
 
 
@@ -158,7 +167,7 @@ class ToolCallRequestDTO:
             arguments=arguments if arguments is not None else body.get("arguments", {}),
             projected_input_tokens=_number(body, "projected_input_tokens", default_input_tokens, int),
             projected_output_tokens=_number(body, "projected_output_tokens", default_output_tokens, int),
-            budget_usd=_number(body, "budget_usd", default_budget_usd, float),
+            budget_usd=_number(body, "budget_usd", default_budget_usd, float, MAX_BUDGET_USD),
             agent=_closed_set(body, "agent", KNOWN_AGENTS, warnings),
             origin=origin,
             explain=_flag(body, "explain", True),

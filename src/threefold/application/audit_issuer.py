@@ -83,7 +83,14 @@ class AuditIssuer:
             for v in stored
         ]
 
-        all_passed = all(AuditIssuer._is_enforced_pass(e) for e in evaluations) and not session.has_failed_verdict
+        # A halted session is not a compliant one, whatever its verdicts say:
+        # the operator's kill switch freezes a session whose calls were all
+        # approved, and certifying it would contradict the halt.
+        all_passed = (
+            all(AuditIssuer._is_enforced_pass(e) for e in evaluations)
+            and not session.has_failed_verdict
+            and not session.is_tripped
+        )
         shown_project = project_label(session.project_name)
         canonical_data = {
             "session_id": session.session_id,

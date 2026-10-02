@@ -50,15 +50,13 @@ regional stack, `threefold-prod`, eu-west-1) and `deploy/edge.yml` (the edge,
 | Credentials | The operator key is a `NoEcho` parameter. Sign-in codes (120 seconds, single use) and sessions (12 hours) are stored as SHA-256 hashes in the table; the browser never holds the key. The hook reads a key from a file, never sends it to an endpoint only a repository names, and refuses a credential in a tool call on the developer's machine. |
 | Least privilege | The function's role may invoke only `eu.anthropic.claude-*` inference profiles and `anthropic.claude-*` foundation models, may touch only its own table, and may use its stack's KMS key only to sign, beside the log and X-Ray writes the SAM transform attaches; it holds no S3 rights. The fleet's schedule has a role of its own that may invoke this one function and nothing else, assumable only by EventBridge Scheduler for this account. |
 | Abuse bounds | The HTTP API's throttle, 100 requests a second with a burst of 200 for each of its seven routes on its own (`DefaultRouteSettings`), so page reads (`ANY /{proxy+}`) and hook verdicts (`POST /evaluate-tool-call`) each get that allowance [PRIMARY, 2026-09-22: `get-stage`, `get-routes`]; it bounds a flood on any one route and does not keep page reads from crowding out verdicts; reserved concurrency 25 [PRIMARY, 2026-09-22: `get-function-concurrency`]; a per-address token bucket in each container (60 in a burst, 2 a second); bodies over 1 MB refused; Bedrock calls capped per container: 200 successful explanation calls (a failed call is not counted, so failures are not bounded by it) and 60 drafting calls, each counted whether it was answered or not; and drafting capped for each stack at 400 model calls a UTC day, claimed in the stack's own table before the model is called and answered 429 once spent, so the account's two stacks may make 400 each. |
-| Data | Table encryption with the AWS managed key `aws/dynamodb` [PRIMARY, 2026-09-22: `describe-table`, `SSEType: KMS`], whose use appears in CloudTrail as KMS events; DynamoDB caches the table key, so they come periodically, not once per request. Project names outside `AllowedProjectPattern` are stored as `unlabelled`, developers are shown only as short hashes, and ledger rows keep a command's program name, never its arguments, with refusal reasons passed through the credential redactor. `AlarmEmail` is `NoEcho`. |
+| Data | Table encryption with the AWS managed key `aws/dynamodb` [PRIMARY, 2026-09-22: `describe-table`, `SSEType: KMS`], whose use appears in CloudTrail as KMS events; DynamoDB caches the table key, so they come periodically, not once per request. Project names outside `AllowedProjectPattern` are stored as `unlabelled`, developers are shown only as short hashes, and ledger rows keep a command's program name as their target; a refusal's reason can quote the command it refused, passed through the credential redactor and cut at 240 characters, and where reads are public that reason is public. `AlarmEmail` is `NoEcho`. |
 
 **Gaps.**
-- The origin URL is public and answers every route without the web ACL, and
-  serves its pages without the edge's headers [PRIMARY, 2026-09-22, rechecked
-  2026-09-27: `GET /prod/` and `GET /prod/dashboard.html` on the origin
-  returned none of them; `/install.py`, `/hooks/threefold_hook.py` and
-  `/assets/threefold.js` carry `x-content-type-options: nosniff` and no other
-  header of the edge's set].
+- The origin URL is public and answers every route without the web ACL. Since
+  2026-10-01 its pages carry framing denial, HSTS, `nosniff` and a referrer
+  policy from the function itself, but not the edge's full content security
+  policy [PRIMARY, 2026-10-02: `GET /prod/` on the origin].
 - The edge secret is not authentication, and it is readable by anyone in the
   account allowed `cloudfront:GetDistributionConfig` or
   `lambda:GetFunctionConfiguration`. See `ARCHITECTURE.md` section 8.6.

@@ -108,7 +108,7 @@ def test_a_write_into_threefold_home_is_held_back(machine, stub, run_hook, held_
         "session_id": "s",
         "cwd": str(machine.home),
         "tool_name": "Write",
-        "tool_input": {"file_path": str(machine.threefold_home / "never_send.txt"), "content": ""},
+        "tool_input": {"file_path": str(machine.threefold_home / "notes.txt"), "content": ""},
     }
     _held_back(stub, run_hook, payload, held_back_lines, "agent-config")
 

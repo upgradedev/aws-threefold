@@ -537,6 +537,30 @@ def _route(event: Dict[str, Any], http_method: str, request_id: str) -> Dict[str
                 action_type=action_type,
                 arguments=tool_args,
             )
+            # The same two refusals the evaluate route makes: a negative count
+            # would lower the spend a ceiling has already seen.
+            if req.projected_input_tokens < 0 or req.projected_output_tokens < 0:
+                return build_response(
+                    400,
+                    rfc7807_error(
+                        400,
+                        "Invalid Parameter",
+                        "Token counts cannot be negative numbers",
+                        path,
+                        invalid_params=[{"name": "projected_tokens", "reason": "Must be >= 0"}],
+                    ),
+                )
+            if req.budget_usd <= 0.0:
+                return build_response(
+                    400,
+                    rfc7807_error(
+                        400,
+                        "Invalid Parameter",
+                        "Budget must be greater than $0.00",
+                        path,
+                        invalid_params=[{"name": "budget_usd", "reason": "Must be > 0"}],
+                    ),
+                )
             result = _evaluator.evaluate_tool_call(req)
             result.bedrock_explanation, result.explanation_source = _reviewer.explain(req, result)
             result.persistence = getattr(_evaluator.session_repo, "persistence_mode", "memory")
@@ -562,11 +586,15 @@ def _route(event: Dict[str, Any], http_method: str, request_id: str) -> Dict[str
 
         # Route 3: Thrashing Loop Simulation
         if path == LOOP_SCENARIO_PATH and http_method == "POST":
-            session_id = f"sim-loop-{event.get('requestContext', {}).get('requestId', '001')[:6]}"
+            # A fresh id per visitor: six characters of a time-ordered request id
+            # let two visitors at the same moment share one halted session.
+            session_id = f"sim-loop-{uuid.uuid4().hex[:12]}"
             req = ToolCallRequestDTO(
                 session_id=session_id,
                 developer_id="dev-sim",
                 project_name="Acme-Sim",
+                agent="page",
+                origin="page",
                 tool_name="edit_file",
                 action_type="FILE_WRITE",
                 arguments={"TargetFile": "src/service.py", "Instruction": "fix typo"},
@@ -585,11 +613,13 @@ def _route(event: Dict[str, Any], http_method: str, request_id: str) -> Dict[str
 
         # Route 4: Secret Leakage Simulation
         if path == SECRET_SCENARIO_PATH and http_method == "POST":
-            session_id = f"sim-sec-{event.get('requestContext', {}).get('requestId', '002')[:6]}"
+            session_id = f"sim-sec-{uuid.uuid4().hex[:12]}"
             req = ToolCallRequestDTO(
                 session_id=session_id,
                 developer_id="dev-sim",
                 project_name="Acme-Sim",
+                agent="page",
+                origin="page",
                 tool_name="run_command",
                 action_type="COMMAND_EXEC",
                 arguments={"command": "export AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE"},

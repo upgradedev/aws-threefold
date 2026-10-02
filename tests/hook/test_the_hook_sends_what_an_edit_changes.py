@@ -141,3 +141,54 @@ def test_stripping_a_governance_write_removes_its_context(hook) -> None:
     entry = call.files[0]
     assert entry["content"] == ""
     assert "edit_before" not in entry and "edit_after" not in entry
+
+
+# --- the routes the second review found without context ---------------------------
+
+
+def test_replace_all_applies_to_every_occurrence(machine, stub, run_hook) -> None:
+    target = machine.project / "src" / "domain" / "order.py"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"import json\n\nprint(json.dumps({}))\n")
+    payload = _edit(target, "json", "boto3")
+    payload["tool_input"]["replace_all"] = True
+    code, out, _ = run_hook(payload)
+    assert (code, out) == (0, "")
+    arguments = _sent(stub)
+    assert arguments["edit_after"] == "import boto3\n\nprint(boto3.dumps({}))\n"
+
+
+def test_a_windows_file_matches_an_old_string_written_with_newlines(machine, stub, run_hook) -> None:
+    target = machine.project / "src" / "domain" / "order.py"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"import json\r\n\r\ndef total():\r\n    return 0\r\n")
+    code, out, _ = run_hook(_edit(target, "json\n\ndef", "boto3\n\ndef"))
+    assert (code, out) == (0, "")
+    arguments = _sent(stub)
+    assert arguments["edit_after"].startswith("import boto3\r\n")
+
+
+def test_a_muse_edit_carries_the_file_before_and_after(machine, payloads, stub, run_hook) -> None:
+    target = machine.project / "src" / "domain" / "order.py"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"import json\n")
+    code, out, _ = run_hook(payloads.muse("edit_file", {"path": str(target), "find": "json", "replace": "boto3"}), ["--agent", "muse"])
+    assert code == 0
+    arguments = _sent(stub)
+    assert arguments["edit_before"] == "import json\n"
+    assert arguments["edit_after"] == "import boto3\n"
+
+
+def test_an_antigravity_replacement_carries_the_file_before_and_after(machine, payloads, stub, run_hook) -> None:
+    target = machine.project / "src" / "domain" / "order.py"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"import json\n")
+    args = {
+        "TargetFile": str(target),
+        "ReplacementChunks": [{"TargetContent": "json", "ReplacementContent": "boto3", "AllowMultiple": False}],
+    }
+    code, out, _ = run_hook(payloads.antigravity("replace_file_content", args), ["--agent", "antigravity"])
+    assert code == 0
+    arguments = _sent(stub)
+    assert arguments["edit_before"] == "import json\n"
+    assert arguments["edit_after"] == "import boto3\n"

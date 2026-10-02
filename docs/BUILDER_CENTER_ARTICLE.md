@@ -22,7 +22,7 @@ small service on AWS that uses that moment.
 No model sits between an agent and its verdict: a verdict must repeat exactly,
 run in milliseconds, and ignore what the call itself says. So the gates are
 standard-library Python: per-project layering rules over real imports (Python,
-Java, C#, TypeScript); ten credential shapes at any depth; protected paths
+Java, C#, TypeScript); fifteen credential shapes at any depth; protected paths
 covering every way to switch the hooks off; every shell route to a write
 judged like a `Write`; loops over repeating calls (reads like `git status`
 are noted, never refused); and a spend ceiling. Amazon Bedrock works only

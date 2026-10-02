@@ -333,6 +333,22 @@ class _EveryKey:
 
 EVERY_KEY = _EveryKey()
 
+
+class _EveryKeyButCredential(_EveryKey):
+    """Every rule watching, except the credential gate: what Observe is.
+
+    A dry run records everything and refuses nothing. A project in Observe
+    is a real call on a real project: a credential in it is refused, as it is
+    on the developer's machine and in every stage, so the service never
+    approves a key the hook would have stopped.
+    """
+
+    def __contains__(self, key: object) -> bool:
+        return key != "CREDENTIAL"
+
+
+OBSERVE_KEYS = _EveryKeyButCredential()
+
 # Which invariant each of the guard's gates fails. A credential fails the
 # secret invariant and everything else the boundary one, which is what the
 # gates themselves have always recorded.
@@ -1243,8 +1259,18 @@ class GovernanceEvaluator:
             halted_before = session.is_tripped
             lead = "Dry run, not enforced." if dry_run else "Observe stage, not enforced."
             found = self._run_gates(
-                request, copy.deepcopy(session), rules, may_halt=False, observe_keys=EVERY_KEY, lead=lead
+                request,
+                copy.deepcopy(session),
+                rules,
+                may_halt=False,
+                observe_keys=EVERY_KEY if dry_run else OBSERVE_KEYS,
+                lead=lead,
             )
+            if found.status == VerdictStatus.BLOCKED_SECRET_DETECTED.value and not dry_run and not halted_before:
+                # Observe watches every rule but the credential gate. The
+                # refusal is judged again on the real session, so it is recorded
+                # there like any refusal; a credential never halts a session.
+                return self._run_gates(request, session, rules, may_halt=False, observe_keys=OBSERVE_KEYS)
             if found.status != VerdictStatus.APPROVED.value:
                 # Only a session that was already halted reaches here: nothing
                 # else refuses when every rule is watching.

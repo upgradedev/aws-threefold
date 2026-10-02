@@ -509,3 +509,15 @@ def test_a_refusal_buried_under_fifty_clean_calls_still_taints_the_certificate()
     assert cert["evaluations_count"] == 50
     assert cert["verdict_status"] == "NON_COMPLIANT_REJECTED"
     assert _evaluator.session_repo.get_session(session_id).has_failed_verdict is True
+
+
+def test_a_frozen_session_does_not_certify_as_compliant() -> None:
+    """The kill switch freezes a session whose calls were all approved; a
+    certificate saying COMPLIANT_APPROVED for it would contradict the halt."""
+    session_id = "sim-cert-frozen-001"
+    _govern_one_call(session_id, tool_name="view_file", action_type="FILE_READ", arguments={"path": "README.md"})
+    status, _ = _post(f"/sessions/{session_id}/terminate", {"reason": "operator check"})
+    assert status == 200
+    status, cert = _post("/issue-certificate", {"session_id": session_id})
+    assert status == 200
+    assert cert["verdict_status"] == "NON_COMPLIANT_REJECTED"

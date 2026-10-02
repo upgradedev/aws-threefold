@@ -195,7 +195,7 @@ class SecretScanner:
 
     PATTERNS: List[Tuple[str, re.Pattern]] = [
         ("AWS_ACCESS_KEY", re.compile(r"(?<![A-Z0-9])((?:AKIA|ASIA)[0-9A-Z]{16})(?![A-Z0-9])")),
-        ("AWS_SECRET_KEY", re.compile(r"(?i)aws_secret_access_key\s*[:=]\s*['\"]?[A-Za-z0-9/+=]{40}")),
+        ("AWS_SECRET_KEY", re.compile(r"(?i)aws_secret_access_(?:key)\s*[:=]\s*['\"]?[A-Za-z0-9/+=]{40}")),
         ("GITHUB_TOKEN", re.compile(r"(?<![A-Za-z0-9_])(gh[pousr]_[A-Za-z0-9_]{36,255})(?![A-Za-z0-9_])")),
         ("OPENAI_KEY", re.compile(r"(?<![A-Za-z0-9_])sk-(?:proj-)?[A-Za-z0-9_\-]{20,}")),
         ("ANTHROPIC_KEY", re.compile(r"(?<![A-Za-z0-9_])sk-ant-[A-Za-z0-9_\-]{20,}")),
@@ -204,6 +204,11 @@ class SecretScanner:
         ("JWT", re.compile(r"(?<![A-Za-z0-9_\-])eyJ[A-Za-z0-9_\-]{10,}\.eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}")),
         ("GENERIC_API_KEY", re.compile(r"(?i)(api[_-]?key|secret[_-]?token)\s*[:=]\s*['\"][A-Za-z0-9_\-]{20,}['\"]")),
         ("PRIVATE_KEY_HEADER", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
+        ("GITHUB_FINE_GRAINED_TOKEN", re.compile(r"github_pat_(?<![A-Za-z0-9_]github_pat_)[A-Za-z0-9_]{22,255}")),
+        ("GITLAB_TOKEN", re.compile(r"glpat-(?<![A-Za-z0-9_]glpat-)[A-Za-z0-9_\-]{20,}")),
+        ("STRIPE_LIVE_KEY", re.compile(r"k_live_(?<=[rs]k_live_)(?<![A-Za-z0-9_][rs]k_live_)[A-Za-z0-9]{20,}")),
+        ("NPM_TOKEN", re.compile(r"npm_(?<![A-Za-z0-9_]npm_)[A-Za-z0-9]{36}(?![A-Za-z0-9])")),
+        ("PYPI_TOKEN", re.compile(r"pypi-AgE(?<![A-Za-z0-9_]pypi-AgE)[A-Za-z0-9_\-]{50,}")),
     ]
 
     @classmethod
@@ -375,7 +380,14 @@ class ArchitecturalBoundaryGuard:
     ] + [re.compile(r"\.git-credentials(?![A-Za-z0-9_])", re.IGNORECASE)]
 
     DESTRUCTIVE_COMMANDS: List[Union[re.Pattern, _RmRemovesRepository]] = [
-        re.compile(r"\brm\s+-rf\s+(/|\*|~|\$HOME)", re.IGNORECASE),
+        # Any spelling of a recursive removal of the root, the home folder or a
+        # glob: `-rf`, `-fr`, `-r -f`, `--recursive --force`, `"$HOME"`. The
+        # flag run is bounded, so a long run of flags costs a fixed walk.
+        re.compile(
+            r"\brm\s+(?=(?:-[\w-]+\s+){0,7}(?:-[a-zA-Z]*[rR]|--recursive\b))"
+            r"(?:-[\w-]+\s+){1,8}(?:/|\*|~|\"?\$\{?HOME)",
+            re.IGNORECASE,
+        ),
         # The repository's history, whatever the order or spelling of the flags.
         # A linear token walk, not the nested-quantifier pattern it replaced:
         # both readers only call search() and read group(0).
@@ -383,7 +395,10 @@ class ArchitecturalBoundaryGuard:
         re.compile(r"\bformat\s+[a-z]:", re.IGNORECASE),
         # The scan stops at the next `git push`, so a body of repeated pushes
         # costs one pass, not one pass per push (`.*` made it quadratic).
-        re.compile(r"\bgit\s+push\s+(?:(?!\bgit\s+push\b).)*?(--force|-f)\b", re.IGNORECASE),
+        # `--force-with-lease` and a branch named `release-f` are not forced pushes.
+        re.compile(
+            r"\bgit\s+push\s+(?:(?!\bgit\s+push\b)[^;&|\n])*?(--force(?![\w-])|(?<![\w-])-f\b)", re.IGNORECASE
+        ),
         re.compile(r"\bdrop\s+database\b", re.IGNORECASE),
     ]
 

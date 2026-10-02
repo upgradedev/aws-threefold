@@ -57,7 +57,7 @@ every response names which of the two you are reading.
 | | URL | What it is |
 |---|---|---|
 | **Site** | **<https://d1og72wpk4aqig.cloudfront.net/>** | CloudFront in front of everything: the pages from a private S3 bucket, every API path to the function, AWS WAF, security headers |
-| Origin | <https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/> | the API Gateway URL the edge forwards to. It serves the same pages from the function and stays public; it has no WAF, its pages carry none of the edge's headers, and its files (`/install.py`, `/hooks/*`, `/assets/*`) carry only `x-content-type-options: nosniff` of them. The trailing slash is part of it: the bare `/prod` is API Gateway's own 404 |
+| Origin | <https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/> | the API Gateway URL the edge forwards to. It serves the same pages from the function and stays public; it has no WAF. Since 2026-10-01 the function answers its pages with `x-frame-options: DENY`, `frame-ancestors 'none'`, HSTS, `nosniff` and `referrer-policy: no-referrer`, and its files with `nosniff` and HSTS; the full content security policy is the edge's alone. The trailing slash is part of it: the bare `/prod` is API Gateway's own 404 |
 
 Both answered anonymously, with no key, on 2026-09-22: `GET /` returned 200
 `text/html` from each, and the site's response carried HSTS, a content security
@@ -400,8 +400,9 @@ to half a minute after a demotion a call can still be refused.
 The stage applies to calls from hooks and CI. The demo's page and simulation
 calls always enforce, so the public demo behaves the same whatever a project's
 stage is. A machine pinned to `--mode observe` is never refused by a rule,
-whatever the dashboard says (only a request the service cannot take, such as a
-body over 1 MB, still comes back as a refusal), and the project page flags such
+whatever the dashboard says (a credential and an attempt to switch the hook off
+are still refused on the machine, and a request the service cannot take, such
+as a body over 1 MB, still comes back as a refusal), and the project page flags such
 a machine among its agents.
 
 A refusal comes with a **validated fix** when one fits: a rewritten file, a
@@ -439,7 +440,7 @@ a rule. As served by the public stack [PRIMARY, 2026-09-22]:
 
 | Gate | Watches | Blind to |
 |---|---|---|
-| Credentials | Ten credential shapes in any argument, at any depth, for every language | Credentials that do not match a known shape, and anything already in the file on disk |
+| Credentials | Fifteen credential shapes in any argument, at any depth, for every language | Credentials that do not match a known shape, and anything already in the file on disk |
 | Layering | 4 rules refusing (`python-domain-stays-pure`, `java-domain-stays-pure`, `dotnet-domain-stays-pure`, `web-domain-stays-pure`) over `**/Domain/**/*.cs`, `**/domain/**/*.java`, `**/domain/**/*.py`, `**/domain/**/*.pyi`, `**/domain/**/*.ts`, `**/domain/**/*.tsx`; imports read from `.cs`, `.java`, `.js`, `.jsx`, `.mjs`, `.py`, `.pyi`, `.ts`, `.tsx` | Any path no refusing rule covers, any file type not in that list, and the dependencies a file does not declare: an import is read from the file's own statements, not resolved, followed or injected |
 | Loops | Any repeating cycle of byte-identical tool calls, up to the policy's history window, plus a second tier over same-shape calls (same tool, targets and keys) at a longer fuse, within one session | Near-identical calls below the fuzzy tier's fuse, and repetition across separate sessions |
 | Budget | Projected spend per call and per session, against the policy | Real usage. The counts are the ones the caller declares, so a caller declaring zero is not stopped |
@@ -455,6 +456,12 @@ Blind by design, as the hook's contract in `STATE.md` sets it [STATE-FILE] and
 
 - A call the hook holds back is not checked by anything, and while the service
   cannot be reached the hook fails open.
+- An edit is judged on the imports it adds by reading the file before and after
+  it on the machine (credentials in it replaced by their labels). A file over
+  64 KB, or one the edit does not apply to cleanly, is judged on the edit's new
+  text alone, where a change to part of an import line can pass.
+- Two calls in one session judged at the same instant can each save over the
+  other's verdict, so a certificate can miss a refusal made in that instant.
 - Everything under `.git` is a data directory to the hook, except the two
   files that decide whether the hooks run. Outside `enforce` mode (and
   `managed` mode while the project enforces), where the hook refuses it on the

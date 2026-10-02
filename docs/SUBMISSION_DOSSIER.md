@@ -66,8 +66,8 @@ so the rollout had to show what a rule would stop before it stops anything.
    terms on the owner's never-send list), and sends the rest to be judged. On
    an approval it prints nothing, so the agent's own permission flow still runs.
 2. **Judges with deterministic gates.** Layering rules per project in Python,
-   Java, C# and TypeScript, read from each file's own import statements; ten
-   credential shapes at any depth of the arguments plus the policy's own
+   Java, C# and TypeScript, read from each file's own import statements;
+   fifteen credential shapes at any depth of the arguments plus the policy's own
    blocked-pattern list; protected paths and every shell route to a write
    (redirections, heredocs, `sed -i`, `cp`, `git apply` and more); repeating
    cycles up to the policy's history window (six by default), byte-exact and,

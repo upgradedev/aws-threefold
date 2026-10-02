@@ -78,7 +78,9 @@ def _run_git(repo: Path, *args: str) -> str:
 
 
 def _changed_files(repo: Path, base: str) -> list:
-    out = _run_git(repo, "diff", "--name-only", "--diff-filter=ACMRT", f"{base}...HEAD")
+    # quotePath off: a name with a non-ASCII letter is listed as it is, not
+    # as a quoted escape the file system has never heard of and skips.
+    out = _run_git(repo, "-c", "core.quotePath=false", "diff", "--name-only", "--diff-filter=ACMRT", f"{base}...HEAD")
     return [line for line in out.splitlines() if line.strip()]
 
 
@@ -114,10 +116,11 @@ def read_judgeable(repo: Path, path: str, max_bytes: int) -> tuple:
         return None, "empty"
     if len(raw) > max_bytes:
         return None, f"over the {max_bytes} byte cap"
-    try:
-        text = raw.decode("utf-8")
-    except UnicodeDecodeError:
+    if b"\x00" in raw[:8192]:
         return None, "not utf-8 text"
+    # One stray byte used to skip a whole source file, and a skip passes: text
+    # that is not quite UTF-8 is judged with the stray bytes replaced.
+    text = raw.decode("utf-8", errors="replace")
     # Judged bytes are identical on every OS: a Windows checkout must judge
     # what a Linux runner judges.
     return text.replace("\r\n", "\n").replace("\r", "\n"), None
