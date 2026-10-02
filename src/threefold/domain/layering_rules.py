@@ -12,6 +12,8 @@ less than a reader assumes is worse than one that says no.
 """
 from __future__ import annotations
 
+import re
+
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from threefold.domain.imports import declared_imports, language_for
@@ -87,7 +89,7 @@ DEFAULT_RULES: List[Dict[str, Any]] = [
         "forbid_imports": [
             "axios", "node-fetch", "@aws-sdk/*", "react", "react-dom", "next/*",
             "@angular/*", "typeorm", "prisma", "@prisma/*",
-            "**/infrastructure/*", "**/adapters/*",
+            "**/infrastructure", "**/infrastructure/**", "**/adapters", "**/adapters/**",
         ],
         "allow_imports": [],
     },
@@ -264,6 +266,36 @@ def rules_for_path(path: str, rules: List[Dict[str, Any]]) -> List[Dict[str, Any
     return [rule for rule in rules if matches_any(path, rule["when_path_matches"])]
 
 
+# `from <module> import <names>`, the names on one line or in parentheses
+# (bounded, so an unclosed parenthesis costs a fixed read, not the rest of the
+# file per statement). Read by line rather than by a second parse, which would
+# double the cost of judging a large file.
+_FROM_IMPORT = re.compile(r"(?m)^[ \t]*from[ \t]+([\w.]+)[ \t]+import[ \t]+(\([^)]{0,1000}\)|[^\n#;]*)")
+
+
+def python_names_imported(language: Optional[str], content: str, modules: List[str]) -> List[str]:
+    """`from acme import infrastructure` read as `acme.infrastructure` too.
+
+    The import reader gives the module after `from`; a package can also be
+    reached by naming it after `import`. Each name is checked after the
+    modules themselves, so a statement already caught is reported under its
+    module, and a class name read this way matches nothing a rule forbids.
+    """
+    if language != "python" or not content:
+        return []
+    seen = set(modules)
+    extra: List[str] = []
+    for match in _FROM_IMPORT.finditer(content):
+        module = match.group(1).lstrip(".")
+        prefix = module + "." if module else ""
+        for word in match.group(2).strip("() \t\r\n").split(","):
+            name = word.split(" as ")[0].strip(" \t\r\n()\\")
+            if name and name != "*" and name.isidentifier() and prefix + name not in seen:
+                seen.add(prefix + name)
+                extra.append(prefix + name)
+    return extra
+
+
 def violations(path: str, content: str, rules: List[Dict[str, Any]]) -> Tuple[List[Dict[str, str]], str]:
     """Every rule this write would break, with the reason for each.
 
@@ -283,6 +315,7 @@ def violations(path: str, content: str, rules: List[Dict[str, Any]]) -> Tuple[Li
         )
 
     _, modules = declared_imports(path, content)
+    modules = modules + python_names_imported(language, content, modules)
     if not modules:
         return [], f"No import declared in this {language} file"
 
@@ -346,7 +379,10 @@ def introduced_violations(
         return [], "The file type is one Threefold does not read, so no import could be checked"
     _, before_modules = declared_imports(path, before)
     _, after_modules = declared_imports(path, after)
-    introduced = [module for module in after_modules if module not in set(before_modules)]
+    before_modules = before_modules + python_names_imported(language, before, before_modules)
+    after_modules = after_modules + python_names_imported(language, after, after_modules)
+    already = set(before_modules)
+    introduced = [module for module in after_modules if module not in already]
     if not introduced:
         return [], "The edit introduces no import"
     found = _check_modules(path, introduced, applicable, introduced=True)

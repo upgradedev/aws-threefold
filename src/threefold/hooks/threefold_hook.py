@@ -301,15 +301,20 @@ _GOVERNANCE_DIRECTORIES = frozenset((".claude", ".codex", ".agents", ".git", ".t
 # other fails the suite instead of drifting quietly.
 SECRET_PATTERNS: List[Tuple[str, "re.Pattern[str]"]] = [
     ("AWS_ACCESS_KEY", re.compile(r"(?<![A-Z0-9])((?:AKIA|ASIA)[0-9A-Z]{16})(?![A-Z0-9])")),
-    ("AWS_SECRET_KEY", re.compile(r"(?i)aws_secret_access_key\s*[:=]\s*['\"]?[A-Za-z0-9/+=]{40}")),
+    ("AWS_SECRET_KEY", re.compile(r"(?i)aws_secret_access_(?:key)\s*[:=]\s*['\"]?[A-Za-z0-9/+=]{40}")),
     ("GITHUB_TOKEN", re.compile(r"(?<![A-Za-z0-9_])(gh[pousr]_[A-Za-z0-9_]{36,255})(?![A-Za-z0-9_])")),
     ("OPENAI_KEY", re.compile(r"(?<![A-Za-z0-9_])sk-(?:proj-)?[A-Za-z0-9_\-]{20,}")),
     ("ANTHROPIC_KEY", re.compile(r"(?<![A-Za-z0-9_])sk-ant-[A-Za-z0-9_\-]{20,}")),
     ("SLACK_TOKEN", re.compile(r"(?<![A-Za-z0-9_])xox[abposr]-[A-Za-z0-9\-]{10,}")),
     ("GOOGLE_API_KEY", re.compile(r"(?<![A-Za-z0-9_])AIza[A-Za-z0-9_\-]{35}(?![A-Za-z0-9_\-])")),
-    ("JWT", re.compile(r"(?<![A-Za-z0-9_])eyJ[A-Za-z0-9_\-]{10,}\.eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}")),
+    ("JWT", re.compile(r"(?<![A-Za-z0-9_\-])eyJ[A-Za-z0-9_\-]{10,}\.eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}")),
     ("GENERIC_API_KEY", re.compile(r"(?i)(api[_-]?key|secret[_-]?token)\s*[:=]\s*['\"][A-Za-z0-9_\-]{20,}['\"]")),
     ("PRIVATE_KEY_HEADER", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
+    ("GITHUB_FINE_GRAINED_TOKEN", re.compile(r"github_pat_(?<![A-Za-z0-9_]github_pat_)[A-Za-z0-9_]{22,255}")),
+    ("GITLAB_TOKEN", re.compile(r"glpat-(?<![A-Za-z0-9_]glpat-)[A-Za-z0-9_\-]{20,}")),
+    ("STRIPE_LIVE_KEY", re.compile(r"k_live_(?<=[rs]k_live_)(?<![A-Za-z0-9_][rs]k_live_)[A-Za-z0-9]{20,}")),
+    ("NPM_TOKEN", re.compile(r"npm_(?<![A-Za-z0-9_]npm_)[A-Za-z0-9]{36}(?![A-Za-z0-9])")),
+    ("PYPI_TOKEN", re.compile(r"pypi-AgE(?<![A-Za-z0-9_]pypi-AgE)[A-Za-z0-9_\-]{50,}")),
 ]
 
 
@@ -886,7 +891,8 @@ def _normalise_claude_code(payload: Dict[str, Any]) -> Optional[NormalisedCall]:
     elif tool == "Edit":
         content = tool_input.get("new_string")
         old = tool_input.get("old_string")
-        pairs = [(old, content)] if isinstance(old, str) and isinstance(content, str) else None
+        replace_all = tool_input.get("replace_all") is True
+        pairs = [(old, content, replace_all)] if isinstance(old, str) and isinstance(content, str) else None
     elif tool == "MultiEdit":
         # The new strings only. old_string is what the edit removes, and an
         # earlier version of the service refused the removal of a forbidden
@@ -899,7 +905,7 @@ def _normalise_claude_code(payload: Dict[str, Any]) -> Optional[NormalisedCall]:
         ]
         content = "\n".join(pieces)
         pairs = [
-            (edit["old_string"], edit["new_string"])
+            (edit["old_string"], edit["new_string"], edit.get("replace_all") is True)
             for edit in (edits if isinstance(edits, list) else [])
             if isinstance(edit, dict)
             and isinstance(edit.get("old_string"), str)
@@ -1026,6 +1032,42 @@ def _antigravity_files(args: Dict[str, Any]) -> List[Dict[str, str]]:
     return [{"file_path": path, "content": "\n".join(pieces)} for path, pieces in found.items()]
 
 
+def _antigravity_pairs(args: Dict[str, Any]) -> Dict[str, List[Tuple[str, str, bool]]]:
+    """Each replacement's taken-out and put-in text, per file, for the edit context.
+
+    The same walk as _antigravity_files: a chunk inherits the path of the
+    object above it. A chunk lacking either text gives the file no pairs, and
+    its edit is judged on the replacement alone, as before.
+    """
+    found: Dict[str, List[Tuple[str, str, bool]]] = {}
+    broken: set = set()
+
+    def walk(node: Any, owner: Optional[str]) -> None:
+        if isinstance(node, dict):
+            here = owner
+            lowered = {key.lower(): value for key, value in node.items() if isinstance(key, str)}
+            for key in ANTIGRAVITY_PATH_KEYS:
+                value = lowered.get(key)
+                if isinstance(value, str) and value.strip():
+                    here = value
+                    break
+            target, replacement = lowered.get("targetcontent"), lowered.get("replacementcontent")
+            if here is not None and (target is not None or replacement is not None):
+                if isinstance(target, str) and isinstance(replacement, str) and target:
+                    found.setdefault(here, []).append((target, replacement, lowered.get("allowmultiple") is True))
+                else:
+                    broken.add(here)
+            for value in node.values():
+                if isinstance(value, (dict, list)):
+                    walk(value, here)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item, owner)
+
+    walk(args, None)
+    return {path: pairs for path, pairs in found.items() if path not in broken}
+
+
 def _normalise_antigravity(payload: Dict[str, Any]) -> Optional[NormalisedCall]:
     call = payload.get("toolCall")
     if not isinstance(call, dict):
@@ -1052,7 +1094,8 @@ def _normalise_antigravity(payload: Dict[str, Any]) -> Optional[NormalisedCall]:
         files = _antigravity_files(args)
         if not files:
             raise UnknownShape(payload)
-        return NormalisedCall(FILE_WRITE, files)
+        pairs = _antigravity_pairs(args)
+        return NormalisedCall(FILE_WRITE, files, edit_pairs=[pairs.get(entry["file_path"]) for entry in files])
 
     # A tool this hook has not been taught. One that carries content or a
     # command may be a write or a shell under a new name, so its shape is worth
@@ -1088,13 +1131,22 @@ def _normalise_muse(payload: Dict[str, Any]) -> Optional[NormalisedCall]:
     path = tool_input.get("path")
     if not isinstance(path, str) or not path.strip():
         raise UnknownShape(payload)
+    pairs: Any = None
     if tool == "write_file":
         content = tool_input.get("content")
     else:
         # edit_file's `find` is the text the edit removes, judged no more than
-        # an old_string is: only the replacement is sent.
+        # an old_string is: only the replacement is sent, with the file before
+        # and after beside it when the find occurs exactly once.
         content = tool_input.get("replace")
-    return NormalisedCall(FILE_WRITE, [{"file_path": path, "content": content if isinstance(content, str) else ""}])
+        find = tool_input.get("find")
+        if isinstance(find, str) and isinstance(content, str):
+            pairs = [(find, content, False)]
+    return NormalisedCall(
+        FILE_WRITE,
+        [{"file_path": path, "content": content if isinstance(content, str) else ""}],
+        edit_pairs=[pairs],
+    )
 
 
 def normalise(payload: Dict[str, Any], agent: str) -> Optional[NormalisedCall]:
@@ -1818,7 +1870,7 @@ _OVERWRITE_LIKE = frozenset(("cp", "mv", "install", "rsync", "copy-item", "move-
 # Commands that remove their first operand by moving it away.
 _MOVE_LIKE = frozenset(("mv", "move", "move-item"))
 # A redirection's destination. `2>&1` names no file: `&` is not a word.
-_REDIRECT_TO = re.compile(r">>?[ \t]*([^ \t;&|()<>]+)")
+_REDIRECT_TO = re.compile(r">>?\|?[ \t]*([^ \t;&|()<>]+)")
 # Words before the command that do not change what runs.
 _COMMAND_WRAPPERS = frozenset(("sudo", "doas", "runas", "env", "command", "builtin", "time"))
 _ENV_ASSIGNMENT = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
@@ -2234,12 +2286,20 @@ def governance_target(call: NormalisedCall, payload: Dict[str, Any], home: str) 
     return None
 
 
-def _governed_home_paths() -> Tuple[str, ...]:
+# THREEFOLD_HOME's own files that decide what the hook does: a dead endpoint,
+# `mode: observe` or a never-send term naming the project switches governance
+# off as surely as removing the hook, so they are refused like bin/.
+GOVERNED_THREEFOLD_FILES = ("config.json", "never_send.txt")
+
+
+def _governed_home_paths(home: Optional[str] = None) -> Tuple[str, ...]:
     """Each file under the home folder that decides whether the hooks run, canonical."""
     user_home = os.path.expanduser("~")
     paths = [os.path.join(user_home, name) for name in GOVERNED_HOME_FILES]
     for directory, files in GOVERNED_AGENT_FILES.items():
         paths.extend(os.path.join(user_home, directory, name) for name in files)
+    if home:
+        paths.extend(os.path.join(home, name) for name in GOVERNED_THREEFOLD_FILES)
     return tuple(_canonical(path) for path in paths)
 
 
@@ -2263,7 +2323,7 @@ def governed_home_target(call: NormalisedCall, payload: Dict[str, Any], home: st
     """
     cwd = project_root(payload)
     canonical_bin = _canonical(os.path.join(home, "bin"))
-    governed = _governed_home_paths()
+    governed = _governed_home_paths(home)
     for target in call.targets():
         resolved = _resolve(target, cwd)
         if _is_within(resolved, canonical_bin) or resolved in governed:
@@ -2271,12 +2331,114 @@ def governed_home_target(call: NormalisedCall, payload: Dict[str, Any], home: st
     return None
 
 
+_HEREDOC_START = re.compile(r"<<-?[ \t]*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
+
+
+def _without_heredoc_bodies(command: str) -> str:
+    """The command with the bodies of heredocs fed to anything but a shell taken out.
+
+    A heredoc's body is data to `cat > notes.md`: words in it run nothing, so
+    an uninstall note that mentions `rm -rf ~/.threefold` is not a removal.
+    Fed to a shell runner (`sh <<EOF`) the body is a script, and it stays.
+    """
+    lines = command.split("\n")
+    kept: List[str] = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        kept.append(line)
+        index += 1
+        start = _HEREDOC_START.search(line)
+        if not start:
+            continue
+        names = {_command_name(part.split())[0] for part in re.split(r"[;&|()]+", line)}
+        if names & (_SHELL_RUNNERS | {"eval", "source", ".", "xargs"}):
+            continue
+        terminator = start.group(2)
+        while index < len(lines) and lines[index].strip() != terminator:
+            index += 1
+        if index < len(lines):
+            kept.append(lines[index])
+            index += 1
+    return "\n".join(kept)
+
+
 def _simple_commands(command: str) -> Iterator[str]:
-    """Each command in a shell line on its own: `a && b` is two commands, `a | b` two as well."""
-    for piece in re.split(r"[;&|()\n]+", command):
-        piece = piece.strip()
-        if piece:
-            yield piece
+    """Each command in a shell line on its own: `a && b` is two commands, `a | b` two as well.
+
+    Separators inside quotes separate nothing - `git commit -m 'a; rm b'` is
+    one command - and a heredoc's body fed to anything but a shell is data.
+    """
+    piece: List[str] = []
+    quote = ""
+    text_in = _without_heredoc_bodies(command)
+    index = 0
+    while index < len(text_in):
+        char = text_in[index]
+        index += 1
+        if char == "\\" and quote != "'" and index < len(text_in):
+            piece.append(char + text_in[index])
+            index += 1
+            continue
+        if quote:
+            piece.append(char)
+            if char == quote:
+                quote = ""
+            continue
+        if char in "'\"":
+            quote = char
+            piece.append(char)
+            continue
+        if char == "|" and piece and piece[-1] == ">":
+            piece.append(char)  # `>|` is a redirection, not a pipe
+            continue
+        if char in ";&|()\n":
+            text = "".join(piece).strip()
+            if text:
+                yield text
+            piece = []
+            continue
+        piece.append(char)
+    text = "".join(piece).strip()
+    if text:
+        yield text
+
+
+def _mask_quoted(simple: str, keep_double: bool = False) -> str:
+    """The command with quoted text blanked, so words inside quotes are not read as syntax.
+
+    A quoted word right after a redirection is its destination and stays.
+    With keep_double, double-quoted text stays, because the shell still runs
+    a substitution there.
+    """
+    out: List[str] = []
+    quote = ""
+    keep = False
+    escaped = False
+    for index, char in enumerate(simple):
+        if escaped:
+            escaped = False
+            out.append(char if (keep or not quote) else " ")
+            continue
+        if char == "\\" and quote != "'":
+            escaped = True
+            out.append(char if (keep or not quote) else " ")
+            continue
+        if quote:
+            if char == quote:
+                quote = ""
+                out.append(char)
+            else:
+                out.append(char if keep else " ")
+            continue
+        if char in "'\"":
+            quote = char
+            before = simple[:index].rstrip(" \t")
+            keep = before.endswith(">") or before.endswith(">|") or (keep_double and char == '"')
+            out.append(char)
+            continue
+        out.append(char)
+    return "".join(out)
 
 
 def _command_name(words: List[str]) -> Tuple[str, List[str]]:
@@ -2335,7 +2497,7 @@ def _overwrite_candidates(name: str, arguments: List[str], simple: str) -> Itera
         for word in named:
             if word.lower().startswith("of="):
                 yield word[3:]
-    for match in _REDIRECT_TO.finditer(simple):
+    for match in _REDIRECT_TO.finditer(_mask_quoted(simple)):
         yield _unquoted(match.group(1))
 
 
@@ -2362,7 +2524,7 @@ def disarming_command(
     """
     canonical_base = _canonical(base)
     canonical_bin = _canonical(os.path.join(home, "bin"))
-    governed = _governed_home_paths()
+    governed = _governed_home_paths(home)
 
     def is_governed(resolved: str) -> bool:
         return _is_within(resolved, canonical_bin) or resolved in governed
@@ -2389,20 +2551,29 @@ def disarming_command(
                 inner = _shell_inner(arguments)
                 if inner:
                     inners.append(inner)
-            for match in _SUBSTITUTION.finditer(simple):
+            for match in _SUBSTITUTION.finditer(_mask_quoted(simple, keep_double=True)):
                 inners.append(match.group(1) or match.group(2) or "")
             for inner in inners:
                 found = disarming_command(inner, base, home, _depth + 1)
                 if found is not None:
                     return found
         if name in _PLUGIN_CLIS:
-            rest = " ".join(arguments)
+            try:
+                words = shlex.split(" ".join(arguments))
+            except ValueError:
+                words = arguments
+            # A quoted phrase is a note, not a plugin name: `--note 'clashes
+            # with threefold'` unplugs nothing, `remove 'threefold'` does.
+            rest = " ".join(word for word in words if not any(c.isspace() for c in word))
             if _PLUGIN_REMOVAL.search(rest) and ("threefold" in rest.lower() or "--all" in rest):
                 return ("unplug", _one_line(simple.strip(), 120), "")
         if name in _MOVE_LIKE:
             named = [word for word in arguments if not word.startswith("-")]
             if named and is_governed(resolve(named[0])):
                 return ("delete", _home_display(resolve(named[0])), "")
+            killed = killed_by(resolve(named[0])) if named else None
+            if killed is not None:
+                return ("delete-tree", _home_display(resolve(named[0])), _home_display(killed))
         if name in _DELETION_COMMANDS:
             for _, candidate in _command_paths(simple, canonical_base):
                 if is_governed(candidate):
@@ -2521,14 +2692,19 @@ def _reconstructed_edit(path: str, pairs: Any) -> Any:
     after = before
     for pair in pairs:
         try:
-            old, new = pair
+            old, new, *rest = pair
         except (TypeError, ValueError):
             return None
+        every = bool(rest and rest[0] is True)
         if not isinstance(old, str) or not isinstance(new, str) or not old:
             return None
-        if after.count(old) != 1:
+        if after.count(old) == 0 and "\r\n" in after and "\n" in old and "\r\n" not in old:
+            # An agent's old text uses \n; a Windows file on disk keeps \r\n.
+            old, new = old.replace("\n", "\r\n"), new.replace("\n", "\r\n")
+        occurrences = after.count(old)
+        if occurrences == 0 or (occurrences > 1 and not every):
             return None
-        after = after.replace(old, new, 1)
+        after = after.replace(old, new) if every else after.replace(old, new, 1)
     if len(after.encode("utf-8")) > _EDIT_RESULT_MAX_BYTES:
         return None
     return before, after
@@ -2566,8 +2742,21 @@ def _attach_edit_context(call: NormalisedCall, home: str) -> None:
         before, after = rebuilt
         if terms and mentions_never_send("", {"edit_before": before, "edit_after": after}, terms):
             continue
-        entry["edit_before"] = before
-        entry["edit_after"] = after
+        entry["edit_before"] = redact_credentials(before)
+        entry["edit_after"] = redact_credentials(after)
+
+
+def redact_credentials(text: str) -> str:
+    """The text with every credential shape replaced by its label.
+
+    The credential check runs before the edit context exists, and the file's
+    unchanged surroundings can hold a key the edit never touches. The context
+    is there for its imports, so a key in it goes as a placeholder: the import
+    lines survive, and the key stays on the machine like any other credential.
+    """
+    for label, pattern in SECRET_PATTERNS:
+        text = pattern.sub(f"<{label} kept on the machine>", text)
+    return text
 
 
 def _strip_governance_content(call: NormalisedCall) -> None:

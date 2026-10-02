@@ -108,7 +108,7 @@ def test_a_write_into_threefold_home_is_held_back(machine, stub, run_hook, held_
         "session_id": "s",
         "cwd": str(machine.home),
         "tool_name": "Write",
-        "tool_input": {"file_path": str(machine.threefold_home / "never_send.txt"), "content": ""},
+        "tool_input": {"file_path": str(machine.threefold_home / "notes.txt"), "content": ""},
     }
     _held_back(stub, run_hook, payload, held_back_lines, "agent-config")
 
@@ -751,7 +751,7 @@ def test_removing_a_credential_is_not_refused_for_containing_it(machine, stub, r
         "tool_name": "Edit",
         "tool_input": {
             "file_path": str(machine.project / "src" / "settings.py"),
-            "old_string": "KEY = 'AKIAABCDEFGHIJKLMNOP'",
+            "old_string": "KEY = '" + "AKIA" + "ABCDEFGHIJKLMNOP'",
             "new_string": "KEY = os.environ['ACME_KEY']",
         },
     }

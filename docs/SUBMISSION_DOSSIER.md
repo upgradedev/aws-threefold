@@ -39,8 +39,11 @@ changed file is sent to the service as the write it is, and a required check
 fails the merge when a rule fires - which covers agents that never installed
 anything, including ones running outside the developer's machine. Threefold is
 not an agent runtime: whatever runs the agent - an IDE extension, a CLI, or a
-managed runtime such as Bedrock AgentCore - can ask the same evaluate endpoint
-about each tool call before it runs.
+managed runtime such as Bedrock AgentCore - could ask the same evaluate
+endpoint about each tool call before it runs; that path is not built or tested.
+Policy in Amazon Bedrock AgentCore already judges tool calls that pass through
+its gateway; Threefold judges the local tool calls a coding agent makes on a
+developer's machine, which never pass through a gateway.
 
 ## 2. Inspiration
 
@@ -63,8 +66,8 @@ so the rollout had to show what a rule would stop before it stops anything.
    terms on the owner's never-send list), and sends the rest to be judged. On
    an approval it prints nothing, so the agent's own permission flow still runs.
 2. **Judges with deterministic gates.** Layering rules per project in Python,
-   Java, C# and TypeScript, read from each file's own import statements; ten
-   credential shapes at any depth of the arguments plus the policy's own
+   Java, C# and TypeScript, read from each file's own import statements;
+   fifteen credential shapes at any depth of the arguments plus the policy's own
    blocked-pattern list; protected paths and every shell route to a write
    (redirections, heredocs, `sed -i`, `cp`, `git apply` and more); repeating
    cycles up to the policy's history window (six by default), byte-exact and,
@@ -200,9 +203,10 @@ so the rollout had to show what a rule would stop before it stops anything.
 
 - The owner's own work has been governed since 2026-09-22 at nine locations,
   under `Acme-Proj-*` aliases, in Observe, reporting to a private stack from the
-  same template [STATE-FILE]: 5,392 calls governed as of 2026-09-28, 163
-  would-be refusals surfaced, none a false alarm [PRIMARY, 2026-09-28: the
-  private stack's `/api/overview`].
+  same template [STATE-FILE]: 5,392 calls governed as of 2026-09-28 and 164
+  would-be refusals surfaced; 5 of them were labelled, none a false alarm, and
+  the rest await review [PRIMARY, 2026-09-28: the private stack's
+  `/api/overview`, `proof.json` `private`].
 - The public stack passed its own live probe on 2026-10-01, 117 checks PASS,
   0 FAIL, 3 SKIP through the edge and the same at the API [PRIMARY,
   2026-10-01: `docs/evidence/PROBES_2026-10-01-3da6ffb2.md`,

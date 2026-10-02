@@ -22,7 +22,7 @@ from threefold.application.rule_keys import NONE, category_for, stored_rule_key
 GATE_COVERAGE = [
     {
         "rule": "SECRET_LEAKAGE_FREE",
-        "watches": "Ten credential shapes in any argument, at any depth, for every language",
+        "watches": "Fifteen credential shapes in any argument, at any depth, for every language",
         "blind_to": "Credentials that do not match a known shape, and anything already in the file on disk",
     },
     {

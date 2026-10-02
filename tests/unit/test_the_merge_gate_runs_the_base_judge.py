@@ -59,3 +59,9 @@ def test_codeowners_names_the_gate_s_own_files() -> None:
     assert CODEOWNERS.is_file(), "The gate's wiring needs an owner on review"
     owned = CODEOWNERS.read_text(encoding="utf-8")
     assert ".github/" in owned and "scripts/judge_pr.py" in owned
+
+
+def test_neither_checkout_keeps_the_job_token() -> None:
+    """The request's files sit in a checkout; a token persisted there is a
+    file a crafted request could point the judge at."""
+    assert _workflow().count("persist-credentials: false") == 2

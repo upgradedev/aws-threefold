@@ -4,11 +4,6 @@
 **Hackathon:** AWS Zero to Shipped 2026 · **Category:** `#workplace-efficiency` · **Lane:** `#community`
 **Try it, no account:** <https://d1og72wpk4aqig.cloudfront.net/dashboard.html#/try>
 
-A claim about the live stacks is tagged **[PRIMARY, date]** when it was
-checked on that date with a read-only request or an AWS `describe`/`get`/`list`
-call, and **[STATE-FILE]** when it is taken from the project's state ledger
-and was not re-measured for this article.
-
 ---
 
 ## The moment that matters
@@ -27,7 +22,7 @@ small service on AWS that uses that moment.
 No model sits between an agent and its verdict: a verdict must repeat exactly,
 run in milliseconds, and ignore what the call itself says. So the gates are
 standard-library Python: per-project layering rules over real imports (Python,
-Java, C#, TypeScript); ten credential shapes at any depth; protected paths
+Java, C#, TypeScript); fifteen credential shapes at any depth; protected paths
 covering every way to switch the hooks off; every shell route to a write
 judged like a `Write`; loops over repeating calls (reads like `git status`
 are noted, never refused); and a spend ceiling. Amazon Bedrock works only
@@ -92,6 +87,23 @@ counted apart and labelled synthetic. The hook **fails open** unless
 `THREEFOLD_FAIL_CLOSED=1`, because a governance outage that stopped every
 developer would end the rollout.
 
+## How it was built and shipped
+
+Coding agents built Threefold, and a coding agent shipped it: Claude Code,
+driving the AWS CLI v2 under the operator's credentials, ran
+`aws sts get-caller-identity`, then `aws cloudformation package` and `deploy`
+for the first stack, with the code as it stood. AWS answered with three
+defects on the first day, and each was read back and fixed in the code: every
+route answered 404, because API Gateway prefixes the stage to the path; the
+session said "halted" while DynamoDB said otherwise, so the halt was written
+through and checked in the table; and the model ID named a retired model in
+the wrong Region, so every explanation was a canned string until the function
+called Claude Haiku 4.5 through the `eu.` inference profile. CloudTrail now
+shows the function's own role as the principal of each Bedrock call
+**[PRIMARY, 2026-09-20]**. The edge, the probes and the daily live agent came
+after; that agent's first run found a false refusal, fixed the next day.
+The full record: [docs/PROOF_OF_AWS_AGENT.md](https://github.com/upgradedev/aws-threefold/blob/main/docs/PROOF_OF_AWS_AGENT.md).
+
 ## What was measured, and what was not
 
 - **Does a deny stop the write?** Measured per agent on the file system:
@@ -151,3 +163,10 @@ developer would end the rollout.
 - The operations dashboard: <https://d1og72wpk4aqig.cloudfront.net/dashboard.html#/overview>
 - The benchmark's six series, side by side:
   <https://d1og72wpk4aqig.cloudfront.net/dashboard.html#/proof>
+- The code, the evidence and every number above:
+  <https://github.com/upgradedev/aws-threefold>
+
+A claim about the live stacks is tagged **[PRIMARY, date]** when it was
+checked on that date with a read-only request or an AWS `describe`/`get`/`list`
+call, and **[STATE-FILE]** when it is taken from the project's state ledger
+and was not re-measured for this article.

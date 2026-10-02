@@ -121,11 +121,12 @@ The API's own URL, `https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/
 stays public and serves the same pages from the function. It answers without
 any of the edge's security headers: a `GET /prod/dashboard.html` returned only
 `date`, `content-type`, `content-length`, `cache-control: no-cache` and API
-Gateway's request id **[PRIMARY, 2026-09-22, rechecked 2026-09-27]**. The pages at
-`/prod/` and `/prod/dashboard.html` carry none of the edge's headers; the
-function's own files carry one of them, `x-content-type-options: nosniff`, on
-`/install.py`, `/hooks/threefold_hook.py` and `/assets/threefold.js`, and
-nothing else of the edge's set **[PRIMARY, 2026-09-22, rechecked 2026-09-27]**.
+Gateway's request id **[PRIMARY, 2026-09-22, rechecked 2026-09-27]**. Since the
+2026-10-01 deploy the function adds its own: HTML pages answer with
+`x-frame-options: DENY`, `content-security-policy: frame-ancestors 'none'`,
+HSTS, `nosniff` and `referrer-policy: no-referrer`, and every other response
+with `nosniff` and HSTS **[PRIMARY, 2026-10-02: `GET /prod/` on the origin]**.
+The edge's full content security policy is still the edge's alone.
 The bare `/prod` without the trailing slash is API Gateway's own 404, before
 the function is reached **[PRIMARY, 2026-09-22, rechecked 2026-09-27]**.
 
@@ -718,7 +719,8 @@ pages are published again. On 2026-09-22 the two `dashboard.html` copies were
 the same size, 159,267 bytes **[PRIMARY, 2026-09-22]**; on 2026-09-27 they
 were byte for byte the same, 432,457 bytes with one SHA-256
 **[PRIMARY, 2026-09-27]**, `GET /dashboard.html` on both URLs. The API URL has
-no web ACL and serves its pages with none of the edge's headers (section 1),
+no web ACL and serves its pages without the edge's content security policy
+(section 1),
 and anyone can reach every route there, past the edge.
 
 ### 8.6 What the edge secret protects, and what it does not
@@ -743,7 +745,8 @@ with a forged `X-Threefold-Viewer-Host`, with and without a wrong
 What it does not do:
 
 - It is not authentication. The API URL stays public, every route answers
-  there, and a caller who uses it skips the web ACL and the edge's headers.
+  there, and a caller who uses it skips the web ACL and the edge's content
+  security policy.
 - It does not keep reads private. That is `PublicReads`.
 - It is readable inside the account: the distribution's configuration holds it
   (anyone allowed `cloudfront:GetDistributionConfig`) and so does the

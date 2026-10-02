@@ -6,13 +6,14 @@ name: Judge the diff
 # on one. A hook nobody installed cannot be bypassed here, because there is no
 # hook: a cloud agent's pull request is judged exactly like a local one's.
 #
-# The judge itself cannot be neutered by the pull request either. This runs on
+# A pull request cannot rewrite the judge that judges it. This runs on
 # pull_request_target, so the workflow comes from the base branch; the base is
 # checked out for its copy of scripts/judge_pr.py, and the pull request's head
 # is checked out beside it as data only: nothing in it is executed, and no
 # pull-request text reaches a run step. A request that rewrites the judge
 # still has its files judged by the base's copy. CODEOWNERS names the gate's
-# own files so such a rewrite always asks its owner for review.
+# own files so such a rewrite asks its owner for review; an admin can still
+# merge past the check (RUNBOOK section 12 lists the limits).
 #
 # Wiring it as a required check is what makes it load-bearing: branch
 # protection on main names this check, without requiring pull requests, so
@@ -41,6 +42,7 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           path: base
+          persist-credentials: false
 
       - name: Check out the pull request as data
         uses: actions/checkout@v7
@@ -48,6 +50,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
           path: pr
+          persist-credentials: false
 
       - uses: actions/setup-python@v7
         with:

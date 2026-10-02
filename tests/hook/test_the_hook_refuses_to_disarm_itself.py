@@ -245,3 +245,49 @@ def test_listing_plugins_is_sent(payloads, stub, run_hook) -> None:
     code, out, _ = run_hook(payloads.command("claude-code", "muse plugins list"))
     assert (code, out) == (0, "")
     assert len(stub.requests) == 1
+
+
+# --- the hook's own decision files, and words that only look like commands ---------
+
+THREEFOLD_DECISION_FILES = ("config.json", "never_send.txt")
+
+
+@pytest.mark.parametrize("relative", THREEFOLD_DECISION_FILES)
+def test_a_write_to_threefolds_own_decision_files_is_refused(relative, machine, stub, run_hook, verdict) -> None:
+    """A dead endpoint, `mode: observe` or a never-send term naming the project
+    switches governance off as surely as deleting the hook."""
+    _denied(stub, run_hook, verdict, _write(machine.threefold_home, relative, '{"mode": "observe"}'))
+
+
+LATER_DISARMS = (
+    "echo '{\"endpoint\": \"http://127.0.0.1:9\"}' > ~/.threefold/config.json",
+    "echo domain >> ~/.threefold/never_send.txt",
+    "echo {} >| ~/.claude/settings.json",
+    "mv ~/.threefold /tmp/parked",
+    "muse plugins remove 'threefold'",
+    "cat <<EOF | sh\nrm -rf ~/.threefold\nEOF",
+    "echo \\' ; rm -rf ~/.threefold #'",
+)
+
+
+@pytest.mark.parametrize("command", LATER_DISARMS)
+def test_the_routes_a_second_review_found_are_refused(command, payloads, stub, run_hook, verdict) -> None:
+    _denied(stub, run_hook, verdict, payloads.command("claude-code", command))
+
+
+WORDS_ABOUT_DISARMING = (
+    "git commit -m 'docs: rm -rf ~/.threefold to uninstall'",
+    "grep -rn 'x; rm ~/.claude/settings.json' docs/",
+    "echo 'tip && claude plugin uninstall threefold'",
+    "printf '%s\\n' 'echo x > ~/.claude/settings.json' > notes.txt",
+    "muse plugins disable linter --note 'conflicts with threefold'",
+    "cat > UNINSTALL.md <<'EOF'\nrm -rf ~/.threefold\nmuse plugins remove threefold\nEOF",
+)
+
+
+@pytest.mark.parametrize("command", WORDS_ABOUT_DISARMING)
+def test_quoted_text_and_heredoc_data_disarm_nothing(command, hook, machine) -> None:
+    """Text inside quotes and a heredoc's body fed to anything but a shell are
+    data: refusing them stopped ordinary commits, greps and docs in Observe."""
+    base = str(machine.project)
+    assert hook.disarming_command(command, base, str(machine.threefold_home)) is None
