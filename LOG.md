@@ -340,3 +340,6 @@
 ## 2026-10-01 -- Full live UAT 29/29, article diagram by URL
 - End-to-end UAT against the edge: 24 API checks (landing/docs/sandbox/label/promote/enforced-block/loop-halt/certificate/freeze/404s) + 5 rendered SPA routes in headless Chromium, all passing. Resume anonymous 403 confirmed by design (operator-only). Own verification traffic added 5 calls to the overview live source (26 to 31 in 4 projects); dossier updated with the split, agent rows unchanged at 26 calls in 4 runs.
 - Diagrams: README already renders docs/architecture.svg (verified visually) and ARCHITECTURE.md renders Mermaid; the ASCII blocks are plain-text fallbacks. The article carried ASCII only, so it now embeds the SVG by raw GitHub URL (verified 200 image/svg+xml) with the ASCII kept as fallback; handoff tells the owner to upload the file if Builder Center does not render it.
+
+## 2026-10-02 -- Seventh live row; live-source correction
+- Codex ran collections-webhook (5 calls, 0 refused, acceptance 8/8, no violation): seven rows, five runs, 31 agent-row calls. Correction to the 2026-10-01 entry: the overview live source 31/4 is all agent rows (9+9+8+5 across the four Acme-Live-* projects); the UAT calls with an empty project name landed in unlabelled/other, not in live. Dossier, article, handoff and state carry the corrected split.

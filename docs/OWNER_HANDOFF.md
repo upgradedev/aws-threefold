@@ -75,8 +75,8 @@ paragraph and link the file on GitHub.
 ## Package B: the article
 
 The article is written and fresh: `docs/BUILDER_CENTER_ARTICLE.md`
-(rewritten to ~1200 words, probes rechecked 2026-10-01, six live-agent rows
-with four runs, six benchmark series).
+(rewritten to ~1200 words, probes rechecked 2026-10-01, seven live-agent
+rows with five runs, six benchmark series).
 
 **Title (the file's first line):**
 
