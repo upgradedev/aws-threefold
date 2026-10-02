@@ -307,7 +307,7 @@ SECRET_PATTERNS: List[Tuple[str, "re.Pattern[str]"]] = [
     ("ANTHROPIC_KEY", re.compile(r"(?<![A-Za-z0-9_])sk-ant-[A-Za-z0-9_\-]{20,}")),
     ("SLACK_TOKEN", re.compile(r"(?<![A-Za-z0-9_])xox[abposr]-[A-Za-z0-9\-]{10,}")),
     ("GOOGLE_API_KEY", re.compile(r"(?<![A-Za-z0-9_])AIza[A-Za-z0-9_\-]{35}(?![A-Za-z0-9_\-])")),
-    ("JWT", re.compile(r"(?<![A-Za-z0-9_])eyJ[A-Za-z0-9_\-]{10,}\.eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}")),
+    ("JWT", re.compile(r"(?<![A-Za-z0-9_\-])eyJ[A-Za-z0-9_\-]{10,}\.eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}")),
     ("GENERIC_API_KEY", re.compile(r"(?i)(api[_-]?key|secret[_-]?token)\s*[:=]\s*['\"][A-Za-z0-9_\-]{20,}['\"]")),
     ("PRIVATE_KEY_HEADER", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
 ]
@@ -2566,8 +2566,21 @@ def _attach_edit_context(call: NormalisedCall, home: str) -> None:
         before, after = rebuilt
         if terms and mentions_never_send("", {"edit_before": before, "edit_after": after}, terms):
             continue
-        entry["edit_before"] = before
-        entry["edit_after"] = after
+        entry["edit_before"] = redact_credentials(before)
+        entry["edit_after"] = redact_credentials(after)
+
+
+def redact_credentials(text: str) -> str:
+    """The text with every credential shape replaced by its label.
+
+    The credential check runs before the edit context exists, and the file's
+    unchanged surroundings can hold a key the edit never touches. The context
+    is there for its imports, so a key in it goes as a placeholder: the import
+    lines survive, and the key stays on the machine like any other credential.
+    """
+    for label, pattern in SECRET_PATTERNS:
+        text = pattern.sub(f"<{label} kept on the machine>", text)
+    return text
 
 
 def _strip_governance_content(call: NormalisedCall) -> None:

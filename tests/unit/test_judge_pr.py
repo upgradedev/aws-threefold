@@ -260,3 +260,27 @@ def test_over_the_file_cap_fails_closed(tmp_path, monkeypatch, capsys):
                           "--max-files", "1", "--session-id", "judge-test"])
     assert code == 2
     assert "over the 1 cap" in capsys.readouterr().err
+
+
+def test_a_symlink_in_the_request_is_not_followed(tmp_path, monkeypatch, capsys):
+    """Under pull_request_target the request's checkout sits beside files of
+    the runner's own; a link to one of them must not be read and sent."""
+    calls: List[str] = []
+
+    def post(endpoint: str, body: Dict[str, Any], timeout: float, retries: int):
+        calls.append(body["arguments"]["path"])
+        return {"status": "APPROVED", "observed_rules": []}
+
+    monkeypatch.setattr(judge_pr, "post_verdict", post)
+    outside = tmp_path / "runner-secret.txt"
+    outside.write_text("token-of-the-runner\n", encoding="utf-8")
+    repo = tmp_path / "repo"
+    (repo / "docs").mkdir(parents=True)
+    (repo / "docs" / "leak.md").symlink_to(outside)
+    (repo / "docs" / "ok.md").write_text("fine\n", encoding="utf-8")
+    monkeypatch.setattr(judge_pr, "_changed_files", lambda _repo, _base: ["docs/leak.md", "docs/ok.md"])
+    code = judge_pr.main(["--endpoint", BASE, "--project", PROJECT, "--repo", str(repo),
+                          "--pace", "0", "--session-id", "judge-test"])
+    assert code == 0
+    assert calls == ["docs/ok.md"]
+    assert "skip docs/leak.md (a symlink, not followed)" in capsys.readouterr().out

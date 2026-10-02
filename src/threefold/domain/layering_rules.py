@@ -346,7 +346,8 @@ def introduced_violations(
         return [], "The file type is one Threefold does not read, so no import could be checked"
     _, before_modules = declared_imports(path, before)
     _, after_modules = declared_imports(path, after)
-    introduced = [module for module in after_modules if module not in set(before_modules)]
+    already = set(before_modules)
+    introduced = [module for module in after_modules if module not in already]
     if not introduced:
         return [], "The edit introduces no import"
     found = _check_modules(path, introduced, applicable, introduced=True)

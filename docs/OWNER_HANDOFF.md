@@ -95,9 +95,10 @@ zero-to-shipped, workplace-efficiency, community, bedrock, lambda, governance
 ```
 
 **Body:** paste the whole file except its first five lines (the title and
-the `For: / Hackathon: / Try it:` meta block). Start at the `A claim about
-the live stacks...` paragraph. Keep the `[PRIMARY, date]` tags; they are
-the evidence trail.
+the `For: / Hackathon: / Try it:` meta block). Start at `## The moment that
+matters`. The note on the `[PRIMARY, date]` tags is at the end; keep it and
+the tags, they are the evidence trail. The section `How it was built and
+shipped` is the deployment journey the project post asks for.
 
 After posting, copy the article URL back into the project's links.
 

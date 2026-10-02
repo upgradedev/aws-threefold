@@ -46,6 +46,7 @@
 - MUSE, the fourth agent (2026-09-28), in its own worktree: `src/threefold/hooks/threefold_hook.py` (the muse adapter only), the new plugin bundle (`tools/threefold_muse_plugin/**` or equivalent), `src/threefold/tools/threefold_install.py` (muse connect/status/disconnect only), `src/threefold/application/dtos.py` (the agent enum only), `src/threefold/web/connect.html` (the manual table only), `tests/hook/test_the_hook_reads_muse.py` (new), `tests/unit/test_threefold_install.py` (muse cases only), `docs/evidence/ENFORCEMENT_2026-09-28-MUSE.md` (new); the openapi twins via the generate script; every "three agents" string its change falsifies, with the drift tests that pin them. No benchmark runner, no fleet change, no MSP governor (measured dead end, see LOG).
 - Shared, one dispatch line each: `src/threefold/interfaces/api_handlers.py`, `src/threefold/web/openapi.json`, `docs/openapi.yaml`
 - Owner: `STATE.md`, `LOG.md`, `TRAPS.md`, `CLAUDE.md`; merges and deploys
+- REVIEW-2 (2026-10-02, Claude Code cloud session, branch `claude/eloquent-archimedes-j2wutb`, not deployed): the second judge review's two Highs only. The hook's edit context leaves credentials home (`hooks/threefold_hook.py`, its muse copy and manifest); the open route stays linear on adversarial bodies (`domain/boundary_guard.py` JWT and git-push patterns and the edit-context predicate, `domain/layering_rules.py` introduced-imports set); tests for these. No deploy: the owner deploys after review.
 
 ## Contracts, 2026-09-21
 

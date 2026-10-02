@@ -61,6 +61,34 @@ WORKING_DIRECTORY_KEYS = ("cwd", "workdir")
 EDIT_CONTEXT_KEYS = frozenset(("edit_before", "edit_after"))
 
 
+# The most an edit context may carry, in characters: the hook's own byte caps
+# (64 KiB before, 128 KiB after), which no context it sends can exceed. A
+# larger one is not a context the hook made, so it is judged like any string.
+EDIT_CONTEXT_MAX_BEFORE = 65536
+EDIT_CONTEXT_MAX_AFTER = 131072
+
+
+def is_edit_context(node: Any) -> bool:
+    """Whether a mapping carries an edit context the way the hook sends one.
+
+    A path under a path key, and a before and an after that are strings within
+    the hook's caps. Anything else that uses the two key names is ordinary
+    argument text, scanned by every gate like the rest of the call, so the
+    names cannot hide a payload from them.
+    """
+    if not isinstance(node, dict):
+        return False
+    before, after = node.get("edit_before"), node.get("edit_after")
+    if not isinstance(before, str) or not isinstance(after, str):
+        return False
+    if len(before) > EDIT_CONTEXT_MAX_BEFORE or len(after) > EDIT_CONTEXT_MAX_AFTER:
+        return False
+    return any(
+        isinstance(key, str) and key.lower() in PATH_KEYS and isinstance(value, str) and named_path(value)
+        for key, value in node.items()
+    )
+
+
 def iter_string_leaves(value: Any) -> Iterator[str]:
     """Yields every string anywhere inside an argument structure.
 
@@ -70,9 +98,10 @@ def iter_string_leaves(value: Any) -> Iterator[str]:
     if isinstance(value, str):
         yield value
     elif isinstance(value, dict):
+        context = is_edit_context(value)
         for key, item in value.items():
             if isinstance(key, str):
-                if key.lower() in EDIT_CONTEXT_KEYS:
+                if context and key.lower() in EDIT_CONTEXT_KEYS:
                     continue
                 yield key
             yield from iter_string_leaves(item)
@@ -172,7 +201,7 @@ class SecretScanner:
         ("ANTHROPIC_KEY", re.compile(r"(?<![A-Za-z0-9_])sk-ant-[A-Za-z0-9_\-]{20,}")),
         ("SLACK_TOKEN", re.compile(r"(?<![A-Za-z0-9_])xox[abposr]-[A-Za-z0-9\-]{10,}")),
         ("GOOGLE_API_KEY", re.compile(r"(?<![A-Za-z0-9_])AIza[A-Za-z0-9_\-]{35}(?![A-Za-z0-9_\-])")),
-        ("JWT", re.compile(r"(?<![A-Za-z0-9_])eyJ[A-Za-z0-9_\-]{10,}\.eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}")),
+        ("JWT", re.compile(r"(?<![A-Za-z0-9_\-])eyJ[A-Za-z0-9_\-]{10,}\.eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}")),
         ("GENERIC_API_KEY", re.compile(r"(?i)(api[_-]?key|secret[_-]?token)\s*[:=]\s*['\"][A-Za-z0-9_\-]{20,}['\"]")),
         ("PRIVATE_KEY_HEADER", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
     ]
@@ -352,7 +381,9 @@ class ArchitecturalBoundaryGuard:
         # both readers only call search() and read group(0).
         _RmRemovesRepository(),
         re.compile(r"\bformat\s+[a-z]:", re.IGNORECASE),
-        re.compile(r"\bgit\s+push\s+.*(--force|-f)\b", re.IGNORECASE),
+        # The scan stops at the next `git push`, so a body of repeated pushes
+        # costs one pass, not one pass per push (`.*` made it quadratic).
+        re.compile(r"\bgit\s+push\s+(?:(?!\bgit\s+push\b).)*?(--force|-f)\b", re.IGNORECASE),
         re.compile(r"\bdrop\s+database\b", re.IGNORECASE),
     ]
 
@@ -988,7 +1019,7 @@ def edit_contexts(arguments: Any) -> List[Tuple[str, str, str]]:
                         path = named
             before = node.get("edit_before")
             after = node.get("edit_after")
-            if path and isinstance(before, str) and isinstance(after, str):
+            if path and is_edit_context(node):
                 found.append((path, before, after))
             for value in node.values():
                 walk(value)

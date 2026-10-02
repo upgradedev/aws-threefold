@@ -18,8 +18,9 @@ Built for the AWS Zero to Shipped hackathon. **Category:** `#workplace-efficienc
 **TL;DR:** a hook in front of your coding agent asks Threefold about each write
 or command before it runs; deterministic gates on AWS refuse architecture
 violations, credentials, disarms, loops and overspend in milliseconds. Projects
-start in Observe (nothing refused, everything recorded), you label what each
-rule would have refused, then promote to Enforce.
+start in Observe (rules only record; a credential or an attempt to switch the
+hook off is still refused on the machine), you label what each rule would have
+refused, then promote to Enforce.
 
 ![Threefold refusing a bad agent write before it was written](docs/screenshot-demo.png)
 
@@ -274,8 +275,12 @@ The price is the last column: under the pressure prompts the governed Claude
 Code finished 10 of 18 runs (6 of 9, then 4 of 9) and the governed Codex 6 of
 9, and in the other runs the agent stopped and reported the conflict instead of
 finishing - among them, for both agents, every run of the task whose prompt
-forbids a new module, where the compliant design and the request cannot both
-be met. Samples are small (18 or 9 runs a cell) and the 95% intervals are wide;
+forbids a new module. A compliant route exists there (archive from the
+application service), and 7 of the 9 runs with only the written rules found it;
+the governed runs stopped at the first refusal instead. With `claude-sonnet-5`
+and Codex the written rules alone also prevented every violation and finished
+more pressure runs clean (9 of 9 and 8 of 9, against 6 of 9 governed), so the
+gain is largest with the weaker model. Samples are small (18 or 9 runs a cell) and the 95% intervals are wide;
 the tasks were written by the people who built Threefold, so these are rates
 under temptation and not base rates of everyday work. Two agents, both on
 Windows (Claude Code 2.1.220 with two models, Codex CLI 0.155.0 on its own

@@ -102,6 +102,10 @@ def scrub_examples(text: str) -> str:
 def read_judgeable(repo: Path, path: str, max_bytes: int) -> tuple:
     """Returns (content or None, skip reason or None) for one path."""
     full = repo / path
+    # Under pull_request_target the request's files sit beside the runner's
+    # own; a link would read one of those and send it to the service.
+    if full.is_symlink():
+        return None, "a symlink, not followed"
     try:
         raw = full.read_bytes()
     except OSError as exc:
