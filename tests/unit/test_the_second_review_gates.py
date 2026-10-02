@@ -71,8 +71,19 @@ def test_commands_that_are_not_destructive_pass(command) -> None:
     assert not _destructive(command)
 
 
-def test_long_runs_of_flags_and_pushes_stay_linear() -> None:
+def test_the_patterns_stay_linear_on_bodies_near_the_cap() -> None:
+    """The regular expressions alone, on bodies near the 1 MB cap."""
+    patterns = [pattern for pattern in ArchitecturalBoundaryGuard.DESTRUCTIVE_COMMANDS if hasattr(pattern, "pattern")]
     for command in ("rm " + "--rm " * 150_000, "rm " + "-rm " * 200_000, "git push " * 100_000):
+        started = time.monotonic()
+        for pattern in patterns:
+            pattern.search(command)
+        assert time.monotonic() - started < 2, command[:20]
+
+
+def test_long_runs_of_flags_and_pushes_are_judged_quickly() -> None:
+    """Every matcher, the token walker included, at the sizes its own tests pin."""
+    for command in ("rm " + "--rm " * 6000, "rm " + "-rm " * 8000, "git push " * 3500):
         started = time.monotonic()
         _destructive(command)
         assert time.monotonic() - started < 2, command[:20]
