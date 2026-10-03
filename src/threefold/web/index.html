@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Threefold - Stop bad agent writes before they reach your code</title>
-  <meta name="description" content="Threefold governs Claude Code, Codex, Antigravity and Muse: a hook asks before every write or command, deterministic gates on AWS decide, and every project observes before it enforces." />
+  <meta name="description" content="Threefold checks supported tool calls from Claude Code, Codex, Antigravity and Muse. Deterministic gates on AWS decide; architecture rules start in Observe." />
   <script>
       // The server rewrites __THREEFOLD_BASE_PATH__ to the API Gateway stage prefix
       // when it serves this page, so the base is exact rather than guessed from the
@@ -631,7 +631,7 @@
       <div class="tf-hero-copy">
         <p class="tf-eyebrow"><span data-tf-icon="shield"></span>Threefold · governance for coding agents</p>
         <h1 id="hero-promise" class="tf-hero-title">Stop bad agent writes <em>before they reach your code.</em></h1>
-        <p id="hero-sentence" class="tf-hero-lede">Deterministic gates on AWS judge each write and command from Claude Code, Codex, Antigravity or Muse. Each repository only watches until you promote its rules.</p>
+        <p id="hero-sentence" class="tf-hero-lede">With the hook installed, deterministic gates on AWS check supported tool calls from Claude Code, Codex, Antigravity and Muse. Architecture rules start in Observe; teams promote selected rules to Enforce.</p>
         <div id="hero-actions" class="tf-hero-actions">
           <a id="hero-try" href="dashboard.html#/try" class="tf-btn tf-btn-primary tf-btn-lg"><span data-tf-icon="play"></span>Try the two-stage rollout - 2 min</a>
           <a id="hero-dashboard" href="dashboard.html#/overview" class="tf-btn tf-btn-lg"><span data-tf-icon="grid"></span>Open the live dashboard</a>
@@ -712,30 +712,30 @@
       <div class="tf-sec-head">
         <p class="tf-eyebrow"><span data-tf-icon="layers"></span>How it works</p>
         <h2 id="how-title" class="tf-h2">The agent asks, Threefold decides, you see everything</h2>
-        <p class="tf-sec-lede">Plain code decides every verdict. Amazon Bedrock never does: it explains verdicts and drafts rules for you to review.</p>
+        <p class="tf-sec-lede">Plain code decides. Bedrock explains verdicts and drafts rules for review.</p>
       </div>
       <ol class="tf-steps">
         <li class="tf-card tf-step-card">
           <div class="tf-step-top"><span class="tf-step-icon"><span data-tf-icon="terminal"></span></span><span class="tf-step-kicker">Step one</span></div>
           <h3>The hook asks</h3>
-          <p>Before each write or command, one hook sends the tool call to Threefold. A credential is refused on the machine, never sent.</p>
+          <p>The hook checks supported calls. Known credentials and hook-disabling attempts are refused locally.</p>
         </li>
         <li class="tf-card tf-step-card">
           <div class="tf-step-top"><span class="tf-step-icon"><span data-tf-icon="shield"></span></span><span class="tf-step-kicker">Step two</span></div>
           <h3>Threefold judges, on AWS</h3>
-          <p>Plain-code gates catch credentials, layering breaks, loops and runaway spend. A refusal carries its reason, and a checked fix where one can be made.</p>
+          <p>Gates check layering, known credentials, repeats and caller-declared token budgets. Refusals explain why, with a checked fix where one can be made.</p>
         </li>
         <li class="tf-card tf-step-card">
           <div class="tf-step-top"><span class="tf-step-icon"><span data-tf-icon="chart"></span></span><span class="tf-step-kicker">Step three</span></div>
           <h3>The dashboard shows</h3>
-          <p>Every verdict lands in a ledger: what was stopped, what would have been, and which rules have earned the right to refuse.</p>
+          <p>The ledger shows refusals, would-refuse calls and rules ready to enforce.</p>
         </li>
       </ol>
 
       <figure class="tf-card tf-diagram tf-flow">
         <svg class="tf-diagram-wide" viewBox="0 0 960 150" role="img" aria-labelledby="flow-wide-title flow-wide-desc">
           <title id="flow-wide-title">How a tool call travels</title>
-          <desc id="flow-wide-desc">The coding agent asks the hook before each call; the hook sends the call to Threefold on AWS; Threefold sends the verdict back, and the hook either denies the call with its reason, and a checked fix where one can be made, or lets it run; every verdict goes to the ledger the dashboard reads.</desc>
+          <desc id="flow-wide-desc">An installed hook checks a supported tool call. It refuses known credentials locally and sends other covered calls to Threefold on AWS. The service returns a deterministic verdict; the hook refuses the call with a reason and a checked fix where one can be made, or lets it run. Recorded decisions feed the dashboard.</desc>
           <defs>
             <marker id="fw-head" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="dg-head" d="M0 0L10 5L0 10z"/></marker>
             <marker id="fw-head-accent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="dg-head-accent" d="M0 0L10 5L0 10z"/></marker>
@@ -773,7 +773,7 @@
         </svg>
         <svg class="tf-diagram-narrow" viewBox="0 0 340 346" role="img" aria-labelledby="flow-narrow-title flow-narrow-desc">
           <title id="flow-narrow-title">How a tool call travels</title>
-          <desc id="flow-narrow-desc">The coding agent asks the hook before each call; the hook sends the call to Threefold on AWS; Threefold sends the verdict back, and the hook either denies the call with its reason, and a checked fix where one can be made, or lets it run; every verdict goes to the ledger the dashboard reads.</desc>
+          <desc id="flow-narrow-desc">An installed hook checks a supported tool call. It refuses known credentials locally and sends other covered calls to Threefold on AWS. The service returns a deterministic verdict; the hook refuses the call with a reason and a checked fix where one can be made, or lets it run. Recorded decisions feed the dashboard.</desc>
           <defs>
             <marker id="fn-head" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="dg-head" d="M0 0L10 5L0 10z"/></marker>
             <marker id="fn-head-accent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="dg-head-accent" d="M0 0L10 5L0 10z"/></marker>
@@ -801,18 +801,18 @@
           <path class="dg-edge" d="M170 249V285" marker-end="url(#fn-head)"/>
           <text class="dg-label" x="178" y="273">ledger</text>
         </svg>
-        <figcaption>A refused call never runs: the agent gets the reason, and a checked fix where one can be made. No verdict waits on a model.</figcaption>
+        <figcaption>A refusal gives the agent a reason and a checked fix where one can be made. No verdict waits on a model.</figcaption>
       </figure>
 
       <div class="tf-card tf-rollout" id="rollout">
         <div class="tf-rollout-head">
-          <h3>Two stages, so nothing breaks</h3>
-          <p>Every project starts by watching. A rule refuses only once you have seen what it would stop and promoted it; one click takes it back.</p>
+          <h3>Observe first. Promote trusted rules.</h3>
+          <p>Review what architecture rules would refuse, promote selected rules to Enforce and demote with one click.</p>
         </div>
         <ol class="tf-track">
           <li class="tf-stage tf-stage-observe">
             <span class="tf-stage-name"><span data-tf-icon="eye"></span>Observe</span>
-            <p>Every call is judged and recorded; none is refused yet.</p>
+            <p>Architecture rules observe first. Credential and hook-protection checks remain active locally.</p>
           </li>
           <li class="tf-stage tf-stage-review">
             <span class="tf-stage-name"><span data-tf-icon="inbox"></span>Review</span>

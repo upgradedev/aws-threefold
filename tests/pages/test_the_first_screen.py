@@ -38,8 +38,8 @@ PROMISE = "Stop bad agent writes before they reach your code."
 # A judge read "your repos observe before they enforce" twice before it made
 # sense; the second sentence says the same in the page's own plain words.
 SENTENCE = (
-    "Deterministic gates on AWS judge each write and command from Claude Code, Codex, Antigravity or Muse. "
-    "Each repository only watches until you promote its rules."
+    "With the hook installed, deterministic gates on AWS check supported tool calls from Claude Code, Codex, Antigravity and Muse. "
+    "Architecture rules start in Observe; teams promote selected rules to Enforce."
 )
 SCOPE = "A refusal is measured to stop the write in Claude Code and Antigravity, in Codex once, over its patch tool only, and in Muse over its file-write, edit and shell tools."
 ACTIONS = [
