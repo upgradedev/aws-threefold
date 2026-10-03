@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Threefold - Connect a Coding Agent</title>
-  <meta name="description" content="Connect Claude Code, Codex, Antigravity or Muse to Threefold in one command. Every project starts in Observe; a rule refuses only once you promote it." />
+  <meta name="description" content="Connect Claude Code, Codex, Antigravity or Muse to Threefold in one command. Architecture rules start in Observe; credential and hook-protection checks stay active locally." />
   <!-- Tailwind CSS via CDN, pinned to an exact version: an unpinned major is a
        script that can change under a page that did not change, and it runs on the
        same origin as the operator key this browser may hold. No integrity hash: the
@@ -79,7 +79,7 @@
       <div>
         <p class="tf-eyebrow"><span data-tf-icon="plug"></span>Connect</p>
         <h1 class="tf-h1">Connect a coding agent</h1>
-        <p class="tf-lede">One script sits in front of Claude Code, Codex, Antigravity or Muse and asks this service about each write and command before it runs. Every project starts in Observe: what a rule would stop is recorded for you to review, and nothing is stopped but a call carrying a credential until you promote the project.</p>
+        <p class="tf-lede">One hook supports Claude Code, Codex, Antigravity and Muse, checking supported writes and commands before they run. Architecture rules start in Observe so you can review what they would refuse before promoting them. Credential and hook-protection checks remain active locally.</p>
       </div>
       <div class="tf-actions">
         <a id="hook-badge" href="hooks/threefold_hook.py" target="_blank" rel="noopener" title="Read the script this deployment serves" class="tf-spec-link">threefold_hook.py <span data-tf-icon="external" data-tf-size="12"></span></a>
@@ -148,10 +148,10 @@
           <span class="tf-step-num">1</span>
           <div class="tf-callout tf-callout-warn" style="flex:1">
             <div class="tf-callout-body">
-              <p class="tf-callout-title">Stage 1 · Observe, so nothing breaks</p>
+              <p class="tf-callout-title">Stage 1 · Observe architecture rules</p>
               <p>
-                Every project starts here. What the hook sends is judged and recorded, and the agent is not stopped; a call
-                carrying a credential is still refused on the machine, and a call the hook holds back is not sent. The dashboard
+                Every project starts here. Architecture rules record what they would refuse. Known credentials and attempts to
+                disable the hook are still refused locally, and a call the hook holds back is not sent. The dashboard
                 lists what each rule would have refused, and you mark each one correct or false alarm.
               </p>
             </div>
@@ -276,9 +276,10 @@
             <p>
               The stage is the project's, on the service, not your machine's. <span class="font-mono">connect</span> installs in
               <span class="font-mono">managed</span> mode, so the project's stage decides every call, and a new project starts in
-              Observe: every call the hook sends is judged and recorded, and the agent is not stopped. Two things are decided on
-              your machine before anything is sent, so they hold whatever the stage: a call carrying a credential is still refused
-              on your machine and never sent, and a call the hook holds back (outside the project, a data file, a term on your
+              Observe: architecture rules record what they would refuse. Credential and hook-protection checks remain active
+              locally in every stage: a call carrying a credential is still refused on your machine and never sent; attempts to
+              disable the hook are refused locally too. A call the hook holds back
+              (outside the project, a data file, a term on your
               never-send list) is neither sent nor recorded.
             </p>
             <p>
@@ -539,7 +540,7 @@
           <p class="tf-panel-sub">Every pull request is judged with nothing installed on any machine.</p>
         </div>
       </div>
-      <p>Hooks ask before each write, but no hook can compel an engineer to install it. The merge can: <span class="font-mono">scripts/judge_pr.py</span>, run by <span class="font-mono">.github/workflows/pr-judge.yml</span> as a required check, sends every added or changed file through the same gates and fails the merge on a refusal or a fired rule. The judge runs from the base branch with the request as data only, so the request cannot neuter it. Anything it cannot judge fails the merge too: the gate fails closed. This repository's own pull request <a class="tf-link" href="https://github.com/upgradedev/aws-threefold/pull/6">PR #6</a> proved it, red on a planted credential, then green.</p>
+      <p>Hooks check supported writes before they run, but no hook can compel an engineer to install it. The merge can: <span class="font-mono">scripts/judge_pr.py</span>, run by <span class="font-mono">.github/workflows/pr-judge.yml</span> as a required check, sends every added or changed file through the same gates and fails the merge on a refusal or a fired rule. The judge runs from the base branch with the request as data only, so the request cannot neuter it. Anything it cannot judge fails the merge too: the gate fails closed. This repository's own pull request <a class="tf-link" href="https://github.com/upgradedev/aws-threefold/pull/6">PR #6</a> proved it, red on a planted credential, then green.</p>
     </section>
 
     <!-- WHAT LEAVES YOUR MACHINE. This transcribes the contract in STATE.md and

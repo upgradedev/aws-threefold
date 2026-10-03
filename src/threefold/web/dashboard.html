@@ -2444,7 +2444,7 @@
             state.busy = false;
             if (!ctx.alive()) return;
             closeDialog();
-            toast(() => T.projectNameText(name) + ' is back in Observe. Nothing is refused from the next call.');
+            toast(() => T.projectNameText(name) + ' is back in Observe. Architecture rules record decisions; local credential and hook protection stay active.');
             return load().then(() => stageChanged('observe'));
           }, err => {
             state.busy = false;
@@ -4019,7 +4019,7 @@
         // Full width: the steps on the left, and at desktop width the first
         // call's panel beside them, where the wait and the arrival are seen
         // while the command is copied and run.
-        ctx.render(html`<div class="tf-ops-connect">${pageTitle('Connect a repository', html`One command installs the hook for the agents on the machine. A new project starts in Observe, so nothing is refused while you watch what would be. <a class="tf-link whitespace-nowrap" href="${T.pageHref('connect.html')}">Every detail, by hand</a>`)}
+        ctx.render(html`<div class="tf-ops-connect">${pageTitle('Connect a repository', html`One command installs the hook for supported agent tool calls. Architecture rules start in Observe; local credential and hook protection stay active. <a class="tf-link whitespace-nowrap" href="${T.pageHref('connect.html')}">Every detail, by hand</a>`)}
           <ol class="tf-ops-steps" aria-label="Where you are">${steps.map((label, i) => {
             const s = stepState(i + 1);
             return html`<li data-state="${s}"${s === 'current' ? raw(' aria-current="step"') : ''}><span class="tf-step-num" data-state="${s}">${s === 'done' ? T.icon('check', 13) : i + 1}</span>${label}</li>`;
@@ -6121,7 +6121,7 @@
             </li>`)}</ol>
             <h3 class="tf-try-next-title">Next</h3>
             <div class="tf-try-next">
-              ${nextCard('#/connect', 'plug', 'Connect your repository', 'One command. It starts in Observe, so nothing is refused until you promote.', true)}
+              ${nextCard('#/connect', 'plug', 'Connect your repository', 'One command. Architecture rules start in Observe; credential and hook protection stay active locally.', true)}
               ${state.project ? nextCard(projectHref(state.project), 'folder', 'Open this sandbox project', html`<span class="tf-mono">${state.project}</span>: its readiness, its calls, and Demote in one click.`) : ''}
               ${nextCard('#/proof', 'chart', 'See the proof', 'What Threefold has been measured to do, with real agents, with and without it.')}
             </div>`,

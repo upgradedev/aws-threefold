@@ -1,6 +1,7 @@
 # Threefold - State Ledger
 
-**Last updated:** 2026-10-02
+**Last updated:** 2026-10-03
+**Post-publication correction:** The README, handoff and public pages now scope hook coverage to supported calls, distinguish architecture Observe from local protection, and describe budgets as based on caller-declared token counts.
 **Hackathon:** AWS Zero to Shipped, submissions close 2026-10-02 23:59 PDT
 **Category:** `#workplace-efficiency` · **Lane:** `#community` (hedge to `#commercial-potential` / `#startup` decided 2026-09-28)
 **Entries permitted:** one. The Rules tab, ELIGIBILITY section, reads "Limit one entry per person." Threefold is that entry.
@@ -65,7 +66,7 @@ Fixed before the tracks split, so no track waits on another for a field name.
 
 Fixed before the tracks split. A track that needs a field not listed here asks the owner; it does not invent one.
 
-**The product in one paragraph.** A team connects a repository with one command. Every project starts in **Observe**: every call is judged and recorded, nothing is refused (except a credential, which the hook refuses on the machine as before). The dashboard shows what each rule *would* have refused; the operator marks each of those **correct** or **false alarm**. A rule becomes **Ready** when every call it would have refused is labelled, at least one call it flagged was marked correct, and none was a false alarm; it is **Quiet** when no label says anything about it: it flagged nothing, or only refused calls nobody labelled (since 2026-09-27; before, a refusal counted as evidence). **Promote** moves the project to **Enforce** with the rules the operator picks; the others keep observing. **Demote** is one click back to Observe. The operator signs in to a private stack from the command line, never by pasting a key.
+**The product in one paragraph.** A team connects a repository with one command. With the hook installed, supported tool calls are checked before they run. Every project starts in **Observe**: architecture rules record what they would refuse, while known credentials and attempts to disable the hook remain refused locally. The dashboard shows what each rule *would* have refused; the operator marks each of those **correct** or **false alarm**. A rule becomes **Ready** when every call it would have refused is labelled, at least one call it flagged was marked correct, and none was a false alarm; it is **Quiet** when no label says anything about it: it flagged nothing, or only refused calls nobody labelled (since 2026-09-27; before, a refusal counted as evidence). **Promote** moves the project to **Enforce** with the rules the operator picks; the others keep observing. **Demote** is one click back to Observe. The operator signs in to a private stack from the command line, never by pasting a key.
 
 **Rule key.** Every ledger row gains `rule_key`: the id of the layering rule that decided (`java-domain-stays-pure`, ...) when a layering rule decided, otherwise one of `LOOP`, `PROTECTED_PATH`, `UNREADABLE_WRITE`, `CREDENTIAL`, `BUDGET`, `HALTED_SESSION`, or `NONE` for a call nothing flagged. It is set on refusals and on observations alike. Readiness, `observe_rules` and the review queue all group by it. Since 2026-09-27 a row or verdict that carries no `rule_key` is given one from the gate's own words at the head of its reason (the rule it names first, or the unreadable-write gate's phrase), never from anything the reason quotes, so a command cannot name the rule it is counted under. Since 2026-09-28 `/api/insights` counts `by_category` and each `recent_refusals` row's `category` from that key (`rule_keys.category_for`), as `/api/decisions` does, and a refusal no key names is `OTHER` on both, never the `NONE` that reads Allowed; a verdict's `suggested_fix` answers the gate its decided key names; and a layering rule may not take a gate's key as its id (`layering_rules.RESERVED_IDS`). Existing fields (`rule`, `observed_rules`, ...) are kept unchanged.
 
@@ -128,7 +129,7 @@ governs, and the runbook's teardown section says the same.
 | Proof of coding agent connected to AWS | **PASS** | `docs/PROOF_OF_AWS_AGENT.md` rewritten around the real session: the commands run, the two defects AWS surfaced, and the CloudTrail principal. Raw output in `docs/evidence/DEPLOYMENT_2026-09-20.md` |
 | Public repository | **PASS** | Since 2026-09-25: `https://github.com/upgradedev/aws-threefold`, public, `main` pushed. CI (10 jobs), CodeQL, secret scanning with push protection, dependabot and keepalive all live. The count of commits is deliberately not recorded here: `git log` holds it, and any line stating it is wrong again the moment it is committed |
 | Continuous delivery | **WRITTEN, role deliberately not created** | `.github/workflows/{ci,deploy,keepalive}.yml`. Deploy assumes `threefold-github-deploy`, which does not exist. Its trust named a repository that does not exist (`threefold-aws`) until 2026-09-27, so it could never have been assumed; it now names `upgradedev/aws-threefold`'s `main` and a test ties it to the README's link. The policy was audited against every resource the template creates and two tests keep it covering them. Not created, by the owner's decision on 2026-09-27: a role that may create roles and write their policies is in practice an account administrator, and the remedy, a permissions boundary (`docs/RUNBOOK.md` section 8), changes live IAM days before the deadline for little a reader would see. Regional deploys run from the owner's machine with the runbook's own commands |
-| Builder Center project, two tags | **NOT DONE** | Owner-gated. Requires Builder Center profile, Join, then the Create Project form |
+| Builder Center project, two tags | **PUBLISHED** | [Threefold: Architecture guardrails for coding agents](https://builder.aws.com/project/3K8lHWCcYrIspFkKAIEWxuiOBcS/threefold-architecture-guardrails-for-coding-agents), published by the owner on 2026-10-03, with `#workplace-efficiency` and `#community` |
 
 ## What is real, measured today
 
@@ -148,7 +149,7 @@ governs, and the runbook's teardown section says the same.
 | The spec names what is deployed | Its description said Claude 3.5 Sonnet while the stack runs `eu.anthropic.claude-haiku-4-5-20251001-v1:0`, and its only server was `127.0.0.1:8001`, so Try it out went to the reader's own laptop. Both corrected, and a test now reads the model family out of `deploy/template.yml` and fails if the document drifts from it |
 | Every page reaches the operation it calls | The four pages deep link into the document rather than at its cover: the dashboard lists the seven operations its buttons call, settings links `/policy/config`, the sessions console links `/api/sessions`, `/sessions/{id}` and the terminate route, and connect links `/evaluate-tool-call`. Walked on the live URL: following one opens Swagger UI with that operation expanded |
 | The links cannot drift from the routes | Swagger UI derives its anchors from method and path, so a renamed route would break every link pointing at it silently. A test rebuilds those anchors from the served document, extracts the endpoints the dashboard actually fetches, and fails when one is unlinked. Confirmed by deleting a single entry and watching it fail |
-| A visitor can take the hook | The deployment serves it at `/hooks/claude_code_hook.py`, anonymously, as readable text. Downloaded from the live URL and run: an ordinary read came back `allow`, a `from boto3 import client` write into a domain file came back `deny` with a Bedrock sentence. Before this, `connect.html` told the reader to `git clone <repository>` - a literal placeholder, since the repository is not published - and the install path ended there |
+| A visitor can take the hook | The deployment serves it at `/hooks/claude_code_hook.py`, anonymously, as readable text. Downloaded from the live URL and run: an ordinary read came back `allow`, a `from boto3 import client` write into a domain file came back `deny` with a Bedrock sentence. Before this, `connect.html` told the reader to `git clone <repository>` - a literal placeholder from before the repository was published - and the install path ended there |
 | A certificate cannot attest to nothing | `POST /issue-certificate` with `{"evaluations": []}` used to answer 200 with `verdict_status: COMPLIANT_APPROVED` and `all_passed: true`, because `all()` over an empty list is true. It now answers 400 `Nothing To Certify`, as does a session this service has no record of governing. Verified against the live stack, and the dashboard's Scenario 4 still issues its certificate |
 | A pull request is judged before merge | `.github/workflows/pr-judge.yml`, a required check on main: every added or changed file judged through `/evaluate-tool-call`, red on a refusal or a fired rule, fail-closed on anything unjudged. Proven on PR #6: a shaped token failed the check in 9 s with the merge BLOCKED, removing it passed in 11 s |
 | Turning the hooks off is seen, not silent | A file-tool write to `.git/hooks/` or `.git/config` is sent as its path alone outside the modes that refuse it on the machine, and recorded under `PROTECTED_PATH` like the same write through a shell; the content stays home because remote URLs can carry tokens |
@@ -303,13 +304,12 @@ tool calls before execution since March, and the judging panel is five AWS
 employees. The distinction that holds is local tool calls against gateway
 traffic.
 
-### Still open
+### Earlier findings and current status
 
-1. There is no Builder Center project. The public repository exists since
-   2026-09-25 (`https://github.com/upgradedev/aws-threefold`); until the
-   project exists alongside it there is no submission, whatever the code does.
-   The Builder Center project is owner-gated: it is a profile, a Join, and a
-   web form, and no command for it exists anywhere in this repository.
+1. Completed on 2026-10-03: the owner published the
+   [Builder Center project](https://builder.aws.com/project/3K8lHWCcYrIspFkKAIEWxuiOBcS/threefold-architecture-guardrails-for-coding-agents).
+   It links the live application and public repository, and the project body
+   links the walkthrough, measured proof and agent-to-AWS deployment record.
 2. Superseded: the number comes from the benchmark rather than a working
    week. Six series, 243 runs in all (four of Claude Code 2.1.220 on 2026-09-22
    and two of Codex CLI 0.155.0 on 2026-09-23), each under no guidance, the

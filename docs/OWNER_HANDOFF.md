@@ -1,8 +1,9 @@
-# Owner handoff: the three things only you can do
+# Owner handoff: published project and optional materials
 
-Everything else is done: the code is deployed, probed 117/0/3 on the edge
-and the origin, and CI is green. These three need your logins, so they are
-yours. Each package below is copy-paste ready.
+The owner published the [Builder Center project](https://builder.aws.com/project/3K8lHWCcYrIspFkKAIEWxuiOBcS/threefold-architecture-guardrails-for-coding-agents)
+on 2026-10-03. It links the live app, repository, walkthrough, measured proof
+and deployment evidence. The article and video below are prepared as optional
+supporting material; no publication links for them appear in the project.
 
 **Deadline: 2026-10-02 23:59 PDT.** Keep the stacks up through winners week;
 teardown is in `docs/RUNBOOK.md` and must not run before judging completes.
@@ -15,55 +16,15 @@ teardown is in `docs/RUNBOOK.md` and must not run before judging completes.
 - Walkthrough: <https://d1og72wpk4aqig.cloudfront.net/dashboard.html#/try>
 - Proof page: <https://d1og72wpk4aqig.cloudfront.net/dashboard.html#/proof>
 - Repository: <https://github.com/upgradedev/aws-threefold>
+- Published project: <https://builder.aws.com/project/3K8lHWCcYrIspFkKAIEWxuiOBcS/threefold-architecture-guardrails-for-coding-agents>
 
 ---
 
-## Package A: the Builder Center project (the submission itself)
+## Package A: the Builder Center project (published)
 
-Without this there is no submission, whatever the code does. Steps:
-
-1. Sign in to Builder Center (a Builder ID profile; 18+).
-2. Open the hackathon page above and click **+ Join**. Joining unlocks
-   project creation and Discussion posting.
-3. Create the project. Paste the fields below.
-
-**Project name:**
-
-```text
-Threefold
-```
-
-**Tagline:**
-
-```text
-Threefold refuses a coding agent's edit the moment it is made, not after the commit, so your architecture does not rot while you sleep.
-```
-
-**Category / Lane:**
-
-```text
-#workplace-efficiency / #community
-```
-
-**Description (short):**
-
-```text
-Threefold governs the tool calls coding agents make. One standard-library hook file sits in front of Claude Code, Codex, Antigravity and Muse and asks a service on AWS about each write or command before it runs. Deterministic gates decide: layering rules, credentials, writes that switch the hooks off, repeating calls, a spend ceiling. Projects start in Observe, where nothing is refused and the dashboard shows what would be; the operator labels each, then promotes to Enforce with the rules that earned it. Amazon Bedrock never decides: it explains refusals to people and drafts rules for architects. Pull requests are judged the same way with nothing installed, through a required check.
-
-Live, no account: https://d1og72wpk4aqig.cloudfront.net/dashboard.html#/try
-Repository: https://github.com/upgradedev/aws-threefold
-```
-
-**Links to attach to the project:**
-
-```text
-Live application: https://d1og72wpk4aqig.cloudfront.net/
-Two-minute walkthrough: https://d1og72wpk4aqig.cloudfront.net/dashboard.html#/try
-Measured proof (6 series, 243 runs): https://d1og72wpk4aqig.cloudfront.net/dashboard.html#/proof
-Repository: https://github.com/upgradedev/aws-threefold
-Demo video: (paste after upload, Package C)
-Article: (paste after posting, Package B)
-```
+The owner published the [project](https://builder.aws.com/project/3K8lHWCcYrIspFkKAIEWxuiOBcS/threefold-architecture-guardrails-for-coding-agents)
+with the live application, two-minute walkthrough, measured proof and repository.
+The article and video below can be added if published.
 
 **Proof of the agent-to-AWS connection** (if the form asks how the agent
 connects to AWS): `docs/PROOF_OF_AWS_AGENT.md` in the repository, with raw
@@ -138,7 +99,7 @@ article's Try-it section if you edit it.
 **Video description (paste under the upload):**
 
 ```text
-Threefold refuses a coding agent's edit the moment it is made, not after the commit. Deterministic gates on AWS (Lambda, DynamoDB, CloudFront) judge every write or command before it runs; Amazon Bedrock explains, never decides.
+With its hook installed, Threefold checks supported coding-agent writes and commands before they run. Deterministic gates on AWS judge architecture rules; Amazon Bedrock explains, never decides. Projects start with architecture rules in Observe while credential and hook-protection checks remain active locally.
 
 Try it live, no account: https://d1og72wpk4aqig.cloudfront.net/dashboard.html#/try
 Measured proof: https://d1og72wpk4aqig.cloudfront.net/dashboard.html#/proof
@@ -148,14 +109,12 @@ Category #workplace-efficiency, lane #community, AWS Zero to Shipped 2026.
 
 ---
 
-## After all three
+## Current status
 
-- [ ] Builder Center project exists and links the live app, repo, video,
-      and article. Cover: upload `docs/builder-cover.png` (1200x675,
-      no text).
-- [ ] Article posted with the six series and the 2026-10-01 probe figures.
-- [ ] Video uploaded, 2:35 to 2:45, linked from the project.
+- [x] Builder Center project published with the live app, repository and
+      measured proof. Cover uploaded.
+- [ ] Optional article publication has not been verified.
+- [ ] Optional video publication has not been verified.
 - [ ] Stacks still up (`threefold-prod`, `threefold-dogfood`,
       `threefold-prod-edge`).
-- [ ] Tell the agent: it will record the submission in `STATE.md` and
-      `LOG.md`.
+- [x] Submission recorded in `STATE.md` and `LOG.md`.

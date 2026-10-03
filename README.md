@@ -1,9 +1,10 @@
 # Threefold
 
-**Threefold refuses a coding agent's edit the moment it is made, not after the commit, so your architecture does not rot while you sleep.**
+**Threefold checks supported coding-agent writes before they run, so teams can catch architecture violations at the moment of change.**
 
 Built for the AWS Zero to Shipped hackathon. **Category:** `#workplace-efficiency` · **Lane:** `#community`
 
+[Published project](https://builder.aws.com/project/3K8lHWCcYrIspFkKAIEWxuiOBcS/threefold-architecture-guardrails-for-coding-agents) ·
 [Live demo](https://d1og72wpk4aqig.cloudfront.net/) ·
 [Dashboard](https://d1og72wpk4aqig.cloudfront.net/dashboard.html#/overview) ·
 [API](https://raa131f9dj.execute-api.eu-west-1.amazonaws.com/prod/) ·
@@ -15,23 +16,22 @@ Built for the AWS Zero to Shipped hackathon. **Category:** `#workplace-efficienc
 [![CI](https://github.com/upgradedev/aws-threefold/actions/workflows/ci.yml/badge.svg)](https://github.com/upgradedev/aws-threefold/actions/workflows/ci.yml)
 [![Still up](https://github.com/upgradedev/aws-threefold/actions/workflows/keepalive.yml/badge.svg)](https://github.com/upgradedev/aws-threefold/actions/workflows/keepalive.yml)
 
-**TL;DR:** a hook in front of your coding agent asks Threefold about each write
-or command before it runs; deterministic gates on AWS refuse architecture
-violations, credentials, disarms, loops and overspend in milliseconds. Projects
-start in Observe (rules only record; a credential or an attempt to switch the
-hook off is still refused on the machine), you label what each rule would have
-refused, then promote to Enforce.
+**TL;DR:** with the hook installed, Threefold checks supported writes and
+commands before they run. Deterministic gates on AWS check architecture rules,
+known credential patterns, repeating calls and caller-declared usage budgets.
+Projects start in Observe: review what rules would refuse, then promote selected
+rules to Enforce. Credential and hook-protection checks remain active locally.
 
 ![Threefold refusing a bad agent write before it was written](docs/screenshot-demo.png)
 
-Threefold sits in front of the tool calls a coding agent makes (Claude Code,
-Codex, Antigravity and Muse, through one hook file) and answers each write or
-command before it runs. Deterministic gates decide: a domain file importing
-infrastructure under the architect's layering rules, a credential in the
-arguments, a write that switches the hooks off, the same call repeating, a
-spend ceiling. A team connects a repository with one command, and by default a
-project starts in **Observe**: calls are judged and recorded and no rule refuses
-anything. What is still refused there is a credential and anything that would
+With the hook installed, Threefold checks supported tool calls from Claude Code,
+Codex, Antigravity and Muse before they run. Deterministic gates decide: a
+domain file importing infrastructure under the architect's layering rules, a
+credential in the arguments, a write that switches the hooks off, the same
+call repeating, a budget based on caller-declared token counts. A team
+connects a repository with one command, and by default a project starts in
+**Observe**: architecture rules record what they would refuse.
+What is still refused there is a credential and anything that would
 switch the hooks off - an agent's settings file, Threefold's own binary,
 unplugging the plugin - by the hook on the developer's own machine, and a
 request the service cannot take at all (a body over 1 MB, a malformed call,
@@ -572,6 +572,10 @@ THREEFOLD_OFFLINE=1 python src/threefold/interfaces/server.py --port 8001
 Then open <http://localhost:8001/> or <http://localhost:8001/dashboard.html>.
 
 ## Evidence
+
+Evidence labels name their source: `[PRIMARY, date]` marks a recorded measurement,
+and `[STATE-FILE]` refers to the maintained [project state](STATE.md). They are
+source notes, not missing values.
 
 | File | What it shows |
 |---|---|
